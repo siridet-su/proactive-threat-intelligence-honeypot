@@ -1,0 +1,14 @@
+{
+  "tailscale.com": {
+    "application": "Tailscale DERP / Control Traffic",
+    "category": "infrastructure_traffic",
+    "confidence": 90,
+    "tags": ["tailscale", "derp"]
+  },
+  "fake-honeypot.local": {
+    "application": "Local TLS Honeypot Test",
+    "category": "lab_test",
+    "confidence": 80,
+    "tags": ["local-test", "tls"]
+  }
+}

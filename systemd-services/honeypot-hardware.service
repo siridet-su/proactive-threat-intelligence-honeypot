@@ -1,0 +1,15 @@
+[Unit]
+Description=Honeypot Hardware Agent (System Metrics to Redis)
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=cpe27
+WorkingDirectory=/home/cpe27/honeypot-pipeline/agents/hardware-agent
+EnvironmentFile=/etc/honeypot-agent.env
+ExecStart=/home/cpe27/honeypot-pipeline/agents/hardware-agent/hardware-agent
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

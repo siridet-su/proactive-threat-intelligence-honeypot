@@ -1,0 +1,14 @@
+{
+  "SSH-2.0-OpenSSH_10.3": {
+    "application": "OpenSSH Client",
+    "category": "ssh_client",
+    "confidence": 80,
+    "tags": ["openssh", "arch-linux"]
+  },
+  "SSH-2.0-OpenSSH_6.0p1 Debian-4+deb7u2": {
+    "application": "Cowrie Fake SSH Server Banner",
+    "category": "honeypot_server",
+    "confidence": 95,
+    "tags": ["cowrie", "fake-ssh-banner", "debian"]
+  }
+}

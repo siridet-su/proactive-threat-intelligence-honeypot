@@ -1,0 +1,15 @@
+[Unit]
+Description=Honeypot Processor Agent (Zeek & Cowrie to MongoDB/Redis)
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=cpe27
+WorkingDirectory=/home/cpe27/honeypot-pipeline/agents/processor-agent
+EnvironmentFile=/etc/honeypot-agent.env
+ExecStart=/home/cpe27/honeypot-pipeline/agents/processor-agent/processor-agent
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

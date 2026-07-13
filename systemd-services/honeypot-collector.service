@@ -1,0 +1,15 @@
+[Unit]
+Description=Honeypot Collector Agent (Tail Zeek/Cowrie to Redis)
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/cpe27/honeypot-pipeline/agents/collector-agent
+EnvironmentFile=/etc/honeypot-agent.env
+ExecStart=/home/cpe27/honeypot-pipeline/agents/collector-agent/collector-agent
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

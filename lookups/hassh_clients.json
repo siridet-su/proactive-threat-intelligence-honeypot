@@ -1,0 +1,20 @@
+{
+  "eeca2460550b9ded084ecf2f70a75356": {
+    "application": "OpenSSH Client",
+    "category": "ssh_client",
+    "confidence": 85,
+    "tags": ["openssh", "linux", "default-kex"]
+  },
+  "2e00a0eff9e97c4e25b6f4996aa864de": {
+    "application": "OpenSSH Client with restricted KEX",
+    "category": "ssh_client_variant",
+    "confidence": 75,
+    "tags": ["openssh", "custom-kex", "zerotier-test"]
+  },
+  "38d91038b3306f392bffd7a5edbaeb59": {
+    "application": "Cowrie Fake SSH Server",
+    "category": "honeypot_server_fingerprint",
+    "confidence": 90,
+    "tags": ["cowrie", "ssh-server", "honeypot"]
+  }
+}

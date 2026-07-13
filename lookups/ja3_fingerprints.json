@@ -1,0 +1,14 @@
+{
+  "cd911cdb3ae1af6c7bc940cdcad83a1a": {
+    "application": "curl / OpenSSL TLS Client",
+    "category": "tls_client",
+    "confidence": 75,
+    "tags": ["curl", "openssl", "tls13"]
+  },
+  "6aa3e70ad597aeef07e78d50366922c1": {
+    "application": "Tailscale DERP TLS Client",
+    "category": "infrastructure_traffic",
+    "confidence": 90,
+    "tags": ["tailscale", "derp", "tls13"]
+  }
+}
