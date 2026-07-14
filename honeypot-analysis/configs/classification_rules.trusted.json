@@ -1,0 +1,3986 @@
+{
+  "description": "Versioned command regex to ATT&CK technique mappings migrated from production.classification.classification_pipeline.RULE_SPECS. These are deterministic command-level mappings; SecureBERT remains the fallback/classifier for commands outside this policy coverage.",
+  "limitations": [
+    "Rules are deterministic command-regex mappings and can miss command variants not represented by the patterns.",
+    "Rules are high-precision policy mappings, not full ATT&CK coverage.",
+    "Generated or externally sourced future rules must include provenance and review status before production activation."
+  ],
+  "owner": "honeypot-cloud-analysis",
+  "policy": {
+    "enabled": true,
+    "rule_review_mode": "reviewed_only",
+    "rules": [
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bwhoami\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1033 System Owner/User Discovery",
+            "url": "https://attack.mitre.org/techniques/T1033/"
+          }
+        ],
+        "rule_id": "cmd-rule-001-t1033-system-owner-user-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Owner/User Discovery",
+        "ttp": "T1033"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bhostname\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-002-t1082-system-information-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)uname(?:\\s+-[A-Za-z]+)?(?:\\s|$)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-003-t1082-system-information-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcat\\s+/etc/(passwd|shadow)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "rule_id": "cmd-rule-004-t1003-os-credential-dumping",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "OS Credential Dumping",
+        "ttp": "T1003"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnet\\s+user\\b(?!.*\\/add)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1087 Account Discovery",
+            "url": "https://attack.mitre.org/techniques/T1087/"
+          }
+        ],
+        "rule_id": "cmd-rule-005-t1087-account-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Account Discovery",
+        "ttp": "T1087"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnet\\s+localgroup\\b(?!.*\\/add)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1069 Permission Groups Discovery",
+            "url": "https://attack.mitre.org/techniques/T1069/"
+          }
+        ],
+        "rule_id": "cmd-rule-006-t1069-permission-groups-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Permission Groups Discovery",
+        "ttp": "T1069"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bip\\s+(a|addr|route)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1016 System Network Configuration Discovery",
+            "url": "https://attack.mitre.org/techniques/T1016/"
+          }
+        ],
+        "rule_id": "cmd-rule-007-t1016-system-network-configuration-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Network Configuration Discovery",
+        "ttp": "T1016"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bifconfig\\b|\\bipconfig\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1016 System Network Configuration Discovery",
+            "url": "https://attack.mitre.org/techniques/T1016/"
+          }
+        ],
+        "rule_id": "cmd-rule-008-t1016-system-network-configuration-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Network Configuration Discovery",
+        "ttp": "T1016"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnetstat\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1049 System Network Connections Discovery",
+            "url": "https://attack.mitre.org/techniques/T1049/"
+          }
+        ],
+        "rule_id": "cmd-rule-009-t1049-system-network-connections-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Network Connections Discovery",
+        "ttp": "T1049"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bps\\s+(aux|ef|-e)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1057 Process Discovery",
+            "url": "https://attack.mitre.org/techniques/T1057/"
+          }
+        ],
+        "rule_id": "cmd-rule-010-t1057-process-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Process Discovery",
+        "ttp": "T1057"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\btasklist\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1057 Process Discovery",
+            "url": "https://attack.mitre.org/techniques/T1057/"
+          }
+        ],
+        "rule_id": "cmd-rule-011-t1057-process-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Process Discovery",
+        "ttp": "T1057"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bls\\s+-la?\\b|\\bdir\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1083 File and Directory Discovery",
+            "url": "https://attack.mitre.org/techniques/T1083/"
+          }
+        ],
+        "rule_id": "cmd-rule-012-t1083-file-and-directory-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "File and Directory Discovery",
+        "ttp": "T1083"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bfind\\s+/.*-name\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1083 File and Directory Discovery",
+            "url": "https://attack.mitre.org/techniques/T1083/"
+          }
+        ],
+        "rule_id": "cmd-rule-013-t1083-file-and-directory-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "File and Directory Discovery",
+        "ttp": "T1083"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bschtasks\\b.*\\/create\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+            "url": "https://attack.mitre.org/techniques/T1053/"
+          }
+        ],
+        "rule_id": "cmd-rule-014-t1053-scheduled-task-job",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Scheduled Task/Job",
+        "ttp": "T1053"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcrontab\\b.*-[le]\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+            "url": "https://attack.mitre.org/techniques/T1053/"
+          }
+        ],
+        "rule_id": "cmd-rule-015-t1053-scheduled-task-job",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Scheduled Task/Job",
+        "ttp": "T1053"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\becho\\b.*>>.*(cron|rc\\.local|profile|bashrc)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Pattern mixes cron persistence with shell startup files; split into narrower mappings before review."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+            "url": "https://attack.mitre.org/techniques/T1053/"
+          }
+        ],
+        "rule_id": "cmd-rule-016-t1053-scheduled-task-job",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Scheduled Task/Job",
+        "ttp": "T1053"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\breg\\b.*add.*\\\\Run\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1547 Boot or Logon Autostart Execution",
+            "url": "https://attack.mitre.org/techniques/T1547/"
+          }
+        ],
+        "rule_id": "cmd-rule-017-t1547-boot-logon-autostart-execution",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Boot or Logon Autostart Execution",
+        "ttp": "T1547"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bsystemctl\\s+enable\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1543 Create or Modify System Process",
+            "url": "https://attack.mitre.org/techniques/T1543/"
+          }
+        ],
+        "rule_id": "cmd-rule-018-t1543-create-or-modify-system-process",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create or Modify System Process",
+        "ttp": "T1543"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bchkconfig\\b.*on\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1543 Create or Modify System Process",
+            "url": "https://attack.mitre.org/techniques/T1543/"
+          }
+        ],
+        "rule_id": "cmd-rule-019-t1543-create-or-modify-system-process",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create or Modify System Process",
+        "ttp": "T1543"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnet\\s+user\\b.*\\/add\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1136 Create Account",
+            "url": "https://attack.mitre.org/techniques/T1136/"
+          }
+        ],
+        "rule_id": "cmd-rule-020-t1136-create-account",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create Account",
+        "ttp": "T1136"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\buseradd\\b|\\badduser\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1136 Create Account",
+            "url": "https://attack.mitre.org/techniques/T1136/"
+          }
+        ],
+        "rule_id": "cmd-rule-021-t1136-create-account",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create Account",
+        "ttp": "T1136"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnet\\s+localgroup\\b.*\\/add\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1098 Account Manipulation",
+            "url": "https://attack.mitre.org/techniques/T1098/"
+          }
+        ],
+        "rule_id": "cmd-rule-022-t1098-account-manipulation",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Account Manipulation",
+        "ttp": "T1098"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\busermod\\b.*-aG\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1098 Account Manipulation",
+            "url": "https://attack.mitre.org/techniques/T1098/"
+          }
+        ],
+        "rule_id": "cmd-rule-023-t1098-account-manipulation",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Account Manipulation",
+        "ttp": "T1098"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bsudo\\s+(su|-i|bash)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1548 Abuse Elevation Control Mechanism",
+            "url": "https://attack.mitre.org/techniques/T1548/"
+          }
+        ],
+        "rule_id": "cmd-rule-024-t1548-abuse-elevation-control-mechanism",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Abuse Elevation Control Mechanism",
+        "ttp": "T1548"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bchmod\\b.*[+]s\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1548 Abuse Elevation Control Mechanism",
+            "url": "https://attack.mitre.org/techniques/T1548/"
+          }
+        ],
+        "rule_id": "cmd-rule-025-t1548-abuse-elevation-control-mechanism",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Abuse Elevation Control Mechanism",
+        "ttp": "T1548"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\brunas\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1548 Abuse Elevation Control Mechanism",
+            "url": "https://attack.mitre.org/techniques/T1548/"
+          }
+        ],
+        "rule_id": "cmd-rule-026-t1548-abuse-elevation-control-mechanism",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Abuse Elevation Control Mechanism",
+        "ttp": "T1548"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcertutil\\b.*-decode\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1140 Deobfuscate/Decode Files or Information",
+            "url": "https://attack.mitre.org/techniques/T1140/"
+          }
+        ],
+        "rule_id": "cmd-rule-027-t1140-deobfuscate-decode-files",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Deobfuscate/Decode Files or Information",
+        "ttp": "T1140"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bbase64\\b.*(--decode|-d)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1140 Deobfuscate/Decode Files or Information",
+            "url": "https://attack.mitre.org/techniques/T1140/"
+          }
+        ],
+        "rule_id": "cmd-rule-028-t1140-deobfuscate-decode-files",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Deobfuscate/Decode Files or Information",
+        "ttp": "T1140"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bpowershell\\b.*-e(nc)?\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1027 Obfuscated Files or Information",
+            "url": "https://attack.mitre.org/techniques/T1027/"
+          }
+        ],
+        "rule_id": "cmd-rule-029-t1027-obfuscated-files-or-information",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Obfuscated Files or Information",
+        "ttp": "T1027"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bhistory\\s+-c\\b|\\brm\\b.*bash_history",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1070 Indicator Removal",
+            "url": "https://attack.mitre.org/techniques/T1070/"
+          }
+        ],
+        "rule_id": "cmd-rule-030-t1070-indicator-removal",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Indicator Removal",
+        "ttp": "T1070"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bshred\\b|\\bwipe\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1070 Indicator Removal",
+            "url": "https://attack.mitre.org/techniques/T1070/"
+          }
+        ],
+        "rule_id": "cmd-rule-031-t1070-indicator-removal",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Indicator Removal",
+        "ttp": "T1070"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "HISTSIZE=0|unset\\s+HISTFILE",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1070 Indicator Removal",
+            "url": "https://attack.mitre.org/techniques/T1070/"
+          }
+        ],
+        "rule_id": "cmd-rule-032-t1070-indicator-removal",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Indicator Removal",
+        "ttp": "T1070"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bpowershell\\b.*(-c |-command|-nop)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-033-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(bash|sh)\\b.*-c\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-034-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bpython[23]?\\b.*-c\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-035-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bperl\\b.*-e\\b|\\bruby\\b.*-e\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-036-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bchmod\\b.*\\+x\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "chmod +x changes file permissions; command alone is not sufficient evidence of interpreter execution."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-037-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bbash\\b\\s+/tmp/\\S+\\.sh",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-038-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bsh\\b\\s+/tmp/\\S+\\.sh",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-039-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "^\\s*(?:\\./|/tmp/|/var/tmp/|/dev/shm/)[^\\s;&|]+",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Direct execution from temporary paths is execution evidence but not specifically command-and-scripting-interpreter without more context."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-040-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmimikatz\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "rule_id": "cmd-rule-041-t1003-os-credential-dumping",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "OS Credential Dumping",
+        "ttp": "T1003"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bprocdump\\b.*lsass\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "rule_id": "cmd-rule-042-t1003-os-credential-dumping",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "OS Credential Dumping",
+        "ttp": "T1003"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bssh-keygen\\b|\\bcat\\b.*id_rsa\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Pattern combines ssh-keygen and private-key reads; ssh-keygen alone is not credential access."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+            "url": "https://attack.mitre.org/techniques/T1552/"
+          }
+        ],
+        "rule_id": "cmd-rule-043-t1552-unsecured-credentials",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Unsecured Credentials",
+        "ttp": "T1552"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bgrep\\b.*(password|passwd|secret)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Broad grep for password/passwd/secret can overmatch benign search behavior."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+            "url": "https://attack.mitre.org/techniques/T1552/"
+          }
+        ],
+        "rule_id": "cmd-rule-044-t1552-unsecured-credentials",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Unsecured Credentials",
+        "ttp": "T1552"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnc\\b.*-[elp]|\\bncat\\b.*-[elp]",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Netcat listener or shell usage is context-dependent and should be split by observed behavior."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-045-t1059-command-and-scripting-interpreter",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(curl|wget)\\b.*http",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          }
+        ],
+        "rule_id": "cmd-rule-046-t1105-ingress-tool-transfer",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Ingress Tool Transfer",
+        "ttp": "T1105"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bscp\\b|\\brsync\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          }
+        ],
+        "rule_id": "cmd-rule-047-t1105-ingress-tool-transfer",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Ingress Tool Transfer",
+        "ttp": "T1105"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnmap\\b|\\bmasscan\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1046 Network Service Discovery",
+            "url": "https://attack.mitre.org/techniques/T1046/"
+          }
+        ],
+        "rule_id": "cmd-rule-048-t1046-network-service-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Network Service Discovery",
+        "ttp": "T1046"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bping\\b.*(-c|-n)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1018 Remote System Discovery",
+            "url": "https://attack.mitre.org/techniques/T1018/"
+          }
+        ],
+        "rule_id": "cmd-rule-049-t1018-remote-system-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Remote System Discovery",
+        "ttp": "T1018"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bpkill\\b.*-f\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "pkill -f is too broad to prove impairment of defenses."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1562 Impair Defenses",
+            "url": "https://attack.mitre.org/techniques/T1562/"
+          }
+        ],
+        "rule_id": "cmd-rule-050-t1562-impair-defenses",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Impair Defenses",
+        "ttp": "T1562"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bkillall\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "killall is too broad to prove impairment of defenses."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1562 Impair Defenses",
+            "url": "https://attack.mitre.org/techniques/T1562/"
+          }
+        ],
+        "rule_id": "cmd-rule-051-t1562-impair-defenses",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Impair Defenses",
+        "ttp": "T1562"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bchattr\\b.*\\+i\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1222 File and Directory Permissions Modification",
+            "url": "https://attack.mitre.org/techniques/T1222/"
+          }
+        ],
+        "rule_id": "cmd-rule-052-t1222-file-permissions-modification",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "File and Directory Permissions Modification",
+        "ttp": "T1222"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\btar\\b.*(xzf|xf|xvf)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Archive extraction is not ingress transfer by itself."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          }
+        ],
+        "rule_id": "cmd-rule-053-t1105-ingress-tool-transfer",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Ingress Tool Transfer",
+        "ttp": "T1105"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmv\\b.*/usr/(local/)?bin/\\.\\w+",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1036 Masquerading",
+            "url": "https://attack.mitre.org/techniques/T1036/"
+          }
+        ],
+        "rule_id": "cmd-rule-054-t1036-masquerading",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Masquerading",
+        "ttp": "T1036"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnohup\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "nohup alone is not masquerading evidence."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1036 Masquerading",
+            "url": "https://attack.mitre.org/techniques/T1036/"
+          }
+        ],
+        "rule_id": "cmd-rule-055-t1036-masquerading",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Masquerading",
+        "ttp": "T1036"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bsystemctl\\s+start\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "systemctl start may operate an existing service rather than create or modify one."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1543 Create or Modify System Process",
+            "url": "https://attack.mitre.org/techniques/T1543/"
+          }
+        ],
+        "rule_id": "cmd-rule-056-t1543-create-or-modify-system-process",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create or Modify System Process",
+        "ttp": "T1543"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(nproc|free|top)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Pattern mixes system information and process/resource discovery; split before review."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-057-t1082-system-information-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\btruncate\\b.*-s\\s+0\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1070 Indicator Removal",
+            "url": "https://attack.mitre.org/techniques/T1070/"
+          }
+        ],
+        "rule_id": "cmd-rule-058-t1070-indicator-removal",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Indicator Removal",
+        "ttp": "T1070"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bchpasswd\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1098 Account Manipulation",
+            "url": "https://attack.mitre.org/techniques/T1098/"
+          }
+        ],
+        "rule_id": "cmd-rule-059-t1098-account-manipulation",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Account Manipulation",
+        "ttp": "T1098"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "authorized_keys",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1098 Account Manipulation",
+            "url": "https://attack.mitre.org/techniques/T1098/"
+          }
+        ],
+        "rule_id": "cmd-rule-060-t1098-account-manipulation",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Account Manipulation",
+        "ttp": "T1098"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmkdir\\b.*\\.ssh",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "mkdir .ssh is preparatory and not account manipulation without credential/key modification."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1098 Account Manipulation",
+            "url": "https://attack.mitre.org/techniques/T1098/"
+          }
+        ],
+        "rule_id": "cmd-rule-061-t1098-account-manipulation",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Account Manipulation",
+        "ttp": "T1098"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\btar\\b.*-cz.*\\|\\s*(curl|wget|nc)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Upload syntax suggests exfiltration but does not prove C2 channel use."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1041 Exfiltration Over C2 Channel",
+            "url": "https://attack.mitre.org/techniques/T1041/"
+          }
+        ],
+        "rule_id": "cmd-rule-062-t1041-exfiltration-over-c2-channel",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Exfiltration Over C2 Channel",
+        "ttp": "T1041"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(curl|wget)\\b.*(--upload-file|--data-binary)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Upload syntax suggests exfiltration but does not prove C2 channel use."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1041 Exfiltration Over C2 Channel",
+            "url": "https://attack.mitre.org/techniques/T1041/"
+          }
+        ],
+        "rule_id": "cmd-rule-063-t1041-exfiltration-over-c2-channel",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Exfiltration Over C2 Channel",
+        "ttp": "T1041"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmysql\\b.*-e\\s+['\\\"]?\\s*show\\s+databases",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Database enumeration is not cleanly system information discovery."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-064-t1082-system-information-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bpsql\\b.*\\\\\\\\l\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Database enumeration is not cleanly system information discovery."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-065-t1082-system-information-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmongo\\b.*listDatabases",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Database enumeration is not cleanly system information discovery."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-066-t1082-system-information-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bredis-cli\\b.*keys",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Redis key enumeration is not cleanly system information discovery."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-067-t1082-system-information-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcat\\b.*(mysql\\.conf|pg_hba\\.conf|my\\.cnf)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1083 File and Directory Discovery",
+            "url": "https://attack.mitre.org/techniques/T1083/"
+          }
+        ],
+        "rule_id": "cmd-rule-068-t1083-file-and-directory-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "File and Directory Discovery",
+        "ttp": "T1083"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcat\\b.*\\.mysql_history",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+            "url": "https://attack.mitre.org/techniques/T1552/"
+          }
+        ],
+        "rule_id": "cmd-rule-069-t1552-unsecured-credentials",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Unsecured Credentials",
+        "ttp": "T1552"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bfind\\b.*(wp-config\\.php|\\.env|database\\.yml)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1083 File and Directory Discovery",
+            "url": "https://attack.mitre.org/techniques/T1083/"
+          }
+        ],
+        "rule_id": "cmd-rule-070-t1083-file-and-directory-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "File and Directory Discovery",
+        "ttp": "T1083"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bgrep\\b.*password.*/var/www",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+            "url": "https://attack.mitre.org/techniques/T1552/"
+          }
+        ],
+        "rule_id": "cmd-rule-071-t1552-unsecured-credentials",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Unsecured Credentials",
+        "ttp": "T1552"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bps\\b.*(mysql|postgres|mongo)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1057 Process Discovery",
+            "url": "https://attack.mitre.org/techniques/T1057/"
+          }
+        ],
+        "rule_id": "cmd-rule-072-t1057-process-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Process Discovery",
+        "ttp": "T1057"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bnetstat\\b.*(3306|5432|27017)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1049 System Network Connections Discovery",
+            "url": "https://attack.mitre.org/techniques/T1049/"
+          }
+        ],
+        "rule_id": "cmd-rule-073-t1049-system-network-connections-discovery",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Network Connections Discovery",
+        "ttp": "T1049"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmysql\\b.*select.*user.*password",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "SQL password query may be credential access but is not OS credential dumping."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "rule_id": "cmd-rule-074-t1003-os-credential-dumping",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "OS Credential Dumping",
+        "ttp": "T1003"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmysqldump\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "mysqldump is data collection/export, not OS credential dumping."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "rule_id": "cmd-rule-075-t1003-os-credential-dumping",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "OS Credential Dumping",
+        "ttp": "T1003"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bpg_dump\\b|\\bpg_dumpall\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "pg_dump is data collection/export, not OS credential dumping."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "rule_id": "cmd-rule-076-t1003-os-credential-dumping",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "OS Credential Dumping",
+        "ttp": "T1003"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmongodump\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "mongodump is data collection/export, not OS credential dumping."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "rule_id": "cmd-rule-077-t1003-os-credential-dumping",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "OS Credential Dumping",
+        "ttp": "T1003"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bgzip\\b.*\\.(sql|dump|bak)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1560 Archive Collected Data",
+            "url": "https://attack.mitre.org/techniques/T1560/"
+          }
+        ],
+        "rule_id": "cmd-rule-078-t1560-archive-collected-data",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Archive Collected Data",
+        "ttp": "T1560"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bzip\\b.*\\.(sql|dump|bak)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1560 Archive Collected Data",
+            "url": "https://attack.mitre.org/techniques/T1560/"
+          }
+        ],
+        "rule_id": "cmd-rule-079-t1560-archive-collected-data",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Archive Collected Data",
+        "ttp": "T1560"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcurl\\b.*--data-binary.*\\.sql",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "curl upload of a database dump suggests exfiltration but does not prove C2 channel use."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1041 Exfiltration Over C2 Channel",
+            "url": "https://attack.mitre.org/techniques/T1041/"
+          }
+        ],
+        "rule_id": "cmd-rule-080-t1041-exfiltration-over-c2-channel",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Exfiltration Over C2 Channel",
+        "ttp": "T1041"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmysql\\b.*CREATE\\s+USER",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1136 Create Account",
+            "url": "https://attack.mitre.org/techniques/T1136/"
+          }
+        ],
+        "rule_id": "cmd-rule-081-t1136-create-account",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create Account",
+        "ttp": "T1136"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bmysql\\b.*GRANT\\s+ALL",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1098 Account Manipulation",
+            "url": "https://attack.mitre.org/techniques/T1098/"
+          }
+        ],
+        "rule_id": "cmd-rule-082-t1098-account-manipulation",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Account Manipulation",
+        "ttp": "T1098"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcrontab\\b.*-\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Crontab wildcard pattern is broad and overlaps with multiple cron behaviors."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+            "url": "https://attack.mitre.org/techniques/T1053/"
+          }
+        ],
+        "rule_id": "cmd-rule-083-t1053-scheduled-task-job",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Scheduled Task/Job",
+        "ttp": "T1053"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\becho\\b.*crontab\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+            "url": "https://attack.mitre.org/techniques/T1053/"
+          }
+        ],
+        "rule_id": "cmd-rule-084-t1053-scheduled-task-job",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Scheduled Task/Job",
+        "ttp": "T1053"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bsed\\b.*bind-address",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Editing database bind-address is configuration change; not clearly impair defenses."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1562 Impair Defenses",
+            "url": "https://attack.mitre.org/techniques/T1562/"
+          }
+        ],
+        "rule_id": "cmd-rule-085-t1562-impair-defenses",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Impair Defenses",
+        "ttp": "T1562"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\btruncate\\b.*(error\\.log|mysql|postgresql)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "2026-06-21",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-21",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1070 Indicator Removal",
+            "url": "https://attack.mitre.org/techniques/T1070/"
+          }
+        ],
+        "rule_id": "cmd-rule-086-t1070-indicator-removal",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Indicator Removal",
+        "ttp": "T1070"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bsystemctl\\s+restart\\b.*(mysql|postgres)",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Existing notebook-parity production command classifier rule",
+            "Human-curated command regex to ATT&CK technique mapping",
+            "Migrated into a versioned policy file so runtime mappings are auditable"
+          ],
+          "created": "2026-06-02",
+          "generated": false,
+          "method": "migration_from_production_classification_pipeline_rule_specs",
+          "reviewed": false,
+          "source_file": "production/classification/classification_pipeline.py",
+          "version": "1.0",
+          "reviewer": "",
+          "last_reviewed": "2026-06-21",
+          "review_status": "needs_semantic_review",
+          "review_scope": "deferred_due_to_broad_or_context_dependent_mapping",
+          "review_deferred_reason": "Restarting a database service does not necessarily create or modify a system process."
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1543 Create or Modify System Process",
+            "url": "https://attack.mitre.org/techniques/T1543/"
+          }
+        ],
+        "rule_id": "cmd-rule-087-t1543-create-or-modify-system-process",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create or Modify System Process",
+        "ttp": "T1543"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bcat\\b\\s+(?:/root|/home/[^/\\s]+)/(?:\\.ssh/(?:id_rsa|id_ed25519|id_ecdsa)|\\.aws/credentials|\\.config/gcloud/[^\\s]+|\\.env)\\b",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved because the command directly reads common private-key, cloud-credential, or environment-secret files from user/root paths.",
+            "This rule intentionally replaces the reviewed-only runtime gap left by the older unreviewed ssh-keygen/id_rsa mixed rule; ssh-keygen alone remains excluded.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-28",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-06-28",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-28",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+            "url": "https://attack.mitre.org/techniques/T1552/"
+          }
+        ],
+        "rule_id": "cmd-rule-088-t1552-unsecured-credentials-private-file-read",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Unsecured Credentials",
+        "ttp": "T1552"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bchmod\\b\\s+(?:[ugoa]*\\+x|[0-7]{3,4})\\b\\s+\\S+",
+        "provenance": {
+          "author": "developer",
+          "basis": [
+            "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
+            "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
+            "Approved because the command directly modifies file permission bits, including executable permissions, without claiming the file has executed.",
+            "This rule intentionally does not map chmod +x to T1059 execution; execution is classified separately when an interpreter or binary execution command is observed.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
+          ],
+          "created": "2026-06-28",
+          "generated": false,
+          "method": "manual_attck_command_rule_review",
+          "reviewed": true,
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-06-28",
+          "reviewer": "project_developer",
+          "last_reviewed": "2026-06-28",
+          "review_status": "approved",
+          "review_scope": "parent_technique_command_regex_semantics",
+          "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+          "mitre_cache_version": "14.1"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1222 File and Directory Permissions Modification",
+            "url": "https://attack.mitre.org/techniques/T1222/"
+          }
+        ],
+        "rule_id": "cmd-rule-089-t1222-file-permissions-modification-chmod",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "File and Directory Permissions Modification",
+        "ttp": "T1222"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)id(\\s|$)",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Linux id directly enumerates current user and group identity in SSH honeypot sessions.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1033 System Owner/User Discovery",
+            "url": "https://attack.mitre.org/techniques/T1033/"
+          }
+        ],
+        "rule_id": "cmd-rule-090-t1033-system-owner-user-discovery-id",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Owner/User Discovery",
+        "ttp": "T1033"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(lscpu|nproc|uptime)\\b|\\bcat\\b\\s+/proc/(cpuinfo|meminfo)\\b",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Hardware, uptime, CPU, and memory probes are common post-login reconnaissance commands.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-091-t1082-system-information-discovery-runtime-hardware",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)(pwd|ls)(\\s|$)|(^|[;&|]\\s*)(find|locate|du)\\b",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Directory listing, working-directory, filesystem search, and disk-use commands provide file-system discovery evidence.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1083 File and Directory Discovery",
+            "url": "https://attack.mitre.org/techniques/T1083/"
+          }
+        ],
+        "rule_id": "cmd-rule-092-t1083-file-and-directory-discovery-basic-linux",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "File and Directory Discovery",
+        "ttp": "T1083"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(ifconfig|ip\\s+(addr|a|route|r|link)|route\\s+-n|arp\\s+-a|ping\\s+[-\\w\\s]*(?:\\d{1,3}\\.){3}\\d{1,3})\\b",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Network interface, route, ARP, and local-IP connectivity probes expose network configuration.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1016 System Network Configuration Discovery",
+            "url": "https://attack.mitre.org/techniques/T1016/"
+          }
+        ],
+        "rule_id": "cmd-rule-093-t1016-network-configuration-discovery-linux",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Network Configuration Discovery",
+        "ttp": "T1016"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(netstat|ss)\\b\\s+[-\\w]*[antulp]+",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "netstat and ss with connection/listener flags enumerate active network connections and listening services.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1049 System Network Connections Discovery",
+            "url": "https://attack.mitre.org/techniques/T1049/"
+          }
+        ],
+        "rule_id": "cmd-rule-094-t1049-network-connections-discovery-linux",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "System Network Connections Discovery",
+        "ttp": "T1049"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)(ps\\s+(aux|ef|x)|top\\b|pgrep\\b|pidof\\b|systemctl\\s+status\\b|service\\s+--status-all)",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Process listing and service-status commands enumerate running processes and services.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1057 Process Discovery",
+            "url": "https://attack.mitre.org/techniques/T1057/"
+          }
+        ],
+        "rule_id": "cmd-rule-095-t1057-process-discovery-linux",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Process Discovery",
+        "ttp": "T1057"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(busybox\\s+)?(wget|curl|ftpget|tftp)\\b\\s+.*https?://|\\bscp\\b\\s+\\S+:\\S+|\\bpython(?:3)?\\b.*(urllib|requests).*https?://|\\b(perl|php|ruby)\\b.*https?://",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Shell download and copy utilities retrieve remote payloads into the honeypot session.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          }
+        ],
+        "rule_id": "cmd-rule-096-t1105-ingress-tool-transfer-common-tools",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Ingress Tool Transfer",
+        "ttp": "T1105"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)(?:sh|bash|dash|zsh|ksh)\\s+\\S+|(^|[;&|]\\s*)\\./[^\\s;&|]+|(^|[;&|]\\s*)/(?:tmp|var/tmp|dev/shm)/[^\\s;&|]+|\\b(?:python3?|perl|php|ruby|lua|node)\\b\\s+\\S+\\.(?:py|pl|php|rb|lua|js)\\b|\\b(nohup|setsid)\\b\\s+\\S+",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Explicit interpreter invocation or execution of a staged local binary/script is command execution evidence.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "rule_id": "cmd-rule-097-t1059-command-and-scripting-interpreter-explicit-execution",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Command and Scripting Interpreter",
+        "ttp": "T1059"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(history\\s+-c|unset\\s+HISTFILE|rm\\b.*(\\.bash_history|/var/log)|truncate\\b.*(/var/log|\\.bash_history)|shred\\b.*(/var/log|\\.bash_history))",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Shell history and log deletion/truncation commands are cleanup and indicator-removal evidence.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1070 Indicator Removal",
+            "url": "https://attack.mitre.org/techniques/T1070/"
+          }
+        ],
+        "rule_id": "cmd-rule-098-t1070-indicator-removal-history-and-logs",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Indicator Removal",
+        "ttp": "T1070"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(/etc/systemd/system/|systemd/system/.*\\.service\\b|\\bsystemctl\\s+(enable|start|restart)\\b.*\\.service\\b)",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Writing or enabling systemd service units indicates persistence through system process configuration.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1543 Create or Modify System Process",
+            "url": "https://attack.mitre.org/techniques/T1543/"
+          }
+        ],
+        "rule_id": "cmd-rule-099-t1543-create-or-modify-system-process-systemd",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create or Modify System Process",
+        "ttp": "T1543"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(\\.bashrc|\\.profile|/etc/profile|/etc/bash\\.bashrc|/etc/rc\\.local|rc\\.local)",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Modification of shell startup files or rc.local is startup-triggered persistence evidence.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1546 Event Triggered Execution",
+            "url": "https://attack.mitre.org/techniques/T1546/"
+          }
+        ],
+        "rule_id": "cmd-rule-100-t1546-event-triggered-execution-shell-startup",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Event Triggered Execution",
+        "ttp": "T1546"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(useradd|adduser)\\b\\s+\\S+",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Linux account creation commands indicate account-based persistence or access expansion.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1136 Create Account",
+            "url": "https://attack.mitre.org/techniques/T1136/"
+          }
+        ],
+        "rule_id": "cmd-rule-101-t1136-create-account-linux",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Create Account",
+        "ttp": "T1136"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)(sudo|su)\\b|\\b/etc/sudoers\\b|\\bNOPASSWD\\b",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "sudo, su, sudoers, and NOPASSWD modifications are observable privilege-escalation mechanism use.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1548 Abuse Elevation Control Mechanism",
+            "url": "https://attack.mitre.org/techniques/T1548/"
+          }
+        ],
+        "rule_id": "cmd-rule-102-t1548-abuse-elevation-control-mechanism-sudo-su",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Abuse Elevation Control Mechanism",
+        "ttp": "T1548"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(killall|pkill|kill\\s+-9)\\b.*(xmrig|minerd|kinsing|kdevtmpfsi|watchdog|aliyun|aegis|falcon|crowdstrike)",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Killing known security, watchdog, or competing miner processes is defense-impairment evidence in honeypot malware sessions.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1562 Impair Defenses",
+            "url": "https://attack.mitre.org/techniques/T1562/"
+          }
+        ],
+        "rule_id": "cmd-rule-103-t1562-impair-defenses-kill-security-or-miner-processes",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Impair Defenses",
+        "ttp": "T1562"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\bsshpass\\b|\\bssh\\b\\s+[^;&|]*@(?:\\d{1,3}\\.){3}\\d{1,3}|\\bscp\\b\\s+.*(?:\\d{1,3}\\.){3}\\d{1,3}",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "SSH, sshpass, or SCP to remote IPs indicate attempted remote-service propagation from the compromised shell.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1021 Remote Services",
+            "url": "https://attack.mitre.org/techniques/T1021/"
+          }
+        ],
+        "rule_id": "cmd-rule-105-t1021-remote-services-ssh-propagation",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Remote Services",
+        "ttp": "T1021"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(xmrig|stratum\\+tcp|minerd|cpuminer|nanopool|supportxmr|monero|cryptonight)\\b",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Cryptocurrency miner binaries, pools, and mining protocols are resource-hijacking indicators.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1496 Resource Hijacking",
+            "url": "https://attack.mitre.org/techniques/T1496/"
+          }
+        ],
+        "rule_id": "cmd-rule-106-t1496-resource-hijacking-miner-indicators",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Resource Hijacking",
+        "ttp": "T1496"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*\\.ssh/(id_rsa|id_dsa|id_ecdsa|id_ed25519|known_hosts)\\b",
+        "provenance": {
+          "method": "manual_attck_command_rule_review",
+          "basis": [
+            "Reading SSH private keys or known_hosts files is credential-material access evidence.",
+            "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "project-reviewer",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-11",
+          "generated": false,
+          "created": "2026-07-11",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-11-honeypot-coverage"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+            "url": "https://attack.mitre.org/techniques/T1552/"
+          }
+        ],
+        "rule_id": "cmd-rule-107-t1552-ssh-credential-file-access",
+        "source_type": "human_curated_command_rule",
+        "technique_name": "Unsecured Credentials",
+        "ttp": "T1552"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*(?:/proc/mounts|/etc/mtab)\\b",
+        "provenance": {
+          "method": "researcher_ai_assisted_attck_command_rule_review",
+          "basis": [
+            "Reading /proc/mounts or /etc/mtab directly observes mounted filesystem paths.",
+            "The mapping is a command-level observable candidate and does not claim attacker intent or command success."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "researcher_ai_assisted_consistency_review",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-12",
+          "generated": false,
+          "created": "2026-07-12",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-12-consistency-fixes"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1083 File and Directory Discovery",
+            "url": "https://attack.mitre.org/techniques/T1083/"
+          }
+        ],
+        "rule_id": "cmd-rule-108-t1083-mounted-filesystem-discovery",
+        "source_type": "researcher_ai_assisted_command_rule",
+        "technique_name": "File and Directory Discovery",
+        "ttp": "T1083"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*(?:/proc/cpuinfo|/etc/(?:[^/\\s]*release|issue))\\b",
+        "provenance": {
+          "method": "researcher_ai_assisted_attck_command_rule_review",
+          "basis": [
+            "Reading processor or operating-system release files directly observes system information.",
+            "The mapping is a command-level observable candidate and does not claim attacker intent or command success."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "researcher_ai_assisted_consistency_review",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-12",
+          "generated": false,
+          "created": "2026-07-12",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-12-consistency-fixes"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-109-t1082-linux-system-files",
+        "source_type": "researcher_ai_assisted_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)(which|whereis|type)\\s+[^;&|\\s]+",
+        "provenance": {
+          "method": "researcher_ai_assisted_attck_command_rule_review",
+          "basis": [
+            "Locating a named executable observes a file path in the target filesystem.",
+            "The mapping is a command-level observable candidate and does not claim attacker intent or command success."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "researcher_ai_assisted_consistency_review",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-12",
+          "generated": false,
+          "created": "2026-07-12",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-12-consistency-fixes"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1083 File and Directory Discovery",
+            "url": "https://attack.mitre.org/techniques/T1083/"
+          }
+        ],
+        "rule_id": "cmd-rule-110-t1083-executable-path-discovery",
+        "source_type": "researcher_ai_assisted_command_rule",
+        "technique_name": "File and Directory Discovery",
+        "ttp": "T1083"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)w(?:\\s|$)",
+        "provenance": {
+          "method": "researcher_ai_assisted_attck_command_rule_review",
+          "basis": [
+            "The w utility directly lists logged-in users and their activity.",
+            "The mapping is a command-level observable candidate and does not claim attacker intent beyond the observed command."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "researcher_ai_assisted_consistency_review",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-12",
+          "generated": false,
+          "created": "2026-07-12",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-12-consistency-fixes"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1033 System Owner/User Discovery",
+            "url": "https://attack.mitre.org/techniques/T1033/"
+          }
+        ],
+        "rule_id": "cmd-rule-111-t1033-logged-in-user-discovery",
+        "source_type": "researcher_ai_assisted_command_rule",
+        "technique_name": "System Owner/User Discovery",
+        "ttp": "T1033"
+      },
+      {
+        "confidence": 1.0,
+        "enabled": true,
+        "evidence_type": "command_regex",
+        "pattern": "(^|[;&|]\\s*)df(?:\\s|$)",
+        "provenance": {
+          "method": "researcher_ai_assisted_attck_command_rule_review",
+          "basis": [
+            "The df utility observes filesystem capacity and storage properties as host system information.",
+            "The mapping is a command-level observable candidate and does not claim attacker intent or command success."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": true,
+          "reviewer": "researcher_ai_assisted_consistency_review",
+          "review_status": "approved_for_honeypot_observables",
+          "review_scope": "high-precision command observable semantics",
+          "last_reviewed": "2026-07-12",
+          "generated": false,
+          "created": "2026-07-12",
+          "source_file": "configs/classification_rules.trusted.json",
+          "version": "2026-07-12-consistency-fixes"
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "rule_id": "cmd-rule-112-t1082-filesystem-capacity-discovery",
+        "source_type": "researcher_ai_assisted_command_rule",
+        "technique_name": "System Information Discovery",
+        "ttp": "T1082"
+      }
+    ]
+  },
+  "policy_id": "honeypot-command-classification-rules",
+  "schema_version": "classification_rule_policy.v1",
+  "updated_at": "2026-07-12T00:00:00Z",
+  "version": "2026-07-12-consistency-fixes"
+}

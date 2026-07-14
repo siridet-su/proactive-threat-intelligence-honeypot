@@ -1,0 +1,649 @@
+"""Asynchronous closed-session analysis worker."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import io
+import json
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Type
+
+from production.classification.trust import (
+    classification_audit_reason,
+    is_trusted_classification_event,
+)
+from production.reporting.reporting_pipeline import ImprovedAsyncSwarmCoordinator, _build_session_correlation_hunting_context
+from production.enrichment.mitre_attack_loader import load_mitre_attack_db
+from production.workers.session_monitor import SessionState, build_pipeline_trigger
+from production.enrichment.threat_feed_loader import load_threat_feeds
+
+from production.reporting.actor_attribution import enrich_report_with_actor_attribution
+from production.reporting.analysis_policy import session_analysis_skip_reason
+from production.reporting.artifacts import attach_report_artifacts
+from production.utils.config import ProductionConfig
+from production.enrichment.enrichment_cache import load_combined_ip_enrichment
+from production.enrichment.feed_status import save_feed_status
+from production.utils.runtime_context import attach_runtime_context
+from production.utils.serialization import command_observation_provenance, utc_now
+from production.storage import open_storage
+
+
+def _as_list(value: Any) -> List[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, set):
+        return list(value)
+    return [value]
+
+
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _main_ttp(value: Any) -> str:
+    text = _clean_text(value).upper()
+    return text.split(".", 1)[0] if "." in text and text.startswith("T") else text
+
+
+def _average(values: List[float]) -> float:
+    return round(sum(values) / len(values), 4) if values else 0.0
+
+
+def _trusted_payload_views(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+    events = [
+        event for event in _as_list(session_payload.get("classification_events"))
+        if isinstance(event, dict)
+    ]
+    if not events:
+        return {
+            "ttps": list(session_payload.get("ttps") or []),
+            "tactics": list(session_payload.get("tactics") or []),
+            "ttp_command_map": dict(session_payload.get("ttp_command_map") or {}),
+        }
+    ttps: List[str] = []
+    tactics: List[str] = []
+    ttp_command_map: Dict[str, List[str]] = {}
+    for event in events:
+        if not is_trusted_classification_event(event):
+            continue
+        ttp = _main_ttp(event.get("ttp"))
+        tactic = _clean_text(event.get("tactic"))
+        command = _clean_text(event.get("command") or event.get("input"))
+        if ttp and ttp not in ttps:
+            ttps.append(ttp)
+        if tactic and tactic != "unknown" and tactic not in tactics:
+            tactics.append(tactic)
+        if ttp and command:
+            commands = ttp_command_map.setdefault(ttp, [])
+            if command not in commands:
+                commands.append(command)
+    return {"ttps": ttps, "tactics": tactics, "ttp_command_map": ttp_command_map}
+
+
+def _direct_command_ttp_layer(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for event in _as_list(session_payload.get("classification_events")):
+        if not isinstance(event, dict):
+            continue
+        if not is_trusted_classification_event(event):
+            continue
+        raw_ttp = _clean_text(event.get("ttp"))
+        if not raw_ttp or raw_ttp == "unknown":
+            continue
+        main_ttp = _main_ttp(raw_ttp)
+        item = grouped.setdefault(
+            main_ttp,
+            {
+                "main_ttp": main_ttp,
+                "source_ttp_values": [],
+                "tactic": _clean_text(event.get("tactic")),
+                "source_type": "direct_command_classification",
+                "evidence_type": "command_level_classifier_output",
+                "commands": [],
+                "sources": [],
+                "confidence_values": [],
+                "evidence": [],
+            },
+        )
+        source_ttp = _clean_text(event.get("source_ttp") or event.get("source_subtechnique") or raw_ttp)
+        if source_ttp and source_ttp not in item["source_ttp_values"]:
+            item["source_ttp_values"].append(source_ttp)
+        source = _clean_text(event.get("source") or "unknown")
+        if source and source not in item["sources"]:
+            item["sources"].append(source)
+        command = _clean_text(event.get("command") or event.get("input"))
+        original_command = _clean_text(event.get("original_command"))
+        if command and command not in item["commands"]:
+            item["commands"].append(command)
+        try:
+            confidence = float(event.get("confidence"))
+            item["confidence_values"].append(max(0.0, min(1.0, confidence)))
+        except (TypeError, ValueError):
+            confidence = None
+        item["evidence"].append(
+            {
+                "command": command,
+                "original_command": original_command,
+                "source": source,
+                "confidence": confidence,
+                "subcommand_index": event.get("subcommand_index"),
+                "technique_granularity": event.get("technique_granularity") or "parent",
+            }
+        )
+    items = []
+    for item in grouped.values():
+        confidences = item.pop("confidence_values", [])
+        item["confidence"] = {
+            "min": round(min(confidences), 4) if confidences else None,
+            "average": _average(confidences) if confidences else None,
+            "count": len(confidences),
+        }
+        item["evidence"] = item["evidence"][:10]
+        item["commands"] = item["commands"][:10]
+        items.append(item)
+    items.sort(key=lambda item: item["main_ttp"])
+    return {
+        "status": "available" if items else "not_available",
+        "count": len(items),
+        "description": "Direct command-level TTPs produced by rules and/or SecureBERT.",
+        "items": items,
+    }
+
+
+def _audit_only_classification_layer(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+    items = []
+    for event in _as_list(session_payload.get("classification_events")):
+        if not isinstance(event, dict) or is_trusted_classification_event(event):
+            continue
+        items.append(
+            {
+                "command": _clean_text(event.get("command") or event.get("input")),
+                "candidate_ttp": _clean_text(event.get("ttp")),
+                "candidate_tactic": _clean_text(event.get("tactic")),
+                "source": _clean_text(event.get("source") or "unknown"),
+                "confidence": event.get("confidence"),
+                "high_confidence": event.get("high_confidence"),
+                "evidence_type": "audit_only_classification_candidate",
+                "reason": classification_audit_reason(event),
+                "excluded_from_observed_facts": True,
+                "excluded_from_prediction": True,
+            }
+        )
+    return {
+        "status": "available" if items else "not_available",
+        "count": len(items),
+        "description": (
+            "Weak classifier candidates and shell noise retained for audit only; "
+            "they are not observed ATT&CK facts and do not drive prediction or the threat hypothesis."
+        ),
+        "items": items[:50],
+    }
+
+
+def _session_correlated_ttp_layer(hunting_context: Dict[str, Any]) -> Dict[str, Any]:
+    correlations = [
+        item
+        for item in _as_list(hunting_context.get("session_correlations"))
+        if isinstance(item, dict)
+    ]
+    return {
+        "status": "available" if correlations else "not_available",
+        "count": len(correlations),
+        "description": (
+            "Session-level TTPs inferred from the whole session pattern. These are "
+            "threat-hunting correlations, not raw command classifications."
+        ),
+        "correlation_rules_fired": hunting_context.get("correlation_rules_fired") or [],
+        "source_type_counts": hunting_context.get("source_type_counts") or {},
+        "items": correlations,
+    }
+
+
+def _prediction_hypothesis_layer(prediction_snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = prediction_snapshot or {}
+    if isinstance(payload.get("payload"), dict):
+        payload = payload["payload"]
+    ranking = [
+        item
+        for item in _as_list(payload.get("final_ranking"))
+        if isinstance(item, dict)
+    ]
+    items = []
+    for item in ranking:
+        sources = [
+            source
+            for source in _as_list(item.get("sources"))
+            if isinstance(source, dict)
+        ]
+        items.append(
+            {
+                "predicted_tactic": _clean_text(item.get("tactic")),
+                "predicted_technique": _clean_text(item.get("technique")),
+                "main_ttp": _main_ttp(item.get("technique")),
+                "confidence": item.get("confidence"),
+                "score": item.get("score"),
+                "calibrated_score": item.get("calibrated_score"),
+                "source_type": ", ".join(item.get("source_types") or []),
+                "source_types": item.get("source_types") or [],
+                "evidence_type": "realtime_prediction_hypothesis",
+                "reasons": item.get("reasons") or [],
+                "sources": sources,
+            }
+        )
+    return {
+        "status": "available" if items else "not_available",
+        "count": len(items),
+        "description": (
+            "Realtime next-step hypotheses. These are forecasts only and must not "
+            "be mixed into the direct observed TTP list."
+        ),
+        "snapshot_id": payload.get("snapshot_id") or "",
+        "generated_at": payload.get("generated_at") or "",
+        "trust_status": payload.get("trust_status") or {},
+        "agreement": payload.get("agreement") or {},
+        "items": items,
+    }
+
+
+def build_threat_evidence_layers(
+    session_payload: Dict[str, Any],
+    prediction_snapshot: Optional[Dict[str, Any]] = None,
+    hunting_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    hunting = hunting_context or _build_session_correlation_hunting_context(
+        session_payload.get("session_ttp_correlations", []),
+        session_payload.get("session_id", "unknown"),
+    )
+    direct = _direct_command_ttp_layer(session_payload)
+    audit_only = _audit_only_classification_layer(session_payload)
+    correlated = _session_correlated_ttp_layer(hunting)
+    prediction = _prediction_hypothesis_layer(prediction_snapshot)
+    return {
+        "schema_version": "threat_evidence_layers.v1",
+        "session_id": session_payload.get("session_id", "unknown"),
+        "interpretation": (
+            "Direct command TTPs, session-correlated TTPs, and realtime prediction "
+            "hypotheses are intentionally separated so the report does not mix facts, "
+            "correlations, and forecasts."
+        ),
+        "direct_command_ttps": direct,
+        "audit_only_classification_candidates": audit_only,
+        "session_correlated_ttps": correlated,
+        "prediction_only_hypotheses": prediction,
+        "summary": {
+            "direct_command_ttp_count": direct["count"],
+            "audit_only_classification_count": audit_only["count"],
+            "session_correlated_ttp_count": correlated["count"],
+            "prediction_hypothesis_count": prediction["count"],
+            "has_direct_command_evidence": direct["count"] > 0,
+            "has_session_correlation_evidence": correlated["count"] > 0,
+            "has_prediction_hypotheses": prediction["count"] > 0,
+        },
+    }
+
+
+def attach_threat_evidence_layers(
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+    prediction_snapshot: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    hunting_context = report.get("threat_hunting_context")
+    if not isinstance(hunting_context, dict):
+        hunting_context = _build_session_correlation_hunting_context(
+            session_payload.get("session_ttp_correlations", []),
+            session_payload.get("session_id", "unknown"),
+        )
+        report["threat_hunting_context"] = hunting_context
+    layers = build_threat_evidence_layers(
+        session_payload,
+        prediction_snapshot=prediction_snapshot,
+        hunting_context=hunting_context,
+    )
+    report["threat_evidence_layers"] = layers
+    report.setdefault("evidence_confidence", layers["summary"])
+    hypothesis = report.get("threat_hypothesis")
+    if not isinstance(hypothesis, dict):
+        hypothesis = {"summary": _clean_text(hypothesis or report.get("summary") or "")}
+        report["threat_hypothesis"] = hypothesis
+    hypothesis["evidence_layer_summary"] = layers["summary"]
+    strength = hypothesis.get("analytical_evidence_strength") or hypothesis.get("analytical_confidence")
+    if isinstance(strength, dict):
+        strength.setdefault("metric_name", "analytical_evidence_strength")
+        strength.setdefault("calibrated_probability", False)
+        strength.setdefault(
+            "description",
+            "Heuristic evidence strength for post-session analysis; not a calibrated probability.",
+        )
+        hypothesis.setdefault("analytical_evidence_strength", strength)
+        hypothesis.setdefault("analytical_confidence", strength)
+    provenance = report.setdefault("data_provenance", {})
+    if isinstance(provenance, dict):
+        provenance["threat_evidence_layers"] = layers["summary"]
+    return report
+
+
+def session_state_from_payload(payload: Dict[str, Any]) -> SessionState:
+    state = SessionState(
+        session_id=payload["session_id"],
+        src_ip=payload.get("src_ip", "unknown"),
+        start_time=payload.get("start_time", utc_now()),
+    )
+    for key, value in payload.items():
+        if hasattr(state, key):
+            setattr(state, key, value)
+    return state
+
+
+def deterministic_baseline_report(
+    session_payload: Dict[str, Any],
+    error: str,
+    prediction_snapshot: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    commands = session_payload.get("commands", [])
+    trusted = _trusted_payload_views(session_payload)
+    ttps = trusted["ttps"]
+    raw_events = session_payload.get("raw_events", [])
+    hunting_context = _build_session_correlation_hunting_context(
+        session_payload.get("session_ttp_correlations", []),
+        session_payload.get("session_id", "unknown"),
+    )
+    report = {
+        "session_id": session_payload.get("session_id", "unknown"),
+        "created_at": utc_now(),
+        "worker": "analysis_worker",
+        "analysis_mode": "deterministic_fallback",
+        "confidence": "Low - heuristic evidence strength; deterministic fallback",
+        "confidence_semantics": "not_a_calibrated_probability",
+        "summary": (
+            f"AI analysis failed, so this report was generated from session facts only. "
+            f"Observed {len(commands)} commands and {len(ttps)} unique TTPs."
+        ),
+        "commands": commands,
+        "ttps": ttps,
+        "tactics": trusted["tactics"],
+        "session_ttp_correlations": session_payload.get("session_ttp_correlations", []),
+        "session_ttp_correlation_summary": session_payload.get("session_ttp_correlation_summary", {}),
+        "threat_hunting_context": hunting_context,
+        "session_correlations": hunting_context.get("session_correlations", []),
+        "correlation_rules_fired": hunting_context.get("correlation_rules_fired", []),
+        "kev_matches": session_payload.get("kev_matches", []),
+        "sigma_hits": session_payload.get("sigma_hits", []),
+        "ttp_command_map": trusted["ttp_command_map"],
+        "threat_hypothesis": {
+            "stated_intent": "Under analysis",
+            "predicted_next_action": "Insufficient evidence to construct a falsifiable follow-on hypothesis.",
+            "post_session_follow_on_hypothesis": "Insufficient evidence to construct a falsifiable follow-on hypothesis.",
+            "falsification_conditions": [],
+            "analytical_evidence_strength": {
+                "level": "Low",
+                "reason": "The analysis coordinator failed; only trusted observed evidence is retained.",
+                "metric_name": "analytical_evidence_strength",
+                "method": "heuristic_evidence_strength_v1",
+                "calibrated_probability": False,
+                "description": "Heuristic evidence strength; not a calibrated probability.",
+            },
+            "hypothesis_status": "insufficient_evidence",
+            "scope": "post_session_cowrie_observable_behavior",
+        },
+        "error": error,
+        "data_provenance": {
+            "session": {
+                "session_id": session_payload.get("session_id", "unknown"),
+                "src_ip": session_payload.get("src_ip", "unknown"),
+                "raw_event_count": len(raw_events),
+                **command_observation_provenance(
+                    commands,
+                    session_payload.get("commands_success", []),
+                    session_payload.get("commands_failed", []),
+                ),
+            },
+            "classification": {
+                "policy": session_payload.get("classification_policy", {}),
+                "event_count": len(session_payload.get("classification_events", [])),
+                "ttp_sources": session_payload.get("ttp_sources", {}),
+            },
+            "session_ttp_correlation": session_payload.get("session_ttp_correlation_summary", {}),
+            "credentials": session_payload.get("credential_metadata", {}),
+            "enrichment": session_payload.get("enrichment_status", {}),
+            "ai": {
+                "status": "failed",
+                "fallback": "deterministic_baseline",
+                "error": error,
+            },
+        },
+    }
+    return attach_threat_evidence_layers(report, session_payload, prediction_snapshot)
+
+
+def load_json_config(path: str) -> Dict[str, Any]:
+    if not path or not Path(path).exists():
+        return {}
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
+    config.apply_environment()
+    storage = open_storage(config.database_url)
+    feeds = None
+    mitre_attack = None
+    if config.enable_feed_loading:
+        feeds = load_threat_feeds(
+            cisa_cache_path=config.cisa_cache_path or None,
+            sigma_cache_path=config.sigma_cache_path or None,
+        )
+        mitre_attack = load_mitre_attack_db(
+            cache_path=config.mitre_attack_path or None,
+            silent=True,
+        )
+    enrichment_db = load_combined_ip_enrichment(
+        storage=storage,
+        file_path=config.enrichment_db_path,
+        allow_stale=config.enrichment_allow_stale,
+    )
+    return {
+        "config": load_json_config(config.threat_intel_config_path),
+        "feeds": feeds,
+        "mitre_attack": mitre_attack,
+        "enrichment_db": enrichment_db,
+    }
+
+
+async def analyze_job(
+    job: Dict[str, Any],
+    config: ProductionConfig,
+    coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator,
+    prediction_snapshot: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    session_payload = job.get("session") or json.loads(job["payload_json"])
+    state = session_state_from_payload(session_payload)
+    if not getattr(state, "bpg_list", None) or not getattr(state, "ioc_summary", None):
+        attach_runtime_context(state)
+    context = load_analysis_context(config)
+    trigger = build_pipeline_trigger(
+        coordinator_class=coordinator_class,
+        feeds=context["feeds"],
+        mitre_db=context["mitre_attack"],
+        config=context["config"],
+        enrichment_db=context["enrichment_db"],
+        max_tokens=config.analysis_max_tokens,
+    )
+    if config.analysis_suppress_stdout:
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = trigger(state)
+    else:
+        result = trigger(state)
+    if not result:
+        raise RuntimeError(getattr(state, "pipeline_error", "analysis pipeline returned no report"))
+    result.setdefault("session_id", state.session_id)
+    result.setdefault("created_at", utc_now())
+    result.setdefault("worker", "analysis_worker")
+    hunting_context = _build_session_correlation_hunting_context(
+        session_payload.get("session_ttp_correlations", []),
+        session_payload.get("session_id", state.session_id),
+    )
+    result.setdefault("threat_hunting_context", hunting_context)
+    result.setdefault("session_correlations", hunting_context.get("session_correlations", []))
+    result.setdefault("correlation_rules_fired", hunting_context.get("correlation_rules_fired", []))
+    if isinstance(result.get("threat_hypothesis"), dict):
+        result["threat_hypothesis"].setdefault(
+            "session_correlations",
+            hunting_context.get("session_correlations", []),
+        )
+        result["threat_hypothesis"].setdefault(
+            "correlation_rules_fired",
+            hunting_context.get("correlation_rules_fired", []),
+        )
+    if isinstance(result.get("honeypot_intelligence"), dict):
+        result["honeypot_intelligence"].setdefault("session_correlation_findings", hunting_context)
+    result = attach_threat_evidence_layers(result, session_payload, prediction_snapshot)
+    if config.enable_actor_attribution:
+        result = enrich_report_with_actor_attribution(
+            result,
+            session_payload,
+            config.actor_db_path,
+            mitre_db=context["mitre_attack"],
+        )
+    return attach_report_artifacts(result, session_payload, config)
+
+
+class AnalysisWorker:
+    def __init__(self, config: ProductionConfig) -> None:
+        self.config = config
+        self.storage = open_storage(config.database_url)
+
+    async def process_once(self, coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator) -> int:
+        save_feed_status(self.storage, self.config)
+        jobs = self.storage.claim_analysis_jobs(self.config.analysis_batch_size)
+        processed = 0
+        for job in jobs:
+            session_payload = job.get("session") or {}
+            session_id = job.get("session_id") or session_payload.get("session_id", "unknown")
+            latest_prediction_row = self.storage.get_latest_prediction_snapshot(session_id)
+            latest_prediction = (
+                latest_prediction_row.get("payload")
+                if isinstance(latest_prediction_row, dict)
+                else None
+            )
+            skip_reason = ""
+            if self.config.analysis_skip_empty_sessions:
+                skip_reason = session_analysis_skip_reason(job["session"])
+            if skip_reason:
+                self.storage.skip_analysis_job(job["job_id"], skip_reason)
+                processed += 1
+                print(
+                    json.dumps(
+                        {
+                            "service": "analysis_worker",
+                            "job_id": job["job_id"],
+                            "session_id": job.get("session_id", "unknown"),
+                            "status": "skipped",
+                            "reason": skip_reason,
+                            "timestamp": utc_now(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+                continue
+            try:
+                report = await analyze_job(
+                    job,
+                    self.config,
+                    coordinator_class=coordinator_class,
+                    prediction_snapshot=latest_prediction,
+                )
+            except Exception as exc:
+                retry = int(job["attempts"]) < self.config.analysis_max_attempts
+                if retry or not self.config.analysis_fallback_on_failure:
+                    self.storage.fail_analysis_job(job["job_id"], str(exc), retry=retry)
+                else:
+                    fallback = deterministic_baseline_report(
+                        job["session"],
+                        str(exc),
+                        prediction_snapshot=latest_prediction,
+                    )
+                    if self.config.enable_actor_attribution:
+                        fallback = enrich_report_with_actor_attribution(
+                            fallback,
+                            job["session"],
+                            self.config.actor_db_path,
+                        )
+                    fallback = attach_report_artifacts(fallback, job["session"], self.config)
+                    self.storage.complete_analysis_job(job["job_id"], fallback)
+                    processed += 1
+                print(
+                    json.dumps(
+                        {
+                            "service": "analysis_worker",
+                            "job_id": job["job_id"],
+                            "status": "retry" if retry else ("fallback_reported" if self.config.analysis_fallback_on_failure else "failed"),
+                            "error": str(exc),
+                            "timestamp": utc_now(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+                continue
+            self.storage.complete_analysis_job(job["job_id"], report)
+            processed += 1
+            print(
+                json.dumps(
+                    {
+                        "service": "analysis_worker",
+                        "job_id": job["job_id"],
+                        "session_id": job.get("session_id", "unknown"),
+                        "status": "succeeded",
+                        "timestamp": utc_now(),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+        return processed
+
+    def run_forever(self) -> None:
+        while True:
+            processed = asyncio.run(self.process_once())
+            print(
+                json.dumps(
+                    {
+                        "service": "analysis_worker",
+                        "processed": processed,
+                        "timestamp": utc_now(),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            time.sleep(self.config.worker_poll_seconds)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run the closed-session analysis worker.")
+    parser.add_argument("--config", help="Path to production JSON config.")
+    parser.add_argument("--once", action="store_true", help="Process one batch and exit.")
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    config = ProductionConfig.from_env(args.config)
+    worker = AnalysisWorker(config)
+    if args.once:
+        processed = asyncio.run(worker.process_once())
+        print(json.dumps({"service": "analysis_worker", "processed": processed}, sort_keys=True))
+        return 0
+    worker.run_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

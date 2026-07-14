@@ -1,0 +1,596 @@
+{
+  "schema_version": "prediction_policy.v1",
+  "policy_id": "honeypot-realtime-trusted-sources",
+  "version": "2026-07-11-primary-transition",
+  "updated_at": "2026-07-11T00:00:00Z",
+  "owner": "honeypot-cloud-analysis",
+  "review_status": "pilot",
+  "policy": {
+    "enabled": true,
+    "prediction_mode": "primary_transition_with_fallback",
+    "compute_weighted_ensemble_baseline": true,
+    "primary_transition": {
+      "primary_model": "transition_frequency",
+      "source_order": ["local_transition", "external_seed_transition"],
+      "fallback_scorer": "fallback_progression",
+      "min_transition_score": 0.01
+    },
+    "max_hypotheses": 5,
+    "min_score": 0.01,
+    "min_sessions_for_local": 50,
+    "min_transition_count": 2,
+    "transition_history_limit": 1000,
+    "external_transition_model_path": "data/models/external_cowrie_seed_transition_model.compound_securebert.json",
+    "external_min_sessions": 50,
+    "external_min_transition_count": 2,
+    "prefix_max_length": 3,
+    "transition_smoothing": 0.05,
+    "technique_to_tactic_aggregation": "max",
+    "technique_tactic_map": {},
+    "recency_decay_half_life_sessions": 500,
+    "min_prefix_transition_count": 2,
+    "min_technique_transition_count": 2,
+    "min_tactic_transition_count": 2,
+    "min_active_scorers": 1,
+    "below_minimum_behavior": "low_confidence_flag",
+    "confidence_damping": {
+      "enabled": true,
+      "mode": "geometric_mean",
+      "damped_scorers": [
+        "local_transition",
+        "external_seed_transition",
+        "actor_fingerprint_transition",
+        "fallback_progression",
+        "tactic_combination",
+        "mitre_association"
+      ]
+    },
+    "weights": {
+      "local_transition": 0.35,
+      "external_seed_transition": 0.22,
+      "actor_fingerprint_transition": 0.0,
+      "fallback_progression": 0.07,
+      "tactic_combination": 0.08,
+      "mitre_association": 0.13,
+      "sigma_correlation": 0.06,
+      "enrichment_context": 0.07
+    },
+    "enrichment_context_mode": "scorer",
+    "enrichment_context_multiplier": {
+      "max_multiplier": 1.15,
+      "min_enrichment_score": 0.01
+    },
+    "external_seed_weight_decay": {
+      "enabled": true,
+      "method": "maturity_multiplier",
+      "cold": 1.0,
+      "warming": 0.5,
+      "stable": 0.2,
+      "shrinkage_count_source": "transitions",
+      "shrinkage_k": 200.0,
+      "min_multiplier": 0.0,
+      "max_multiplier": 1.0
+    },
+    "actor_fingerprint_prior": {
+      "enabled": false,
+      "match_fields": ["hassh_fingerprint", "ja3_fingerprint", "command_pattern_hash"],
+      "min_sessions": 2,
+      "min_transition_count": 1,
+      "min_prefix_transition_count": 1,
+      "min_tactic_transition_count": 1,
+      "prefix_max_length": 3,
+      "smoothing": 0.05,
+      "history_limit": 500,
+      "model_path": "",
+      "comparison_weight": 0.15
+    },
+    "behavior_regime_classifier": {
+      "enabled": true,
+      "min_commands": 2,
+      "automated_command_rate_per_minute": 8.0,
+      "human_command_rate_per_minute": 1.5,
+      "low_delay_variance_seconds2": 4.0,
+      "high_delay_variance_seconds2": 900.0,
+      "high_entropy_bits_per_char": 4.2,
+      "low_entropy_bits_per_char": 2.5,
+      "low_payload_diversity": 0.40,
+      "high_payload_diversity": 0.80,
+      "automated_threshold": 0.65,
+      "human_threshold": 0.35,
+      "feature_weights": {
+        "command_frequency": 0.35,
+        "delay_regularity": 0.25,
+        "command_entropy": 0.20,
+        "payload_repetition": 0.20
+      }
+    },
+    "confidence_controls": {
+      "enabled": true,
+      "single_active_scorer_cap": "medium",
+      "single_supporting_scorer_cap": "medium",
+      "external_seed_only_cap": "low",
+      "external_seed_dominated_cap": "medium",
+      "context_only_cap": "low",
+      "medium_divergence_ratio": 0.5,
+      "medium_divergence_cap": "medium",
+      "high_divergence_ratio": 0.75,
+      "high_divergence_cap": "low",
+      "low_classification_geomean": 0.65,
+      "unknown_or_noise_ratio": 0.4,
+      "low_classification_cap": "low"
+    },
+    "prediction_triggers": {
+      "enabled": true,
+      "eventids": [
+        "cowrie.login.success",
+        "cowrie.login.failed",
+        "cowrie.session.file_download",
+        "cowrie.session.file_upload",
+        "cowrie.session.closed"
+      ],
+      "eventid_prefixes": [
+        "cowrie.command."
+      ]
+    },
+    "predictive_alerts": {
+      "enabled": true,
+      "min_confidence": "medium",
+      "min_score": 0.5,
+      "min_severity": "high",
+      "min_active_scorers": 1,
+      "min_supporting_scorers": 1,
+      "block_on_coverage_below_minimum": true,
+      "max_divergence_ratio": 0.5,
+      "block_external_seed_only": true,
+      "block_context_only": true,
+      "alert_on_session_status": [
+        "active"
+      ],
+      "max_alerts_per_snapshot": 1,
+      "risk_annotation_severity_boost": {
+        "enabled": false,
+        "min_risk_level": "high",
+        "boost_high_to_critical": false
+      },
+      "tactic_severity": {
+        "credential-access": "medium",
+        "defense-evasion": "medium",
+        "command-and-control": "high",
+        "persistence": "high",
+        "privilege-escalation": "high",
+        "lateral-movement": "critical",
+        "exfiltration": "critical",
+        "impact": "critical"
+      }
+    },
+    "calibration": {
+      "enabled": false,
+      "method": "empirical_binning",
+      "min_cases_per_bin": 20,
+      "bins": []
+    },
+    "fallback_progression": {
+      "initial-access": ["execution", "discovery", "persistence"],
+      "execution": ["discovery", "credential-access", "collection"],
+      "discovery": ["credential-access", "lateral-movement", "collection"],
+      "credential-access": ["persistence", "lateral-movement", "exfiltration"],
+      "persistence": ["defense-evasion", "command-and-control", "collection"],
+      "privilege-escalation": ["defense-evasion", "credential-access", "persistence"],
+      "defense-evasion": ["collection", "command-and-control", "exfiltration"],
+      "lateral-movement": ["collection", "command-and-control", "exfiltration"],
+      "collection": ["exfiltration", "command-and-control"],
+      "command-and-control": ["exfiltration", "impact"],
+      "exfiltration": ["impact"],
+      "impact": []
+    },
+    "maturity": {
+      "cold": {
+        "max_usable_sessions": 49,
+        "max_transition_count": 49
+      },
+      "warming": {
+        "min_usable_sessions": 50,
+        "min_transition_count": 50,
+        "max_usable_sessions": 199,
+        "max_transition_count": 299
+      },
+      "stable": {
+        "min_usable_sessions": 200,
+        "min_transition_count": 300
+      },
+      "cold_confidence_cap": "low",
+      "warming_confidence_cap": ""
+    },
+    "vulnerability_risk": {
+      "enabled": true,
+      "default_tactic": "impact",
+      "high_epss_threshold": 0.7,
+      "medium_epss_threshold": 0.3,
+      "epss_scores": {}
+    },
+    "risk_annotators": {
+      "vulnerability_risk": {
+        "enabled": true
+      }
+    },
+    "rule_prior_deduplication": {
+      "enabled": true,
+      "method": "max_contribution",
+      "scorers": ["tactic_combination", "mitre_association"],
+      "require_shared_evidence_key": true
+    },
+    "tactic_combination_rules": [
+      {
+        "rule_id": "observed-discovery-credential-access",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "inference_type": "human_curated_tactic_combination",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": ["MITRE ATT&CK tactic semantics", "honeypot operator review"],
+          "author": "developer",
+          "reviewed": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "required_tactics": ["discovery", "credential-access"],
+        "evidence_sources": ["configured human-curated tactic combination prior"],
+        "references": ["https://attack.mitre.org/", "https://attack.mitre.org/tactics/TA0006/"],
+        "confidence_policy": "heuristic prior only; rank below local transition evidence",
+        "hypotheses": [
+          {
+            "tactic": "command-and-control",
+            "score": 0.45,
+            "reason": "discovery plus credential access can precede payload staging or callback setup"
+          },
+          {
+            "tactic": "persistence",
+            "score": 0.3,
+            "reason": "credential interest after discovery can lead to account or key persistence"
+          }
+        ]
+      },
+      {
+        "rule_id": "observed-c2-execution",
+        "evidence_key": "download-execution-chain",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "inference_type": "human_curated_tactic_combination",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": ["MITRE ATT&CK tactic semantics", "common post-download honeypot command ordering"],
+          "author": "developer",
+          "reviewed": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "required_tactics": ["command-and-control", "execution"],
+        "evidence_sources": ["configured human-curated tactic combination prior"],
+        "references": ["https://attack.mitre.org/tactics/TA0011/", "https://attack.mitre.org/tactics/TA0002/"],
+        "confidence_policy": "heuristic prior only; rank below local transition evidence",
+        "hypotheses": [
+          {
+            "tactic": "persistence",
+            "score": 0.4,
+            "reason": "command-and-control plus execution can indicate staging before persistence"
+          },
+          {
+            "tactic": "defense-evasion",
+            "score": 0.35,
+            "reason": "execution after download commonly pairs with cleanup or hiding activity"
+          }
+        ]
+      },
+      {
+        "rule_id": "observed-defense-evasion",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "inference_type": "human_curated_tactic_combination",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": ["MITRE ATT&CK defense-evasion tactic semantics"],
+          "author": "developer",
+          "reviewed": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "required_flags": ["has_defense_evasion"],
+        "evidence_sources": ["configured human-curated tactic combination prior"],
+        "references": ["https://attack.mitre.org/tactics/TA0005/"],
+        "confidence_policy": "heuristic prior only; rank below local transition evidence",
+        "hypotheses": [
+          {
+            "tactic": "exfiltration",
+            "score": 0.25,
+            "reason": "defense evasion is present; later stages may include collection or exfiltration"
+          }
+        ]
+      },
+      {
+        "rule_id": "downloader-without-execution",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "inference_type": "human_curated_tactic_combination",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": ["MITRE ATT&CK Ingress Tool Transfer semantics", "common honeypot download-then-execute ordering"],
+          "author": "developer",
+          "reviewed": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "required_flags": ["has_downloader"],
+        "absent_flags": ["has_execution"],
+        "evidence_sources": ["configured human-curated tactic combination prior"],
+        "references": ["https://attack.mitre.org/techniques/T1105/", "https://attack.mitre.org/tactics/TA0002/"],
+        "confidence_policy": "heuristic prior only; rank below local transition evidence",
+        "hypotheses": [
+          {
+            "tactic": "execution",
+            "score": 0.35,
+            "reason": "download behavior was observed without a confirmed execution step"
+          }
+        ]
+      }
+    ],
+    "mitre_association_rules": [
+      {
+        "rule_id": "mitre-t1059-t1105-post-download-association",
+        "evidence_key": "download-execution-chain",
+        "enabled": true,
+        "source_type": "human_curated_attck_prior",
+        "inference_type": "associated_technique_prior",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK technique pages",
+            "CTID TIE concept"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated_by_tie": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "required_ttps": ["T1059", "T1105"],
+        "evidence_sources": [
+          "MITRE ATT&CK technique semantics for Command and Scripting Interpreter and Ingress Tool Transfer",
+          "MITRE CTID Technique Inference Engine style associated-technique prior"
+        ],
+        "references": [
+          "https://attack.mitre.org/techniques/T1059/",
+          "https://attack.mitre.org/techniques/T1105/",
+          "https://github.com/center-for-threat-informed-defense/technique-inference-engine"
+        ],
+        "confidence_policy": "external association prior only; rank below local transition evidence until backtested",
+        "hypotheses": [
+          {
+            "technique": "T1053",
+            "tactic": "persistence",
+            "score": 0.22,
+            "reason": "download plus execution has enough ATT&CK context to review scheduled or repeat execution paths"
+          },
+          {
+            "technique": "T1070",
+            "tactic": "defense-evasion",
+            "score": 0.18,
+            "reason": "post-download execution can be followed by cleanup or indicator removal"
+          }
+        ]
+      },
+      {
+        "rule_id": "mitre-credential-access-to-lateral-movement-review",
+        "enabled": true,
+        "source_type": "human_curated_attck_prior",
+        "inference_type": "associated_technique_prior",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK technique pages",
+            "CTID TIE concept"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated_by_tie": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "any_ttps": ["T1003", "T1552", "T1110"],
+        "required_tactics": ["credential-access"],
+        "evidence_sources": [
+          "MITRE ATT&CK credential-access and remote-services technique semantics",
+          "MITRE CTID Technique Inference Engine style associated-technique prior"
+        ],
+        "references": [
+          "https://attack.mitre.org/tactics/TA0006/",
+          "https://attack.mitre.org/techniques/T1003/",
+          "https://attack.mitre.org/techniques/T1552/",
+          "https://attack.mitre.org/techniques/T1021/",
+          "https://github.com/center-for-threat-informed-defense/technique-inference-engine"
+        ],
+        "confidence_policy": "association prior only; requires local transition or later commands before high confidence",
+        "hypotheses": [
+          {
+            "technique": "T1021",
+            "tactic": "lateral-movement",
+            "score": 0.20,
+            "reason": "credential access can make remote-service authentication worth monitoring"
+          },
+          {
+            "technique": "T1041",
+            "tactic": "exfiltration",
+            "score": 0.12,
+            "reason": "credential or private-key access can precede exfiltration over command-and-control channels"
+          }
+        ]
+      },
+      {
+        "rule_id": "mitre-defense-evasion-to-impact-review",
+        "enabled": true,
+        "source_type": "human_curated_attck_prior",
+        "inference_type": "associated_technique_prior",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK technique pages",
+            "CTID TIE concept"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated_by_tie": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "any_ttps": ["T1070", "T1562"],
+        "required_tactics": ["defense-evasion"],
+        "evidence_sources": [
+          "MITRE ATT&CK defense-evasion technique semantics",
+          "MITRE CTID Technique Inference Engine style associated-technique prior"
+        ],
+        "references": [
+          "https://attack.mitre.org/tactics/TA0005/",
+          "https://attack.mitre.org/techniques/T1070/",
+          "https://attack.mitre.org/techniques/T1562/",
+          "https://attack.mitre.org/tactics/TA0040/"
+        ],
+        "confidence_policy": "low-to-medium external prior; use as triage context",
+        "hypotheses": [
+          {
+            "tactic": "impact",
+            "score": 0.14,
+            "reason": "cleanup or defense-evasion behavior can occur before destructive or disruptive actions"
+          }
+        ]
+      }
+    ],
+    "sigma_correlation_rules": [
+      {
+        "rule_id": "sigma-downloader-dropper-context",
+        "enabled": true,
+        "source_type": "detection_correlation",
+        "inference_type": "indirect_detection_context",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "Sigma generic detection methodology",
+            "local Sigma hit/title/tag matching"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "sigma_contains_any": ["download", "dropper", "wget", "curl", "payload"],
+        "evidence_sources": [
+          "Sigma generic detection-rule methodology for portable detection logic",
+          "Local Sigma hit/title/tag match from current session"
+        ],
+        "references": [
+          "https://sigmahq.io/sigma",
+          "https://sigmahq.io/sigma-specification/"
+        ],
+        "confidence_policy": "detection correlation only; use as context modifier unless reinforced by local transitions",
+        "hypotheses": [
+          {
+            "technique": "T1105",
+            "tactic": "command-and-control",
+            "score": 0.24,
+            "reason": "downloader/dropper-style detection context suggests possible payload staging or callback setup"
+          },
+          {
+            "technique": "T1059",
+            "tactic": "execution",
+            "score": 0.18,
+            "reason": "downloaded payload context often needs a follow-on execution step"
+          }
+        ]
+      },
+      {
+        "rule_id": "sigma-credential-file-access-context",
+        "enabled": true,
+        "source_type": "detection_correlation",
+        "inference_type": "indirect_detection_context",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "Sigma generic detection methodology",
+            "local Sigma hit/title/tag matching"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "sigma_contains_any": ["passwd", "shadow", "ssh key", "id_rsa", "credential"],
+        "evidence_sources": [
+          "Sigma generic detection-rule methodology for portable detection logic",
+          "Local Sigma hit/title/tag match from current session"
+        ],
+        "references": [
+          "https://sigmahq.io/sigma",
+          "https://attack.mitre.org/tactics/TA0006/"
+        ],
+        "confidence_policy": "detection correlation only; do not infer exact next command",
+        "hypotheses": [
+          {
+            "technique": "T1021",
+            "tactic": "lateral-movement",
+            "score": 0.16,
+            "reason": "credential-file access increases the value of watching for remote-service reuse"
+          },
+          {
+            "technique": "T1041",
+            "tactic": "exfiltration",
+            "score": 0.14,
+            "reason": "credential material may be staged for exfiltration"
+          }
+        ]
+      },
+      {
+        "rule_id": "sigma-log-cleanup-context",
+        "enabled": true,
+        "source_type": "detection_correlation",
+        "inference_type": "indirect_detection_context",
+        "temporal_claim": false,
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "Sigma generic detection methodology",
+            "local Sigma hit/title/tag matching"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "created": "2026-05-20",
+          "version": "1.0"
+        },
+        "sigma_contains_any": ["history", "clear", "log", "utmp", "wtmp", "auth.log"],
+        "evidence_sources": [
+          "Sigma generic detection-rule methodology for portable detection logic",
+          "Local Sigma hit/title/tag match from current session"
+        ],
+        "references": [
+          "https://sigmahq.io/sigma",
+          "https://attack.mitre.org/techniques/T1070/"
+        ],
+        "confidence_policy": "detection correlation only; use as low-confidence later-stage triage context",
+        "hypotheses": [
+          {
+            "technique": "T1070",
+            "tactic": "defense-evasion",
+            "score": 0.22,
+            "reason": "log or history cleanup context indicates defense-evasion review"
+          }
+        ]
+      }
+    ]
+  }
+}

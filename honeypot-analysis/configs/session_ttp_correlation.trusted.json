@@ -1,0 +1,842 @@
+{
+  "schema_version": "session_ttp_correlation_policy.v1",
+  "policy_id": "honeypot-session-ttp-correlation-trusted",
+  "version": "2026-07-12-conservative-correlation-semantics",
+  "updated_at": "2026-07-12T00:00:00Z",
+  "owner": "honeypot-cloud-analysis",
+  "review_status": "pilot",
+  "policy": {
+    "enabled": true,
+    "default_role": "post_session_report_evidence",
+    "confidence_semantics": "developer_defined_heuristic_policy_strength_not_probability",
+    "prediction_use_requires": ["reviewed", "empirically_evaluated"],
+    "rules": [
+      {
+        "rule_id": "cowrie-file-transfer-correlates-t1105",
+        "enabled": true,
+        "ttp": "T1105",
+        "tactic": "command-and-control",
+        "technique_name": "Ingress Tool Transfer",
+        "confidence": 0.88,
+        "evidence_type": "session_correlated_confirmed",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "Cowrie recorded a successful file-download event. This confirms transfer into the honeypot session, but does not by itself confirm execution or persistence.",
+        "conditions": {
+          "all": [
+            {
+              "type": "eventid",
+              "eventid": "cowrie.session.file_download",
+              "description": "Cowrie recorded a file transfer into the honeypot session."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          },
+          {
+            "name": "Cowrie JSON logging/event telemetry",
+            "url": "https://docs.cowrie.org/en/latest/README.html"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1105 technique definition",
+            "Cowrie session file-download event telemetry"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.1"
+        }
+      },
+      {
+        "rule_id": "downloader-command-observed-correlates-t1105",
+        "enabled": true,
+        "ttp": "T1105",
+        "tactic": "command-and-control",
+        "technique_name": "Ingress Tool Transfer",
+        "confidence": 0.7,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "A downloader command was observed, supporting attempted tool transfer or possible payload staging. Successful download, execution, and persistence are not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1105",
+              "min_confidence": 0.75,
+              "description": "A trusted command-level classifier identified a downloader or transfer command."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "\\b(wget|curl|tftp|ftp)\\b\\s+\\S+",
+              "description": "Command text contains a transfer utility and target, which indicates transfer intent but not success."
+            }
+          ],
+          "none": [
+            {
+              "type": "eventid",
+              "eventid": "cowrie.session.file_download",
+              "description": "No Cowrie successful file-download event was recorded for this candidate-only rule."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          },
+          {
+            "name": "Cowrie JSON logging/event telemetry",
+            "url": "https://docs.cowrie.org/en/latest/README.html"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1105 technique definition",
+            "Trusted downloader command evidence",
+            "Absence of Cowrie successful file-download telemetry"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-07-12",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "download-then-execute-chain-correlates-t1059",
+        "enabled": true,
+        "ttp": "T1059",
+        "tactic": "execution",
+        "technique_name": "Command and Scripting Interpreter",
+        "confidence": 0.7,
+        "evidence_type": "sequence_correlation",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": true,
+        "apply_to_prediction": false,
+        "reason": "The session contains transfer-related evidence followed by an execution command. This supports an ordered behavior candidate, but successful execution and resulting impact are not confirmed.",
+        "conditions": {
+          "all": [
+            {
+              "type": "ordered_ttps",
+              "sequence": [
+                "T1105",
+                "T1059"
+              ],
+              "description": "A file transfer technique appears before a command/script execution technique."
+            }
+          ],
+          "any": [
+            {
+              "type": "command_regex",
+              "pattern": "\\b(chmod\\s+\\+x|sh\\s+/tmp/|bash\\s+/tmp/|\\./\\S+|/tmp/\\S+)\\b",
+              "description": "Command sequence includes execution of a local or downloaded artifact."
+            },
+            {
+              "type": "classification_ttp",
+              "ttp": "T1059",
+              "min_confidence": 0.75,
+              "description": "Command-level classifier identified command/script execution with high confidence."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          },
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1059 technique definition",
+            "MITRE ATT&CK T1105 technique definition",
+            "ordered session evidence from Cowrie command telemetry"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "ssh-login-failures-correlate-t1110",
+        "enabled": true,
+        "ttp": "T1110",
+        "tactic": "credential-access",
+        "technique_name": "Brute Force",
+        "confidence": 0.65,
+        "evidence_type": "threshold_correlation",
+        "source_type": "operational_threshold",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "Multiple failed Cowrie login attempts in one session support a brute-force credential-access hypothesis. The threshold is operational and should be tuned from local data.",
+        "conditions": {
+          "any": [
+            {
+              "type": "min_login_failures",
+              "count": 5,
+              "description": "At least five failed login events were observed in the same session."
+            },
+            {
+              "type": "min_event_count",
+              "eventid": "cowrie.login.failed",
+              "count": 5,
+              "description": "At least five cowrie.login.failed events were observed."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1110 Brute Force",
+            "url": "https://attack.mitre.org/techniques/T1110/"
+          },
+          {
+            "name": "Cowrie JSON logging/event telemetry",
+            "url": "https://docs.cowrie.org/en/latest/README.html"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1110 technique definition",
+            "Cowrie login failure event telemetry",
+            "pilot operational threshold"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "linux-shadow-read-correlates-t1003-008",
+        "enabled": true,
+        "ttp": "T1003.008",
+        "tactic": "credential-access",
+        "technique_name": "/etc/passwd and /etc/shadow",
+        "confidence": 0.7,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "A command attempted to read /etc/shadow or referenced equivalent credential-dumping evidence. Command success and credential recovery are not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "command_regex",
+              "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*\\s/etc/shadow\\b",
+              "description": "Command text directly references /etc/shadow."
+            },
+            {
+              "type": "classification_ttp",
+              "ttp": "T1003",
+              "min_confidence": 0.85,
+              "command_regex": "/etc/shadow\\b",
+              "description": "Command-level classifier identified credential dumping on a command that references /etc/shadow."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1003.008 /etc/passwd and /etc/shadow",
+            "url": "https://attack.mitre.org/techniques/T1003/008/"
+          },
+          {
+            "name": "MITRE ATT&CK T1003 OS Credential Dumping",
+            "url": "https://attack.mitre.org/techniques/T1003/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1003.008 sub-technique definition",
+            "command evidence from Cowrie"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "ssh-private-key-read-correlates-t1552-004",
+        "enabled": true,
+        "ttp": "T1552.004",
+        "tactic": "credential-access",
+        "technique_name": "Private Keys",
+        "confidence": 0.7,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "A command attempted to access a common SSH private-key filename. Successful file access or key collection is not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "command_regex",
+              "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*\\.ssh/(id_rsa|id_dsa|id_ecdsa|id_ed25519)\\b",
+              "description": "Command text directly references a common SSH private-key filename."
+            },
+            {
+              "type": "classification_ttp",
+              "ttp": "T1552",
+              "min_confidence": 0.85,
+              "command_regex": "\\.ssh/(id_rsa|id_dsa|id_ecdsa|id_ed25519)\\b",
+              "description": "Command-level classifier identified unsecured credential access on an SSH private-key command."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1552.004 Private Keys",
+            "url": "https://attack.mitre.org/techniques/T1552/004/"
+          },
+          {
+            "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+            "url": "https://attack.mitre.org/techniques/T1552/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1552.004 sub-technique definition",
+            "command evidence from Cowrie"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "history-or-log-cleanup-correlates-t1070",
+        "enabled": true,
+        "ttp": "T1070",
+        "tactic": "defense-evasion",
+        "technique_name": "Indicator Removal",
+        "confidence": 0.7,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "A command requested shell-history or log cleanup behavior. Successful indicator removal is not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1070",
+              "min_confidence": 0.75,
+              "description": "Command-level classifier identified indicator removal."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "\\b(history\\s+-c|unset\\s+HISTFILE|rm\\b.*(/var/log|\\.bash_history)|truncate\\b.*(/var/log|\\.bash_history))",
+              "description": "Command text contains shell history or log cleanup behavior."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1070 Indicator Removal",
+            "url": "https://attack.mitre.org/techniques/T1070/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1070 technique definition",
+            "command evidence from Cowrie"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "cron-modification-correlates-t1053",
+        "enabled": true,
+        "ttp": "T1053",
+        "tactic": "persistence",
+        "technique_name": "Scheduled Task/Job",
+        "confidence": 0.6,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "The session contains a command that attempts to create, edit, remove, or write a cron entry. Successful scheduled execution or persistence is not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1053",
+              "min_confidence": 0.75,
+              "command_regex": "(?:^|[;&|]\\s*)crontab\\s+(?!-l(?:\\s|$))(?:-e|-r|[^;&|]+)|(?:>>?|tee(?:\\s+-a)?)\\s*(?:/etc/cron(?:\\.d|tab|\\.daily|\\.hourly|\\.weekly|\\.monthly)?|/var/spool/cron)",
+              "description": "Trusted Scheduled Task/Job evidence is tied to an observed cron modification command."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "(?:^|[;&|]\\s*)crontab\\s+(?!-l(?:\\s|$))(?:-e|-r|[^;&|]+)|(?:>>?|tee(?:\\s+-a)?)\\s*(?:/etc/cron(?:\\.d|tab|\\.daily|\\.hourly|\\.weekly|\\.monthly)?|/var/spool/cron)",
+              "description": "Command text attempts to modify a cron entry; read-only crontab listing and unrelated startup mechanisms are excluded."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+            "url": "https://attack.mitre.org/techniques/T1053/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1053 technique definition",
+            "command evidence from Cowrie"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "authorized-keys-modification-correlates-t1098",
+        "enabled": true,
+        "ttp": "T1098.004",
+        "tactic": "persistence",
+        "technique_name": "SSH Authorized Keys",
+        "confidence": 0.65,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "A command attempted to write, copy, install, or change an SSH authorized_keys file. Successful account modification or persistence is not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1098",
+              "min_confidence": 0.75,
+              "command_regex": "(?:(?:echo|printf|cat)\\b.*(?:>>?|tee(?:\\s+-a)?)\\s*\\S*authorized_keys|(?:cp|mv|install|chmod|chattr)\\b[^;&|]*authorized_keys)",
+              "description": "Trusted account-manipulation evidence is tied to an authorized_keys modification command."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "(?:(?:echo|printf|cat)\\b.*(?:>>?|tee(?:\\s+-a)?)\\s*\\S*authorized_keys|(?:cp|mv|install|chmod|chattr)\\b[^;&|]*authorized_keys)",
+              "description": "Command text attempts to modify authorized_keys; a path reference or mkdir .ssh alone is insufficient."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1098 Account Manipulation",
+            "url": "https://attack.mitre.org/techniques/T1098/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "MITRE ATT&CK T1098 technique definition",
+            "command evidence from Cowrie"
+          ],
+          "author": "developer",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-05-24",
+          "version": "1.0"
+        }
+      },
+      {
+        "rule_id": "recon-then-payload-chain-correlates-t1105",
+        "enabled": true,
+        "ttp": "T1105",
+        "tactic": "command-and-control",
+        "technique_name": "Ingress Tool Transfer",
+        "confidence": 0.7,
+        "evidence_type": "sequence_correlation",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": true,
+        "apply_to_prediction": false,
+        "reason": "The session shows reconnaissance before a downloader or transfer command, supporting a possible staged workflow. Transfer success and execution are not confirmed, and the rule does not replace command-level labels.",
+        "conditions": {
+          "all": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1105",
+              "min_confidence": 0.75,
+              "description": "A command-level downloader or file-transfer label is present."
+            }
+          ],
+          "any": [
+            {
+              "type": "ordered_ttps",
+              "sequence": [
+                "T1033",
+                "T1105"
+              ],
+              "description": "User discovery appears before a downloader or transfer command."
+            },
+            {
+              "type": "ordered_ttps",
+              "sequence": [
+                "T1082",
+                "T1105"
+              ],
+              "description": "System information discovery appears before a downloader or transfer command."
+            },
+            {
+              "type": "ordered_ttps",
+              "sequence": [
+                "T1083",
+                "T1105"
+              ],
+              "description": "File/directory discovery appears before a downloader or transfer command."
+            },
+            {
+              "type": "ordered_ttps",
+              "sequence": [
+                "T1016",
+                "T1105"
+              ],
+              "description": "Network configuration discovery appears before a downloader or transfer command."
+            },
+            {
+              "type": "ordered_ttps",
+              "sequence": [
+                "T1049",
+                "T1105"
+              ],
+              "description": "Network connection discovery appears before a downloader or transfer command."
+            },
+            {
+              "type": "ordered_ttps",
+              "sequence": [
+                "T1057",
+                "T1105"
+              ],
+              "description": "Process discovery appears before a downloader or transfer command."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          },
+          {
+            "name": "MITRE ATT&CK T1082 System Information Discovery",
+            "url": "https://attack.mitre.org/techniques/T1082/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK transfer and discovery definitions",
+            "ordered Cowrie command telemetry",
+            "Rule is policy-driven session correlation over Cowrie observables, not a definitive claim of attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-07-11",
+          "version": "2026-07-11-honeypot-coverage"
+        }
+      },
+      {
+        "rule_id": "botnet-miner-staging-correlates-t1496",
+        "enabled": true,
+        "ttp": "T1496",
+        "tactic": "impact",
+        "technique_name": "Resource Hijacking",
+        "confidence": 0.75,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "The session contains miner or mining-pool indicators together with staging or execution-command evidence, supporting a possible resource-hijacking attempt. Successful payload execution, mining activity, resource consumption, and real-world impact are not confirmed. This remains a report-only session candidate.",
+        "conditions": {
+          "all": [
+            {
+              "type": "command_regex",
+              "pattern": "\\b(xmrig|stratum\\+tcp|minerd|cpuminer|nanopool|supportxmr|monero|cryptonight)\\b",
+              "description": "Miner binary, pool, or protocol indicator appears in command text."
+            }
+          ],
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1105",
+              "min_confidence": 0.75,
+              "description": "Payload transfer is present in the same session."
+            },
+            {
+              "type": "classification_ttp",
+              "ttp": "T1059",
+              "min_confidence": 0.75,
+              "description": "Command/script execution is present in the same session."
+            },
+            {
+              "type": "eventid",
+              "eventid": "cowrie.session.file_download",
+              "description": "Cowrie recorded a downloaded file."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1496 Resource Hijacking",
+            "url": "https://attack.mitre.org/techniques/T1496/"
+          },
+          {
+            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+            "url": "https://attack.mitre.org/techniques/T1105/"
+          },
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK resource hijacking and execution definitions",
+            "common Cowrie cryptominer staging observables",
+            "Rule is policy-driven session correlation over Cowrie observables, not a definitive claim of attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-07-11",
+          "version": "2026-07-11-honeypot-coverage"
+        }
+      },
+      {
+        "rule_id": "shell-startup-persistence-correlates-t1546",
+        "enabled": true,
+        "ttp": "T1546",
+        "tactic": "persistence",
+        "technique_name": "Event Triggered Execution",
+        "confidence": 0.65,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "The session contains a command that attempts to write or alter a shell startup file or rc.local. Successful persistence or later startup execution is not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1546",
+              "min_confidence": 0.75,
+              "command_regex": "(?:(?:echo|printf|cat)\\b.*(?:>>?|tee(?:\\s+-a)?)\\s*\\S*(?:\\.bashrc|\\.profile|/etc/profile|/etc/bash\\.bashrc|/etc/rc\\.local)|(?:sed\\s+-i|cp|mv|install|chmod|chattr)\\b[^;&|]*(?:\\.bashrc|\\.profile|/etc/profile|/etc/bash\\.bashrc|/etc/rc\\.local))",
+              "description": "Trusted startup-trigger evidence is tied to an observed startup-file modification command."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "(?:(?:echo|printf|cat)\\b.*(?:>>?|tee(?:\\s+-a)?)\\s*\\S*(?:\\.bashrc|\\.profile|/etc/profile|/etc/bash\\.bashrc|/etc/rc\\.local)|(?:sed\\s+-i|cp|mv|install|chmod|chattr)\\b[^;&|]*(?:\\.bashrc|\\.profile|/etc/profile|/etc/bash\\.bashrc|/etc/rc\\.local))",
+              "description": "Command text attempts to modify a startup file; a read-only path reference is insufficient."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1546 Event Triggered Execution",
+            "url": "https://attack.mitre.org/techniques/T1546/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK event-triggered execution definition",
+            "Linux shell startup file telemetry",
+            "Rule is policy-driven session correlation over Cowrie observables, not a definitive claim of attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-07-11",
+          "version": "2026-07-11-honeypot-coverage"
+        }
+      },
+      {
+        "rule_id": "remote-service-attempt-correlates-t1021",
+        "enabled": true,
+        "ttp": "T1021.004",
+        "tactic": "lateral-movement",
+        "technique_name": "SSH",
+        "confidence": 0.65,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "The session invokes SSH/SCP/sshpass toward another host, supporting attempted remote-service use. Successful authentication, lateral movement, or propagation is not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1021",
+              "min_confidence": 0.75,
+              "description": "Command-level classifier identified remote-service use."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "\\bsshpass\\b|\\bssh\\b\\s+[^;&|]*@(?:\\d{1,3}\\.){3}\\d{1,3}|\\bscp\\b\\s+.*(?:\\d{1,3}\\.){3}\\d{1,3}",
+              "description": "Command text attempts SSH/SCP to a remote IP."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1021 Remote Services",
+            "url": "https://attack.mitre.org/techniques/T1021/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK remote services definition",
+            "SSH propagation attempts observed in shell telemetry",
+            "Rule is policy-driven session correlation over Cowrie observables, not a definitive claim of attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-07-11",
+          "version": "2026-07-11-honeypot-coverage"
+        }
+      },
+      {
+        "rule_id": "decode-then-execute-chain-correlates-t1140",
+        "enabled": true,
+        "ttp": "T1140",
+        "tactic": "defense-evasion",
+        "technique_name": "Deobfuscate/Decode Files or Information",
+        "confidence": 0.7,
+        "evidence_type": "sequence_correlation",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": true,
+        "apply_to_prediction": false,
+        "reason": "Trusted decode-related evidence occurs before an execution command, supporting an ordered deobfuscation candidate. Successful decoding, execution, and impact are not confirmed.",
+        "conditions": {
+          "all": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1140",
+              "min_confidence": 0.75,
+              "description": "Command-level classifier identified deobfuscation or decoding."
+            },
+            {
+              "type": "ordered_ttps",
+              "sequence": ["T1140", "T1059"],
+              "description": "Trusted deobfuscation evidence occurs before trusted command/script execution evidence."
+            }
+          ],
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1059",
+              "min_confidence": 0.75,
+              "description": "Command/script execution is present."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "(^|[;&|]\\s*)(sh|bash)\\s+\\S+|(^|[;&|]\\s*)\\./[^\\s;&|]+",
+              "description": "A script or local artifact is executed."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1140 Deobfuscate/Decode Files or Information",
+            "url": "https://attack.mitre.org/techniques/T1140/"
+          },
+          {
+            "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+            "url": "https://attack.mitre.org/techniques/T1059/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK obfuscation and execution definitions",
+            "ordered shell payload staging telemetry",
+            "Rule is policy-driven session correlation over Cowrie observables, not a definitive claim of attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-07-11",
+          "version": "2026-07-11-honeypot-coverage"
+        }
+      },
+      {
+        "rule_id": "privilege-escalation-attempt-correlates-t1548",
+        "enabled": true,
+        "ttp": "T1548",
+        "tactic": "privilege-escalation",
+        "technique_name": "Abuse Elevation Control Mechanism",
+        "confidence": 0.6,
+        "evidence_type": "session_correlated_candidate",
+        "source_type": "human_curated_attck_detection",
+        "temporal_claim": false,
+        "apply_to_prediction": false,
+        "reason": "The session invokes sudo/su or references sudoers-related modification, supporting an attempted privilege-elevation candidate. Successful privilege gain is not confirmed.",
+        "conditions": {
+          "any": [
+            {
+              "type": "classification_ttp",
+              "ttp": "T1548",
+              "min_confidence": 0.75,
+              "description": "Command-level classifier identified elevation-control mechanism use."
+            },
+            {
+              "type": "command_regex",
+              "pattern": "(^|[;&|]\\s*)(sudo|su)\\b|\\b/etc/sudoers\\b|\\bNOPASSWD\\b",
+              "description": "Command text uses sudo/su or sudoers/NOPASSWD configuration."
+            }
+          ]
+        },
+        "references": [
+          {
+            "name": "MITRE ATT&CK T1548 Abuse Elevation Control Mechanism",
+            "url": "https://attack.mitre.org/techniques/T1548/"
+          }
+        ],
+        "provenance": {
+          "method": "manual_review",
+          "basis": [
+            "ATT&CK abuse elevation control mechanism definition",
+            "Linux sudo/su and sudoers telemetry",
+            "Rule is policy-driven session correlation over Cowrie observables, not a definitive claim of attacker intent."
+          ],
+          "author": "Codex-assisted policy update",
+          "reviewed": false,
+          "generated": false,
+          "created": "2026-07-11",
+          "version": "2026-07-11-honeypot-coverage"
+        }
+      }
+    ]
+  }
+}

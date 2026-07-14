@@ -1,0 +1,45 @@
+{
+  "schema_version": "smb_asset_profile.v1",
+  "profile_id": "example-small-business-honeypot-profile",
+  "version": "1.0.0",
+  "updated_at": "2026-05-21",
+  "owner": "local-operator",
+  "description": "Example asset context for the cloud analysis monitor. Replace names, owners, ports, and criticality with the small business environment this honeypot represents.",
+  "organization": {
+    "name": "Example Small Business",
+    "business_type": "small-business",
+    "security_staffing": "it-generalist",
+    "notes": "This file contains local business context only. Threat/action mappings live in smb_action_playbooks.trusted.json."
+  },
+  "assets": [
+    {
+      "asset_id": "public-ssh-admin-plane",
+      "display_name": "Public SSH remote administration",
+      "service_category": "remote_access",
+      "protocols": ["ssh"],
+      "ports": [22, 2222],
+      "internet_exposed": true,
+      "criticality": "high",
+      "owner": "IT operations",
+      "default_for_honeypot": true,
+      "business_impact": "Compromise could allow unauthorized administrative access, credential theft, and lateral movement."
+    },
+    {
+      "asset_id": "linux-server-workloads",
+      "display_name": "Linux server workloads",
+      "service_category": "server_workload",
+      "protocols": ["ssh", "telnet"],
+      "ports": [22, 23, 2222],
+      "internet_exposed": true,
+      "criticality": "medium",
+      "owner": "IT operations",
+      "business_impact": "Compromise could disrupt hosted services or expose stored application secrets."
+    }
+  ],
+  "notification_contacts": [
+    {
+      "role": "IT owner",
+      "contact": "replace-with-local-contact"
+    }
+  ]
+}
