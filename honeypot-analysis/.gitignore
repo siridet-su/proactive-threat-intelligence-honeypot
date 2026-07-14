@@ -1,0 +1,70 @@
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local editor state
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.agents/
+.codex/
+.DS_Store
+Thumbs.db
+.aider*
+.codex_deps/
+.kagglehub_cache/
+
+# Credentials and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+*service-account*.json
+
+# Runtime databases, queues, logs, and reports
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+production_state.db*
+sensor_spool.ndjson*
+*.log
+logs/
+reports/
+downloads/
+tty/
+
+# Generated models, review queues, and temporary evaluation output
+external_cowrie_seed_transition_model.json
+data/models/external_cowrie_seed_transition_model.json
+data/models/external_seed_sessions*.json
+data/models/external_seed_review_queue*.json
+data/models/external_seed_validation*.json
+data/models/external_seed_health*.json
+data/models/external_seed_minimal_events*
+data/classification_review_queue*.json
+evaluation/generated/
+
+# Generated deployment bundles and local artifacts
+deployment/artifacts/
+archives/deployments/*.tgz
+*.tgz
+*.tar.gz
+*.zip
+
+# Generated reports and examples
+artifact-local_*.html
+review_cases.json
+reviewed_labels.json

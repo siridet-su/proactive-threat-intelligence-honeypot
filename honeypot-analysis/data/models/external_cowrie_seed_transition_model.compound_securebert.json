@@ -1,0 +1,254 @@
+{
+  "built_at": "2026-05-22T08:49:25.065836+00:00",
+  "classification_quality": {
+    "acceptance_rate": 0.1875,
+    "accepted_classification_events": 59074,
+    "accepted_command_events": 53284,
+    "disagreement_commands_skipped": 110,
+    "disagreement_rate": 0.0004,
+    "drop_disagreements": true,
+    "filtered_known_commands_skipped": 0,
+    "low_confidence_commands_skipped": 248324,
+    "low_confidence_rate": 0.8737,
+    "min_label_confidence": 0.9,
+    "noise_commands_skipped": 12428,
+    "raw_command_events": 284209,
+    "securebert_cache_hits": 276764,
+    "securebert_invocations": 1212,
+    "shell_noise_rate": 0.0437,
+    "source_counts": {
+      "both_agree": 2496,
+      "both_disagree": 110,
+      "rule": 56272,
+      "securebert": 1826,
+      "securebert_low_confidence": 246874,
+      "shell_noise": 6195
+    },
+    "unique_classification_cache_entries": 1212,
+    "unknown_commands_skipped": 70,
+    "unknown_rate": 0.0002
+  },
+  "completed_sessions": 517812,
+  "model_id": "externaltransition_1ec330113086868b5d6ab05eef9602f5",
+  "prefix_max_length": 3,
+  "prefix_transition_count": 1255.0,
+  "prefix_transitions": {
+    "command-and-control>defense-evasion": {
+      "command-and-control": 4.0,
+      "execution": 4.0
+    },
+    "command-and-control>defense-evasion>execution": {
+      "command-and-control": 1.0
+    },
+    "credential-access>command-and-control": {
+      "defense-evasion": 100.0,
+      "execution": 9.0
+    },
+    "defense-evasion>execution": {
+      "command-and-control": 1.0,
+      "defense-evasion": 3.0
+    },
+    "defense-evasion>execution>command-and-control": {
+      "defense-evasion": 1.0
+    },
+    "discovery>credential-access": {
+      "command-and-control": 100.0
+    },
+    "discovery>credential-access>command-and-control": {
+      "defense-evasion": 100.0
+    },
+    "discovery>execution": {
+      "discovery": 60.0
+    },
+    "discovery>persistence": {
+      "discovery": 50.0
+    },
+    "discovery>persistence>discovery": {
+      "execution": 50.0
+    },
+    "execution>command-and-control": {
+      "defense-evasion": 43.0
+    },
+    "execution>command-and-control>defense-evasion": {
+      "execution": 4.0
+    },
+    "execution>defense-evasion": {
+      "execution": 3.0
+    },
+    "execution>defense-evasion>execution": {
+      "defense-evasion": 3.0
+    },
+    "execution>persistence": {
+      "discovery": 499.0
+    },
+    "persistence>discovery": {
+      "execution": 60.0,
+      "persistence": 50.0
+    },
+    "persistence>discovery>execution": {
+      "discovery": 60.0
+    },
+    "persistence>discovery>persistence": {
+      "discovery": 50.0
+    }
+  },
+  "provenance": {
+    "accepted_classification_events": 59074,
+    "accepted_command_events": 53284,
+    "bad_lines": 0,
+    "built_at": "2026-05-22T08:49:25.065836+00:00",
+    "classification_quality": {
+      "acceptance_rate": 0.1875,
+      "accepted_classification_events": 59074,
+      "accepted_command_events": 53284,
+      "disagreement_commands_skipped": 110,
+      "disagreement_rate": 0.0004,
+      "drop_disagreements": true,
+      "filtered_known_commands_skipped": 0,
+      "low_confidence_commands_skipped": 248324,
+      "low_confidence_rate": 0.8737,
+      "min_label_confidence": 0.9,
+      "noise_commands_skipped": 12428,
+      "raw_command_events": 284209,
+      "securebert_cache_hits": 276764,
+      "securebert_invocations": 1212,
+      "shell_noise_rate": 0.0437,
+      "source_counts": {
+        "both_agree": 2496,
+        "both_disagree": 110,
+        "rule": 56272,
+        "securebert": 1826,
+        "securebert_low_confidence": 246874,
+        "shell_noise": 6195
+      },
+      "unique_classification_cache_entries": 1212,
+      "unknown_commands_skipped": 70,
+      "unknown_rate": 0.0002
+    },
+    "classifier": "NotebookParityClassifier rules plus SecureBERT",
+    "closed_sessions": 517812,
+    "dataset_handle": "nlaha11/global-ssh-and-telnet-honeypot-logs-cowrie",
+    "disagreement_commands_skipped": 110,
+    "files_scanned": 1,
+    "filtered_known_commands_skipped": 0,
+    "input_root": "<SOURCE_DATA_NOT_DISTRIBUTED>",
+    "known_tactic_commands": 59074,
+    "low_confidence_commands_skipped": 248324,
+    "mitre_techniques": 625,
+    "noise_commands_skipped": 12428,
+    "raw_command_events": 284209,
+    "raw_lines": 829065,
+    "securebert_available": true,
+    "securebert_cache_hits": 276764,
+    "securebert_checkpoint_path": "<SECUREBERT_CHECKPOINT_NOT_DISTRIBUTED>",
+    "securebert_device": "cpu",
+    "securebert_high_confidence": 0.55,
+    "securebert_invocations": 1212,
+    "securebert_model_path": "<SECUREBERT_MODEL_NOT_DISTRIBUTED>",
+    "securebert_scope": "hybrid",
+    "securebert_source": "SecureBertCommandClassifier",
+    "securebert_used": true,
+    "source_type": "external_cowrie_seed",
+    "training_source": "external Cowrie command events classified by production rules, optional SecureBERT, and MITRE tactic mapping",
+    "unknown_commands_skipped": 70
+  },
+  "recency_decay_half_life_sessions": 0.0,
+  "schema_version": "external_transition_model.v1",
+  "source_database": "",
+  "source_name": "local_transition",
+  "source_type": "external_cowrie_seed",
+  "start_counts": {
+    "command-and-control": 23.0,
+    "credential-access": 12.0,
+    "discovery": 49981.0,
+    "execution": 585.0,
+    "persistence": 1417.0
+  },
+  "technique_tactics": {
+    "T1016": "discovery",
+    "T1033": "discovery",
+    "T1036": "defense-evasion",
+    "T1053": "execution",
+    "T1059": "execution",
+    "T1070": "defense-evasion",
+    "T1082": "discovery",
+    "T1083": "discovery",
+    "T1098": "persistence",
+    "T1105": "command-and-control",
+    "T1110": "credential-access"
+  },
+  "technique_transition_count": 2334.0,
+  "technique_transitions": {
+    "T1016": {
+      "T1082": 91.0,
+      "T1083": 1.0
+    },
+    "T1033": {
+      "T1082": 156.0
+    },
+    "T1036": {
+      "T1059": 7.0
+    },
+    "T1053": {
+      "T1082": 60.0
+    },
+    "T1059": {
+      "T1036": 43.0,
+      "T1098": 499.0,
+      "T1105": 43.0
+    },
+    "T1070": {
+      "T1105": 4.0
+    },
+    "T1082": {
+      "T1033": 156.0,
+      "T1053": 60.0,
+      "T1059": 2.0,
+      "T1083": 90.0,
+      "T1098": 50.0,
+      "T1105": 83.0,
+      "T1110": 100.0
+    },
+    "T1098": {
+      "T1082": 610.0
+    },
+    "T1105": {
+      "T1036": 43.0,
+      "T1059": 23.0,
+      "T1070": 104.0
+    },
+    "T1110": {
+      "T1105": 109.0
+    }
+  },
+  "transition_count": 1840.0,
+  "transitions": {
+    "command-and-control": {
+      "defense-evasion": 147.0,
+      "execution": 23.0
+    },
+    "credential-access": {
+      "command-and-control": 109.0
+    },
+    "defense-evasion": {
+      "command-and-control": 4.0,
+      "execution": 7.0
+    },
+    "discovery": {
+      "command-and-control": 83.0,
+      "credential-access": 100.0,
+      "execution": 62.0,
+      "persistence": 50.0
+    },
+    "execution": {
+      "command-and-control": 43.0,
+      "defense-evasion": 43.0,
+      "discovery": 60.0,
+      "persistence": 499.0
+    },
+    "persistence": {
+      "discovery": 610.0
+    }
+  },
+  "usable_sessions": 52018
+}

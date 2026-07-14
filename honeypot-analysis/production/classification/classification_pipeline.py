@@ -1,0 +1,554 @@
+"""Notebook-parity command classification for production session monitoring.
+
+This module moves the runtime parts of notebook cell 3A into importable code:
+
+- full rule table used for Cowrie shell commands
+- shell-noise prefilter that does not drop rule-attributable commands
+- rule/SecureBERT merge where deterministic rules win for raw shell commands
+- optional auto-label helper for training data preparation
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+
+
+@dataclass
+class TTPPrediction:
+    tid: str
+    name: str
+    confidence: float
+    high_conf: bool
+    source: str = ""
+
+    def to_event(self, command: str, tactic: str = "unknown") -> Dict[str, Any]:
+        return {
+            "command": command,
+            "ttp": None if self.tid == "T0000_UNKNOWN" else self.tid,
+            "tactic": tactic,
+            "source": self.source,
+            "confidence": self.confidence,
+            "name": self.name,
+            "high_confidence": self.high_conf,
+        }
+
+
+@dataclass
+class MergedResult:
+    command: str
+    bert_ttps: List[TTPPrediction]
+    rule_ttps: List[TTPPrediction]
+    source: str
+
+    @property
+    def final_ttps(self) -> List[TTPPrediction]:
+        # Notebook behavior: rules are authoritative for raw shell commands.
+        if self.rule_ttps:
+            return self.rule_ttps
+        return [p for p in self.bert_ttps if p.high_conf]
+
+
+@dataclass
+class ClassificationResult:
+    session_root: str
+    session_pid: int
+    cmd_ttps: List[TTPPrediction]
+    session_top3: List[TTPPrediction]
+
+    @property
+    def high_conf_ids(self) -> List[str]:
+        seen, out = set(), []
+        for pred in self.cmd_ttps + self.session_top3:
+            if pred.high_conf and pred.tid not in seen and pred.tid != "T0000_UNKNOWN":
+                seen.add(pred.tid)
+                out.append(pred.tid)
+        return out
+
+
+@dataclass(frozen=True)
+class CommandFragment:
+    text: str
+    index: int
+    count: int
+    operator_before: str = ""
+    operator_after: str = ""
+
+
+CLASSIFICATION_RULE_POLICY_SCHEMA = "classification_rule_policy.v1"
+DEFAULT_CLASSIFICATION_RULE_POLICY = "configs/classification_rules.trusted.json"
+
+# Minimal emergency fallback only. Full command coverage lives in the versioned
+# classification policy file so mappings are auditable and replaceable without
+# editing Python code.
+EMERGENCY_RULE_SPECS: List[Tuple[str, str, str]] = [
+    (r"\bwhoami\b", "T1033", "System Owner/User Discovery"),
+    (r"\buname\b.*-[asr]", "T1082", "System Information Discovery"),
+    (r"\bcat\s+/etc/(passwd|shadow)\b", "T1003", "OS Credential Dumping"),
+    (r"\b(curl|wget)\b.*http", "T1105", "Ingress Tool Transfer"),
+    (r"\bhistory\s+-c\b|\brm\b.*bash_history", "T1070", "Indicator Removal"),
+]
+
+
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _candidate_policy_paths(path_text: str = "") -> List[Path]:
+    if path_text:
+        return [Path(path_text)]
+    env_path = os.getenv("CLASSIFICATION_RULES_PATH", "")
+    if env_path:
+        return [Path(env_path)]
+    module_root = Path(__file__).resolve().parents[1]
+    return [
+        Path.cwd() / DEFAULT_CLASSIFICATION_RULE_POLICY,
+        module_root / DEFAULT_CLASSIFICATION_RULE_POLICY,
+    ]
+
+
+def _attack_url(ttp: str) -> str:
+    return f"https://attack.mitre.org/techniques/{_clean_text(ttp).upper().replace('.', '/')}/"
+
+
+def load_classification_rule_policy(path_text: str = "") -> Dict[str, Any]:
+    errors: List[str] = []
+    for path in _candidate_policy_paths(path_text):
+        try:
+            if not path.exists():
+                errors.append(f"not found: {path}")
+                continue
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(loaded, dict):
+                errors.append(f"JSON root must be object: {path}")
+                continue
+            loaded.setdefault("source_path", str(path))
+            return loaded
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{path}: {type(exc).__name__}: {exc}")
+    return {
+        "schema_version": CLASSIFICATION_RULE_POLICY_SCHEMA,
+        "policy_id": "emergency-python-fallback",
+        "version": "0",
+        "source_path": "python:production.classification.classification_pipeline.EMERGENCY_RULE_SPECS",
+        "load_errors": errors,
+        "policy": {
+            "enabled": True,
+            "rules": [
+                {
+                    "rule_id": f"emergency-{idx:02d}-{tid.lower()}",
+                    "enabled": True,
+                    "pattern": pattern,
+                    "ttp": tid,
+                    "technique_name": name,
+                    "confidence": 1.0,
+                    "source_type": "emergency_python_fallback",
+                    "evidence_type": "command_regex",
+                    "references": [{"name": f"MITRE ATT&CK {tid} {name}", "url": _attack_url(tid)}],
+                    "provenance": {
+                        "method": "minimal_emergency_python_fallback",
+                        "basis": ["Classification policy file was unavailable"],
+                        "author": "production.classification.classification_pipeline",
+                        "reviewed": False,
+                        "generated": False,
+                        "created": "2026-06-02",
+                        "version": "1.0",
+                    },
+                }
+                for idx, (pattern, tid, name) in enumerate(EMERGENCY_RULE_SPECS, start=1)
+            ],
+        },
+    }
+
+
+def _policy_rules(document: Dict[str, Any]) -> List[Dict[str, Any]]:
+    body = document.get("policy", document)
+    if not isinstance(body, dict):
+        return []
+    return [dict(rule) for rule in body.get("rules") or [] if isinstance(rule, dict)]
+
+
+def _runtime_rule_review_mode(document: Dict[str, Any], rule_review_mode: str = "") -> str:
+    configured = _clean_text(rule_review_mode)
+    if not configured:
+        body = document.get("policy", document)
+        if isinstance(body, dict):
+            configured = _clean_text(body.get("rule_review_mode"))
+        if not configured:
+            configured = _clean_text(document.get("rule_review_mode"))
+    return (configured or "reviewed_only").lower()
+
+
+def _rule_allowed_for_runtime(rule: Dict[str, Any], review_mode: str, *, emergency_fallback: bool = False) -> bool:
+    if review_mode in {"all", "all_enabled", "include_unreviewed"}:
+        return True
+    if emergency_fallback:
+        return True
+    provenance = rule.get("provenance")
+    if not isinstance(provenance, dict):
+        return False
+    return provenance.get("reviewed") is True
+
+
+def load_rule_specs(path_text: str = "", rule_review_mode: str = "") -> List[Tuple[str, str, str]]:
+    document = load_classification_rule_policy(path_text)
+    review_mode = _runtime_rule_review_mode(document, rule_review_mode)
+    emergency_fallback = document.get("policy_id") == "emergency-python-fallback"
+    specs: List[Tuple[str, str, str]] = []
+    for rule in _policy_rules(document):
+        if rule.get("enabled") is False:
+            continue
+        if not _rule_allowed_for_runtime(rule, review_mode, emergency_fallback=emergency_fallback):
+            continue
+        pattern = _clean_text(rule.get("pattern"))
+        tid = _clean_text(rule.get("ttp")).upper()
+        name = _clean_text(rule.get("technique_name") or rule.get("name") or tid)
+        if pattern and tid:
+            specs.append((pattern, tid, name))
+    if specs or not emergency_fallback:
+        return specs
+    return list(EMERGENCY_RULE_SPECS)
+
+
+RULE_POLICY = load_classification_rule_policy()
+RULE_SPECS: List[Tuple[str, str, str]] = load_rule_specs()
+
+
+def _compile_rules(rule_specs: Sequence[Tuple[str, str, str]]) -> List[Tuple[re.Pattern[str], str, str]]:
+    compiled: List[Tuple[re.Pattern[str], str, str]] = []
+    for pattern, tid, name in rule_specs:
+        try:
+            compiled.append((re.compile(pattern, re.IGNORECASE), tid, name))
+        except re.error:
+            continue
+    return compiled
+
+
+RULES: List[Tuple[re.Pattern[str], str, str]] = _compile_rules(RULE_SPECS)
+_COMBINED_PATTERN = re.compile(
+    "|".join(pattern.pattern for pattern, _, _ in RULES) if RULES else r"(?!)",
+    re.IGNORECASE,
+)
+_NOISE_RE = re.compile(
+    r"^(?:bash|sh|/bin/bash|/bin/sh|dash|zsh|ksh|whoami|id|pwd|hostname|exit|logout|clear|reset)$",
+    re.IGNORECASE,
+)
+
+
+def split_compound_command(command: str, max_fragments: int = 20) -> List[CommandFragment]:
+    """Split a shell command into ordered subcommands without executing it.
+
+    The splitter is intentionally conservative. It splits on common command
+    sequence operators (`&&`, `||`, `;`, and newlines), but it keeps quoted text
+    intact and does not split simple pipes because pipeline context can carry
+    its own behavior (for example archive-and-exfiltrate patterns).
+    """
+    text = (command or "").strip()
+    if not text:
+        return []
+
+    raw_parts: List[Dict[str, str]] = []
+    buf: List[str] = []
+    quote = ""
+    escaped = False
+    operator_before = ""
+    i = 0
+
+    def flush(operator_after: str = "") -> None:
+        nonlocal buf, operator_before
+        part = "".join(buf).strip()
+        if part:
+            raw_parts.append(
+                {
+                    "text": part,
+                    "operator_before": operator_before,
+                    "operator_after": operator_after,
+                }
+            )
+            operator_before = operator_after
+        elif operator_after:
+            operator_before = operator_after
+        buf = []
+
+    while i < len(text):
+        ch = text[i]
+
+        if escaped:
+            buf.append(ch)
+            escaped = False
+            i += 1
+            continue
+
+        if ch == "\\":
+            buf.append(ch)
+            escaped = True
+            i += 1
+            continue
+
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+
+        if ch in {"'", '"', "`"}:
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+
+        operator = ""
+        operator_len = 0
+        if text.startswith("&&", i):
+            operator = "&&"
+            operator_len = 2
+        elif text.startswith("||", i):
+            operator = "||"
+            operator_len = 2
+        elif ch == ";":
+            operator = ";"
+            operator_len = 1
+        elif ch in {"\n", "\r"}:
+            operator = "\\n"
+            operator_len = 2 if ch == "\r" and i + 1 < len(text) and text[i + 1] == "\n" else 1
+
+        if operator:
+            if len(raw_parts) >= max(max_fragments - 1, 1):
+                remainder = text[i:].strip()
+                if remainder:
+                    if buf and not str(buf[-1]).endswith(" "):
+                        buf.append(" ")
+                    buf.append(remainder)
+                break
+            flush(operator)
+            i += operator_len
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    flush("")
+
+    if not raw_parts:
+        return []
+    count = len(raw_parts)
+    return [
+        CommandFragment(
+            text=item["text"],
+            index=index,
+            count=count,
+            operator_before=item.get("operator_before", ""),
+            operator_after=item.get("operator_after", ""),
+        )
+        for index, item in enumerate(raw_parts)
+    ]
+
+
+def _rule_based_ttp_with_rules(
+    command: str,
+    rules: Sequence[Tuple[re.Pattern[str], str, str]],
+    combined_pattern: re.Pattern[str],
+) -> List[TTPPrediction]:
+    command = command or ""
+    if not combined_pattern.search(command):
+        return []
+
+    matched: List[TTPPrediction] = []
+    seen = set()
+    for pattern, tid, name in rules:
+        if tid not in seen and pattern.search(command):
+            matched.append(TTPPrediction(tid=tid, name=name, confidence=1.0, high_conf=True, source="rule"))
+            seen.add(tid)
+    return matched
+
+
+def rule_based_ttp(command: str) -> List[TTPPrediction]:
+    return _rule_based_ttp_with_rules(command, RULES, _COMBINED_PATTERN)
+
+
+def is_shell_noise(
+    command: str,
+    rules: Optional[Sequence[Tuple[re.Pattern[str], str, str]]] = None,
+    combined_pattern: Optional[re.Pattern[str]] = None,
+) -> bool:
+    stripped = (command or "").strip()
+    if not stripped:
+        return True
+    parts = [part.strip() for part in re.split(r"[;&|]+", stripped) if part.strip()]
+    all_primitive = bool(parts) and all(_NOISE_RE.match(part) for part in parts)
+    if not all_primitive:
+        return False
+    return not bool(_rule_based_ttp_with_rules(
+        stripped,
+        rules or RULES,
+        combined_pattern or _COMBINED_PATTERN,
+    ))
+
+
+class NotebookParityClassifier:
+    """Classifier that mirrors the notebook's rule/SecureBERT merge behavior."""
+
+    def __init__(
+        self,
+        bert_fn: Optional[Callable[[str], Tuple[Optional[str], float]]] = None,
+        mitre_db: Any = None,
+        high_confidence: float = 0.55,
+        rule_policy_path: str = "",
+        rule_review_mode: str = "",
+        rule_specs: Optional[Sequence[Tuple[str, str, str]]] = None,
+    ) -> None:
+        self.bert_fn = bert_fn
+        self.mitre_db = mitre_db
+        self.high_confidence = high_confidence
+        self.rule_policy = load_classification_rule_policy(rule_policy_path) if rule_specs is None else {}
+        self.rule_review_mode = _runtime_rule_review_mode(self.rule_policy, rule_review_mode) if rule_specs is None else "explicit_rule_specs"
+        self.rule_specs = list(rule_specs) if rule_specs is not None else load_rule_specs(rule_policy_path, self.rule_review_mode)
+        self.rules = _compile_rules(self.rule_specs)
+        self.combined_pattern = re.compile(
+            "|".join(pattern.pattern for pattern, _, _ in self.rules) if self.rules else r"(?!)",
+            re.IGNORECASE,
+        )
+
+    def _technique_name(self, tid: Optional[str]) -> str:
+        if not tid:
+            return "Unknown"
+        if self.mitre_db and hasattr(self.mitre_db, "get_name"):
+            try:
+                return self.mitre_db.get_name(tid) or "Unknown"
+            except Exception:
+                return "Unknown"
+        return "Unknown"
+
+    def _tactic(self, tid: Optional[str]) -> str:
+        if not tid:
+            return "unknown"
+        if self.mitre_db and hasattr(self.mitre_db, "get_tactics"):
+            try:
+                tactics = self.mitre_db.get_tactics(tid)
+                return tactics[0] if tactics else "unknown"
+            except Exception:
+                return "unknown"
+        return "unknown"
+
+    def _bert_prediction(self, command: str) -> TTPPrediction:
+        if not self.bert_fn:
+            return TTPPrediction("T0000_UNKNOWN", "SecureBERT unavailable", 0.0, False, "securebert_unavailable")
+        try:
+            tid, confidence = self.bert_fn(command)
+            confidence = float(confidence or 0.0)
+            if tid and confidence >= self.high_confidence:
+                return TTPPrediction(tid, self._technique_name(tid), round(confidence, 4), True, "securebert")
+            return TTPPrediction(
+                tid or "T0000_UNKNOWN",
+                "Unclassified (low confidence)",
+                round(confidence, 4),
+                False,
+                "securebert_low_confidence",
+            )
+        except Exception:
+            return TTPPrediction("T0000_UNKNOWN", "SecureBERT error", 0.0, False, "securebert_error")
+
+    def _classify_single(self, command: str) -> List[Dict[str, Any]]:
+        command = (command or "").strip()
+        if not command:
+            return []
+
+        rule_predictions = _rule_based_ttp_with_rules(command, self.rules, self.combined_pattern)
+        if is_shell_noise(command, self.rules, self.combined_pattern) and not rule_predictions:
+            return [{
+                "command": command,
+                "ttp": None,
+                "tactic": "unknown",
+                "source": "shell_noise",
+                "confidence": 0.0,
+                "name": "Shell noise",
+                "high_confidence": False,
+            }]
+
+        bert_prediction = self._bert_prediction(command)
+        has_bert = bert_prediction.high_conf and bert_prediction.tid != "T0000_UNKNOWN"
+
+        if rule_predictions:
+            source = "both" if has_bert else "rule"
+            bert_tactic = self._tactic(bert_prediction.tid) if bert_prediction.tid != "T0000_UNKNOWN" else "unknown"
+            return [
+                {
+                    **prediction.to_event(command, self._tactic(prediction.tid)),
+                    "source": source,
+                    "bert_ttp": None if bert_prediction.tid == "T0000_UNKNOWN" else bert_prediction.tid,
+                    "bert_tactic": bert_tactic,
+                    "bert_confidence": bert_prediction.confidence,
+                }
+                for prediction in rule_predictions
+            ]
+
+        if has_bert:
+            return [bert_prediction.to_event(command, self._tactic(bert_prediction.tid))]
+
+        return [bert_prediction.to_event(command, "unknown")]
+
+    def classify(self, command: str) -> List[Dict[str, Any]]:
+        original_command = (command or "").strip()
+        fragments = split_compound_command(original_command)
+        if not fragments:
+            return []
+
+        events: List[Dict[str, Any]] = []
+        for fragment in fragments:
+            for event in self._classify_single(fragment.text):
+                item = dict(event)
+                if fragment.count > 1:
+                    item["original_command"] = original_command
+                    item["subcommand"] = fragment.text
+                    item["subcommand_index"] = fragment.index
+                    item["subcommand_count"] = fragment.count
+                    item["operator_before"] = fragment.operator_before
+                    item["operator_after"] = fragment.operator_after
+                events.append(item)
+        return events
+
+
+def auto_label_commands(
+    commands: Sequence[str],
+    exclude_ttps: Optional[set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Auto-label Cowrie commands from deterministic rules for later fine-tuning."""
+    exclude_ttps = exclude_ttps or set()
+    labeled: List[Dict[str, Any]] = []
+    for command in commands:
+        matches = [match for match in rule_based_ttp(command.strip()) if match.tid not in exclude_ttps]
+        for match in matches:
+            labeled.append(
+                {
+                    "text": command,
+                    "label": match.tid,
+                    "label_name": match.name,
+                    "source": "rule_multi" if len(matches) > 1 else "rule_single",
+                    "confidence": match.confidence,
+                }
+            )
+    return labeled
+
+
+def merge_success_commands(
+    commands: Sequence[str],
+    bert_predictions: Sequence[TTPPrediction],
+) -> List[MergedResult]:
+    results: List[MergedResult] = []
+    for command, bert in zip(commands, bert_predictions):
+        rules = rule_based_ttp(command)
+        if bert.high_conf and rules:
+            source = "both"
+        elif bert.high_conf:
+            source = "bert"
+        elif rules:
+            source = "rule"
+        else:
+            source = "none"
+        results.append(MergedResult(command=command, bert_ttps=[bert], rule_ttps=rules, source=source))
+    return results

@@ -1,0 +1,382 @@
+{
+  "environment": "local_demo",
+  "sensor_id": "demo-sensor",
+  "api_token": "<TOKEN>",
+  "database_url": "sqlite:///production_state.db",
+  "ingest_host": "127.0.0.1",
+  "ingest_port": 8080,
+  "dashboard_host": "127.0.0.1",
+  "dashboard_port": 8081,
+  "cowrie_log_path": "data/samples/demo_cowrie_realistic.json",
+  "spool_path": "sensor_spool.ndjson",
+  "ingest_url": "http://127.0.0.1:8080/events",
+  "forwarder_batch_size": 50,
+  "forwarder_poll_seconds": 2.0,
+  "worker_batch_size": 100,
+  "worker_poll_seconds": 2.0,
+  "analysis_batch_size": 1,
+  "analysis_max_attempts": 3,
+  "analysis_fallback_on_failure": true,
+  "analysis_skip_empty_sessions": true,
+  "analysis_suppress_stdout": true,
+  "webhook_url": "",
+  "webhook_retry_seconds": 30.0,
+  "enrichment_db_path": "enrichment_db.json",
+  "enable_enrichment_jobs": true,
+  "enrichment_batch_size": 20,
+  "enrichment_max_attempts": 3,
+  "enrichment_retry_seconds": 300.0,
+  "enrichment_ttl_seconds": 86400,
+  "enrichment_allow_stale": true,
+  "otx_api_key": "",
+  "abuseipdb_api_key": "",
+  "shodan_api_key": "",
+  "virustotal_api_key": "",
+  "censys_api_id": "",
+  "censys_api_secret": "",
+  "censys_platform_token": "",
+  "censys_organization_id": "",
+  "threat_intel_config_path": "configs/threat_intel_config.json",
+  "smb_asset_profile_path": "configs/smb_asset_profile.example.json",
+  "smb_action_policy_path": "configs/smb_action_playbooks.trusted.json",
+  "enable_smb_decisions": true,
+  "enable_smb_decision_alerts": true,
+  "smb_alert_min_severity": "high",
+  "cisa_cache_path": "data/feeds/cisa_kev_cache.json",
+  "sigma_cache_path": "data/feeds/sigma_rules_cache.json",
+  "mitre_attack_path": "data/feeds/mitre_attack_cache.json",
+  "enable_securebert": false,
+  "securebert_model_path": "",
+  "securebert_checkpoint_path": "",
+  "securebert_device": "auto",
+  "securebert_max_length": 128,
+  "reports_dir": "reports",
+  "enable_artifacts": true,
+  "enable_pdf_export": true,
+  "enable_stix_export": true,
+  "enable_actor_attribution": false,
+  "actor_db_path": "",
+  "vertex_project_id": "<GCP_PROJECT_ID>",
+  "vertex_location": "us-central1",
+  "vertex_model": "gemini-2.5-pro",
+  "classification_policy": {
+    "strategy": "notebook_merge",
+    "bert_min_confidence": 0.55,
+    "keyword_fallback_on_low_confidence": true,
+    "keyword_fallback_on_error": true,
+    "rule_review_mode": "reviewed_only"
+  },
+  "classification_rules_path": "configs/classification_rules.trusted.json",
+  "prediction_policy_path": "configs/prediction_policy.trusted.json",
+  "prediction_snapshot_retention_days": 90,
+  "prediction_snapshot_keep_latest_per_session": true,
+  "enable_session_ttp_correlation": true,
+  "session_ttp_correlation_policy_path": "configs/session_ttp_correlation.trusted.json",
+  "session_ttp_knowledge_pack_paths": ["configs/session_ttp_knowledge_pack.generated.json"],
+  "calibration_policy": {
+    "enabled": true,
+    "output_path": "calibration_output.json",
+    "min_feedback_rows": 200,
+    "min_backtest_cases": 50,
+    "max_weight_step": 0.05,
+    "feedback_limit": 500,
+    "allowed_weight_feedback_types": ["auto_evidence", "expert_review"],
+    "allowed_calibration_evidence_origins": ["live_cowrie", "expert_review"],
+    "min_auto_evidence_confidence": 0.9,
+    "operator_feedback_affects_weights": false,
+    "feedback_case_weight": 2.0,
+    "backtest_case_weight": 1.0,
+    "apply_output": false
+  },
+  "prediction_policy": {
+    "enabled": true,
+    "max_hypotheses": 5,
+    "min_score": 0.01,
+    "min_sessions_for_local": 50,
+    "min_transition_count": 2,
+    "transition_history_limit": 500,
+    "external_transition_model_path": "data/models/external_cowrie_seed_transition_model.compound_securebert.json",
+    "external_min_sessions": 50,
+    "external_min_transition_count": 2,
+    "prefix_max_length": 3,
+    "transition_smoothing": 0.05,
+    "technique_to_tactic_aggregation": "max",
+    "technique_tactic_map": {},
+    "recency_decay_half_life_sessions": 500,
+    "min_prefix_transition_count": 2,
+    "min_technique_transition_count": 2,
+    "min_tactic_transition_count": 2,
+    "min_active_scorers": 2,
+    "below_minimum_behavior": "low_confidence_flag",
+    "confidence_damping": {
+      "enabled": true,
+      "mode": "geometric_mean",
+      "damped_scorers": ["local_transition", "external_seed_transition", "actor_fingerprint_transition", "fallback_progression", "tactic_combination", "mitre_association"]
+    },
+    "weights": {
+      "local_transition": 0.30,
+      "external_seed_transition": 0.20,
+      "actor_fingerprint_transition": 0.00,
+      "fallback_progression": 0.10,
+      "tactic_combination": 0.12,
+      "mitre_association": 0.13,
+      "sigma_correlation": 0.05,
+      "enrichment_context": 0.10
+    },
+    "enrichment_context_mode": "scorer",
+    "enrichment_context_multiplier": {
+      "max_multiplier": 1.15,
+      "min_enrichment_score": 0.01
+    },
+    "external_seed_weight_decay": {
+      "enabled": true,
+      "method": "maturity_multiplier",
+      "cold": 1.0,
+      "warming": 0.5,
+      "stable": 0.2,
+      "shrinkage_count_source": "transitions",
+      "shrinkage_k": 200.0,
+      "min_multiplier": 0.0,
+      "max_multiplier": 1.0
+    },
+    "actor_fingerprint_prior": {
+      "enabled": false,
+      "match_fields": ["hassh_fingerprint", "ja3_fingerprint", "command_pattern_hash"],
+      "min_sessions": 2,
+      "min_transition_count": 1,
+      "min_prefix_transition_count": 1,
+      "min_tactic_transition_count": 1,
+      "prefix_max_length": 3,
+      "smoothing": 0.05,
+      "history_limit": 500,
+      "model_path": "",
+      "comparison_weight": 0.15
+    },
+    "behavior_regime_classifier": {
+      "enabled": true,
+      "min_commands": 2,
+      "automated_command_rate_per_minute": 8.0,
+      "human_command_rate_per_minute": 1.5,
+      "low_delay_variance_seconds2": 4.0,
+      "high_delay_variance_seconds2": 900.0,
+      "high_entropy_bits_per_char": 4.2,
+      "low_entropy_bits_per_char": 2.5,
+      "low_payload_diversity": 0.40,
+      "high_payload_diversity": 0.80,
+      "automated_threshold": 0.65,
+      "human_threshold": 0.35,
+      "feature_weights": {
+        "command_frequency": 0.35,
+        "delay_regularity": 0.25,
+        "command_entropy": 0.20,
+        "payload_repetition": 0.20
+      }
+    },
+    "confidence_controls": {
+      "enabled": true,
+      "single_active_scorer_cap": "medium",
+      "single_supporting_scorer_cap": "medium",
+      "external_seed_only_cap": "low",
+      "external_seed_dominated_cap": "medium",
+      "context_only_cap": "low",
+      "medium_divergence_ratio": 0.5,
+      "medium_divergence_cap": "medium",
+      "high_divergence_ratio": 0.75,
+      "high_divergence_cap": "low",
+      "low_classification_geomean": 0.65,
+      "unknown_or_noise_ratio": 0.4,
+      "low_classification_cap": "low"
+    },
+    "prediction_triggers": {
+      "enabled": true,
+      "eventids": [
+        "cowrie.login.success",
+        "cowrie.login.failed",
+        "cowrie.session.file_download",
+        "cowrie.session.file_upload",
+        "cowrie.session.closed"
+      ],
+      "eventid_prefixes": ["cowrie.command."]
+    },
+    "predictive_alerts": {
+      "enabled": true,
+      "min_confidence": "medium",
+      "min_score": 0.5,
+      "min_severity": "high",
+      "min_active_scorers": 2,
+      "min_supporting_scorers": 2,
+      "block_on_coverage_below_minimum": true,
+      "max_divergence_ratio": 0.5,
+      "block_external_seed_only": true,
+      "block_context_only": true,
+      "alert_on_session_status": ["active"],
+      "max_alerts_per_snapshot": 1,
+      "risk_annotation_severity_boost": {
+        "enabled": false,
+        "min_risk_level": "high",
+        "boost_high_to_critical": false
+      },
+      "tactic_severity": {
+        "credential-access": "medium",
+        "defense-evasion": "medium",
+        "command-and-control": "high",
+        "persistence": "high",
+        "privilege-escalation": "high",
+        "lateral-movement": "critical",
+        "exfiltration": "critical",
+        "impact": "critical"
+      }
+    },
+    "vulnerability_risk": {
+      "enabled": true,
+      "default_tactic": "impact",
+      "high_epss_threshold": 0.70,
+      "medium_epss_threshold": 0.30,
+      "epss_scores": {}
+    },
+    "risk_annotators": {
+      "vulnerability_risk": {
+        "enabled": true
+      }
+    },
+    "calibration": {
+      "enabled": false,
+      "method": "empirical_binning",
+      "min_cases_per_bin": 20,
+      "bins": []
+    },
+    "rule_prior_deduplication": {
+      "enabled": true,
+      "method": "max_contribution",
+      "scorers": ["tactic_combination", "mitre_association"],
+      "require_shared_evidence_key": true
+    },
+    "maturity": {
+      "cold": {
+        "max_usable_sessions": 49,
+        "max_transition_count": 49
+      },
+      "warming": {
+        "min_usable_sessions": 50,
+        "min_transition_count": 50,
+        "max_usable_sessions": 199,
+        "max_transition_count": 299
+      },
+      "stable": {
+        "min_usable_sessions": 200,
+        "min_transition_count": 300
+      },
+      "cold_confidence_cap": "low",
+      "warming_confidence_cap": ""
+    },
+    "tactic_combination_rules": [
+      {
+        "rule_id": "observed-discovery-credential-access",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "required_tactics": ["discovery", "credential-access"],
+        "evidence_sources": [
+          "MITRE ATT&CK tactic semantics",
+          "MITRE CTID Technique Inference Engine supports associated-technique inference, not strict temporal ordering"
+        ],
+        "references": [
+          "https://attack.mitre.org/",
+          "https://github.com/center-for-threat-informed-defense/technique-inference-engine"
+        ],
+        "confidence_policy": "low-to-medium unless reinforced by local transition evidence",
+        "hypotheses": [
+          {
+            "tactic": "command-and-control",
+            "score": 0.45,
+            "reason": "discovery plus credential access can precede payload staging or callback setup"
+          },
+          {
+            "tactic": "persistence",
+            "score": 0.30,
+            "reason": "credential interest after discovery can lead to account or key persistence"
+          }
+        ]
+      },
+      {
+        "rule_id": "observed-c2-execution",
+        "evidence_key": "download-execution-chain",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "required_tactics": ["command-and-control", "execution"],
+        "evidence_sources": [
+          "MITRE ATT&CK tactic semantics",
+          "common post-download execution tradecraft observed in honeypot command sessions"
+        ],
+        "references": [
+          "https://attack.mitre.org/tactics/TA0011/",
+          "https://attack.mitre.org/tactics/TA0002/"
+        ],
+        "confidence_policy": "low-to-medium unless reinforced by local transition evidence",
+        "hypotheses": [
+          {
+            "tactic": "persistence",
+            "score": 0.40,
+            "reason": "command-and-control plus execution can indicate staging before persistence"
+          },
+          {
+            "tactic": "defense-evasion",
+            "score": 0.35,
+            "reason": "execution after download commonly pairs with cleanup or hiding activity"
+          }
+        ]
+      },
+      {
+        "rule_id": "observed-defense-evasion",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "required_flags": ["has_defense_evasion"],
+        "evidence_sources": [
+          "MITRE ATT&CK tactic semantics",
+          "local operator heuristic for later-stage session triage"
+        ],
+        "references": ["https://attack.mitre.org/tactics/TA0005/"],
+        "confidence_policy": "low unless reinforced by local transition evidence",
+        "hypotheses": [
+          {
+            "tactic": "exfiltration",
+            "score": 0.25,
+            "reason": "defense evasion is present; later stages may include collection or exfiltration"
+          }
+        ]
+      },
+      {
+        "rule_id": "downloader-without-execution",
+        "enabled": true,
+        "source_type": "heuristic_prior",
+        "required_flags": ["has_downloader"],
+        "absent_flags": ["has_execution"],
+        "evidence_sources": [
+          "MITRE ATT&CK tactic semantics",
+          "common honeypot command ordering where download is followed by chmod/bash/sh execution"
+        ],
+        "references": [
+          "https://attack.mitre.org/techniques/T1105/",
+          "https://attack.mitre.org/tactics/TA0002/"
+        ],
+        "confidence_policy": "low-to-medium unless reinforced by the current session or local transitions",
+        "hypotheses": [
+          {
+            "tactic": "execution",
+            "score": 0.35,
+            "reason": "download behavior was observed without a confirmed execution step"
+          }
+        ]
+      }
+    ],
+    "mitre_association_rules": [],
+    "sigma_correlation_rules": []
+  },
+  "credential_policy": {
+    "store_raw_credentials": false,
+    "redaction": "[REDACTED]",
+    "hash_algorithm": "sha256",
+    "hash_salt": "",
+    "sanitize_raw_events": true,
+    "redact_fields": ["password", "passwd"]
+  }
+}

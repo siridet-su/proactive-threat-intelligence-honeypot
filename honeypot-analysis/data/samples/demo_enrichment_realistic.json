@@ -1,0 +1,160 @@
+{
+  "198.51.100.45": {
+    "raw_otx_pulse": "Calypso APT — Linux SSH Campaign 2026",
+    "otx_tags": [
+      "ssh-bruteforce",
+      "linux-malware",
+      "dropper",
+      "persistence",
+      "tor-exit"
+    ],
+    "hassh_label": "PuTTY 0.79 (ec7378c1a92f5a8dde7e8b7a4e8f1234)",
+    "hassh": "ec7378c1a92f5a8dde7e8b7a4e8f1234",
+    "ja3_label": null,
+    "asn": "AS24940 Hetzner Online GmbH",
+    "country": "DE",
+    "isp": "Hetzner Online GmbH",
+    "risk_score": 98,
+    "total_reports": 1247,
+    "abuse_tags": [
+      "ssh-brute-force",
+      "malware-dropper",
+      "command-and-control"
+    ],
+    "abuseipdb_categories": [
+      18,
+      22
+    ],
+    "first_seen": "2024-11-03T00:00:00Z",
+    "last_seen": "2026-05-09T10:00:00Z",
+    "open_ports": [
+      22,
+      80,
+      443,
+      4444
+    ],
+    "running_services": [
+      "OpenSSH 8.9",
+      "nginx 1.24"
+    ],
+    "infrastructure_tags": [
+      "tor-exit",
+      "bulletproof_hosting",
+      "known_c2"
+    ],
+    "is_tor_exit": true,
+    "is_vpn": false,
+    "host_type": "vps",
+    "shodan_tags": [
+      "self-signed",
+      "honeypot-target",
+      "scanner"
+    ],
+    "vt_detection_ratio": "52/70",
+    "vt_malware_family": "Mirai.Gen / XorDDoS.Dropper",
+    "vt_hit": true
+  },
+  "203.0.113.22": {
+    "raw_otx_pulse": "Calypso APT — Linux SSH Campaign 2026",
+    "otx_tags": [
+      "ssh-bruteforce",
+      "linux-malware",
+      "dropper",
+      "vpn-exit"
+    ],
+    "hassh_label": "PuTTY 0.79 (ec7378c1a92f5a8dde7e8b7a4e8f1234)",
+    "hassh": "ec7378c1a92f5a8dde7e8b7a4e8f1234",
+    "ja3_label": null,
+    "asn": "AS45090 Shenzhen Tencent Computer Systems",
+    "country": "HK",
+    "isp": "Tencent Cloud",
+    "risk_score": 85,
+    "total_reports": 342,
+    "abuse_tags": [
+      "ssh-brute-force",
+      "malware-dropper"
+    ],
+    "abuseipdb_categories": [
+      18,
+      22
+    ],
+    "first_seen": "2025-09-14T00:00:00Z",
+    "last_seen": "2026-05-09T10:05:00Z",
+    "open_ports": [
+      22,
+      1080,
+      3128
+    ],
+    "running_services": [
+      "OpenSSH 7.9",
+      "Squid 5.7 (proxy)"
+    ],
+    "infrastructure_tags": [
+      "vpn",
+      "proxy",
+      "residential_proxy"
+    ],
+    "is_tor_exit": false,
+    "is_vpn": true,
+    "host_type": "vps",
+    "shodan_tags": [
+      "proxy",
+      "open-proxy"
+    ],
+    "vt_detection_ratio": "48/70",
+    "vt_malware_family": "Mirai.Gen / XorDDoS.Dropper",
+    "vt_hit": true
+  },
+  "192.0.2.45": {
+    "raw_otx_pulse": "Mirai Botnet SSH Scanner — M247 Romania Exit",
+    "otx_tags": [
+      "botnet",
+      "scanner",
+      "mirai",
+      "ssh-bruteforce"
+    ],
+    "hassh_label": "libssh 0.9.6 (b12abcd1234567890abcdef1234567890)",
+    "hassh": "b12abcd1234567890abcdef1234567890",
+    "ja3_label": null,
+    "asn": "AS9009 M247 Ltd",
+    "country": "RO",
+    "isp": "M247 Ltd",
+    "risk_score": 100,
+    "total_reports": 8923,
+    "abuse_tags": [
+      "ssh-brute-force",
+      "port-scan",
+      "botnet"
+    ],
+    "abuseipdb_categories": [
+      14,
+      18,
+      22
+    ],
+    "first_seen": "2023-03-11T00:00:00Z",
+    "last_seen": "2026-05-09T10:10:00Z",
+    "open_ports": [
+      22,
+      23,
+      2323
+    ],
+    "running_services": [
+      "Dropbear 2022.83"
+    ],
+    "infrastructure_tags": [
+      "botnet-node",
+      "scanner",
+      "compromised_router"
+    ],
+    "is_tor_exit": false,
+    "is_vpn": false,
+    "host_type": "residential",
+    "shodan_tags": [
+      "iot",
+      "mirai-target"
+    ],
+    "vt_detection_ratio": null,
+    "vt_malware_family": null,
+    "vt_hit": false
+  }
+}

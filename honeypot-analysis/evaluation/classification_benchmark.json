@@ -1,0 +1,1724 @@
+{
+  "benchmark_case_count": 130,
+  "benchmark_review_type": "researcher/AI-assisted consistency review",
+  "generated_at": "2026-07-13T14:35:11.082719+00:00",
+  "high_confidence_unsupported_examples": [],
+  "metric_interpretation": "consistency metrics on a designed scoped benchmark; not production accuracy",
+  "schema_version": "classification_benchmark_results.v1",
+  "securebert_threshold": 0.55,
+  "validation_status": "not independent expert validation; not expert-adjudicated or human-reviewed ground truth",
+  "variants": {
+    "raw_hybrid": {
+      "exact_technique_metrics": {
+        "correct_abstentions": 27,
+        "coverage": 0.7273,
+        "eligible_cases": 121,
+        "evaluated_commands": 121,
+        "exact_set_accuracy": 0.843,
+        "false_negative_labels": 10,
+        "false_positive_labels": 13,
+        "macro_f1": 0.7792,
+        "macro_precision": 0.78,
+        "macro_recall": 0.784,
+        "micro_f1": 0.8832,
+        "micro_precision": 0.87,
+        "micro_recall": 0.8969,
+        "per_ttp": {
+          "T1003": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 2
+          },
+          "T1016": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1018": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1033": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1036": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 6,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1046": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1049": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1053": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 9
+          },
+          "T1070": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 6
+          },
+          "T1070.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1082": {
+            "f1": 0.9655,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.9333,
+            "tp": 14
+          },
+          "T1083": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 19
+          },
+          "T1098": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 2,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 6
+          },
+          "T1098.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1105": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 5
+          },
+          "T1136": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1140": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1222": {
+            "f1": 0.8,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.6667,
+            "tp": 2
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1543": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1546": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1548": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1552": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1562": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 4,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1562.004": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          }
+        },
+        "true_positive_labels": 87,
+        "unknown_abstention_accuracy": 0.75,
+        "unknown_expected_cases": 36
+      },
+      "false_positive_examples": [
+        {
+          "command": "tftp; wget; /bin/busybox DNOQI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1562"
+          ]
+        },
+        {
+          "command": "tftp; wget; /bin/busybox OYBVI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "cd /dev/shm; cat .s || cp /bin/echo .s; /bin/busybox GJJDA",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "tftp; wget; /bin/busybox GJJDA",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "/bin/busybox GJJDA",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "/bin/busybox OYBVI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "/bin/busybox DNOQI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1562"
+          ]
+        },
+        {
+          "command": "cd /dev/shm; cat .s || cp /bin/echo .s; /bin/busybox DNOQI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1562"
+          ]
+        },
+        {
+          "command": "cd /dev/shm; cat .s || cp /bin/echo .s; /bin/busybox OYBVI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        }
+      ],
+      "not_evaluated_cases": 9,
+      "parent_technique_metrics": {
+        "correct_abstentions": 27,
+        "coverage": 0.7273,
+        "eligible_cases": 121,
+        "evaluated_commands": 121,
+        "exact_set_accuracy": 0.8595,
+        "false_negative_labels": 7,
+        "false_positive_labels": 10,
+        "macro_f1": 0.8643,
+        "macro_precision": 0.8696,
+        "macro_recall": 0.8848,
+        "micro_f1": 0.9137,
+        "micro_precision": 0.9,
+        "micro_recall": 0.9278,
+        "per_ttp": {
+          "T1003": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 2
+          },
+          "T1016": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1018": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1033": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1036": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 6,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1046": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1049": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1053": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 9
+          },
+          "T1070": {
+            "f1": 0.8571,
+            "fn": 2,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.75,
+            "tp": 6
+          },
+          "T1082": {
+            "f1": 0.9655,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.9333,
+            "tp": 14
+          },
+          "T1083": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 19
+          },
+          "T1098": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 8
+          },
+          "T1105": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 5
+          },
+          "T1136": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1140": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1222": {
+            "f1": 0.8,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.6667,
+            "tp": 2
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1543": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1546": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1548": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1552": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1562": {
+            "f1": 0.4,
+            "fn": 0,
+            "fp": 3,
+            "precision": 0.25,
+            "recall": 1.0,
+            "tp": 1
+          }
+        },
+        "true_positive_labels": 90,
+        "unknown_abstention_accuracy": 0.75,
+        "unknown_expected_cases": 36
+      }
+    },
+    "rules_only": {
+      "exact_technique_metrics": {
+        "correct_abstentions": 44,
+        "coverage": 0.6,
+        "eligible_cases": 130,
+        "evaluated_commands": 130,
+        "exact_set_accuracy": 0.9154,
+        "false_negative_labels": 11,
+        "false_positive_labels": 3,
+        "macro_f1": 0.7756,
+        "macro_precision": 0.78,
+        "macro_recall": 0.7773,
+        "micro_f1": 0.9255,
+        "micro_precision": 0.9667,
+        "micro_recall": 0.8878,
+        "per_ttp": {
+          "T1003": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 2
+          },
+          "T1016": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1018": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1033": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1046": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1049": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1053": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 9
+          },
+          "T1070": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 6
+          },
+          "T1070.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1082": {
+            "f1": 0.9655,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.9333,
+            "tp": 14
+          },
+          "T1083": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 19
+          },
+          "T1098": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 2,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 6
+          },
+          "T1098.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1105": {
+            "f1": 0.9091,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.8333,
+            "tp": 5
+          },
+          "T1136": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1140": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1222": {
+            "f1": 0.8,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.6667,
+            "tp": 2
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1543": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1546": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1548": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1552": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1562.004": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          }
+        },
+        "true_positive_labels": 87,
+        "unknown_abstention_accuracy": 1.0,
+        "unknown_expected_cases": 44
+      },
+      "false_positive_examples": [],
+      "not_evaluated_cases": 0,
+      "parent_technique_metrics": {
+        "correct_abstentions": 44,
+        "coverage": 0.6,
+        "eligible_cases": 130,
+        "evaluated_commands": 130,
+        "exact_set_accuracy": 0.9308,
+        "false_negative_labels": 9,
+        "false_positive_labels": 1,
+        "macro_f1": 0.843,
+        "macro_precision": 0.8587,
+        "macro_recall": 0.8341,
+        "micro_f1": 0.9468,
+        "micro_precision": 0.9889,
+        "micro_recall": 0.9082,
+        "per_ttp": {
+          "T1003": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 2
+          },
+          "T1016": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1018": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1033": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1046": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1049": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1053": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 9
+          },
+          "T1070": {
+            "f1": 0.8571,
+            "fn": 2,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.75,
+            "tp": 6
+          },
+          "T1082": {
+            "f1": 0.9655,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.9333,
+            "tp": 14
+          },
+          "T1083": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 19
+          },
+          "T1098": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 8
+          },
+          "T1105": {
+            "f1": 0.9091,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.8333,
+            "tp": 5
+          },
+          "T1136": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1140": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1222": {
+            "f1": 0.8,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.6667,
+            "tp": 2
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1543": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1546": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1548": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1552": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1562": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          }
+        },
+        "true_positive_labels": 89,
+        "unknown_abstention_accuracy": 1.0,
+        "unknown_expected_cases": 44
+      }
+    },
+    "securebert_only": {
+      "exact_technique_metrics": {
+        "correct_abstentions": 27,
+        "coverage": 0.2836,
+        "eligible_cases": 67,
+        "evaluated_commands": 67,
+        "exact_set_accuracy": 0.4179,
+        "false_negative_labels": 33,
+        "false_positive_labels": 19,
+        "macro_f1": 0.0364,
+        "macro_precision": 0.0909,
+        "macro_recall": 0.0227,
+        "micro_f1": 0.0714,
+        "micro_precision": 0.0952,
+        "micro_recall": 0.0571,
+        "per_ttp": {
+          "T1033": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1036": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 9,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1070.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1078": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 3,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1082": {
+            "f1": 0.4,
+            "fn": 6,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.25,
+            "tp": 2
+          },
+          "T1083": {
+            "f1": 0.0,
+            "fn": 11,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1087": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1098": {
+            "f1": 0.0,
+            "fn": 4,
+            "fp": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1098.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1222": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1562": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 5,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1562.004": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          }
+        },
+        "true_positive_labels": 2,
+        "unknown_abstention_accuracy": 0.75,
+        "unknown_expected_cases": 36
+      },
+      "false_positive_examples": [
+        {
+          "command": "tftp; wget; /bin/busybox DNOQI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1562"
+          ]
+        },
+        {
+          "command": "tftp; wget; /bin/busybox OYBVI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "cd /dev/shm; cat .s || cp /bin/echo .s; /bin/busybox GJJDA",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "tftp; wget; /bin/busybox GJJDA",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "/bin/busybox GJJDA",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "/bin/busybox OYBVI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        },
+        {
+          "command": "/bin/busybox DNOQI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1562"
+          ]
+        },
+        {
+          "command": "cd /dev/shm; cat .s || cp /bin/echo .s; /bin/busybox DNOQI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1562"
+          ]
+        },
+        {
+          "command": "cd /dev/shm; cat .s || cp /bin/echo .s; /bin/busybox OYBVI",
+          "expected_ttps": [],
+          "predicted_ttps": [
+            "T1036"
+          ]
+        }
+      ],
+      "not_evaluated_cases": 63,
+      "parent_technique_metrics": {
+        "correct_abstentions": 27,
+        "coverage": 0.2836,
+        "eligible_cases": 67,
+        "evaluated_commands": 67,
+        "exact_set_accuracy": 0.4179,
+        "false_negative_labels": 31,
+        "false_positive_labels": 17,
+        "macro_f1": 0.1019,
+        "macro_precision": 0.22,
+        "macro_recall": 0.1417,
+        "micro_f1": 0.1429,
+        "micro_precision": 0.1905,
+        "micro_recall": 0.1143,
+        "per_ttp": {
+          "T1033": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1036": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 9,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1070": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1078": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 3,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1082": {
+            "f1": 0.4,
+            "fn": 6,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.25,
+            "tp": 2
+          },
+          "T1083": {
+            "f1": 0.0,
+            "fn": 11,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1087": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1098": {
+            "f1": 0.2857,
+            "fn": 5,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.1667,
+            "tp": 1
+          },
+          "T1222": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1562": {
+            "f1": 0.3333,
+            "fn": 0,
+            "fp": 4,
+            "precision": 0.2,
+            "recall": 1.0,
+            "tp": 1
+          }
+        },
+        "true_positive_labels": 4,
+        "unknown_abstention_accuracy": 0.75,
+        "unknown_expected_cases": 36
+      }
+    },
+    "trusted_hybrid": {
+      "exact_technique_metrics": {
+        "correct_abstentions": 36,
+        "coverage": 0.6529,
+        "eligible_cases": 121,
+        "evaluated_commands": 121,
+        "exact_set_accuracy": 0.9174,
+        "false_negative_labels": 10,
+        "false_positive_labels": 4,
+        "macro_f1": 0.7792,
+        "macro_precision": 0.78,
+        "macro_recall": 0.784,
+        "micro_f1": 0.9255,
+        "micro_precision": 0.956,
+        "micro_recall": 0.8969,
+        "per_ttp": {
+          "T1003": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 2
+          },
+          "T1016": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1018": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1033": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1046": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1049": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1053": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 9
+          },
+          "T1070": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 6
+          },
+          "T1070.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1082": {
+            "f1": 0.9655,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.9333,
+            "tp": 14
+          },
+          "T1083": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 19
+          },
+          "T1098": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 2,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 6
+          },
+          "T1098.004": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1105": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 5
+          },
+          "T1136": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1140": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1222": {
+            "f1": 0.8,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.6667,
+            "tp": 2
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1543": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1546": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1548": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1552": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1562": {
+            "f1": 0.0,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1562.004": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          }
+        },
+        "true_positive_labels": 87,
+        "unknown_abstention_accuracy": 1.0,
+        "unknown_expected_cases": 36
+      },
+      "false_positive_examples": [],
+      "not_evaluated_cases": 9,
+      "parent_technique_metrics": {
+        "correct_abstentions": 36,
+        "coverage": 0.6529,
+        "eligible_cases": 121,
+        "evaluated_commands": 121,
+        "exact_set_accuracy": 0.9339,
+        "false_negative_labels": 7,
+        "false_positive_labels": 1,
+        "macro_f1": 0.8904,
+        "macro_precision": 0.9022,
+        "macro_recall": 0.8848,
+        "micro_f1": 0.9574,
+        "micro_precision": 0.989,
+        "micro_recall": 0.9278,
+        "per_ttp": {
+          "T1003": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 2
+          },
+          "T1016": {
+            "f1": 0.8571,
+            "fn": 0,
+            "fp": 1,
+            "precision": 0.75,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1018": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1033": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1046": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1049": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1053": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1057": {
+            "f1": 0.0,
+            "fn": 2,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1059": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 9
+          },
+          "T1070": {
+            "f1": 0.8571,
+            "fn": 2,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.75,
+            "tp": 6
+          },
+          "T1082": {
+            "f1": 0.9655,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.9333,
+            "tp": 14
+          },
+          "T1083": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 19
+          },
+          "T1098": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 8
+          },
+          "T1105": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 5
+          },
+          "T1136": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1140": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1222": {
+            "f1": 0.8,
+            "fn": 1,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 0.6667,
+            "tp": 2
+          },
+          "T1518": {
+            "f1": 0.0,
+            "fn": 1,
+            "fp": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "T1543": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1546": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          },
+          "T1548": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 4
+          },
+          "T1552": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 3
+          },
+          "T1562": {
+            "f1": 1.0,
+            "fn": 0,
+            "fp": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "tp": 1
+          }
+        },
+        "true_positive_labels": 90,
+        "unknown_abstention_accuracy": 1.0,
+        "unknown_expected_cases": 36
+      }
+    }
+  }
+}
