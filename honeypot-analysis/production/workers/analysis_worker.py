@@ -23,6 +23,10 @@ from production.enrichment.threat_feed_loader import load_threat_feeds
 from production.reporting.actor_attribution import enrich_report_with_actor_attribution
 from production.reporting.analysis_policy import session_analysis_skip_reason
 from production.reporting.artifacts import attach_report_artifacts
+from production.reporting.threat_hypothesis import (
+    attach_model_prediction,
+    build_v2_report,
+)
 from production.utils.config import ProductionConfig
 from production.enrichment.enrichment_cache import load_combined_ip_enrichment
 from production.enrichment.feed_status import save_feed_status
@@ -129,11 +133,20 @@ def _direct_command_ttp_layer(session_payload: Dict[str, Any]) -> Dict[str, Any]
             confidence = None
         item["evidence"].append(
             {
+                "evidence_id": _clean_text(event.get("evidence_id")),
                 "command": command,
                 "original_command": original_command,
+                "command_outcome": _clean_text(event.get("command_outcome")) or "legacy_outcome_unknown",
+                "cowrie_eventid": _clean_text(event.get("cowrie_eventid")),
+                "timestamp": _clean_text(event.get("event_timestamp")),
                 "source": source,
+                "agreement_status": _clean_text(event.get("agreement_status")),
                 "confidence": confidence,
+                "confidence_semantics": _clean_text(event.get("confidence_semantics")) or "legacy_unscoped_score",
+                "rule_policy_id": _clean_text(event.get("rule_policy_id")),
+                "rule_policy_version": _clean_text(event.get("rule_policy_version")),
                 "subcommand_index": event.get("subcommand_index"),
+                "subcommand_count": event.get("subcommand_count"),
                 "technique_granularity": event.get("technique_granularity") or "parent",
             }
         )
@@ -294,6 +307,13 @@ def attach_threat_evidence_layers(
     session_payload: Dict[str, Any],
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    if report.get("schema_version") != "threat_hypothesis.v2":
+        report = build_v2_report(
+            report,
+            [session_payload],
+            raw_events=session_payload.get("raw_events") or [],
+        )
+    report = attach_model_prediction(report, prediction_snapshot)
     hunting_context = report.get("threat_hunting_context")
     if not isinstance(hunting_context, dict):
         hunting_context = _build_session_correlation_hunting_context(
@@ -473,6 +493,7 @@ async def analyze_job(
         config=context["config"],
         enrichment_db=context["enrichment_db"],
         max_tokens=config.analysis_max_tokens,
+        enable_vertex_narrative=config.enable_vertex_narrative,
     )
     if config.analysis_suppress_stdout:
         with contextlib.redirect_stdout(io.StringIO()):

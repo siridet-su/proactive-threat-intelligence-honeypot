@@ -77,6 +77,12 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from collections import Counter
 
+from production.reporting.threat_hypothesis import (
+    apply_validated_vertex_presentation,
+    build_observed_behavior,
+    build_v2_report,
+)
+
 try:
     import requests as _requests_lib
     _REQUESTS_AVAILABLE = True
@@ -100,36 +106,19 @@ except ImportError:
         return "No infrastructure data"
 
 
-# =============================================================================
-# COLAB CONFIGURATION  â€” à¹à¸à¹‰à¸•à¸£à¸‡à¸™à¸µà¹‰à¹€à¸žà¸µà¸¢à¸‡à¸ˆà¸¸à¸”à¹€à¸”à¸µà¸¢à¸§
-# =============================================================================
-# à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²à¸„à¸£à¸±à¹‰à¸‡à¹€à¸”à¸µà¸¢à¸§ à¹ƒà¸Šà¹‰à¹„à¸”à¹‰à¸—à¸±à¹‰à¸‡à¹„à¸Ÿà¸¥à¹Œ à¹„à¸¡à¹ˆà¸•à¹‰à¸­à¸‡à¹à¸•à¸° environment variable à¸­à¸µà¸
-# à¸ªà¸³à¸«à¸£à¸±à¸š Colab: auth à¸ˆà¸°à¸–à¸¹à¸ run à¸­à¸±à¸•à¹‚à¸™à¸¡à¸±à¸•à¸´à¸œà¹ˆà¸²à¸™ google.colab.auth
-# à¸–à¹‰à¸²à¸£à¸±à¸™à¸šà¸™ local machine à¹ƒà¸«à¹‰ set VERTEX_ACCESS_TOKEN à¹à¸—à¸™ à¸«à¸£à¸·à¸­ run `gcloud auth application-default login`
-# =============================================================================
 
 COLAB_CONFIG = {
-    # --- Required ---
     "project_id": "",                              # Set VERTEX_PROJECT_ID in your environment.
-                                  #   à¹€à¸Šà¹ˆà¸™ "my-gcp-project-12345"
 
-    # --- Model selection ---
     "model": "gemini-2.5-pro",          # GA â€” à¹„à¸¡à¹ˆà¸•à¹‰à¸­à¸‡ enable à¹ƒà¸™ Model Garden
-                                          # à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¹€à¸›à¹‡à¸™ "gemini-3.1-pro-preview" à¹„à¸”à¹‰à¹€à¸¡à¸·à¹ˆà¸­ enable à¹ƒà¸™ Model Garden à¹à¸¥à¹‰à¸§
 
-    # --- Location ---
     "location": "us-central1",    # Vertex AI à¹„à¸¡à¹ˆà¸¡à¸µ global endpoint â€” à¸•à¹‰à¸­à¸‡à¹ƒà¸Šà¹‰ region à¹€à¸ªà¸¡à¸­
 
-    # --- Auto-auth ---
-    # True  = à¸£à¸±à¸™ google.colab.auth.authenticate_user() à¸­à¸±à¸•à¹‚à¸™à¸¡à¸±à¸•à¸´à¹€à¸¡à¸·à¹ˆà¸­à¸£à¸±à¸™à¹ƒà¸™ Colab
-    # False = à¹ƒà¸Šà¹‰ VERTEX_ACCESS_TOKEN à¸«à¸£à¸·à¸­ ADC à¹à¸—à¸™
     "auto_colab_auth": True,
 }
 
 
-# =============================================================================
 # PATTERN 1: CENTRALIZED PROMPTS & TOKEN BUDGET
-# =============================================================================
 
 class CTIPrompts:
     """Central repository for AI prompts."""
@@ -199,79 +188,33 @@ class CTIPrompts:
         '14. Kill Chain: The "evidence" column must contain ONLY the raw malicious command or artefact. Do NOT put recommendations or mitigations in the "evidence" column.\n'
     )
 
-    # -----------------------------------------------------------------------
     # ANALYST_SYSTEM_PROMPT â€” used in Phase 3 refactor (AI-as-Analyst mode).
     # The AI receives a structured evidence brief and answers specific
     # analytical questions. It does NOT rewrite the full report.
-    # -----------------------------------------------------------------------
     ANALYST_SYSTEM_PROMPT = (
-        'You are a senior Cyber Threat Intelligence (CTI) analyst specialising '
-        'in honeypot deception systems. Every connection to this honeypot is hostile '
-        'by definition.\n\n'
-        'You will be given a STRUCTURED EVIDENCE BRIEF containing pre-computed facts '
-        'extracted from Cowrie logs, MITRE ATT&CK mappings, and external enrichment '
-        'sources (OTX, Shodan, VirusTotal, JA3/HASSH fingerprinting).\n\n'
-        'Your task is to answer SEVEN SPECIFIC ANALYTICAL QUESTIONS about this '
-        'intrusion. You must:\n'
-        '  1. Cite specific evidence (commands, IPs, OTX pulse names, ASNs, '
-        'fingerprint labels) in EVERY answer.\n'
-        '  2. Respect the pre-computed facts â€” do NOT contradict them.\n'
-        '  3. Follow strict scientific methodology for falsification conditions.\n'
-        '  4. Use professional CTI language appropriate for an incident response team.\n\n'
-        'Output your answers as a JSON object inside <json_output> tags with these '
-        'exact keys:\n'
+        'You are a presentation editor for a Cowrie SSH honeypot report. The input '
+        'contains validated deterministic claims. You may improve wording only. You '
+        'must not add objectives, actor attribution, campaign claims, recommendations, '
+        'falsification conditions, predictions, confidence, or facts.\n\n'
+        'Output JSON inside <json_output> tags with exactly these keys:\n'
         '{\n'
-        '  "executive_summary": "3-4 sentence narrative. Cite attacker IPs, tools observed, '
-        'and highest-impact action taken.",\n'
-        '  "correlation_reasoning": "Explain WHY these are the same campaign OR unrelated '
-        'actors. Cite OTX pulse names and ASNs explicitly.",\n'
-        '  "sophistication_justification": "Justify the sophistication level using ONLY '
-        'the fingerprint labels and commands provided. Do NOT invent tools not in evidence.",\n'
-        '  "threat_actor_description": "Profile the actor(s). What type of operator? '
-        'What infrastructure choices reveal about their capability?",\n'
-        '  "predicted_next_action": "A possible next observable action if activity continues. State it as a hypothesis, not a fact, and be specific about supporting evidence.",\n'
-        '  "falsification_conditions": ["3-5 conditions that would DISPROVE this '
-        'hypothesis â€” not operational blocks, but observable evidence that contradicts '
-        'the threat model. Example: if no encrypted file found on disk, the ransomware '
-        'hypothesis is falsified."],\n'
-        '  "attacker_playbook": ["What was the attacker hunting for on REAL targets? '
-        'Derived from observed commands. List 3-6 specific items."],\n'
-        '  "honeypot_awareness_note": "Did the attacker show signs of honeypot/VM '
-        'awareness? Cite specific commands as evidence for or against."\n'
+        '  "presentation_summary": "A concise summary of only the validated claims",\n'
+        '  "grounded_claim_ids": ["Every canonical claim_id used in the summary"]\n'
         '}\n\n'
-        'ABSOLUTE CONSTRAINTS:\n'
-        '  - Do NOT add or reference MITRE technique IDs not in the provided TTP list.\n'
-        '  - Do NOT claim a tool was used unless its name appears in the evidence commands '
-        'or fingerprint labels.\n'
-        '  - Falsification conditions must describe observable evidence, not firewall '
-        'actions (those are mitigations, not falsifiers).\n'
-        '  - Do not invent a falsification condition when no evidence-specific follow-on hypothesis is supported.\n'
-        '  - Low/Medium/High analytical confidence means heuristic evidence strength, not calibrated probability.\n'
-        '  - If IPs have different OTX pulses or ASNs, correlation_reasoning MUST '
-        'conclude they are unrelated actors.\n'
-        '  - Do NOT mention any IP address unless it appears in '
-        'FIXED_allowed_narrative_ips or FIXED_observed_source_ips.\n'
-        '  - Treat session_correlation_hunting_context as supporting context only; '
-        'do not describe correlated candidates as if they were raw commands from '
-        'the current session.\n'
+        'Do not introduce ATT&CK identifiers absent from the input. Do not claim '
+        'confirmed intent, compromise, execution, persistence, exfiltration, or '
+        'attribution. Do not propose operator actions. If there are no analytical '
+        'claims, summarize only the observed behavior and return an empty claim-ID list.'
     )
 
 
-    # -----------------------------------------------------------------------
     # ANALYTICAL_FIELD_NAMES â€” single source of truth for all fields the AI
     # is responsible for in analyst mode. JSONValidator.ANALYTICAL_FIELDS
     # references this so that adding a new analytical question only requires
     # updating this one constant.
-    # -----------------------------------------------------------------------
     ANALYTICAL_FIELD_NAMES: frozenset = frozenset({
-        'executive_summary',
-        'correlation_reasoning',
-        'sophistication_justification',
-        'threat_actor_description',
-        'predicted_next_action',
-        'falsification_conditions',
-        'attacker_playbook',
-        'honeypot_awareness_note',
+        'presentation_summary',
+        'grounded_claim_ids',
     })
 
 
@@ -319,9 +262,7 @@ class TokenBudget:
         return max(0, self.max_tokens - self.used)
 
 
-# =============================================================================
 # PATTERN 2: STRUCTURED THINKING PHASES
-# =============================================================================
 
 class AnalysisPhase(Enum):
     DISCOVERY = "discovery"
@@ -366,9 +307,7 @@ def build_structured_prompt(phase: AnalysisPhase, detected_ttps: List[str] = Non
     return f"{system_msg}\n{thinking}"
 
 
-# =============================================================================
 # PATTERN 3: JSON VALIDATION
-# =============================================================================
 
 class JSONValidator:
     """Schema validation and recovery for AI-generated JSON."""
@@ -500,20 +439,14 @@ class JSONValidator:
         missing = JSONValidator.ANALYTICAL_FIELDS - set(data.keys())
         if missing:
             return False, f"Missing analytical fields: {missing}"
-        if not isinstance(data.get('falsification_conditions'), list):
-            return False, "'falsification_conditions' must be a list"
-        if not isinstance(data.get('attacker_playbook'), list):
-            return False, "'attacker_playbook' must be a list"
-        if len(data.get('falsification_conditions', [])) < 1:
-            return False, "'falsification_conditions' must have at least 1 item"
-        if len(data.get('attacker_playbook', [])) < 1:
-            return False, "'attacker_playbook' must have at least 1 item"
+        if not isinstance(data.get('presentation_summary'), str):
+            return False, "'presentation_summary' must be a string"
+        if not isinstance(data.get('grounded_claim_ids'), list):
+            return False, "'grounded_claim_ids' must be a list"
         return True, "OK"
 
 
-# =============================================================================
 # PATTERN 4: AI CLIENT (Ollama â€” local inference)
-# =============================================================================
 
 class VertexAIClient:
     """
@@ -531,11 +464,7 @@ class VertexAIClient:
     """
 
     _VERTEX_LOCATION = "us-central1"
-    # âš ï¸ Vertex AI à¹„à¸¡à¹ˆà¸¡à¸µ 'global' endpoint â€” à¸•à¹‰à¸­à¸‡à¹ƒà¸Šà¹‰ region (us-central1, europe-west4, à¹€à¸›à¹‡à¸™à¸•à¹‰à¸™)
-    # Primary model: gemini-2.5-pro (GA, à¹€à¸£à¸µà¸¢à¸à¹„à¸”à¹‰à¸—à¸±à¸™à¸—à¸µà¸ªà¸¸à¸”)
-    # à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¹€à¸›à¹‡à¸™ gemini-3.1-pro-preview à¹„à¸”à¹‰à¸«à¸¥à¸±à¸‡à¸ˆà¸²à¸ enable à¹ƒà¸™ Vertex AI Model Garden
     _VERTEX_MODEL = "gemini-2.5-pro"
-    # à¹„à¸¡à¹ˆà¸¡à¸µ fallback â€” à¸–à¹‰à¸² Gemini fail à¸ˆà¸°à¹ƒà¸Šà¹‰ deterministic baseline
     _FALLBACK_MODELS: list = []
 
     def __init__(self, token_budget: TokenBudget,
@@ -683,7 +612,6 @@ class VertexAIClient:
         # Strip chain-of-thought tags before any other processing
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-        # â”€â”€ 1. Direct bare JSON (application/json mode) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if text.startswith("{"):
             try:
                 _json.loads(text)   # fast-path: already valid JSON
@@ -691,17 +619,14 @@ class VertexAIClient:
             except _json.JSONDecodeError:
                 pass  # might be truncated â€” fall through to repair
 
-        # â”€â”€ 2. <json_output> XML tag â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         match = re.search(r"<json_output>(.*?)</json_output>", text, re.DOTALL)
         if match:
             return match.group(1).strip()
 
-        # â”€â”€ 3. ```json ... ``` code fence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
         if match:
             return match.group(1).strip()
 
-        # â”€â”€ 4. Greedy {.*} (catches JSON embedded in prose) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         match = re.search(r"(\{.*\})", text, re.DOTALL)
         if match:
             candidate = match.group(1).strip()
@@ -711,7 +636,6 @@ class VertexAIClient:
             except _json.JSONDecodeError:
                 pass                      # truncated â€” fall through to repair
 
-        # â”€â”€ 5. Truncated-JSON repair (response hit max_output_tokens) â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # The response was cut mid-object. Close all open braces/brackets.
         brace_start = text.find("{")
         if brace_start != -1:
@@ -895,7 +819,6 @@ class VertexAIClient:
         attempted_models: set = set()
 
         for attempt in range(1, self.MAX_RETRIES + 1):
-            # à¸–à¹‰à¸²à¸—à¸”à¸¥à¸­à¸‡à¸—à¸¸à¸à¹‚à¸¡à¹€à¸”à¸¥à¹à¸¥à¹‰à¸§ à¸«à¸¢à¸¸à¸” (anti-clamp)
             if len(attempted_models) >= len(models_to_try):
                 print(f"    [Analyst] All {len(models_to_try)} model(s) tried â€” stopping")
                 break
@@ -947,7 +870,6 @@ class VertexAIClient:
                 err_msg = str(e)
                 print(f"    [Analyst] Attempt {attempt} failed: "
                       f"{type(e).__name__}: {err_msg[:120]}")
-                # 404 = model not found / not enabled â€” à¹„à¸¡à¹ˆà¸¡à¸µà¸›à¸£à¸°à¹‚à¸¢à¸Šà¸™à¹Œ retryà¸à¸±à¸šà¹‚à¸¡à¹€à¸”à¸¥à¹€à¸”à¸´à¸¡
                 if "404" in err_msg:
                     print(f"    [Analyst] 404 â€” model '{model}' not found/not enabled. "
                           f"Check Vertex AI Model Garden.")
@@ -973,11 +895,9 @@ GroqClient = VertexAIClient
 OllamaClient = VertexAIClient
 
 
-# =============================================================================
 # CAMPAIGN NAME SYNTHESIS
-# =============================================================================
 
-async def _synthesize_campaign_name(
+async def _legacy_synthesize_campaign_name_disabled(
         ioc_bundle,
         tactic_summary: Dict[str, List[str]],
         fingerprint_text: str,
@@ -1131,9 +1051,17 @@ async def _synthesize_campaign_name(
         return fallback
 
 
-# =============================================================================
+async def _synthesize_campaign_name(
+        ioc_bundle,
+        tactic_summary: Dict[str, List[str]],
+        fingerprint_text: str,
+        behavioral_patterns: Dict[str, int]) -> str:
+    """Compatibility wrapper; AI-generated campaign naming is disabled."""
+
+    return "Cowrie SSH Session Assessment"
+
+
 # VT INTELLIGENCE EXTRACTION
-# =============================================================================
 
 def _extract_vt_intelligence(ioc_bundle) -> Dict[str, Any]:
     """
@@ -1199,9 +1127,7 @@ def _extract_vt_intelligence(ioc_bundle) -> Dict[str, Any]:
     }
 
 
-# =============================================================================
 # DYNAMIC RECOMMENDATION ENGINE â€” NO TTPâ†’TEXT MAPPINGS
-# =============================================================================
 
 def _derive_actions_from_command(cmd: str, add_fn) -> None:
     """
@@ -1574,9 +1500,7 @@ def _build_trusted_recommendation_decision(
         }
 
 
-# =============================================================================
 # HONEYPOT-SPECIFIC ANALYSIS FUNCTIONS
-# =============================================================================
 
 def _assess_honeypot_awareness(sessions: List[Any],
                                behavioral_rules: dict) -> dict:
@@ -1890,7 +1814,15 @@ def _derive_primary_objective(
         ttp_command_map: Dict[str, List[str]],
         playbook: Dict[str, Any] = None) -> str:
     """Derive a conservative objective from observed tactics/TTPs."""
-    if current and current != "Under analysis":
+    if (
+        current
+        and current != "Under analysis"
+        and not re.search(
+            r"\b(?:harvest(?:ing)?|confirmed|persistent access|payload execution|compromise)\b",
+            current,
+            re.IGNORECASE,
+        )
+    ):
         return current
 
     playbook = playbook or {}
@@ -1900,20 +1832,18 @@ def _derive_primary_objective(
     credential_targets = playbook.get("credential_targets") or []
     if credential_targets:
         return (
-            "Credential discovery and access preparation - targeting "
+            "Possible credential-related discovery or access preparation involving "
             + ", ".join(str(t) for t in credential_targets[:3])
         )
-    if {"T1105", "T1059"} <= ttps and "defense-evasion" in tactics:
-        return "Payload staging, execution, and post-execution cleanup"
-    if {"T1105", "T1059"} <= ttps:
-        return "Payload staging and execution"
+    if "T1105" in ttps:
+        return "Possible tool transfer or payload staging"
     if "T1003" in ttps or "credential-access" in tactics:
-        return "Credential and account discovery"
+        return "Possible credential-related discovery or access preparation"
     if "command-and-control" in tactics:
-        return "External tool transfer or command-and-control preparation"
+        return "Observed command or transfer behavior mapped to Command and Control"
     if "discovery" in tactics:
-        return "Host reconnaissance and environment discovery"
-    return "Under analysis"
+        return "Observed host and environment discovery behavior"
+    return "Insufficient evidence to infer an attacker objective from Cowrie telemetry."
 
 
 def _build_evidence_grounded_actor_profile(
@@ -2406,7 +2336,6 @@ def _build_attack_timeline(raw_events: List[dict]) -> dict:
     if not raw_events:
         return {}
 
-    # â”€â”€ Format detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Inspect the first event to determine which format we have.
     sample = raw_events[0] if raw_events else {}
     is_raw_cowrie = 'eventid' in sample
@@ -2426,7 +2355,6 @@ def _build_attack_timeline(raw_events: List[dict]) -> dict:
         print("[Timeline] WARNING: unrecognised event format â€” timeline skipped.")
         return {}
 
-    # â”€â”€ Raw Cowrie format (correct path) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     timestamps = [e.get('timestamp', '') for e in raw_events if e.get('timestamp')]
     if not timestamps:
         return {}
@@ -2515,7 +2443,8 @@ def _build_attack_timeline_from_processed(processed_events: List[dict]) -> dict:
 
 def _predict_next_action(ttp_command_map: Dict[str, List[str]],
                          ioc_bundle,
-                         tactic_summary: Dict[str, List[str]]) -> str:
+                         tactic_summary: Dict[str, List[str]],
+                         ordered_behavior_chain: List[Dict[str, Any]] = None) -> str:
     """
     Predict attacker's next action from last observed technique and enrichment.
 
@@ -2527,49 +2456,43 @@ def _predict_next_action(ttp_command_map: Dict[str, List[str]],
 
     No TTPâ†’prediction lookup table.
     """
-    # Establish kill-chain order from observed tactics
-    tactic_order = [
-        'Credential Access', 'Discovery', 'Execution',
-        'Persistence', 'Privilege Escalation',
-        'Defense Evasion', 'Command And Control', 'Exfiltration'
-    ]
-    observed = set(tactic_summary.keys())
-    last_tactic = next(
-        (t for t in reversed(tactic_order) if t in observed), None
-    )
-
     predictions = []
 
-    # Parse commands from last observed tactic for concrete artefact-based predictions
-    if last_tactic:
-        last_ttps = tactic_summary.get(last_tactic, [])
-        for ttp in last_ttps:
-            for cmd in ttp_command_map.get(ttp, []):
-                m = re.search(r'useradd\s+(?:-\S+\s+)*(\w+)', cmd)
-                if m:
-                    predictions.append(
-                        f"Possible follow-on re-entry attempt using the observed account `{m.group(1)}`"
-                    )
-                if 'authorized_keys' in cmd:
-                    predictions.append(
-                        "Possible follow-on re-entry attempt using the observed SSH public-key modification"
-                    )
-                if 'crontab' in cmd:
-                    path_m = re.search(r'(/tmp/\S+|/var/tmp/\S+)', cmd)
-                    path = path_m.group(1) if path_m else "scheduled payload"
-                    predictions.append(
-                        f"Possible scheduled execution of `{path}` if the observed cron change persists"
-                    )
-                m = re.search(r'curl.*?-d\s+@([^\s]+)\s+(https?://[^\s]+)', cmd)
-                if m:
-                    predictions.append(
-                        f"Possible follow-on use of data read from `{m.group(1)}`; successful credential abuse is not confirmed"
-                    )
+    chain = [item for item in ordered_behavior_chain or [] if isinstance(item, dict)]
+    if chain:
+        final_command = str(chain[-1].get("command") or "").strip()
+    else:
+        flattened = [
+            str(command).strip()
+            for commands in (ttp_command_map or {}).values()
+            for command in commands or []
+            if str(command).strip()
+        ]
+        final_command = flattened[-1] if flattened else ""
 
-    # Supplement from OTX tags
-    otx_tags = set()
-    for ip in ioc_bundle.ips:
-        otx_tags.update(getattr(ip, 'otx_tags', []) or [])
+    if final_command:
+        m = re.search(r'\b(?:useradd|adduser)\b\s+(?:-\S+\s+)*(\w+)', final_command)
+        if m:
+            predictions.append(
+                f"Possible follow-on re-entry attempt using the observed account `{m.group(1)}`; "
+                "account creation success is not established"
+            )
+        if 'authorized_keys' in final_command:
+            predictions.append(
+                "Possible follow-on re-entry attempt using the observed SSH public-key modification; "
+                "successful key installation is not established"
+            )
+        if 'crontab' in final_command.lower():
+            path_m = re.search(r'(/tmp/\S+|/var/tmp/\S+)', final_command)
+            path = path_m.group(1) if path_m else "the referenced command"
+            predictions.append(
+                f"Possible scheduled execution of `{path}`; subsequent execution is not observed"
+            )
+        if re.search(r"\b(?:curl|wget|tftp|ftp)\b\s+\S+", final_command, re.IGNORECASE):
+            predictions.append(
+                "Possible later execution of an artifact referenced by the final observed downloader command; "
+                "successful transfer, execution, and persistence are not established"
+            )
 
     command_text = "\n".join(
         str(command).lower()
@@ -2589,29 +2512,30 @@ def _predict_next_action(ttp_command_map: Dict[str, List[str]],
         and any(re.search(r"\b(?:curl|wget|tftp|ftp)\b\s+\S+", str(cmd), re.IGNORECASE) for cmd in commands or [])
         for ttp, commands in (ttp_command_map or {}).items()
     )
-    observed_payload_execution = any(
-        str(ttp).split(".", 1)[0] == "T1059"
-        for ttp in (ttp_command_map or {})
-    ) or bool(re.search(
-        r"(?:chmod\s+\+x|(?:^|[;&|]\s*)(?:sh|bash)\s+(?:/tmp|/var/tmp|/dev/shm)/|"
+    observed_payload_execution = bool(re.search(
+        r"(?:(?:^|[;&|]\s*)(?:sh|bash|python\d*|perl)\s+(?:/tmp|/var/tmp|/dev/shm)/|"
         r"(?:^|[;&|]\s*)(?:\./|/tmp/|/var/tmp/|/dev/shm/)[^\s;&|]+)",
         command_text,
-        re.MULTILINE,
+        re.IGNORECASE | re.MULTILINE,
     ))
-    if observed_downloader and not observed_payload_execution:
+    if observed_downloader and not observed_payload_execution and not predictions:
         predictions.append(
             "Possible follow-on execution of an artifact referenced by the observed downloader command; "
             "successful download, execution, and persistence are not confirmed"
         )
-    if (
-        ('cloud-credential-theft' in otx_tags or 'aws-key-theft' in otx_tags)
-        and observed_cloud_credential_access
+    if observed_cloud_credential_access and final_command and re.search(
+        r"(?:\.aws/credentials|\.config/gcloud|application_default_credentials)",
+        final_command,
     ):
         predictions.append(
             "Possible follow-on cloud API access using credentials referenced in the observed commands; "
             "successful use is not confirmed"
         )
-    if 'backdoor' in otx_tags and observed_persistence_change:
+    if observed_persistence_change and final_command and re.search(
+        r"(?:useradd|adduser|authorized_keys|crontab|systemctl\s+(?:enable|start))",
+        final_command,
+        re.IGNORECASE,
+    ):
         predictions.append(
             "Possible follow-on access through the observed persistence-related account or SSH-key change"
         )
@@ -2762,7 +2686,6 @@ def _detect_target_platform(
     """
     platform_rules = platform_rules or {}
 
-    # â”€â”€ Load signal lists from config (platform_rules) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # config.json keys: linux, windows, cloud, web_application, database, network_device
     # These replace the old hardcoded _linux_signals / _windows_signals lists.
     _linux_signals   = platform_rules.get('linux', [
@@ -2777,7 +2700,6 @@ def _detect_target_platform(
     ])
     _cloud_signals   = platform_rules.get('cloud', [])
 
-    # â”€â”€ Collect all observed commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     all_cmds: List[str] = []
     for cmds in ttp_command_map.values():
         all_cmds.extend(str(c).lower() for c in cmds)
@@ -2807,7 +2729,6 @@ def _detect_target_platform(
                 return 'Linux (cross-OS command errors detected)'
             return 'Multi-platform (Linux + Windows indicators observed)'
 
-    # â”€â”€ Fallback: MITRE ATT&CK platform data for detected TTPs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Used when no command evidence exists (connection observed but no commands)
     if mitre_db and detected_ttps:
         mitre_platforms: Dict[str, int] = {}
@@ -2827,7 +2748,7 @@ def _detect_target_platform(
     return 'Unknown'
 
 
-def _build_falsification_conditions(
+def _build_legacy_falsification_conditions(
         ttp_command_map: Dict[str, List[str]],
         ioc_bundle,
         raw_events: List[dict] = None) -> List[str]:
@@ -3002,8 +2923,74 @@ def _build_falsification_conditions(
     return conditions[:6]  # cap at 6 â€” quality over quantity
 
 
+def _build_falsification_conditions(
+        ttp_command_map: Dict[str, List[str]],
+        ioc_bundle,
+        raw_events: List[dict] = None) -> List[str]:
+    """Return only disconfirming observations available in Cowrie telemetry.
 
-def _build_analytical_confidence(
+    Checks requiring endpoint, cloud, EDR, or enterprise authentication logs are
+    external validation suggestions in the v2 schema, not falsification facts.
+    """
+
+    raw_events = [event for event in raw_events or [] if isinstance(event, dict)]
+    commands = [
+        str(command).strip()
+        for values in (ttp_command_map or {}).values()
+        for command in values or []
+        if str(command).strip()
+    ]
+    command_text = "\n".join(commands)
+    has_downloader = bool(re.search(r"\b(?:curl|wget|tftp|ftp)\b\s+\S+", command_text, re.IGNORECASE))
+    has_execution = bool(re.search(
+        r"(?:(?:^|[;&|]\s*)(?:sh|bash|python\d*|perl)\s+(?:/tmp|/var/tmp|/dev/shm)/|"
+        r"(?:^|[;&|]\s*)(?:\./|/tmp/|/var/tmp/|/dev/shm/)\S+)",
+        command_text,
+        re.IGNORECASE | re.MULTILINE,
+    ))
+    has_persistence = bool(re.search(
+        r"\b(?:useradd|adduser)\b|authorized_keys|\bcrontab\b|"
+        r"\bsystemctl\s+(?:enable|start)\b|(?:\.bashrc|\.profile|rc\.local)",
+        command_text,
+        re.IGNORECASE,
+    ))
+    has_download_event = any(
+        str(event.get("eventid") or "") == "cowrie.session.file_download"
+        for event in raw_events
+    )
+    failed_commands = [
+        str(event.get("input") or "").strip()
+        for event in raw_events
+        if str(event.get("eventid") or "") == "cowrie.command.failed"
+        and str(event.get("input") or "").strip()
+    ]
+
+    conditions: List[str] = []
+    if has_downloader and not has_download_event:
+        conditions.append(
+            "No `cowrie.session.file_download` event or explicit successful-download metadata "
+            "was observed; a successful-transfer interpretation is therefore unsupported."
+        )
+    if has_downloader and not has_execution:
+        conditions.append(
+            "No subsequent explicit artifact-execution command was observed in the captured "
+            "Cowrie session; an execution follow-on is not confirmed by current telemetry."
+        )
+    if has_downloader and not has_persistence:
+        conditions.append(
+            "No account, SSH-key, scheduled-task, service, or shell-startup modification was "
+            "observed in Cowrie; persistence is not supported by current telemetry."
+        )
+    for command in failed_commands[:3]:
+        conditions.append(
+            f"Cowrie reported failure for the observed command `{command[:160]}`; claims relying "
+            "on successful completion of that command are disconfirmed."
+        )
+    return list(dict.fromkeys(conditions))[:6]
+
+
+
+def _build_legacy_analytical_confidence(
         detected_ttps: List[str],
         sessions: List[Any],
         ioc_bundle,
@@ -3118,6 +3105,30 @@ def _build_analytical_confidence(
     }
 
 
+def _build_analytical_confidence(
+        detected_ttps: List[str],
+        sessions: List[Any],
+        ioc_bundle,
+        ai_enriched: bool,
+        vt_intel: Dict[str, Any] = None,
+        thresholds: Dict[str, int] = None) -> dict:
+    """Deprecated global-confidence alias for v2 claim-level evidence labels."""
+
+    return {
+        "level": "Unscored",
+        "reason": (
+            "Global analytical confidence was retired because behavioral observations, "
+            "model scores, and external reputation are not a single calibrated quantity."
+        ),
+        "metric_name": "claim_evidence_summary",
+        "method": "claim_level_evidence_status_v2",
+        "calibrated_probability": False,
+        "deprecated": True,
+        "observed_candidate_mapping_count": len(set(detected_ttps or [])),
+        "description": "Inspect each canonical claim's evidence_status and evidence_refs.",
+    }
+
+
 def _threat_hypothesis_semantics(follow_on: str) -> Dict[str, Any]:
     insufficient = str(follow_on or "").lower().startswith("insufficient evidence")
     return {
@@ -3133,9 +3144,7 @@ def _threat_hypothesis_semantics(follow_on: str) -> Dict[str, Any]:
     }
 
 
-# =============================================================================
 # MAIN COORDINATOR
-# =============================================================================
 
 class ImprovedAsyncSwarmCoordinator:
     """
@@ -3143,7 +3152,8 @@ class ImprovedAsyncSwarmCoordinator:
     """
 
     def __init__(self, base_url: str, model: str, max_tokens: int = 4000,
-                 mitre_name_map: dict = None):
+                 mitre_name_map: dict = None,
+                 enable_vertex_narrative: bool = False):
         # base_url and model are accepted for backward compatibility with
         # existing notebook call sites, but VertexAIClient reads endpoint,
         # project, location, model, and auth from VERTEX_* / Google env vars.
@@ -3151,9 +3161,9 @@ class ImprovedAsyncSwarmCoordinator:
         self.model    = model
         self.budget   = TokenBudget(max_tokens=max_tokens)
         self.ai_client = GroqClient(self.budget)
+        self.enable_vertex_narrative = bool(enable_vertex_narrative)
         self.detected_ttps = []
 
-        # â”€â”€ MITRE ATT&CK DB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # Priority: caller-provided dict -> auto-load from production.enrichment.mitre_attack_loader
         # MitreAttackDB exposes .get() so it's a drop-in for the old dict
         if mitre_name_map is not None:
@@ -3210,7 +3220,6 @@ class ImprovedAsyncSwarmCoordinator:
         except Exception as e:
             print(f"Could not load config [{type(e).__name__}]: {e}")
 
-        # â”€â”€ External Threat Feeds (CISA KEV + Sigma Rules) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # Load asynchronously-safe: cached after first call, graceful on failure
         try:
             from production.enrichment.threat_feed_loader import load_threat_feeds
@@ -3290,7 +3299,11 @@ class ImprovedAsyncSwarmCoordinator:
 
         if not detected_ttps:
             print("\nEARLY EXIT: No TTPs detected â€” returning fallback hypothesis")
-            return self._fallback_hypothesis(ioc_bundle, tactic_summary)
+            return build_v2_report(
+                self._fallback_hypothesis(ioc_bundle, tactic_summary),
+                sessions,
+                raw_events=raw_events,
+            )
 
         # STEP 1: Deterministic baseline
         print("\n[Step 1] Building deterministic baseline...")
@@ -3308,57 +3321,60 @@ class ImprovedAsyncSwarmCoordinator:
             raise RuntimeError(f"Baseline hallucination detected: {base_msg}")
         print(f"  Baseline validated: {base_msg}")
 
-        # STEP 2: Build structured evidence brief for AI analyst
-        print("\n[Step 2] Building structured evidence brief...")
-        evidence_brief = self._build_evidence_brief(
-            ioc_bundle, tactic_summary, sessions, base_hypothesis,
+        normalized_base = self._normalize_hypothesis(
+            base_hypothesis,
+            ioc_bundle,
+            tactic_summary,
+            sessions,
             ttp_command_map=ttp_command_map,
             raw_events=raw_events,
             session_correlations=session_correlations,
+            confidence="Unscored",
+            confidence_source="claim_evidence_summary_v2",
+            ai_enriched=False,
+        )
+        canonical_report = build_v2_report(
+            normalized_base,
+            sessions,
+            raw_events=raw_events,
         )
 
-        # STEP 3: AI Analytical Inference (Vertex)
-        # The AI receives pre-computed facts and answers specific analytical
-        # questions. It does NOT rewrite the full report or touch factual fields.
-        print("\n[Step 3] AI Analytical Inference (Vertex)...")
+        if not self.enable_vertex_narrative:
+            print("\n[Step 2] Vertex narrative disabled; returning deterministic v2 claims")
+            return apply_validated_vertex_presentation(canonical_report, None)
+
+        # Vertex receives only validated canonical claims and can edit wording only.
+        print("\n[Step 2] Optional Vertex presentation wording...")
+        evidence_brief = json.dumps(
+            {
+                "schema_version": canonical_report.get("schema_version"),
+                "observed_behavior": canonical_report.get("observed_behavior"),
+                "supported_assessment": canonical_report.get("supported_assessment"),
+                "follow_on_hypothesis": canonical_report.get("follow_on_hypothesis"),
+                "limitations": canonical_report.get("limitations"),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
         analytical_result = await self.ai_client.infer_analytical(
             evidence_brief=evidence_brief,
             detected_ttps=detected_ttps
         )
 
         if not analytical_result:
-            print("AI analytical inference failed â€” using deterministic baseline")
-            return self._normalize_hypothesis(
-                base_hypothesis, ioc_bundle, tactic_summary, sessions,
-                ttp_command_map=ttp_command_map, raw_events=raw_events,
-                session_correlations=session_correlations,
-                confidence='high', confidence_source='deterministic_baseline',
-                ai_enriched=False
-            )
+            canonical_report["presentation"]["vertex_validation"] = {
+                "status": "unavailable",
+                "reason": "no_valid_model_output",
+            }
+            return canonical_report
 
-        # STEP 3b: Post-generation hallucination verification
-        # Scan free-text analytical fields for tool names not supported by evidence.
-        # Flags unverified claims in-place without discarding the AI output.
-        analytical_result = self._verify_analytical_claims(
-            analytical_result, ioc_bundle, ttp_command_map or {}
+        report = apply_validated_vertex_presentation(canonical_report, analytical_result)
+        print(
+            "Final: presentation="
+            f"{report.get('presentation', {}).get('vertex_validation', {}).get('status', 'unknown')} "
+            f"| tokens={self.budget.used}/{self.budget.max_tokens}"
         )
-
-        # STEP 4: Merge Factual Layer (deterministic) + Analytical Layer (AI)
-        # Factual fields are immutable â€” AI output populates only analytical fields.
-        print("\n[Step 4] Merging Factual and Analytical layers...")
-        merged_report = self._merge_analytical_layer(
-            base_hypothesis=base_hypothesis,
-            analytical=analytical_result,
-            ioc_bundle=ioc_bundle,
-            tactic_summary=tactic_summary,
-            sessions=sessions,
-            ttp_command_map=ttp_command_map,
-            raw_events=raw_events,
-            session_correlations=session_correlations,
-        )
-
-        print(f"Final: AI-enriched | tokens={self.budget.used}/{self.budget.max_tokens}")
-        return merged_report
+        return report
 
     def _verify_analytical_claims(
             self,
@@ -3448,7 +3464,7 @@ class ImprovedAsyncSwarmCoordinator:
 
         return analytical
 
-    def _merge_analytical_layer(
+    def _legacy_merge_analytical_layer_disabled(
             self,
             base_hypothesis: dict,
             analytical: dict,
@@ -3477,7 +3493,6 @@ class ImprovedAsyncSwarmCoordinator:
         raw_events = raw_events or []
         vt_intel = _extract_vt_intelligence(ioc_bundle)
 
-        # --- Immutable factual fields (AI cannot touch these) ---
         kill_chain       = base_hypothesis.get('kill_chain_analysis', [])
         ioc_table        = base_hypothesis.get('ioc_table') or _build_ioc_table(
             raw_events, ioc_bundle, sessions)
@@ -3513,7 +3528,6 @@ class ImprovedAsyncSwarmCoordinator:
         if grounding_warnings:
             print(f"  [Verify] AI grounding warnings: {grounding_warnings}")
 
-        # --- Analytical fields from AI (with deterministic fallbacks) ---
         exec_summary = (
             analytical.get('executive_summary') or
             base_hypothesis.get('executive_summary', 'N/A')
@@ -3681,6 +3695,33 @@ class ImprovedAsyncSwarmCoordinator:
             "recommended_actions": mitigations,
         }
 
+    def _merge_analytical_layer(
+            self,
+            base_hypothesis: dict,
+            analytical: dict,
+            ioc_bundle,
+            tactic_summary: Dict[str, List[str]],
+            sessions: List[Any],
+            ttp_command_map: Dict[str, List[str]] = None,
+            raw_events: List[dict] = None,
+            session_correlations: List[Dict[str, Any]] = None) -> dict:
+        """Compatibility merge that grants Vertex presentation authority only."""
+
+        normalized = self._normalize_hypothesis(
+            base_hypothesis,
+            ioc_bundle,
+            tactic_summary,
+            sessions,
+            ttp_command_map=ttp_command_map,
+            raw_events=raw_events,
+            session_correlations=session_correlations,
+            confidence="Unscored",
+            confidence_source="claim_evidence_summary_v2",
+            ai_enriched=False,
+        )
+        report = build_v2_report(normalized, sessions, raw_events=raw_events or [])
+        return apply_validated_vertex_presentation(report, analytical)
+
     def _build_evidence_brief(self,
                               ioc_bundle,
                               tactic_summary: Dict[str, List[str]],
@@ -3705,7 +3746,6 @@ class ImprovedAsyncSwarmCoordinator:
             or _build_session_correlation_hunting_context(session_correlations, session_id)
         )
 
-        # --- Pre-compute all deterministic facts ---
         source_ips = _extract_session_source_ips(sessions, raw_events)
         direct_evidence_ips = sorted(_extract_direct_evidence_ips(sessions, raw_events))
         corr       = _build_campaign_correlation(ioc_bundle, source_ips=source_ips)
@@ -3718,7 +3758,6 @@ class ImprovedAsyncSwarmCoordinator:
         soph_score = tap.get('_score', 'N/A')
         soph_reasons = tap.get('_score_reasons', [])
 
-        # --- Infrastructure profiles (one dict per IP) ---
         # Import AbuseIPDB decoder once for this brief build
         try:
             from production.enrichment.enrichment_mapping import decode_abuseipdb_categories as _decode_abuse
@@ -3760,12 +3799,10 @@ class ImprovedAsyncSwarmCoordinator:
                 "abuseipdb_categories": decoded_categories,
             })
 
-        # --- Command evidence (per-TTP, capped to 3 commands each) ---
         cmd_evidence = {}
         for ttp, cmds in ttp_command_map.items():
             cmd_evidence[ttp] = [str(c)[:500] for c in cmds[:3]]
 
-        # --- TTP chain summary ---
         # Each entry is enriched with MITRE ATT&CK description + affected platforms
         # from live STIX data (updated every 30 days) so AI has full context.
         ttp_chain = []
@@ -3785,14 +3822,12 @@ class ImprovedAsyncSwarmCoordinator:
                     "observed_commands": cmds,
                 })
 
-        # --- Command samples across sessions ---
         cmd_samples = []
         for s in sessions:
             for cmd in getattr(s, 'commands_success', [])[:5]:
                 if len(cmd_samples) < 15:
                     cmd_samples.append(str(cmd)[:120])
 
-        # --- Attack timeline (gives AI temporal grounding for prediction questions) ---
         timeline = _build_attack_timeline(raw_events or [])
         timeline_events = []
         for ts, entries in sorted(timeline.items()) if isinstance(timeline, dict) else []:
@@ -3806,7 +3841,6 @@ class ImprovedAsyncSwarmCoordinator:
             ttp_command_map or {},
         )
 
-        # --- CISA KEV: extract CVEs from OTX pulse text + check catalog ---
         cisa_kev_matches = []
         if self.threat_feeds:
             import re as _re_kev
@@ -3827,7 +3861,6 @@ class ImprovedAsyncSwarmCoordinator:
                       f"in observed OTX pulses: "
                       f"{[m['cve_id'] for m in cisa_kev_matches]}")
 
-        # --- Sigma: match keywords against observed commands ---
         sigma_matched_commands = []
         if self.threat_feeds:
             all_cmds_lower = ' '.join(
@@ -3840,7 +3873,6 @@ class ImprovedAsyncSwarmCoordinator:
                 if kw and len(kw) > 3 and kw in all_cmds_lower
             ][:20]  # cap at 20
 
-        # --- Pre-computed facts block (AI must not contradict these) ---
         # Compute target_platform once for use in both facts and the brief
         target_platform = _detect_target_platform(
             sessions, ttp_command_map or {},
@@ -4011,7 +4043,6 @@ class ImprovedAsyncSwarmCoordinator:
         ctx.append("  - AbuseIPDB risk_score is NOT a sophistication indicator â€” ignore it")
         ctx.append("  - vt_malware_family is confirmed malware â€” reference it by name")
 
-        # --- FIXED DETERMINISTIC VALUES (AI must not contradict these) ---
         corr = _build_campaign_correlation(ioc_bundle)
         ctx.append("\n[FIXED - DO NOT OVERRIDE] CAMPAIGN CORRELATION VERDICT:")
         ctx.append(f"  coordinated={corr['coordinated']}")
@@ -4046,7 +4077,6 @@ class ImprovedAsyncSwarmCoordinator:
             sessions, tactic_summary
         )
 
-        # --- Sophistication scoring (unchanged from v4.1) ---
         score = 0
         score_reasons = []
 
@@ -4154,7 +4184,6 @@ class ImprovedAsyncSwarmCoordinator:
             score += 1
             score_reasons.append("Targeted SSH key persistence (+1)")
 
-        # --- Execution quality penalties (catches cross-OS errors and spray-and-pray) ---
         # These are deliberate negative signals: a skilled operator adapts to the
         # environment. Using Windows commands on Linux (vssadmin) or trying 3+
         # reverse shell payloads in rapid succession and failing all of them
@@ -4200,7 +4229,6 @@ class ImprovedAsyncSwarmCoordinator:
             score -= 1
             score_reasons.append("Only Credential Access (scanning only) (-1)")
 
-        # --- Session execution quality penalties ---
         # A skilled operator has low error rates and diverse commands.
         # High failure rates and low unique-command ratios are strong indicators
         # of copy-pasted scripts, commodity automation, or low-skill operators.
@@ -4240,7 +4268,6 @@ class ImprovedAsyncSwarmCoordinator:
                     f"\u2014 insufficient behavioral diversity for actor profiling (-1)"
                 )
 
-        # --- Shodan infrastructure signal (additive â€” never primary driver) ---
         # IMPORTANT: AbuseIPDB risk_score is deliberately NOT included here.
         # A fresh APT VPS scores 0; a noisy Mirai bot scores 100. Using risk_score
         # would produce inverted sophistication results for APT detection.
@@ -4267,7 +4294,6 @@ class ImprovedAsyncSwarmCoordinator:
         for r in score_reasons:
             print(f"    - {r}")
 
-        # --- Kill chain ---
         ttps_flat = set().union(*tactic_summary.values()) if tactic_summary else set()
         command_evidence = self._extract_command_evidence_for_ttps(
             sessions, tactic_summary,
@@ -4289,42 +4315,10 @@ class ImprovedAsyncSwarmCoordinator:
                 'evidence': evidence
             })
 
-        # --- Campaign name â€” AI synthesized, not a raw OTX pulse copy ---
-        # CHANGE FROM v1: previously did `campaign_name = otx_pulse` which produced
-        # low-quality names like "SSH Brute Force IPs March 2024".
-        # Now: _synthesize_campaign_name() passes raw_otx_pulse + tags + behavioral
-        # patterns to Claude haiku and synthesizes a professional name.
-        # Falls back to a deterministic name if AI call fails.
-        behavioral_patterns = {
-            "manual_recon": manual_recon_cmds,
-            "bot_noise": bot_noise_cmds,
-            "persistence": persistence_cmds,
-            "credential_hunting": 1 if any(
-                any(k in cmd.lower() for k in ['.aws', 'credentials', 'gcloud'])
-                for s in sessions for cmd in getattr(s, 'commands_success', [])
-            ) else 0,
-        }
-        # Campaign name must reflect the coordination verdict.
-        # A unified 'Operation X' name implies a single coordinated actor.
-        # When correlation shows multiple independent actors, that framing is
-        # analytically wrong and contradicts the rest of the report.
         source_ips = _extract_session_source_ips(sessions, raw_events)
         campaign_correlation = _build_campaign_correlation(ioc_bundle, source_ips=source_ips)
-        if not campaign_correlation.get('coordinated', True) and len(ioc_bundle.ips) > 1:
-            # Deterministic multi-actor label â€” never synthesize a unified name here
-            n_actors = len(ioc_bundle.ips)
-            top_tactics_label = ' / '.join(sorted(tactic_summary.keys())[:3])
-            campaign_name = (
-                f"Multi-Actor Opportunistic Exploitation â€” "
-                f"{n_actors} Independent Actors â€” "
-                f"{top_tactics_label}"
-            )
-        else:
-            campaign_name = await _synthesize_campaign_name(
-                ioc_bundle, tactic_summary, fingerprint_text, behavioral_patterns
-            )
+        campaign_name = "Cowrie SSH Session Assessment"
 
-        # --- VT intelligence (extracted once, passed to all consumers) ---
         vt_intel = _extract_vt_intelligence(ioc_bundle)
         if vt_intel["has_hits"]:
             print(f"  VT intel: {vt_intel['hit_count']} hit(s), "
@@ -4333,7 +4327,6 @@ class ImprovedAsyncSwarmCoordinator:
             print("  VT intel: no confirmed hits "
                   "(absence does not mean clean â€” polymorphic malware evades AV)")
 
-        # --- Dynamic recommendations (no TTPâ†’text mappings) ---
         artifact_recommendations = _generate_dynamic_recommendations(
             ttp_command_map, ioc_bundle, raw_events, vt_intel=vt_intel
         )
@@ -4350,18 +4343,21 @@ class ImprovedAsyncSwarmCoordinator:
             if str(action.get("action") or "").strip()
         ]
 
-        # --- Honeypot-specific analysis ---
         honeypot_awareness = _assess_honeypot_awareness(sessions, self.behavioral_rules)
-        campaign_correlation = _build_campaign_correlation(ioc_bundle)
+        campaign_correlation = _build_campaign_correlation(ioc_bundle, source_ips=source_ips)
         playbook = _extract_attacker_playbook(ttp_command_map)
 
-        # --- Hypothesis fields ---
-        predicted_next = _predict_next_action(ttp_command_map, ioc_bundle, tactic_summary)
+        ordered_chain = build_observed_behavior(sessions, raw_events).get("ordered_behavior_chain", [])
+        predicted_next = _predict_next_action(
+            ttp_command_map,
+            ioc_bundle,
+            tactic_summary,
+            ordered_behavior_chain=ordered_chain,
+        )
         falsification = _build_falsification_conditions(
             ttp_command_map, ioc_bundle, raw_events=raw_events
         )
 
-        # --- OTX tags for strategic controls ---
         otx_tags = set()
         for ip in ioc_bundle.ips:
             otx_tags.update(getattr(ip, 'otx_tags', []) or [])
@@ -4394,28 +4390,20 @@ class ImprovedAsyncSwarmCoordinator:
                     )
                     seen_strat.add(action)
 
-        # --- Campaign intelligence (replaces asset register) ---
         campaign_intel = _build_campaign_intelligence(
             playbook, campaign_correlation, ioc_bundle, vt_intel=vt_intel
         )
 
-        # --- IOC table and timeline ---
         ioc_table = _build_ioc_table(raw_events, ioc_bundle, sessions)
         timeline = _build_attack_timeline(raw_events)
 
-        # --- Analytical confidence ---
         analytical_confidence = _build_analytical_confidence(
             list(ttps_flat), sessions, ioc_bundle,
             ai_enriched=False, vt_intel=vt_intel,
             thresholds=self.config.get('honeypot_config', {}).get('alert_thresholds', {})
         )
 
-        primary_objective = (
-            f"Credential harvesting and persistent access â€” "
-            f"targeting {', '.join(playbook.get('credential_targets', ['unknown'])[:3])}"
-            if playbook.get('credential_targets')
-            else "Under analysis"
-        )
+        primary_objective = "Under analysis"
         primary_objective = _derive_primary_objective(
             primary_objective, tactic_summary, ttp_command_map, playbook
         )
@@ -4546,7 +4534,6 @@ class ImprovedAsyncSwarmCoordinator:
         if not all_ttps:
             return ttp_evidence
 
-        # --- Build cmd â†’ src_ip reverse lookup from raw Cowrie events ---
         # cowrie.command.input events contain both 'input' (the command text)
         # and 'src_ip' (the attacker IP that typed it).
         cmd_to_ip: Dict[str, str] = {}
@@ -4573,7 +4560,6 @@ class ImprovedAsyncSwarmCoordinator:
             prefix = f"[{ip}] " if ip else ''
             return f"{prefix}{cmd_s[:300]}"
 
-        # --- Build attributed evidence per TTP ---
         if ttp_command_map:
             for ttp in all_ttps:
                 cmds = ttp_command_map.get(ttp, [])
@@ -4581,7 +4567,6 @@ class ImprovedAsyncSwarmCoordinator:
                     parts = [_annotate(c) for c in cmds[:4]]
                     ttp_evidence[ttp] = 'Observed commands: ' + '; '.join(parts)
 
-        # --- Fallback: use general session commands for un-mapped TTPs ---
         all_session_cmds: List[str] = []
         for s in sessions:
             for c in getattr(s, 'commands_success', []):
@@ -4838,9 +4823,7 @@ class ImprovedAsyncSwarmCoordinator:
         }
 
 
-# =============================================================================
 # DISPLAY HELPER (fixes raw dict rendering â€” Bug 5a)
-# =============================================================================
 
 def print_hypothesis_report(result: dict) -> None:
     """
@@ -4950,9 +4933,7 @@ def print_hypothesis_report(result: dict) -> None:
         print(f"\nCampaign Intelligence:\n   {ci}")
 
 
-# =============================================================================
 # JUPYTER-SAFE ASYNCIO RUNNER
-# =============================================================================
 
 def run_async_in_jupyter(coro):
     try:

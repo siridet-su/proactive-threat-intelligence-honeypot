@@ -55,6 +55,7 @@
   "enable_pdf_export": true,
   "enable_stix_export": true,
   "enable_actor_attribution": false,
+  "enable_vertex_narrative": false,
   "actor_db_path": "",
   "vertex_project_id": "<GCP_PROJECT_ID>",
   "vertex_location": "us-central1",

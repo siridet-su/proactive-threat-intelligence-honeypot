@@ -12,12 +12,9 @@ from typing import Any, Dict, Iterable, List
 from production.classification.trust import is_trusted_classification_event
 from production.correlation.session_ttp_correlation import apply_session_ttp_correlations, load_policy
 from production.reporting.reporting_pipeline import (
-    _build_analytical_confidence,
     _build_evidence_grounded_actor_profile,
-    _build_falsification_conditions,
-    _predict_next_action,
-    _threat_hypothesis_semantics,
 )
+from production.reporting.threat_hypothesis import build_v2_report
 from production.utils.serialization import utc_now
 from production.workers.analysis_worker import build_threat_evidence_layers
 
@@ -115,12 +112,29 @@ def evaluate_scenario(payload: Dict[str, Any], policy: Dict[str, Any]) -> Dict[s
         sessions,
         raw_events=payload.get("raw_events") or [],
     )
-    follow_on = _predict_next_action(views["ttp_command_map"], bundle, views["tactic_summary"])
-    falsifiers = _build_falsification_conditions(
-        views["ttp_command_map"], bundle, raw_events=payload.get("raw_events") or []
+    canonical = build_v2_report(
+        {},
+        [correlated],
+        raw_events=payload.get("raw_events") or [],
     )
-    strength = _build_analytical_confidence(views["ttps"], sessions, bundle, ai_enriched=False)
-    semantics = _threat_hypothesis_semantics(follow_on)
+    follow_on_payload = canonical["follow_on_hypothesis"]
+    follow_claims = follow_on_payload.get("claims") or []
+    follow_on = (
+        "; ".join(str(item.get("text") or "") for item in follow_claims)
+        if follow_claims
+        else "Insufficient evidence to construct a bounded follow-on hypothesis."
+    )
+    evidence_gaps = [
+        str(item.get("text") or "")
+        for item in follow_on_payload.get("evidence_gaps") or []
+        if isinstance(item, dict)
+    ]
+    falsifiers = [
+        str(item.get("text") or "")
+        for item in follow_on_payload.get("disconfirming_observations") or []
+        if isinstance(item, dict)
+    ]
+    strength = canonical["claim_evidence_summary"]
     layers = build_threat_evidence_layers(correlated)
     category = str(payload["category"])
     has_download_event = any(
@@ -155,9 +169,9 @@ def evaluate_scenario(payload: Dict[str, Any], policy: Dict[str, Any]) -> Dict[s
             key in profile for key in ("observed_facts", "supported_inferences", "unsupported_possibilities")
         ),
         "forecast_is_bounded": follow_on.lower().startswith(("possible", "insufficient evidence")) and not re.search(r"\bwill\b", follow_on, re.IGNORECASE),
-        "scope_is_cowrie_observable": semantics.get("scope") == "post_session_cowrie_observable_behavior",
-        "strength_is_not_probability": strength.get("metric_name") == "analytical_evidence_strength" and strength.get("calibrated_probability") is False,
-        "insufficient_when_no_trusted_evidence": bool(views["events"]) or semantics.get("hypothesis_status") == "insufficient_evidence",
+        "scope_is_cowrie_observable": follow_on_payload.get("scope") == "post_session_cowrie_observable_behavior",
+        "strength_is_not_probability": strength.get("metric_name") == "claim_evidence_summary" and strength.get("calibrated_probability") is False,
+        "insufficient_when_no_trusted_evidence": bool(views["events"]) or follow_on_payload.get("abstained") is True,
         "downloader_success_not_overclaimed": (
             not has_downloader
             or has_download_event
@@ -169,9 +183,9 @@ def evaluate_scenario(payload: Dict[str, Any], policy: Dict[str, Any]) -> Dict[s
         "downloader_only_has_matching_falsifiers": (
             category != "downloader_without_download"
             or (
-                any("no downloaded or staged artifact is executed" in item for item in falsifiers)
-                and any("persistence follow-on hypothesis is falsified" in item for item in falsifiers)
-                and any("successful-download metadata" in item for item in falsifiers)
+                any("No subsequent explicit artifact-execution" in item for item in evidence_gaps)
+                and any("No persistence-related command" in item for item in evidence_gaps)
+                and any("No Cowrie file-download event" in item for item in evidence_gaps)
             )
         ),
         "download_event_does_not_claim_execution": (
@@ -180,7 +194,7 @@ def evaluate_scenario(payload: Dict[str, Any], policy: Dict[str, Any]) -> Dict[s
         ),
         "weak_only_has_no_strong_hypothesis": (
             category not in {"weak_securebert_false_positive", "shell_noise_only"}
-            or semantics.get("hypothesis_status") == "insufficient_evidence"
+            or follow_on_payload.get("abstained") is True
         ),
     }
     return {
@@ -193,9 +207,13 @@ def evaluate_scenario(payload: Dict[str, Any], policy: Dict[str, Any]) -> Dict[s
         "supported_inferences": profile["supported_inferences"],
         "unsupported_possibilities": profile["unsupported_possibilities"],
         "follow_on_hypothesis": follow_on,
-        "hypothesis_semantics": semantics,
-        "analytical_evidence_strength": strength,
+        "hypothesis_semantics": {
+            "hypothesis_status": "insufficient_evidence" if follow_on_payload.get("abstained") else "bounded_hypothesis",
+            "scope": follow_on_payload.get("scope"),
+        },
+        "claim_evidence_summary": strength,
         "falsification_conditions": falsifiers,
+        "evidence_gaps": evidence_gaps,
         "checks": checks,
         "passed": all(checks.values()),
     }

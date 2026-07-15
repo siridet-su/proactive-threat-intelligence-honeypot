@@ -1421,29 +1421,50 @@ def _load_report_json_from_artifact(paths: Dict[str, str], reports_dir: str) -> 
 
 def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> Dict[str, str]:
     merged = _merged_report_payload(report_payload, artifact_payload)
+    assessment = merged.get("supported_assessment") or {}
+    follow_on = merged.get("follow_on_hypothesis") or {}
+    presentation = merged.get("presentation") or {}
+    claim_summary = merged.get("claim_evidence_summary") or {}
+    is_v2 = merged.get("schema_version") == "threat_hypothesis.v2"
     threat = merged.get("threat_hypothesis") or {}
     if not isinstance(threat, dict):
         threat = {}
     evidence_strength = threat.get("analytical_evidence_strength") or threat.get("analytical_confidence") or {}
     if not isinstance(evidence_strength, dict):
         evidence_strength = {}
+    canonical_follow_on = "; ".join(
+        _text(item.get("text"))
+        for item in follow_on.get("claims") or []
+        if isinstance(item, dict) and _text(item.get("text"))
+    )
     return {
+        "schema_version": _text(merged.get("schema_version") or "legacy"),
         "campaign_name": _text(merged.get("campaign_name") or merged.get("title") or ""),
-        "confidence": _text(merged.get("confidence") or ""),
+        "confidence": "Unscored" if is_v2 else _text(merged.get("confidence") or ""),
         "confidence_source": _text(merged.get("confidence_source") or ""),
-        "analytical_evidence_strength": _text(evidence_strength.get("level") or ""),
-        "evidence_strength_reason": _text(evidence_strength.get("reason") or ""),
+        "analytical_evidence_strength": _text(
+            assessment.get("assessment_status")
+            if is_v2 else evidence_strength.get("level") or ""
+        ),
+        "evidence_strength_reason": _text(
+            claim_summary.get("description")
+            if is_v2 else evidence_strength.get("reason") or ""
+        ),
         "ai_enriched": _text(merged.get("ai_enriched") if "ai_enriched" in merged else ""),
         "analysis_mode": _text(merged.get("analysis_mode") or ""),
         "post_session_follow_on_hypothesis": _text(
-            threat.get("post_session_follow_on_hypothesis")
+            canonical_follow_on
+            or follow_on.get("abstention_reason")
+            or threat.get("post_session_follow_on_hypothesis")
             or merged.get("post_session_follow_on_hypothesis")
             or threat.get("predicted_next_action")
             or merged.get("predicted_next_action")
             or ""
         ),
         "summary": _text(
-            merged.get("executive_summary")
+            presentation.get("summary")
+            or assessment.get("behavior_summary")
+            or merged.get("executive_summary")
             or merged.get("summary")
             or merged.get("threat_hypothesis")
             or merged.get("hypothesis")
@@ -1455,6 +1476,14 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
 def _render_ai_validation_warnings(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> str:
     merged = _merged_report_payload(report_payload, artifact_payload)
     warnings = merged.get("ai_validation_warnings") or []
+    presentation = merged.get("presentation") or {}
+    vertex_validation = presentation.get("vertex_validation") if isinstance(presentation, dict) else {}
+    if not warnings and isinstance(vertex_validation, dict) and vertex_validation.get("status") == "rejected":
+        return (
+            '<div class="warning-box"><strong>Vertex presentation rejected.</strong> '
+            f'{_html(vertex_validation.get("reason") or "grounding validation failed")}. '
+            'Deterministic canonical claims were retained unchanged.</div>'
+        )
     if not isinstance(warnings, list) or not warnings:
         return '<div class="empty">No unsupported AI narrative claims were accepted.</div>'
     rows = []
@@ -1658,8 +1687,16 @@ def _report_recommendations(
     if not isinstance(threat, dict):
         threat = {}
 
+    follow_on = merged.get("follow_on_hypothesis") or {}
+    canonical_predicted = "; ".join(
+        _text(item.get("text"))
+        for item in follow_on.get("claims") or []
+        if isinstance(item, dict) and _text(item.get("text"))
+    )
     predicted = _text(
-        threat.get("post_session_follow_on_hypothesis")
+        canonical_predicted
+        or follow_on.get("abstention_reason")
+        or threat.get("post_session_follow_on_hypothesis")
         or merged.get("post_session_follow_on_hypothesis")
         or threat.get("predicted_next_action")
         or merged.get("predicted_next_action")
@@ -1690,7 +1727,12 @@ def _report_recommendations(
     ]
     strategic = _as_text_list(merged.get("strategic_recommendations"))
     falsification = _as_text_list(
-        threat.get("falsification_conditions")
+        [
+            item.get("text")
+            for item in follow_on.get("disconfirming_observations") or []
+            if isinstance(item, dict)
+        ]
+        or threat.get("falsification_conditions")
         or merged.get("falsification_conditions")
     )
     source = "trusted_policy_engine" if policy_authoritative else "policy_unavailable"
@@ -1706,6 +1748,16 @@ def _report_recommendations(
         "policy_action_count": len(structured_actions),
         "strategic_recommendations": strategic,
         "falsification_conditions": falsification,
+        "evidence_gaps": [
+            _text(item.get("text"))
+            for item in follow_on.get("evidence_gaps") or []
+            if isinstance(item, dict) and _text(item.get("text"))
+        ],
+        "external_validation_suggestions": [
+            _text(item.get("text"))
+            for item in follow_on.get("external_validation_suggestions") or []
+            if isinstance(item, dict) and _text(item.get("text"))
+        ],
         "rule_based_likely_next_steps": _likely_next_steps(session_payload),
     }
 
@@ -3729,6 +3781,8 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     strategic = recommendations.get("strategic_recommendations") or []
     structured_report_actions = recommendations.get("recommended_actions_structured") or []
     falsification = recommendations.get("falsification_conditions") or []
+    evidence_gaps = recommendations.get("evidence_gaps") or []
+    external_suggestions = recommendations.get("external_validation_suggestions") or []
     likely_steps = recommendations.get("rule_based_likely_next_steps") or _likely_next_steps(payload)
     if realtime_ranking and source == "rule_based_fallback":
         source = "realtime_prediction"
@@ -3761,6 +3815,10 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         parts.extend(["<h3>Strategic Recommendations</h3>", _render_list_items(strategic)])
     if falsification:
         parts.extend(["<h3>What To Check Next</h3>", _render_list_items(falsification)])
+    if evidence_gaps:
+        parts.extend(["<h3>Evidence Gaps Within Cowrie Visibility</h3>", _render_list_items(evidence_gaps)])
+    if external_suggestions:
+        parts.extend(["<h3>External Validation Suggestions</h3>", _render_list_items(external_suggestions)])
     return "\n".join(parts)
 
 
@@ -3772,6 +3830,7 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     artifact_payload = _load_report_json_from_artifact(paths, reports_dir)
     summary = _report_summary(report_payload, artifact_payload)
     job = selected.get("job") or {}
+    is_v2 = summary.get("schema_version") == "threat_hypothesis.v2"
     lines = [
         ("job status", job.get("status") or selected.get("analysis_status") or "pending"),
         ("report_id", job.get("report_id") or selected.get("report_id") or ""),
@@ -3779,8 +3838,15 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
         ("updated_at", job.get("updated_at") or selected.get("updated_at") or ""),
         ("ai_enriched", summary.get("ai_enriched")),
         ("confidence_source", summary.get("confidence_source")),
-        ("analytical evidence strength", summary.get("analytical_evidence_strength") or summary.get("confidence")),
-        ("evidence strength semantics", "heuristic, not a calibrated probability"),
+        (
+            "claim evidence status" if is_v2 else "analytical evidence strength",
+            summary.get("analytical_evidence_strength") or summary.get("confidence"),
+        ),
+        (
+            "evidence semantics",
+            "per-claim categorical status; no global probability"
+            if is_v2 else "heuristic, not a calibrated probability",
+        ),
         ("analysis_mode", summary.get("analysis_mode")),
         ("campaign", summary.get("campaign_name")),
         ("post_session_follow_on_hypothesis", summary.get("post_session_follow_on_hypothesis")),

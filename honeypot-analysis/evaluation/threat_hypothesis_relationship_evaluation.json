@@ -1,0 +1,1888 @@
+{
+  "case_count": 48,
+  "category_summary": {
+    "account_and_credential_entities": {
+      "cases": 4,
+      "passed": 4
+    },
+    "artifact_non_match": {
+      "cases": 6,
+      "passed": 6
+    },
+    "connected_artifact_chain": {
+      "cases": 4,
+      "passed": 4
+    },
+    "connected_transfer_execution": {
+      "cases": 4,
+      "passed": 4
+    },
+    "cowrie_transfer_linkage": {
+      "cases": 3,
+      "passed": 3
+    },
+    "cowrie_transfer_non_linkage": {
+      "cases": 5,
+      "passed": 5
+    },
+    "curl_semantics": {
+      "cases": 4,
+      "passed": 4
+    },
+    "outcome_semantics": {
+      "cases": 6,
+      "passed": 6
+    },
+    "session_structure": {
+      "cases": 4,
+      "passed": 4
+    },
+    "shell_condition": {
+      "cases": 6,
+      "passed": 6
+    },
+    "shell_sequence": {
+      "cases": 2,
+      "passed": 2
+    }
+  },
+  "evaluation_type": "developer_authored_controlled_functional_evaluation",
+  "existing_factuality_matrix": {
+    "failed": 0,
+    "passed": 45,
+    "scenario_count": 45,
+    "validation_status": "not_independent_human_validation"
+  },
+  "failed": 0,
+  "ground_truth_status": "deterministic implementation oracle from explicit shell structure, shared entities, Cowrie event metadata, and known outcomes; not expert validation or attacker-intent ground truth",
+  "limitations": [
+    "Synthetic cases test supported parser and claim behavior, not field accuracy or analyst usefulness.",
+    "Expected results were authored by the project developer and were not independently expert-reviewed.",
+    "Relationship recall applies only to the explicitly represented controlled patterns.",
+    "The benchmark does not establish attacker intent, real-host impact, or complete shell understanding."
+  ],
+  "metrics": {
+    "abstention_appropriateness": 1.0,
+    "claim_evidence_reference_correctness": 1.0,
+    "false_link_rate": 0.0,
+    "overclaim_free_case_rate": 1.0,
+    "relationship_f1": 1.0,
+    "relationship_false_negative": 0,
+    "relationship_false_positive": 0,
+    "relationship_precision": 1.0,
+    "relationship_recall": 1.0,
+    "relationship_true_positive": 41,
+    "scenario_pass_rate": 1.0
+  },
+  "passed": 48,
+  "results": [
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "actual_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change",
+        "cowrie_transfer_observed"
+      ],
+      "category": "connected_artifact_chain",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "expected_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change",
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 4,
+      "scenario_id": "controlled-full-chain-01-wget"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "actual_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change",
+        "cowrie_transfer_observed"
+      ],
+      "category": "connected_artifact_chain",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "expected_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change",
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 4,
+      "scenario_id": "controlled-full-chain-02-curl"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "actual_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change",
+        "cowrie_transfer_observed"
+      ],
+      "category": "connected_artifact_chain",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "expected_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change",
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 4,
+      "scenario_id": "controlled-full-chain-03-python"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "actual_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change"
+      ],
+      "category": "connected_artifact_chain",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_artifact_activity"
+      ],
+      "expected_relationship_types": [
+        "artifact_deletion",
+        "artifact_execution",
+        "artifact_permission_change"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 3,
+      "scenario_id": "controlled-full-chain-04-direct"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "actual_relationship_types": [
+        "artifact_execution"
+      ],
+      "category": "connected_transfer_execution",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "expected_relationship_types": [
+        "artifact_execution"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-transfer-execute-01"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "actual_relationship_types": [
+        "artifact_execution"
+      ],
+      "category": "connected_transfer_execution",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "expected_relationship_types": [
+        "artifact_execution"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-transfer-execute-02"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "actual_relationship_types": [
+        "artifact_execution"
+      ],
+      "category": "connected_transfer_execution",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "expected_relationship_types": [
+        "artifact_execution"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-transfer-execute-03"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "actual_relationship_types": [
+        "artifact_execution"
+      ],
+      "category": "connected_transfer_execution",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "expected_relationship_types": [
+        "artifact_execution"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-transfer-execute-04"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "artifact_non_match",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-no-link-01-different-files"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "artifact_non_match",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-no-link-02-same-basename"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "artifact_non_match",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-no-link-03-relative-absolute"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "artifact_non_match",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-no-link-04-variable-absolute"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "artifact_non_match",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-no-link-05-wildcard-absolute"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "artifact_non_match",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-no-link-06-reverse-order"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "curl_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-curl-semantics-01-webpage"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "curl_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-curl-semantics-02-output"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "piped_remote_content_execution_attempt"
+      ],
+      "actual_relationship_types": [
+        "piped_to"
+      ],
+      "category": "curl_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "piped_remote_content_execution_attempt"
+      ],
+      "expected_relationship_types": [
+        "piped_to"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-curl-semantics-03-pipe-sh"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "piped_remote_content_execution_attempt"
+      ],
+      "actual_relationship_types": [
+        "piped_to"
+      ],
+      "category": "curl_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "piped_remote_content_execution_attempt"
+      ],
+      "expected_relationship_types": [
+        "piped_to"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-curl-semantics-04-pipe-bash"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "conditional_successor"
+      ],
+      "category": "shell_condition",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "conditional_successor"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-01-and-satisfied"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "conditional_successor"
+      ],
+      "category": "shell_condition",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "conditional_successor"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-02-and-unsatisfied"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "conditional_failure_successor"
+      ],
+      "category": "shell_condition",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "conditional_failure_successor"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-03-or-satisfied"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "conditional_failure_successor"
+      ],
+      "category": "shell_condition",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "conditional_failure_successor"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-04-or-unsatisfied"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "conditional_successor"
+      ],
+      "category": "shell_condition",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "conditional_successor"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-05-and-unknown"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "conditional_failure_successor"
+      ],
+      "category": "shell_condition",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "conditional_failure_successor"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-06-or-unknown"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "explicit_sequence"
+      ],
+      "category": "shell_sequence",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "explicit_sequence"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-07-semicolon"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "explicit_sequence"
+      ],
+      "category": "shell_sequence",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "explicit_sequence"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-conditional-08-newline"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "actual_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "category": "cowrie_transfer_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": false,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "expected_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-transfer-link-01-path"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "actual_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "category": "cowrie_transfer_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": false,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "expected_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-transfer-link-02-url"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "actual_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "category": "cowrie_transfer_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": false,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "expected_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-transfer-link-03-hash"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "cowrie_transfer_non_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-transfer-link-04-metadata-insufficient"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "cowrie_transfer_non_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-transfer-link-05-event-before-command"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "cowrie_transfer_non_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-transfer-link-06-ambiguous-command"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "cowrie_transfer_non_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-transfer-link-07-mismatched-metadata"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "cowrie_transfer_non_linkage",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-transfer-link-08-upload-independent"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_permission_change"
+      ],
+      "actual_relationship_types": [
+        "artifact_permission_change"
+      ],
+      "category": "session_structure",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": false,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_permission_change"
+      ],
+      "expected_relationship_types": [
+        "artifact_permission_change"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-session-structure-01-duplicates"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "session_structure",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 2,
+      "claims_with_valid_evidence_refs": 2,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-session-structure-02-unrelated"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 2,
+      "actual_connected_claims": [
+        "connected_transfer_execution",
+        "connected_transfer_permission_change"
+      ],
+      "actual_relationship_types": [
+        "artifact_execution",
+        "artifact_permission_change"
+      ],
+      "category": "session_structure",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 5,
+      "claims_with_valid_evidence_refs": 5,
+      "expected_abstained": false,
+      "expected_chain_count": 2,
+      "expected_connected_claims": [
+        "connected_transfer_execution",
+        "connected_transfer_permission_change"
+      ],
+      "expected_relationship_types": [
+        "artifact_execution",
+        "artifact_permission_change"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 2,
+      "scenario_id": "controlled-session-structure-03-two-chains"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "actual_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "category": "session_structure",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": false,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "expected_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-session-structure-04-unrelated-final"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [
+        "account_modified"
+      ],
+      "category": "account_and_credential_entities",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [
+        "account_modified"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-entity-01-account-match"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "account_and_credential_entities",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-entity-02-account-mismatch"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "account_and_credential_entities",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-entity-03-shadow"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "account_and_credential_entities",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-entity-04-cloud-credentials"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "actual_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "category": "outcome_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 4,
+      "claims_with_valid_evidence_refs": 4,
+      "expected_abstained": false,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "observed_transfer_without_linked_execution"
+      ],
+      "expected_relationship_types": [
+        "cowrie_transfer_observed"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-outcome-01-failed-transfer-with-event"
+    },
+    {
+      "actual_abstained": false,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_permission_change"
+      ],
+      "actual_relationship_types": [
+        "artifact_permission_change"
+      ],
+      "category": "outcome_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": false,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_permission_change"
+      ],
+      "expected_relationship_types": [
+        "artifact_permission_change"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-outcome-02-failed-chmod"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "actual_relationship_types": [
+        "artifact_execution"
+      ],
+      "category": "outcome_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "expected_relationship_types": [
+        "artifact_execution"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-outcome-03-failed-execution"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 1,
+      "actual_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "actual_relationship_types": [
+        "artifact_execution"
+      ],
+      "category": "outcome_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 3,
+      "claims_with_valid_evidence_refs": 3,
+      "expected_abstained": true,
+      "expected_chain_count": 1,
+      "expected_connected_claims": [
+        "connected_transfer_execution"
+      ],
+      "expected_relationship_types": [
+        "artifact_execution"
+      ],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 1,
+      "scenario_id": "controlled-outcome-04-successful-execution"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "outcome_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 0,
+      "claims_with_valid_evidence_refs": 0,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-outcome-05-audit-only"
+    },
+    {
+      "actual_abstained": true,
+      "actual_chain_count": 0,
+      "actual_connected_claims": [],
+      "actual_relationship_types": [],
+      "category": "outcome_semantics",
+      "checks": {
+        "abstention_correct": true,
+        "claim_evidence_refs_valid": true,
+        "claim_statuses_valid": true,
+        "connected_chain_count_correct": true,
+        "connected_claim_set_exact": true,
+        "duplicate_evidence_diversity_correct": true,
+        "forbidden_claims_absent": true,
+        "prohibited_certainty_absent": true,
+        "relationship_evidence_refs_valid": true,
+        "relationship_semantics_non_causal": true,
+        "relationship_set_exact": true,
+        "relationship_status_correct": true
+      },
+      "claim_count": 1,
+      "claims_with_valid_evidence_refs": 1,
+      "expected_abstained": true,
+      "expected_chain_count": 0,
+      "expected_connected_claims": [],
+      "expected_relationship_types": [],
+      "forbidden_claim_types_found": [],
+      "passed": true,
+      "relationship_false_negative": 0,
+      "relationship_false_positive": 0,
+      "relationship_true_positive": 0,
+      "scenario_id": "controlled-outcome-06-transfer-event-only"
+    }
+  ],
+  "schema_version": "threat_hypothesis_relationship_evaluation.v1",
+  "scope": "Cowrie honeypot-observable SSH behavior"
+}

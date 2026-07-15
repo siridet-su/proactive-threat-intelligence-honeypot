@@ -11,6 +11,7 @@ from typing import Any, Dict
 
 
 AUDIT_ONLY_CLASSIFICATION_SOURCES = {
+    "rule_securebert_disagreement",
     "shell_noise",
     "securebert_low_confidence",
     "securebert_error",
@@ -43,8 +44,19 @@ def classification_evidence_tier(event: Dict[str, Any]) -> str:
     """Return ``trusted_observation`` or ``audit_only_candidate`` for an event."""
 
     source = str(event.get("source") or "").strip().lower()
+    agreement_status = str(event.get("agreement_status") or "").strip().lower()
     if source in AUDIT_ONLY_CLASSIFICATION_SOURCES:
         return "audit_only_candidate"
+    if agreement_status in {
+        "tactic_only_disagreement",
+        "technique_and_tactic_disagreement",
+    }:
+        return "audit_only_candidate"
+    if source == "both":
+        rule_ttp = str(event.get("ttp") or "").strip().upper()
+        bert_ttp = str(event.get("bert_ttp") or "").strip().upper()
+        if rule_ttp and bert_ttp and rule_ttp != bert_ttp:
+            return "audit_only_candidate"
     if event.get("high_confidence") is False:
         return "audit_only_candidate"
     if is_opaque_securebert_probe(event):
@@ -72,8 +84,11 @@ def classification_audit_reason(event: Dict[str, Any]) -> str:
     """Give a stable analyst-facing reason for keeping an event audit-only."""
 
     source = str(event.get("source") or "").strip().lower()
+    agreement_status = str(event.get("agreement_status") or "").strip().lower()
     if source == "shell_noise":
         return "shell noise is retained for audit and excluded from ATT&CK evidence"
+    if source == "rule_securebert_disagreement" or "disagreement" in agreement_status:
+        return "rule and SecureBERT disagree; the candidate is retained for audit and excluded from trusted evidence"
     if is_opaque_securebert_probe(event):
         return "opaque BusyBox applet probe has no defensible command-level ATT&CK meaning"
     if source in {"securebert", "securebert_low_confidence"} or event.get("high_confidence") is False:

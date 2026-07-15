@@ -62,6 +62,22 @@ def _evidence_layer_summary_lines(report: Dict[str, Any]) -> List[str]:
     ]
 
 
+def _trusted_ttp_ids(report: Dict[str, Any], session_payload: Dict[str, Any]) -> List[str]:
+    observed = report.get("observed_behavior") or {}
+    candidates = observed.get("trusted_attck_candidates") if isinstance(observed, dict) else []
+    if report.get("schema_version") == "threat_hypothesis.v2":
+        return list(dict.fromkeys(
+            str(item.get("technique_id") or "").strip()
+            for item in candidates or []
+            if isinstance(item, dict) and str(item.get("technique_id") or "").strip()
+        ))
+    return list(dict.fromkeys(
+        str(value).strip()
+        for value in (session_payload.get("ttps", []) or report.get("ttps", []) or [])
+        if str(value).strip()
+    ))
+
+
 def write_json_report(report: Dict[str, Any], session_id: str, output_dir: Path) -> str:
     path = output_dir / f"{_safe_name(session_id)}_report.json"
     path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
@@ -226,7 +242,7 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
     }
 
     ttp_obj_map = {}
-    for tid in sorted(set(session_payload.get("ttps", []) or report.get("ttps", []) or [])):
+    for tid in sorted(set(_trusted_ttp_ids(report, session_payload))):
         ap_id = f"attack-pattern--{uuid.uuid5(TI_NAMESPACE, 'attack-pattern:' + tid)}"
         attack_pattern = {
             "type": "attack-pattern",
@@ -244,7 +260,8 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
         ttp_obj_map[tid] = attack_pattern
         _append_stix_object(objects, report_obj, attack_pattern, seen_ids)
 
-    for actor in report.get("actor_matches", []) or []:
+    legacy_actor_matches = [] if report.get("schema_version") == "threat_hypothesis.v2" else report.get("actor_matches", []) or []
+    for actor in legacy_actor_matches:
         actor_name = actor.get("actor", "Unknown")
         actor_id = f"threat-actor--{uuid.uuid5(TI_NAMESPACE, 'actor:' + actor_name)}"
         actor_obj = {
@@ -495,12 +512,32 @@ def write_markdown_report(report: Dict[str, Any], session_payload: Dict[str, Any
         f"Source IP: {session_payload.get('src_ip', 'unknown')}",
         "",
         "## Summary",
-        str(report.get("executive_summary") or report.get("summary") or "No summary available."),
+        str((report.get("presentation") or {}).get("summary") or report.get("executive_summary") or report.get("summary") or "No summary available."),
         "",
         "## TTPs",
     ]
-    for tid in session_payload.get("ttps", []) or report.get("ttps", []) or []:
+    for tid in _trusted_ttp_ids(report, session_payload):
         lines.append(f"- {tid}")
+    assessment = report.get("supported_assessment") or {}
+    follow_on = report.get("follow_on_hypothesis") or {}
+    if report.get("schema_version") == "threat_hypothesis.v2":
+        lines.extend(["", "## Evidence-Grounded Assessment"])
+        lines.append(str(assessment.get("behavior_summary") or "No trusted behavioral evidence."))
+        objectives = assessment.get("possible_objectives") or []
+        if objectives:
+            for claim in objectives:
+                lines.append(
+                    f"- [{claim.get('evidence_status', 'insufficient_evidence')}] "
+                    f"{claim.get('text', '')} (claim `{claim.get('claim_id', '')}`)"
+                )
+        else:
+            lines.append("- No attacker objective inferred from the observed evidence.")
+        lines.extend(["", "## Post-Session Follow-On Hypothesis"])
+        if follow_on.get("abstained"):
+            lines.append(f"- Abstained: {follow_on.get('abstention_reason', '')}")
+        else:
+            for claim in follow_on.get("claims") or []:
+                lines.append(f"- [{claim.get('evidence_status', '')}] {claim.get('text', '')}")
     evidence_lines = _evidence_layer_summary_lines(report)
     if evidence_lines:
         lines.extend(["", "## Evidence Layers"])
@@ -567,13 +604,13 @@ def write_pdf_report(report: Dict[str, Any], session_payload: Dict[str, Any], ou
         Paragraph(f"Generated: {utc_now()}", meta),
         HRFlowable(width="100%", thickness=2, color=colors.HexColor("#C0392B"), spaceAfter=12),
         Paragraph("Executive Summary", h2),
-        Paragraph(str(report.get("executive_summary") or report.get("summary") or "No summary available."), body),
+        Paragraph(str((report.get("presentation") or {}).get("summary") or report.get("executive_summary") or report.get("summary") or "No summary available."), body),
         Spacer(1, 8),
     ]
 
     ttp_rows = [["TTP ID", "Source"]]
     sources = session_payload.get("ttp_sources", {})
-    for tid in session_payload.get("ttps", []) or report.get("ttps", []) or []:
+    for tid in _trusted_ttp_ids(report, session_payload):
         ttp_rows.append([tid, ", ".join(sources.get(tid, []))])
     if len(ttp_rows) > 1:
         table = Table(ttp_rows, colWidths=[4 * cm, 12 * cm])

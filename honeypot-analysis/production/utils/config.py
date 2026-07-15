@@ -186,7 +186,8 @@ class ProductionConfig:
     enable_pdf_export: bool = True
     enable_stix_export: bool = True
     actor_db_path: str = ""
-    enable_actor_attribution: bool = True
+    enable_actor_attribution: bool = False
+    enable_vertex_narrative: bool = False
 
     vertex_project_id: str = ""
     vertex_location: str = "us-central1"
@@ -555,6 +556,10 @@ class ProductionConfig:
         cfg.enable_stix_export = _env_bool("ENABLE_STIX_EXPORT", cfg.enable_stix_export)
         cfg.actor_db_path = os.getenv("ACTOR_DB_PATH", cfg.actor_db_path)
         cfg.enable_actor_attribution = _env_bool("ENABLE_ACTOR_ATTRIBUTION", cfg.enable_actor_attribution)
+        cfg.enable_vertex_narrative = _env_bool(
+            "ENABLE_VERTEX_NARRATIVE",
+            cfg.enable_vertex_narrative,
+        )
         cfg.vertex_project_id = os.getenv("VERTEX_PROJECT_ID", cfg.vertex_project_id)
         cfg.vertex_location = os.getenv("VERTEX_LOCATION", cfg.vertex_location)
         cfg.vertex_model = os.getenv("VERTEX_MODEL", cfg.vertex_model)
