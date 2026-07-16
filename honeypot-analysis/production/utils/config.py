@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from production.storage.contract import DatabaseSettings
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     normalize_session_source,
@@ -116,7 +117,13 @@ class ProductionConfig:
     session_source: str = SESSION_SOURCE_PRODUCTION_LIVE
     api_token: str = ""
 
-    database_url: str = "sqlite:///production_state.db"
+    # Explicit backend fields are authoritative. ``database_url`` remains as a
+    # compatibility input and canonical runtime URL for existing callers.
+    database_backend: str = ""
+    sqlite_database_path: str = ""
+    mongodb_uri: str = ""
+    mongodb_database: str = ""
+    database_url: str = ""
     ingest_host: str = "0.0.0.0"
     ingest_port: int = 8080
     dashboard_host: str = "0.0.0.0"
@@ -466,20 +473,89 @@ class ProductionConfig:
         "redact_fields": ["password", "passwd"],
     })
 
+    def __post_init__(self) -> None:
+        self._apply_database_settings(self.database_settings())
+
+    def database_settings(self) -> DatabaseSettings:
+        """Validate and return the selected storage backend settings."""
+        return DatabaseSettings.from_values(
+            database_backend=self.database_backend,
+            database_url=self.database_url,
+            sqlite_database_path=self.sqlite_database_path,
+            mongodb_uri=self.mongodb_uri,
+            mongodb_database=self.mongodb_database,
+        )
+
+    def safe_database_descriptor(self) -> Dict[str, str]:
+        """Describe the selected backend without credentials or URI options."""
+        return self.database_settings().safe_descriptor()
+
+    def _apply_database_settings(self, settings: DatabaseSettings) -> None:
+        self.database_backend = settings.backend
+        self.database_url = settings.database_url
+        self.sqlite_database_path = settings.sqlite_database_path
+        self.mongodb_uri = settings.mongodb_uri
+        self.mongodb_database = settings.mongodb_database
+
     @classmethod
     def from_env(cls, config_path: Optional[str] = None) -> "ProductionConfig":
         file_values: Dict[str, Any] = {}
         selected_path = config_path or os.getenv("HONEYPOT_CONFIG_FILE", "")
         if selected_path:
             path = Path(selected_path)
-            if path.exists():
-                with path.open("r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                if not isinstance(loaded, dict):
-                    raise ValueError("production config file must contain a JSON object")
-                file_values = loaded
+            if not path.exists():
+                raise FileNotFoundError(f"production config file not found: {path}")
+            with path.open("r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if not isinstance(loaded, dict):
+                raise ValueError("production config file must contain a JSON object")
+            file_values = loaded
 
-        cfg = cls(**{k: v for k, v in file_values.items() if k in cls.__dataclass_fields__})
+        database_backend_from_env = "DATABASE_BACKEND" in os.environ
+        database_url_from_env = "DATABASE_URL" in os.environ
+        raw_database_backend = (
+            os.getenv("DATABASE_BACKEND", "")
+            if database_backend_from_env
+            else str(file_values.get("database_backend") or "")
+        )
+        raw_database_url = (
+            os.getenv("DATABASE_URL", "")
+            if database_url_from_env
+            else (
+                ""
+                if database_backend_from_env
+                else str(file_values.get("database_url") or "")
+            )
+        )
+        database_settings = DatabaseSettings.from_values(
+            database_backend=raw_database_backend,
+            database_url=raw_database_url,
+            sqlite_database_path=os.getenv(
+                "SQLITE_DATABASE_PATH",
+                str(file_values.get("sqlite_database_path") or ""),
+            ),
+            mongodb_uri=os.getenv(
+                "MONGODB_URI",
+                str(file_values.get("mongodb_uri") or ""),
+            ),
+            mongodb_database=os.getenv(
+                "MONGODB_DATABASE",
+                str(file_values.get("mongodb_database") or ""),
+            ),
+        )
+        config_values = {
+            k: v for k, v in file_values.items() if k in cls.__dataclass_fields__
+        }
+        config_values.update(
+            {
+                "database_backend": database_settings.backend,
+                "database_url": database_settings.database_url,
+                "sqlite_database_path": database_settings.sqlite_database_path,
+                "mongodb_uri": database_settings.mongodb_uri,
+                "mongodb_database": database_settings.mongodb_database,
+            }
+        )
+        cfg = cls(**config_values)
         cfg.environment = os.getenv("HONEYPOT_ENV", cfg.environment)
         cfg.sensor_id = os.getenv("SENSOR_ID", cfg.sensor_id)
         cfg.session_source = normalize_session_source(
@@ -487,7 +563,6 @@ class ProductionConfig:
             SESSION_SOURCE_PRODUCTION_LIVE,
         )
         cfg.api_token = os.getenv("HONEYPOT_API_TOKEN", cfg.api_token)
-        cfg.database_url = os.getenv("DATABASE_URL", cfg.database_url)
         cfg.ingest_host = os.getenv("INGEST_HOST", cfg.ingest_host)
         cfg.ingest_port = _env_int("INGEST_PORT", cfg.ingest_port)
         cfg.dashboard_host = os.getenv("DASHBOARD_HOST", cfg.dashboard_host)

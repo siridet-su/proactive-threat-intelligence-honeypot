@@ -1,0 +1,466 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
+
+from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
+
+
+SQLITE_BACKEND = "sqlite"
+MONGODB_BACKEND = "mongodb"
+POSTGRESQL_BACKEND = "postgresql"
+SUPPORTED_DATABASE_BACKENDS = {
+    SQLITE_BACKEND,
+    MONGODB_BACKEND,
+    POSTGRESQL_BACKEND,
+}
+MONGODB_SCHEMES = {"mongodb", "mongodb+srv"}
+POSTGRESQL_SCHEMES = {"postgres", "postgresql"}
+DEFAULT_SQLITE_DATABASE_PATH = "production_state.db"
+
+
+class DatabaseConfigurationError(ValueError):
+    """Raised when database selection is missing, conflicting, or unsupported."""
+
+
+def _normalize_backend(value: str) -> str:
+    backend = str(value or "").strip().lower()
+    if backend == "postgres":
+        return POSTGRESQL_BACKEND
+    return backend
+
+
+def _backend_from_url(database_url: str) -> str:
+    value = str(database_url or "").strip()
+    if value.startswith("sqlite:///"):
+        return SQLITE_BACKEND
+    scheme = urlsplit(value).scheme.lower()
+    if scheme in MONGODB_SCHEMES:
+        return MONGODB_BACKEND
+    if scheme in POSTGRESQL_SCHEMES:
+        return POSTGRESQL_BACKEND
+    if not scheme:
+        raise DatabaseConfigurationError(
+            "legacy database_url must be a supported URL; plain filesystem paths are not accepted"
+        )
+    raise DatabaseConfigurationError(
+        f"unsupported database URL scheme {scheme!r}; select sqlite or mongodb explicitly"
+    )
+
+
+def _sqlite_path_from_url(database_url: str) -> str:
+    if not database_url.startswith("sqlite:///"):
+        raise DatabaseConfigurationError("SQLite database_url must use sqlite:///DATABASE_PATH")
+    path = database_url.replace("sqlite:///", "", 1)
+    if not path:
+        raise DatabaseConfigurationError("SQLite database path must not be empty")
+    return path
+
+
+def _mongodb_database_from_uri(uri: str) -> str:
+    parsed = urlsplit(uri)
+    path = unquote(parsed.path.lstrip("/"))
+    if not path:
+        return ""
+    if "/" in path:
+        raise DatabaseConfigurationError("MongoDB URI must contain at most one database name")
+    return path
+
+
+def _mongodb_uri_with_database(uri: str, database: str) -> str:
+    parsed = urlsplit(uri)
+    if parsed.scheme.lower() not in MONGODB_SCHEMES or not parsed.netloc:
+        raise DatabaseConfigurationError(
+            "MONGODB_URI must use mongodb:// or mongodb+srv:// and include a host"
+        )
+    uri_database = _mongodb_database_from_uri(uri)
+    if uri_database and uri_database != database:
+        raise DatabaseConfigurationError(
+            "MONGODB_URI database name conflicts with MONGODB_DATABASE"
+        )
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/{quote(database, safe='')}",
+            parsed.query,
+            parsed.fragment,
+        )
+    )
+
+
+def _safe_endpoint(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    # Removing everything through the final @ strips URI user information even
+    # when a password contains a percent-encoded @. Query parameters are omitted.
+    return parsed.netloc.rsplit("@", 1)[-1]
+
+
+@dataclass(frozen=True)
+class DatabaseSettings:
+    """Validated, backend-neutral database connection settings."""
+
+    backend: str
+    database_url: str
+    sqlite_database_path: str = ""
+    mongodb_uri: str = ""
+    mongodb_database: str = ""
+
+    @classmethod
+    def from_values(
+        cls,
+        *,
+        database_backend: str = "",
+        database_url: str = "",
+        sqlite_database_path: str = "",
+        mongodb_uri: str = "",
+        mongodb_database: str = "",
+    ) -> "DatabaseSettings":
+        backend = _normalize_backend(database_backend)
+        legacy_url = str(database_url or "").strip()
+        sqlite_path = str(sqlite_database_path or "").strip()
+        mongo_uri = str(mongodb_uri or "").strip()
+        mongo_database = str(mongodb_database or "").strip()
+
+        url_backend = _backend_from_url(legacy_url) if legacy_url else ""
+        if backend and backend not in SUPPORTED_DATABASE_BACKENDS:
+            raise DatabaseConfigurationError(
+                f"unsupported database backend {backend!r}; expected sqlite or mongodb"
+            )
+        if backend and url_backend and backend != url_backend:
+            raise DatabaseConfigurationError(
+                "database_backend conflicts with legacy database_url backend"
+            )
+        selected_backend = backend or url_backend or SQLITE_BACKEND
+
+        if selected_backend == SQLITE_BACKEND:
+            legacy_path = _sqlite_path_from_url(legacy_url) if legacy_url else ""
+            if legacy_path and sqlite_path and legacy_path != sqlite_path:
+                raise DatabaseConfigurationError(
+                    "SQLITE_DATABASE_PATH conflicts with legacy sqlite database_url"
+                )
+            selected_path = sqlite_path or legacy_path or DEFAULT_SQLITE_DATABASE_PATH
+            return cls(
+                backend=SQLITE_BACKEND,
+                database_url=f"sqlite:///{selected_path}",
+                sqlite_database_path=selected_path,
+                mongodb_uri=mongo_uri,
+                mongodb_database=mongo_database,
+            )
+
+        if selected_backend == MONGODB_BACKEND:
+            legacy_mongo_uri = legacy_url if url_backend == MONGODB_BACKEND else ""
+            selected_uri = mongo_uri or legacy_mongo_uri
+            if not selected_uri:
+                raise DatabaseConfigurationError(
+                    "DATABASE_BACKEND=mongodb requires MONGODB_URI"
+                )
+            uri_database = _mongodb_database_from_uri(selected_uri)
+            legacy_database = (
+                _mongodb_database_from_uri(legacy_mongo_uri)
+                if legacy_mongo_uri
+                else ""
+            )
+            selected_database = mongo_database or uri_database or legacy_database
+            if not selected_database:
+                raise DatabaseConfigurationError(
+                    "DATABASE_BACKEND=mongodb requires MONGODB_DATABASE"
+                )
+            canonical_url = _mongodb_uri_with_database(selected_uri, selected_database)
+            if legacy_mongo_uri:
+                canonical_legacy = _mongodb_uri_with_database(
+                    legacy_mongo_uri,
+                    selected_database,
+                )
+                if mongo_uri and canonical_legacy != canonical_url:
+                    raise DatabaseConfigurationError(
+                        "MONGODB_URI conflicts with legacy mongodb database_url"
+                    )
+            return cls(
+                backend=MONGODB_BACKEND,
+                database_url=canonical_url,
+                mongodb_uri=selected_uri,
+                mongodb_database=selected_database,
+                sqlite_database_path=sqlite_path,
+            )
+
+        if not legacy_url:
+            raise DatabaseConfigurationError(
+                "legacy PostgreSQL compatibility requires a postgresql:// database_url"
+            )
+        return cls(
+            backend=POSTGRESQL_BACKEND,
+            database_url=legacy_url,
+            sqlite_database_path=sqlite_path,
+            mongodb_uri=mongo_uri,
+            mongodb_database=mongo_database,
+        )
+
+    @classmethod
+    def from_url(cls, database_url: str) -> "DatabaseSettings":
+        return cls.from_values(database_url=database_url)
+
+    def safe_descriptor(self) -> Dict[str, str]:
+        """Return connection identity without credentials or query parameters."""
+        if self.backend == SQLITE_BACKEND:
+            return {
+                "backend": SQLITE_BACKEND,
+                "database_path": self.sqlite_database_path,
+            }
+        parsed = urlsplit(self.database_url)
+        database = unquote(parsed.path.lstrip("/"))
+        return {
+            "backend": self.backend,
+            "endpoint": _safe_endpoint(self.database_url),
+            "database": database,
+        }
+
+
+@runtime_checkable
+class StorageBackend(Protocol):
+    """Logical persistence contract shared by runtime services and tools."""
+
+    def initialize(self) -> None: ...
+
+    def health_check(self) -> Dict[str, Any]: ...
+
+    def store_event(
+        self,
+        sensor_id: str,
+        event: Dict[str, Any],
+    ) -> tuple[str, bool]: ...
+
+    def fetch_unprocessed_events(self, limit: int) -> List[Dict[str, Any]]: ...
+
+    def fetch_events(
+        self,
+        limit: int = 1000,
+        processed: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]: ...
+
+    def mark_event_processed(self, event_id: str) -> None: ...
+
+    def save_session(self, session_payload: Dict[str, Any]) -> None: ...
+
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]: ...
+
+    def update_session_analysis_status(
+        self,
+        session_id: str,
+        status: str,
+        *,
+        report_id: str = "",
+        error: str = "",
+        skip_reason: str = "",
+    ) -> None: ...
+
+    def store_alert(self, alert_payload: Dict[str, Any]) -> str: ...
+
+    def enqueue_analysis_job(self, session_payload: Dict[str, Any]) -> str: ...
+
+    def claim_analysis_jobs(self, limit: int) -> List[Dict[str, Any]]: ...
+
+    def complete_analysis_job(
+        self,
+        job_id: str,
+        report_payload: Dict[str, Any],
+    ) -> str: ...
+
+    def fail_analysis_job(
+        self,
+        job_id: str,
+        error: str,
+        retry: bool = False,
+    ) -> None: ...
+
+    def skip_analysis_job(self, job_id: str, reason: str) -> None: ...
+
+    def save_feed_status(self, status: Dict[str, Any]) -> None: ...
+
+    def get_enrichment_record(
+        self,
+        observable_type: str,
+        observable_value: str,
+        allow_stale: bool = True,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def load_enrichment_cache(
+        self,
+        observable_type: str = "ip",
+        allow_stale: bool = True,
+    ) -> Dict[str, Dict[str, Any]]: ...
+
+    def save_enrichment_record(
+        self,
+        observable_type: str,
+        observable_value: str,
+        payload: Dict[str, Any],
+        provider_status: Dict[str, Any],
+        expires_at: Optional[str] = None,
+    ) -> None: ...
+
+    def enqueue_enrichment_job(
+        self,
+        observable_type: str,
+        observable_value: str,
+        session_id: str = "",
+        payload: Optional[Dict[str, Any]] = None,
+        force: bool = False,
+        priority: str = "normal",
+        priority_reason: str = "",
+    ) -> tuple[str, bool]: ...
+
+    def claim_enrichment_jobs(self, limit: int) -> List[Dict[str, Any]]: ...
+
+    def reprioritize_enrichment_jobs(
+        self,
+        observable_value: str,
+        observable_type: str = "ip",
+        priority: str = "urgent",
+        reason: str = "",
+        session_id: str = "",
+    ) -> int: ...
+
+    def complete_enrichment_job(self, job_id: str) -> None: ...
+
+    def fail_enrichment_job(
+        self,
+        job_id: str,
+        error: str,
+        retry: bool = False,
+        retry_seconds: float = 300.0,
+    ) -> None: ...
+
+    def record_observable_sighting(self, sighting: Dict[str, Any]) -> str: ...
+
+    def enqueue_threat_hunt_job(
+        self,
+        session_id: str,
+        observable_type: str,
+        observable_value: str,
+        trigger_reason: str = "",
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> tuple[str, bool]: ...
+
+    def claim_threat_hunt_jobs(self, limit: int) -> List[Dict[str, Any]]: ...
+
+    def complete_threat_hunt_job(
+        self,
+        job_id: str,
+        result: Dict[str, Any],
+    ) -> None: ...
+
+    def fail_threat_hunt_job(
+        self,
+        job_id: str,
+        error: str,
+        retry: bool = False,
+    ) -> None: ...
+
+    def find_sessions_by_observable(
+        self,
+        observable_type: str,
+        observable_value: str,
+        exclude_session_id: str = "",
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
+    def save_session_link(self, link_payload: Dict[str, Any]) -> str: ...
+
+    def list_session_links(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
+    def save_campaign(self, campaign: Dict[str, Any]) -> str: ...
+
+    def get_campaign(self, campaign_id: str) -> Optional[Dict[str, Any]]: ...
+
+    def find_matching_campaigns(
+        self,
+        fingerprint: Dict[str, Any],
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]: ...
+
+    def link_campaign_session(
+        self,
+        campaign_id: str,
+        session_id: str,
+        match_reasons: Optional[List[str]] = None,
+        confidence: float = 0.0,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> tuple[str, bool]: ...
+
+    def count_campaign_sessions(self, campaign_id: str) -> int: ...
+
+    def list_campaign_sessions(
+        self,
+        campaign_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
+    def list_session_campaigns(
+        self,
+        session_id: str,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]: ...
+
+    def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str: ...
+
+    def get_latest_prediction_snapshot(
+        self,
+        session_id: str,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def get_prediction_snapshot(
+        self,
+        snapshot_id: str,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def prune_prediction_snapshots(
+        self,
+        retention_days: int = 90,
+        keep_latest_per_session: bool = True,
+        now: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    def save_prediction_backtest_run(self, result: Dict[str, Any]) -> str: ...
+
+    def save_prediction_calibration_run(self, result: Dict[str, Any]) -> str: ...
+
+    def record_analyst_feedback(self, feedback: Dict[str, Any]) -> str: ...
+
+    def record_classification_review_label(self, label: Dict[str, Any]) -> str: ...
+
+    def list_classification_review_labels(
+        self,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]: ...
+
+    def list_rows(self, table: str, limit: int = 100) -> List[Dict[str, Any]]: ...
+
+    def list_session_rows(
+        self,
+        limit: int = 100,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+        external_only: bool = False,
+    ) -> List[Dict[str, Any]]: ...
+
+    def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]: ...
+
+    def get_webhook_delivery(
+        self,
+        delivery_id: str,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def record_webhook_delivery(
+        self,
+        payload: Dict[str, Any],
+        target_url_hash: str,
+        status: str,
+        error: str = "",
+        alert_id: Optional[str] = None,
+        report_id: Optional[str] = None,
+    ) -> str: ...

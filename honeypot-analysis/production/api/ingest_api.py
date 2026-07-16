@@ -137,7 +137,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "service": "ingest_api",
                 "host": config.ingest_host,
                 "port": config.ingest_port,
-                "database_url": config.database_url,
+                "database": config.safe_database_descriptor(),
             },
             sort_keys=True,
         ),

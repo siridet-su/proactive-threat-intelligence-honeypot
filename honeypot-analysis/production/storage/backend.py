@@ -7,6 +7,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from production.storage.contract import (
+    DatabaseConfigurationError,
+    DatabaseSettings,
+    MONGODB_BACKEND,
+    POSTGRESQL_BACKEND,
+    SQLITE_BACKEND,
+    StorageBackend,
+)
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.utils.feedback import normalize_feedback_payload
@@ -408,6 +416,14 @@ class SQLiteStorage:
             )
             self._ensure_sqlite_session_source_column(conn)
             self._ensure_sqlite_enrichment_priority_columns(conn)
+
+    def health_check(self) -> Dict[str, Any]:
+        with self.connection() as conn:
+            row = conn.execute("SELECT 1 AS ready").fetchone()
+        return {
+            "ok": bool(row and int(row["ready"]) == 1),
+            "backend": SQLITE_BACKEND,
+        }
 
     def _ensure_sqlite_session_source_column(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
@@ -1987,6 +2003,15 @@ class PostgresStorage:
         with self.connection() as conn:
             for statement in statements:
                 self._execute(conn, statement)
+
+    def health_check(self) -> Dict[str, Any]:
+        with self.connection() as conn:
+            cur = self._execute(conn, "SELECT 1 AS ready")
+            row = cur.fetchone()
+        return {
+            "ok": bool(row and int(row["ready"]) == 1),
+            "backend": POSTGRESQL_BACKEND,
+        }
 
     def store_event(self, sensor_id: str, event: Dict[str, Any]) -> tuple[str, bool]:
         eid = make_event_id(sensor_id, event)
@@ -3587,13 +3612,55 @@ class PostgresStorage:
         return delivery_id
 
 
-def open_storage(database_url: str) -> SQLiteStorage | PostgresStorage:
-    if database_url.startswith("sqlite:///"):
-        storage = SQLiteStorage(database_url)
+def safe_database_descriptor(database_url: str) -> Dict[str, str]:
+    """Return a log-safe database description for a legacy runtime URL."""
+    try:
+        return DatabaseSettings.from_url(database_url).safe_descriptor()
+    except DatabaseConfigurationError as exc:
+        raise StorageError(str(exc)) from exc
+
+
+def open_storage(database: str | DatabaseSettings) -> StorageBackend:
+    """Open and initialize the explicitly selected storage adapter.
+
+    String URLs remain supported for compatibility. New configuration should
+    resolve to :class:`DatabaseSettings` first so backend-specific values are
+    validated before an adapter is imported or a connection is attempted.
+    """
+    try:
+        settings = (
+            database
+            if isinstance(database, DatabaseSettings)
+            else DatabaseSettings.from_url(database)
+        )
+    except DatabaseConfigurationError as exc:
+        raise StorageError(str(exc)) from exc
+
+    if settings.backend == SQLITE_BACKEND:
+        storage: StorageBackend = SQLiteStorage(settings.database_url)
+    elif settings.backend == MONGODB_BACKEND:
+        try:
+            from production.storage.mongodb import MongoStorage
+
+            storage = MongoStorage(
+                settings.mongodb_uri or settings.database_url,
+                settings.mongodb_database,
+            )
+        except ImportError as exc:
+            raise StorageError(
+                "MongoDB backend requested but its adapter or dependency is unavailable"
+            ) from exc
+    elif settings.backend == POSTGRESQL_BACKEND:
+        storage = PostgresStorage(settings.database_url)
+    else:  # DatabaseSettings validation makes this defensive branch unreachable.
+        raise StorageError(f"unsupported database backend: {settings.backend}")
+
+    try:
         storage.initialize()
-        return storage
-    if database_url.startswith(("postgresql://", "postgres://")):
-        storage = PostgresStorage(database_url)
-        storage.initialize()
-        return storage
-    raise StorageError(f"unsupported DATABASE_URL: {database_url}")
+    except ImportError as exc:
+        if settings.backend == MONGODB_BACKEND:
+            raise StorageError(
+                "MongoDB backend requested but its adapter or dependency is unavailable"
+            ) from exc
+        raise
+    return storage

@@ -369,7 +369,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "service": "dashboard_api",
                 "host": config.dashboard_host,
                 "port": config.dashboard_port,
-                "database_url": config.database_url,
+                "database": config.safe_database_descriptor(),
             },
             sort_keys=True,
         ),

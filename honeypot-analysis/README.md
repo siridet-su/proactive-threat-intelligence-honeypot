@@ -207,6 +207,21 @@ The default example binds APIs to loopback, uses SQLite, disables SecureBERT,
 and uses only repository-local fixtures/caches. Replace `<TOKEN>` locally before
 sending events. Do not commit the edited copy.
 
+Database selection is explicit:
+
+- `DATABASE_BACKEND=sqlite` uses `SQLITE_DATABASE_PATH`.
+- `DATABASE_BACKEND=mongodb` requires both `MONGODB_URI` and
+  `MONGODB_DATABASE`.
+- `DATABASE_URL` remains a legacy compatibility input for SQLite, MongoDB, and
+  PostgreSQL deployments. It must agree with an explicit backend or startup
+  fails.
+
+SQLite is the local-development and emergency fallback default. MongoDB is the
+intended production backend once it is privately provisioned, indexed, tested,
+and migrated. PostgreSQL is retained only as a legacy compatibility path.
+Startup descriptions omit database usernames, passwords, and URI query
+parameters.
+
 Run the local components in separate terminals:
 
 ```bash
