@@ -801,6 +801,75 @@ def _default_context(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _canonical_operator_actions(
+    legacy_report: Dict[str, Any],
+    observed: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Retain only policy-approved actions and label their evidence boundary."""
+
+    candidates = [
+        item for item in legacy_report.get("recommended_actions_structured") or []
+        if isinstance(item, dict)
+    ]
+    trusted_decision = legacy_report.get("trusted_recommendation_decision") or {}
+    if not candidates and isinstance(trusted_decision, dict):
+        candidates = [
+            item for item in trusted_decision.get("immediate_actions") or []
+            if isinstance(item, dict)
+        ]
+
+    canonical_refs: set[str] = set()
+    for key in (
+        "ordered_behavior_chain",
+        "ordered_command_observations",
+        "cowrie_event_evidence",
+    ):
+        for item in observed.get(key) or []:
+            if isinstance(item, dict) and _clean(item.get("evidence_id")):
+                canonical_refs.add(_clean(item.get("evidence_id")))
+    for chain in observed.get("connected_behavior_chains") or []:
+        if not isinstance(chain, dict):
+            continue
+        canonical_refs.update(
+            _clean(ref) for ref in chain.get("evidence_refs") or [] if _clean(ref)
+        )
+
+    output: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for action in candidates:
+        provenance = action.get("provenance") or {}
+        authority = _clean(action.get("authority") or provenance.get("authority"))
+        if action.get("approved_by_policy") is not True or authority != "trusted_policy_engine":
+            continue
+        action_id = _clean(action.get("action_id") or action.get("action"))
+        if not action_id or action_id in seen:
+            continue
+        seen.add(action_id)
+        item = dict(action)
+        refs = {_clean(ref) for ref in item.get("evidence_refs") or [] if _clean(ref)}
+        scopes = {_clean(scope) for scope in item.get("evidence_scope") or [] if _clean(scope)}
+        matched_refs = sorted(refs.intersection(canonical_refs))
+        if matched_refs:
+            item["grounding_status"] = "canonical_observed_evidence"
+            item["canonical_evidence_refs"] = matched_refs
+        elif scopes.intersection({"contextual_intelligence", "model_prediction"}):
+            item["grounding_status"] = "context_or_prediction_only"
+            item["canonical_evidence_refs"] = []
+        elif scopes.intersection({"configured_asset_context", "session_context", "policy_default"}):
+            item["grounding_status"] = "session_or_policy_context"
+            item["canonical_evidence_refs"] = []
+        else:
+            item["grounding_status"] = "legacy_evidence_unverified"
+            item["canonical_evidence_refs"] = []
+            limitations = list(item.get("visibility_limitations") or [])
+            limitation = "Legacy action lacks canonical v2 evidence references; verify its basis manually."
+            if limitation not in limitations:
+                limitations.append(limitation)
+            item["visibility_limitations"] = limitations
+        output.append(item)
+    return output
+
+
 def build_v2_report(
     legacy_report: Dict[str, Any],
     sessions: Iterable[Any],
@@ -829,6 +898,18 @@ def build_v2_report(
         behavior_policy_path=behavior_policy_path,
     )
     evidence_summary = build_claim_evidence_summary(assessment, follow_on)
+    operator_actions = _canonical_operator_actions(report, observed)
+    report["recommended_actions_structured"] = operator_actions
+    report["recommended_mitigations"] = [
+        _clean(action.get("action"))
+        for action in operator_actions
+        if _clean(action.get("action"))
+    ]
+    trusted_decision = report.get("trusted_recommendation_decision")
+    if isinstance(trusted_decision, dict):
+        trusted_decision = dict(trusted_decision)
+        trusted_decision["immediate_actions"] = operator_actions
+        report["trusted_recommendation_decision"] = trusted_decision
     report.update({
         "schema_version": SCHEMA_VERSION,
         "behavior_policy": policy_summary(document),
@@ -842,10 +923,12 @@ def build_v2_report(
         },
         "contextual_intelligence": contextual_intelligence or _default_context(report),
         "recommendations": {
-            "operator_actions": report.get("recommended_actions_structured") or [],
+            "operator_actions": operator_actions,
             "mitigations": report.get("recommended_mitigations") or [],
             "strategic": report.get("strategic_recommendations") or [],
             "authority": "trusted_policy_engine",
+            "grounding_contract": "canonical_v2_evidence_or_explicit_context_only",
+            "manual_approval_required": True,
         },
         "limitations": [
             "Assessment is limited to Cowrie-observable SSH telemetry.",

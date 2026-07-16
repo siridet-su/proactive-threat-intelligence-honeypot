@@ -1139,81 +1139,83 @@ def _derive_actions_from_command(cmd: str, add_fn) -> None:
     # Unauthorised account creation
     m = re.search(r'useradd\s+(?:-\S+\s+)*(\w+)', cmd)
     if m:
-        add_fn(f"Delete unauthorised account `{m.group(1)}` â€” "
-               f"created via: `{cmd[:80]}`")
+        add_fn(f"Check whether account `{m.group(1)}` exists on authorized real systems; "
+               f"remove it only if confirmed unauthorized. Cowrie observed an account-creation command: `{cmd[:80]}`")
 
     # Attacker SSH key implanted
     m = re.search(r'authorized_keys.*?(ssh-\S+\s+\S+)', cmd)
     if m:
-        add_fn(f"Remove attacker SSH public key from authorized_keys: "
-               f"`{m.group(1)[:70]}`")
+        add_fn(f"Search authorized real systems for the observed SSH public-key material and "
+               f"remove it only if confirmed unauthorized: `{m.group(1)[:70]}`")
     elif 'authorized_keys' in cmd:
-        add_fn(f"Audit ~/.ssh/authorized_keys on all accounts â€” "
-               f"key injection observed via: `{cmd[:80]}`")
+        add_fn(f"Audit ~/.ssh/authorized_keys on authorized real systems; Cowrie observed a "
+               f"key-modification command, not confirmed real-host persistence: `{cmd[:80]}`")
 
     # Cron-based persistence
     if 'crontab' in cmd and '-' in cmd:
         path_m = re.search(r'(/tmp/\S+|/var/tmp/\S+|/dev/shm/\S+)', cmd)
         path = path_m.group(1) if path_m else "scheduled payload"
-        add_fn(f"Remove malicious cron entry â€” `{path}` scheduled via: `{cmd[:80]}`")
+        add_fn(f"Check authorized real systems for a cron entry referencing `{path}` and remove it "
+               f"only if confirmed unauthorized. Cowrie observed: `{cmd[:80]}`")
 
     # Credential exfiltration via curl POST
     m = re.search(r'curl.*?-d\s+@([^\s]+)\s+(https?://[^\s]+)', cmd)
     if m:
-        add_fn(f"Rotate credential `{m.group(1)}` immediately â€” "
-               f"exfiltrated to `{m.group(2)}`")
+        add_fn(f"Review network and application telemetry for an attempted upload of `{m.group(1)}` "
+               f"to `{m.group(2)}`; rotate credentials only if exposure is corroborated")
 
     # File download and execution
     m = re.search(r'wget\s+(https?://\S+)\s+-O\s+(\S+)', cmd)
     if m:
-        add_fn(f"Locate and remove malicious file `{m.group(2)}` â€” "
-               f"downloaded from `{m.group(1)}`")
+        add_fn(f"Search authorized telemetry for an attempted transfer from `{m.group(1)}` to "
+               f"`{m.group(2)}`; the command alone does not confirm a completed download")
 
     # Alternate wget pattern
     m = re.search(r'wget\s+(https?://\S+)', cmd)
     if m and '-O' not in cmd:
-        add_fn(f"Block outbound access to `{m.group(1)}` â€” "
-               f"observed in: `{cmd[:80]}`")
+        add_fn(f"Review `{m.group(1)}` and block it only if policy or corroborating telemetry supports "
+               f"that action; Cowrie observed: `{cmd[:80]}`")
 
     # Log file truncation
     m = re.search(r'truncate.*?(/var/log/\S+)', cmd)
     if m:
-        add_fn(f"Restore `{m.group(1)}` from backup â€” truncated by attacker to "
-               f"erase evidence")
+        add_fn(f"Check integrity and backups for `{m.group(1)}`; Cowrie observed a truncation command, "
+               f"but successful evidence removal on a real host is not established")
 
     # History clearing
     if 'unset HISTFILE' in cmd or 'history -c' in cmd:
-        add_fn("Enable remote/immutable logging (e.g. rsyslog to a remote host) â€” "
-               "local command history was wiped by attacker")
+        add_fn("Verify remote or immutable logging coverage; Cowrie observed a history-cleanup command, "
+               "but successful real-host history deletion is not established")
 
     # Sudo privilege enumeration
     if re.search(r'\bsudo\s+-l\b', cmd):
-        add_fn("Audit /etc/sudoers and remove unnecessary sudo grants â€” "
-               "attacker enumerated sudo privileges")
+        add_fn("Review /etc/sudoers and sudo audit logs on authorized real systems; Cowrie observed a "
+               "sudo-enumeration command, not confirmed privilege escalation")
 
     # Password / shadow file access
     m = re.search(r'cat\s+(/etc/(?:passwd|shadow))', cmd)
     if m:
-        add_fn(f"Verify integrity of `{m.group(1)}` â€” read by attacker")
+        add_fn(f"Review access telemetry and integrity for `{m.group(1)}`; Cowrie observed a read command, "
+               "but successful credential acquisition is not established")
 
     # Credential grep across home directories
     m = re.search(r'grep.*?(/home/[^\s]+)', cmd)
     if m:
-        add_fn(f"Audit `{m.group(1)}` for plaintext secrets â€” "
-               f"attacker searched it via: `{cmd[:80]}`")
+        add_fn(f"Audit `{m.group(1)}` for plaintext secrets and review access telemetry; Cowrie observed "
+               f"a search command: `{cmd[:80]}`")
 
     # Cloud credential access
     m = re.search(r'cat\s+(/home/[^/]+/\.aws/credentials|'
                   r'/home/[^/]+/\.config/gcloud/[^\s]+)', cmd)
     if m:
-        add_fn(f"Rotate cloud credentials at `{m.group(1)}` immediately and "
-               f"audit cloud API activity in CloudTrail / GCloud audit logs")
+        add_fn(f"Audit cloud API and file-access telemetry related to `{m.group(1)}`; rotate credentials "
+               f"only if real exposure or unauthorized use is corroborated")
 
     # usermod privilege escalation
     m = re.search(r'usermod\s+-aG\s+(?:sudo|wheel|admin)\s+(\w+)', cmd)
     if m:
-        add_fn(f"Remove `{m.group(1)}` from sudo/wheel/admin group â€” "
-               f"privilege escalation observed via: `{cmd[:80]}`")
+        add_fn(f"Check group membership for `{m.group(1)}` on authorized real systems and revert only "
+               f"a confirmed unauthorized change. Cowrie observed: `{cmd[:80]}`")
 
 
 def _generate_dynamic_recommendations(
@@ -1246,10 +1248,14 @@ def _generate_dynamic_recommendations(
             seen.add(rec)
             recommendations.append(rec)
 
-    # 1. Block all observed attacker source IPs
+    # 1. Preserve the source as a correlation lead; do not infer maliciousness
+    # or recommend a permanent block from a single honeypot observation.
     for ip in ioc_bundle.ips:
         note = getattr(ip, 'note', None) or 'observed in attack session'
-        add(f"Block source IP `{ip.value}` at perimeter firewall â€” {note}")
+        add(
+            f"Review source IP `{ip.value}` in real authentication and network logs; "
+            f"consider temporary rate limiting only if repeated or corroborated â€” {note}"
+        )
 
     # 2. Parse every observed command for artefacts
     for ttp, commands in ttp_command_map.items():
@@ -1270,11 +1276,14 @@ def _generate_dynamic_recommendations(
                 add(
                     f"Scan all systems for file `{outfile}` "
                     f"(SHA256: `{shasum}`){family_note} â€” "
-                    f"downloaded from `{url}` â€” "
-                    f"add hash to AV/EDR block list immediately"
+                    f"Cowrie recorded a transfer from `{url}` â€” "
+                    f"validate the artifact before adding the hash to AV/EDR controls"
                 )
             elif outfile:
-                add(f"Locate and remove file `{outfile}` â€” downloaded from `{url}`")
+                add(
+                    f"Search authorized telemetry for file `{outfile}`; Cowrie recorded a transfer "
+                    f"from `{url}`, but execution and real-host presence are not established"
+                )
 
     # 4. Family-specific hunt recommendations when VT confirms a known malware family
     if vt_intel.get("has_hits") and vt_families:
@@ -1313,6 +1322,15 @@ def _generate_strategic_recommendations(
 
 
 def _default_recommendation_policy_paths() -> Tuple[str, str]:
+    configured_asset = str(os.getenv("SMB_ASSET_PROFILE_PATH") or "").strip()
+    configured_policy = str(os.getenv("SMB_ACTION_POLICY_PATH") or "").strip()
+    if (
+        configured_asset
+        and configured_policy
+        and os.path.exists(configured_asset)
+        and os.path.exists(configured_policy)
+    ):
+        return configured_asset, configured_policy
     candidates = [
         os.path.dirname(os.path.abspath(__file__)),
         os.getcwd(),
@@ -1407,7 +1425,17 @@ def _session_payload_for_recommendations(
     commands = _extract_observed_commands(sessions)
     first = sessions[0] if sessions else None
     classification_events: List[dict] = []
+    commands_success: List[str] = []
+    commands_failed: List[str] = []
     for session in sessions or []:
+        for command in getattr(session, "commands_success", []) or []:
+            text = str(command or "").strip()
+            if text and text not in commands_success:
+                commands_success.append(text)
+        for command in getattr(session, "commands_failed", []) or []:
+            text = str(command or "").strip()
+            if text and text not in commands_failed:
+                commands_failed.append(text)
         for event in getattr(session, "classification_events", []) or []:
             if isinstance(event, dict):
                 classification_events.append(event)
@@ -1441,9 +1469,13 @@ def _session_payload_for_recommendations(
         "login_success": login_success,
         "login_username": username or "",
         "commands": commands,
-        "commands_success": commands,
+        "commands_success": commands_success,
+        "commands_failed": commands_failed,
         "raw_events": raw_events or [],
         "classification_events": classification_events,
+        "session_evidence_graph": (
+            getattr(first, "session_evidence_graph", {}) if first is not None else {}
+        ) or {},
         "tactics": tactics,
         "ttps": ttps,
         "ttp_command_map": ttp_command_map or {},
@@ -1454,8 +1486,10 @@ def _build_trusted_recommendation_decision(
         sessions: List[Any],
         raw_events: List[dict],
         tactic_summary: Dict[str, List[str]],
-        ttp_command_map: Dict[str, List[str]],
-        mitre_db: Any = None) -> Dict[str, Any]:
+    ttp_command_map: Dict[str, List[str]],
+    mitre_db: Any = None,
+    asset_profile_path: str = "",
+    action_policy_path: str = "") -> Dict[str, Any]:
     """
     Build report actions from the same trusted policy engine used by production.
 
@@ -1476,7 +1510,9 @@ def _build_trusted_recommendation_decision(
             "immediate_actions": [],
         }
 
-    asset_path, policy_path = _default_recommendation_policy_paths()
+    default_asset_path, default_policy_path = _default_recommendation_policy_paths()
+    asset_path = asset_profile_path or default_asset_path
+    policy_path = action_policy_path or default_policy_path
     session_payload = _session_payload_for_recommendations(
         sessions, raw_events, tactic_summary, ttp_command_map
     )
@@ -3162,6 +3198,8 @@ class ImprovedAsyncSwarmCoordinator:
         self.budget   = TokenBudget(max_tokens=max_tokens)
         self.ai_client = GroqClient(self.budget)
         self.enable_vertex_narrative = bool(enable_vertex_narrative)
+        self.recommendation_asset_profile_path = ""
+        self.recommendation_action_policy_path = ""
         self.detected_ttps = []
 
         # Priority: caller-provided dict -> auto-load from production.enrichment.mitre_attack_loader
@@ -3299,8 +3337,37 @@ class ImprovedAsyncSwarmCoordinator:
 
         if not detected_ttps:
             print("\nEARLY EXIT: No TTPs detected â€” returning fallback hypothesis")
+            fallback = self._fallback_hypothesis(ioc_bundle, tactic_summary)
+            decision = _build_trusted_recommendation_decision(
+                sessions,
+                raw_events,
+                tactic_summary,
+                ttp_command_map or {},
+                mitre_db=self.mitre_db,
+                asset_profile_path=self.recommendation_asset_profile_path,
+                action_policy_path=self.recommendation_action_policy_path,
+            )
+            actions = [
+                item for item in decision.get("immediate_actions") or []
+                if isinstance(item, dict)
+            ]
+            fallback["trusted_recommendation_decision"] = decision
+            fallback["recommended_actions_structured"] = actions
+            fallback["recommended_mitigations"] = [
+                str(item.get("action") or "").strip()
+                for item in actions
+                if str(item.get("action") or "").strip()
+            ]
+            fallback["recommendation_provenance"] = {
+                "authority": "trusted_policy_engine",
+                "status": decision.get("status") or "unavailable",
+                "policy": (decision.get("trust") or {}).get("policy") or {},
+                "policy_action_count": len(actions),
+                "rejected_action_count": len(decision.get("rejected_actions") or []),
+                "fallback_actions_allowed": False,
+            }
             return build_v2_report(
-                self._fallback_hypothesis(ioc_bundle, tactic_summary),
+                fallback,
                 sessions,
                 raw_events=raw_events,
             )
@@ -4331,7 +4398,13 @@ class ImprovedAsyncSwarmCoordinator:
             ttp_command_map, ioc_bundle, raw_events, vt_intel=vt_intel
         )
         trusted_recommendation_decision = _build_trusted_recommendation_decision(
-            sessions, raw_events, tactic_summary, ttp_command_map, mitre_db=self.mitre_db
+            sessions,
+            raw_events,
+            tactic_summary,
+            ttp_command_map,
+            mitre_db=self.mitre_db,
+            asset_profile_path=self.recommendation_asset_profile_path,
+            action_policy_path=self.recommendation_action_policy_path,
         )
         structured_recommendations = [
             action for action in trusted_recommendation_decision.get("immediate_actions", [])
@@ -4802,11 +4875,15 @@ class ImprovedAsyncSwarmCoordinator:
                 ),
             },
             "kill_chain_analysis": [],
-            "recommended_mitigations": [
-                f"Block detected IPs: {', '.join(ip.value for ip in ioc_bundle.ips[:5])}",
-                "Enable continuous endpoint monitoring",
-                "Review firewall logs for anomalies"
-            ],
+            "recommended_mitigations": [],
+            "recommended_actions_structured": [],
+            "trusted_recommendation_decision": {},
+            "recommendation_provenance": {
+                "authority": "trusted_policy_engine",
+                "status": "pending_policy_evaluation",
+                "policy_action_count": 0,
+                "fallback_actions_allowed": False,
+            },
             "strategic_recommendations": [],
             "campaign_intelligence": "",
             "ioc_table": {},

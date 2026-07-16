@@ -56,6 +56,11 @@ def _rate(numerator: int, denominator: int) -> float:
 
 def _source_bucket(event: Dict[str, Any]) -> str:
     source = str(event.get("source") or "unknown")
+    agreement_status = str(event.get("agreement_status") or "")
+    if source == "rule_securebert_disagreement":
+        if agreement_status == "tactic_only_disagreement":
+            return "both_tactic_disagree"
+        return "both_disagree"
     if source == "both":
         bert_ttp = str(event.get("bert_ttp") or "")
         ttp = str(event.get("ttp") or "")
@@ -176,7 +181,7 @@ def _accepted_classifications(
                 review_records.append(_review_record(command, "low_confidence", classifications))
             continue
 
-        if source_bucket == "both_disagree" and drop_disagreements:
+        if source_bucket in {"both_disagree", "both_tactic_disagree"}:
             skipped_any = True
             stats["disagreement_commands_skipped"] += 1
             if len(review_records) < review_limit:

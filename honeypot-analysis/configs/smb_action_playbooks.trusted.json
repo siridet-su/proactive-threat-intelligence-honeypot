@@ -1,14 +1,16 @@
 {
   "schema_version": "smb_action_policy.v1",
   "policy_id": "smb-proactive-cti-playbooks",
-  "version": "1.0.1",
-  "updated_at": "2026-06-21",
+  "version": "1.1.0",
+  "updated_at": "2026-07-16",
   "owner": "honeypot-production",
   "description": "Small-business action guidance for proactive honeypot CTI. Rules are human-curated from cited trusted sources and should not be labeled as generated intelligence.",
   "limitations": [
     "This policy turns honeypot evidence into prioritized guidance for non-specialist operators.",
     "It does not prove that a production host was compromised.",
-    "Predicted next steps are likely or possible hypotheses and should be verified against real logs before major remediation."
+    "Predicted next steps are likely or possible hypotheses and should be verified against real logs before major remediation.",
+    "Attempted commands and Cowrie login acceptance do not establish successful action or compromise of a real account.",
+    "Disruptive actions require corroboration from real-host or network telemetry and explicit operator approval."
   ],
   "trusted_sources": {
     "cisa-small-business": {
@@ -97,7 +99,7 @@
     {
       "rule_id": "internet-exposed-remote-access-observed",
       "enabled": true,
-      "severity": "medium",
+      "severity": "low",
       "source_type": "trusted_control_guidance",
       "references": [
         "cisa-small-business",
@@ -110,7 +112,7 @@
         ],
         "min_command_count": 1
       },
-      "reason": "An internet-exposed remote-access service received interactive commands from {src_ip}.",
+      "reason": "An internet-exposed honeypot received an interactive command from {src_ip}; this is an observation to correlate, not proof of compromise.",
       "provenance": {
         "method": "manual_trusted_source_policy_review",
         "basis": [
@@ -145,7 +147,7 @@
           "has_commands"
         ]
       },
-      "reason": "Credential-access behavior was observed against {asset_names}.",
+      "reason": "A trusted command mapping indicates possible credential-related discovery or access preparation against {asset_names}; successful acquisition is not established.",
       "provenance": {
         "method": "manual_trusted_source_policy_review",
         "basis": [
@@ -164,7 +166,7 @@
     {
       "rule_id": "payload-download-or-c2-observed",
       "enabled": true,
-      "severity": "high",
+      "severity": "medium",
       "source_type": "trusted_control_guidance",
       "references": [
         "mitre-t1105",
@@ -172,15 +174,14 @@
         "cisa-small-business"
       ],
       "applies_when": {
-        "any_tactics": [
-          "command-and-control",
-          "execution"
-        ],
         "required_flags": [
-          "has_downloader"
+          "has_transfer_attempt"
+        ],
+        "absent_flags": [
+          "has_confirmed_transfer"
         ]
       },
-      "reason": "The session included payload transfer or execution behavior from {src_ip}.",
+      "reason": "A transfer command was observed from {src_ip}, but Cowrie did not record a successful file-transfer event.",
       "provenance": {
         "method": "manual_trusted_source_policy_review",
         "basis": [
@@ -197,9 +198,69 @@
       }
     },
     {
+      "rule_id": "cowrie-file-transfer-observed",
+      "enabled": true,
+      "severity": "high",
+      "source_type": "trusted_control_guidance",
+      "references": [
+        "mitre-t1105",
+        "cisa-small-business"
+      ],
+      "applies_when": {
+        "required_flags": [
+          "has_confirmed_transfer"
+        ]
+      },
+      "reason": "Cowrie recorded a file transfer into the simulated environment; artifact execution or real-host compromise is not established.",
+      "provenance": {
+        "method": "manual_trusted_source_policy_review",
+        "basis": [
+          "source references reviewed: mitre-t1105, cisa-small-business",
+          "wording distinguishes a Cowrie transfer event from execution or real-host compromise"
+        ],
+        "author": "project_developer",
+        "reviewer": "project_developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-16",
+        "last_reviewed": "2026-07-16",
+        "version": "1.1.0"
+      }
+    },
+    {
+      "rule_id": "artifact-execution-attempt-observed",
+      "enabled": true,
+      "severity": "high",
+      "source_type": "trusted_control_guidance",
+      "references": [
+        "mitre-t1059",
+        "cisa-small-business"
+      ],
+      "applies_when": {
+        "required_flags": [
+          "has_execution_attempt"
+        ]
+      },
+      "reason": "An explicit execution command was observed inside Cowrie; command success on a real host is outside current visibility.",
+      "provenance": {
+        "method": "manual_trusted_source_policy_review",
+        "basis": [
+          "source references reviewed: mitre-t1059, cisa-small-business",
+          "wording preserves attempted-versus-successful execution semantics"
+        ],
+        "author": "project_developer",
+        "reviewer": "project_developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-16",
+        "last_reviewed": "2026-07-16",
+        "version": "1.1.0"
+      }
+    },
+    {
       "rule_id": "persistence-or-account-change-observed",
       "enabled": true,
-      "severity": "critical",
+      "severity": "high",
       "source_type": "trusted_control_guidance",
       "references": [
         "mitre-t1053",
@@ -207,14 +268,11 @@
         "cis-ig1"
       ],
       "applies_when": {
-        "any_tactics": [
-          "persistence"
-        ],
         "required_flags": [
-          "has_commands"
+          "has_persistence_attempt"
         ]
       },
-      "reason": "Persistence behavior was observed; a real host could retain attacker access after the session.",
+      "reason": "A persistence-related command was attempted inside Cowrie; successful modification, re-entry, and real-host persistence are not established.",
       "provenance": {
         "method": "manual_trusted_source_policy_review",
         "basis": [
@@ -241,11 +299,11 @@
         "nist-small-business"
       ],
       "applies_when": {
-        "any_tactics": [
-          "defense-evasion"
+        "required_flags": [
+          "has_cleanup_attempt"
         ]
       },
-      "reason": "Defense-evasion or cleanup behavior was observed; local evidence may be incomplete on a real host.",
+      "reason": "A cleanup or trace-removal command was attempted inside Cowrie; successful evidence removal on a real host is not established.",
       "provenance": {
         "method": "manual_trusted_source_policy_review",
         "basis": [
@@ -264,7 +322,7 @@
     {
       "rule_id": "successful-remote-login-observed",
       "enabled": true,
-      "severity": "high",
+      "severity": "medium",
       "source_type": "trusted_control_guidance",
       "references": [
         "cisa-small-business",
@@ -279,7 +337,7 @@
           "has_login_success"
         ]
       },
-      "reason": "A login succeeded on an internet-exposed remote-access service represented by {asset_names}.",
+      "reason": "Cowrie accepted a credential guess for the simulated service represented by {asset_names}; this does not validate credentials on a real account.",
       "provenance": {
         "method": "manual_trusted_source_policy_review",
         "basis": [
@@ -427,7 +485,7 @@
     {
       "rule_id": "goal-credential-theft-to-lateral-movement",
       "enabled": true,
-      "likely_goal": "Credential theft that may enable lateral movement or account reuse.",
+      "likely_goal": "Possible credential-related discovery or access preparation; the model separately ranks lateral movement or account reuse as a follow-on hypothesis.",
       "confidence": "possible",
       "source_type": "trusted_control_guidance",
       "references": [
@@ -463,7 +521,7 @@
     {
       "rule_id": "goal-payload-staging",
       "enabled": true,
-      "likely_goal": "Payload staging, callback setup, or follow-on execution.",
+      "likely_goal": "Possible tool transfer or payload staging; successful transfer, callback setup, and execution are not established.",
       "confidence": "possible",
       "source_type": "trusted_control_guidance",
       "references": [
@@ -471,12 +529,8 @@
         "mitre-t1059"
       ],
       "applies_when": {
-        "any_tactics": [
-          "command-and-control",
-          "execution"
-        ],
         "required_flags": [
-          "has_downloader"
+          "has_transfer_attempt"
         ]
       },
       "provenance": {
@@ -497,7 +551,7 @@
     {
       "rule_id": "goal-hide-activity",
       "enabled": true,
-      "likely_goal": "Hiding activity or reducing local forensic evidence.",
+      "likely_goal": "Possible attempt to reduce local forensic evidence inside the simulated environment.",
       "confidence": "possible",
       "source_type": "trusted_control_guidance",
       "references": [
@@ -505,8 +559,8 @@
         "nist-small-business"
       ],
       "applies_when": {
-        "any_tactics": [
-          "defense-evasion"
+        "required_flags": [
+          "has_cleanup_attempt"
         ]
       },
       "provenance": {
@@ -527,7 +581,7 @@
     {
       "rule_id": "goal-credential-validation",
       "enabled": true,
-      "likely_goal": "Credential validation or account takeover attempt against remote access.",
+      "likely_goal": "Possible credential-guessing or validation activity against the simulated service; real-account takeover is not established.",
       "confidence": "possible",
       "source_type": "trusted_control_guidance",
       "references": [
@@ -561,7 +615,7 @@
     {
       "rule_id": "goal-origin-masking-repeat-attempt",
       "enabled": true,
-      "likely_goal": "Repeat access attempts from rotated infrastructure rather than the same IP.",
+      "likely_goal": "Origin masking may complicate correlation; repeated access or infrastructure rotation is not established from one session.",
       "confidence": "possible",
       "source_type": "context_modifier",
       "references": [
@@ -620,8 +674,8 @@
         {
           "action_id": "block-observed-source",
           "priority": 10,
-          "action": "Block or rate-limit source IP {src_ip} at the firewall or cloud security group.",
-          "why": "The source interacted with an exposed remote-access service represented by {asset_names}.",
+          "action": "Review source IP {src_ip} and apply temporary rate limiting or blocking only when repeated activity, reputation, or real-system telemetry corroborates risk.",
+          "why": "A single honeypot interaction is useful defensive context but is not sufficient by itself to justify a permanent block.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -706,8 +760,8 @@
         {
           "action_id": "rotate-affected-credentials",
           "priority": 5,
-          "action": "Rotate credentials or keys related to observed paths/users: {credential_paths}; users: {usernames}.",
-          "why": "The session included credential-access behavior. In a real environment, exposed passwords, SSH keys, and cloud keys should be considered compromised.",
+          "action": "Review real systems for exposure of the observed paths/users ({credential_paths}; users: {usernames}) and rotate only credentials confirmed exposed or reused.",
+          "why": "The Cowrie command supports possible credential-related access preparation but does not establish successful acquisition or use.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -729,7 +783,7 @@
           "action_id": "check-lateral-logins",
           "priority": 15,
           "action": "Check other systems for SSH/VPN/cloud logins using the same account names or source IP {src_ip}.",
-          "why": "Credential access can enable account reuse and lateral movement.",
+          "why": "This is a corroboration check; the honeypot evidence does not establish account reuse or lateral movement.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -807,15 +861,18 @@
       ],
       "applies_when": {
         "required_flags": [
-          "has_downloader"
+          "has_transfer_attempt"
+        ],
+        "absent_flags": [
+          "has_confirmed_transfer"
         ]
       },
       "actions": [
         {
           "action_id": "block-download-iocs",
           "priority": 10,
-          "action": "Block observed download URLs/domains where appropriate: {download_urls}.",
-          "why": "Ingress tool transfer can stage malware, scripts, or follow-on tooling.",
+          "action": "Review observed transfer URLs/domains and block them only when policy, reputation, or real-system telemetry corroborates risk: {download_urls}.",
+          "why": "A transfer command can indicate staging intent, but no successful Cowrie file-transfer event was observed.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -836,8 +893,8 @@
         {
           "action_id": "hunt-downloaded-paths",
           "priority": 15,
-          "action": "Search real Linux hosts for downloaded paths and hashes: {download_paths}; {hashes}.",
-          "why": "If the same artifact appears on real hosts, treat the host as potentially compromised.",
+          "action": "Search available proxy, DNS, and host telemetry for requests or paths matching the attempted transfer: {download_paths}; {download_urls}.",
+          "why": "This corroboration step does not assume that the command downloaded a file successfully.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -894,12 +951,134 @@
       }
     },
     {
+      "rule_id": "confirmed-cowrie-transfer-response",
+      "title": "Cowrie-confirmed file-transfer response",
+      "enabled": true,
+      "priority": 11,
+      "severity": "high",
+      "confidence": "high",
+      "automation_safety": {
+        "level": "manual_approval_required",
+        "safe_to_auto_execute": false,
+        "requires_manual_approval": true,
+        "rationale": "Artifact hunting or blocking can affect real systems and must be verified by an operator."
+      },
+      "source_type": "trusted_control_guidance",
+      "references": [
+        "mitre-t1105",
+        "cisa-small-business",
+        "cis-ig1"
+      ],
+      "applies_when": {
+        "required_flags": [
+          "has_confirmed_transfer"
+        ]
+      },
+      "actions": [
+        {
+          "action_id": "hunt-cowrie-confirmed-artifact",
+          "priority": 8,
+          "action": "Search authorized real-host telemetry for the Cowrie-recorded artifact path or hash: {download_paths}; {hashes}.",
+          "why": "Cowrie recorded a transfer into its simulated environment; this supports artifact hunting but does not establish execution or real-host compromise.",
+          "provenance": {
+            "method": "manual_sme_action_template_review",
+            "basis": [
+              "source references reviewed: mitre-t1105, cisa-small-business, cis-ig1",
+              "action wording distinguishes confirmed Cowrie transfer from execution"
+            ],
+            "author": "project_developer",
+            "reviewer": "project_developer",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-16",
+            "last_reviewed": "2026-07-16",
+            "version": "1.1.0"
+          }
+        }
+      ],
+      "provenance": {
+        "method": "manual_sme_playbook_review",
+        "basis": [
+          "source references reviewed: mitre-t1105, cisa-small-business, cis-ig1",
+          "playbook requires a direct Cowrie file-transfer event"
+        ],
+        "author": "project_developer",
+        "reviewer": "project_developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-16",
+        "last_reviewed": "2026-07-16",
+        "version": "1.1.0"
+      }
+    },
+    {
+      "rule_id": "artifact-execution-attempt-response",
+      "title": "Artifact-execution attempt response",
+      "enabled": true,
+      "priority": 13,
+      "severity": "high",
+      "confidence": "possible",
+      "automation_safety": {
+        "level": "manual_approval_required",
+        "safe_to_auto_execute": false,
+        "requires_manual_approval": true,
+        "rationale": "Real-host process investigation must be scoped and approved by an operator."
+      },
+      "source_type": "trusted_control_guidance",
+      "references": [
+        "mitre-t1059",
+        "cisa-small-business",
+        "cis-ig1"
+      ],
+      "applies_when": {
+        "required_flags": [
+          "has_execution_attempt"
+        ]
+      },
+      "actions": [
+        {
+          "action_id": "correlate-execution-attempt",
+          "priority": 12,
+          "action": "Check authorized process, audit, and EDR telemetry for execution matching the observed artifact path and session time window.",
+          "why": "Cowrie observed an execution command, but its outcome and any execution on a real host remain unconfirmed.",
+          "provenance": {
+            "method": "manual_sme_action_template_review",
+            "basis": [
+              "source references reviewed: mitre-t1059, cisa-small-business, cis-ig1",
+              "action wording preserves unknown command-outcome semantics"
+            ],
+            "author": "project_developer",
+            "reviewer": "project_developer",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-16",
+            "last_reviewed": "2026-07-16",
+            "version": "1.1.0"
+          }
+        }
+      ],
+      "provenance": {
+        "method": "manual_sme_playbook_review",
+        "basis": [
+          "source references reviewed: mitre-t1059, cisa-small-business, cis-ig1",
+          "playbook is limited to corroboration and does not claim successful execution"
+        ],
+        "author": "project_developer",
+        "reviewer": "project_developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-16",
+        "last_reviewed": "2026-07-16",
+        "version": "1.1.0"
+      }
+    },
+    {
       "rule_id": "persistence-response",
       "title": "Persistence response",
       "enabled": true,
       "priority": 12,
-      "severity": "critical",
-      "confidence": "high",
+      "severity": "high",
+      "confidence": "possible",
       "automation_safety": {
         "level": "manual_approval_required",
         "safe_to_auto_execute": false,
@@ -913,8 +1092,8 @@
         "cis-ig1"
       ],
       "applies_when": {
-        "any_tactics": [
-          "persistence"
+        "required_flags": [
+          "has_persistence_attempt"
         ]
       },
       "actions": [
@@ -922,7 +1101,7 @@
           "action_id": "audit-persistence-locations",
           "priority": 8,
           "action": "Audit authorized_keys, cron, systemd services, startup scripts, and newly created local users.",
-          "why": "Persistence techniques can allow re-entry after the initial session ends.",
+          "why": "A persistence-related command was attempted in Cowrie; this audit checks whether comparable changes exist on real systems.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -943,8 +1122,8 @@
         {
           "action_id": "remove-unknown-admin-accounts",
           "priority": 12,
-          "action": "Remove unknown admin users or keys and verify account ownership with the business owner.",
-          "why": "Account and key persistence is common in SSH compromise paths.",
+          "action": "Verify ownership of unfamiliar admin users or keys and remove them only after confirming they are unauthorized.",
+          "why": "The observed Cowrie command does not prove that any real-system account or key was created successfully.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -998,8 +1177,8 @@
         "cis-ig1"
       ],
       "applies_when": {
-        "any_tactics": [
-          "defense-evasion"
+        "required_flags": [
+          "has_cleanup_attempt"
         ]
       },
       "actions": [
@@ -1007,7 +1186,7 @@
           "action_id": "preserve-logs",
           "priority": 10,
           "action": "Preserve relevant logs immediately and forward future auth/system logs to a remote or immutable location.",
-          "why": "Log cleanup behavior means local evidence may be intentionally removed on a real host.",
+          "why": "A cleanup-related command was attempted in Cowrie; successful evidence removal or activity on a real host is not established.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [
@@ -1068,8 +1247,8 @@
       "title": "Successful remote-login response",
       "enabled": true,
       "priority": 14,
-      "severity": "high",
-      "confidence": "high",
+      "severity": "medium",
+      "confidence": "possible",
       "automation_safety": {
         "level": "manual_approval_required",
         "safe_to_auto_execute": false,
@@ -1116,8 +1295,8 @@
         {
           "action_id": "rotate-reused-remote-access-passwords",
           "priority": 18,
-          "action": "Rotate any real passwords matching the observed usernames and disable shared/default accounts.",
-          "why": "Small businesses often reuse administrative usernames; account validation should trigger credential hygiene checks.",
+          "action": "If real authentication logs show reuse or successful access, rotate the affected passwords and disable confirmed shared/default accounts.",
+          "why": "Cowrie acceptance does not validate a real credential; rotation is conditional on corroborating real-system evidence.",
           "provenance": {
             "method": "manual_sme_action_template_review",
             "basis": [

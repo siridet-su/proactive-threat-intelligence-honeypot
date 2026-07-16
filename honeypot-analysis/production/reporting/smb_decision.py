@@ -214,6 +214,161 @@ def _enrichment_context(session_payload: Dict[str, Any]) -> Dict[str, Any]:
     return context
 
 
+def _canonical_recommendation_evidence(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the same bounded evidence layers used by threat_hypothesis.v2."""
+
+    try:
+        from production.reporting.threat_hypothesis import (
+            build_follow_on_hypothesis,
+            build_observed_behavior,
+            build_supported_assessment,
+        )
+
+        raw_events = [
+            event for event in _as_list(session_payload.get("raw_events"))
+            if isinstance(event, dict)
+        ]
+        observed = build_observed_behavior([session_payload], raw_events=raw_events)
+        assessment = build_supported_assessment(observed)
+        follow_on = build_follow_on_hypothesis(observed)
+        claims = [
+            claim
+            for claim in (
+                _as_list(assessment.get("possible_objectives"))
+                + _as_list(follow_on.get("claims"))
+            )
+            if isinstance(claim, dict)
+        ]
+        return {
+            "status": "available",
+            "observed_behavior": observed,
+            "supported_assessment": assessment,
+            "follow_on_hypothesis": follow_on,
+            "claims": claims,
+        }
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "error": f"{type(exc).__name__}: {exc}",
+            "observed_behavior": {},
+            "supported_assessment": {},
+            "follow_on_hypothesis": {},
+            "claims": [],
+        }
+
+
+def _append_ref(index: Dict[str, List[str]], key: str, value: Any) -> None:
+    ref = str(value or "").strip()
+    if not ref:
+        return
+    bucket = index.setdefault(key, [])
+    if ref not in bucket:
+        bucket.append(ref)
+
+
+def _canonical_feature_index(
+    session_payload: Dict[str, Any],
+    canonical: Dict[str, Any],
+) -> Dict[str, Any]:
+    observed = canonical.get("observed_behavior") or {}
+    claims = [item for item in canonical.get("claims") or [] if isinstance(item, dict)]
+    observations = [
+        item for item in observed.get("ordered_command_observations") or []
+        if isinstance(item, dict)
+    ]
+    candidates = [
+        item for item in observed.get("trusted_attck_candidates") or []
+        if isinstance(item, dict)
+    ]
+    event_evidence = [
+        item for item in observed.get("cowrie_event_evidence") or []
+        if isinstance(item, dict)
+    ]
+    connected_chains = [
+        item for item in observed.get("connected_behavior_chains") or []
+        if isinstance(item, dict)
+    ]
+
+    refs: Dict[str, List[str]] = {}
+    action_types: set[str] = set()
+    action_type_refs: Dict[str, List[str]] = {}
+    outcome_counts = {
+        "cowrie_reported_success": 0,
+        "cowrie_reported_failure": 0,
+        "outcome_unknown": 0,
+        "legacy_outcome_unknown": 0,
+    }
+    for item in observations:
+        evidence_id = item.get("evidence_id")
+        _append_ref(refs, "commands", evidence_id)
+        outcome = str(item.get("command_outcome") or "outcome_unknown")
+        outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+        for action_type in _clean_strings(item.get("action_types") or []):
+            action_types.add(action_type)
+            _append_ref(action_type_refs, action_type, evidence_id)
+
+    for item in candidates:
+        evidence_id = item.get("evidence_id")
+        tactic = str(item.get("tactic") or "").strip().lower()
+        ttp = str(item.get("technique_id") or "").strip().lower()
+        if tactic:
+            _append_ref(refs, f"tactic:{tactic}", evidence_id)
+        if ttp:
+            _append_ref(refs, f"ttp:{ttp}", evidence_id)
+
+    claim_types: set[str] = set()
+    supported_claim_types: set[str] = set()
+    claim_refs: Dict[str, List[str]] = {}
+    claim_limitations: Dict[str, List[str]] = {}
+    for claim in claims:
+        claim_type = str(claim.get("claim_type") or "").strip().lower()
+        if not claim_type:
+            continue
+        claim_types.add(claim_type)
+        if claim.get("evidence_status") == "supported":
+            supported_claim_types.add(claim_type)
+        for ref in claim.get("evidence_refs") or []:
+            _append_ref(claim_refs, claim_type, ref)
+        claim_limitations[claim_type] = _clean_strings(claim.get("limitations") or [])
+
+    confirmed_transfer_refs: List[str] = []
+    for item in event_evidence:
+        if item.get("transfer_observed"):
+            ref = str(item.get("evidence_id") or "").strip()
+            if ref and ref not in confirmed_transfer_refs:
+                confirmed_transfer_refs.append(ref)
+
+    session_ref = stable_id(
+        "session-evidence",
+        {
+            "session_id": session_payload.get("session_id") or "unknown",
+            "command_refs": refs.get("commands") or [],
+            "event_refs": [item.get("evidence_id") for item in event_evidence],
+        },
+    )
+    refs["session"] = [session_ref]
+    refs["confirmed_transfer"] = confirmed_transfer_refs
+    for action_type, values in action_type_refs.items():
+        refs[f"action_type:{action_type}"] = values
+    for claim_type, values in claim_refs.items():
+        refs[f"claim:{claim_type}"] = values
+
+    return {
+        "observed": observed,
+        "claims": claims,
+        "claim_types_l": claim_types,
+        "supported_claim_types_l": supported_claim_types,
+        "claim_limitations": claim_limitations,
+        "action_types_l": action_types,
+        "connected_chains": connected_chains,
+        "event_evidence": event_evidence,
+        "evidence_ref_index": refs,
+        "outcome_counts": outcome_counts,
+        "confirmed_transfer_refs": confirmed_transfer_refs,
+        "session_evidence_ref": session_ref,
+    }
+
+
 def _float_value(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -258,6 +413,8 @@ def _features(
     raw_events = [event for event in _as_list(session_payload.get("raw_events")) if isinstance(event, dict)]
     commands = _clean_strings(session_payload.get("commands") or [])
     assets = _matched_assets(session_payload, asset_profile)
+    canonical = _canonical_recommendation_evidence(session_payload)
+    canonical_index = _canonical_feature_index(session_payload, canonical)
     all_classification_events = [
         item for item in _as_list(session_payload.get("classification_events")) if isinstance(item, dict)
     ]
@@ -265,14 +422,21 @@ def _features(
         item for item in all_classification_events
         if is_trusted_classification_event(item)
     ]
+    canonical_candidates = [
+        item
+        for item in (canonical_index.get("observed") or {}).get("trusted_attck_candidates") or []
+        if isinstance(item, dict)
+    ]
     aggregate_tactics = [] if all_classification_events else _as_list(session_payload.get("tactics"))
     aggregate_ttps = [] if all_classification_events else _as_list(session_payload.get("ttps"))
     tactics = _clean_strings(
         aggregate_tactics
+        + [item.get("tactic") for item in canonical_candidates if item.get("tactic")]
         + [item.get("tactic") for item in classification_events if item.get("tactic")]
     )
     ttps = _clean_strings(
         aggregate_ttps
+        + [item.get("technique_id") for item in canonical_candidates if item.get("technique_id")]
         + [item.get("ttp") for item in classification_events if item.get("ttp")]
     )
     artifact_values = _extract_policy_artifacts(commands, raw_events, action_policy)
@@ -293,10 +457,44 @@ def _features(
         [session_payload.get("login_username")]
         + [event.get("username") for event in raw_events if event.get("username")]
     )
+    action_types = canonical_index.get("action_types_l") or set()
+    claim_types = canonical_index.get("claim_types_l") or set()
+    has_transfer_attempt = "transfer_attempt" in action_types
+    has_execution_attempt = bool(
+        action_types.intersection({"execution_attempt", "shell_pipe_consumer"})
+    )
+    has_confirmed_transfer = bool(canonical_index.get("confirmed_transfer_refs"))
+    if canonical.get("status") != "available":
+        command_text = "\n".join(commands)
+        has_transfer_attempt = bool(re.search(
+            r"\b(?:curl|wget|tftp|ftp)\b[^\n]*(?:https?://|ftp://)",
+            command_text,
+            re.IGNORECASE,
+        ))
+        has_confirmed_transfer = any(
+            event.get("eventid") in {
+                "cowrie.session.file_download",
+                "cowrie.session.file_upload",
+            }
+            for event in raw_events
+        )
+        has_execution_attempt = bool(re.search(
+            r"(?:^|[;&|]\s*)(?:sh|bash|python\d*|perl)\s+(?:/tmp|/var/tmp|/dev/shm)/\S+|"
+            r"(?:^|[;&|]\s*)(?:\./|/tmp/|/var/tmp/|/dev/shm/)\S+",
+            command_text,
+            re.IGNORECASE,
+        ))
     behavior_flags = {
         "has_commands": bool(commands),
         "has_login_success": bool(session_payload.get("login_success")),
-        "has_downloader": bool(artifact_values.get("download_urls")),
+        "has_downloader": has_transfer_attempt,
+        "has_transfer_attempt": has_transfer_attempt,
+        "has_confirmed_transfer": has_confirmed_transfer,
+        "has_execution_attempt": has_execution_attempt,
+        "has_connected_behavior_chain": bool(canonical_index.get("connected_chains")),
+        "has_persistence_attempt": "possible_continued_access_preparation" in claim_types,
+        "has_cleanup_attempt": "possible_trace_removal" in claim_types,
+        "has_credential_access_candidate": "possible_credential_access_preparation" in claim_types,
         "has_credential_paths": bool(artifact_values.get("credential_paths")),
         "has_hashes": bool(artifact_values.get("hashes")),
     }
@@ -321,6 +519,17 @@ def _features(
         "trust_status": prediction.get("trust_status") or {},
         "classification_quality": prediction.get("classification_quality") or {},
         "agreement": prediction.get("agreement") or {},
+        "canonical_evidence": canonical,
+        "canonical_evidence_status": canonical.get("status") or "unavailable",
+        "claim_types_l": canonical_index.get("claim_types_l") or set(),
+        "supported_claim_types_l": canonical_index.get("supported_claim_types_l") or set(),
+        "claim_limitations": canonical_index.get("claim_limitations") or {},
+        "action_types_l": canonical_index.get("action_types_l") or set(),
+        "connected_chains": canonical_index.get("connected_chains") or [],
+        "event_evidence": canonical_index.get("event_evidence") or [],
+        "evidence_ref_index": canonical_index.get("evidence_ref_index") or {},
+        "outcome_counts": canonical_index.get("outcome_counts") or {},
+        "session_evidence_ref": canonical_index.get("session_evidence_ref") or "",
         "assets": assets,
         "asset_categories_l": _lower_set(asset.get("service_category") for asset in assets),
         "asset_criticalities_l": _lower_set(asset.get("criticality") for asset in assets),
@@ -337,107 +546,193 @@ def _features(
     }
 
 
-def _condition_matches(condition: Dict[str, Any], features: Dict[str, Any]) -> Tuple[bool, List[str]]:
+def _condition_matches(
+    condition: Dict[str, Any],
+    features: Dict[str, Any],
+) -> Tuple[bool, List[str], List[str], List[str]]:
     evidence: List[str] = []
+    evidence_refs: List[str] = []
+    evidence_scopes: List[str] = []
     tactics = features["tactics_l"]
     ttps = features["ttps_l"]
     predicted_tactics = features["predicted_tactics_l"]
     flags = features["behavior_flags"]
     enrichment_flags = features["enrichment_flags"]
     commands_text = "\n".join(features["commands"])
+    ref_index = features.get("evidence_ref_index") or {}
+
+    def add_refs(key: str, scope: str = "observed_behavior") -> None:
+        for ref in ref_index.get(key) or []:
+            if ref not in evidence_refs:
+                evidence_refs.append(ref)
+        if scope and scope not in evidence_scopes:
+            evidence_scopes.append(scope)
+
+    def no_match() -> Tuple[bool, List[str], List[str], List[str]]:
+        return False, [], [], []
 
     all_tactics = _lower_set(condition.get("all_tactics") or [])
     if all_tactics and not all_tactics.issubset(tactics):
-        return False, []
+        return no_match()
     if all_tactics:
         evidence.append(f"observed tactics include {', '.join(sorted(all_tactics))}")
+        for tactic in all_tactics:
+            add_refs(f"tactic:{tactic}")
 
     any_tactics = _lower_set(condition.get("any_tactics") or [])
     if any_tactics and not tactics.intersection(any_tactics):
-        return False, []
+        return no_match()
     if any_tactics:
-        evidence.append(f"observed tactic matched {', '.join(sorted(tactics.intersection(any_tactics)))}")
+        matched_tactics = tactics.intersection(any_tactics)
+        evidence.append(f"observed tactic matched {', '.join(sorted(matched_tactics))}")
+        for tactic in matched_tactics:
+            add_refs(f"tactic:{tactic}")
 
     all_ttps = _lower_set(condition.get("all_ttps") or [])
     if all_ttps and not all_ttps.issubset(ttps):
-        return False, []
+        return no_match()
     if all_ttps:
         evidence.append(f"observed techniques include {', '.join(sorted(all_ttps))}")
+        for ttp in all_ttps:
+            add_refs(f"ttp:{ttp}")
 
     any_ttps = _lower_set(condition.get("any_ttps") or [])
     if any_ttps and not ttps.intersection(any_ttps):
-        return False, []
+        return no_match()
     if any_ttps:
-        evidence.append(f"observed technique matched {', '.join(sorted(ttps.intersection(any_ttps)))}")
+        matched_ttps = ttps.intersection(any_ttps)
+        evidence.append(f"observed technique matched {', '.join(sorted(matched_ttps))}")
+        for ttp in matched_ttps:
+            add_refs(f"ttp:{ttp}")
+
+    all_claim_types = _lower_set(condition.get("all_claim_types") or [])
+    if all_claim_types and not all_claim_types.issubset(features["claim_types_l"]):
+        return no_match()
+    if all_claim_types:
+        evidence.append(f"canonical claims include {', '.join(sorted(all_claim_types))}")
+        for claim_type in all_claim_types:
+            add_refs(f"claim:{claim_type}")
+
+    any_claim_types = _lower_set(condition.get("any_claim_types") or [])
+    matched_claim_types = features["claim_types_l"].intersection(any_claim_types)
+    if any_claim_types and not matched_claim_types:
+        return no_match()
+    if matched_claim_types:
+        evidence.append(f"canonical claim matched {', '.join(sorted(matched_claim_types))}")
+        for claim_type in matched_claim_types:
+            add_refs(f"claim:{claim_type}")
+
+    any_action_types = _lower_set(condition.get("any_action_types") or [])
+    matched_action_types = features["action_types_l"].intersection(any_action_types)
+    if any_action_types and not matched_action_types:
+        return no_match()
+    if matched_action_types:
+        evidence.append(f"observed action type matched {', '.join(sorted(matched_action_types))}")
+        for action_type in matched_action_types:
+            add_refs(f"action_type:{action_type}")
 
     any_predicted = _lower_set(condition.get("any_predicted_tactics") or [])
     if any_predicted and not predicted_tactics.intersection(any_predicted):
-        return False, []
+        return no_match()
     if any_predicted:
         evidence.append(f"realtime prediction includes {', '.join(sorted(predicted_tactics.intersection(any_predicted)))}")
+        prediction_ref = str((features.get("top_prediction") or {}).get("snapshot_id") or "").strip()
+        if prediction_ref:
+            evidence_refs.append(prediction_ref)
+        if "model_prediction" not in evidence_scopes:
+            evidence_scopes.append("model_prediction")
 
     required_flags = _clean_strings(condition.get("required_flags") or [])
     missing_flags = [flag for flag in required_flags if not flags.get(flag)]
     if missing_flags:
-        return False, []
+        return no_match()
     if required_flags:
         evidence.append(f"session flags matched {', '.join(required_flags)}")
+        for flag in required_flags:
+            if flag == "has_confirmed_transfer":
+                add_refs("confirmed_transfer")
+            elif flag == "has_transfer_attempt" or flag == "has_downloader":
+                add_refs("action_type:transfer_attempt")
+            elif flag == "has_execution_attempt":
+                add_refs("action_type:execution_attempt")
+                add_refs("action_type:shell_pipe_consumer")
+            elif flag == "has_commands":
+                add_refs("commands")
+            elif flag == "has_login_success":
+                add_refs("session")
+            elif flag == "has_persistence_attempt":
+                add_refs("claim:possible_continued_access_preparation")
+            elif flag == "has_cleanup_attempt":
+                add_refs("claim:possible_trace_removal")
+            elif flag == "has_credential_access_candidate":
+                add_refs("claim:possible_credential_access_preparation")
 
     absent_flags = _clean_strings(condition.get("absent_flags") or [])
     present_absent = [flag for flag in absent_flags if flags.get(flag)]
     if present_absent:
-        return False, []
+        return no_match()
 
     asset_categories = _lower_set(condition.get("any_asset_categories") or [])
     if asset_categories and not features["asset_categories_l"].intersection(asset_categories):
-        return False, []
+        return no_match()
     if asset_categories:
         evidence.append(f"asset category matched {', '.join(sorted(features['asset_categories_l'].intersection(asset_categories)))}")
+        if "configured_asset_context" not in evidence_scopes:
+            evidence_scopes.append("configured_asset_context")
 
     if condition.get("internet_exposed_asset") is True and not features["internet_exposed_asset"]:
-        return False, []
+        return no_match()
     if condition.get("internet_exposed_asset") is True:
         evidence.append("matched asset is marked internet-exposed")
+        if "configured_asset_context" not in evidence_scopes:
+            evidence_scopes.append("configured_asset_context")
 
     enrichment_tags = _lower_set(condition.get("any_enrichment_tags") or [])
     if enrichment_tags and not features["enrichment_tags_l"].intersection(enrichment_tags):
-        return False, []
+        return no_match()
     if enrichment_tags:
         evidence.append(f"enrichment tag matched {', '.join(sorted(features['enrichment_tags_l'].intersection(enrichment_tags)))}")
+        if "contextual_intelligence" not in evidence_scopes:
+            evidence_scopes.append("contextual_intelligence")
 
     min_command_count = condition.get("min_command_count")
     if min_command_count is not None:
         try:
             if int(features["command_count"]) < int(min_command_count):
-                return False, []
+                return no_match()
             evidence.append(f"command count >= {int(min_command_count)}")
+            add_refs("commands")
         except (TypeError, ValueError):
-            return False, []
+            return no_match()
 
     max_command_count = condition.get("max_command_count")
     if max_command_count is not None:
         try:
             if int(features["command_count"]) > int(max_command_count):
-                return False, []
+                return no_match()
             evidence.append(f"command count <= {int(max_command_count)}")
         except (TypeError, ValueError):
-            return False, []
+            return no_match()
 
     required_enrichment_flags = _clean_strings(condition.get("required_enrichment_flags") or [])
     missing_enrichment_flags = [flag for flag in required_enrichment_flags if not enrichment_flags.get(flag)]
     if missing_enrichment_flags:
-        return False, []
+        return no_match()
     if required_enrichment_flags:
         evidence.append(f"enrichment context matched {', '.join(required_enrichment_flags)}")
+        if "contextual_intelligence" not in evidence_scopes:
+            evidence_scopes.append("contextual_intelligence")
 
     min_risk_score = condition.get("min_reputation_risk_score")
     if min_risk_score is not None:
         try:
             if float(features["risk_score"]) < float(min_risk_score):
-                return False, []
+                return no_match()
             evidence.append(f"reputation risk score >= {float(min_risk_score):.0f}")
+            if "contextual_intelligence" not in evidence_scopes:
+                evidence_scopes.append("contextual_intelligence")
         except (TypeError, ValueError):
-            return False, []
+            return no_match()
 
     regexes = _clean_strings(condition.get("any_command_regex") or [])
     if regexes:
@@ -449,10 +744,13 @@ def _condition_matches(condition: Dict[str, Any], features: Dict[str, Any]) -> T
             except re.error:
                 continue
         if not matched:
-            return False, []
+            return no_match()
         evidence.append(f"command evidence matched {len(matched)} policy pattern(s)")
+        add_refs("commands")
 
-    return True, evidence
+    if not evidence_refs:
+        add_refs("session", "session_context")
+    return True, evidence, evidence_refs, evidence_scopes
 
 
 def _render_template(text: str, context: Dict[str, Any]) -> str:
@@ -490,6 +788,9 @@ def _template_context(features: Dict[str, Any]) -> Dict[str, Any]:
         "vt_malware_family": features.get("enrichment_context", {}).get("vt_malware_family") or "-",
         "open_ports": features.get("enrichment_context", {}).get("open_ports") or [],
         "running_services": features.get("enrichment_context", {}).get("running_services") or [],
+        "session_evidence_ref": features.get("session_evidence_ref") or "",
+        "confirmed_transfer": bool(features.get("behavior_flags", {}).get("has_confirmed_transfer")),
+        "outcome_counts": features.get("outcome_counts") or {},
     }
 
 
@@ -540,6 +841,8 @@ def _build_action_payload(
     rule: Dict[str, Any],
     action_item: Dict[str, Any],
     evidence: List[str],
+    evidence_refs: List[str],
+    evidence_scopes: List[str],
     context: Dict[str, Any],
     action_policy: Dict[str, Any],
     default_rule_id: str = "",
@@ -553,6 +856,14 @@ def _build_action_payload(
         else:
             rendered_evidence.append("matched trusted policy default guidance")
     safety = _automation_safety(rule, action_item)
+    visibility_limitations = _clean_strings(
+        _as_list(rule.get("visibility_limitations"))
+        + _as_list(action_item.get("visibility_limitations"))
+        + [
+            "Cowrie evidence describes activity inside a simulated SSH environment, not a real production compromise.",
+            "Validate the recommendation against real-host or network telemetry before taking disruptive action.",
+        ]
+    )
     return {
         "action_id": action_item.get("action_id") or stable_id(
             "smbaction",
@@ -566,6 +877,9 @@ def _build_action_payload(
         "severity": _normalise_severity(action_item.get("severity") or rule.get("severity")),
         "confidence": _normalise_confidence(action_item.get("confidence") or rule.get("confidence")),
         "evidence": rendered_evidence,
+        "evidence_refs": _clean_strings(evidence_refs or [context.get("session_evidence_ref")]),
+        "evidence_scope": _clean_strings(evidence_scopes or ["session_context"]),
+        "visibility_limitations": visibility_limitations,
         "source_type": rule.get("source_type") or action_item.get("source_type") or "",
         "references": _rule_references(rule or action_item, action_policy),
         "automation_safety": safety,
@@ -594,6 +908,10 @@ def _action_contract_errors(action: Dict[str, Any]) -> List[str]:
         errors.append("missing references")
     if not action.get("evidence"):
         errors.append("missing evidence")
+    if not action.get("evidence_refs"):
+        errors.append("missing evidence_refs")
+    if not action.get("visibility_limitations"):
+        errors.append("missing visibility_limitations")
     safety = action.get("automation_safety")
     if not isinstance(safety, dict):
         errors.append("missing automation_safety")
@@ -730,7 +1048,9 @@ def build_smb_decision(
     for rule in _as_list(action_policy.get("risk_rules")):
         if not isinstance(rule, dict) or rule.get("enabled") is False:
             continue
-        matched, evidence = _condition_matches(rule.get("applies_when") or {}, features)
+        matched, evidence, evidence_refs, evidence_scopes = _condition_matches(
+            rule.get("applies_when") or {}, features
+        )
         if not matched:
             continue
         severity = str(rule.get("severity") or "low").lower()
@@ -740,6 +1060,8 @@ def build_smb_decision(
                 "severity": severity,
                 "reason": _render_template(rule.get("reason") or "", context),
                 "evidence": evidence,
+                "evidence_refs": evidence_refs,
+                "evidence_scope": evidence_scopes,
                 "source_type": rule.get("source_type") or "",
                 "references": _rule_references(rule, action_policy),
                 "provenance": {
@@ -753,7 +1075,9 @@ def build_smb_decision(
     for rule in _as_list(action_policy.get("goal_rules")):
         if not isinstance(rule, dict) or rule.get("enabled") is False:
             continue
-        matched, evidence = _condition_matches(rule.get("applies_when") or {}, features)
+        matched, evidence, evidence_refs, evidence_scopes = _condition_matches(
+            rule.get("applies_when") or {}, features
+        )
         if not matched:
             continue
         matched_goals.append(
@@ -762,6 +1086,8 @@ def build_smb_decision(
                 "likely_goal": _render_template(rule.get("likely_goal") or "", context),
                 "confidence": rule.get("confidence") or "possible",
                 "evidence": evidence,
+                "evidence_refs": evidence_refs,
+                "evidence_scope": evidence_scopes,
                 "source_type": rule.get("source_type") or "",
                 "references": _rule_references(rule, action_policy),
                 "provenance": {
@@ -775,7 +1101,9 @@ def build_smb_decision(
     for rule in _as_list(action_policy.get("action_playbooks")):
         if not isinstance(rule, dict) or rule.get("enabled") is False:
             continue
-        matched, evidence = _condition_matches(rule.get("applies_when") or {}, features)
+        matched, evidence, evidence_refs, evidence_scopes = _condition_matches(
+            rule.get("applies_when") or {}, features
+        )
         if not matched:
             continue
         for action in _as_list(rule.get("actions")):
@@ -790,6 +1118,8 @@ def build_smb_decision(
                     rule=rule,
                     action_item=action_item,
                     evidence=evidence,
+                    evidence_refs=evidence_refs,
+                    evidence_scopes=evidence_scopes,
                     context=context,
                     action_policy=action_policy,
                 )
@@ -808,6 +1138,8 @@ def build_smb_decision(
                         },
                         action_item=action,
                         evidence=[],
+                        evidence_refs=[features.get("session_evidence_ref") or ""],
+                        evidence_scopes=["policy_default"],
                         context=context,
                         action_policy=action_policy,
                         default_rule_id="default_guidance",
@@ -830,7 +1162,27 @@ def build_smb_decision(
             continue
         valid_actions.append(action)
 
-    matched_actions = valid_actions
+    deduplicated_actions: Dict[str, Dict[str, Any]] = {}
+    for action in valid_actions:
+        key = str(action.get("action_id") or action.get("action") or "").strip()
+        if not key:
+            continue
+        existing = deduplicated_actions.get(key)
+        if existing is None:
+            deduplicated_actions[key] = action
+            continue
+        existing["evidence"] = _clean_strings(
+            _as_list(existing.get("evidence")) + _as_list(action.get("evidence"))
+        )
+        existing["evidence_refs"] = _clean_strings(
+            _as_list(existing.get("evidence_refs")) + _as_list(action.get("evidence_refs"))
+        )
+        existing["evidence_scope"] = _clean_strings(
+            _as_list(existing.get("evidence_scope")) + _as_list(action.get("evidence_scope"))
+        )
+        existing["priority"] = min(int(existing.get("priority", 50)), int(action.get("priority", 50)))
+
+    matched_actions = list(deduplicated_actions.values())
     matched_actions.sort(key=lambda item: (item.get("priority", 50), item.get("action", "")))
     strongest_risk = max(matched_risks, key=lambda item: RISK_ORDER.get(item.get("severity", "low"), 1), default=None)
     if not strongest_risk:
@@ -838,6 +1190,8 @@ def build_smb_decision(
             "severity": "low" if features["command_count"] else "info",
             "reason": "No higher-risk playbook matched the current session evidence.",
             "evidence": [],
+            "evidence_refs": [features.get("session_evidence_ref") or ""],
+            "evidence_scope": ["policy_default"],
             "references": [],
             "source_type": "policy_default",
         }
@@ -845,6 +1199,8 @@ def build_smb_decision(
         "likely_goal": "No specific attacker goal inferred from the current trusted-source playbooks.",
         "confidence": "low",
         "evidence": [],
+        "evidence_refs": [features.get("session_evidence_ref") or ""],
+        "evidence_scope": ["policy_default"],
         "references": [],
         "source_type": "policy_default",
     }
@@ -912,6 +1268,21 @@ def build_smb_decision(
                     for key, value in (features.get("enrichment_flags") or {}).items()
                     if value
                 },
+            },
+            "canonical_summary": {
+                "status": features.get("canonical_evidence_status") or "unavailable",
+                "claim_types": sorted(features.get("claim_types_l") or []),
+                "supported_claim_types": sorted(features.get("supported_claim_types_l") or []),
+                "observed_action_types": sorted(features.get("action_types_l") or []),
+                "connected_behavior_chain_count": len(features.get("connected_chains") or []),
+                "command_outcome_counts": features.get("outcome_counts") or {},
+                "confirmed_cowrie_transfer": bool(
+                    features.get("behavior_flags", {}).get("has_confirmed_transfer")
+                ),
+                "evidence_semantics": (
+                    "Canonical threat_hypothesis.v2 evidence is used for recommendation matching; "
+                    "context and prediction remain separate from observed behavior."
+                ),
             },
         },
         "trust": {

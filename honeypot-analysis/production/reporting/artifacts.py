@@ -6,6 +6,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -111,6 +112,7 @@ def _trusted_recommendation_actions(report: Dict[str, Any]) -> List[Dict[str, An
     recommendations = report.get("recommendations")
     if isinstance(recommendations, dict):
         candidates.extend(recommendations.get("recommended_actions_structured") or [])
+        candidates.extend(recommendations.get("operator_actions") or [])
     hypothesis = report.get("threat_hypothesis")
     if isinstance(hypothesis, dict):
         candidates.extend(hypothesis.get("recommended_actions_structured") or [])
@@ -453,6 +455,10 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
             "x_honeypot_severity": action.get("severity") or "",
             "x_honeypot_confidence": action.get("confidence") or "",
             "x_honeypot_evidence": action.get("evidence") or [],
+            "x_honeypot_evidence_refs": action.get("evidence_refs") or [],
+            "x_honeypot_evidence_scope": action.get("evidence_scope") or [],
+            "x_honeypot_grounding_status": action.get("grounding_status") or "",
+            "x_honeypot_visibility_limitations": action.get("visibility_limitations") or [],
             "x_honeypot_requires_manual_approval": bool(
                 action.get("requires_manual_approval") or safety.get("requires_manual_approval")
             ),
@@ -573,6 +579,18 @@ def write_markdown_report(report: Dict[str, Any], session_payload: Dict[str, Any
                     f"- {item.get('predicted_tactic', '')} | confidence={item.get('confidence', '-')} | "
                     f"source_types={', '.join(item.get('source_types') or [])}"
                 )
+    actions = _trusted_recommendation_actions(report)
+    lines.extend(["", "## Policy-Approved Operator Actions"])
+    if actions:
+        for action in actions:
+            lines.append(
+                f"- P{action.get('priority', 50)} [{action.get('severity', 'info')}] "
+                f"{action.get('action', '')} (rule `{action.get('rule_id', '')}`; manual approval required)"
+            )
+            for limitation in (action.get("visibility_limitations") or [])[:2]:
+                lines.append(f"  - Limitation: {limitation}")
+    else:
+        lines.append("- No policy-approved operator action matched the available evidence.")
     lines.extend(["", "## IoCs"])
     for item in _ioc_items(ioc_summary):
         lines.append(f"- {item.get('type')}: {item.get('value')} ({item.get('confidence', 'unknown')})")
@@ -640,6 +658,20 @@ def write_pdf_report(report: Dict[str, Any], session_payload: Dict[str, Any], ou
             ("FONTSIZE", (0, 0), (-1, -1), 8),
         ]))
         story.extend([table, Spacer(1, 8)])
+
+    actions = _trusted_recommendation_actions(report)
+    story.append(Paragraph("Policy-Approved Operator Actions", h2))
+    if actions:
+        for action in actions[:8]:
+            story.append(Paragraph(
+                escape(
+                    f"P{action.get('priority', 50)} [{action.get('severity', 'info')}] "
+                    f"{action.get('action', '')} (manual approval required)"
+                ),
+                body,
+            ))
+    else:
+        story.append(Paragraph("No policy-approved operator action matched the available evidence.", body))
 
     ioc_rows = [["Type", "Value", "Confidence"]]
     for item in _ioc_items(report.get("ioc_summary") or session_payload.get("ioc_summary") or {}):

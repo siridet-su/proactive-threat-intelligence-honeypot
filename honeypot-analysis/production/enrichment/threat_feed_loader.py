@@ -37,7 +37,6 @@ import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-# â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 CISA_KEV_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 )
@@ -104,9 +103,7 @@ def _save_cache(path: str, data: dict) -> None:
         print(f"  [FeedLoader] Cache save failed (non-fatal): {e}")
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # Part 1: CISA Known Exploited Vulnerabilities (KEV)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @dataclass
 class KEVEntry:
@@ -254,9 +251,7 @@ def load_cisa_kev(force_refresh: bool = False, cache_path: Optional[str] = None)
     return CisaKevDB({}, catalog_version="unavailable")
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # Part 2: Sigma Rules (SigmaHQ community detection keywords)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @dataclass
 class SigmaRule:
@@ -541,9 +536,7 @@ def load_sigma_rules(force_refresh: bool = False, cache_path: Optional[str] = No
     return SigmaRuleDB([])
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # Part 3: Combined ThreatFeedDB facade
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class ThreatFeedDB:
     """
@@ -555,7 +548,6 @@ class ThreatFeedDB:
         self.kev   = kev
         self.sigma = sigma
 
-    # â”€â”€ KEV pass-throughs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def is_actively_exploited(self, cve_id: str) -> bool:
         return self.kev.is_actively_exploited(cve_id)
@@ -572,7 +564,6 @@ class ThreatFeedDB:
                 matches.append({"cve_id": cve, **details})
         return matches
 
-    # â”€â”€ Sigma pass-throughs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def get_bruteforce_keywords(self) -> List[str]:
         return self.sigma.get_ssh_bruteforce_keywords()
@@ -584,7 +575,6 @@ class ThreatFeedDB:
         return f"<ThreatFeedDB kev={self.kev} sigma={self.sigma}>"
 
 
-# â”€â”€ Module-level singletons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _GLOBAL_FEEDS: Optional[ThreatFeedDB] = None
 
 
@@ -630,7 +620,6 @@ def check_feeds_status() -> dict:
     now = datetime.datetime.now(datetime.timezone.utc)
     result = {}
 
-    # â”€â”€ CISA KEV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kev_path = _cache_path(CISA_CACHE_FILENAME)
     kev_info: dict = {"status": "missing", "age_hours": None, "entries": 0}
     if os.path.exists(kev_path):
@@ -651,7 +640,6 @@ def check_feeds_status() -> dict:
             kev_info = {"status": "corrupt", "error": str(e)}
     result["cisa_kev"] = kev_info
 
-    # â”€â”€ Sigma Rules â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     sigma_path = _cache_path(SIGMA_CACHE_FILENAME)
     sigma_info: dict = {"status": "missing", "age_days": None, "rules": 0}
     if os.path.exists(sigma_path):
@@ -671,7 +659,6 @@ def check_feeds_status() -> dict:
             sigma_info = {"status": "corrupt", "error": str(e)}
     result["sigma"] = sigma_info
 
-    # â”€â”€ MITRE ATT&CK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from production.enrichment.mitre_attack_loader import _cache_path as _mitre_cache_path, CACHE_FILENAME as _MITRE_CACHE_FILE
         mitre_path = _mitre_cache_path()
@@ -693,7 +680,6 @@ def check_feeds_status() -> dict:
     except Exception as _e:
         result["mitre"] = {"status": "unavailable", "error": str(_e)}
 
-    # â”€â”€ Summary line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kev_s   = f"KEV: {kev_info.get('entries', 0)} CVEs [{kev_info['status']}]"
     sigma_s = f"Sigma: {sigma_info.get('rules', 0)} rules [{sigma_info['status']}]"
     mitre_s = f"MITRE: {result['mitre'].get('techniques', 0)} techniques [{result['mitre']['status']}]"
@@ -793,7 +779,6 @@ def scan_history_for_new_kev(
     return hits
 
 
-# â”€â”€ CLI test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":
     import sys
     force = "--refresh" in sys.argv

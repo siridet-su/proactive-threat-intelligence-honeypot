@@ -1706,12 +1706,27 @@ def _report_recommendations(
         item for item in (merged.get("recommended_actions_structured") or [])
         if isinstance(item, dict)
     ]
+    canonical_recommendations = merged.get("recommendations") or {}
+    if not structured_actions and isinstance(canonical_recommendations, dict):
+        structured_actions = [
+            item for item in canonical_recommendations.get("operator_actions") or []
+            if isinstance(item, dict)
+        ]
     trusted_decision = merged.get("trusted_recommendation_decision") or {}
     if not structured_actions and isinstance(trusted_decision, dict):
         structured_actions = [
             item for item in (trusted_decision.get("immediate_actions") or [])
             if isinstance(item, dict)
         ]
+    policy_actions: List[Dict[str, Any]] = []
+    for item in structured_actions:
+        action_provenance = item.get("provenance")
+        if not isinstance(action_provenance, dict):
+            action_provenance = {}
+        authority = str(item.get("authority") or action_provenance.get("authority") or "").strip()
+        if item.get("approved_by_policy") is True and authority == "trusted_policy_engine":
+            policy_actions.append(item)
+    structured_actions = policy_actions
     provenance = merged.get("recommendation_provenance") or {}
     policy_authoritative = (
         isinstance(provenance, dict)

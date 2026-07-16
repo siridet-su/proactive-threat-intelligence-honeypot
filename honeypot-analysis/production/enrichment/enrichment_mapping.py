@@ -65,7 +65,6 @@ FIELD MAPPING (enrichment JSON key → IP object attribute):
 from typing import Any, Dict, List, Optional
 
 
-# ---------------------------------------------------------------------------
 # FIELD MAPPING TABLE  (v2)
 #
 # Format: json_key → (ip_attribute_name, default_value)
@@ -76,7 +75,6 @@ from typing import Any, Dict, List, Optional
 #   3. Bool defaults must be False, not None, so truthiness checks are safe.
 #   4. raw_otx_pulse and campaign_hint are SEPARATE. See module docstring.
 #   5. risk_score default is 0 — absence of reports ≠ safe. See [FIX-D].
-# ---------------------------------------------------------------------------
 _ENRICHMENT_FIELD_MAP: Dict[str, tuple] = {
     # ── OTX ──────────────────────────────────────────────────────────────────
     # IMPORTANT: raw_otx_pulse is stored verbatim for AI consumption as evidence.
@@ -154,12 +152,10 @@ _INFRASTRUCTURE_TAG_FIELDS = {"infrastructure_tags", "otx_tags", "abuse_tags",
                                "open_ports", "running_services", "abuseipdb_categories"}
 
 
-# ---------------------------------------------------------------------------
 # ABUSEIPDB CATEGORY DECODER
 # Source: https://www.abuseipdb.com/categories
 # Maps integer category code → human-readable label.
 # Used to convert raw 'categories' arrays from AbuseIPDB API to readable labels.
-# ---------------------------------------------------------------------------
 _ABUSEIPDB_CATEGORY_LABELS: Dict[int, str] = {
     1:  "DNS Compromise",
     2:  "DNS Poisoning",
@@ -484,37 +480,3 @@ def enrich_ioc_bundle(ioc_bundle: Any, enrichment_db: Dict[str, Dict]) -> Any:
               f"Consider adding Shodan enrichment for these IPs.")
 
     return ioc_bundle
-
-
-# ---------------------------------------------------------------------------
-# NOTEBOOK 1B CELL — DROP-IN REPLACEMENT (v2)
-# ---------------------------------------------------------------------------
-#
-# AFTER (v2, production import):
-#   import os
-#   from production.enrichment.enrichment_mapping import load_enrichment_db, enrich_ioc_bundle
-#
-#   # Optional: Support local file upload when running in Google Colab
-#   if globals().get('IN_COLAB', False):
-#       from google.colab import files
-#       print("Please upload your Enrichment DB JSON file (or cancel to use default):")
-#       try:
-#           uploaded = files.upload()
-#           if uploaded:
-#               ENRICHMENT_DB_PATH = list(uploaded.keys())[0]
-#               print(f"Using uploaded file: {ENRICHMENT_DB_PATH}")
-#       except Exception:
-#           print(f"Upload cancelled. Using default: {ENRICHMENT_DB_PATH}")
-#
-#   enrichment_db = load_enrichment_db(ENRICHMENT_DB_PATH)
-#   ioc_bundle    = enrich_ioc_bundle(ioc_bundle, enrichment_db)
-#
-#   # After this call:
-#   # - ip.raw_otx_pulse  → verbatim OTX pulse name (AI input evidence only)
-#   # - ip.campaign_hint  → None until AI synthesis step writes it
-#   # - ip.otx_tags       → structured tag list (drives strategic_controls)
-#   # - ip.infrastructure_tags → Shodan tags (drives sophistication scoring)
-#   # - ip.is_tor_exit    → bool (drives tradecraft assessment)
-#   # - ip.vt_hit         → bool (surfaces known malware families)
-#   # - ip.risk_score     → int  (corroborating signal only — NOT primary)
-# ---------------------------------------------------------------------------

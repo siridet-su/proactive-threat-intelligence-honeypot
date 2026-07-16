@@ -1,0 +1,1543 @@
+{
+  "evaluations": [
+    {
+      "data_sufficiency": {
+        "claim_scope": "comparison against classifier-derived external weak labels; not expert-ground-truth accuracy",
+        "metrics_are_descriptive_only": true,
+        "minimum_examples": 30,
+        "status": "sufficient_for_weak_label_comparative_reporting"
+      },
+      "heldout_cases": 291,
+      "identical_heldout_case_ids": [
+        "external-00f863a543931a54e2b48aec:276:persistence",
+        "external-00f863a543931a54e2b48aec:277:discovery",
+        "external-02e3267582c1ff4d6718f5ed:46:persistence",
+        "external-02e3267582c1ff4d6718f5ed:47:discovery",
+        "external-0ab795fff7c00357252bd78c:72:persistence",
+        "external-0ab795fff7c00357252bd78c:73:discovery",
+        "external-0c5dea9017ab024fc8d1881d:148:persistence",
+        "external-0c5dea9017ab024fc8d1881d:149:discovery",
+        "external-0e6a73f494cdf49a8331844b:74:discovery",
+        "external-0e6a73f494cdf49a8331844b:75:persistence",
+        "external-0e6a73f494cdf49a8331844b:76:discovery",
+        "external-0e6a73f494cdf49a8331844b:77:execution",
+        "external-0e6a73f494cdf49a8331844b:78:discovery",
+        "external-102c0d7a02af7ae07a2684ea:287:persistence",
+        "external-102c0d7a02af7ae07a2684ea:288:discovery",
+        "external-1206ab36600bbafb9ca29492:141:persistence",
+        "external-1206ab36600bbafb9ca29492:142:discovery",
+        "external-1232e849034cd1428b603748:104:persistence",
+        "external-1232e849034cd1428b603748:105:discovery",
+        "external-133540cfddb9fd3168cb56f3:122:persistence",
+        "external-133540cfddb9fd3168cb56f3:123:discovery",
+        "external-152ffe17212f3aa0b14de1ec:124:command-and-control",
+        "external-152ffe17212f3aa0b14de1ec:125:defense-evasion",
+        "external-15bb4bdae961efcd20a4b582:43:execution",
+        "external-194bea6f4bb1eebee10e7495:88:discovery",
+        "external-194bea6f4bb1eebee10e7495:89:persistence",
+        "external-194bea6f4bb1eebee10e7495:90:discovery",
+        "external-194bea6f4bb1eebee10e7495:91:execution",
+        "external-194bea6f4bb1eebee10e7495:92:discovery",
+        "external-1a9c67f05504178c355f0a2c:168:credential-access",
+        "external-1a9c67f05504178c355f0a2c:169:command-and-control",
+        "external-1a9c67f05504178c355f0a2c:170:defense-evasion",
+        "external-1d6ce666ed4ddb7a5024c3e9:241:persistence",
+        "external-1d6ce666ed4ddb7a5024c3e9:242:discovery",
+        "external-234d3d8929f28bc3a1fc8b45:150:persistence",
+        "external-234d3d8929f28bc3a1fc8b45:151:discovery",
+        "external-2443ae1807445aeb21b181ad:126:defense-evasion",
+        "external-24552e978880bd244293dc3e:34:persistence",
+        "external-24552e978880bd244293dc3e:35:discovery",
+        "external-25f7d16745fe490abd85f92b:6:credential-access",
+        "external-25f7d16745fe490abd85f92b:7:command-and-control",
+        "external-25f7d16745fe490abd85f92b:8:defense-evasion",
+        "external-2892a1d53479951f871dafe6:270:persistence",
+        "external-2892a1d53479951f871dafe6:271:discovery",
+        "external-2907ec34b8569e9e31eebbda:67:discovery",
+        "external-2907ec34b8569e9e31eebbda:68:persistence",
+        "external-2907ec34b8569e9e31eebbda:69:discovery",
+        "external-2907ec34b8569e9e31eebbda:70:execution",
+        "external-2907ec34b8569e9e31eebbda:71:discovery",
+        "external-290b7028cda3e7d351f69df2:48:persistence",
+        "external-290b7028cda3e7d351f69df2:49:discovery",
+        "external-2a734c10e0f848101c573a34:114:persistence",
+        "external-2a734c10e0f848101c573a34:115:discovery",
+        "external-2ae858c8cdd729de75486600:146:persistence",
+        "external-2ae858c8cdd729de75486600:147:discovery",
+        "external-2dd5927c2425b277d7ef66ed:79:persistence",
+        "external-2dd5927c2425b277d7ef66ed:80:discovery",
+        "external-38c0ba481922f62461006cc1:289:persistence",
+        "external-38c0ba481922f62461006cc1:290:discovery",
+        "external-3b1ae3f80eb2aec06fa44465:201:persistence",
+        "external-3b1ae3f80eb2aec06fa44465:202:discovery",
+        "external-3cbd81ea161e604b948d02e9:194:command-and-control",
+        "external-3dbce77bc26257f6230d329b:56:persistence",
+        "external-3dbce77bc26257f6230d329b:57:discovery",
+        "external-3f3ee84ffd0dae5a30952e95:191:command-and-control",
+        "external-40833342e7b6b6b6f5f76949:98:persistence",
+        "external-40833342e7b6b6b6f5f76949:99:discovery",
+        "external-408cf32415939648871e1bf2:20:credential-access",
+        "external-408cf32415939648871e1bf2:21:command-and-control",
+        "external-408cf32415939648871e1bf2:22:defense-evasion",
+        "external-419bf41f4e3b155d517c5b75:183:persistence",
+        "external-419bf41f4e3b155d517c5b75:184:discovery",
+        "external-44ea6db453cfb96f69a1f987:112:persistence",
+        "external-44ea6db453cfb96f69a1f987:113:discovery",
+        "external-450e9d2ffcae26433ab31535:203:persistence",
+        "external-450e9d2ffcae26433ab31535:204:discovery",
+        "external-458fd07bc8debbb4922949b9:83:discovery",
+        "external-458fd07bc8debbb4922949b9:84:persistence",
+        "external-458fd07bc8debbb4922949b9:85:discovery",
+        "external-458fd07bc8debbb4922949b9:86:execution",
+        "external-458fd07bc8debbb4922949b9:87:discovery",
+        "external-484cfcbd8210504bb6efa8c1:156:persistence",
+        "external-484cfcbd8210504bb6efa8c1:157:discovery",
+        "external-4b0824735bbd7e75ba02328f:158:persistence",
+        "external-4b0824735bbd7e75ba02328f:159:discovery",
+        "external-4dd9750522cb89ddd6a5680d:166:persistence",
+        "external-4dd9750522cb89ddd6a5680d:167:discovery",
+        "external-4ef8df69492faf7fb0895216:214:defense-evasion",
+        "external-5018cca3249088b74e24ddbc:282:persistence",
+        "external-5018cca3249088b74e24ddbc:283:discovery",
+        "external-51956937264a4b5a3fd4e1c9:281:defense-evasion",
+        "external-51fc5e353acfc194ef35c262:186:command-and-control",
+        "external-5231c35c6a40deca47ebc0b3:137:persistence",
+        "external-5231c35c6a40deca47ebc0b3:138:discovery",
+        "external-52380095170fc5a34d51dd27:274:persistence",
+        "external-52380095170fc5a34d51dd27:275:discovery",
+        "external-573ae301d885414647e5d9b5:3:credential-access",
+        "external-573ae301d885414647e5d9b5:4:command-and-control",
+        "external-573ae301d885414647e5d9b5:5:defense-evasion",
+        "external-582b3d46bd07c5a7f08bbb64:144:command-and-control",
+        "external-582b3d46bd07c5a7f08bbb64:145:execution",
+        "external-583560408543c8919fdd5b7b:187:command-and-control",
+        "external-61b1c951fabd4724fb62b9fb:108:persistence",
+        "external-61b1c951fabd4724fb62b9fb:109:discovery",
+        "external-63f17219cb771f70af767a77:38:discovery",
+        "external-63f17219cb771f70af767a77:39:persistence",
+        "external-63f17219cb771f70af767a77:40:discovery",
+        "external-63f17219cb771f70af767a77:41:execution",
+        "external-63f17219cb771f70af767a77:42:discovery",
+        "external-65b7fdcd202cd8a9f5166744:251:defense-evasion",
+        "external-65b7fdcd202cd8a9f5166744:252:execution",
+        "external-65b7fdcd202cd8a9f5166744:253:defense-evasion",
+        "external-67b87ccad5e31a76b171d0c2:222:credential-access",
+        "external-67b87ccad5e31a76b171d0c2:223:command-and-control",
+        "external-67b87ccad5e31a76b171d0c2:224:defense-evasion",
+        "external-689d70266792ed1d5e23e6cc:192:command-and-control",
+        "external-6ea375c29dee959677266e80:93:discovery",
+        "external-6ea375c29dee959677266e80:94:persistence",
+        "external-6ea375c29dee959677266e80:95:discovery",
+        "external-6ea375c29dee959677266e80:96:execution",
+        "external-6ea375c29dee959677266e80:97:discovery",
+        "external-7057ba5faba99ece6ae73319:65:persistence",
+        "external-7057ba5faba99ece6ae73319:66:discovery",
+        "external-707b3b3eeef3f76804781f41:260:persistence",
+        "external-707b3b3eeef3f76804781f41:261:discovery",
+        "external-759b7b8d294ff3ed44e0b845:284:command-and-control",
+        "external-759b7b8d294ff3ed44e0b845:285:defense-evasion",
+        "external-759b7b8d294ff3ed44e0b845:286:execution",
+        "external-77482a0a97c27b9d25b922a3:116:persistence",
+        "external-77482a0a97c27b9d25b922a3:117:discovery",
+        "external-790a44da84bf629567b0a36a:154:persistence",
+        "external-790a44da84bf629567b0a36a:155:discovery",
+        "external-7d013f188bb8642e333f1eba:177:persistence",
+        "external-7d013f188bb8642e333f1eba:178:discovery",
+        "external-7e7e70a58b673e8a552b7c42:225:credential-access",
+        "external-7e7e70a58b673e8a552b7c42:226:command-and-control",
+        "external-7e7e70a58b673e8a552b7c42:227:defense-evasion",
+        "external-810b160da8f07e9e2bbf138f:209:persistence",
+        "external-810b160da8f07e9e2bbf138f:210:discovery",
+        "external-832d631677fa4ff29a91d158:188:command-and-control",
+        "external-83a1fc2eadb5bfaff1207586:264:command-and-control",
+        "external-83a1fc2eadb5bfaff1207586:265:defense-evasion",
+        "external-84254d5bae616564e9621e94:102:persistence",
+        "external-84254d5bae616564e9621e94:103:discovery",
+        "external-85d43e117b0e7832cb45f6dc:110:persistence",
+        "external-85d43e117b0e7832cb45f6dc:111:discovery",
+        "external-87d5f540144f1c3810b6198a:54:persistence",
+        "external-87d5f540144f1c3810b6198a:55:discovery",
+        "external-87f90c73fe1052a86a8d08a2:152:command-and-control",
+        "external-87f90c73fe1052a86a8d08a2:153:defense-evasion",
+        "external-8a13f7a4755e3d36eb3359a2:189:command-and-control",
+        "external-8e930618bae937ae1cffe1a9:135:persistence",
+        "external-8e930618bae937ae1cffe1a9:136:discovery",
+        "external-8eb7bfd5cbdd73478c2deaf4:129:persistence",
+        "external-8eb7bfd5cbdd73478c2deaf4:130:discovery",
+        "external-9348899498296ac68e6772e2:243:persistence",
+        "external-9348899498296ac68e6772e2:244:discovery",
+        "external-94c5a4dfed851d30355c7cc4:100:command-and-control",
+        "external-94c5a4dfed851d30355c7cc4:101:defense-evasion",
+        "external-94e8e9489d8d919f352b2058:81:persistence",
+        "external-94e8e9489d8d919f352b2058:82:discovery",
+        "external-951bad1ff16d04dd871777cb:25:discovery",
+        "external-951bad1ff16d04dd871777cb:26:execution",
+        "external-951bad1ff16d04dd871777cb:27:discovery",
+        "external-9882a7d17c1b998ed898f2fa:185:command-and-control",
+        "external-9990ef414497fafb7cb1977a:278:defense-evasion",
+        "external-9990ef414497fafb7cb1977a:279:command-and-control",
+        "external-99a85aac73b96e1e58ee6834:237:persistence",
+        "external-99a85aac73b96e1e58ee6834:238:discovery",
+        "external-9d95878d4b8e207272d9edd0:249:persistence",
+        "external-9d95878d4b8e207272d9edd0:250:discovery",
+        "external-9e3aa6f23c778e3ebbce39b9:196:command-and-control",
+        "external-9e77ca0591dc7ce86115b729:193:command-and-control",
+        "external-9f0e5b24ce08eb20ba6b531f:44:persistence",
+        "external-9f0e5b24ce08eb20ba6b531f:45:discovery",
+        "external-a11e689067c1642852bdf987:219:credential-access",
+        "external-a11e689067c1642852bdf987:220:command-and-control",
+        "external-a11e689067c1642852bdf987:221:defense-evasion",
+        "external-a3e4fa9c5759a01d8aef49d8:181:persistence",
+        "external-a3e4fa9c5759a01d8aef49d8:182:discovery",
+        "external-a454c4dbbb982680d497782c:1:persistence",
+        "external-a454c4dbbb982680d497782c:2:discovery",
+        "external-a5176846e57cc9b257af00b0:217:persistence",
+        "external-a5176846e57cc9b257af00b0:218:discovery",
+        "external-a538e165e22f84ecc636745a:230:credential-access",
+        "external-a538e165e22f84ecc636745a:231:command-and-control",
+        "external-a538e165e22f84ecc636745a:232:defense-evasion",
+        "external-a62f4d872318c31b7c8f17ed:174:credential-access",
+        "external-a62f4d872318c31b7c8f17ed:175:command-and-control",
+        "external-a62f4d872318c31b7c8f17ed:176:defense-evasion",
+        "external-a6da84f9043459f8b09ebaf0:23:persistence",
+        "external-a6da84f9043459f8b09ebaf0:24:discovery",
+        "external-a8cd51e878a0356854e878a4:233:persistence",
+        "external-a8cd51e878a0356854e878a4:234:discovery",
+        "external-a92ff3dbbe73c32ada9e201e:10:command-and-control",
+        "external-a92ff3dbbe73c32ada9e201e:11:defense-evasion",
+        "external-a92ff3dbbe73c32ada9e201e:9:credential-access",
+        "external-a99937861d4457476b2230bf:268:persistence",
+        "external-a99937861d4457476b2230bf:269:discovery",
+        "external-acc58aa393174186368c7445:36:persistence",
+        "external-acc58aa393174186368c7445:37:discovery",
+        "external-af531e4f2c0d1cbb9c19e5b1:256:persistence",
+        "external-af531e4f2c0d1cbb9c19e5b1:257:discovery",
+        "external-b2dd7491984d5b64b53df0ad:17:credential-access",
+        "external-b2dd7491984d5b64b53df0ad:18:command-and-control",
+        "external-b2dd7491984d5b64b53df0ad:19:defense-evasion",
+        "external-b3a9659d0e7926884f604f44:179:persistence",
+        "external-b3a9659d0e7926884f604f44:180:discovery",
+        "external-b447849ab596e3a19bd5db11:211:persistence",
+        "external-b447849ab596e3a19bd5db11:212:discovery",
+        "external-b64708bf1e8bccc4f8789d3c:118:persistence",
+        "external-b64708bf1e8bccc4f8789d3c:119:discovery",
+        "external-b77a3c4d6870fb9c47bf647e:197:command-and-control",
+        "external-b962f12ceac532af454bc2fa:0:execution",
+        "external-b9a0daa95cf3b8f00106da50:143:defense-evasion",
+        "external-ba4d5dc5b40b8d03e189eca1:106:persistence",
+        "external-ba4d5dc5b40b8d03e189eca1:107:discovery",
+        "external-babc0182cf830cdd4cd33d16:207:command-and-control",
+        "external-babc0182cf830cdd4cd33d16:208:defense-evasion",
+        "external-bc0eaf53ab9dc79efbf82e73:133:persistence",
+        "external-bc0eaf53ab9dc79efbf82e73:134:discovery",
+        "external-be1b269ae6e0584009ce34eb:52:persistence",
+        "external-be1b269ae6e0584009ce34eb:53:discovery",
+        "external-bf5c1695cf8bd5f0ef7d5a35:160:credential-access",
+        "external-bf5c1695cf8bd5f0ef7d5a35:161:command-and-control",
+        "external-bf5c1695cf8bd5f0ef7d5a35:162:defense-evasion",
+        "external-c006e80299f74a6dd8565dac:131:persistence",
+        "external-c006e80299f74a6dd8565dac:132:discovery",
+        "external-c6d553a203f8f37d6e190ca3:235:persistence",
+        "external-c6d553a203f8f37d6e190ca3:236:discovery",
+        "external-c6d9de86a2cbe24dc95dd30e:163:credential-access",
+        "external-c6d9de86a2cbe24dc95dd30e:164:command-and-control",
+        "external-c6d9de86a2cbe24dc95dd30e:165:defense-evasion",
+        "external-c78ce867d25e913b31374dc5:258:persistence",
+        "external-c78ce867d25e913b31374dc5:259:discovery",
+        "external-d2ba1b2aef1d4dfd5999affd:171:credential-access",
+        "external-d2ba1b2aef1d4dfd5999affd:172:command-and-control",
+        "external-d2ba1b2aef1d4dfd5999affd:173:defense-evasion",
+        "external-d69e9a5c2a5d861b924f8bb2:33:execution",
+        "external-de2efa0c0cf4c34091040918:254:persistence",
+        "external-de2efa0c0cf4c34091040918:255:discovery",
+        "external-de67974deb8d69594a42fb18:262:persistence",
+        "external-de67974deb8d69594a42fb18:263:discovery",
+        "external-e0b545fabb3ece5f0c9354e3:190:command-and-control",
+        "external-e1621571d94542e4b42e0be3:245:persistence",
+        "external-e1621571d94542e4b42e0be3:246:discovery",
+        "external-e18b207c21b71425ec6a63c0:205:command-and-control",
+        "external-e18b207c21b71425ec6a63c0:206:execution",
+        "external-e18d962d1aa377183ce04f11:58:discovery",
+        "external-e18d962d1aa377183ce04f11:59:persistence",
+        "external-e18d962d1aa377183ce04f11:60:discovery",
+        "external-e18d962d1aa377183ce04f11:61:execution",
+        "external-e18d962d1aa377183ce04f11:62:discovery",
+        "external-e5b1eabc322c04407bed3190:280:execution",
+        "external-e70cf786934cd9cc2117931d:239:persistence",
+        "external-e70cf786934cd9cc2117931d:240:discovery",
+        "external-e7730c5c0e21cc83a99845ba:213:defense-evasion",
+        "external-ef61f3cf5132a91b14d30f6e:50:command-and-control",
+        "external-ef61f3cf5132a91b14d30f6e:51:defense-evasion",
+        "external-ef67d75bca9bd61f29ea8263:139:persistence",
+        "external-ef67d75bca9bd61f29ea8263:140:discovery",
+        "external-f02ba4c0f70a0215455d5a78:215:persistence",
+        "external-f02ba4c0f70a0215455d5a78:216:discovery",
+        "external-f0853e8ed0a896835c249168:272:persistence",
+        "external-f0853e8ed0a896835c249168:273:discovery",
+        "external-f243201c5b88d1da31689ed6:195:command-and-control",
+        "external-f62d1580a8000c75ff2ed741:28:discovery",
+        "external-f62d1580a8000c75ff2ed741:29:persistence",
+        "external-f62d1580a8000c75ff2ed741:30:discovery",
+        "external-f62d1580a8000c75ff2ed741:31:execution",
+        "external-f62d1580a8000c75ff2ed741:32:discovery",
+        "external-f813c5a5bedd2a58ada69b26:12:discovery",
+        "external-f813c5a5bedd2a58ada69b26:13:persistence",
+        "external-f813c5a5bedd2a58ada69b26:14:discovery",
+        "external-f813c5a5bedd2a58ada69b26:15:execution",
+        "external-f813c5a5bedd2a58ada69b26:16:discovery",
+        "external-f9c6f5d76eeef7d59b16e8cc:247:persistence",
+        "external-f9c6f5d76eeef7d59b16e8cc:248:discovery",
+        "external-fa2d528f97d8ba3a81d1ef6f:63:persistence",
+        "external-fa2d528f97d8ba3a81d1ef6f:64:discovery",
+        "external-fc46dedabf26935e05d1df33:266:persistence",
+        "external-fc46dedabf26935e05d1df33:267:discovery",
+        "external-fce3497d4295a2724cec9cdf:120:persistence",
+        "external-fce3497d4295a2724cec9cdf:121:discovery",
+        "external-fe21809ab0ee07cebeef04ec:228:persistence",
+        "external-fe21809ab0ee07cebeef04ec:229:discovery",
+        "external-fe4c41d85517d237b1b2c8df:198:credential-access",
+        "external-fe4c41d85517d237b1b2c8df:199:command-and-control",
+        "external-fe4c41d85517d237b1b2c8df:200:defense-evasion",
+        "external-fe5efda6d7811d08819df62b:127:persistence",
+        "external-fe5efda6d7811d08819df62b:128:discovery"
+      ],
+      "kappa_selection": {
+        "calibration_cases": 0,
+        "grid": [
+          1.0,
+          2.0,
+          5.0,
+          10.0,
+          20.0,
+          50.0,
+          100.0,
+          200.0,
+          500.0
+        ],
+        "selected_kappa": null,
+        "status": "insufficient_local_calibration_data"
+      },
+      "reason": "",
+      "rows": [
+        {
+          "abstention_support": "no; predicts when training targets exist",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "training-set next-tactic prevalence only",
+          "limitation": "ignores all sequential context",
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.360825,
+            "bootstrap_95ci_by_session": {
+              "brier_score": [
+                0.714507,
+                0.786762
+              ],
+              "coverage": [
+                1.0,
+                1.0
+              ],
+              "mean_reciprocal_rank": [
+                0.557602,
+                0.63615
+              ],
+              "selective_top1_accuracy": [
+                0.313993,
+                0.408228
+              ],
+              "top1_accuracy": [
+                0.313993,
+                0.408228
+              ]
+            },
+            "brier_score": 0.750603,
+            "coverage": 1.0,
+            "covered_examples": 291,
+            "evaluated_examples": 291,
+            "mean_reciprocal_rank": 0.596793,
+            "per_tactic": {
+              "command-and-control": {
+                "enough_support": true,
+                "support": 38,
+                "top1_accuracy": 0.0
+              },
+              "credential-access": {
+                "enough_support": true,
+                "support": 15,
+                "top1_accuracy": 0.0
+              },
+              "defense-evasion": {
+                "enough_support": true,
+                "support": 30,
+                "top1_accuracy": 0.0
+              },
+              "discovery": {
+                "enough_support": true,
+                "support": 105,
+                "top1_accuracy": 1.0
+              },
+              "execution": {
+                "enough_support": true,
+                "support": 18,
+                "top1_accuracy": 0.0
+              },
+              "persistence": {
+                "enough_support": true,
+                "support": 85,
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.360825,
+            "top1_accuracy": 0.360825,
+            "top3_accuracy_secondary": 0.783505
+          },
+          "model": "Zero-order categorical / Majority Class Classifier",
+          "model_id": "majority_class",
+          "model_metadata": {
+            "training_next_tactic_counts": {
+              "command-and-control": 201,
+              "credential-access": 85,
+              "defense-evasion": 160,
+              "discovery": 565,
+              "execution": 74,
+              "persistence": 464
+            }
+          },
+          "output": "fixed categorical next-tactic distribution",
+          "reason": "",
+          "role": "sanity baseline",
+          "scope": "external",
+          "status": "evaluated"
+        },
+        {
+          "abstention_support": "yes; unseen last-tactic context",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "last trusted tactic",
+          "limitation": "cannot use longer tactic history or external/local shrinkage",
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.783505,
+            "bootstrap_95ci_by_session": {
+              "brier_score": [
+                0.239602,
+                0.35408
+              ],
+              "coverage": [
+                1.0,
+                1.0
+              ],
+              "mean_reciprocal_rank": [
+                0.831887,
+                0.901858
+              ],
+              "selective_top1_accuracy": [
+                0.726351,
+                0.838488
+              ],
+              "top1_accuracy": [
+                0.726351,
+                0.838488
+              ]
+            },
+            "brier_score": 0.294468,
+            "coverage": 1.0,
+            "covered_examples": 291,
+            "evaluated_examples": 291,
+            "mean_reciprocal_rank": 0.867698,
+            "per_tactic": {
+              "command-and-control": {
+                "enough_support": true,
+                "support": 38,
+                "top1_accuracy": 0.447368
+              },
+              "credential-access": {
+                "enough_support": true,
+                "support": 15,
+                "top1_accuracy": 1.0
+              },
+              "defense-evasion": {
+                "enough_support": true,
+                "support": 30,
+                "top1_accuracy": 0.766667
+              },
+              "discovery": {
+                "enough_support": true,
+                "support": 105,
+                "top1_accuracy": 0.904762
+              },
+              "execution": {
+                "enough_support": true,
+                "support": 18,
+                "top1_accuracy": 0.111111
+              },
+              "persistence": {
+                "enough_support": true,
+                "support": 85,
+                "top1_accuracy": 0.894118
+              }
+            },
+            "selective_top1_accuracy": 0.783505,
+            "top1_accuracy": 0.783505,
+            "top3_accuracy_secondary": 0.945017
+          },
+          "model": "First-order Markov Chain (maximum likelihood)",
+          "model_id": "first_order_markov",
+          "model_metadata": {
+            "transition_model": {
+              "completed_sessions": 51884,
+              "prefix_transition_count": 1053.0,
+              "technique_transition_count": 2023.0,
+              "transition_count": 1549.0,
+              "usable_sessions": 51884
+            }
+          },
+          "output": "P(next tactic | last tactic)",
+          "reason": "",
+          "role": "simple sequence baseline",
+          "scope": "external",
+          "status": "evaluated"
+        },
+        {
+          "abstention_support": "operationally replaced by fixed fallback",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "tactic suffix up to 3, then technique, then last tactic",
+          "limitation": "hard source switching and heuristic fallback",
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.80756,
+            "bootstrap_95ci_by_session": {
+              "brier_score": [
+                0.180772,
+                0.275178
+              ],
+              "coverage": [
+                1.0,
+                1.0
+              ],
+              "mean_reciprocal_rank": [
+                0.87,
+                0.914655
+              ],
+              "selective_top1_accuracy": [
+                0.769231,
+                0.845018
+              ],
+              "top1_accuracy": [
+                0.769231,
+                0.845018
+              ]
+            },
+            "brier_score": 0.227558,
+            "coverage": 1.0,
+            "covered_examples": 291,
+            "evaluated_examples": 291,
+            "mean_reciprocal_rank": 0.892039,
+            "per_tactic": {
+              "command-and-control": {
+                "enough_support": true,
+                "support": 38,
+                "top1_accuracy": 0.473684
+              },
+              "credential-access": {
+                "enough_support": true,
+                "support": 15,
+                "top1_accuracy": 0.0
+              },
+              "defense-evasion": {
+                "enough_support": true,
+                "support": 30,
+                "top1_accuracy": 0.8
+              },
+              "discovery": {
+                "enough_support": true,
+                "support": 105,
+                "top1_accuracy": 1.0
+              },
+              "execution": {
+                "enough_support": true,
+                "support": 18,
+                "top1_accuracy": 0.666667
+              },
+              "persistence": {
+                "enough_support": true,
+                "support": 85,
+                "top1_accuracy": 0.894118
+              }
+            },
+            "selective_top1_accuracy": 0.80756,
+            "top1_accuracy": 0.80756,
+            "top3_accuracy_secondary": 0.996564
+          },
+          "model": "Current Hard-backoff Variable-order Markov Model",
+          "model_id": "current_hard_backoff",
+          "model_metadata": {
+            "prediction_mode": "primary_transition_with_fallback"
+          },
+          "output": "current runtime ranking from one selected source",
+          "reason": "",
+          "role": "incumbent baseline",
+          "scope": "external",
+          "status": "evaluated"
+        },
+        {
+          "abstention_support": "yes; no context meeting raw support threshold",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "trusted tactic suffix up to 3, technique, then last tactic",
+          "limitation": "local posterior updating requires clean local calibration data",
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.80756,
+            "bootstrap_95ci_by_session": {
+              "brier_score": [
+                0.182831,
+                0.275427
+              ],
+              "coverage": [
+                1.0,
+                1.0
+              ],
+              "mean_reciprocal_rank": [
+                0.868566,
+                0.912582
+              ],
+              "selective_top1_accuracy": [
+                0.771626,
+                0.843137
+              ],
+              "top1_accuracy": [
+                0.771626,
+                0.843137
+              ]
+            },
+            "brier_score": 0.227593,
+            "coverage": 1.0,
+            "covered_examples": 291,
+            "evaluated_examples": 291,
+            "mean_reciprocal_rank": 0.892039,
+            "per_tactic": {
+              "command-and-control": {
+                "enough_support": true,
+                "support": 38,
+                "top1_accuracy": 0.473684
+              },
+              "credential-access": {
+                "enough_support": true,
+                "support": 15,
+                "top1_accuracy": 0.0
+              },
+              "defense-evasion": {
+                "enough_support": true,
+                "support": 30,
+                "top1_accuracy": 0.8
+              },
+              "discovery": {
+                "enough_support": true,
+                "support": 105,
+                "top1_accuracy": 1.0
+              },
+              "execution": {
+                "enough_support": true,
+                "support": 18,
+                "top1_accuracy": 0.666667
+              },
+              "persistence": {
+                "enough_support": true,
+                "support": 85,
+                "top1_accuracy": 0.894118
+              }
+            },
+            "selective_top1_accuracy": 0.80756,
+            "top1_accuracy": 0.80756,
+            "top3_accuracy_secondary": 0.996564
+          },
+          "model": "Empirical-Bayes / Dirichlet-smoothed Variable-order Markov Model",
+          "model_id": "empirical_bayes_vomm",
+          "model_metadata": {
+            "alpha": 0.05,
+            "evaluation_mode": "external_prior_only",
+            "kappa_selection": {
+              "calibration_cases": 0,
+              "grid": [
+                1.0,
+                2.0,
+                5.0,
+                10.0,
+                20.0,
+                50.0,
+                100.0,
+                200.0,
+                500.0
+              ],
+              "selected_kappa": null,
+              "status": "insufficient_local_calibration_data"
+            },
+            "local_update_validated": false
+          },
+          "output": "posterior predictive next-tactic distribution",
+          "reason": "",
+          "role": "proposed model",
+          "scope": "external",
+          "status": "evaluated"
+        },
+        {
+          "abstention_support": "limited; normally forces a suggestion",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "last trusted tactic",
+          "limitation": "developer-defined heuristic, not a fitted probability model",
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.085911,
+            "bootstrap_95ci_by_session": {
+              "brier_score": [
+                1.30561,
+                1.359189
+              ],
+              "coverage": [
+                1.0,
+                1.0
+              ],
+              "mean_reciprocal_rank": [
+                0.060071,
+                0.112211
+              ],
+              "selective_top1_accuracy": [
+                0.058621,
+                0.110063
+              ],
+              "top1_accuracy": [
+                0.058621,
+                0.110063
+              ]
+            },
+            "brier_score": 1.330777,
+            "coverage": 1.0,
+            "covered_examples": 291,
+            "evaluated_examples": 291,
+            "mean_reciprocal_rank": 0.087629,
+            "per_tactic": {
+              "command-and-control": {
+                "enough_support": true,
+                "support": 38,
+                "top1_accuracy": 0.0
+              },
+              "credential-access": {
+                "enough_support": true,
+                "support": 15,
+                "top1_accuracy": 1.0
+              },
+              "defense-evasion": {
+                "enough_support": true,
+                "support": 30,
+                "top1_accuracy": 0.0
+              },
+              "discovery": {
+                "enough_support": true,
+                "support": 105,
+                "top1_accuracy": 0.095238
+              },
+              "execution": {
+                "enough_support": true,
+                "support": 18,
+                "top1_accuracy": 0.0
+              },
+              "persistence": {
+                "enough_support": true,
+                "support": 85,
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.085911,
+            "top1_accuracy": 0.085911,
+            "top3_accuracy_secondary": 0.089347
+          },
+          "model": "Fixed Progression Fallback",
+          "model_id": "fallback_progression",
+          "model_metadata": {
+            "source_type": "heuristic_prior"
+          },
+          "output": "policy-defined ranked tactic suggestions",
+          "reason": "",
+          "role": "ablation only",
+          "scope": "external",
+          "status": "evaluated"
+        },
+        {
+          "abstention_support": "yes; unsupported external context",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "trusted tactic/technique context",
+          "limitation": "external corpus is weak-labeled SSH/Telnet and may shift by deployment",
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.80756,
+            "bootstrap_95ci_by_session": {
+              "brier_score": [
+                0.180822,
+                0.279132
+              ],
+              "coverage": [
+                1.0,
+                1.0
+              ],
+              "mean_reciprocal_rank": [
+                0.86859,
+                0.914605
+              ],
+              "selective_top1_accuracy": [
+                0.768421,
+                0.846154
+              ],
+              "top1_accuracy": [
+                0.768421,
+                0.846154
+              ]
+            },
+            "brier_score": 0.227558,
+            "coverage": 1.0,
+            "covered_examples": 291,
+            "evaluated_examples": 291,
+            "mean_reciprocal_rank": 0.892039,
+            "per_tactic": {
+              "command-and-control": {
+                "enough_support": true,
+                "support": 38,
+                "top1_accuracy": 0.473684
+              },
+              "credential-access": {
+                "enough_support": true,
+                "support": 15,
+                "top1_accuracy": 0.0
+              },
+              "defense-evasion": {
+                "enough_support": true,
+                "support": 30,
+                "top1_accuracy": 0.8
+              },
+              "discovery": {
+                "enough_support": true,
+                "support": 105,
+                "top1_accuracy": 1.0
+              },
+              "execution": {
+                "enough_support": true,
+                "support": 18,
+                "top1_accuracy": 0.666667
+              },
+              "persistence": {
+                "enough_support": true,
+                "support": 85,
+                "top1_accuracy": 0.894118
+              }
+            },
+            "selective_top1_accuracy": 0.80756,
+            "top1_accuracy": 0.80756,
+            "top3_accuracy_secondary": 0.996564
+          },
+          "model": "External-only Variable-order Transition Model",
+          "model_id": "external_only",
+          "model_metadata": {
+            "prediction_mode": "primary_transition_with_fallback"
+          },
+          "output": "external Cowrie transition ranking",
+          "reason": "",
+          "role": "source ablation",
+          "scope": "external",
+          "status": "evaluated"
+        },
+        {
+          "abstention_support": "yes; insufficient or unsupported local context",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "trusted tactic/technique context",
+          "limitation": "public package does not retain enough local held-out evidence",
+          "metrics": null,
+          "model": "Local-only Variable-order Transition Model",
+          "model_id": "local_only",
+          "model_metadata": {},
+          "output": "deployment-local transition ranking",
+          "reason": "local-only is not a valid source ablation for the external-corpus scope",
+          "role": "source ablation",
+          "scope": "external",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "not enabled without a calibrated threshold",
+          "data_used": "privacy-minimized external Cowrie SSH/Telnet mixed weak-label sessions",
+          "input_context": "one-hot tactic/technique suffix features and sequence length",
+          "limitation": "optional dependency and weak-label/class-imbalance overfitting risk",
+          "metrics": null,
+          "model": "L2-regularized Multinomial Logistic Regression",
+          "model_id": "multinomial_logistic_regression",
+          "model_metadata": {},
+          "output": "softmax next-tactic distribution",
+          "reason": "scikit-learn is not installed; optional baseline skipped",
+          "role": "optional classical ML baseline",
+          "scope": "external",
+          "status": "skipped"
+        }
+      ],
+      "scope": "external",
+      "split": {
+        "calibration": 126,
+        "test": 134,
+        "train": 51758
+      },
+      "split_method": "preassigned_whole_session_split",
+      "status": "evaluated",
+      "training_model_summaries": {
+        "external": {
+          "completed_sessions": 51884,
+          "prefix_transition_count": 1053.0,
+          "technique_transition_count": 2023.0,
+          "transition_count": 1549.0,
+          "usable_sessions": 51884
+        },
+        "local": {
+          "completed_sessions": 0,
+          "prefix_transition_count": 0.0,
+          "technique_transition_count": 0.0,
+          "transition_count": 0.0,
+          "usable_sessions": 0
+        }
+      },
+      "vocabulary": [
+        "command-and-control",
+        "credential-access",
+        "defense-evasion",
+        "discovery",
+        "execution",
+        "persistence"
+      ]
+    },
+    {
+      "heldout_cases": 0,
+      "reason": "no session-level payload input was supplied",
+      "rows": [
+        {
+          "abstention_support": "no; predicts when training targets exist",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "training-set next-tactic prevalence only",
+          "limitation": "ignores all sequential context",
+          "metrics": null,
+          "model": "Zero-order categorical / Majority Class Classifier",
+          "model_id": "majority_class",
+          "model_metadata": {},
+          "output": "fixed categorical next-tactic distribution",
+          "reason": "no held-out session cases available",
+          "role": "sanity baseline",
+          "scope": "local",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "yes; unseen last-tactic context",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "last trusted tactic",
+          "limitation": "cannot use longer tactic history or external/local shrinkage",
+          "metrics": null,
+          "model": "First-order Markov Chain (maximum likelihood)",
+          "model_id": "first_order_markov",
+          "model_metadata": {},
+          "output": "P(next tactic | last tactic)",
+          "reason": "no held-out session cases available",
+          "role": "simple sequence baseline",
+          "scope": "local",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "operationally replaced by fixed fallback",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "tactic suffix up to 3, then technique, then last tactic",
+          "limitation": "hard source switching and heuristic fallback",
+          "metrics": null,
+          "model": "Current Hard-backoff Variable-order Markov Model",
+          "model_id": "current_hard_backoff",
+          "model_metadata": {},
+          "output": "current runtime ranking from one selected source",
+          "reason": "no held-out session cases available",
+          "role": "incumbent baseline",
+          "scope": "local",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "yes; no context meeting raw support threshold",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "trusted tactic suffix up to 3, technique, then last tactic",
+          "limitation": "local posterior updating requires clean local calibration data",
+          "metrics": null,
+          "model": "Empirical-Bayes / Dirichlet-smoothed Variable-order Markov Model",
+          "model_id": "empirical_bayes_vomm",
+          "model_metadata": {},
+          "output": "posterior predictive next-tactic distribution",
+          "reason": "no held-out session cases available",
+          "role": "proposed model",
+          "scope": "local",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "limited; normally forces a suggestion",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "last trusted tactic",
+          "limitation": "developer-defined heuristic, not a fitted probability model",
+          "metrics": null,
+          "model": "Fixed Progression Fallback",
+          "model_id": "fallback_progression",
+          "model_metadata": {},
+          "output": "policy-defined ranked tactic suggestions",
+          "reason": "no held-out session cases available",
+          "role": "ablation only",
+          "scope": "local",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "yes; unsupported external context",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "trusted tactic/technique context",
+          "limitation": "external corpus is weak-labeled SSH/Telnet and may shift by deployment",
+          "metrics": null,
+          "model": "External-only Variable-order Transition Model",
+          "model_id": "external_only",
+          "model_metadata": {},
+          "output": "external Cowrie transition ranking",
+          "reason": "no held-out session cases available",
+          "role": "source ablation",
+          "scope": "local",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "yes; insufficient or unsupported local context",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "trusted tactic/technique context",
+          "limitation": "public package does not retain enough local held-out evidence",
+          "metrics": null,
+          "model": "Local-only Variable-order Transition Model",
+          "model_id": "local_only",
+          "model_metadata": {},
+          "output": "deployment-local transition ranking",
+          "reason": "no held-out session cases available",
+          "role": "source ablation",
+          "scope": "local",
+          "status": "skipped"
+        },
+        {
+          "abstention_support": "not enabled without a calibrated threshold",
+          "data_used": "local session payloads unavailable in public package",
+          "input_context": "one-hot tactic/technique suffix features and sequence length",
+          "limitation": "optional dependency and weak-label/class-imbalance overfitting risk",
+          "metrics": null,
+          "model": "L2-regularized Multinomial Logistic Regression",
+          "model_id": "multinomial_logistic_regression",
+          "model_metadata": {},
+          "output": "softmax next-tactic distribution",
+          "reason": "no held-out session cases available",
+          "role": "optional classical ML baseline",
+          "scope": "local",
+          "status": "skipped"
+        }
+      ],
+      "scope": "local",
+      "split": {
+        "calibration": 0,
+        "test": 0,
+        "train": 0
+      },
+      "status": "not_evaluated"
+    }
+  ],
+  "generated_at": "2026-07-14T12:11:05.795778+00:00",
+  "historical_external_evidence": {
+    "available": true,
+    "comparisons": {
+      "external_seed_transition_only": {
+        "accuracy_by_tactic": {
+          "command-and-control": {
+            "brier_score": 0.677516,
+            "cases": 38,
+            "coverage": 1.0,
+            "top1_accuracy": 0.4474,
+            "top3_accuracy": 1.0
+          },
+          "credential-access": {
+            "brier_score": 1.012644,
+            "cases": 15,
+            "coverage": 1.0,
+            "top1_accuracy": 0.0,
+            "top3_accuracy": 1.0
+          },
+          "defense-evasion": {
+            "brier_score": 0.319478,
+            "cases": 30,
+            "coverage": 1.0,
+            "top1_accuracy": 0.8,
+            "top3_accuracy": 1.0
+          },
+          "discovery": {
+            "brier_score": 0.0,
+            "cases": 105,
+            "coverage": 1.0,
+            "top1_accuracy": 1.0,
+            "top3_accuracy": 1.0
+          },
+          "execution": {
+            "brier_score": 0.527763,
+            "cases": 18,
+            "coverage": 1.0,
+            "top1_accuracy": 0.6667,
+            "top3_accuracy": 0.9444
+          },
+          "persistence": {
+            "brier_score": 0.092178,
+            "cases": 85,
+            "coverage": 1.0,
+            "top1_accuracy": 0.8941,
+            "top3_accuracy": 1.0
+          }
+        },
+        "brier_score": 0.233177,
+        "coverage": 1.0,
+        "mean_reciprocal_rank": 0.8903,
+        "predicted_cases": 291,
+        "top1_accuracy": 0.8041,
+        "top3_accuracy": 0.9966,
+        "total_cases": 291
+      },
+      "fallback_progression_only": {
+        "accuracy_by_tactic": {
+          "command-and-control": {
+            "brier_score": 1.399211,
+            "cases": 38,
+            "coverage": 1.0,
+            "top1_accuracy": 0.0,
+            "top3_accuracy": 0.0263
+          },
+          "credential-access": {
+            "brier_score": 0.315,
+            "cases": 15,
+            "coverage": 1.0,
+            "top1_accuracy": 1.0,
+            "top3_accuracy": 1.0
+          },
+          "defense-evasion": {
+            "brier_score": 1.513327,
+            "cases": 30,
+            "coverage": 1.0,
+            "top1_accuracy": 0.0,
+            "top3_accuracy": 0.0
+          },
+          "discovery": {
+            "brier_score": 1.310238,
+            "cases": 105,
+            "coverage": 1.0,
+            "top1_accuracy": 0.0952,
+            "top3_accuracy": 0.0952
+          },
+          "execution": {
+            "brier_score": 1.450626,
+            "cases": 18,
+            "coverage": 1.0,
+            "top1_accuracy": 0.0,
+            "top3_accuracy": 0.0
+          },
+          "persistence": {
+            "brier_score": 1.415,
+            "cases": 85,
+            "coverage": 1.0,
+            "top1_accuracy": 0.0,
+            "top3_accuracy": 0.0
+          }
+        },
+        "brier_score": 1.330777,
+        "coverage": 1.0,
+        "mean_reciprocal_rank": 0.0876,
+        "predicted_cases": 291,
+        "top1_accuracy": 0.0859,
+        "top3_accuracy": 0.0893,
+        "total_cases": 291
+      },
+      "local_transition_only": {
+        "accuracy_by_tactic": {
+          "command-and-control": {
+            "brier_score": 0.553915,
+            "cases": 38,
+            "coverage": 1.0,
+            "top1_accuracy": 0.4737,
+            "top3_accuracy": 1.0
+          },
+          "credential-access": {
+            "brier_score": 0.6383,
+            "cases": 15,
+            "coverage": 1.0,
+            "top1_accuracy": 1.0,
+            "top3_accuracy": 1.0
+          },
+          "defense-evasion": {
+            "brier_score": 0.376258,
+            "cases": 30,
+            "coverage": 1.0,
+            "top1_accuracy": 0.7667,
+            "top3_accuracy": 1.0
+          },
+          "discovery": {
+            "brier_score": 0.0,
+            "cases": 105,
+            "coverage": 1.0,
+            "top1_accuracy": 1.0,
+            "top3_accuracy": 1.0
+          },
+          "execution": {
+            "brier_score": 0.743307,
+            "cases": 18,
+            "coverage": 1.0,
+            "top1_accuracy": 0.5556,
+            "top3_accuracy": 0.8889
+          },
+          "persistence": {
+            "brier_score": 0.093351,
+            "cases": 85,
+            "coverage": 1.0,
+            "top1_accuracy": 0.8941,
+            "top3_accuracy": 1.0
+          }
+        },
+        "brier_score": 0.217269,
+        "coverage": 1.0,
+        "mean_reciprocal_rank": 0.9164,
+        "predicted_cases": 291,
+        "top1_accuracy": 0.8488,
+        "top3_accuracy": 0.9931,
+        "total_cases": 291
+      }
+    },
+    "dataset_statistics": {
+      "completed_sessions": 517812,
+      "completed_sessions_with_at_least_one_tactic_transition": 854,
+      "compressed_tactic_observations": 54079,
+      "compressed_transition_observations": 1840,
+      "sessions_with_at_least_one_tactic_transition": 854,
+      "sessions_with_at_least_one_usable_tactic": 52239,
+      "sessions_with_two_or_more_tactic_transitions": 717,
+      "tactic_distribution": {
+        "command-and-control": 262,
+        "credential-access": 112,
+        "defense-evasion": 190,
+        "discovery": 50872,
+        "execution": 677,
+        "persistence": 1966
+      },
+      "total_sessions": 518033,
+      "transition_distribution_top20": [
+        {
+          "count": 610,
+          "transition": "persistence->discovery"
+        },
+        {
+          "count": 499,
+          "transition": "execution->persistence"
+        },
+        {
+          "count": 147,
+          "transition": "command-and-control->defense-evasion"
+        },
+        {
+          "count": 109,
+          "transition": "credential-access->command-and-control"
+        },
+        {
+          "count": 100,
+          "transition": "discovery->credential-access"
+        },
+        {
+          "count": 83,
+          "transition": "discovery->command-and-control"
+        },
+        {
+          "count": 62,
+          "transition": "discovery->execution"
+        },
+        {
+          "count": 60,
+          "transition": "execution->discovery"
+        },
+        {
+          "count": 50,
+          "transition": "discovery->persistence"
+        },
+        {
+          "count": 43,
+          "transition": "execution->defense-evasion"
+        },
+        {
+          "count": 43,
+          "transition": "execution->command-and-control"
+        },
+        {
+          "count": 23,
+          "transition": "command-and-control->execution"
+        },
+        {
+          "count": 7,
+          "transition": "defense-evasion->execution"
+        },
+        {
+          "count": 4,
+          "transition": "defense-evasion->command-and-control"
+        }
+      ]
+    },
+    "interpretation": "Historical external weak-label evidence only; not recomputed by this run and not local accuracy.",
+    "limitations": [
+      "The experiment is proposal-only and does not change the trusted production prediction policy.",
+      "The empirical scope is limited to honeypot-observable Cowrie SSH/Telnet tactics, not full ATT&CK-wide tactic prediction.",
+      "The external seed labels inherit the quality and bias of the upstream classification pipeline; they are not manually adjudicated ground truth.",
+      "Only scorers computable from the external Cowrie session payloads are fitted. Context/risk scorers that require live enrichment, vulnerability context, Sigma correlation, or behavior-regime state are excluded from the fitted voter set.",
+      "Most external Cowrie sessions contain no tactic transition after scoping, so the held-out evaluation is based on the subset with usable next-tactic labels.",
+      "The held-out split is used only for final evaluation; production adoption of fitted weights should still be reviewed against local live honeypot data when enough high-quality labeled sessions exist."
+    ],
+    "path": "evaluation/external_seed_weight_fit.json",
+    "split": {
+      "calibration_ratio": 0.15,
+      "calibration_sessions": 126,
+      "eligible_transition_sessions": 854,
+      "ineligible_sessions_assigned_to_train": 517179,
+      "method": "deterministic_stratified_by_first_tactic_transition",
+      "seed": 20260707,
+      "test_ratio": 0.15,
+      "test_sessions": 134,
+      "top_transition_groups": [
+        {
+          "sessions": 499,
+          "transition": "execution->persistence"
+        },
+        {
+          "sessions": 100,
+          "transition": "discovery->credential-access"
+        },
+        {
+          "sessions": 83,
+          "transition": "discovery->command-and-control"
+        },
+        {
+          "sessions": 61,
+          "transition": "persistence->discovery"
+        },
+        {
+          "sessions": 42,
+          "transition": "execution->command-and-control"
+        },
+        {
+          "sessions": 40,
+          "transition": "execution->defense-evasion"
+        },
+        {
+          "sessions": 14,
+          "transition": "command-and-control->execution"
+        },
+        {
+          "sessions": 9,
+          "transition": "credential-access->command-and-control"
+        },
+        {
+          "sessions": 4,
+          "transition": "command-and-control->defense-evasion"
+        },
+        {
+          "sessions": 2,
+          "transition": "discovery->execution"
+        }
+      ],
+      "total_sessions_loaded": 518033,
+      "train_eligible_sessions": 594,
+      "train_ratio": 0.7,
+      "train_sessions_total": 517773,
+      "transition_group_count": 10
+    }
+  },
+  "input_provenance": {
+    "external_payload_summary": {
+      "protocols": [
+        "ssh_telnet_mixed_or_unknown"
+      ],
+      "schema_versions": [
+        "next_tactic_external_session_payload.v1"
+      ],
+      "sessions": 52018,
+      "split_sessions": {
+        "calibration": 126,
+        "test": 134,
+        "train": 51758
+      },
+      "split_transition_cases": {
+        "calibration": 270,
+        "test": 291,
+        "train": 1279
+      },
+      "split_transition_sessions": {
+        "calibration": 126,
+        "test": 134,
+        "train": 594
+      },
+      "transition_cases": 1840,
+      "transition_sessions": 854
+    },
+    "external_protocol_scope": [
+      "ssh_telnet_mixed_or_unknown"
+    ],
+    "external_session_payloads": "evaluation/next_tactic_external_session_payload.jsonl",
+    "external_transition_model": "data/models/external_cowrie_seed_transition_model.compound_securebert.json",
+    "local_payload_summary": {
+      "protocols": [],
+      "schema_versions": [],
+      "sessions": 0,
+      "split_sessions": {},
+      "split_transition_cases": {},
+      "split_transition_sessions": {},
+      "transition_cases": 0,
+      "transition_sessions": 0
+    },
+    "local_provenance_filter": {
+      "accepted_payloads": 0,
+      "excluded_payloads": 0,
+      "excluded_reasons": {},
+      "input_payloads": 0,
+      "required_is_external_source": true,
+      "required_session_source": "production_live"
+    },
+    "local_session_payloads": "not supplied",
+    "policy": "configs/prediction_policy.trusted.json"
+  },
+  "limitations": [
+    "No production improvement is claimed unless a supplied held-out set supports it.",
+    "The public package may include privacy-minimized external tactic sequences, but no raw Cowrie telemetry or local production sessions.",
+    "The retained external aggregate model is derived from an SSH/Telnet dataset and cannot alone establish SSH-only performance.",
+    "External tactic labels are classifier-derived weak labels, not independent expert ground truth.",
+    "Local prediction accuracy remains unclaimed when clean held-out local transitions are insufficient.",
+    "Returned scores are not called calibrated probabilities without held-out calibration evidence."
+  ],
+  "metric_semantics": {
+    "brier_score": "multiclass Brier score over a normalized returned probability vector; lower is better",
+    "coverage": "fraction of held-out cases receiving a non-empty ranking",
+    "scores_calibrated": false,
+    "selective_top1_accuracy": "Top-1 accuracy among covered cases only",
+    "top1_accuracy": "all-case accuracy; abstentions count as failures",
+    "top3_accuracy_secondary": "secondary because the external empirical scope contains few tactics"
+  },
+  "not_recommended_models": [
+    {
+      "model": "Hidden Markov Model",
+      "reason": "The trusted tactics are already observed states and targets; latent-state semantics are not established."
+    },
+    {
+      "model": "Random Forest / XGBoost",
+      "reason": "Flattened tabular features add overfitting risk without a useful sequential inductive bias."
+    },
+    {
+      "model": "RNN / LSTM / GRU / Transformer",
+      "reason": "The retained evidence has only 854 transition-bearing external sessions and weak labels."
+    },
+    {
+      "model": "Reinforcement learning",
+      "reason": "There is no defensible action, reward, or intervention-learning problem in this advisory predictor."
+    },
+    {
+      "model": "Exact-command language model",
+      "reason": "Exact next-command prediction is outside the Cowrie next-tactic thesis scope."
+    }
+  ],
+  "optional_dependency_status": {
+    "multinomial_logistic_regression": "skipped unless scikit-learn is supplied by the evaluation environment",
+    "scikit_learn_available": false
+  },
+  "parameters": {
+    "alpha": 0.05,
+    "bootstrap_iterations": 1000,
+    "kappa_grid": [
+      1.0,
+      2.0,
+      5.0,
+      10.0,
+      20.0,
+      50.0,
+      100.0,
+      200.0,
+      500.0
+    ],
+    "min_calibration_cases": 10,
+    "min_evaluation_examples": 30,
+    "min_per_tactic_support": 5,
+    "seed": 20260714
+  },
+  "production_policy_changed": false,
+  "runtime_behavior_changed": false,
+  "schema_version": "next_tactic_model_comparison.v1",
+  "scope_statement": "Next observed MITRE ATT&CK tactic from trusted Cowrie honeypot-observable tactic sequences. The external comparison corpus is SSH/Telnet mixed or protocol-unknown and is not evidence of SSH-only accuracy.",
+  "scorer_weights_changed": false,
+  "split_method": "recorded per evaluation scope",
+  "thesis_defense_qa": [
+    {
+      "answer": "The target is the next observed tactic in a short trusted sequence, and the available evidence consists directly of interpretable transition counts.",
+      "question": "Why use Markov-family models?"
+    },
+    {
+      "answer": "Only 854 external sessions contain transitions and their labels are classifier-derived; that is insufficient for a defensible high-capacity neural sequence model.",
+      "question": "Why not LSTM/Transformer?"
+    },
+    {
+      "answer": "HMMs are useful when meaningful states are hidden. Here ATT&CK tactic candidates are already the observed states and prediction target.",
+      "question": "Why not HMM?"
+    },
+    {
+      "answer": "They would flatten the sequence into tabular features, add overfitting risk, and provide no demonstrated advantage over transition counts.",
+      "question": "Why not Random Forest/XGBoost?"
+    },
+    {
+      "answer": "It tests whether any sequential model improves on class prevalence and exposes inflation caused by tactic imbalance.",
+      "question": "Why compare with Majority Class Classifier?"
+    },
+    {
+      "answer": "It is the simplest well-known sequential baseline and isolates the value of longer context and cross-source adaptation.",
+      "question": "Why compare with First-order Markov Chain?"
+    },
+    {
+      "answer": "It is the incumbent runtime behavior, so it is the required reference for any improvement claim.",
+      "question": "Why compare with the current hard-backoff model?"
+    },
+    {
+      "answer": "Hard backoff chooses one source. The proposed model can combine external prior counts and validated local evidence continuously in one posterior distribution. In this external-only run no clean local update is available, so it reduces to a Dirichlet-smoothed external prior and does not demonstrate an improvement over hard backoff.",
+      "question": "What differs between hard backoff and Empirical-Bayes smoothing?"
+    },
+    {
+      "answer": "It supplies cold-start transition evidence when deployment-local trusted transitions are sparse.",
+      "question": "How does the external Cowrie dataset help?"
+    },
+    {
+      "answer": "The public package retains no local session corpus and documents only one clean local held-out transition.",
+      "question": "Why is local accuracy not claimed?"
+    },
+    {
+      "answer": "The shared trust predicate excludes audit-only, low-confidence, unsupported, and shell-noise classifications before sequence construction.",
+      "question": "How are weak labels handled?"
+    },
+    {
+      "answer": "The recorded 70/15/15 whole-session split is applied before transition cases are extracted, so no session crosses partitions. The external split is deterministic and stratified by first tactic transition, not chronological, because the retained source payload has no timestamps.",
+      "question": "How is leakage prevented?"
+    },
+    {
+      "answer": "The retained external model contains only six empirical target tactics, so Top-3 is comparatively easy and less discriminating than Top-1, MRR, and Brier.",
+      "question": "Why is Top-3 secondary?"
+    },
+    {
+      "answer": "The model emits no empirical next-tactic ranking when the observed context lacks the configured raw transition support.",
+      "question": "What does abstention mean?"
+    },
+    {
+      "answer": "Not automatically. They are normalized model scores unless calibration is fitted and evaluated on held-out data.",
+      "question": "Are the scores calibrated probabilities?"
+    },
+    {
+      "answer": "Results are limited to trusted Cowrie-observable evidence; external labels are weak labels, the retained corpus mixes SSH/Telnet, and local generalization is not yet estimable.",
+      "question": "What limitation belongs in the thesis?"
+    }
+  ],
+  "trust_and_leakage_controls": {
+    "adjacent_tactic_deduplication": true,
+    "external_and_local_results_separate": true,
+    "shared_trust_predicate": "production.classification.trust.is_trusted_classification_event",
+    "whole_session_split_before_case_extraction": true
+  }
+}

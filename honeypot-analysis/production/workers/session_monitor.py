@@ -1266,6 +1266,8 @@ def build_pipeline_trigger(
     enrichment_db: dict = None,
     max_tokens: int = 4000,
     enable_vertex_narrative: bool = False,
+    smb_asset_profile_path: str = "",
+    smb_action_policy_path: str = "",
 ):
     """
     Returns an on_session_end callback that runs the full analysis pipeline
@@ -1426,6 +1428,8 @@ def build_pipeline_trigger(
                 max_tokens=max_tokens,
             )
             coord.enable_vertex_narrative = bool(enable_vertex_narrative)
+            coord.recommendation_asset_profile_path = str(smb_asset_profile_path or "")
+            coord.recommendation_action_policy_path = str(smb_action_policy_path or "")
 
             # MitreAttackDB.get_tactics(tid) returns list of tactic names
             tactic_summary, ttp_command_map = _build_trusted_reporting_views(

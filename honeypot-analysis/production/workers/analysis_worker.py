@@ -494,6 +494,8 @@ async def analyze_job(
         enrichment_db=context["enrichment_db"],
         max_tokens=config.analysis_max_tokens,
         enable_vertex_narrative=config.enable_vertex_narrative,
+        smb_asset_profile_path=config.smb_asset_profile_path,
+        smb_action_policy_path=config.smb_action_policy_path,
     )
     if config.analysis_suppress_stdout:
         with contextlib.redirect_stdout(io.StringIO()):
