@@ -8,7 +8,7 @@ and future knowledge-pack importers can reason over the same stable contract.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from production.classification.trust import (
     classification_audit_reason,
@@ -315,7 +315,12 @@ def _edges(
     return edges
 
 
-def build_session_evidence_graph(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+def build_session_evidence_graph(
+    session_payload: Dict[str, Any],
+    *,
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
+) -> Dict[str, Any]:
     """Return a compact, safe graph of commands, events, labels, and observables."""
 
     commands = [
@@ -359,7 +364,7 @@ def build_session_evidence_graph(session_payload: Dict[str, Any]) -> Dict[str, A
         **session_payload,
         "classification_events": all_classification_events,
         "raw_events": raw_events,
-    })
+    }, policy_document=behavior_policy_document, policy_path=behavior_policy_path)
     eventids = [
         _clean_text(item.get("eventid"))
         for item in raw_events
@@ -386,6 +391,7 @@ def build_session_evidence_graph(session_payload: Dict[str, Any]) -> Dict[str, A
         + event_nodes
         + observable_nodes,
         "audit_only_classification_candidates": audit_only_candidates,
+        "behavior_policy": relationship_analysis["behavior_policy"],
         "ordered_behavior_chain": ordered_behavior_chain,
         "ordered_command_observations": relationship_analysis["ordered_command_observations"],
         "transfer_event_observations": relationship_analysis["transfer_event_observations"],

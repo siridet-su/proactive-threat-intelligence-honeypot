@@ -1,0 +1,286 @@
+{
+  "schema_version": "threat_hypothesis_behavior_policy.v1",
+  "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
+  "version": "2026-07-16",
+  "provenance": {
+    "method": "developer-authored conservative behavior policy",
+    "basis": [
+      "Executable threat_hypothesis.v2 behavior as of commit 67b200a",
+      "Cowrie command, command-outcome, and file-transfer event semantics",
+      "Controlled synthetic relationship benchmark"
+    ],
+    "reviewed": true,
+    "reviewer": "project developer",
+    "last_reviewed": "2026-07-16",
+    "review_status": "approved for scoped Cowrie SSH analysis"
+  },
+  "policy": {
+    "enabled": true,
+    "event_types": {
+      "command": [
+        "cowrie.command.input",
+        "cowrie.command.success",
+        "cowrie.command.failed"
+      ],
+      "transfer": [
+        "cowrie.session.file_download",
+        "cowrie.session.file_upload"
+      ],
+      "confirmed_download": [
+        "cowrie.session.file_download"
+      ]
+    },
+    "extraction": {
+      "command_wrappers": [
+        "sudo",
+        "env",
+        "nohup",
+        "setsid"
+      ],
+      "shell_interpreters": [
+        "sh",
+        "bash",
+        "dash",
+        "zsh",
+        "ksh"
+      ],
+      "script_interpreters": [
+        "sh",
+        "bash",
+        "dash",
+        "zsh",
+        "ksh",
+        "python",
+        "python2",
+        "python3",
+        "perl",
+        "php",
+        "ruby",
+        "lua",
+        "node"
+      ],
+      "remote_content_executables": {
+        "curl": {
+          "output_options": [
+            "-o",
+            "--output"
+          ],
+          "transfer_without_output": false,
+          "pipe_source": true
+        },
+        "wget": {
+          "output_options": [
+            "-O",
+            "--output-document"
+          ],
+          "transfer_without_output": true,
+          "pipe_source": false
+        }
+      },
+      "permission_modification": {
+        "executables": [
+          "chmod"
+        ],
+        "path_argument_start": 2,
+        "action_type": "permission_modification_attempt"
+      },
+      "deletion": {
+        "executables": [
+          "rm"
+        ],
+        "path_argument_start": 1,
+        "action_type": "deletion_attempt"
+      },
+      "account": {
+        "authorized_keys_marker": "authorized_keys",
+        "creation_pattern": "\\b(?:useradd|adduser)\\b(?:\\s+-\\S+)*\\s+([A-Za-z_][A-Za-z0-9_-]*)",
+        "authorized_keys_account_pattern": "/home/([^/]+)/\\.ssh/authorized_keys",
+        "action_type": "account_modification_attempt",
+        "relationship_type": "account_modified"
+      },
+      "patterns": {
+        "url": "https?://[^\\s'\"`|;&]+",
+        "hash": "(?<![0-9a-f])(?:[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![0-9a-f])",
+        "path_token": "(?:/[^\\s'\"`|;&<>]+|\\./[^\\s'\"`|;&<>]+|~[^\\s'\"`|;&<>]*|\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?/[^\\s'\"`|;&<>]+)",
+        "credential_path": "(?:/etc/(?:passwd|shadow)|(?:^|[\\s'\"])(?:~[^/\\s]*)?/?.ssh/(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)|\\.aws/credentials|application_default_credentials|\\.config/gcloud)"
+      }
+    },
+    "relationships": {
+      "path_action_roles": {
+        "destination_paths": "transfer_attempt",
+        "modified_paths": "permission_modification_attempt",
+        "executed_paths": "execution_attempt",
+        "deleted_paths": "deletion_attempt"
+      },
+      "allowed_predecessors": {
+        "permission_modification_attempt": [
+          "transfer_attempt"
+        ],
+        "execution_attempt": [
+          "transfer_attempt",
+          "permission_modification_attempt"
+        ],
+        "deletion_attempt": [
+          "transfer_attempt",
+          "permission_modification_attempt",
+          "execution_attempt"
+        ]
+      },
+      "relationship_types": {
+        "permission_modification_attempt": "artifact_permission_change",
+        "execution_attempt": "artifact_execution",
+        "deletion_attempt": "artifact_deletion"
+      }
+    },
+    "claims": {
+      "connected": [
+        {
+          "rule_id": "remote-content-piped-to-shell",
+          "required_action_types": [
+            "remote_content_pipe_source",
+            "shell_pipe_consumer"
+          ],
+          "claim_type": "piped_remote_content_execution_attempt",
+          "text": "Remote content retrieval was piped directly to a shell interpreter, supporting an execution attempt without a separately observed stored artifact.",
+          "evidence_status_override": "partially_supported",
+          "limitations": [
+            "Pipeline syntax does not establish successful retrieval or shell execution."
+          ]
+        },
+        {
+          "rule_id": "transfer-permission-execution-deletion",
+          "required_action_types": [
+            "transfer_attempt",
+            "permission_modification_attempt",
+            "execution_attempt",
+            "deletion_attempt"
+          ],
+          "claim_type": "connected_artifact_activity",
+          "text": "A connected sequence involving a transfer attempt, permission-modification attempt, execution attempt, and deletion attempt for the same artifact path was observed.",
+          "limitations": [
+            "Deletion of an artifact does not by itself establish trace-removal intent."
+          ]
+        },
+        {
+          "rule_id": "transfer-permission-execution",
+          "required_action_types": [
+            "transfer_attempt",
+            "permission_modification_attempt",
+            "execution_attempt"
+          ],
+          "claim_type": "connected_transfer_permission_execution",
+          "text": "A connected sequence involving a transfer attempt, permission-modification attempt, and execution attempt for the same artifact path was observed.",
+          "limitations": []
+        },
+        {
+          "rule_id": "transfer-execution",
+          "required_action_types": [
+            "transfer_attempt",
+            "execution_attempt"
+          ],
+          "claim_type": "connected_transfer_execution",
+          "text": "A transfer attempt and execution attempt referencing the same artifact path were observed.",
+          "limitations": []
+        },
+        {
+          "rule_id": "observed-transfer-without-execution",
+          "required_action_types": [
+            "cowrie_file_transfer_observed"
+          ],
+          "excluded_action_types": [
+            "execution_attempt"
+          ],
+          "claim_type": "observed_transfer_without_linked_execution",
+          "text": "A transfer into Cowrie was observed, but no execution attempt linked to the transferred artifact was identified.",
+          "limitations": []
+        },
+        {
+          "rule_id": "transfer-permission-change",
+          "required_action_types": [
+            "transfer_attempt",
+            "permission_modification_attempt"
+          ],
+          "claim_type": "connected_transfer_permission_change",
+          "text": "A transfer attempt and permission-modification attempt referencing the same artifact path were observed; linked execution was not observed.",
+          "limitations": []
+        }
+      ],
+      "independent": {
+        "credential": {
+          "trusted_command_pattern": "/etc/(?:passwd|shadow)|(?:^|/)\\.ssh/id_(?:rsa|ed25519)|\\.aws/credentials|application_default_credentials|\\.config/gcloud",
+          "claim_type": "possible_credential_access_preparation",
+          "text": "Possible credential-related discovery or access preparation within the observed SSH session.",
+          "evidence_status": "partially_supported",
+          "limitations": [
+            "Successful credential acquisition or use is not established.",
+            "Attacker intent is not directly observable."
+          ]
+        },
+        "downloader": {
+          "literal_action_types": [
+            "transfer_attempt"
+          ],
+          "legacy_command_pattern": "\\b(?:curl|wget|tftp|ftp)\\b\\s+\\S+",
+          "claim_type": "possible_tool_transfer_or_staging",
+          "text": "Possible tool transfer or payload staging within the Cowrie session.",
+          "evidence_status": "partially_supported",
+          "limitations": [
+            "A downloader command alone does not establish successful transfer.",
+            "Real-world compromise is outside Cowrie visibility."
+          ]
+        },
+        "execution": {
+          "literal_action_types": [
+            "execution_attempt"
+          ],
+          "legacy_command_pattern": "(?:^|[;&|]\\s*)(?:sh|bash|python\\d*|perl)\\s+(?:/tmp|/var/tmp|/dev/shm)/\\S+|(?:^|[;&|]\\s*)(?:\\./|/tmp/|/var/tmp/|/dev/shm/)\\S+",
+          "claim_types": {
+            "success": "possible_artifact_execution",
+            "failure_or_unknown": "attempted_artifact_execution"
+          }
+        },
+        "persistence": {
+          "trusted_command_pattern": "\\b(?:useradd|adduser)\\b|authorized_keys|\\bcrontab\\b|\\bsystemctl\\s+(?:enable|start)\\b|(?:\\.bashrc|\\.profile|rc\\.local)",
+          "claim_type": "possible_continued_access_preparation",
+          "text": "Possible preparation for continued access within the simulated SSH environment.",
+          "limitations": [
+            "Continued access, re-entry, and persistence outside Cowrie are not established."
+          ]
+        },
+        "cleanup": {
+          "trusted_command_pattern": "\\bhistory\\s+-c\\b|\\bunset\\s+HISTFILE\\b|\\brm\\b[^\\n]*(?:bash_history|auth\\.log|/tmp/)",
+          "claim_type": "possible_trace_removal",
+          "text": "Possible trace-removal or defense-evasion behavior within the observed session.",
+          "limitations": [
+            "A cleanup-related command does not establish successful post-execution cleanup."
+          ]
+        },
+        "confirmed_download": {
+          "claim_type": "observed_cowrie_file_transfer",
+          "text": "Cowrie recorded a file transfer into the simulated honeypot environment.",
+          "evidence_status": "supported",
+          "limitations": [
+            "The Cowrie transfer event does not establish artifact execution or persistence.",
+            "Transfer into Cowrie does not establish transfer to a real victim system."
+          ]
+        }
+      },
+      "follow_on": {
+        "progress_action_types": [
+          "transfer_attempt",
+          "cowrie_file_transfer_observed"
+        ],
+        "completion_action_types": [
+          "execution_attempt",
+          "shell_pipe_consumer"
+        ],
+        "claim_type": "possible_follow_on_execution",
+        "text": "Possible later execution of the artifact referenced by an incomplete evidence-linked transfer chain.",
+        "evidence_status": "partially_supported",
+        "limitations": [
+          "Successful execution and persistence are not established."
+        ]
+      }
+    }
+  }
+}

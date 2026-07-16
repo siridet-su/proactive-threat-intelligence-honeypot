@@ -201,6 +201,7 @@ class ProductionConfig:
         "rule_review_mode": "reviewed_only",
     })
     classification_rules_path: str = "configs/classification_rules.trusted.json"
+    threat_hypothesis_behavior_policy_path: str = "configs/threat_hypothesis_behavior.trusted.json"
     prediction_policy_path: str = "configs/prediction_policy.trusted.json"
     prediction_snapshot_retention_days: int = 90
     prediction_snapshot_keep_latest_per_session: bool = True
@@ -565,6 +566,10 @@ class ProductionConfig:
         cfg.vertex_model = os.getenv("VERTEX_MODEL", cfg.vertex_model)
         cfg.classification_policy = _env_json("CLASSIFICATION_POLICY_JSON", cfg.classification_policy)
         cfg.classification_rules_path = os.getenv("CLASSIFICATION_RULES_PATH", cfg.classification_rules_path)
+        cfg.threat_hypothesis_behavior_policy_path = os.getenv(
+            "THREAT_HYPOTHESIS_BEHAVIOR_POLICY_PATH",
+            cfg.threat_hypothesis_behavior_policy_path,
+        )
         cfg.prediction_policy_path = os.getenv("PREDICTION_POLICY_PATH", cfg.prediction_policy_path)
         cfg.prediction_snapshot_retention_days = _env_int(
             "PREDICTION_SNAPSHOT_RETENTION_DAYS",
@@ -602,3 +607,8 @@ class ProductionConfig:
             os.environ.setdefault("VERTEX_LOCATION", self.vertex_location)
         if self.vertex_model:
             os.environ.setdefault("VERTEX_MODEL", self.vertex_model)
+        if self.threat_hypothesis_behavior_policy_path:
+            os.environ.setdefault(
+                "THREAT_HYPOTHESIS_BEHAVIOR_POLICY_PATH",
+                self.threat_hypothesis_behavior_policy_path,
+            )

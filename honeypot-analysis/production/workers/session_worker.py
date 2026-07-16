@@ -77,6 +77,7 @@ def alert_payload(alert: Any) -> Dict[str, Any]:
 class SessionWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
+        config.apply_environment()
         self.storage = open_storage(config.database_url)
         self.feeds = None
         self.mitre_db = None

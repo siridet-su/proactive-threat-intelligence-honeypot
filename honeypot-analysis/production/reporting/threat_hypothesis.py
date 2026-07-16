@@ -12,32 +12,18 @@ import re
 from typing import Any, Dict, Iterable, List, Optional
 
 from production.correlation.session_evidence_graph import build_session_evidence_graph
+from production.policies.threat_hypothesis_behavior_policy import (
+    compile_pattern,
+    policy_body,
+    policy_summary,
+    resolve_behavior_policy,
+)
 from production.utils.serialization import stable_id
 
 
 SCHEMA_VERSION = "threat_hypothesis.v2"
 EVIDENCE_STATUSES = {"supported", "partially_supported", "insufficient_evidence"}
 
-_DOWNLOADER_RE = re.compile(r"\b(?:curl|wget|tftp|ftp)\b\s+\S+", re.IGNORECASE)
-_EXPLICIT_EXECUTION_RE = re.compile(
-    r"(?:^|[;&|]\s*)(?:sh|bash|python\d*|perl)\s+(?:/tmp|/var/tmp|/dev/shm)/\S+|"
-    r"(?:^|[;&|]\s*)(?:\./|/tmp/|/var/tmp/|/dev/shm/)\S+",
-    re.IGNORECASE | re.MULTILINE,
-)
-_PERSISTENCE_RE = re.compile(
-    r"\b(?:useradd|adduser)\b|authorized_keys|\bcrontab\b|"
-    r"\bsystemctl\s+(?:enable|start)\b|(?:\.bashrc|\.profile|rc\.local)",
-    re.IGNORECASE,
-)
-_CREDENTIAL_RE = re.compile(
-    r"/etc/(?:passwd|shadow)|(?:^|/)\.ssh/id_(?:rsa|ed25519)|"
-    r"\.aws/credentials|application_default_credentials|\.config/gcloud",
-    re.IGNORECASE,
-)
-_CLEANUP_RE = re.compile(
-    r"\bhistory\s+-c\b|\bunset\s+HISTFILE\b|\brm\b[^\n]*(?:bash_history|auth\.log|/tmp/)",
-    re.IGNORECASE,
-)
 _UNSUPPORTED_NARRATIVE_RE = re.compile(
     r"\b(?:confirmed\s+(?:compromise|intent|attribution)|definitive(?:ly)?|"
     r"successfully\s+(?:compromised|executed|persisted|exfiltrated|stole|harvested)|"
@@ -68,6 +54,21 @@ def _as_list(value: Any) -> List[Any]:
     if isinstance(value, (tuple, set)):
         return list(value)
     return [value]
+
+
+def _resolved_behavior_policy(
+    policy_document: Optional[Dict[str, Any]] = None,
+    policy_path: str = "",
+) -> Dict[str, Any]:
+    return resolve_behavior_policy(policy_document, policy_path)
+
+
+def _claim_policy(document: Dict[str, Any]) -> Dict[str, Any]:
+    body = policy_body(document)
+    if not body.get("enabled"):
+        return {}
+    claims = body.get("claims")
+    return claims if isinstance(claims, dict) else {}
 
 
 def _session_value(session: Any, name: str, default: Any = None) -> Any:
@@ -137,7 +138,11 @@ def _event_evidence(raw_events: List[Dict[str, Any]], session_id: str) -> List[D
 def build_observed_behavior(
     sessions: Iterable[Any],
     raw_events: Optional[List[Dict[str, Any]]] = None,
+    *,
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
 ) -> Dict[str, Any]:
+    document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     payload = _first_session_payload(sessions, list(raw_events or []))
     graph = payload.get("session_evidence_graph") or {}
     if (
@@ -151,7 +156,11 @@ def build_observed_behavior(
             or "connected_behavior_chains" not in graph
         )
     ):
-        graph = build_session_evidence_graph(payload)
+        graph = build_session_evidence_graph(
+            payload,
+            behavior_policy_document=document,
+            behavior_policy_path=behavior_policy_path,
+        )
     chain = [dict(item) for item in graph.get("ordered_behavior_chain") or [] if isinstance(item, dict)]
     audit_only = [
         dict(item)
@@ -181,6 +190,7 @@ def build_observed_behavior(
     events = _event_evidence(payload.get("raw_events") or [], _clean(payload.get("session_id")))
     return {
         "session_id": _clean(payload.get("session_id")) or "unknown",
+        "behavior_policy": graph.get("behavior_policy") or policy_summary(document),
         "ordered_behavior_chain": chain,
         "ordered_command_observations": [
             dict(item)
@@ -290,8 +300,12 @@ def _action_refs(items: Iterable[Dict[str, Any]]) -> List[str]:
     return [_clean(item.get("evidence_id")) for item in items if _clean(item.get("evidence_id"))]
 
 
-def _connected_behavior_claims(observed: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _connected_behavior_claims(
+    observed: Dict[str, Any],
+    policy_document: Dict[str, Any],
+) -> List[Dict[str, Any]]:
     claims: List[Dict[str, Any]] = []
+    definitions = _claim_policy(policy_document).get("connected") or []
     for chain in observed.get("connected_behavior_chains") or []:
         if not isinstance(chain, dict):
             continue
@@ -301,50 +315,26 @@ def _connected_behavior_claims(observed: Dict[str, Any]) -> List[Dict[str, Any]]
             if chain.get("chain_status") == "supported"
             else "partially_supported"
         )
-        text = ""
-        claim_type = ""
-        limitations = list(chain.get("limitations") or [])
-        if {"remote_content_pipe_source", "shell_pipe_consumer"}.issubset(action_types):
-            claim_type = "piped_remote_content_execution_attempt"
-            text = (
-                "Remote content retrieval was piped directly to a shell interpreter, "
-                "supporting an execution attempt without a separately observed stored artifact."
-            )
-            status = "partially_supported"
-            limitations.append("Pipeline syntax does not establish successful retrieval or shell execution.")
-        elif {"transfer_attempt", "permission_modification_attempt", "execution_attempt", "deletion_attempt"}.issubset(action_types):
-            claim_type = "connected_artifact_activity"
-            text = (
-                "A connected sequence involving a transfer attempt, permission-modification "
-                "attempt, execution attempt, and deletion attempt for the same artifact path was observed."
-            )
-            limitations.append("Deletion of an artifact does not by itself establish trace-removal intent.")
-        elif {"transfer_attempt", "permission_modification_attempt", "execution_attempt"}.issubset(action_types):
-            claim_type = "connected_transfer_permission_execution"
-            text = (
-                "A connected sequence involving a transfer attempt, permission-modification "
-                "attempt, and execution attempt for the same artifact path was observed."
-            )
-        elif {"transfer_attempt", "execution_attempt"}.issubset(action_types):
-            claim_type = "connected_transfer_execution"
-            text = "A transfer attempt and execution attempt referencing the same artifact path were observed."
-        elif "cowrie_file_transfer_observed" in action_types and "execution_attempt" not in action_types:
-            claim_type = "observed_transfer_without_linked_execution"
-            text = (
-                "A transfer into Cowrie was observed, but no execution attempt linked to the "
-                "transferred artifact was identified."
-            )
-        elif {"transfer_attempt", "permission_modification_attempt"}.issubset(action_types):
-            claim_type = "connected_transfer_permission_change"
-            text = (
-                "A transfer attempt and permission-modification attempt referencing the same "
-                "artifact path were observed; linked execution was not observed."
-            )
-        if not claim_type:
+        matched_rule: Dict[str, Any] = {}
+        for definition in definitions:
+            if not isinstance(definition, dict):
+                continue
+            required = set(definition.get("required_action_types") or [])
+            excluded = set(definition.get("excluded_action_types") or [])
+            if required.issubset(action_types) and not excluded.intersection(action_types):
+                matched_rule = definition
+                break
+        if not matched_rule:
             continue
+        override = _clean(matched_rule.get("evidence_status_override"))
+        if override in EVIDENCE_STATUSES:
+            status = override
+        limitations = list(chain.get("limitations") or []) + list(
+            matched_rule.get("limitations") or []
+        )
         claim = _claim(
-            claim_type,
-            text,
+            _clean(matched_rule.get("claim_type")),
+            _clean(matched_rule.get("text")),
             status,
             chain.get("evidence_refs") or [],
             list(dict.fromkeys(limitations)),
@@ -352,6 +342,7 @@ def _connected_behavior_claims(observed: Dict[str, Any]) -> List[Dict[str, Any]]
         claim.update({
             "claim_basis": "connected_behavior_chain",
             "connected_chain_id": _clean(chain.get("chain_id")),
+            "behavior_policy_rule_id": _clean(matched_rule.get("rule_id")),
             "relationship_refs": [
                 _clean(item.get("relationship_id"))
                 for item in chain.get("relationships") or []
@@ -362,54 +353,89 @@ def _connected_behavior_claims(observed: Dict[str, Any]) -> List[Dict[str, Any]]
     return claims
 
 
-def build_supported_assessment(observed: Dict[str, Any]) -> Dict[str, Any]:
+def build_supported_assessment(
+    observed: Dict[str, Any],
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
+) -> Dict[str, Any]:
+    document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
+    claims_policy = _claim_policy(document)
+    independent = claims_policy.get("independent") or {}
     chain = list(observed.get("ordered_behavior_chain") or [])
-    connected_claims = _connected_behavior_claims(observed)
+    connected_claims = _connected_behavior_claims(observed, document)
     objectives: List[Dict[str, Any]] = list(connected_claims)
-    credential = _matching_chain(chain, _CREDENTIAL_RE)
-    literal_downloader = _literal_actions(observed, "transfer_attempt")
+    credential_definition = independent.get("credential") or {}
+    downloader_definition = independent.get("downloader") or {}
+    execution_definition = independent.get("execution") or {}
+    persistence_definition = independent.get("persistence") or {}
+    cleanup_definition = independent.get("cleanup") or {}
+    download_definition = independent.get("confirmed_download") or {}
+    credential = _matching_chain(
+        chain,
+        compile_pattern(document, credential_definition.get("trusted_command_pattern")),
+    )
+    literal_downloader = _literal_actions(
+        observed,
+        *(downloader_definition.get("literal_action_types") or []),
+    )
     downloader = literal_downloader or (
-        _matching_chain(chain, _DOWNLOADER_RE)
+        _matching_chain(
+            chain,
+            compile_pattern(document, downloader_definition.get("legacy_command_pattern")),
+        )
         if not observed.get("ordered_command_observations") else []
     )
-    literal_execution = _literal_actions(observed, "execution_attempt")
+    literal_execution = _literal_actions(
+        observed,
+        *(execution_definition.get("literal_action_types") or []),
+    )
     execution = literal_execution or (
-        _matching_chain(chain, _EXPLICIT_EXECUTION_RE)
+        _matching_chain(
+            chain,
+            compile_pattern(document, execution_definition.get("legacy_command_pattern")),
+        )
         if not observed.get("ordered_command_observations") else []
     )
-    persistence = _matching_chain(chain, _PERSISTENCE_RE)
-    cleanup = _matching_chain(chain, _CLEANUP_RE)
-    download_refs = _event_refs(observed, "cowrie.session.file_download")
+    persistence = _matching_chain(
+        chain,
+        compile_pattern(document, persistence_definition.get("trusted_command_pattern")),
+    )
+    cleanup = _matching_chain(
+        chain,
+        compile_pattern(document, cleanup_definition.get("trusted_command_pattern")),
+    )
+    confirmed_eventids = (
+        (policy_body(document).get("event_types") or {}).get("confirmed_download") or []
+    )
+    download_refs = list(dict.fromkeys(
+        ref
+        for eventid in confirmed_eventids
+        for ref in _event_refs(observed, eventid)
+    ))
 
     if credential:
         objectives.append(_claim(
-            "possible_credential_access_preparation",
-            "Possible credential-related discovery or access preparation within the observed SSH session.",
-            "partially_supported",
+            _clean(credential_definition.get("claim_type")),
+            _clean(credential_definition.get("text")),
+            _clean(credential_definition.get("evidence_status")) or "partially_supported",
             _chain_refs(credential),
-            ["Successful credential acquisition or use is not established.", "Attacker intent is not directly observable."],
+            credential_definition.get("limitations") or [],
         ))
     if downloader:
         objectives.append(_claim(
-            "possible_tool_transfer_or_staging",
-            "Possible tool transfer or payload staging within the Cowrie session.",
-            "partially_supported",
+            _clean(downloader_definition.get("claim_type")),
+            _clean(downloader_definition.get("text")),
+            _clean(downloader_definition.get("evidence_status")) or "partially_supported",
             _action_refs(downloader),
-            [
-                "A downloader command alone does not establish successful transfer.",
-                "Real-world compromise is outside Cowrie visibility.",
-            ],
+            downloader_definition.get("limitations") or [],
         ))
     if download_refs:
         objectives.append(_claim(
-            "observed_cowrie_file_transfer",
-            "Cowrie recorded a file transfer into the simulated honeypot environment.",
-            "supported",
+            _clean(download_definition.get("claim_type")),
+            _clean(download_definition.get("text")),
+            _clean(download_definition.get("evidence_status")) or "supported",
             download_refs,
-            [
-                "The Cowrie transfer event does not establish artifact execution or persistence.",
-                "Transfer into Cowrie does not establish transfer to a real victim system.",
-            ],
+            download_definition.get("limitations") or [],
         ))
     if execution:
         successful_execution = [
@@ -424,7 +450,7 @@ def build_supported_assessment(observed: Dict[str, Any]) -> Dict[str, Any]:
         ]
         if successful_execution:
             objectives.append(_claim(
-                "possible_artifact_execution",
+                _clean((execution_definition.get("claim_types") or {}).get("success")),
                 "Cowrie reported success for an explicit artifact-execution command in the simulated shell.",
                 "supported",
                 _action_refs(successful_execution),
@@ -436,7 +462,7 @@ def build_supported_assessment(observed: Dict[str, Any]) -> Dict[str, Any]:
                 for item in unsuccessful_or_unknown
             )
             objectives.append(_claim(
-                "attempted_artifact_execution",
+                _clean((execution_definition.get("claim_types") or {}).get("failure_or_unknown")),
                 (
                     "Cowrie reported failure for an explicit artifact-execution command."
                     if failed
@@ -452,20 +478,20 @@ def build_supported_assessment(observed: Dict[str, Any]) -> Dict[str, Any]:
     if persistence:
         success = any(item.get("command_outcome") == "cowrie_reported_success" for item in persistence)
         objectives.append(_claim(
-            "possible_continued_access_preparation",
-            "Possible preparation for continued access within the simulated SSH environment.",
+            _clean(persistence_definition.get("claim_type")),
+            _clean(persistence_definition.get("text")),
             "supported" if success else "partially_supported",
             _chain_refs(persistence),
-            ["Continued access, re-entry, and persistence outside Cowrie are not established."],
+            persistence_definition.get("limitations") or [],
         ))
     if cleanup:
         success = any(item.get("command_outcome") == "cowrie_reported_success" for item in cleanup)
         objectives.append(_claim(
-            "possible_trace_removal",
-            "Possible trace-removal or defense-evasion behavior within the observed session.",
+            _clean(cleanup_definition.get("claim_type")),
+            _clean(cleanup_definition.get("text")),
             "supported" if success else "partially_supported",
             _chain_refs(cleanup),
-            ["A cleanup-related command does not establish successful post-execution cleanup."],
+            cleanup_definition.get("limitations") or [],
         ))
 
     if not objectives:
@@ -480,6 +506,7 @@ def build_supported_assessment(observed: Dict[str, Any]) -> Dict[str, Any]:
         "possible_objectives": objectives,
         "connected_behavior_claims": connected_claims,
         "claim_preference": "connected_behavior_chains_before_independent_command_claims",
+        "behavior_policy": policy_summary(document),
         "unknowns": [
             "Named actor identity and intent are not established.",
             "Behavior outside Cowrie-observable SSH telemetry is unknown.",
@@ -487,7 +514,18 @@ def build_supported_assessment(observed: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_follow_on_hypothesis(observed: Dict[str, Any]) -> Dict[str, Any]:
+def build_follow_on_hypothesis(
+    observed: Dict[str, Any],
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
+) -> Dict[str, Any]:
+    document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
+    claims_policy = _claim_policy(document)
+    follow_on_policy = claims_policy.get("follow_on") or {}
+    independent = claims_policy.get("independent") or {}
+    persistence_definition = independent.get("persistence") or {}
+    progress_types = set(follow_on_policy.get("progress_action_types") or [])
+    completion_types = set(follow_on_policy.get("completion_action_types") or [])
     chain = list(observed.get("ordered_behavior_chain") or [])
     claims: List[Dict[str, Any]] = []
     gaps: List[Dict[str, Any]] = []
@@ -498,8 +536,8 @@ def build_follow_on_hypothesis(observed: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(connected, dict):
             continue
         action_types = set(connected.get("action_types") or [])
-        has_transfer = bool({"transfer_attempt", "cowrie_file_transfer_observed"} & action_types)
-        has_execution = bool({"execution_attempt", "shell_pipe_consumer"} & action_types)
+        has_transfer = bool(progress_types & action_types)
+        has_execution = bool(completion_types & action_types)
         if has_transfer and not has_execution:
             incomplete_chains.append(connected)
     if incomplete_chains:
@@ -510,11 +548,11 @@ def build_follow_on_hypothesis(observed: Dict[str, Any]) -> Dict[str, Any]:
                 if _clean(value)
             ]
             claim = _claim(
-                "possible_follow_on_execution",
-                "Possible later execution of the artifact referenced by an incomplete evidence-linked transfer chain.",
-                "partially_supported",
+                _clean(follow_on_policy.get("claim_type")),
+                _clean(follow_on_policy.get("text")),
+                _clean(follow_on_policy.get("evidence_status")) or "partially_supported",
                 refs,
-                ["Successful execution and persistence are not established."],
+                follow_on_policy.get("limitations") or [],
             )
             claim.update({
                 "claim_basis": "incomplete_connected_behavior_chain",
@@ -565,6 +603,7 @@ def build_follow_on_hypothesis(observed: Dict[str, Any]) -> Dict[str, Any]:
             "external_validation_suggestions": external,
             "scope": "post_session_cowrie_observable_behavior",
             "selection_semantics": "all_coherent_incomplete_chains_ordered_by_final_timestamp",
+            "behavior_policy": policy_summary(document),
         }
     connected_chains = [
         item
@@ -598,7 +637,10 @@ def build_follow_on_hypothesis(observed: Dict[str, Any]) -> Dict[str, Any]:
                 "machine_evaluable": True,
             },
         ])
-        if not _matching_chain(chain, _PERSISTENCE_RE):
+        if not _matching_chain(
+            chain,
+            compile_pattern(document, persistence_definition.get("trusted_command_pattern")),
+        ):
             gaps.append({
                 "text": "No persistence-related command was observed in this session.",
                 "data_source": "Cowrie command events",
@@ -622,6 +664,7 @@ def build_follow_on_hypothesis(observed: Dict[str, Any]) -> Dict[str, Any]:
             if connected_chains
             else "no_connected_chain_abstention"
         ),
+        "behavior_policy": policy_summary(document),
     }
 
 
@@ -763,14 +806,32 @@ def build_v2_report(
     sessions: Iterable[Any],
     raw_events: Optional[List[Dict[str, Any]]] = None,
     contextual_intelligence: Optional[Dict[str, Any]] = None,
+    *,
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
 ) -> Dict[str, Any]:
+    document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     report = dict(legacy_report or {})
-    observed = build_observed_behavior(sessions, raw_events=raw_events)
-    assessment = build_supported_assessment(observed)
-    follow_on = build_follow_on_hypothesis(observed)
+    observed = build_observed_behavior(
+        sessions,
+        raw_events=raw_events,
+        behavior_policy_document=document,
+        behavior_policy_path=behavior_policy_path,
+    )
+    assessment = build_supported_assessment(
+        observed,
+        behavior_policy_document=document,
+        behavior_policy_path=behavior_policy_path,
+    )
+    follow_on = build_follow_on_hypothesis(
+        observed,
+        behavior_policy_document=document,
+        behavior_policy_path=behavior_policy_path,
+    )
     evidence_summary = build_claim_evidence_summary(assessment, follow_on)
     report.update({
         "schema_version": SCHEMA_VERSION,
+        "behavior_policy": policy_summary(document),
         "observed_behavior": observed,
         "supported_assessment": assessment,
         "follow_on_hypothesis": follow_on,

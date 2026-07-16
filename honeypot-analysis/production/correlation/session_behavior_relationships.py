@@ -18,42 +18,16 @@ from urllib.parse import urlsplit, urlunsplit
 
 from production.classification.classification_pipeline import split_compound_command
 from production.classification.trust import is_trusted_classification_event
+from production.policies.threat_hypothesis_behavior_policy import (
+    compile_pattern,
+    policy_body,
+    policy_summary,
+    resolve_behavior_policy,
+)
 from production.utils.serialization import stable_id
 
 
 SCHEMA_VERSION = "session_behavior_relationships.v1"
-COMMAND_EVENTIDS = {
-    "cowrie.command.input",
-    "cowrie.command.success",
-    "cowrie.command.failed",
-}
-TRANSFER_EVENTIDS = {
-    "cowrie.session.file_download",
-    "cowrie.session.file_upload",
-}
-SHELL_INTERPRETERS = {"sh", "bash", "dash", "zsh", "ksh"}
-SCRIPT_INTERPRETERS = SHELL_INTERPRETERS | {
-    "python",
-    "python2",
-    "python3",
-    "perl",
-    "php",
-    "ruby",
-    "lua",
-    "node",
-}
-URL_RE = re.compile(r"https?://[^\s'\"`|;&]+", re.IGNORECASE)
-HASH_RE = re.compile(r"(?<![0-9a-f])(?:[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![0-9a-f])", re.IGNORECASE)
-CREDENTIAL_PATH_RE = re.compile(
-    r"(?:/etc/(?:passwd|shadow)|(?:^|[\s'\"])(?:~[^/\s]*)?/?.ssh/"
-    r"(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)|\.aws/credentials|"
-    r"application_default_credentials|\.config/gcloud)",
-    re.IGNORECASE,
-)
-PATH_TOKEN_RE = re.compile(
-    r"(?:/[^\s'\"`|;&<>]+|\./[^\s'\"`|;&<>]+|~[^\s'\"`|;&<>]*|"
-    r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/[^\s'\"`|;&<>]+)"
-)
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -68,6 +42,18 @@ def _as_list(value: Any) -> List[Any]:
 
 def _clean(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _resolved_policy(
+    policy_document: Optional[Dict[str, Any]] = None,
+    policy_path: str = "",
+) -> Dict[str, Any]:
+    return resolve_behavior_policy(policy_document, policy_path)
+
+
+def _policy_section(document: Dict[str, Any], name: str) -> Dict[str, Any]:
+    value = policy_body(document).get(name)
+    return value if isinstance(value, dict) else {}
 
 
 def _parse_timestamp(value: Any) -> Optional[datetime]:
@@ -203,13 +189,14 @@ def _tokens(command: str) -> List[str]:
         return command.split()
 
 
-def _executable(tokens: List[str]) -> str:
+def _executable(tokens: List[str], wrappers: Iterable[str] = ()) -> str:
     if not tokens:
         return ""
+    wrapper_names = {_clean(value).lower() for value in wrappers if _clean(value)}
     index = 0
     while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[index]):
         index += 1
-    while index < len(tokens) and posixpath.basename(tokens[index]) in {"sudo", "env", "nohup", "setsid"}:
+    while index < len(tokens) and posixpath.basename(tokens[index]).lower() in wrapper_names:
         index += 1
         while index < len(tokens) and tokens[index].startswith("-"):
             index += 1
@@ -227,8 +214,8 @@ def _option_value(tokens: List[str], names: Iterable[str]) -> str:
     return ""
 
 
-def _path_values(command: str) -> List[str]:
-    return [match.group(0) for match in PATH_TOKEN_RE.finditer(command)]
+def _path_values(command: str, pattern: re.Pattern[str]) -> List[str]:
+    return [match.group(0) for match in pattern.finditer(command)]
 
 
 def _entity_value(kind: str, raw: str, cwd: str = "") -> Optional[Dict[str, Any]]:
@@ -263,11 +250,50 @@ def extract_command_entities(
     cwd: str = "",
     operator_before: str = "",
     operator_after: str = "",
+    policy_document: Optional[Dict[str, Any]] = None,
+    policy_path: str = "",
 ) -> Dict[str, Any]:
     """Extract literal, high-precision actions and entities from one fragment."""
 
+    document = _resolved_policy(policy_document, policy_path)
+    body = policy_body(document)
+    if not body.get("enabled"):
+        return {
+            "action_types": [],
+            "entities": {
+                "urls": [],
+                "source_paths": [],
+                "destination_paths": [],
+                "executed_paths": [],
+                "modified_paths": [],
+                "deleted_paths": [],
+                "account_names": [],
+                "credential_paths": [],
+                "artifact_hashes": [],
+            },
+            "pipe_producer": None,
+            "pipe_consumer": None,
+        }
+    extraction = body.get("extraction") or {}
+    patterns = extraction.get("patterns") or {}
+    url_pattern = compile_pattern(document, patterns.get("url"))
+    hash_pattern = compile_pattern(document, patterns.get("hash"))
+    path_pattern = compile_pattern(document, patterns.get("path_token"))
+    credential_pattern = compile_pattern(document, patterns.get("credential_path"))
+    wrappers = extraction.get("command_wrappers") or []
+    shell_interpreters = {
+        _clean(value).lower() for value in extraction.get("shell_interpreters") or []
+    }
+    script_interpreters = {
+        _clean(value).lower() for value in extraction.get("script_interpreters") or []
+    }
+    remote_definitions = extraction.get("remote_content_executables") or {}
+    permission_definition = extraction.get("permission_modification") or {}
+    deletion_definition = extraction.get("deletion") or {}
+    account_definition = extraction.get("account") or {}
+
     tokens = _tokens(command)
-    executable = _executable(tokens)
+    executable = _executable(tokens, wrappers)
     entities: Dict[str, List[Dict[str, Any]]] = {
         "urls": [],
         "source_paths": [],
@@ -281,9 +307,9 @@ def extract_command_entities(
     }
     action_types: List[str] = []
 
-    for match in URL_RE.finditer(command):
+    for match in url_pattern.finditer(command):
         _add_entity(entities, "urls", "url", match.group(0), cwd)
-    for match in HASH_RE.finditer(command):
+    for match in hash_pattern.finditer(command):
         value = match.group(0).lower()
         entity = {
             "entity_id": stable_id("entity", {"type": "hash", "value": value}),
@@ -295,28 +321,30 @@ def extract_command_entities(
         }
         entities["artifact_hashes"].append(entity)
 
-    if executable in {"curl", "wget"} and entities["urls"]:
+    remote_definition = remote_definitions.get(executable) or {}
+    if remote_definition and entities["urls"]:
         action_types.append("remote_content_access")
-        output = _option_value(
-            tokens,
-            {"-o", "--output"} if executable == "curl" else {"-O", "--output-document"},
-        )
+        output = _option_value(tokens, remote_definition.get("output_options") or [])
         if output:
             _add_entity(entities, "destination_paths", "path", output, cwd)
             action_types.append("transfer_attempt")
-        elif executable == "wget":
+        elif bool(remote_definition.get("transfer_without_output")):
             action_types.append("transfer_attempt")
-        elif operator_after == "|":
+        elif operator_after == "|" and bool(remote_definition.get("pipe_source")):
             action_types.append("remote_content_pipe_source")
 
-    if executable == "chmod":
-        for value in tokens[2:]:
+    permission_executables = {
+        _clean(value).lower() for value in permission_definition.get("executables") or []
+    }
+    if executable in permission_executables:
+        argument_start = int(permission_definition.get("path_argument_start") or 0)
+        for value in tokens[argument_start:]:
             if not value.startswith("-"):
                 _add_entity(entities, "modified_paths", "path", value, cwd)
         if entities["modified_paths"]:
-            action_types.append("permission_modification_attempt")
+            action_types.append(_clean(permission_definition.get("action_type")))
 
-    if executable in SCRIPT_INTERPRETERS:
+    if executable in script_interpreters:
         for value in tokens[1:]:
             if value.startswith("-"):
                 continue
@@ -325,25 +353,35 @@ def extract_command_entities(
                 break
         if entities["executed_paths"]:
             action_types.append("execution_attempt")
-        elif operator_before == "|" and executable in SHELL_INTERPRETERS:
+        elif operator_before == "|" and executable in shell_interpreters:
             action_types.append("shell_pipe_consumer")
     elif tokens and tokens[0].startswith(("/", "./", "~", "$")):
         _add_entity(entities, "executed_paths", "path", tokens[0], cwd)
         if entities["executed_paths"]:
             action_types.append("execution_attempt")
 
-    if executable == "rm":
-        for value in tokens[1:]:
+    deletion_executables = {
+        _clean(value).lower() for value in deletion_definition.get("executables") or []
+    }
+    if executable in deletion_executables:
+        argument_start = int(deletion_definition.get("path_argument_start") or 0)
+        for value in tokens[argument_start:]:
             if not value.startswith("-"):
                 _add_entity(entities, "deleted_paths", "path", value, cwd)
         if entities["deleted_paths"]:
-            action_types.append("deletion_attempt")
+            action_types.append(_clean(deletion_definition.get("action_type")))
 
-    if "authorized_keys" in command:
-        for value in _path_values(command):
-            if "authorized_keys" in value:
+    authorized_keys_marker = _clean(account_definition.get("authorized_keys_marker"))
+    authorized_account_pattern = compile_pattern(
+        document,
+        account_definition.get("authorized_keys_account_pattern"),
+    )
+    account_action_type = _clean(account_definition.get("action_type"))
+    if authorized_keys_marker and authorized_keys_marker in command:
+        for value in _path_values(command, path_pattern):
+            if authorized_keys_marker in value:
                 _add_entity(entities, "modified_paths", "path", value, cwd)
-                account = re.search(r"/home/([^/]+)/\.ssh/authorized_keys", value)
+                account = authorized_account_pattern.search(value)
                 if account:
                     account_name = account.group(1)
                     entities["account_names"].append({
@@ -354,9 +392,9 @@ def extract_command_entities(
                         "uncertain": False,
                         "linkable": True,
                     })
-        action_types.append("account_modification_attempt")
+        action_types.append(account_action_type)
 
-    account_match = re.search(r"\b(?:useradd|adduser)\b(?:\s+-\S+)*\s+([A-Za-z_][A-Za-z0-9_-]*)", command)
+    account_match = compile_pattern(document, account_definition.get("creation_pattern")).search(command)
     if account_match:
         account = account_match.group(1)
         entities["account_names"].append({
@@ -367,9 +405,9 @@ def extract_command_entities(
             "uncertain": False,
             "linkable": True,
         })
-        action_types.append("account_modification_attempt")
+        action_types.append(account_action_type)
 
-    for match in CREDENTIAL_PATH_RE.finditer(command):
+    for match in credential_pattern.finditer(command):
         value = match.group(0).strip()
         _add_entity(entities, "credential_paths", "path", value, cwd)
     if entities["credential_paths"]:
@@ -440,12 +478,14 @@ def _command_observation(
     source_refs: List[str],
     mappings: List[Dict[str, Any]],
     cwd: str = "",
+    policy_document: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     extracted = extract_command_entities(
         command,
         cwd=cwd,
         operator_before=operator_before,
         operator_after=operator_after,
+        policy_document=policy_document,
     )
     evidence_id = stable_id(
         "command_action",
@@ -485,7 +525,10 @@ def _command_observation(
     }
 
 
-def _build_command_observations(session_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _build_command_observations(
+    session_payload: Dict[str, Any],
+    policy_document: Dict[str, Any],
+) -> List[Dict[str, Any]]:
     session_id = _clean(session_payload.get("session_id")) or "unknown"
     classification_events = [
         dict(item)
@@ -500,10 +543,13 @@ def _build_command_observations(session_payload: Dict[str, Any]) -> List[Dict[st
     observations: List[Dict[str, Any]] = []
     covered: set[Tuple[str, str]] = set()
     compound_index = 0
+    command_eventids = set(
+        (_policy_section(policy_document, "event_types").get("command") or [])
+    )
 
     for source_index, event in enumerate(raw_events):
         eventid = _clean(event.get("eventid"))
-        if eventid not in COMMAND_EVENTIDS:
+        if eventid not in command_eventids:
             continue
         original = _clean(event.get("input"))
         if not original:
@@ -538,6 +584,7 @@ def _build_command_observations(session_payload: Dict[str, Any]) -> List[Dict[st
                 source_refs=[raw_ref] + mapping_refs,
                 mappings=mappings,
                 cwd=_clean(event.get("cwd")),
+                policy_document=policy_document,
             ))
         covered.add((timestamp, original))
         compound_index += 1
@@ -592,6 +639,7 @@ def _build_command_observations(session_payload: Dict[str, Any]) -> List[Dict[st
                 source_index=int(matching_event.get("_source_index") or 0),
                 source_refs=refs,
                 mappings=mappings,
+                policy_document=policy_document,
             ))
         compound_index += 1
 
@@ -615,6 +663,7 @@ def _build_command_observations(session_payload: Dict[str, Any]) -> List[Dict[st
                     source_index=source_index,
                     source_refs=[],
                     mappings=[],
+                    policy_document=policy_document,
                 ))
 
     observations.sort(key=_sort_key)
@@ -636,11 +685,21 @@ def _build_command_observations(session_payload: Dict[str, Any]) -> List[Dict[st
     return observations
 
 
-def _build_transfer_observations(session_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _build_transfer_observations(
+    session_payload: Dict[str, Any],
+    policy_document: Dict[str, Any],
+) -> List[Dict[str, Any]]:
     session_id = _clean(session_payload.get("session_id")) or "unknown"
     observations: List[Dict[str, Any]] = []
+    transfer_eventids = set(
+        (_policy_section(policy_document, "event_types").get("transfer") or [])
+    )
+    hash_pattern = compile_pattern(
+        policy_document,
+        ((_policy_section(policy_document, "extraction").get("patterns") or {}).get("hash")),
+    )
     for source_index, event in enumerate(_as_list(session_payload.get("raw_events"))):
-        if not isinstance(event, dict) or _clean(event.get("eventid")) not in TRANSFER_EVENTIDS:
+        if not isinstance(event, dict) or _clean(event.get("eventid")) not in transfer_eventids:
             continue
         entities: Dict[str, List[Dict[str, Any]]] = {
             "urls": [], "destination_paths": [], "artifact_hashes": [],
@@ -652,7 +711,7 @@ def _build_transfer_observations(session_payload: Dict[str, Any]) -> List[Dict[s
         if url:
             _add_entity(entities, "urls", "url", url)
         digest = _clean(event.get("shasum")).lower()
-        if digest and re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}", digest):
+        if digest and hash_pattern.fullmatch(digest):
             entities["artifact_hashes"].append({
                 "entity_id": stable_id("entity", {"type": "hash", "value": digest}),
                 "entity_type": "hash",
@@ -729,14 +788,12 @@ def _entity_roles(action: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     return action.get("entities") or {}
 
 
-def _path_action_records(actions: List[Dict[str, Any]]) -> Dict[str, List[Tuple[Dict[str, Any], str, Dict[str, Any]]]]:
+def _path_action_records(
+    actions: List[Dict[str, Any]],
+    policy_document: Dict[str, Any],
+) -> Dict[str, List[Tuple[Dict[str, Any], str, Dict[str, Any]]]]:
     records: Dict[str, List[Tuple[Dict[str, Any], str, Dict[str, Any]]]] = {}
-    role_actions = {
-        "destination_paths": "transfer_attempt",
-        "modified_paths": "permission_modification_attempt",
-        "executed_paths": "execution_attempt",
-        "deleted_paths": "deletion_attempt",
-    }
+    role_actions = (_policy_section(policy_document, "relationships").get("path_action_roles") or {})
     for action in actions:
         if (action.get("conditional_execution") or {}).get("status") == "condition_not_satisfied":
             continue
@@ -754,8 +811,16 @@ def _path_action_records(actions: List[Dict[str, Any]]) -> Dict[str, List[Tuple[
 def _build_relationships(
     actions: List[Dict[str, Any]],
     transfers: List[Dict[str, Any]],
+    policy_document: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     relationships: List[Dict[str, Any]] = []
+    extraction = _policy_section(policy_document, "extraction")
+    account_definition = extraction.get("account") or {}
+    account_action_type = _clean(account_definition.get("action_type"))
+    account_relationship_type = _clean(account_definition.get("relationship_type"))
+    relationship_policy = _policy_section(policy_document, "relationships")
+    allowed_predecessors = relationship_policy.get("allowed_predecessors") or {}
+    relationship_types = relationship_policy.get("relationship_types") or {}
     for action in actions:
         action["action_status"] = _action_status(action)
 
@@ -820,7 +885,7 @@ def _build_relationships(
 
     account_records: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
     for action in actions:
-        if "account_modification_attempt" not in set(action.get("action_types") or []):
+        if account_action_type not in set(action.get("action_types") or []):
             continue
         if (action.get("conditional_execution") or {}).get("status") == "condition_not_satisfied":
             continue
@@ -835,7 +900,7 @@ def _build_relationships(
                 status = "partially_supported"
                 limitations.append("Account-related command completion is failed, compound-scoped, or unknown.")
             relationships.append(_relationship(
-                "account_modified",
+                account_relationship_type,
                 source,
                 target,
                 entity=entity,
@@ -844,14 +909,10 @@ def _build_relationships(
                 limitations=limitations,
             ))
 
-    for values in _path_action_records(actions).values():
+    for values in _path_action_records(actions, policy_document).values():
         previous_records: List[Tuple[Dict[str, Any], str, Dict[str, Any]]] = []
         for current, action_type, entity in values:
-            allowed_previous = {
-                "permission_modification_attempt": {"transfer_attempt"},
-                "execution_attempt": {"transfer_attempt", "permission_modification_attempt"},
-                "deletion_attempt": {"transfer_attempt", "permission_modification_attempt", "execution_attempt"},
-            }.get(action_type, set())
+            allowed_previous = set(allowed_predecessors.get(action_type) or [])
             candidates = [record for record in previous_records if record[1] in allowed_previous]
             if candidates:
                 source, _, _ = candidates[-1]
@@ -865,11 +926,10 @@ def _build_relationships(
                 if _action_status(current) in {"reported_failure", "compound_outcome_not_fragment_proof", "outcome_unknown"}:
                     status = "partially_supported"
                     limitations.append("The target action outcome is failed, compound-scoped, or unknown.")
-                relationship_type = {
-                    "permission_modification_attempt": "artifact_permission_change",
-                    "execution_attempt": "artifact_execution",
-                    "deletion_attempt": "artifact_deletion",
-                }[action_type]
+                relationship_type = _clean(relationship_types.get(action_type))
+                if not relationship_type:
+                    previous_records.append((current, action_type, entity))
+                    continue
                 relationships.append(_relationship(
                     relationship_type,
                     source,
@@ -952,6 +1012,7 @@ def _connected_chains(
     actions: List[Dict[str, Any]],
     transfers: List[Dict[str, Any]],
     relationships: List[Dict[str, Any]],
+    policy_document: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     nodes = {item["evidence_id"]: item for item in actions + transfers}
     adjacency: Dict[str, set[str]] = {node_id: set() for node_id in nodes}
@@ -1019,8 +1080,11 @@ def _connected_chains(
             "evidence_refs": [item["evidence_id"] for item in ordered],
             "relationships": [item["relationship_id"] for item in component_relationships],
         })
-        has_transfer = bool({"transfer_attempt", "cowrie_file_transfer_observed"} & set(action_types))
-        has_execution = "execution_attempt" in action_types or "shell_pipe_consumer" in action_types
+        follow_on = ((_policy_section(policy_document, "claims").get("follow_on") or {}))
+        progress_types = set(follow_on.get("progress_action_types") or [])
+        completion_types = set(follow_on.get("completion_action_types") or [])
+        has_transfer = bool(progress_types & set(action_types))
+        has_execution = bool(completion_types & set(action_types))
         gaps: List[str] = []
         if has_transfer and not has_execution:
             gaps.append("No execution attempt linked to the transferred or referenced artifact was observed.")
@@ -1042,15 +1106,22 @@ def _connected_chains(
     return chains
 
 
-def build_session_behavior_relationships(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+def build_session_behavior_relationships(
+    session_payload: Dict[str, Any],
+    *,
+    policy_document: Optional[Dict[str, Any]] = None,
+    policy_path: str = "",
+) -> Dict[str, Any]:
     """Build additive literal-action, entity, relationship, and chain evidence."""
 
-    actions = _build_command_observations(session_payload)
-    transfers = _build_transfer_observations(session_payload)
-    relationships = _build_relationships(actions, transfers)
-    chains = _connected_chains(actions, transfers, relationships)
+    document = _resolved_policy(policy_document, policy_path)
+    actions = _build_command_observations(session_payload, document)
+    transfers = _build_transfer_observations(session_payload, document)
+    relationships = _build_relationships(actions, transfers, document)
+    chains = _connected_chains(actions, transfers, relationships, document)
     return {
         "schema_version": SCHEMA_VERSION,
+        "behavior_policy": policy_summary(document),
         "ordered_command_observations": actions,
         "transfer_event_observations": transfers,
         "normalized_entities": _collect_entities(actions, transfers),
