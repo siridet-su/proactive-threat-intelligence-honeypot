@@ -222,6 +222,44 @@ and migrated. PostgreSQL is retained only as a legacy compatibility path.
 Startup descriptions omit database usernames, passwords, and URI query
 parameters.
 
+### Optional MongoDB Backend
+
+Install the MongoDB runtime dependency separately so SQLite-only development
+does not require it:
+
+```bash
+pip install -r requirements-mongodb.txt
+```
+
+MongoDB must remain on a private management network and must not be exposed
+directly to the public Internet. Adapter initialization creates the reviewed
+unique and queue/query indexes before readiness succeeds.
+
+The migration tool opens SQLite read-only, never deletes it, uses stable
+idempotency keys, checkpoints each completed batch, and verifies collection
+counts plus deterministic sample hashes:
+
+```bash
+# Conversion and SQLite integrity check; no MongoDB connection or write.
+python -m production.tools.migrate_sqlite_to_mongodb \
+  --sqlite sqlite:////path/to/production.db \
+  --dry-run
+
+# Private cutover after MONGODB_URI and MONGODB_DATABASE are set.
+python -m production.tools.migrate_sqlite_to_mongodb \
+  --sqlite sqlite:////path/to/production.db \
+  --migration-id production-cutover-v1
+```
+
+Rerun the same command to resume an interrupted migration. If SQLite changes
+after a checkpoint, the tool refuses resume; rerun with `--restart` to clear
+only migration checkpoints and reconcile every source row. Keep the original
+SQLite database and a verified backup until MongoDB validation and rollback
+testing are complete. The tool never removes the SQLite rollback source.
+
+An opt-in real-driver test uses a unique disposable database when
+`MONGODB_TEST_URI` is set; otherwise pytest reports it as explicitly skipped.
+
 Run the local components in separate terminals:
 
 ```bash
