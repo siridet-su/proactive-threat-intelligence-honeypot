@@ -18,7 +18,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 from production.utils.config import ProductionConfig
 from production.utils.serialization import stable_json, utc_now
 from production.correlation.session_ttp_knowledge import is_subtechnique_id, main_ttp_id
-from production.storage import PostgresStorage, SQLiteStorage, open_storage
+from production.storage import StorageBackend, open_storage, safe_database_descriptor
 
 
 TABLES: Dict[str, Dict[str, str]] = {
@@ -151,44 +151,59 @@ def _decode_payload(raw: Any) -> Dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _select_rows(storage: Any, table: str, limit: int) -> List[Dict[str, Any]]:
-    spec = TABLES[table]
-    key = spec["key"]
-    order = spec["order"]
-    with storage.connection() as conn:
-        if isinstance(storage, SQLiteStorage):
-            rows = conn.execute(
-                f"SELECT {key}, payload_json FROM {table} ORDER BY {order} DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [dict(row) for row in rows]
-        if isinstance(storage, PostgresStorage):
-            cur = storage._execute(
-                conn,
-                f"SELECT {key}, payload_json FROM {table} ORDER BY {order} DESC LIMIT %s",
-                (limit,),
-            )
-            return [dict(row) for row in cur.fetchall()]
-    return []
+def _payload_from_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    payload = row.get("payload")
+    if isinstance(payload, dict):
+        return dict(payload)
+    return _decode_payload(row.get("payload_json"))
 
 
-def _update_payload(storage: Any, table: str, key_value: str, payload: Dict[str, Any]) -> None:
+def _safe_database_label(descriptor: Dict[str, str]) -> str:
+    backend = str(descriptor.get("backend") or "unknown")
+    if backend == "sqlite":
+        return f"sqlite:///{descriptor.get('database_path', '')}"
+    endpoint = str(descriptor.get("endpoint") or "")
+    database = str(descriptor.get("database") or "")
+    suffix = f"/{database}" if database else ""
+    return f"{backend}://{endpoint}{suffix}"
+
+
+def _select_rows(storage: StorageBackend, table: str, limit: int) -> List[Dict[str, Any]]:
+    return [dict(row) for row in storage.list_rows(table, limit=limit)]
+
+
+def _update_payload(
+    storage: StorageBackend,
+    table: str,
+    key_value: str,
+    payload: Dict[str, Any],
+    row: Dict[str, Any],
+) -> None:
     spec = TABLES[table]
     key = spec["key"]
-    payload_json = stable_json(payload)
-    with storage.connection() as conn:
-        if isinstance(storage, SQLiteStorage):
-            conn.execute(
-                f"UPDATE {table} SET payload_json = ? WHERE {key} = ?",
-                (payload_json, key_value),
-            )
-            return
-        if isinstance(storage, PostgresStorage):
-            storage._execute(
-                conn,
-                f"UPDATE {table} SET payload_json = %s::jsonb WHERE {key} = %s",
-                (payload_json, key_value),
-            )
+    updated = dict(payload)
+    updated.setdefault(key, key_value)
+    if table == "sessions":
+        for field in ("src_ip", "start_time", "session_source"):
+            if field not in updated and row.get(field) is not None:
+                updated[field] = row[field]
+        if "is_ended" not in updated and row.get("ended") is not None:
+            updated["is_ended"] = bool(row["ended"])
+        storage.save_session(updated)
+        return
+    if table == "prediction_snapshots":
+        for field in (
+            "session_id",
+            "src_ip",
+            "session_status",
+            "event_id",
+            "features_hash",
+        ):
+            if field not in updated and row.get(field) is not None:
+                updated[field] = row[field]
+        storage.save_prediction_snapshot(updated)
+        return
+    raise ValueError(f"unsupported table: {table}")
 
 
 def normalize_storage(
@@ -197,11 +212,14 @@ def normalize_storage(
     tables: Iterable[str] = ("sessions", "prediction_snapshots"),
     limit: int = 5000,
     apply: bool = False,
+    storage: StorageBackend | None = None,
 ) -> Dict[str, Any]:
-    storage = open_storage(database_url)
+    selected_storage = storage or open_storage(database_url)
+    database_descriptor = safe_database_descriptor(database_url)
     result: Dict[str, Any] = {
         "schema_version": "main_ttp_normalization.v1",
-        "database_url": database_url.split("?", 1)[0],
+        "database": database_descriptor,
+        "database_url": _safe_database_label(database_descriptor),
         "apply": bool(apply),
         "generated_at": utc_now(),
         "tables": {},
@@ -216,7 +234,7 @@ def normalize_storage(
         table = str(table).strip()
         if table not in TABLES:
             raise ValueError(f"unsupported table: {table}")
-        rows = _select_rows(storage, table, limit)
+        rows = _select_rows(selected_storage, table, limit)
         changed_keys: List[str] = []
         table_stats = {
             "rows_scanned": len(rows),
@@ -228,7 +246,7 @@ def normalize_storage(
         }
         key_name = TABLES[table]["key"]
         for row in rows:
-            payload = _decode_payload(row.get("payload_json"))
+            payload = _payload_from_row(row)
             normalized, stats = normalize_payload_main_ttps(payload)
             actual_ttp_changes = (
                 stats["active_ttp_values_normalized"]
@@ -256,7 +274,7 @@ def normalize_storage(
                             "snapshot_ids_and_feature_hashes_preserved": table == "prediction_snapshots",
                         }
                     )
-                _update_payload(storage, table, key_value, normalized)
+                _update_payload(selected_storage, table, key_value, normalized, row)
 
         result["tables"][table] = table_stats
         result["total_rows_scanned"] += table_stats["rows_scanned"]

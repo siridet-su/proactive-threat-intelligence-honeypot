@@ -441,12 +441,26 @@ class StorageBackend(Protocol):
 
     def list_rows(self, table: str, limit: int = 100) -> List[Dict[str, Any]]: ...
 
+    def list_rows_for_session(
+        self,
+        table: str,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
     def list_session_rows(
         self,
         limit: int = 100,
         session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
         external_only: bool = False,
     ) -> List[Dict[str, Any]]: ...
+
+    def count_sessions(
+        self,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+        external_only: bool = False,
+        ended_only: bool = False,
+    ) -> int: ...
 
     def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]: ...
 

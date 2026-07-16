@@ -60,6 +60,21 @@ def _retry_at(seconds: float) -> str:
 
 PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
 
+SESSION_SCOPED_TABLE_ORDER = {
+    "events": "received_at",
+    "sessions": "updated_at",
+    "alerts": "created_at",
+    "analysis_jobs": "updated_at",
+    "reports": "created_at",
+    "enrichment_jobs": "updated_at",
+    "prediction_snapshots": "created_at",
+    "analyst_feedback": "created_at",
+    "classification_review_labels": "created_at",
+    "observable_sightings": "created_at",
+    "threat_hunt_jobs": "updated_at",
+    "campaign_sessions": "created_at",
+}
+
 
 def _normalize_priority(priority: str) -> str:
     value = str(priority or "normal").strip().lower()
@@ -1865,6 +1880,26 @@ class SQLiteStorage:
             rows = conn.execute(f"SELECT * FROM {table} ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
         return [dict(row) for row in rows]
 
+    def list_rows_for_session(
+        self,
+        table: str,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        if table not in SESSION_SCOPED_TABLE_ORDER:
+            raise ValueError(f"unsupported session-scoped table: {table}")
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM {table}
+                WHERE session_id = ?
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (session_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_session_rows(
         self,
         limit: int = 100,
@@ -1892,6 +1927,30 @@ class SQLiteStorage:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def count_sessions(
+        self,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+        external_only: bool = False,
+        ended_only: bool = False,
+    ) -> int:
+        source = normalize_session_source(session_source, "") if session_source else ""
+        clauses = []
+        params: List[Any] = []
+        if source:
+            clauses.append("session_source = ?")
+            params.append(source)
+        if external_only:
+            clauses.append("is_external_source = 1")
+        if ended_only:
+            clauses.append("ended = 1")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self.connection() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS session_count FROM sessions {where}",
+                params,
+            ).fetchone()
+        return int(row["session_count"] if row else 0)
 
     def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]:
         with self.connection() as conn:
@@ -3523,6 +3582,28 @@ class PostgresStorage:
             cur = self._execute(conn, f"SELECT * FROM {table} ORDER BY {order_by} DESC LIMIT %s", (limit,))
             return [dict(row) for row in cur.fetchall()]
 
+    def list_rows_for_session(
+        self,
+        table: str,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        if table not in SESSION_SCOPED_TABLE_ORDER:
+            raise ValueError(f"unsupported session-scoped table: {table}")
+        order_by = SESSION_SCOPED_TABLE_ORDER[table]
+        with self.connection() as conn:
+            cur = self._execute(
+                conn,
+                f"""
+                SELECT * FROM {table}
+                WHERE session_id = %s
+                ORDER BY {order_by} DESC
+                LIMIT %s
+                """,
+                (session_id, limit),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
     def list_session_rows(
         self,
         limit: int = 100,
@@ -3551,6 +3632,32 @@ class PostgresStorage:
                 tuple(params),
             )
             return [dict(row) for row in cur.fetchall()]
+
+    def count_sessions(
+        self,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+        external_only: bool = False,
+        ended_only: bool = False,
+    ) -> int:
+        source = normalize_session_source(session_source, "") if session_source else ""
+        clauses = []
+        params: List[Any] = []
+        if source:
+            clauses.append("session_source = %s")
+            params.append(source)
+        if external_only:
+            clauses.append("is_external_source = true")
+        if ended_only:
+            clauses.append("ended = true")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self.connection() as conn:
+            cur = self._execute(
+                conn,
+                f"SELECT COUNT(*) AS session_count FROM sessions {where}",
+                tuple(params),
+            )
+            row = cur.fetchone()
+        return int(row["session_count"] if row else 0)
 
     def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]:
         with self.connection() as conn:

@@ -208,6 +208,95 @@ def test_sqlite_adapter_implements_contract_and_health_check(
     assert storage.health_check() == {"ok": True, "backend": "sqlite"}
 
 
+def test_sqlite_list_rows_for_session_matches_list_rows_shape_and_order(
+    tmp_path: Path,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'session-rows.db'}")
+    first_id, _ = storage.store_event(
+        "sensor",
+        {
+            "eventid": "cowrie.login.failed",
+            "session": "session-a",
+            "src_ip": "8.8.8.8",
+            "timestamp": "2026-07-16T00:00:01Z",
+        },
+    )
+    storage.store_event(
+        "sensor",
+        {
+            "eventid": "cowrie.login.failed",
+            "session": "session-b",
+            "src_ip": "1.1.1.1",
+            "timestamp": "2026-07-16T00:00:02Z",
+        },
+    )
+    latest_id, _ = storage.store_event(
+        "sensor",
+        {
+            "eventid": "cowrie.command.input",
+            "session": "session-a",
+            "src_ip": "8.8.8.8",
+            "timestamp": "2026-07-16T00:00:03Z",
+            "input": "id",
+        },
+    )
+
+    expected = [
+        row
+        for row in storage.list_rows("events", limit=10)
+        if row["session_id"] == "session-a"
+    ]
+    actual = storage.list_rows_for_session("events", "session-a", limit=10)
+
+    assert actual == expected
+    assert [row["event_id"] for row in actual] == [latest_id, first_id]
+    assert storage.list_rows_for_session("events", "session-a", limit=1) == [
+        expected[0]
+    ]
+
+
+def test_sqlite_list_rows_for_session_supports_explicit_table_allowlist(
+    tmp_path: Path,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'allowed-session-rows.db'}")
+    allowed_tables = (
+        "events",
+        "sessions",
+        "alerts",
+        "analysis_jobs",
+        "reports",
+        "enrichment_jobs",
+        "prediction_snapshots",
+        "analyst_feedback",
+        "classification_review_labels",
+        "observable_sightings",
+        "threat_hunt_jobs",
+        "campaign_sessions",
+    )
+
+    for table in allowed_tables:
+        assert storage.list_rows_for_session(table, "missing-session") == []
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        "feed_status",
+        "observables",
+        "webhook_deliveries",
+        "events WHERE session_id = 'session-a'",
+    ],
+)
+def test_sqlite_list_rows_for_session_rejects_non_allowlisted_tables(
+    tmp_path: Path,
+    table: str,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'rejected-session-rows.db'}")
+
+    with pytest.raises(ValueError, match="unsupported session-scoped table"):
+        storage.list_rows_for_session(table, "session-a")
+
+
 def test_example_config_uses_explicit_backend_contract() -> None:
     values = json.loads(
         Path("configs/production_config.example.json").read_text(encoding="utf-8")

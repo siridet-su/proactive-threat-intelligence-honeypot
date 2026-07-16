@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import ipaddress
 import json
 import os
-import sqlite3
 from dataclasses import dataclass
 from html import escape
 from http import HTTPStatus
@@ -28,16 +28,17 @@ from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_re
 from production.utils.feedback import normalize_feedback_payload
 from production.utils.serialization import stable_id, utc_now
 from production.reporting.smb_decision import build_smb_decision_from_paths
-from production.storage import open_storage
+from production.storage import open_storage, safe_database_descriptor
 
 
-DEFAULT_DB_PATH = "./runtime/production_pilot.db"
 DEFAULT_REPORTS_DIR = "./runtime/reports"
 DEFAULT_REFRESH_SECONDS = 5
 DEFAULT_SESSION_LIMIT = 500
 MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
+MONITOR_SUMMARY_SCAN_LIMIT = 100_000
+MONITOR_DETAIL_SCAN_LIMIT = 10_000
 STATIC_MONITOR_HTML = Path(__file__).with_name("static") / "monitor.html"
 SENSITIVE_KEYS = {
     "authorization",
@@ -72,7 +73,7 @@ class MonitorConfig:
 def _sqlite_path(database_url: str) -> str:
     if database_url.startswith("sqlite:///"):
         return database_url.replace("sqlite:///", "", 1)
-    return DEFAULT_DB_PATH
+    return ""
 
 
 def _load_monitor_config(config_path: Optional[str] = None) -> MonitorConfig:
@@ -137,11 +138,40 @@ def _short(value: Any, limit: int = 120) -> str:
 
 
 def _monitor_database_url(config: MonitorConfig) -> str:
-    return config.database_url or f"sqlite:///{config.db_path}"
+    if config.database_url:
+        return config.database_url
+    if config.db_path:
+        # Deprecated compatibility for callers that explicitly provide only a
+        # SQLite path. Ordinary configuration always supplies database_url.
+        return f"sqlite:///{config.db_path}"
+    raise ValueError(
+        "monitor database configuration is missing; configure DATABASE_BACKEND "
+        "or use the deprecated explicit --db-path SQLite override"
+    )
+
+
+def _monitor_database_descriptor(config: MonitorConfig) -> Dict[str, str]:
+    return safe_database_descriptor(_monitor_database_url(config))
+
+
+def _monitor_database_display(config: MonitorConfig) -> str:
+    try:
+        descriptor = _monitor_database_descriptor(config)
+    except Exception:
+        return "unavailable"
+    if descriptor.get("backend") == "sqlite":
+        return descriptor.get("database_path") or "sqlite"
+    endpoint = descriptor.get("endpoint") or "private"
+    database = descriptor.get("database") or "default"
+    return f"{descriptor.get('backend')}://{endpoint}/{database}"
+
+
+def _open_monitor_storage(config: MonitorConfig) -> Any:
+    return open_storage(_monitor_database_url(config))
 
 
 def _monitor_runtime_config(config: MonitorConfig) -> ProductionConfig:
-    cfg = config.production_config or ProductionConfig()
+    cfg = copy.copy(config.production_config or ProductionConfig())
     cfg.database_url = _monitor_database_url(config)
     cfg.reports_dir = config.reports_dir
     cfg.smb_asset_profile_path = config.smb_asset_profile_path or cfg.smb_asset_profile_path
@@ -174,7 +204,7 @@ def _decode_dashboard_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, List[str]]) -> Tuple[HTTPStatus, Optional[Dict[str, Any]]]:
     runtime_config = _monitor_runtime_config(config)
-    storage = open_storage(runtime_config.database_url)
+    storage = _open_monitor_storage(config)
 
     if path == "/predictions/current":
         session_id = query.get("session_id", [""])[0].strip()
@@ -269,141 +299,118 @@ def _format_list(values: Iterable[Any], limit: int = 8) -> str:
     return ", ".join(display) + suffix
 
 
-def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (table,),
-    ).fetchone()
-    return bool(row)
+def _storage_error(label: str, exc: BaseException) -> str:
+    return f"{label} failed: {type(exc).__name__}: {exc}"
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> List[str]:
-    if not _table_exists(conn, table):
-        return []
-    return [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-
-
-def _order_column(columns: List[str], preferred: Iterable[str]) -> str:
-    for column in preferred:
-        if column in columns:
-            return column
-    return "rowid"
-
-
-def _safe_select_rows(
-    conn: sqlite3.Connection,
+def _storage_list_rows(
+    storage: Any,
     table: str,
     limit: int,
-    preferred_order: Iterable[str],
-    offset: int = 0,
 ) -> Tuple[List[Dict[str, Any]], str]:
-    columns = _columns(conn, table)
-    if not columns:
-        return [], f"{table} table not available"
-    order_by = _order_column(columns, preferred_order)
     try:
-        rows = conn.execute(
-            f"SELECT rowid, * FROM {table} ORDER BY {order_by} DESC LIMIT ? OFFSET ?",
-            (limit, max(int(offset), 0)),
-        ).fetchall()
-        return [dict(row) for row in rows], ""
-    except sqlite3.Error as exc:
-        return [], f"{table} query failed: {type(exc).__name__}: {exc}"
+        rows = storage.list_rows(table, limit=max(int(limit), 1))
+        return [dict(row) for row in rows or []], ""
+    except Exception as exc:  # Monitor degrades individual panels independently.
+        return [], _storage_error(f"{table} query", exc)
 
 
-def _safe_select_session_rows(
-    conn: sqlite3.Connection,
+def _row_session_id(row: Dict[str, Any]) -> str:
+    payload = _payload_from_row(row)
+    return _text(
+        row.get("session_id")
+        or payload.get("session_id")
+        or payload.get("session")
+    )
+
+
+def _storage_session_rows(
+    storage: Any,
     table: str,
     session_id: str,
     limit: int,
-    preferred_order: Iterable[str],
 ) -> Tuple[List[Dict[str, Any]], str]:
-    columns = _columns(conn, table)
-    if not columns:
-        return [], f"{table} table not available"
-    order_by = _order_column(columns, preferred_order)
-    try:
-        if "session_id" in columns:
-            rows = conn.execute(
-                f"SELECT rowid, * FROM {table} WHERE session_id = ? ORDER BY {order_by} DESC LIMIT ?",
-                (session_id, limit),
-            ).fetchall()
-            return [dict(row) for row in rows], ""
-        if "payload_json" in columns:
-            rows = conn.execute(
-                f"SELECT rowid, * FROM {table} ORDER BY {order_by} DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            filtered = []
-            for row in rows:
-                item = dict(row)
-                payload = _json_loads(item.get("payload_json"), {})
-                if isinstance(payload, dict) and payload.get("session_id") == session_id:
-                    filtered.append(item)
-            return filtered, ""
-        return [], f"{table} has no session_id or payload_json column"
-    except sqlite3.Error as exc:
-        return [], f"{table} session query failed: {type(exc).__name__}: {exc}"
+    session_loader = getattr(storage, "list_rows_for_session", None)
+    if session_loader is not None:
+        try:
+            rows = session_loader(table, session_id, limit=limit)
+        except Exception as exc:
+            return [], _storage_error(f"{table} session query", exc)
+        return [dict(row) for row in rows or []], ""
+
+    # Bounded compatibility for injected legacy test doubles. Runtime adapters
+    # implement list_rows_for_session and do not scan unrelated records.
+    if table == "sessions":
+        try:
+            row = storage.get_session(session_id)
+        except Exception as exc:
+            return [], _storage_error("session query", exc)
+        return ([dict(row)] if row else []), (
+            "" if row else f"session not found: {session_id}"
+        )
+    rows, error = _storage_list_rows(
+        storage,
+        table,
+        max(int(limit), MONITOR_DETAIL_SCAN_LIMIT),
+    )
+    if error:
+        return [], error
+    filtered = [row for row in rows if _row_session_id(row) == session_id]
+    return filtered[:limit], ""
 
 
-def _safe_select_enrichment_rows(
-    conn: sqlite3.Connection,
+def _storage_enrichment_rows(
+    storage: Any,
     session_id: str,
     observables: Iterable[Tuple[str, str]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    records: List[Dict[str, Any]] = []
-    jobs: List[Dict[str, Any]] = []
-    errors: List[str] = []
     normalized = [(str(t), str(v)) for t, v in observables if t and v]
-
-    record_columns = _columns(conn, "enrichment_records")
-    if record_columns:
+    records: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    for observable_type, observable_value in normalized:
         try:
-            for observable_type, observable_value in normalized:
-                rows = conn.execute(
-                    """
-                    SELECT rowid, * FROM enrichment_records
-                    WHERE observable_type = ? AND observable_value = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 5
-                    """,
-                    (observable_type, observable_value),
-                ).fetchall()
-                records.extend(dict(row) for row in rows)
-        except sqlite3.Error as exc:
-            errors.append(f"enrichment_records query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("enrichment_records table not available")
+            record = storage.get_enrichment_record(
+                observable_type,
+                observable_value,
+                allow_stale=True,
+            )
+        except Exception as exc:
+            errors.append(
+                _storage_error(
+                    f"enrichment record {observable_type}",
+                    exc,
+                )
+            )
+            continue
+        if record:
+            records.append(dict(record))
 
-    job_columns = _columns(conn, "enrichment_jobs")
-    if job_columns:
-        try:
-            if "session_id" in job_columns:
-                rows = conn.execute(
-                    """
-                    SELECT rowid, * FROM enrichment_jobs
-                    WHERE session_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 100
-                    """,
-                    (session_id,),
-                ).fetchall()
-                jobs.extend(dict(row) for row in rows)
-            for observable_type, observable_value in normalized:
-                rows = conn.execute(
-                    """
-                    SELECT rowid, * FROM enrichment_jobs
-                    WHERE observable_type = ? AND observable_value = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 20
-                    """,
-                    (observable_type, observable_value),
-                ).fetchall()
-                jobs.extend(dict(row) for row in rows)
-        except sqlite3.Error as exc:
-            errors.append(f"enrichment_jobs query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("enrichment_jobs table not available")
+    session_jobs, session_jobs_error = _storage_session_rows(
+        storage,
+        "enrichment_jobs",
+        session_id,
+        100,
+    )
+    if session_jobs_error:
+        errors.append(session_jobs_error)
+    job_rows, jobs_error = _storage_list_rows(
+        storage,
+        "enrichment_jobs",
+        MONITOR_DETAIL_SCAN_LIMIT,
+    )
+    if jobs_error:
+        errors.append(jobs_error)
+    observable_set = set(normalized)
+    observable_jobs = [
+        row
+        for row in job_rows
+        if (
+            _text(row.get("observable_type")),
+            _text(row.get("observable_value")),
+        )
+        in observable_set
+    ]
+    jobs = session_jobs + observable_jobs
 
     def dedupe(rows: List[Dict[str, Any]], keys: Tuple[str, ...]) -> List[Dict[str, Any]]:
         seen = set()
@@ -418,200 +425,123 @@ def _safe_select_enrichment_rows(
 
     return (
         dedupe(records, ("observable_type", "observable_value", "updated_at")),
-        dedupe(jobs, ("job_id",)),
+        dedupe(jobs, ("job_id",))[:100],
         "; ".join(errors),
     )
 
 
-def _safe_select_observable_sightings(
-    conn: sqlite3.Connection,
+def _storage_observable_sightings(
+    storage: Any,
     session_id: str,
     observables: Iterable[Tuple[str, str]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    columns = _columns(conn, "observable_sightings")
-    if not columns:
-        return [], [], "observable_sightings table not available"
-
-    session_rows: List[Dict[str, Any]] = []
-    related_rows: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    normalized = [(str(t), str(v)) for t, v in observables if t and v]
-    try:
-        session_rows = [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT rowid, * FROM observable_sightings
-                WHERE session_id = ?
-                ORDER BY COALESCE(timestamp, created_at) DESC
-                LIMIT 200
-                """,
-                (session_id,),
-            ).fetchall()
-        ]
-        for observable_type, observable_value in normalized:
-            rows = conn.execute(
-                """
-                SELECT rowid, * FROM observable_sightings
-                WHERE observable_type = ? AND observable_value = ? AND session_id <> ?
-                ORDER BY COALESCE(timestamp, created_at) DESC
-                LIMIT 20
-                """,
-                (observable_type, observable_value, session_id),
-            ).fetchall()
-            related_rows.extend(dict(row) for row in rows)
-    except sqlite3.Error as exc:
-        errors.append(f"observable_sightings query failed: {type(exc).__name__}: {exc}")
-
-    def dedupe(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        seen = set()
-        output = []
-        for row in rows:
-            marker = row.get("sighting_id") or (
-                row.get("observable_type"),
-                row.get("observable_value"),
-                row.get("session_id"),
-                row.get("role"),
-                row.get("event_id"),
-            )
-            if marker in seen:
-                continue
-            seen.add(marker)
-            output.append(row)
-        return output
-
-    return dedupe(session_rows), dedupe(related_rows), "; ".join(errors)
+    session_rows, session_error = _storage_session_rows(
+        storage,
+        "observable_sightings",
+        session_id,
+        200,
+    )
+    rows, error = _storage_list_rows(
+        storage,
+        "observable_sightings",
+        MONITOR_DETAIL_SCAN_LIMIT,
+    )
+    errors = [message for message in (session_error, error) if message]
+    observable_set = {(str(t), str(v)) for t, v in observables if t and v}
+    related_rows = [
+        row
+        for row in rows
+        if _row_session_id(row) != session_id
+        and (
+            _text(row.get("observable_type")),
+            _text(row.get("observable_value")),
+        )
+        in observable_set
+    ][:200]
+    return session_rows, related_rows, "; ".join(errors)
 
 
-def _safe_select_session_links(
-    conn: sqlite3.Connection,
+def _storage_session_links_and_jobs(
+    storage: Any,
     session_id: str,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
     errors: List[str] = []
-    links: List[Dict[str, Any]] = []
-    jobs: List[Dict[str, Any]] = []
-    if _table_exists(conn, "session_links"):
-        try:
-            links = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    SELECT rowid, * FROM session_links
-                    WHERE session_id_a = ? OR session_id_b = ?
-                    ORDER BY created_at DESC
-                    LIMIT 100
-                    """,
-                    (session_id, session_id),
-                ).fetchall()
-            ]
-        except sqlite3.Error as exc:
-            errors.append(f"session_links query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("session_links table not available")
-
-    if _table_exists(conn, "threat_hunt_jobs"):
-        try:
-            jobs = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    SELECT rowid, * FROM threat_hunt_jobs
-                    WHERE session_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 100
-                    """,
-                    (session_id,),
-                ).fetchall()
-            ]
-        except sqlite3.Error as exc:
-            errors.append(f"threat_hunt_jobs query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("threat_hunt_jobs table not available")
-
+    try:
+        links = [
+            dict(row)
+            for row in storage.list_session_links(session_id, limit=100) or []
+        ]
+    except Exception as exc:
+        links = []
+        errors.append(_storage_error("session links query", exc))
+    jobs, jobs_error = _storage_session_rows(
+        storage,
+        "threat_hunt_jobs",
+        session_id,
+        100,
+    )
+    if jobs_error:
+        errors.append(jobs_error)
     return links, jobs, "; ".join(errors)
 
 
-def _safe_select_campaign_rows(
-    conn: sqlite3.Connection,
+def _storage_campaign_rows(
+    storage: Any,
     session_id: str,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    errors: List[str] = []
-    memberships: List[Dict[str, Any]] = []
-    campaigns: List[Dict[str, Any]] = []
-    if not _table_exists(conn, "campaign_sessions"):
-        return [], [], "campaign_sessions table not available"
     try:
         memberships = [
             dict(row)
-            for row in conn.execute(
-                """
-                SELECT rowid, * FROM campaign_sessions
-                WHERE session_id = ?
-                ORDER BY created_at DESC
-                LIMIT 50
-                """,
-                (session_id,),
-            ).fetchall()
+            for row in storage.list_session_campaigns(session_id, limit=50) or []
         ]
-    except sqlite3.Error as exc:
-        errors.append(f"campaign_sessions query failed: {type(exc).__name__}: {exc}")
-        memberships = []
-
-    campaign_ids = []
-    for row in memberships:
-        campaign_id = str(row.get("campaign_id") or "").strip()
-        if campaign_id and campaign_id not in campaign_ids:
-            campaign_ids.append(campaign_id)
-    if campaign_ids and _table_exists(conn, "campaigns"):
+    except Exception as exc:
+        return [], [], _storage_error("campaign memberships query", exc)
+    campaigns: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    seen = set()
+    for membership in memberships:
+        campaign_id = _text(membership.get("campaign_id"))
+        if not campaign_id or campaign_id in seen:
+            continue
+        seen.add(campaign_id)
         try:
-            placeholders = ",".join("?" for _ in campaign_ids)
-            campaigns = [
-                dict(row)
-                for row in conn.execute(
-                    f"""
-                    SELECT rowid, * FROM campaigns
-                    WHERE campaign_id IN ({placeholders})
-                    ORDER BY updated_at DESC
-                    LIMIT 50
-                    """,
-                    campaign_ids,
-                ).fetchall()
-            ]
-        except sqlite3.Error as exc:
-            errors.append(f"campaigns query failed: {type(exc).__name__}: {exc}")
-            campaigns = []
-    elif campaign_ids:
-        errors.append("campaigns table not available")
+            campaign = storage.get_campaign(campaign_id)
+        except Exception as exc:
+            errors.append(_storage_error(f"campaign {campaign_id} query", exc))
+            continue
+        if campaign:
+            campaigns.append(dict(campaign))
     return memberships, campaigns, "; ".join(errors)
 
 
-def _safe_count(conn: sqlite3.Connection, table: str, where: str = "", params: Tuple[Any, ...] = ()) -> int:
-    if not _table_exists(conn, table):
-        return 0
+def _storage_ip_enrichment_contexts(
+    storage: Any,
+    ips: Iterable[str],
+) -> Tuple[Dict[str, Dict[str, Any]], str]:
     try:
-        sql = f"SELECT COUNT(*) AS count FROM {table}"
-        if where:
-            sql += f" WHERE {where}"
-        row = conn.execute(sql, params).fetchone()
-        return int(row["count"]) if row else 0
-    except sqlite3.Error:
-        return 0
-
-
-def _connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _connect_write(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+        cache = storage.load_enrichment_cache("ip", allow_stale=True)
+    except Exception as exc:
+        return {}, _storage_error("IP enrichment cache query", exc)
+    contexts: Dict[str, Dict[str, Any]] = {}
+    for ip in sorted({str(item).strip() for item in ips if _is_public_ip(item)}):
+        payload = cache.get(ip)
+        if not isinstance(payload, dict):
+            continue
+        context = _extract_geo_context(payload)
+        if context:
+            contexts[ip] = _merge_geo_contexts(
+                context,
+                {
+                    "observable_type": "ip",
+                    "observable_value": ip,
+                    "source": context.get("source") or "enrichment_records",
+                },
+            )
+    return contexts, ""
 
 
 def _session_payload(row: Dict[str, Any]) -> Dict[str, Any]:
-    payload = _json_loads(row.get("payload_json"), {})
+    payload = _payload_from_row(row)
     if not isinstance(payload, dict):
         payload = {}
     payload.setdefault("session_id", row.get("session_id", "unknown"))
@@ -623,12 +553,12 @@ def _session_payload(row: Dict[str, Any]) -> Dict[str, Any]:
 def _report_payload(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not row:
         return {}
-    payload = _json_loads(row.get("payload_json"), {})
+    payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
 
 
 def _event_payload(row: Dict[str, Any]) -> Dict[str, Any]:
-    payload = _json_loads(row.get("payload_json"), {})
+    payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
 
 
@@ -946,52 +876,13 @@ def _public_ips_from_rows(rows: Iterable[Dict[str, Any]], payload_loader) -> Lis
     return ips
 
 
-def _safe_select_ip_enrichment_contexts(
-    conn: sqlite3.Connection,
-    ips: Iterable[str],
-) -> Tuple[Dict[str, Dict[str, Any]], str]:
-    columns = _columns(conn, "enrichment_records")
-    if not columns:
-        return {}, "enrichment_records table not available"
-    contexts: Dict[str, Dict[str, Any]] = {}
-    errors: List[str] = []
-    for ip in sorted({str(item).strip() for item in ips if _is_public_ip(item)}):
-        try:
-            rows = conn.execute(
-                """
-                SELECT rowid, * FROM enrichment_records
-                WHERE observable_type = 'ip' AND observable_value = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (ip,),
-            ).fetchall()
-        except sqlite3.Error as exc:
-            errors.append(f"{ip}: {type(exc).__name__}: {exc}")
-            continue
-        if not rows:
-            continue
-        row = dict(rows[0])
-        payload = _json_loads(row.get("payload_json"), {})
-        context = _extract_geo_context(payload) if isinstance(payload, dict) else {}
-        if context:
-            context = _merge_geo_contexts(
-                context,
-                {
-                    "observable_type": "ip",
-                    "observable_value": ip,
-                    "updated_at": row.get("updated_at") or "",
-                    "expires_at": row.get("expires_at") or "",
-                    "source": context.get("source") or "enrichment_records",
-                },
-            )
-            contexts[ip] = context
-    return contexts, "; ".join(errors)
-
-
 def _row_with_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(row)
-    payload = _json_loads(item.get("payload_json"), {})
+    payload = (
+        item.get("payload")
+        if isinstance(item.get("payload"), dict)
+        else _json_loads(item.get("payload_json"), {})
+    )
     item.pop("payload_json", None)
     if isinstance(payload, dict):
         item["payload"] = payload
@@ -1011,19 +902,35 @@ def _row_with_payload(row: Dict[str, Any]) -> Dict[str, Any]:
             geo_from_context = _geo_from_context(geo_context)
             if geo_from_context:
                 item["geo"] = geo_from_context
-    result = _json_loads(item.get("result_json"), {})
+    result = (
+        item.get("result")
+        if isinstance(item.get("result"), dict)
+        else _json_loads(item.get("result_json"), {})
+    )
     item.pop("result_json", None)
     if isinstance(result, dict):
         item["result"] = result
-    provider_status = _json_loads(item.get("provider_status_json"), {})
+    provider_status = (
+        item.get("provider_status")
+        if isinstance(item.get("provider_status"), dict)
+        else _json_loads(item.get("provider_status_json"), {})
+    )
     item.pop("provider_status_json", None)
     if isinstance(provider_status, dict):
         item["provider_status"] = provider_status
-    match_reasons = _json_loads(item.get("match_reasons_json"), [])
+    match_reasons = (
+        item.get("match_reasons")
+        if isinstance(item.get("match_reasons"), list)
+        else _json_loads(item.get("match_reasons_json"), [])
+    )
     item.pop("match_reasons_json", None)
     if isinstance(match_reasons, list):
         item["match_reasons"] = match_reasons
-    confirmed_tactics = _json_loads(item.get("confirmed_tactics_json"), [])
+    confirmed_tactics = (
+        item.get("confirmed_tactics")
+        if isinstance(item.get("confirmed_tactics"), list)
+        else _json_loads(item.get("confirmed_tactics_json"), [])
+    )
     item.pop("confirmed_tactics_json", None)
     if isinstance(confirmed_tactics, list):
         item["confirmed_tactics"] = confirmed_tactics
@@ -1254,121 +1161,8 @@ def record_analyst_feedback(config: MonitorConfig, feedback: Dict[str, Any]) -> 
         raise ValueError("label is required")
     feedback_id = stable_id("feedback", payload)
     payload["feedback_id"] = feedback_id
-    conn = _connect_write(config.db_path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS analyst_feedback (
-                feedback_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                snapshot_id TEXT,
-                label TEXT NOT NULL,
-                feedback_type TEXT NOT NULL DEFAULT 'operator_usefulness',
-                operator_signal TEXT,
-                action_status TEXT,
-                label_authority TEXT,
-                evidence_confidence REAL,
-                evidence_origin TEXT NOT NULL DEFAULT 'live_cowrie',
-                weight_eligible INTEGER NOT NULL DEFAULT 0,
-                correct_next_tactic TEXT,
-                observed_prefix TEXT,
-                predicted_top_tactic TEXT,
-                predicted_ranking TEXT,
-                final_actual_next_tactic TEXT,
-                tactic_granularity TEXT NOT NULL DEFAULT 'tactic',
-                analyst_corrected_at TEXT,
-                notes TEXT,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        for column, ddl_type in (
-            ("feedback_type", "TEXT NOT NULL DEFAULT 'operator_usefulness'"),
-            ("operator_signal", "TEXT"),
-            ("action_status", "TEXT"),
-            ("label_authority", "TEXT"),
-            ("evidence_confidence", "REAL"),
-            ("evidence_origin", "TEXT NOT NULL DEFAULT 'live_cowrie'"),
-            ("weight_eligible", "INTEGER NOT NULL DEFAULT 0"),
-            ("observed_prefix", "TEXT"),
-            ("predicted_top_tactic", "TEXT"),
-            ("predicted_ranking", "TEXT"),
-            ("final_actual_next_tactic", "TEXT"),
-            ("tactic_granularity", "TEXT NOT NULL DEFAULT 'tactic'"),
-            ("analyst_corrected_at", "TEXT"),
-        ):
-            try:
-                conn.execute(f"ALTER TABLE analyst_feedback ADD COLUMN {column} {ddl_type}")
-            except sqlite3.OperationalError as exc:
-                if "duplicate column name" not in str(exc).lower():
-                    raise
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_analyst_feedback_session
-                ON analyst_feedback(session_id, created_at)
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO analyst_feedback
-            (feedback_id, session_id, snapshot_id, label, feedback_type,
-             operator_signal, action_status, label_authority, evidence_confidence,
-             evidence_origin, weight_eligible, correct_next_tactic,
-             observed_prefix, predicted_top_tactic, predicted_ranking,
-             final_actual_next_tactic, tactic_granularity, analyst_corrected_at,
-             notes, payload_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(feedback_id) DO UPDATE SET
-                session_id=excluded.session_id,
-                snapshot_id=excluded.snapshot_id,
-                label=excluded.label,
-                feedback_type=excluded.feedback_type,
-                operator_signal=excluded.operator_signal,
-                action_status=excluded.action_status,
-                label_authority=excluded.label_authority,
-                evidence_confidence=excluded.evidence_confidence,
-                evidence_origin=excluded.evidence_origin,
-                weight_eligible=excluded.weight_eligible,
-                correct_next_tactic=excluded.correct_next_tactic,
-                observed_prefix=excluded.observed_prefix,
-                predicted_top_tactic=excluded.predicted_top_tactic,
-                predicted_ranking=excluded.predicted_ranking,
-                final_actual_next_tactic=excluded.final_actual_next_tactic,
-                tactic_granularity=excluded.tactic_granularity,
-                analyst_corrected_at=excluded.analyst_corrected_at,
-                notes=excluded.notes,
-                payload_json=excluded.payload_json,
-                created_at=excluded.created_at
-            """,
-            (
-                feedback_id,
-                payload["session_id"],
-                payload["snapshot_id"] or None,
-                payload["label"],
-                payload.get("feedback_type") or "operator_usefulness",
-                payload.get("operator_signal") or None,
-                payload.get("action_status") or None,
-                payload.get("label_authority") or None,
-                payload.get("evidence_confidence") if payload.get("evidence_confidence") not in ("", None) else None,
-                payload.get("evidence_origin") or "live_cowrie",
-                1 if bool(payload.get("weight_eligible")) else 0,
-                payload["correct_next_tactic"] or None,
-                payload["observed_prefix"] or None,
-                payload["predicted_top_tactic"] or None,
-                payload["predicted_ranking"] or None,
-                payload["final_actual_next_tactic"] or None,
-                payload["tactic_granularity"],
-                payload.get("analyst_corrected_at") or None,
-                payload["notes"] or None,
-                json.dumps(payload, sort_keys=True),
-                payload["created_at"],
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return feedback_id
+    stored_id = _open_monitor_storage(config).record_analyst_feedback(payload)
+    return str(stored_id or feedback_id)
 
 
 def _index_by_latest(rows: List[Dict[str, Any]], key: str, time_key: str) -> Dict[str, Dict[str, Any]]:
@@ -1915,32 +1709,88 @@ def _session_observables(payload: Dict[str, Any], session_id: str) -> List[Tuple
     return observables
 
 
-def load_session_detail(config: MonitorConfig, session_id: str) -> Dict[str, Any]:
+def load_session_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
     if not session_id:
         return {"ok": False, "error": "session_id is required", "timestamp": utc_now()}
-    if not Path(config.db_path).exists():
-        return {"ok": False, "error": f"SQLite database not found: {config.db_path}", "timestamp": utc_now()}
     try:
-        conn = _connect(config.db_path)
-    except sqlite3.Error as exc:
-        return {"ok": False, "error": f"SQLite open failed: {type(exc).__name__}: {exc}", "timestamp": utc_now()}
+        storage = _storage or _open_monitor_storage(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": _storage_error("storage open", exc),
+            "session_id": session_id,
+            "timestamp": utc_now(),
+        }
 
-    try:
-        session_rows, session_error = _safe_select_session_rows(conn, "sessions", session_id, 1, ["updated_at", "start_time"])
-        payload_for_observables = _session_payload(session_rows[0]) if session_rows else {}
-        observables = _session_observables(payload_for_observables, session_id)
-        job_rows, jobs_error = _safe_select_session_rows(conn, "analysis_jobs", session_id, 50, ["updated_at", "created_at"])
-        report_rows, reports_error = _safe_select_session_rows(conn, "reports", session_id, 50, ["created_at"])
-        event_rows, events_error = _safe_select_session_rows(conn, "events", session_id, MAX_SESSION_EVENTS, ["received_at", "timestamp"])
-        alert_rows, alerts_error = _safe_select_session_rows(conn, "alerts", session_id, 50, ["created_at"])
-        prediction_rows, predictions_error = _safe_select_session_rows(conn, "prediction_snapshots", session_id, 50, ["created_at"])
-        feedback_rows, feedback_error = _safe_select_session_rows(conn, "analyst_feedback", session_id, 50, ["created_at"])
-        sighting_rows, related_sighting_rows, sightings_error = _safe_select_observable_sightings(conn, session_id, observables)
-        session_link_rows, threat_hunt_job_rows, threat_hunt_error = _safe_select_session_links(conn, session_id)
-        campaign_membership_rows, campaign_rows, campaigns_error = _safe_select_campaign_rows(conn, session_id)
-        enrichment_record_rows, enrichment_job_rows, enrichment_error = _safe_select_enrichment_rows(conn, session_id, observables)
-    finally:
-        conn.close()
+    session_rows, session_error = _storage_session_rows(
+        storage,
+        "sessions",
+        session_id,
+        1,
+    )
+    payload_for_observables = _session_payload(session_rows[0]) if session_rows else {}
+    observables = _session_observables(payload_for_observables, session_id)
+    job_rows, jobs_error = _storage_session_rows(
+        storage,
+        "analysis_jobs",
+        session_id,
+        50,
+    )
+    report_rows, reports_error = _storage_session_rows(
+        storage,
+        "reports",
+        session_id,
+        50,
+    )
+    event_rows, events_error = _storage_session_rows(
+        storage,
+        "events",
+        session_id,
+        MAX_SESSION_EVENTS,
+    )
+    alert_rows, alerts_error = _storage_session_rows(
+        storage,
+        "alerts",
+        session_id,
+        50,
+    )
+    prediction_rows, predictions_error = _storage_session_rows(
+        storage,
+        "prediction_snapshots",
+        session_id,
+        50,
+    )
+    feedback_rows, feedback_error = _storage_session_rows(
+        storage,
+        "analyst_feedback",
+        session_id,
+        50,
+    )
+    (
+        sighting_rows,
+        related_sighting_rows,
+        sightings_error,
+    ) = _storage_observable_sightings(storage, session_id, observables)
+    (
+        session_link_rows,
+        threat_hunt_job_rows,
+        threat_hunt_error,
+    ) = _storage_session_links_and_jobs(storage, session_id)
+    (
+        campaign_membership_rows,
+        campaign_rows,
+        campaigns_error,
+    ) = _storage_campaign_rows(storage, session_id)
+    (
+        enrichment_record_rows,
+        enrichment_job_rows,
+        enrichment_error,
+    ) = _storage_enrichment_rows(storage, session_id, observables)
 
     if not session_rows:
         return {
@@ -2047,10 +1897,12 @@ def load_snapshot(
     session_limit: int = DEFAULT_SESSION_LIMIT,
     session_offset: int = 0,
 ) -> Dict[str, Any]:
-    if not Path(config.db_path).exists():
+    try:
+        storage = _open_monitor_storage(config)
+    except Exception as exc:
         return {
             "ok": False,
-            "error": f"SQLite database not found: {config.db_path}",
+            "error": _storage_error("storage open", exc),
             "sessions": [],
             "selected": None,
             "events": [],
@@ -2059,41 +1911,83 @@ def load_snapshot(
             "timestamp": utc_now(),
         }
 
+    session_limit = min(max(int(session_limit), 1), MAX_SESSIONS)
+    session_offset = max(int(session_offset), 0)
     try:
-        conn = _connect(config.db_path)
-    except sqlite3.Error as exc:
-        return {
-            "ok": False,
-            "error": f"SQLite open failed: {type(exc).__name__}: {exc}",
-            "sessions": [],
-            "selected": None,
-            "events": [],
-            "events_error": "events table not available",
-            "summary": {},
-            "timestamp": utc_now(),
-        }
-
-    try:
-        session_limit = min(max(int(session_limit), 1), MAX_SESSIONS)
-        session_offset = max(int(session_offset), 0)
-        session_rows, sessions_error = _safe_select_rows(conn, "sessions", session_limit, ["updated_at", "start_time"], offset=session_offset)
-        job_rows, _ = _safe_select_rows(conn, "analysis_jobs", 500, ["updated_at", "created_at"])
-        report_rows, _ = _safe_select_rows(conn, "reports", 500, ["created_at"])
-        event_rows, events_error = _safe_select_rows(conn, "events", MAX_EVENTS, ["received_at", "timestamp"])
-        backtest_rows, backtests_error = _safe_select_rows(conn, "prediction_backtest_runs", 10, ["created_at"])
-        calibration_rows, calibration_error = _safe_select_rows(conn, "prediction_calibration_runs", 10, ["created_at"])
-        feedback_rows, feedback_error = _safe_select_rows(conn, "analyst_feedback", 500, ["created_at"])
-        classification_review_rows, classification_review_error = _safe_select_rows(conn, "classification_review_labels", 500, ["created_at"])
-        public_ips = _public_ips_from_rows(session_rows, _session_payload)
-        for ip in _public_ips_from_rows(event_rows, _event_payload):
-            if ip not in public_ips:
-                public_ips.append(ip)
-        ip_geo_contexts, ip_geo_context_error = _safe_select_ip_enrichment_contexts(conn, public_ips)
-        total_sessions = _safe_count(conn, "sessions")
-        succeeded_reports = _safe_count(conn, "reports")
-        queued_jobs = _safe_count(conn, "analysis_jobs", "status IN ('queued', 'running', 'retry')")
-    finally:
-        conn.close()
+        all_session_rows = [
+            dict(row)
+            for row in storage.list_session_rows(
+                limit=max(
+                    MONITOR_SUMMARY_SCAN_LIMIT,
+                    session_offset + session_limit,
+                ),
+                session_source=None,
+                external_only=False,
+            )
+            or []
+        ]
+        sessions_error = ""
+    except Exception as exc:
+        all_session_rows = []
+        sessions_error = _storage_error("sessions query", exc)
+    session_rows = all_session_rows[
+        session_offset : session_offset + session_limit
+    ]
+    all_job_rows, _jobs_error = _storage_list_rows(
+        storage,
+        "analysis_jobs",
+        MONITOR_SUMMARY_SCAN_LIMIT,
+    )
+    job_rows = all_job_rows[:500]
+    all_report_rows, _reports_error = _storage_list_rows(
+        storage,
+        "reports",
+        MONITOR_SUMMARY_SCAN_LIMIT,
+    )
+    report_rows = all_report_rows[:500]
+    event_rows, events_error = _storage_list_rows(
+        storage,
+        "events",
+        MAX_EVENTS,
+    )
+    backtest_rows, backtests_error = _storage_list_rows(
+        storage,
+        "prediction_backtest_runs",
+        10,
+    )
+    calibration_rows, calibration_error = _storage_list_rows(
+        storage,
+        "prediction_calibration_runs",
+        10,
+    )
+    feedback_rows, feedback_error = _storage_list_rows(
+        storage,
+        "analyst_feedback",
+        500,
+    )
+    (
+        classification_review_rows,
+        classification_review_error,
+    ) = _storage_list_rows(
+        storage,
+        "classification_review_labels",
+        500,
+    )
+    public_ips = _public_ips_from_rows(session_rows, _session_payload)
+    for ip in _public_ips_from_rows(event_rows, _event_payload):
+        if ip not in public_ips:
+            public_ips.append(ip)
+    (
+        ip_geo_contexts,
+        ip_geo_context_error,
+    ) = _storage_ip_enrichment_contexts(storage, public_ips)
+    total_sessions = len(all_session_rows)
+    succeeded_reports = len(all_report_rows)
+    queued_jobs = sum(
+        1
+        for row in all_job_rows
+        if _text(row.get("status")).lower() in {"queued", "running", "retry"}
+    )
 
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
@@ -2169,7 +2063,15 @@ def load_snapshot(
                 break
     if not selected and sessions:
         selected = sessions[0]
-    selected_detail = load_session_detail(config, selected["session_id"]) if selected else {}
+    selected_detail = (
+        load_session_detail(
+            config,
+            selected["session_id"],
+            _storage=storage,
+        )
+        if selected
+        else {}
+    )
     feedback_decoded = [_row_with_payload(row) for row in feedback_rows]
     feedback_review = build_feedback_review(feedback_decoded)
 
@@ -3919,7 +3821,7 @@ def render_html(snapshot: Dict[str, Any], config: MonitorConfig, selected_sessio
     selected_id = selected["session_id"] if selected else ""
     error = snapshot.get("error") or ""
     title = "Cyber Threat Intelligence Dashboard"
-    db_info = f"{config.db_path}"
+    db_info = _monitor_database_display(config)
     summary = snapshot.get("summary", {})
 
     _js_sessions = []
@@ -4594,9 +4496,11 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 payload = {}
             if not isinstance(payload, dict):
                 payload = {}
-            storage = open_storage(_monitor_database_url(self.monitor_config))
             try:
-                feedback_id = storage.record_analyst_feedback(payload)
+                feedback_id = record_analyst_feedback(
+                    self.monitor_config,
+                    payload,
+                )
             except ValueError as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
@@ -4613,7 +4517,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
         feedback = {key: values[0] for key, values in form.items() if values}
         try:
             record_analyst_feedback(self.monitor_config, feedback)
-        except (OSError, sqlite3.Error, ValueError) as exc:
+        except Exception as exc:
             self._send(
                 HTTPStatus.BAD_REQUEST,
                 f"feedback failed: {type(exc).__name__}: {exc}",
@@ -4747,7 +4651,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", help="Path to production JSON config.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host. Default: 127.0.0.1")
     parser.add_argument("--port", type=int, default=8090, help="Bind port. Default: 8090")
-    parser.add_argument("--db-path", help="Override SQLite database path.")
+    parser.add_argument(
+        "--db-path",
+        help="Deprecated: explicitly override the configured backend with a SQLite database path.",
+    )
     parser.add_argument("--reports-dir", help="Override reports directory.")
     parser.add_argument("--refresh-seconds", type=int, default=DEFAULT_REFRESH_SECONDS)
     parser.add_argument("--check", action="store_true", help="Load one snapshot and print a compact health summary.")
@@ -4760,8 +4667,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.db_path:
         config.db_path = args.db_path
         config.database_url = f"sqlite:///{args.db_path}"
-        if config.production_config:
-            config.production_config.database_url = config.database_url
     if args.reports_dir:
         config.reports_dir = args.reports_dir
         if config.production_config:
@@ -4776,6 +4681,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "ok": bool(snapshot.get("ok")),
                     "service": "monitor_web",
                     "db_path": config.db_path,
+                    "database": _monitor_database_descriptor(config),
                     "sessions": len(snapshot.get("sessions", [])),
                     "selected_session": (snapshot.get("selected") or {}).get("session_id"),
                     "events": len(snapshot.get("events", [])),
@@ -4796,6 +4702,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "host": args.host,
                 "port": args.port,
                 "db_path": config.db_path,
+                "database": _monitor_database_descriptor(config),
                 "reports_dir": config.reports_dir,
             },
             sort_keys=True,

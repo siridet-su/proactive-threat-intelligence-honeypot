@@ -506,6 +506,93 @@ def test_main_ttp_normalization_storage_dry_run_and_apply() -> None:
         assert second["total_rows_changed"] == 0
 
 
+def test_main_ttp_normalization_uses_backend_neutral_storage_methods() -> None:
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved_sessions = []
+            self.saved_snapshots = []
+
+        def list_rows(self, table, limit=100):
+            assert limit == 50
+            if table == "sessions":
+                return [
+                    {
+                        "session_id": "mongo-session",
+                        "src_ip": "8.8.8.8",
+                        "ended": True,
+                        "session_source": "production_live",
+                        "payload": None,
+                        "payload_json": json.dumps(
+                            {
+                                "session_id": "mongo-session",
+                                "src_ip": "8.8.8.8",
+                                "is_ended": True,
+                                "session_source": "production_live",
+                                "ttps": ["T1565.001"],
+                            }
+                        ),
+                    }
+                ]
+            if table == "prediction_snapshots":
+                return [
+                    {
+                        "snapshot_id": "mongo-snapshot",
+                        "session_id": "mongo-session",
+                        "src_ip": "8.8.8.8",
+                        "session_status": "closed",
+                        "event_id": "mongo-event",
+                        "features_hash": "preserved-hash",
+                        "payload": {
+                            "snapshot_id": "mongo-snapshot",
+                            "session_id": "mongo-session",
+                            "src_ip": "8.8.8.8",
+                            "session_status": "closed",
+                            "event_id": "mongo-event",
+                            "features_hash": "preserved-hash",
+                            "features": {
+                                "observed_ttps": ["T1565.001"],
+                                "last_ttp": "T1565.001",
+                            },
+                        },
+                    }
+                ]
+            raise AssertionError(f"unexpected table: {table}")
+
+        def save_session(self, payload):
+            self.saved_sessions.append(copy.deepcopy(payload))
+
+        def save_prediction_snapshot(self, payload):
+            self.saved_snapshots.append(copy.deepcopy(payload))
+
+    storage = FakeStorage()
+    result = normalize_storage(
+        database_url=(
+            "mongodb://unit-user:unit-password@example.invalid/honeypot"
+            "?authSource=admin&token=unit-secret"
+        ),
+        limit=50,
+        apply=True,
+        storage=storage,
+    )
+
+    assert result["database"] == {
+        "backend": "mongodb",
+        "endpoint": "example.invalid",
+        "database": "honeypot",
+    }
+    assert result["database_url"] == "mongodb://example.invalid/honeypot"
+    assert "unit-user" not in json.dumps(result)
+    assert "unit-password" not in json.dumps(result)
+    assert "unit-secret" not in json.dumps(result)
+    assert result["total_rows_scanned"] == 2
+    assert result["total_rows_changed"] == 2
+    assert storage.saved_sessions[0]["ttps"] == ["T1565"]
+    assert storage.saved_snapshots[0]["snapshot_id"] == "mongo-snapshot"
+    assert storage.saved_snapshots[0]["features_hash"] == "preserved-hash"
+    assert storage.saved_snapshots[0]["features"]["observed_ttps"] == ["T1565"]
+    assert storage.saved_snapshots[0]["features"]["last_ttp"] == "T1565"
+
+
 def test_session_ttp_correlation_policy_validates_and_correlates_session_patterns() -> None:
     policy = load_session_ttp_correlation_policy(Path("configs") / "session_ttp_correlation.trusted.json")
     assert validate_session_ttp_correlation_policy(policy) == []

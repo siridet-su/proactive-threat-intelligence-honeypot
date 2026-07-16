@@ -5,11 +5,11 @@ import json
 import logging
 import logging.handlers
 import os
-import sqlite3
 import sys
 from pathlib import Path
-from typing import Iterable, List
+from typing import Any, Iterable, List
 
+from production.storage import StorageBackend, open_storage
 from production.utils.config import ProductionConfig
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
@@ -20,6 +20,7 @@ from production.storage.session_provenance import (
 
 DEFAULT_STATE_PATH = "./runtime/session_count_monitor_state.json"
 DEFAULT_THRESHOLDS = [1, 30]
+LEGACY_SESSION_COUNT_SCAN_LIMIT = 10_000
 
 
 def parse_thresholds(raw: str | None) -> List[int]:
@@ -37,42 +38,87 @@ def parse_thresholds(raw: str | None) -> List[int]:
     return sorted(set(thresholds))
 
 
-def _sqlite_path(database_url: str) -> Path:
-    if not database_url.startswith("sqlite:///"):
-        raise ValueError("session_count_monitor currently supports sqlite:/// database URLs only")
-    return Path(database_url.replace("sqlite:///", "", 1))
+def _session_payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    raw = row.get("payload_json")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+    return {}
 
 
-def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    return column in {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+def _row_bool(row: dict[str, Any], payload: dict[str, Any], *keys: str) -> bool:
+    def as_bool(value: Any) -> bool:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"", "0", "false", "no", "off"}:
+                return False
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+        return bool(value)
+
+    for key in keys:
+        if key in row and row[key] is not None:
+            return as_bool(row[key])
+        if key in payload and payload[key] is not None:
+            return as_bool(payload[key])
+    return False
 
 
 def completed_session_count(
     database_url: str,
     session_source: str = SESSION_SOURCE_PRODUCTION_LIVE,
     external_only: bool = True,
+    *,
+    storage: StorageBackend | None = None,
 ) -> int:
-    db_path = _sqlite_path(database_url)
-    uri = f"file:{db_path}?mode=ro"
     source = normalize_session_source(session_source, SESSION_SOURCE_PRODUCTION_LIVE)
-    with sqlite3.connect(uri, uri=True) as conn:
-        if external_only and _column_exists(conn, "sessions", "is_external_source"):
-            row = conn.execute(
-                "select count(*) from sessions where ended = 1 and session_source = ? and is_external_source = 1",
-                (source,),
-            ).fetchone()
-        elif external_only and _column_exists(conn, "sessions", "src_ip"):
-            rows = conn.execute(
-                "select src_ip from sessions where ended = 1 and session_source = ?",
-                (source,),
-            ).fetchall()
-            return sum(1 for row in rows if is_external_source_ip(row[0]))
-        else:
-            row = conn.execute(
-                "select count(*) from sessions where ended = 1 and session_source = ?",
-                (source,),
-            ).fetchone()
-    return int(row[0] if row else 0)
+    selected_storage = storage or open_storage(database_url)
+    count_method = getattr(selected_storage, "count_sessions", None)
+    if callable(count_method):
+        return int(
+            count_method(
+                session_source=source,
+                external_only=external_only,
+                ended_only=True,
+            )
+        )
+    if storage is None:
+        raise AttributeError("configured storage backend does not implement count_sessions")
+
+    # Compatibility for older injected test fakes only. Runtime adapters use
+    # count_sessions() so the monitor never loads the session corpus into memory.
+    rows = selected_storage.list_session_rows(
+        limit=LEGACY_SESSION_COUNT_SCAN_LIMIT,
+        session_source=source,
+        external_only=False,
+    )
+    completed = 0
+    for row in rows:
+        payload = _session_payload(row)
+        if not _row_bool(row, payload, "ended", "is_ended"):
+            continue
+        if external_only:
+            has_external_marker = (
+                ("is_external_source" in row and row.get("is_external_source") is not None)
+                or ("is_external_source" in payload and payload.get("is_external_source") is not None)
+            )
+            if has_external_marker:
+                if not _row_bool(row, payload, "is_external_source"):
+                    continue
+            else:
+                src_ip = row.get("src_ip") or payload.get("src_ip")
+                if not is_external_source_ip(src_ip):
+                    continue
+        completed += 1
+    return completed
 
 
 def load_state(path: Path) -> dict:
