@@ -140,6 +140,15 @@ _URL_VALUE_KEYS = {
     "target_url",
 }
 
+_DATABASE_URL_SCHEMES = {
+    "mongodb",
+    "mongodb+srv",
+    "mysql",
+    "postgres",
+    "postgresql",
+    "sqlite",
+}
+
 _URL_PATTERN = re.compile(
     r"\b[a-z][a-z0-9+.-]*://[^\s<>'\"]+",
     flags=re.IGNORECASE,
@@ -179,6 +188,28 @@ _SECRET_ASSIGNMENT_PATTERN = re.compile(
         [^\s,;&]+
     )
     """
+)
+_QUOTED_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r'''(?ix)
+    (["'])
+    (
+        authorization|proxy[_-]?authorization|cookie|set[_-]?cookie|
+        password|passwd|pwd|passphrase|login[_-]?password|
+        api[_-]?key|apikey|x[_-]?api[_-]?key|
+        access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?token|
+        auth[_-]?token|bearer[_-]?token|session[_-]?token|token|
+        client[_-]?secret|api[_-]?secret|secret|credential(?:s)?|
+        private[_-]?key|hmac[_-]?key|signing[_-]?key|encryption[_-]?key|
+        password[_-]?(?:hash|hmac|digest)|credential[_-]?(?:hash|hmac|digest)
+    )
+    \1
+    (\s*:\s*)
+    (
+        "(?:\\.|[^"])*" |
+        '(?:\\.|[^'])*' |
+        [^\s,;&}\]]+
+    )
+    '''
 )
 
 
@@ -271,6 +302,9 @@ def _fallback_sanitize_url(value: str) -> str:
         rf"\1{URL_REDACTION_MARKER}@",
         value,
     )
+    scheme = sanitized.partition("://")[0].lower()
+    if scheme in _DATABASE_URL_SCHEMES:
+        return sanitized.split("?", 1)[0].split("#", 1)[0]
     base_and_query, fragment_separator, fragment = sanitized.partition("#")
     base, query_separator, query = base_and_query.partition("?")
     if query_separator:
@@ -292,8 +326,16 @@ def sanitize_url(value: str) -> str:
     except ValueError:
         return _fallback_sanitize_url(value)
 
-    query = _sanitize_parameter_string(parsed.query)
-    fragment = _sanitize_fragment(parsed.fragment)
+    if parsed.scheme.lower() in _DATABASE_URL_SCHEMES:
+        # Connection options can contain nested or provider-specific secrets
+        # (for example MongoDB authMechanismProperties).  They are not useful
+        # in logs or public provenance, so omit them rather than attempting to
+        # maintain an inevitably incomplete option-name denylist.
+        query = ""
+        fragment = ""
+    else:
+        query = _sanitize_parameter_string(parsed.query)
+        fragment = _sanitize_fragment(parsed.fragment)
 
     if not parsed.netloc:
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, fragment))
@@ -343,6 +385,13 @@ def _scrub_plaintext(value: str) -> str:
         lambda match: f"{match.group(1)}{match.group(2)}{REDACTION_MARKER}",
         sanitized,
     )
+    sanitized = _QUOTED_SECRET_ASSIGNMENT_PATTERN.sub(
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}{match.group(1)}"
+            f"{match.group(3)}{REDACTION_MARKER}"
+        ),
+        sanitized,
+    )
     return _SECRET_ASSIGNMENT_PATTERN.sub(
         lambda match: f"{match.group(1)}{match.group(2)}{REDACTION_MARKER}",
         sanitized,
@@ -355,6 +404,10 @@ def _truncate(value: str, limit: int) -> str:
     if limit <= len(TRUNCATION_MARKER):
         return TRUNCATION_MARKER[:limit]
     return value[: limit - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise ValueError(f"non-finite JSON constant {value!r}")
 
 
 def _mapping_key_text(key: Any) -> str:
@@ -386,8 +439,8 @@ def _redact_string(
         if len(value) > policy.max_embedded_json_chars:
             return OVERSIZED_JSON_MARKER
         try:
-            decoded = json.loads(value)
-        except (json.JSONDecodeError, RecursionError):
+            decoded = json.loads(value, parse_constant=_reject_json_constant)
+        except (json.JSONDecodeError, ValueError, RecursionError):
             pass
         else:
             if isinstance(decoded, (Mapping, list)):
@@ -398,13 +451,16 @@ def _redact_string(
                     depth=depth + 1,
                     active_container_ids=active_container_ids,
                 )
-                rendered = json.dumps(
-                    to_jsonable(redacted),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                )
+                try:
+                    rendered = json.dumps(
+                        to_jsonable(redacted),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                except (TypeError, ValueError, RecursionError):
+                    return _truncate(_scrub_plaintext(value), policy.max_string_chars)
                 if len(rendered) > policy.max_string_chars:
                     return OVERSIZED_JSON_MARKER
                 return rendered

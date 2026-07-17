@@ -402,6 +402,13 @@
     }
     window.openSession = openSession;
 
+    document.addEventListener('click', event => {
+        const row = event.target.closest('[data-open-session]');
+        if (!row) return;
+        const sessionId = row.dataset.openSession;
+        if (sessionId) openSession(sessionId);
+    });
+
     function startClock() {
         const el = document.getElementById('clock-display');
         const tick = () => { if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
@@ -1743,9 +1750,8 @@
         return sessions.map(s => {
             const tactics = (s.tactics||[]).slice(0,2).map(t=>`<span class="chip" style="font-size:10px">${t}</span>`).join('');
             const more = (s.tactics||[]).length>2?`<span class="chip" style="font-size:10px">+${s.tactics.length-2}</span>`:'';
-            // Use openSession(id) — safe in HTML onclick; avoids JSON double-quote escaping issues
-            const sid = (s.session_id||'').replace(/'/g, "\\'");
-            return `<tr class="data-row" onclick="openSession('${sid}')">
+            const sid = escapeHtmlString(s.session_id || '');
+            return `<tr class="data-row" data-open-session="${sid}">
                 <td class="px-5 py-3.5 font-mono text-xs text-zinc-300 hover:text-zinc-100 transition-colors">${s.session_id}</td>
                 <td class="px-5 py-3.5 font-mono text-xs text-zinc-400">${s.src_ip}</td>
                 <td class="px-5 py-3.5">${statusBadge(s.analysis_status)}</td>
@@ -3731,7 +3737,7 @@
                         <tbody>${snaps.length?snaps.slice(0,80).map(s=>{
                             const div=Number(s.agreement?.divergence_ratio||0);
                             const cq=Number(s.classification_quality?.confidence_min||0);
-                            return `<tr class="data-row cursor-pointer" onclick="openSession('${String(s.session_id||'').replace(/'/g,"\\'")}')"><td class="px-5 py-3 font-mono text-[11px] text-teal-400">${(s.session_id||'—').slice(0,22)}</td><td class="px-5 py-3 text-xs text-zinc-300">${s.prediction||'—'}</td><td class="px-5 py-3 text-right text-xs font-mono">${pct(s.confidence)}</td><td class="px-5 py-3">${confidenceBadge(s.confidence_label || (s.confidence>=0.7?'high':s.confidence>=0.4?'medium':'low'))}</td><td class="px-5 py-3 text-xs ${s.agreement?.disagreement?'text-amber-400':'text-emerald-400'}">${s.agreement?.disagreement?`diverged ${Math.round(div*100)}%`:'aligned'}</td><td class="px-5 py-3 text-right text-xs font-mono text-zinc-500">${cq?pct(cq):'—'}</td><td class="px-5 py-3 text-right text-xs text-zinc-600">${relativeTime(s.created_at)}</td></tr>`;
+                            return `<tr class="data-row cursor-pointer" data-open-session="${escapeHtmlString(s.session_id || '')}"><td class="px-5 py-3 font-mono text-[11px] text-teal-400">${(s.session_id||'—').slice(0,22)}</td><td class="px-5 py-3 text-xs text-zinc-300">${s.prediction||'—'}</td><td class="px-5 py-3 text-right text-xs font-mono">${pct(s.confidence)}</td><td class="px-5 py-3">${confidenceBadge(s.confidence_label || (s.confidence>=0.7?'high':s.confidence>=0.4?'medium':'low'))}</td><td class="px-5 py-3 text-xs ${s.agreement?.disagreement?'text-amber-400':'text-emerald-400'}">${s.agreement?.disagreement?`diverged ${Math.round(div*100)}%`:'aligned'}</td><td class="px-5 py-3 text-right text-xs font-mono text-zinc-500">${cq?pct(cq):'—'}</td><td class="px-5 py-3 text-right text-xs text-zinc-600">${relativeTime(s.created_at)}</td></tr>`;
                         }).join(''):`<tr><td colspan="7" class="px-6 py-10 text-center text-sm text-zinc-600 italic">No prediction snapshots available yet.</td></tr>`}</tbody>
                     </table>
                 </div>
@@ -3806,7 +3812,7 @@
             const action = row.action || {};
             const source = action.source_type || action.rule_id || action.authority || 'trusted_policy_engine';
             const confidence = action.confidence !== undefined ? action.confidence : '—';
-            return `<tr class="data-row cursor-pointer" onclick="openSession('${String(sid).replace(/'/g,"\\'")}')">
+            return `<tr class="data-row cursor-pointer" data-open-session="${escapeHtmlString(String(sid))}">
                 <td class="px-5 py-3 font-mono text-[11px] text-teal-400">${escapeHtmlString(String(sid).slice(0, 24))}</td>
                 <td class="px-5 py-3">${severityBadge(risk.severity || 'info')}</td>
                 <td class="px-5 py-3">

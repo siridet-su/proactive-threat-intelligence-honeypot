@@ -99,7 +99,7 @@ from production.correlation.session_ttp_correlation import (
     validate_policy_document as validate_session_ttp_correlation_policy,
 )
 from production.prediction.session_features import build_session_features
-from production.workers.session_worker import SessionWorker
+from production.workers.session_worker import SessionWorker, _safe_exception_text
 from production.reporting.smb_decision import _features as smb_decision_features, build_smb_decision
 from production.reporting.threat_hypothesis import build_v2_report
 from production.storage import open_storage
@@ -144,6 +144,21 @@ def _config(tmp: str) -> ProductionConfig:
         analysis_max_attempts=1,
         webhook_url="",
     )
+
+
+def test_session_worker_exception_text_uses_central_redaction() -> None:
+    message = _safe_exception_text(
+        RuntimeError(
+            "mongodb://unit-user:unit-password@example.invalid/honeypot"
+            "?token=unit-token"
+        )
+    )
+
+    assert message.startswith("RuntimeError: ")
+    assert "unit-user" not in message
+    assert "unit-password" not in message
+    assert "unit-token" not in message
+    assert "mongodb://<redacted>@example.invalid/honeypot" in message
 
 
 def _demo_events() -> list[dict]:

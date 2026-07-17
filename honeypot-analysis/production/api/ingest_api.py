@@ -8,7 +8,7 @@ import math
 import re
 import socket
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -16,10 +16,15 @@ from production.storage import open_storage
 from production.storage.contract import StorageBackend
 from production.utils.config import ProductionConfig
 from production.utils.http_security import (
+    BoundedThreadingHTTPServer,
+    HTTPBodyError,
     TokenAuthentication,
     authenticate_token,
+    decode_strict_json_body,
     parse_bearer_token,
+    read_bounded_http_body,
     safe_request_id,
+    single_header_value,
     validate_bind_auth,
 )
 from production.utils.sensitive_data import redact_for_log
@@ -93,9 +98,9 @@ def _normalized_sensor_tokens(config: ProductionConfig) -> Dict[str, str]:
         token = raw_token
         if not _SENSOR_ID_RE.fullmatch(sensor_id):
             raise ValueError("ingest_sensor_tokens contains an invalid sensor ID")
-        if not token or token != token.strip():
+        if not token or parse_bearer_token(f"Bearer {token}") != token:
             raise ValueError(
-                f"ingest_sensor_tokens contains an empty or whitespace-padded token for {sensor_id!r}"
+                f"ingest_sensor_tokens contains an unusable Bearer token for {sensor_id!r}"
             )
         if token in configured_values:
             raise ValueError("ingest_sensor_tokens must not reuse a token across sensor IDs")
@@ -113,8 +118,8 @@ def _validate_ingest_config(config: ProductionConfig) -> Dict[str, str]:
     if not isinstance(config.api_token, str):
         raise ValueError("api_token must be a string")
     fallback_token = config.api_token
-    if fallback_token != fallback_token.strip():
-        raise ValueError("api_token must not contain surrounding whitespace")
+    if fallback_token and parse_bearer_token(f"Bearer {fallback_token}") != fallback_token:
+        raise ValueError("api_token is not a valid Bearer token value")
 
     integer_limits = {
         "ingest_max_body_bytes": config.ingest_max_body_bytes,
@@ -183,7 +188,7 @@ def _resolve_sensor_identity(
     return sensor_id
 
 
-class IngestHTTPServer(ThreadingHTTPServer):
+class IngestHTTPServer(BoundedThreadingHTTPServer):
     """Threaded server carrying immutable runtime dependencies for handlers."""
 
     daemon_threads = True
@@ -199,12 +204,11 @@ class IngestHTTPServer(ThreadingHTTPServer):
         self.storage = storage
         self.sensor_tokens = dict(sensor_tokens)
         self.request_timeout_seconds = float(config.ingest_request_timeout_seconds)
-        super().__init__(address, IngestHandler)
-
-    def get_request(self) -> Tuple[socket.socket, Any]:
-        request, client_address = super().get_request()
-        request.settimeout(self.request_timeout_seconds)
-        return request, client_address
+        super().__init__(
+            address,
+            IngestHandler,
+            request_timeout_seconds=self.request_timeout_seconds,
+        )
 
 
 class IngestHandler(BaseHTTPRequestHandler):
@@ -309,11 +313,8 @@ class IngestHandler(BaseHTTPRequestHandler):
     def _authenticate(self) -> TokenAuthentication:
         if not self.server.sensor_tokens and not self.config.api_token:
             return TokenAuthentication(True)
-        authorization_headers = self.headers.get_all("Authorization") or []
         candidate = parse_bearer_token(
-            authorization_headers[0]
-            if len(authorization_headers) == 1
-            else None
+            single_header_value(self.headers, "Authorization")
         )
         return authenticate_token(
             candidate,
@@ -322,83 +323,21 @@ class IngestHandler(BaseHTTPRequestHandler):
         )
 
     def _read_json_body(self) -> Any:
-        transfer_encoding = self.headers.get("Transfer-Encoding")
-        if transfer_encoding:
-            raise IngestRequestError(
-                HTTPStatus.BAD_REQUEST,
-                "unsupported_transfer_encoding",
-                "transfer encoding is not supported",
-            )
-
-        content_types = self.headers.get_all("Content-Type") or []
-        if len(content_types) != 1 or self.headers.get_content_type().lower() != "application/json":
-            raise IngestRequestError(
-                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-                "unsupported_media_type",
-                "Content-Type must be application/json",
-            )
-
-        content_lengths = self.headers.get_all("Content-Length") or []
-        if not content_lengths:
-            raise IngestRequestError(
-                HTTPStatus.LENGTH_REQUIRED,
-                "content_length_required",
-                "Content-Length is required",
-            )
-        if len(content_lengths) != 1:
-            raise IngestRequestError(
-                HTTPStatus.BAD_REQUEST,
-                "invalid_content_length",
-                "exactly one Content-Length header is required",
-            )
-        raw_length = content_lengths[0]
-        if not raw_length.isascii() or not raw_length.isdigit():
-            raise IngestRequestError(
-                HTTPStatus.BAD_REQUEST,
-                "invalid_content_length",
-                "Content-Length must be a non-negative decimal integer",
-            )
-        length = int(raw_length)
-        if length <= 0:
-            raise IngestRequestError(
-                HTTPStatus.BAD_REQUEST,
-                "empty_body",
-                "request body must not be empty",
-            )
-        if length > int(self.config.ingest_max_body_bytes):
-            raise IngestRequestError(
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                "body_too_large",
-                "request body exceeds the configured limit",
-            )
-
         try:
-            raw_body = self.rfile.read(length)
-        except (socket.timeout, TimeoutError) as exc:
-            raise IngestRequestError(
-                HTTPStatus.REQUEST_TIMEOUT,
-                "request_timeout",
-                "request body was not received before the timeout",
-            ) from exc
-        except OSError as exc:
-            raise IngestRequestError(
-                HTTPStatus.BAD_REQUEST,
-                "body_read_failed",
-                "request body could not be read",
-            ) from exc
-        if len(raw_body) != length:
-            raise IngestRequestError(
-                HTTPStatus.BAD_REQUEST,
-                "incomplete_body",
-                "request body ended before Content-Length bytes were received",
+            raw_body = read_bounded_http_body(
+                self.headers,
+                self.rfile,
+                max_body_bytes=int(self.config.ingest_max_body_bytes),
+                expected_content_type="application/json",
+                timeout_seconds=float(self.config.ingest_request_timeout_seconds),
+                timeout_setter=self.connection.settimeout,
             )
-        try:
-            return json.loads(raw_body)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            return decode_strict_json_body(raw_body)
+        except HTTPBodyError as exc:
             raise IngestRequestError(
-                HTTPStatus.BAD_REQUEST,
-                "invalid_json",
-                "request body must contain valid UTF-8 JSON",
+                exc.status,
+                exc.code,
+                exc.public_message,
             ) from exc
 
     def _header_sensor_id(self) -> Optional[str]:

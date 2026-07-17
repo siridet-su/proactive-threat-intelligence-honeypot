@@ -315,7 +315,14 @@ def test_both_feedback_http_paths_use_shared_feedback_writer(
 
         def __init__(self, path: str, body: bytes) -> None:
             self.path = path
-            self.headers = {"Content-Length": str(len(body))}
+            self.headers = {
+                "Content-Length": str(len(body)),
+                "Content-Type": (
+                    "application/json"
+                    if path == "/analyst-feedback"
+                    else "application/x-www-form-urlencoded"
+                ),
+            }
             self.rfile = io.BytesIO(body)
             self.json_response = None
             self.redirect_location = ""

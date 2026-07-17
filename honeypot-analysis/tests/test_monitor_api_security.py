@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from email.message import Message
 from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
@@ -65,6 +66,12 @@ def _handler(
         "Content-Length": str(len(body)),
         "X-Request-ID": "unit-monitor-request",
     }
+    if body:
+        handler.headers["Content-Type"] = (
+            "application/x-www-form-urlencoded"
+            if path == "/feedback"
+            else "application/json"
+        )
     if authorization:
         handler.headers["Authorization"] = authorization
     handler.rfile = io.BytesIO(body)
@@ -145,6 +152,22 @@ def test_monitor_sensitive_reads_require_bearer_when_configured(
     session = allowed_responses[0][1]["sessions"][0]
     assert "payload" not in session
     assert session["command_count"] == 1
+
+
+def test_monitor_rejects_ambiguous_authorization_headers(tmp_path: Path) -> None:
+    handler, responses, _ = _handler(
+        _config(tmp_path, read_token="read-secret"),
+        "/api/sessions",
+    )
+    headers = Message()
+    headers.add_header("Authorization", "Bearer read-secret")
+    headers.add_header("Authorization", "Bearer conflicting-secret")
+    headers.add_header("X-Request-ID", "unit-monitor-request")
+    handler.headers = headers
+
+    monitor_web.MonitorHandler.do_GET(handler)
+
+    assert responses[0][0] == HTTPStatus.UNAUTHORIZED
 
 
 def test_monitor_loopback_without_read_token_remains_local_only_compatible(
@@ -260,6 +283,42 @@ def test_monitor_legacy_form_feedback_uses_same_write_boundary(
     assert len(writes) == 1
 
 
+def test_monitor_feedback_rejects_oversized_and_negative_lengths(
+    tmp_path: Path,
+) -> None:
+    config = _config(
+        tmp_path,
+        read_token="read-secret",
+        allow_feedback=True,
+    )
+    oversized, oversized_responses, _ = _handler(
+        config,
+        "/analyst-feedback",
+        method="POST",
+        authorization="Bearer read-secret",
+        body=b"{}",
+    )
+    oversized.headers["Content-Length"] = str(
+        monitor_web.MAX_FEEDBACK_JSON_BYTES + 1
+    )
+    monitor_web.MonitorHandler.do_POST(oversized)
+
+    negative, negative_responses, _ = _handler(
+        config,
+        "/feedback",
+        method="POST",
+        authorization="Bearer read-secret",
+        body=b"session_id=safe",
+    )
+    negative.headers["Content-Length"] = "-1"
+    monitor_web.MonitorHandler.do_POST(negative)
+
+    assert oversized_responses[0][0] == HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+    assert oversized_responses[0][1]["error_code"] == "body_too_large"
+    assert negative_responses[0][0] == HTTPStatus.BAD_REQUEST
+    assert negative_responses[0][1]["error_code"] == "invalid_content_length"
+
+
 def test_monitor_rejects_non_loopback_bind_without_read_auth(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -274,7 +333,7 @@ def test_monitor_rejects_non_loopback_bind_without_read_auth(
     sentinel = object()
     monkeypatch.setattr(
         monitor_web,
-        "ThreadingHTTPServer",
+        "BoundedThreadingHTTPServer",
         lambda *_args, **_kwargs: sentinel,
     )
     assert (
@@ -289,6 +348,13 @@ def test_monitor_rejects_non_loopback_bind_without_read_auth(
         )
         is sentinel
     )
+
+    with pytest.raises(ValueError, match="valid Bearer token"):
+        monitor_web.build_server(
+            "127.0.0.1",
+            8090,
+            _config(tmp_path, read_token="unusable token"),
+        )
 
 
 def test_monitor_session_api_view_omits_raw_events_and_redacts_commands() -> None:
@@ -346,3 +412,113 @@ def test_monitor_request_log_sanitizes_sensitive_query_values(
     assert "secret-session" not in output
     assert "secret-token" not in output
     assert "[REDACTED]" in output
+
+
+def test_legacy_monitor_uses_central_redaction_and_safe_script_json(
+    tmp_path: Path,
+) -> None:
+    secret = "legacy-secret"
+    redacted = monitor_web._sanitize_public(
+        {
+            "login_password_hash": f"sha256:{secret}",
+            "target_url": f"https://user:pass@example.invalid/?token={secret}",
+            "command": f"password={secret}",
+        }
+    )
+    assert secret not in json.dumps(redacted, sort_keys=True)
+
+    breakout = "</script><script>window.PWNED=1</script>"
+    html = monitor_web.render_html(
+        {
+            "ok": True,
+            "timestamp": "2026-07-17T00:00:00Z",
+            "summary": {},
+            "sessions": [],
+            "events": [
+                {
+                    "timestamp": "2026-07-17T00:00:00Z",
+                    "src_ip": "203.0.113.10",
+                    "eventid": "cowrie.command.input",
+                    "detail": breakout,
+                }
+            ],
+            "selected": {
+                "session_id": "session-breakout",
+                "payload": {
+                    "commands": ["echo password=legacy-command-secret"],
+                    "classification_events": [],
+                },
+            },
+            "selected_detail": {
+                "ok": True,
+                "session_id": "session-breakout",
+            },
+        },
+        _config(tmp_path),
+        "",
+    )
+    assert breakout not in html
+    assert "\\u003c/script\\u003e" in html
+    assert "legacy-command-secret" not in html
+
+    historical_secret = "historical-database-secret"
+    detail = {
+        "ok": True,
+        "session_id": "session-safe",
+        "session_payload": {"password": historical_secret},
+        "latest_prediction_snapshot": {
+            "payload": {
+                "local_transition_model": {
+                    "source_database": (
+                        "mongodb://unit-user:unit-password@example.invalid/honeypot"
+                        f"?token={historical_secret}"
+                    )
+                },
+                "weight_calibration": {
+                    "status": "error",
+                    "reason": f"password={historical_secret}",
+                },
+            }
+        },
+    }
+    raw_panel = monitor_web._render_raw_api_panel(detail)
+    prediction_panel = monitor_web._render_prediction_panel(detail)
+    assert historical_secret not in raw_panel
+    assert historical_secret not in prediction_panel
+    assert "unit-password" not in raw_panel
+    assert "unit-password" not in prediction_panel
+
+    static_html = monitor_web.STATIC_MONITOR_HTML.read_text(encoding="utf-8")
+    assert "onclick=\"openSession(" not in static_html
+    assert "data-open-session=" in static_html
+
+
+def test_monitor_unexpected_error_and_storage_error_do_not_echo_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret_error = RuntimeError(
+        "mongodb://user:password@example.invalid/db?token=secret-token"
+    )
+    assert "password" not in monitor_web._storage_error("query", secret_error)
+    assert "secret-token" not in monitor_web._storage_error("query", secret_error)
+
+    monkeypatch.setattr(
+        monitor_web,
+        "load_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(secret_error),
+    )
+    handler, responses, _ = _handler(
+        _config(tmp_path, read_token="read-secret"),
+        "/api/sessions",
+        authorization="Bearer read-secret",
+    )
+
+    monitor_web.MonitorHandler.do_GET(handler)
+
+    assert responses[0][0] == HTTPStatus.SERVICE_UNAVAILABLE
+    assert responses[0][1]["error"] == "service temporarily unavailable"
+    output = capsys.readouterr().out
+    assert "password" not in output
+    assert "secret-token" not in output

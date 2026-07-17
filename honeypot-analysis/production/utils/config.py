@@ -11,6 +11,7 @@ from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     normalize_session_source,
 )
+from production.utils.http_security import parse_bearer_token
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -49,9 +50,13 @@ def _token_mapping(value: Dict[str, Any], name: str) -> Dict[str, str]:
     for raw_identity, raw_token in value.items():
         identity = str(raw_identity).strip()
         token = raw_token if isinstance(raw_token, str) else ""
-        if not identity or not token or token != token.strip():
+        if (
+            not identity
+            or not token
+            or parse_bearer_token(f"Bearer {token}") != token
+        ):
             raise ValueError(
-                f"{name} must map non-empty identities to non-empty, unpadded token strings"
+                f"{name} must map non-empty identities to valid Bearer token strings"
             )
         if identity in normalized:
             raise ValueError(f"{name} contains duplicate normalized identities")

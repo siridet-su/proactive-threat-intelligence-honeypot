@@ -17,7 +17,6 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
-import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -31,6 +30,7 @@ from production.storage.session_provenance import (
     normalize_session_source,
 )
 from production.utils.feedback import normalize_feedback_payload
+from production.utils.sensitive_data import redact_for_log
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
 
@@ -95,16 +95,9 @@ def _normalize_priority(priority: str) -> str:
 
 
 def _safe_error(exc: BaseException) -> str:
-    """Remove credentials if a driver embeds a URI in an exception."""
+    """Apply the central log policy when a driver embeds request details."""
 
-    text = str(exc)
-    text = re.sub(
-        r"(mongodb(?:\+srv)?://)([^/@\s]+)@",
-        r"\1<redacted>@",
-        text,
-        flags=re.IGNORECASE,
-    )
-    return text[:1000]
+    return str(redact_for_log(exc, max_string_chars=1000))
 
 
 def _encode_key(value: Any) -> str:

@@ -442,6 +442,24 @@ def test_driver_exception_redaction_removes_credentials() -> None:
     assert "correct-horse" not in message
     assert "mongodb://<redacted>@example.invalid:27017/honeypot" in message
 
+    query_message = _safe_error(
+        RuntimeError(
+            "cannot connect mongodb://alice:correct-horse@example.invalid/honeypot"
+            "?token=query-secret&retry=true"
+        )
+    )
+    assert "query-secret" not in query_message
+    assert "?token=" not in query_message
+
+    compound_auth_message = _safe_error(
+        RuntimeError(
+            "cannot connect mongodb://alice:correct-horse@example.invalid/honeypot"
+            "?authMechanismProperties=AWS_SESSION_TOKEN:compound-secret"
+        )
+    )
+    assert "compound-secret" not in compound_auth_message
+    assert "authMechanismProperties" not in compound_auth_message
+
 
 def test_idempotent_events_atomic_claims_and_session_counts() -> None:
     storage, database = make_storage()

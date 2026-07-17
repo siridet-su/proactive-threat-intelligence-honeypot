@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass
 from html import escape
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -30,18 +30,24 @@ from production.api.security import (
     public_payload,
     sanitize_request_target,
     session_detail_view,
+    validate_configured_bearer_tokens,
 )
 from production.classification.classification_evaluation import classification_metrics
 from production.utils.config import ProductionConfig
 from production.prediction.external_seed_health import infer_external_seed_paths, load_external_seed_health
 from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
-from production.utils.feedback import normalize_feedback_payload
+from production.utils.feedback import normalize_submitted_feedback_payload
 from production.utils.http_security import (
+    BoundedThreadingHTTPServer,
+    HTTPBodyError,
+    decode_strict_json_body,
     is_loopback_host,
+    read_bounded_http_body,
     safe_request_id,
+    single_header_value,
     validate_bind_auth,
 )
-from production.utils.serialization import stable_id, utc_now
+from production.utils.serialization import html_script_json, stable_id, utc_now
 from production.reporting.smb_decision import build_smb_decision_from_paths
 from production.storage import open_storage, safe_database_descriptor
 
@@ -54,18 +60,10 @@ MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
 MONITOR_SUMMARY_SCAN_LIMIT = 100_000
 MONITOR_DETAIL_SCAN_LIMIT = 10_000
+MAX_FEEDBACK_JSON_BYTES = 1_000_000
+MAX_FEEDBACK_FORM_BYTES = 100_000
+FEEDBACK_REQUEST_TIMEOUT_SECONDS = 15.0
 STATIC_MONITOR_HTML = Path(__file__).with_name("static") / "monitor.html"
-SENSITIVE_KEYS = {
-    "authorization",
-    "api_token",
-    "honeypot_api_token",
-    "token",
-    "secret",
-    "api_key",
-    "password",
-    "passwd",
-    "login_password",
-}
 
 
 @dataclass
@@ -122,22 +120,13 @@ def _json_loads(value: Any, default: Any) -> Any:
         return default
 
 
-def _public_value(key: str, value: Any) -> Any:
-    key_l = key.lower()
-    if key_l.endswith("_hash") or key_l in {"password_hash", "login_password_hash"}:
-        return value
-    if key_l in SENSITIVE_KEYS or any(part in key_l for part in ("authorization", "api_key", "secret", "token")):
-        return "[REDACTED]" if value else value
-    return value
-
-
 def _sanitize_public(value: Any, key: str = "") -> Any:
-    value = _public_value(key, value)
-    if isinstance(value, dict):
-        return {str(k): _sanitize_public(v, str(k)) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_public(item, key) for item in value]
-    return value
+    """Compatibility shim delegating legacy HTML paths to the central policy."""
+
+    if key:
+        wrapped = public_payload({str(key): value})
+        return wrapped.get(str(key)) if isinstance(wrapped, dict) else wrapped
+    return public_payload(value)
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -341,7 +330,7 @@ def _format_list(values: Iterable[Any], limit: int = 8) -> str:
 
 
 def _storage_error(label: str, exc: BaseException) -> str:
-    return f"{label} failed: {type(exc).__name__}: {exc}"
+    return f"{label} failed: {type(exc).__name__}"
 
 
 def _storage_list_rows(
@@ -1169,37 +1158,16 @@ def _load_external_seed_health(config: MonitorConfig) -> Dict[str, Any]:
             "schema_version": "external_seed_health.v1",
             "generated_at": utc_now(),
             "available": False,
-            "warnings": [f"External seed health load failed: {type(exc).__name__}: {exc}"],
+            "warnings": [f"External seed health load failed: {type(exc).__name__}"],
         }
     return health if isinstance(health, dict) else {}
 
 
 def record_analyst_feedback(config: MonitorConfig, feedback: Dict[str, Any]) -> str:
-    payload = normalize_feedback_payload({
-        "session_id": str(feedback.get("session_id") or "").strip(),
-        "snapshot_id": str(feedback.get("snapshot_id") or "").strip(),
-        "label": str(feedback.get("label") or "").strip(),
-        "feedback_type": str(feedback.get("feedback_type") or "").strip(),
-        "evidence_origin": str(feedback.get("evidence_origin") or feedback.get("feedback_origin") or "").strip(),
-        "operator_signal": str(feedback.get("operator_signal") or "").strip(),
-        "action_status": str(feedback.get("action_status") or "").strip(),
-        "correct_next_tactic": str(feedback.get("correct_next_tactic") or "").strip(),
-        "observed_prefix": str(feedback.get("observed_prefix") or "").strip(),
-        "predicted_top_tactic": str(feedback.get("predicted_top_tactic") or "").strip(),
-        "predicted_ranking": str(feedback.get("predicted_ranking") or "").strip(),
-        "smb_decision_id": str(feedback.get("smb_decision_id") or "").strip(),
-        "smb_risk": str(feedback.get("smb_risk") or "").strip(),
-        "smb_top_actions": str(feedback.get("smb_top_actions") or "").strip(),
-        "final_actual_next_tactic": str(feedback.get("final_actual_next_tactic") or "").strip(),
-        "tactic_granularity": str(feedback.get("tactic_granularity") or "tactic").strip() or "tactic",
-        "notes": str(feedback.get("notes") or "").strip(),
-        "created_at": utc_now(),
-        "source": "monitor_web",
-    })
-    if not payload["session_id"]:
-        raise ValueError("session_id is required")
-    if not payload["label"]:
-        raise ValueError("label is required")
+    payload = normalize_submitted_feedback_payload(
+        feedback,
+        source="monitor_web",
+    )
     feedback_id = stable_id("feedback", payload)
     payload["feedback_id"] = feedback_id
     stored_id = _open_monitor_storage(config).record_analyst_feedback(payload)
@@ -3023,7 +2991,7 @@ def _render_raw_api_panel(detail: Dict[str, Any]) -> str:
         return '<div class="empty">No API detail available.</div>'
     session_id = detail.get("session_id", "")
     api_url = f"/api/session?{urlencode({'session_id': session_id})}"
-    payload = json.dumps(detail, indent=2, sort_keys=True)
+    payload = json.dumps(public_payload(detail), indent=2, sort_keys=True)
     return (
         f'<p>JSON API: <a href="{_html(api_url)}">{_html(api_url)}</a></p>'
         f'<details><summary>Full sanitized session detail JSON</summary><pre>{_html(payload)}</pre></details>'
@@ -3258,6 +3226,7 @@ def _classification_quality_warnings(classification_quality: Dict[str, Any]) -> 
 def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     if not detail or not detail.get("ok"):
         return '<div class="empty">No selected session.</div>'
+    detail = public_payload(detail)
     latest = detail.get("latest_prediction_snapshot") or {}
     payload = latest.get("payload") or {}
     if not payload:
@@ -3308,7 +3277,13 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         ("local_transition_sessions", maturity.get("local_transition_sessions")),
         ("local_transition_transitions", maturity.get("local_transition_transitions")),
         ("local_model_id", local_model.get("model_id") or "-"),
-        ("local_model_source", local_model.get("source_database") or "-"),
+        (
+            "local_model_source",
+            _sanitize_public(
+                local_model.get("source_database") or "-",
+                "source_database",
+            ),
+        ),
         ("local_recency_decay_half_life", local_model.get("recency_decay_half_life_sessions")),
         ("prior_dominated", maturity.get("prior_dominated")),
         ("external_seed_enabled", external_seed.get("enabled")),
@@ -3870,6 +3845,7 @@ def _render_events(events: List[Dict[str, Any]], error: str) -> str:
 
 
 def render_html(snapshot: Dict[str, Any], config: MonitorConfig, selected_session_id: str, feedback_filter: str = "all") -> str:  # noqa: PLR0914
+    snapshot = public_payload(snapshot)
     selected = snapshot.get("selected")
     selected_detail = snapshot.get("selected_detail") or {}
     selected_id = selected["session_id"] if selected else ""
@@ -3897,8 +3873,8 @@ def render_html(snapshot: Dict[str, Any], config: MonitorConfig, selected_sessio
             "d": e.get("detail", ""),
             "s": e.get("sensor", ""),
         })
-    sessions_json = json.dumps(_js_sessions, sort_keys=True)
-    events_json = json.dumps(_js_events, sort_keys=True)
+    sessions_json = html_script_json(_js_sessions)
+    events_json = html_script_json(_js_events)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -4537,6 +4513,18 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
+            "object-src 'none'; form-action 'self'; img-src 'self' data: https:; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+            "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com "
+            "https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self' https:",
+        )
         self.send_header("X-Request-ID", self._request_id())
         self.end_headers()
         self.wfile.write(data)
@@ -4551,7 +4539,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
     def _require_read(self) -> bool:
         read_token = _monitor_read_token(self.monitor_config)
         decision = authorize_read(
-            self.headers.get("Authorization"),
+            single_header_value(self.headers, "Authorization"),
             read_token,
             allow_anonymous=(
                 not read_token
@@ -4577,7 +4565,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             )
             return False
         decision = authorize_write(
-            self.headers.get("Authorization"),
+            single_header_value(self.headers, "Authorization"),
             _monitor_read_token(self.monitor_config),
             _monitor_write_token(self.monitor_config),
         )
@@ -4597,46 +4585,116 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
+        try:
+            MonitorHandler._do_POST(self)
+        except Exception as exc:
+            MonitorHandler._handle_unexpected_error(self, "post_failed", exc)
+
+    def _do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path not in {"/analyst-feedback", "/feedback"}:
             self._send(HTTPStatus.NOT_FOUND, "not found", "text/plain; charset=utf-8")
             return
         if not self._require_feedback_write():
             return
+        connection = getattr(self, "connection", None)
+        if connection is not None and hasattr(connection, "settimeout"):
+            connection.settimeout(FEEDBACK_REQUEST_TIMEOUT_SECONDS)
         if parsed.path == "/analyst-feedback":
             try:
-                length = min(int(self.headers.get("Content-Length", "0")), 1_000_000)
-            except ValueError:
-                length = 0
-            raw = self.rfile.read(length) if length else b"{}"
+                raw = read_bounded_http_body(
+                    self.headers,
+                    self.rfile,
+                    max_body_bytes=MAX_FEEDBACK_JSON_BYTES,
+                    expected_content_type="application/json",
+                    timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+                    timeout_setter=getattr(connection, "settimeout", None),
+                )
+            except HTTPBodyError as exc:
+                self._send_json(
+                    exc.status,
+                    {"error": exc.public_message, "error_code": exc.code},
+                )
+                return
             try:
-                payload = json.loads(raw.decode("utf-8"))
-            except json.JSONDecodeError:
-                payload = {}
+                payload = decode_strict_json_body(raw)
+            except HTTPBodyError as exc:
+                self._send_json(
+                    exc.status,
+                    {"error": exc.public_message, "error_code": exc.code},
+                )
+                return
             if not isinstance(payload, dict):
-                payload = {}
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "request body must contain a JSON object", "error_code": "invalid_json_object"},
+                )
+                return
             try:
                 feedback_id = record_analyst_feedback(
                     self.monitor_config,
                     payload,
                 )
-            except ValueError as exc:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            except ValueError:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid feedback payload"})
                 return
             self._send_json(HTTPStatus.CREATED, {"feedback_id": feedback_id, "status": "recorded", "timestamp": utc_now()})
             return
         try:
-            length = min(int(self.headers.get("Content-Length", "0")), 100_000)
-        except ValueError:
-            length = 0
-        form = parse_qs(self.rfile.read(length).decode("utf-8")) if length else {}
+            raw_form = read_bounded_http_body(
+                self.headers,
+                self.rfile,
+                max_body_bytes=MAX_FEEDBACK_FORM_BYTES,
+                expected_content_type="application/x-www-form-urlencoded",
+                timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+                timeout_setter=getattr(connection, "settimeout", None),
+            )
+        except HTTPBodyError as exc:
+            self._send_json(
+                exc.status,
+                {"error": exc.public_message, "error_code": exc.code},
+            )
+            return
+        try:
+            form = parse_qs(
+                raw_form.decode("utf-8"),
+                max_num_fields=200,
+            )
+        except (UnicodeDecodeError, ValueError):
+            self._send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid feedback form", "error_code": "invalid_form"},
+            )
+            return
         feedback = {key: values[0] for key, values in form.items() if values}
         try:
             record_analyst_feedback(self.monitor_config, feedback)
-        except Exception as exc:
+        except ValueError:
             self._send(
                 HTTPStatus.BAD_REQUEST,
-                f"feedback failed: {type(exc).__name__}: {exc}",
+                "invalid feedback payload",
+                "text/plain; charset=utf-8",
+            )
+            return
+        except Exception as exc:
+            print(
+                json.dumps(
+                    log_payload(
+                        {
+                            "service": "monitor_web",
+                            "event": "feedback_write_failed",
+                            "exception": exc,
+                            "request_id": self._request_id(),
+                            "timestamp": utc_now(),
+                        }
+                    ),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            self._send(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "feedback storage failed",
                 "text/plain; charset=utf-8",
             )
             return
@@ -4647,6 +4705,12 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self._redirect(target)
 
     def do_GET(self) -> None:
+        try:
+            MonitorHandler._do_GET(self)
+        except Exception as exc:
+            MonitorHandler._handle_unexpected_error(self, "get_failed", exc)
+
+    def _do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path in {"/health", "/health/live", "/live"}:
             self._send_json(
@@ -4771,6 +4835,30 @@ class MonitorHandler(BaseHTTPRequestHandler):
         snapshot = load_snapshot(self.monitor_config, selected_session_id=selected_session_id)
         self._send(HTTPStatus.OK, render_html(snapshot, self.monitor_config, selected_session_id, feedback_filter))
 
+    def _handle_unexpected_error(self, event: str, exc: BaseException) -> None:
+        print(
+            json.dumps(
+                log_payload(
+                    {
+                        "service": "monitor_web",
+                        "event": event,
+                        "exception": exc,
+                        "request_id": self._request_id(),
+                        "timestamp": utc_now(),
+                    }
+                ),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        self._send_json(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "service temporarily unavailable",
+                "request_id": self._request_id(),
+            },
+        )
+
     def log_message(self, fmt: str, *args: Any) -> None:
         del fmt
         status = ""
@@ -4793,7 +4881,12 @@ class MonitorHandler(BaseHTTPRequestHandler):
         )
 
 
-def build_server(host: str, port: int, config: MonitorConfig) -> ThreadingHTTPServer:
+def build_server(host: str, port: int, config: MonitorConfig) -> BoundedThreadingHTTPServer:
+    validate_configured_bearer_tokens(
+        read_token=_monitor_read_token(config),
+        write_token=_monitor_write_token(config),
+        service_name="monitor_web",
+    )
     validate_bind_auth(
         host,
         auth_configured=bool(_monitor_read_token(config)),
@@ -4801,7 +4894,11 @@ def build_server(host: str, port: int, config: MonitorConfig) -> ThreadingHTTPSe
     )
     config.bind_host = host
     MonitorHandler.monitor_config = config
-    return ThreadingHTTPServer((host, port), MonitorHandler)
+    return BoundedThreadingHTTPServer(
+        (host, port),
+        MonitorHandler,
+        request_timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

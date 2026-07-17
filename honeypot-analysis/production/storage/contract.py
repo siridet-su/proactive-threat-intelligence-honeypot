@@ -217,6 +217,34 @@ class DatabaseSettings:
         }
 
 
+def safe_database_label(database: str | DatabaseSettings) -> str:
+    """Return a compact connection label that cannot contain URI credentials.
+
+    This is intended for persisted provenance and human-readable diagnostics.
+    It deliberately omits connection options and URI fragments as well as user
+    information.  Callers that need structured logging should prefer
+    :meth:`DatabaseSettings.safe_descriptor`.
+    """
+
+    settings = (
+        database
+        if isinstance(database, DatabaseSettings)
+        else DatabaseSettings.from_url(database)
+    )
+    descriptor = settings.safe_descriptor()
+    if settings.backend == SQLITE_BACKEND:
+        return f"sqlite:///{descriptor['database_path']}"
+    endpoint = descriptor.get("endpoint") or "private"
+    database_name = descriptor.get("database") or "default"
+    configured_scheme = urlsplit(settings.database_url).scheme.lower()
+    label_scheme = (
+        configured_scheme
+        if configured_scheme in MONGODB_SCHEMES | POSTGRESQL_SCHEMES
+        else settings.backend
+    )
+    return f"{label_scheme}://{endpoint}/{database_name}"
+
+
 @runtime_checkable
 class StorageBackend(Protocol):
     """Logical persistence contract shared by runtime services and tools."""

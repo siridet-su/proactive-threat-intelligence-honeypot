@@ -13,6 +13,7 @@ from production.storage import (
     StorageError,
     open_storage,
     safe_database_descriptor,
+    safe_database_label,
 )
 from production.utils.config import ProductionConfig
 
@@ -169,6 +170,24 @@ def test_safe_descriptor_redacts_postgresql_credentials_and_options() -> None:
     assert "unit-user" not in str(descriptor)
     assert "unit-password" not in str(descriptor)
     assert "unit-secret" not in str(descriptor)
+
+
+def test_safe_database_label_omits_credentials_and_connection_options() -> None:
+    label = safe_database_label(
+        "mongodb://unit-user:unit-password@database.internal:27017/honeypot"
+        "?authSource=admin&token=unit-secret"
+    )
+
+    assert label == "mongodb://database.internal:27017/honeypot"
+    assert "unit-user" not in label
+    assert "unit-password" not in label
+    assert "unit-secret" not in label
+
+    srv_label = safe_database_label(
+        "mongodb+srv://unit-user:unit-password@cluster.example.invalid/honeypot"
+        "?retryWrites=true"
+    )
+    assert srv_label == "mongodb+srv://cluster.example.invalid/honeypot"
 
 
 def test_unsupported_url_error_does_not_echo_credentials() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -13,9 +13,15 @@ from production.utils.config import ProductionConfig
 from production.prediction.external_seed_health import infer_external_seed_paths, load_external_seed_health
 from production.classification.classification_evaluation import classification_metrics
 from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
+from production.utils.feedback import normalize_submitted_feedback_payload
 from production.utils.http_security import (
+    BoundedThreadingHTTPServer,
+    HTTPBodyError,
+    decode_strict_json_body,
     is_loopback_host,
+    read_bounded_http_body,
     safe_request_id,
+    single_header_value,
     validate_bind_auth,
 )
 from production.utils.serialization import utc_now
@@ -28,6 +34,7 @@ from production.api.security import (
     log_payload,
     public_payload,
     sanitize_request_target,
+    validate_configured_bearer_tokens,
 )
 
 
@@ -53,6 +60,8 @@ TABLES = {
     "/campaign-sessions": "campaign_sessions",
     "/webhooks": "webhook_deliveries",
 }
+MAX_FEEDBACK_BODY_BYTES = 1_000_000
+FEEDBACK_REQUEST_TIMEOUT_SECONDS = 15.0
 
 
 def _feedback_summary(rows: list[Dict[str, Any]]) -> Dict[str, Any]:
@@ -202,9 +211,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             sort_keys=True,
         ).encode("utf-8")
         self.send_response(status.value)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        )
         self.send_header("X-Request-ID", self._request_id())
         self.end_headers()
         self.wfile.write(body)
@@ -212,7 +228,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _require_read(self) -> bool:
         read_token = str(getattr(self.config, "dashboard_read_token", "") or "")
         decision = authorize_read(
-            self.headers.get("Authorization"),
+            single_header_value(self.headers, "Authorization"),
             read_token,
             allow_anonymous=(
                 not read_token
@@ -229,7 +245,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _require_write(self) -> bool:
         decision = authorize_write(
-            self.headers.get("Authorization"),
+            single_header_value(self.headers, "Authorization"),
             str(getattr(self.config, "dashboard_read_token", "") or ""),
             str(getattr(self.config, "dashboard_write_token", "") or ""),
         )
@@ -242,32 +258,61 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return False
 
     def _read_json_body(self) -> Dict[str, Any]:
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            length = 0
-        if length <= 0:
-            return {}
-        body = self.rfile.read(min(length, 1_000_000))
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError:
-            return {}
-        return payload if isinstance(payload, dict) else {}
+        body = read_bounded_http_body(
+            self.headers,
+            self.rfile,
+            max_body_bytes=MAX_FEEDBACK_BODY_BYTES,
+            expected_content_type="application/json",
+            timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+            timeout_setter=getattr(
+                getattr(self, "connection", None),
+                "settimeout",
+                None,
+            ),
+        )
+        payload = decode_strict_json_body(body)
+        if not isinstance(payload, dict):
+            raise HTTPBodyError(
+                HTTPStatus.BAD_REQUEST,
+                "invalid_json_object",
+                "request body must contain a JSON object",
+            )
+        return payload
 
     def do_POST(self) -> None:
+        try:
+            self._do_POST()
+        except Exception as exc:
+            self._handle_unexpected_error("post_failed", exc)
+
+    def _do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path != "/analyst-feedback":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         if not self._require_write():
             return
-        payload = self._read_json_body()
+        connection = getattr(self, "connection", None)
+        if connection is not None and hasattr(connection, "settimeout"):
+            connection.settimeout(FEEDBACK_REQUEST_TIMEOUT_SECONDS)
+        try:
+            payload = self._read_json_body()
+        except HTTPBodyError as exc:
+            self._send_json(
+                exc.status,
+                {"error": exc.public_message, "error_code": exc.code},
+            )
+            return
         storage = open_storage(self.config.database_url)
         try:
-            feedback_id = storage.record_analyst_feedback(payload)
-        except ValueError as exc:
-            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            feedback_id = storage.record_analyst_feedback(
+                normalize_submitted_feedback_payload(
+                    payload,
+                    source="dashboard_api",
+                )
+            )
+        except ValueError:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid feedback payload"})
             return
         self._send_json(
             HTTPStatus.CREATED,
@@ -279,6 +324,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:
+        try:
+            self._do_GET()
+        except Exception as exc:
+            self._handle_unexpected_error("get_failed", exc)
+
+    def _do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path in {"/health", "/health/live", "/live"}:
             self._send_json(HTTPStatus.OK, {"ok": True, "service": "dashboard_api", "timestamp": utc_now()})
@@ -418,6 +469,30 @@ class DashboardHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _handle_unexpected_error(self, event: str, exc: BaseException) -> None:
+        print(
+            json.dumps(
+                log_payload(
+                    {
+                        "service": "dashboard_api",
+                        "event": event,
+                        "exception": exc,
+                        "request_id": self._request_id(),
+                        "timestamp": utc_now(),
+                    }
+                ),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        self._send_json(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "service temporarily unavailable",
+                "request_id": self._request_id(),
+            },
+        )
+
     def log_message(self, fmt: str, *args: Any) -> None:
         del fmt
         status = ""
@@ -440,16 +515,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
         )
 
 
-def build_server(config: ProductionConfig) -> ThreadingHTTPServer:
-    validate_bind_auth(
-        str(config.dashboard_host),
-        auth_configured=bool(
-            str(getattr(config, "dashboard_read_token", "") or "")
-        ),
+def _validate_dashboard_runtime(config: ProductionConfig) -> None:
+    read_token = str(getattr(config, "dashboard_read_token", "") or "")
+    write_token = str(getattr(config, "dashboard_write_token", "") or "")
+    validate_configured_bearer_tokens(
+        read_token=read_token,
+        write_token=write_token,
         service_name="dashboard_api",
     )
+    validate_bind_auth(
+        str(config.dashboard_host),
+        auth_configured=bool(read_token),
+        service_name="dashboard_api",
+    )
+
+
+def build_server(config: ProductionConfig) -> BoundedThreadingHTTPServer:
+    _validate_dashboard_runtime(config)
     DashboardHandler.config = config
-    return ThreadingHTTPServer((config.dashboard_host, config.dashboard_port), DashboardHandler)
+    return BoundedThreadingHTTPServer(
+        (config.dashboard_host, config.dashboard_port),
+        DashboardHandler,
+        request_timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -461,13 +549,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = ProductionConfig.from_env(args.config)
-    validate_bind_auth(
-        str(config.dashboard_host),
-        auth_configured=bool(
-            str(getattr(config, "dashboard_read_token", "") or "")
-        ),
-        service_name="dashboard_api",
-    )
+    _validate_dashboard_runtime(config)
     storage = open_storage(config.database_url)
     storage.initialize()
     server = build_server(config)

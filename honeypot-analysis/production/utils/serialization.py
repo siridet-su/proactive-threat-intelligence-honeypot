@@ -237,6 +237,24 @@ def stable_json(value: Any) -> str:
     )
 
 
+def html_script_json(value: Any) -> str:
+    """Serialize JSON for direct embedding in an HTML ``script`` element.
+
+    JSON itself does not escape ``<``.  Without this additional encoding, an
+    attacker-controlled ``</script>`` string can terminate the surrounding
+    element and create stored script injection in an operator interface.
+    """
+
+    return (
+        stable_json(value)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
 def stable_id(prefix: str, value: Any) -> str:
     digest = hashlib.sha256(stable_json(value).encode("utf-8")).hexdigest()
     return f"{prefix}_{digest[:32]}"

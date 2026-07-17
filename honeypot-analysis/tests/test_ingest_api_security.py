@@ -136,6 +136,7 @@ def test_shared_http_security_helpers_are_strict_and_constant_time(
     assert parse_bearer_token("Bearer  token-value") is None
     assert parse_bearer_token("Basic token-value") is None
     assert parse_bearer_token("Bearer token:value") is None
+    assert parse_bearer_token("Bearer " + ("a" * 4_097)) is None
     assert constant_time_token_match("same", "same") is True
     assert constant_time_token_match("different", "same") is False
 
@@ -196,6 +197,7 @@ def test_config_parses_http_security_environment(
         {"": "token"},
         {"sensor-a": ""},
         {"sensor-a": " padded "},
+        {"sensor-a": "invalid:token"},
     ],
 )
 def test_config_rejects_unusable_sensor_token_mappings(
@@ -233,6 +235,12 @@ def test_startup_rejects_unauthenticated_remote_bind_and_invalid_limits() -> Non
                     "sensor-b": "same-token",
                 },
             ),
+            storage=FakeStorage(),
+        )
+
+    with pytest.raises(ValueError, match="valid Bearer"):
+        build_server(
+            _config(api_token="invalid:token"),
             storage=FakeStorage(),
         )
 

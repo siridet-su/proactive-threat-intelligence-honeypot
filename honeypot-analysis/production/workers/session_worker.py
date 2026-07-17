@@ -45,12 +45,13 @@ from production.prediction.session_features import build_session_features
 from production.correlation.session_ttp_correlation import apply_session_ttp_correlations, load_knowledge as load_session_ttp_correlation_knowledge
 from production.reporting.smb_decision import RISK_ORDER, build_smb_decision_from_paths
 from production.classification.securebert_classifier import load_securebert_classifier
-from production.storage import open_storage
+from production.storage import open_storage, safe_database_label
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     normalize_session_source,
 )
 from production.utils.feedback import build_auto_evidence_feedback
+from production.utils.sensitive_data import redact_for_artifact, redact_for_log
 from production.workers.threat_hunt_worker import enqueue_threat_hunts_for_session
 
 
@@ -65,6 +66,12 @@ DEFAULT_PREDICTION_TRIGGER_EVENTIDS = [
 DEFAULT_PREDICTION_TRIGGER_PREFIXES = [
     "cowrie.command.",
 ]
+
+
+def _safe_exception_text(exc: BaseException) -> str:
+    """Return a bounded exception description using the central redactor."""
+
+    return f"{type(exc).__name__}: {redact_for_log(exc, max_string_chars=1_000)}"
 
 
 def alert_payload(alert: Any) -> Dict[str, Any]:
@@ -140,7 +147,7 @@ class SessionWorker:
                         "warning": "session_ttp_correlation_policy_load_failed",
                         "path": path,
                         "knowledge_pack_paths": pack_paths,
-                        "error": f"{type(exc).__name__}: {exc}",
+                        "error": _safe_exception_text(exc),
                         "timestamp": utc_now(),
                     },
                     sort_keys=True,
@@ -180,7 +187,7 @@ class SessionWorker:
             payloads,
             prefix_max_length=int(policy.get("prefix_max_length", 3)),
             source_name="local_transition",
-            source_database=self.config.database_url.split("?", 1)[0],
+            source_database=safe_database_label(self.config.database_url),
             recency_half_life_sessions=float(policy.get("recency_decay_half_life_sessions") or 0.0),
         )
 
@@ -214,7 +221,7 @@ class SessionWorker:
                         "service": "session_worker",
                         "warning": "external_transition_model_load_failed",
                         "path": path_text,
-                        "error": str(exc),
+                        "error": _safe_exception_text(exc),
                         "timestamp": utc_now(),
                     },
                     sort_keys=True,
@@ -263,7 +270,7 @@ class SessionWorker:
                                 "service": "session_worker",
                                 "warning": "actor_fingerprint_transition_model_load_failed",
                                 "path": path_text,
-                                "error": str(exc),
+                                "error": _safe_exception_text(exc),
                                 "timestamp": utc_now(),
                             },
                             sort_keys=True,
@@ -305,7 +312,7 @@ class SessionWorker:
             payloads,
             policy=policy,
             prefix_max_length=int(actor_policy.get("prefix_max_length") or policy.get("prefix_max_length", 3)),
-            source_database=self.config.database_url.split("?", 1)[0],
+            source_database=safe_database_label(self.config.database_url),
             recency_half_life_sessions=float(policy.get("recency_decay_half_life_sessions") or 0.0),
         )
 
@@ -377,7 +384,7 @@ class SessionWorker:
                 "enabled": True,
                 "status": "error",
                 "path": output_path,
-                "reason": f"{type(exc).__name__}: {exc}",
+                "reason": _safe_exception_text(exc),
             }
             self._calibration_output_mtime = mtime
             return
@@ -401,16 +408,18 @@ class SessionWorker:
         else:
             self.config.prediction_policy = deepcopy(self._base_prediction_policy)
             status = str(loaded.get("status") or "not_applied")
-        self.weight_calibration_status = {
-            "enabled": True,
-            "status": status,
-            "path": output_path,
-            "run_id": loaded.get("run_id") or "",
-            "generated_at": loaded.get("generated_at") or "",
-            "reason": loaded.get("reason") or "",
-            "applied": apply_output and applied,
-            "inputs": loaded.get("inputs") or {},
-        }
+        self.weight_calibration_status = redact_for_artifact(
+            {
+                "enabled": True,
+                "status": status,
+                "path": output_path,
+                "run_id": loaded.get("run_id") or "",
+                "generated_at": loaded.get("generated_at") or "",
+                "reason": loaded.get("reason") or "",
+                "applied": apply_output and applied,
+                "inputs": loaded.get("inputs") or {},
+            }
+        )
         self._calibration_output_mtime = mtime
 
     def _refresh_prediction_engine(self) -> None:
@@ -637,7 +646,7 @@ class SessionWorker:
         except Exception as exc:
             summary = {
                 "status": "error",
-                "reason": f"{type(exc).__name__}: {exc}",
+                "reason": _safe_exception_text(exc),
                 "session_id": payload.get("session_id") or "unknown",
             }
             print(
@@ -808,7 +817,7 @@ class SessionWorker:
                         "service": "session_worker",
                         "warning": "auto_evidence_generation_failed",
                         "session_id": payload.get("session_id", "unknown"),
-                        "error": f"{type(exc).__name__}: {exc}",
+                        "error": _safe_exception_text(exc),
                         "timestamp": utc_now(),
                     },
                     sort_keys=True,

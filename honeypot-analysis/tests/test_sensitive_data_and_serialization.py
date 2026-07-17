@@ -19,7 +19,8 @@ from production.utils.sensitive_data import (
     redact_for_webhook,
     sanitize_url,
 )
-from production.utils.serialization import stable_json, to_jsonable
+from production.utils.feedback import normalize_feedback_payload
+from production.utils.serialization import html_script_json, stable_json, to_jsonable
 
 
 REDACTORS = (
@@ -117,11 +118,7 @@ def test_sanitize_url_redacts_userinfo_and_only_sensitive_parameters() -> None:
         "#access_token=fragment-token&section=summary"
     )
 
-    assert sanitized == (
-        "mongodb://<redacted>@[2001:db8::1]:27017/honeypot"
-        "?authSource=admin&apiKey=[REDACTED]&x-amz-signature=[REDACTED]&page=2"
-        "#access_token=[REDACTED]&section=summary"
-    )
+    assert sanitized == "mongodb://<redacted>@[2001:db8::1]:27017/honeypot"
     assert sanitize_url("/callback?code=oauth-code&state=public") == (
         "/callback?code=[REDACTED]&state=public"
     )
@@ -149,7 +146,8 @@ def test_log_redaction_scrubs_plaintext_headers_assignments_urls_and_exceptions(
         "credential-digest",
     ):
         assert secret not in redacted
-    assert "mongodb://<redacted>@example.invalid/honeypot?token=[REDACTED]" in redacted
+    assert "mongodb://<redacted>@example.invalid/honeypot" in redacted
+    assert "?token=" not in redacted
     assert "Authorization: [REDACTED]" in redacted
     assert "Cookie: [REDACTED]" in redacted
     assert "password_hash=[REDACTED]" in redacted
@@ -164,6 +162,42 @@ def test_embedded_json_is_bounded_and_plain_strings_are_truncated() -> None:
     assert truncated.endswith("...[TRUNCATED]")
     with pytest.raises(ValueError, match="must be positive"):
         redact_for_log("value", max_string_chars=0)
+
+
+def test_malformed_or_nonfinite_embedded_json_cannot_break_redaction() -> None:
+    oversized_integer = '{"password":"unit-secret","value":' + ("9" * 5_000) + "}"
+    nonfinite = '{"password":"unit-secret","value":NaN}'
+
+    for value in (oversized_integer, nonfinite):
+        redacted = redact_for_log({"detail": value}, max_string_chars=512)
+        encoded = json.dumps(redacted, sort_keys=True)
+        assert "unit-secret" not in encoded
+        assert "[REDACTED]" in encoded
+
+    assert redact_for_log("[Errno 111] Connection refused") == (
+        "[Errno 111] Connection refused"
+    )
+    assert redact_for_api("[ -f /etc/passwd ] && echo yes") == (
+        "[ -f /etc/passwd ] && echo yes"
+    )
+
+
+def test_feedback_normalization_redacts_sensitive_internal_callers() -> None:
+    secret = "direct-feedback-secret"
+    feedback = normalize_feedback_payload(
+        {
+            "session_id": "session-safe",
+            "label": "useful",
+            "password": secret,
+            "authorization": f"Bearer {secret}",
+        },
+        now="2026-07-17T00:00:00+00:00",
+    )
+
+    encoded = json.dumps(feedback, sort_keys=True)
+    assert secret not in encoded
+    assert feedback["password"] == REDACTION_MARKER
+    assert feedback["authorization"] == REDACTION_MARKER
 
 
 def test_redaction_handles_dataclasses_collections_and_cycles() -> None:
@@ -253,6 +287,16 @@ def test_to_jsonable_supports_backend_types_and_normalizes_datetimes_to_utc() ->
 
 def test_to_jsonable_is_deterministic_for_sets() -> None:
     assert stable_json({"values": {3, 1, 2}}) == '{"values":[1,2,3]}'
+
+
+def test_html_script_json_prevents_script_element_breakout() -> None:
+    attacker_text = "</script><script>window.PWNED=1</script>\u2028next"
+    encoded = html_script_json({"detail": attacker_text})
+
+    assert "</script>" not in encoded
+    assert "<script>" not in encoded
+    assert "\\u003c/script\\u003e" in encoded
+    assert json.loads(encoded)["detail"] == attacker_text
 
 
 def test_to_jsonable_rejects_unsupported_values_without_calling_str() -> None:

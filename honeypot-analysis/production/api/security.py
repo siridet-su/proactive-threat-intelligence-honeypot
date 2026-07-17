@@ -40,7 +40,7 @@ def validate_configured_bearer_tokens(
             continue
         if parse_bearer_token(f"Bearer {configured}") != configured:
             raise ValueError(
-                f"{service_name} {field_name} contains whitespace or control characters"
+                f"{service_name} {field_name} is not a valid Bearer token value"
             )
 
 

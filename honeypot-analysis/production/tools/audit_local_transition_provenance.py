@@ -9,7 +9,7 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List
 
 from production.prediction.realtime_prediction import build_transition_model
-from production.storage import open_storage
+from production.storage import open_storage, safe_database_label
 from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
 
 
@@ -84,6 +84,7 @@ def _top_transitions(model: Dict[str, Any], limit: int = 10) -> List[Dict[str, A
 
 def build_audit(database_url: str, limit: int = 5000, prefix_max_length: int = 3) -> Dict[str, Any]:
     storage = open_storage(database_url)
+    database_label = safe_database_label(database_url)
     all_rows = storage.list_session_rows(limit=limit, session_source=None) if hasattr(storage, "list_session_rows") else storage.list_rows("sessions", limit=limit)
     live_rows = storage.list_session_rows(limit=limit, session_source=SESSION_SOURCE_PRODUCTION_LIVE) if hasattr(storage, "list_session_rows") else [
         row for row in all_rows if str(row.get("session_source") or "") == SESSION_SOURCE_PRODUCTION_LIVE
@@ -106,19 +107,19 @@ def build_audit(database_url: str, limit: int = 5000, prefix_max_length: int = 3
         all_payloads,
         prefix_max_length=prefix_max_length,
         source_name="local_transition_all_session_sources_audit",
-        source_database=database_url.split("?", 1)[0],
+        source_database=database_label,
     )
     live_model = build_transition_model(
         live_payloads,
         prefix_max_length=prefix_max_length,
         source_name="local_transition_production_live_audit",
-        source_database=database_url.split("?", 1)[0],
+        source_database=database_label,
     )
     live_external_model = build_transition_model(
         live_external_payloads,
         prefix_max_length=prefix_max_length,
         source_name="local_transition_production_live_external_audit",
-        source_database=database_url.split("?", 1)[0],
+        source_database=database_label,
     )
     all_compact = _compact_model(all_model)
     live_compact = _compact_model(live_model)
@@ -127,19 +128,19 @@ def build_audit(database_url: str, limit: int = 5000, prefix_max_length: int = 3
         _legacy_unfiltered_payloads(all_payloads),
         prefix_max_length=prefix_max_length,
         source_name="legacy_unfiltered_all_session_sources_audit",
-        source_database=database_url.split("?", 1)[0],
+        source_database=database_label,
     )
     legacy_live_external_model = build_transition_model(
         _legacy_unfiltered_payloads(live_external_payloads),
         prefix_max_length=prefix_max_length,
         source_name="legacy_unfiltered_production_live_external_audit",
-        source_database=database_url.split("?", 1)[0],
+        source_database=database_label,
     )
     legacy_all_compact = _compact_model(legacy_all_model)
     legacy_live_external_compact = _compact_model(legacy_live_external_model)
     return {
         "schema_version": "local_transition_provenance_audit.v1",
-        "database_url": database_url.split("?", 1)[0],
+        "database_url": database_label,
         "session_source_counts": dict(sorted(source_counts.items())),
         "production_live_external_source_counts": {
             str(key).lower(): value for key, value in sorted(external_counts.items())
