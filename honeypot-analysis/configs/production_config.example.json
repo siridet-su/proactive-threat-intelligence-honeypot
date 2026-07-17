@@ -379,9 +379,9 @@
   "credential_policy": {
     "store_raw_credentials": false,
     "redaction": "[REDACTED]",
-    "hash_algorithm": "sha256",
-    "hash_salt": "",
+    "hash_algorithm": "hmac-sha256-v1",
     "sanitize_raw_events": true,
     "redact_fields": ["password", "passwd"]
-  }
+  },
+  "credential_hmac_keyring_file": ""
 }

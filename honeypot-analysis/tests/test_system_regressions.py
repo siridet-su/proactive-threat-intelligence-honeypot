@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
 
 from production.workers.session_monitor import SessionMonitor, SessionState, build_pipeline_trigger
 from production.classification.classification_pipeline import NotebookParityClassifier
+from production.utils.credential_hmac import CredentialHasher
 
 
 def _command_event(session="s1", src_ip="203.0.113.10", command="whoami"):
@@ -22,7 +23,12 @@ def _command_event(session="s1", src_ip="203.0.113.10", command="whoami"):
 
 
 def test_credentials_are_redacted_and_hashed():
-    monitor = SessionMonitor()
+    monitor = SessionMonitor(
+        credential_hasher=CredentialHasher(
+            active_key_id="regression-key",
+            keys={"regression-key": b"regression-test-key-material-32!!"},
+        )
+    )
     monitor.on_event({
         "eventid": "cowrie.login.success",
         "session": "cred-1",
@@ -35,7 +41,7 @@ def test_credentials_are_redacted_and_hashed():
     state = monitor.get_session("cred-1")
     assert state.login_password == "[REDACTED]"
     assert state.login_password_redacted == "[REDACTED]"
-    assert state.login_password_hash.startswith("sha256:")
+    assert state.login_password_hash.startswith("hmac-sha256-v1:regression-key:")
     assert "secret123" not in str(state.raw_events)
     assert state.raw_events[0]["password"] == "[REDACTED]"
     assert state.raw_events[0]["password_hash"] == state.login_password_hash

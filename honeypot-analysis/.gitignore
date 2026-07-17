@@ -31,6 +31,8 @@ Thumbs.db
 *.pfx
 *credentials*.json
 *service-account*.json
+*credential*hmac*keyring*.json
+*credential*keyring*.json
 
 # Runtime databases, queues, logs, and reports
 *.db

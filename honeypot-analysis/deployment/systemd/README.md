@@ -44,6 +44,33 @@ sudo chown root:root /etc/honeypot/honeypot.env
 ```
 
 Edit `/etc/honeypot/production_config.json` and `/etc/honeypot/honeypot.env`.
+Create `/etc/honeypot/credential-hmac-keyring.json` through the deployment
+secret manager as `root:root` mode `0600`. Never put its contents in the
+shared environment file, project checkout, shell history, logs, or command
+output. The document contract is:
+
+```json
+{
+  "schema_version": "credential_hmac_keyring.v1",
+  "active_key_id": "ROTATION_ID",
+  "keys": {
+    "ROTATION_ID": "BASE64_OF_32_OR_MORE_RANDOM_BYTES"
+  },
+  "correlation_key_ids": []
+}
+```
+
+The session-worker unit copies this file into its private systemd credential
+directory. No other backend service and no Raspberry Pi service receives the
+keyring. Set `credential_policy.hash_algorithm` to `hmac-sha256-v1`; the worker
+fails before opening storage if the policy or keyring is unsafe.
+
+For routine rotation, install a replacement file atomically with a new active
+key and retain at most two prior key IDs in `correlation_key_ids` for the
+defined correlation-retention window, then restart only the session worker.
+Each listed prior key must also be present in `keys`. For a suspected key
+compromise, do not retain the compromised key as a correlation alias.
+
 For a production pilot, set `DATABASE_URL` to Cloud SQL Postgres unless the
 MongoDB adapter has been implemented and tested. MongoDB is a reasonable target
 for this document-heavy pipeline, but it is not a drop-in replacement yet

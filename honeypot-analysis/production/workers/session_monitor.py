@@ -18,7 +18,6 @@ Usage (Colab test):
 from __future__ import annotations
 
 import json
-import hashlib
 import re
 import time
 from dataclasses import dataclass, field
@@ -29,6 +28,10 @@ from production.classification.trust import (
     classification_audit_reason,
     classification_evidence_tier,
     is_trusted_classification_event,
+)
+from production.utils.credential_hmac import (
+    CREDENTIAL_HMAC_SCHEME,
+    CredentialHasher,
 )
 from production.utils.serialization import command_observation_provenance, stable_id
 
@@ -268,6 +271,7 @@ class SessionState:
     login_username:   str          = ""
     login_password:   str          = ""       # redacted unless raw storage is explicitly enabled
     login_password_hash: str       = ""       # stable hash for clustering without exposing plaintext
+    login_password_hash_aliases: List[str] = field(default_factory=list)
     login_password_redacted: str   = ""
     credential_metadata: dict      = field(default_factory=dict)
     # Session data
@@ -394,8 +398,7 @@ class SessionMonitor:
     DEFAULT_CREDENTIAL_POLICY = {
         "store_raw_credentials": False,
         "redaction": "[REDACTED]",
-        "hash_algorithm": "sha256",
-        "hash_salt": "",
+        "hash_algorithm": "disabled",
         "sanitize_raw_events": True,
         "redact_fields": ["password", "passwd"],
     }
@@ -413,6 +416,7 @@ class SessionMonitor:
         thresholds: Optional[dict] = None,
         classification_policy: Optional[dict] = None,
         credential_policy: Optional[dict] = None,
+        credential_hasher: Optional[CredentialHasher] = None,
     ):
         self.feeds          = feeds
         self.mitre_db       = mitre_db
@@ -431,6 +435,27 @@ class SessionMonitor:
             **self.DEFAULT_CREDENTIAL_POLICY,
             **(credential_policy or {}),
         }
+        self.credential_hasher = credential_hasher
+        requested_hash_algorithm = str(
+            self.credential_policy.get("hash_algorithm", "disabled")
+        ).strip().lower()
+        if credential_hasher is None and requested_hash_algorithm not in {
+            "",
+            "disabled",
+            "none",
+        }:
+            raise ValueError(
+                "credential hashing was requested without a CredentialHasher"
+            )
+        if (
+            credential_hasher is not None
+            and credential_policy is not None
+            and "hash_algorithm" in credential_policy
+            and requested_hash_algorithm != CREDENTIAL_HMAC_SCHEME
+        ):
+            raise ValueError(
+                f"credential hash_algorithm must be {CREDENTIAL_HMAC_SCHEME}"
+            )
         self._sessions:     Dict[str, SessionState] = {}
         self._sigma_kws:    List[str] = self._load_sigma_keywords()
         self._stats         = {"events": 0, "alerts": 0, "sessions": 0}
@@ -593,20 +618,38 @@ class SessionMonitor:
             self._sessions[session_id].credential_policy = {
                 "store_raw_credentials": bool(self.credential_policy.get("store_raw_credentials", False)),
                 "sanitize_raw_events": bool(self.credential_policy.get("sanitize_raw_events", True)),
-                "hash_algorithm": self.credential_policy.get("hash_algorithm", "sha256"),
+                **self._credential_hash_summary(),
             }
             self._stats["sessions"] += 1
         return self._sessions[session_id]
 
-    def _hash_secret(self, value: str) -> str:
-        if not value:
-            return ""
-        algorithm = str(self.credential_policy.get("hash_algorithm", "sha256")).lower()
-        if algorithm != "sha256":
-            algorithm = "sha256"
-        salt = str(self.credential_policy.get("hash_salt", ""))
-        digest = hashlib.sha256(f"{salt}{value}".encode("utf-8")).hexdigest()
-        return f"{algorithm}:{digest}"
+    def _credential_hash_summary(self) -> dict:
+        if self.credential_hasher is not None:
+            return self.credential_hasher.safe_summary()
+        return {
+            "hash_algorithm": str(
+                self.credential_policy.get("hash_algorithm", CREDENTIAL_HMAC_SCHEME)
+            ),
+            "hashing_enabled": False,
+            "active_key_id": "",
+            "correlation_key_ids": [],
+        }
+
+    def _hash_secret_bundle(self, value: str) -> tuple[str, tuple[str, ...]]:
+        if not value or self.credential_hasher is None:
+            return "", ()
+        return self.credential_hasher.digests(value)
+
+    def _event_secret_bundle(
+        self,
+        event: dict,
+        field: str,
+    ) -> tuple[str, tuple[str, ...]]:
+        raw_value = event.get(field, "")
+        value = "" if raw_value is None else str(raw_value)
+        # SessionMonitor consumes raw Cowrie events. Never trust sensor-supplied
+        # derived hashes; recompute them from the raw value at this boundary.
+        return self._hash_secret_bundle(value)
 
     def _sanitize_event(self, event: dict) -> dict:
         sanitized = dict(event)
@@ -615,17 +658,26 @@ class SessionMonitor:
 
         redaction = str(self.credential_policy.get("redaction", "[REDACTED]"))
         for field in self.credential_policy.get("redact_fields", ["password", "passwd"]):
-            if field in sanitized and sanitized[field]:
-                sanitized[f"{field}_hash"] = self._hash_secret(str(sanitized[field]))
+            sanitized.pop(f"{field}_hash", None)
+            sanitized.pop(f"{field}_hash_aliases", None)
+            if field in sanitized and sanitized[field] not in (None, ""):
+                digest, aliases = self._event_secret_bundle(event, field)
+                if digest:
+                    sanitized[f"{field}_hash"] = digest
+                if aliases:
+                    sanitized[f"{field}_hash_aliases"] = list(aliases)
                 sanitized[field] = redaction
         return sanitized
 
     def _record_login_success(self, state: SessionState, event: dict) -> None:
-        password = str(event.get("password", "") or "")
+        raw_password = event.get("password", "")
+        password = "" if raw_password is None else str(raw_password)
         redaction = str(self.credential_policy.get("redaction", "[REDACTED]"))
 
         state.login_username = event.get("username", "")
-        state.login_password_hash = self._hash_secret(password)
+        active_digest, digest_aliases = self._event_secret_bundle(event, "password")
+        state.login_password_hash = active_digest
+        state.login_password_hash_aliases = list(digest_aliases)
         state.login_password_redacted = redaction if password else ""
         state.login_password = (
             password if self.credential_policy.get("store_raw_credentials", False)
@@ -634,7 +686,9 @@ class SessionMonitor:
         state.credential_metadata = {
             "raw_password_stored": bool(self.credential_policy.get("store_raw_credentials", False)),
             "password_hash_present": bool(state.login_password_hash),
+            "password_hash_alias_count": len(state.login_password_hash_aliases),
             "raw_events_sanitized": bool(self.credential_policy.get("sanitize_raw_events", True)),
+            **self._credential_hash_summary(),
         }
 
     def _apply_session_enrichment(self, state: SessionState) -> None:

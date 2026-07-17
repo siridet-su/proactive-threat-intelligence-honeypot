@@ -495,11 +495,11 @@ class ProductionConfig:
     credential_policy: Dict[str, Any] = field(default_factory=lambda: {
         "store_raw_credentials": False,
         "redaction": "[REDACTED]",
-        "hash_algorithm": "sha256",
-        "hash_salt": "",
+        "hash_algorithm": "hmac-sha256-v1",
         "sanitize_raw_events": True,
         "redact_fields": ["password", "passwd"],
     })
+    credential_hmac_keyring_file: str = ""
 
     def __post_init__(self) -> None:
         self._apply_database_settings(self.database_settings())
@@ -735,6 +735,10 @@ class ProductionConfig:
         cfg.prediction_policy = _env_json("PREDICTION_POLICY_JSON", cfg.prediction_policy)
         cfg.prediction_policy = _load_prediction_policy_file(cfg.prediction_policy_path, cfg.prediction_policy)
         cfg.credential_policy = _env_json("CREDENTIAL_POLICY_JSON", cfg.credential_policy)
+        cfg.credential_hmac_keyring_file = os.getenv(
+            "CREDENTIAL_HMAC_KEYRING_FILE",
+            cfg.credential_hmac_keyring_file,
+        )
         return cfg
 
     def apply_environment(self) -> None:

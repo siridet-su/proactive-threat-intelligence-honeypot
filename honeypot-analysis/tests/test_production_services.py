@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import json
 import os
@@ -134,6 +135,24 @@ from production.reporting.artifacts import build_stix_bundle
 
 
 def _config(tmp: str) -> ProductionConfig:
+    keyring_path = Path(tmp) / "credential-hmac-keyring.json"
+    keyring_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "credential_hmac_keyring.v1",
+                "active_key_id": "unit-test-key",
+                "keys": {
+                    "unit-test-key": base64.b64encode(b"unit-test-key-material" * 2).decode(
+                        "ascii"
+                    )
+                },
+                "correlation_key_ids": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(keyring_path, 0o600)
     return ProductionConfig(
         database_url=f"sqlite:///{Path(tmp) / 'state.db'}",
         enable_feed_loading=False,
@@ -143,6 +162,7 @@ def _config(tmp: str) -> ProductionConfig:
         analysis_batch_size=10,
         analysis_max_attempts=1,
         webhook_url="",
+        credential_hmac_keyring_file=str(keyring_path),
     )
 
 
@@ -5020,7 +5040,7 @@ def test_session_close_creates_exactly_one_analysis_job_and_redacts_credentials(
         assert payload["is_ended"] is True
         assert payload["session_outcome"] == "completed"
         assert payload["login_password"] == "[REDACTED]"
-        assert payload["login_password_hash"]
+        assert payload["login_password_hash"].startswith("hmac-sha256-v1:unit-test-key:")
         assert "secret-pass" not in serialized
 
 

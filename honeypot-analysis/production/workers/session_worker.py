@@ -15,6 +15,11 @@ from production.enrichment.threat_feed_loader import load_threat_feeds
 
 from production.classification.classification_pipeline import NotebookParityClassifier
 from production.utils.config import ProductionConfig
+from production.utils.credential_hmac import (
+    load_credential_hmac_keyring,
+    resolve_credential_hmac_keyring_path,
+    validate_production_credential_policy,
+)
 from production.enrichment.enrichment_cache import (
     enqueue_event_observables,
     enqueue_session_observables,
@@ -84,6 +89,13 @@ def alert_payload(alert: Any) -> Dict[str, Any]:
 class SessionWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
+        self.config.credential_policy = validate_production_credential_policy(
+            config.credential_policy
+        )
+        keyring_path = resolve_credential_hmac_keyring_path(
+            config.credential_hmac_keyring_file
+        )
+        self.credential_hasher = load_credential_hmac_keyring(keyring_path)
         config.apply_environment()
         self.storage = open_storage(config.database_url)
         self.feeds = None
@@ -439,6 +451,7 @@ class SessionWorker:
             on_session_end=self._on_session_end,
             classification_policy=self.config.classification_policy,
             credential_policy=self.config.credential_policy,
+            credential_hasher=self.credential_hasher,
         )
 
     def _refresh_enrichment_cache(self) -> None:

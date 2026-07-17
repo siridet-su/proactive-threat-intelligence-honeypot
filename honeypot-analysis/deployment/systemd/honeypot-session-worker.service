@@ -9,6 +9,7 @@ User=honeypot
 Group=honeypot
 WorkingDirectory=/opt/honeypot
 EnvironmentFile=/etc/honeypot/honeypot.env
+LoadCredential=credential-hmac-keyring.json:/etc/honeypot/credential-hmac-keyring.json
 ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.session_worker --config /etc/honeypot/production_config.json
 Restart=always
 RestartSec=5

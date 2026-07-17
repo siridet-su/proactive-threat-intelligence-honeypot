@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -21,6 +23,24 @@ from production.storage import open_storage
 
 def _config(tmp: str) -> ProductionConfig:
     root = Path(tmp)
+    keyring_path = root / "credential-hmac-keyring.json"
+    keyring_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "credential_hmac_keyring.v1",
+                "active_key_id": "e2e-test-key",
+                "keys": {
+                    "e2e-test-key": base64.b64encode(b"e2e-test-key-material-32-bytes!!").decode(
+                        "ascii"
+                    )
+                },
+                "correlation_key_ids": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(keyring_path, 0o600)
     return ProductionConfig(
         sensor_id="pi5-test-sensor",
         api_token="dev-token",
@@ -39,6 +59,7 @@ def _config(tmp: str) -> ProductionConfig:
         enable_securebert=False,
         enable_actor_attribution=False,
         webhook_url="",
+        credential_hmac_keyring_file=str(keyring_path),
     )
 
 
@@ -172,7 +193,9 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         serialized_session = json.dumps(session_payload)
         assert session_payload["is_ended"] is True
         assert session_payload["login_password"] == "[REDACTED]"
-        assert session_payload["login_password_hash"].startswith("sha256:")
+        assert session_payload["login_password_hash"].startswith(
+            "hmac-sha256-v1:e2e-test-key:"
+        )
         assert "real-secret" not in serialized_session
         assert session_payload["hassh"] == "hassh-test-value"
         assert session_payload["client_version"] == "SSH-2.0-libssh"
