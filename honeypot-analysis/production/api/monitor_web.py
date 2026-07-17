@@ -21,11 +21,26 @@ from production.api.dashboard_api import (
     _current_prediction_payload,
     _external_seed_health_payload,
 )
+from production.api.security import (
+    api_row_view,
+    authorize_read,
+    authorize_write,
+    event_views,
+    log_payload,
+    public_payload,
+    sanitize_request_target,
+    session_detail_view,
+)
 from production.classification.classification_evaluation import classification_metrics
 from production.utils.config import ProductionConfig
 from production.prediction.external_seed_health import infer_external_seed_paths, load_external_seed_health
 from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
 from production.utils.feedback import normalize_feedback_payload
+from production.utils.http_security import (
+    is_loopback_host,
+    safe_request_id,
+    validate_bind_auth,
+)
 from production.utils.serialization import stable_id, utc_now
 from production.reporting.smb_decision import build_smb_decision_from_paths
 from production.storage import open_storage, safe_database_descriptor
@@ -57,6 +72,7 @@ SENSITIVE_KEYS = {
 class MonitorConfig:
     db_path: str
     reports_dir: str
+    bind_host: str = "127.0.0.1"
     database_url: str = ""
     external_seed_model_path: str = ""
     external_seed_validation_path: str = ""
@@ -181,6 +197,24 @@ def _monitor_runtime_config(config: MonitorConfig) -> ProductionConfig:
     return cfg
 
 
+def _monitor_read_token(config: MonitorConfig) -> str:
+    return str(
+        getattr(config.production_config, "dashboard_read_token", "") or ""
+    )
+
+
+def _monitor_write_token(config: MonitorConfig) -> str:
+    return str(
+        getattr(config.production_config, "dashboard_write_token", "") or ""
+    )
+
+
+def _monitor_feedback_enabled(config: MonitorConfig) -> bool:
+    return bool(
+        getattr(config.production_config, "monitor_allow_feedback", False)
+    )
+
+
 def _parse_limit(query: Dict[str, List[str]], default: int = 100, maximum: int = 1000) -> int:
     try:
         return min(max(int(query.get("limit", [str(default)])[0]), 1), maximum)
@@ -218,7 +252,7 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
             if str(row.get("session_id") or "") == session_id
         ]
         return HTTPStatus.OK, {
-            "item": snapshot,
+            "item": api_row_view("prediction_snapshots", snapshot),
             "current_prediction": _current_prediction_payload(snapshot, feedback_rows),
             "smb_decision": _current_decision_payload(runtime_config, storage, session_id, snapshot),
             "session_id": session_id,
@@ -242,9 +276,13 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         if feedback_filter not in FEEDBACK_FILTERS:
             feedback_filter = "all"
         rows = storage.list_rows("analyst_feedback", limit=limit)
+        filtered_rows = filter_feedback_rows(rows, feedback_filter)[:100]
         return HTTPStatus.OK, {
             "filter": feedback_filter,
-            "items": filter_feedback_rows(rows, feedback_filter)[:100],
+            "items": [
+                api_row_view("analyst_feedback", row)
+                for row in filtered_rows
+            ],
             "review": build_feedback_review(rows),
             "timestamp": utc_now(),
         }
@@ -266,7 +304,10 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
     if table:
         limit = _parse_limit(query, default=100, maximum=1000)
         return HTTPStatus.OK, {
-            "items": [_decode_dashboard_row(row) for row in storage.list_rows(table, limit=limit)],
+            "items": [
+                api_row_view(table, _decode_dashboard_row(row))
+                for row in storage.list_rows(table, limit=limit)
+            ],
             "limit": limit,
             "table": table,
             "timestamp": utc_now(),
@@ -3439,7 +3480,10 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     )
 
 
-def _render_feedback_panel(detail: Dict[str, Any]) -> str:
+def _render_feedback_panel(
+    detail: Dict[str, Any],
+    allow_feedback: bool = True,
+) -> str:
     if not detail or not detail.get("ok"):
         return '<div class="empty">No selected session.</div>'
     session_id = detail.get("session_id") or ""
@@ -3523,7 +3567,9 @@ def _render_feedback_panel(detail: Dict[str, Any]) -> str:
     else:
         history = '<div class="empty">No analyst feedback recorded for this session yet.</div>'
 
-    return f"""
+    forms = ""
+    if allow_feedback:
+        forms = f"""
 <form class="feedback-form" method="post" action="/feedback">
   {common_hidden}
   <input type="hidden" name="feedback_type" value="operator_usefulness">
@@ -3548,6 +3594,14 @@ def _render_feedback_panel(detail: Dict[str, Any]) -> str:
     <textarea name="notes" rows="2" placeholder="Optional action note"></textarea>
   </label>
 </form>
+"""
+    else:
+        forms = (
+            '<div class="empty">Monitor feedback is disabled; this deployment '
+            "is operating in read-only mode.</div>"
+        )
+    return f"""
+{forms}
 <h3>Feedback History</h3>
 {history}
 """
@@ -4202,7 +4256,10 @@ def render_html(snapshot: Dict[str, Any], config: MonitorConfig, selected_sessio
       </div>
       <div class="section">
         <div class="sec-header"><span class="sec-icon">&#x1f4dd;</span><h2>Analyst Feedback</h2></div>
-        {_render_feedback_panel(selected_detail)}
+        {_render_feedback_panel(
+            selected_detail,
+            allow_feedback=_monitor_feedback_enabled(config),
+        )}
       </div>
       <div class="section">
         <div class="sec-header"><span class="sec-icon">&#x26a1;</span><h2>Recommendations &amp; Next Actions</h2></div>
@@ -4463,17 +4520,74 @@ def render_html(snapshot: Dict[str, Any], config: MonitorConfig, selected_sessio
 class MonitorHandler(BaseHTTPRequestHandler):
     monitor_config: MonitorConfig
 
+    def _request_id(self) -> str:
+        current = getattr(self, "_monitor_request_id", "")
+        if current:
+            return str(current)
+        headers = getattr(self, "headers", None)
+        request_id = safe_request_id(
+            headers.get("X-Request-ID") if headers is not None else None
+        )
+        self._monitor_request_id = request_id
+        return request_id
+
     def _send(self, status: HTTPStatus, body: str, content_type: str = "text/html; charset=utf-8") -> None:
         data = body.encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Request-ID", self._request_id())
         self.end_headers()
         self.wfile.write(data)
 
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
-        self._send(status, json.dumps(_sanitize_public(payload), sort_keys=True), "application/json")
+        self._send(
+            status,
+            json.dumps(public_payload(payload), ensure_ascii=False, sort_keys=True),
+            "application/json",
+        )
+
+    def _require_read(self) -> bool:
+        read_token = _monitor_read_token(self.monitor_config)
+        decision = authorize_read(
+            self.headers.get("Authorization"),
+            read_token,
+            allow_anonymous=(
+                not read_token
+                and is_loopback_host(self.monitor_config.bind_host)
+            ),
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
+
+    def _require_feedback_write(self) -> bool:
+        if not _monitor_feedback_enabled(self.monitor_config):
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "monitor feedback is disabled",
+                    "request_id": self._request_id(),
+                },
+            )
+            return False
+        decision = authorize_write(
+            self.headers.get("Authorization"),
+            _monitor_read_token(self.monitor_config),
+            _monitor_write_token(self.monitor_config),
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
 
     def _redirect(self, location: str) -> None:
         self.send_response(HTTPStatus.SEE_OTHER.value)
@@ -4484,6 +4598,11 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path not in {"/analyst-feedback", "/feedback"}:
+            self._send(HTTPStatus.NOT_FOUND, "not found", "text/plain; charset=utf-8")
+            return
+        if not self._require_feedback_write():
+            return
         if parsed.path == "/analyst-feedback":
             try:
                 length = min(int(self.headers.get("Content-Length", "0")), 1_000_000)
@@ -4505,9 +4624,6 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
             self._send_json(HTTPStatus.CREATED, {"feedback_id": feedback_id, "status": "recorded", "timestamp": utc_now()})
-            return
-        if parsed.path != "/feedback":
-            self._send(HTTPStatus.NOT_FOUND, "not found", "text/plain; charset=utf-8")
             return
         try:
             length = min(int(self.headers.get("Content-Length", "0")), 100_000)
@@ -4532,17 +4648,40 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/health":
+        if parsed.path in {"/health", "/health/live", "/live"}:
             self._send_json(
                 HTTPStatus.OK,
                 {"ok": True, "service": "monitor_web", "timestamp": utc_now()},
             )
             return
+        if parsed.path in {"/health/ready", "/ready"}:
+            try:
+                ready = bool(
+                    _open_monitor_storage(self.monitor_config)
+                    .health_check()
+                    .get("ok")
+                )
+            except Exception:
+                ready = False
+            self._send_json(
+                HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "ok": ready,
+                    "service": "monitor_web",
+                    "timestamp": utc_now(),
+                },
+            )
+            return
+        if not self._require_read():
+            return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)
             session_id = query.get("session_id", [""])[0]
             detail = load_session_detail(self.monitor_config, session_id=session_id)
-            self._send_json(HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND, detail)
+            self._send_json(
+                HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
+                session_detail_view(detail),
+            )
             return
         if parsed.path == "/api/sessions":
             query = parse_qs(parsed.query)
@@ -4552,7 +4691,6 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 session_offset = max(int(query.get("offset", ["0"])[0]), 0)
             except (TypeError, ValueError):
                 session_offset = 0
-            include_full = query.get("include_full", ["0"])[0].lower() in {"1", "true", "yes"}
             snapshot = load_snapshot(
                 self.monitor_config,
                 selected_session_id=selected_session_id,
@@ -4560,8 +4698,11 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 session_offset=session_offset,
             )
             sessions = snapshot.get("sessions") or []
-            if not include_full:
-                sessions = [_session_overview(item) for item in sessions if isinstance(item, dict)]
+            sessions = [
+                _session_overview(item)
+                for item in sessions
+                if isinstance(item, dict)
+            ]
             payload = {
                 "ok": snapshot.get("ok"),
                 "timestamp": snapshot.get("timestamp"),
@@ -4580,7 +4721,11 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 payload = {
                     "ok": detail.get("ok"),
                     "session_id": session_id,
-                    "events": detail.get("events_table_rows") or detail.get("raw_events_from_session_payload") or [],
+                    "events": event_views(
+                        detail.get("events_table_rows")
+                        or detail.get("raw_events_from_session_payload")
+                        or []
+                    ),
                     "error": (detail.get("errors") or {}).get("events") or detail.get("error") or "",
                     "timestamp": utc_now(),
                 }
@@ -4589,7 +4734,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             snapshot = load_snapshot(self.monitor_config)
             payload = {
                 "ok": snapshot.get("ok"),
-                "events": snapshot.get("events"),
+                "events": event_views(snapshot.get("events") or []),
                 "error": snapshot.get("events_error") or snapshot.get("error") or "",
                 "timestamp": snapshot.get("timestamp"),
             }
@@ -4627,14 +4772,21 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self._send(HTTPStatus.OK, render_html(snapshot, self.monitor_config, selected_session_id, feedback_filter))
 
     def log_message(self, fmt: str, *args: Any) -> None:
+        del fmt
+        status = ""
+        if len(args) > 1 and str(args[1]).isdigit():
+            status = str(args[1])
         print(
             json.dumps(
-                {
+                log_payload({
                     "service": "monitor_web",
-                    "client": self.address_string(),
-                    "message": fmt % args,
+                    "client": str(self.client_address[0]) if self.client_address else "",
+                    "method": str(getattr(self, "command", "") or ""),
+                    "path": sanitize_request_target(str(getattr(self, "path", "") or "")),
+                    "status": status,
+                    "request_id": self._request_id(),
                     "timestamp": utc_now(),
-                },
+                }),
                 sort_keys=True,
             ),
             flush=True,
@@ -4642,6 +4794,12 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
 
 def build_server(host: str, port: int, config: MonitorConfig) -> ThreadingHTTPServer:
+    validate_bind_auth(
+        host,
+        auth_configured=bool(_monitor_read_token(config)),
+        service_name="monitor_web",
+    )
+    config.bind_host = host
     MonitorHandler.monitor_config = config
     return ThreadingHTTPServer((host, port), MonitorHandler)
 
@@ -4664,6 +4822,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = _load_monitor_config(args.config)
+    config.bind_host = args.host
     if args.db_path:
         config.db_path = args.db_path
         config.database_url = f"sqlite:///{args.db_path}"

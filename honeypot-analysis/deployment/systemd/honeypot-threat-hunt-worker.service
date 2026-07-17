@@ -1,0 +1,18 @@
+[Unit]
+Description=Honeypot Cross-Session Threat Hunt Worker
+After=network-online.target honeypot-session-worker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honeypot
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=/etc/honeypot/honeypot.env
+ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.threat_hunt_worker --config /etc/honeypot/production_config.json
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

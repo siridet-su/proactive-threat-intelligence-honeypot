@@ -1,0 +1,154 @@
+# systemd Deployment Templates
+
+These files are templates for running the production pilot continuously on a VM
+or Raspberry Pi. They assume the project lives at `/opt/honeypot`, runtime data
+lives under `/var/lib/honeypot`, and configuration lives under `/etc/honeypot`.
+Adjust those paths if your VM uses a different checkout location.
+
+## GCP VM Backend
+
+1. Create a restricted service user.
+
+```bash
+sudo useradd --system --home /opt/honeypot --shell /usr/sbin/nologin honeypot
+sudo mkdir -p /opt/honeypot /etc/honeypot /var/lib/honeypot/feeds /var/lib/honeypot/reports
+sudo chown -R honeypot:honeypot /opt/honeypot /var/lib/honeypot
+```
+
+2. Put the project in `/opt/honeypot`.
+
+Copy a reviewed checkout into the service directory:
+
+```bash
+sudo cp -a /path/to/honeypot-threat-intelligence/. /opt/honeypot/
+sudo chown -R honeypot:honeypot /opt/honeypot
+```
+
+3. Create the Python environment from the project directory.
+
+```bash
+cd /opt/honeypot
+python3 -m venv .venv
+sudo chown -R honeypot:honeypot .venv
+sudo -u honeypot .venv/bin/pip install --upgrade pip
+sudo -u honeypot .venv/bin/pip install requests reportlab google-genai torch transformers psycopg[binary]
+```
+
+4. Install config and secrets.
+
+```bash
+sudo cp configs/production_config.example.json /etc/honeypot/production_config.json
+sudo cp deployment/systemd/honeypot.env.example /etc/honeypot/honeypot.env
+sudo chmod 600 /etc/honeypot/honeypot.env
+sudo chown root:root /etc/honeypot/honeypot.env
+```
+
+Edit `/etc/honeypot/production_config.json` and `/etc/honeypot/honeypot.env`.
+For a production pilot, set `DATABASE_URL` to Cloud SQL Postgres unless the
+MongoDB adapter has been implemented and tested. MongoDB is a reasonable target
+for this document-heavy pipeline, but it is not a drop-in replacement yet
+because the storage layer also claims durable worker jobs. Keep
+`ANALYSIS_SKIP_EMPTY_SESSIONS=true`, and keep `ANALYSIS_SUPPRESS_STDOUT=true`.
+
+5. Install backend services.
+
+```bash
+sudo cp deployment/systemd/honeypot-ingest-api.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-session-worker.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-enrichment-worker.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-analysis-worker.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-dashboard-api.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-webhook-dispatcher.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-prediction-backtest.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-prediction-backtest.timer /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-calibration-worker.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-calibration-worker.timer /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-prediction-retention.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-prediction-retention.timer /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-session-count-monitor.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-session-count-monitor.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+6. Start the services.
+
+```bash
+sudo systemctl enable --now honeypot-ingest-api
+sudo systemctl enable --now honeypot-session-worker
+sudo systemctl enable --now honeypot-enrichment-worker
+sudo systemctl enable --now honeypot-analysis-worker
+sudo systemctl enable --now honeypot-dashboard-api
+sudo systemctl enable --now honeypot-webhook-dispatcher
+sudo systemctl enable --now honeypot-prediction-backtest.timer
+sudo systemctl enable --now honeypot-calibration-worker.timer
+sudo systemctl enable --now honeypot-prediction-retention.timer
+sudo systemctl enable --now honeypot-session-count-monitor.timer
+```
+
+7. Verify operation.
+
+```bash
+systemctl status honeypot-ingest-api --no-pager
+systemctl status honeypot-session-worker --no-pager
+journalctl -u honeypot-analysis-worker -f
+curl http://127.0.0.1:8081/sessions
+curl http://127.0.0.1:8081/jobs
+curl http://127.0.0.1:8081/reports
+curl "http://127.0.0.1:8081/predictions/current?session_id=SESSION_ID"
+```
+
+Prediction snapshots are written after every processed event. The retention
+timer prunes old intermediate snapshots while keeping feedback-linked snapshots
+and the latest snapshot per session by default. Configure retention with
+`PREDICTION_SNAPSHOT_RETENTION_DAYS` and
+`PREDICTION_SNAPSHOT_KEEP_LATEST_PER_SESSION`.
+
+The session-count monitor is a daily oneshot timer. It queries completed
+sessions from the production database and writes warning-level journal lines
+when the first completed session and the 30-session threshold are crossed. Its
+state file is `/var/lib/honeypot/session_count_monitor_state.json`.
+
+## Raspberry Pi Sensor
+
+Install only the forwarder service on the Pi. Cowrie should keep writing
+`cowrie.json`; the forwarder tails that file and posts outbound batches to the
+GCP ingest API.
+
+```bash
+sudo useradd --system --home /var/lib/honeypot-forwarder --shell /usr/sbin/nologin honeypot-forwarder
+sudo mkdir -p /opt/honeypot /etc/honeypot /var/lib/honeypot-forwarder
+sudo chown -R honeypot-forwarder:honeypot-forwarder /var/lib/honeypot-forwarder
+sudo cp deployment/systemd/honeypot-sensor-forwarder.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now honeypot-sensor-forwarder
+```
+
+The Pi environment needs `HONEYPOT_API_TOKEN`, `SENSOR_ID`,
+`COWRIE_LOG_PATH`, `FORWARDER_SPOOL_PATH`, and `INGEST_URL`. It does not need
+database credentials, Vertex credentials, SecureBERT, or enrichment provider
+API keys.
+
+## Read-Only Web Monitor
+
+`production.api.monitor_web` provides a separate read-only view of the VM-side
+pipeline. It defaults to `127.0.0.1:8090`, reads the production database, and
+must not print API tokens or enrichment-provider keys.
+
+Install and verify it on the VM:
+
+```bash
+sudo cp deployment/systemd/honeypot-monitor-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now honeypot-monitor-web
+sudo systemctl status honeypot-monitor-web --no-pager
+curl http://127.0.0.1:8090/health
+```
+
+Keep port `8090` private. Reach it through the existing private management path:
+
+```bash
+ssh -L 8090:127.0.0.1:8090 ADMIN_USER@VM_PRIVATE_ADDRESS
+```
+
+Then open `http://127.0.0.1:8090`. The page shows session state, classification
+evidence, stored prediction snapshots, job/report status, and recent events.

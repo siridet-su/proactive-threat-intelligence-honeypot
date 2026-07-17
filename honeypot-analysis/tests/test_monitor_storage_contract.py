@@ -330,6 +330,9 @@ def test_both_feedback_http_paths_use_shared_feedback_writer(
         def _send(self, status, body, content_type) -> None:
             self.error_response = (status, body, content_type)
 
+        def _require_feedback_write(self) -> bool:
+            return True
+
     json_handler = StubHandler(
         "/analyst-feedback",
         (

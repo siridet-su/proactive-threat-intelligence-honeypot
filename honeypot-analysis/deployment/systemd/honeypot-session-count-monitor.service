@@ -1,0 +1,16 @@
+[Unit]
+Description=Honeypot completed-session threshold monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=/etc/honeypot/honeypot.env
+ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.session_count_monitor --config /etc/honeypot/production_config.json --no-syslog
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot

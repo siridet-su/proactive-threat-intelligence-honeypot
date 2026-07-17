@@ -1,0 +1,13 @@
+[Unit]
+Description=Honeypot Prediction Snapshot Retention
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=honeypot
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=/etc/honeypot/honeypot.env
+ExecStart=/opt/honeypot/.venv/bin/python -m production.prediction.prune_prediction_snapshots --config /etc/honeypot/production_config.json
+StandardOutput=journal
+StandardError=journal

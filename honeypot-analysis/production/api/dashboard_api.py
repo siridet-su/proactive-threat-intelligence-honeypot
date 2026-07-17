@@ -13,9 +13,22 @@ from production.utils.config import ProductionConfig
 from production.prediction.external_seed_health import infer_external_seed_paths, load_external_seed_health
 from production.classification.classification_evaluation import classification_metrics
 from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
+from production.utils.http_security import (
+    is_loopback_host,
+    safe_request_id,
+    validate_bind_auth,
+)
 from production.utils.serialization import utc_now
 from production.reporting.smb_decision import build_smb_decision_from_paths
 from production.storage import open_storage
+from production.api.security import (
+    api_row_view,
+    authorize_read,
+    authorize_write,
+    log_payload,
+    public_payload,
+    sanitize_request_target,
+)
 
 
 TABLES = {
@@ -136,12 +149,12 @@ def _payload_from_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _session_payload_for_id(storage: Any, session_id: str) -> Dict[str, Any]:
-    for row in storage.list_rows("sessions", limit=5000):
-        if str(row.get("session_id") or "") == session_id:
-            payload = _payload_from_row(row)
-            payload.setdefault("session_id", session_id)
-            payload.setdefault("src_ip", row.get("src_ip") or "unknown")
-            return payload
+    row = storage.get_session(session_id)
+    if row:
+        payload = _payload_from_row(row)
+        payload.setdefault("session_id", session_id)
+        payload.setdefault("src_ip", row.get("src_ip") or "unknown")
+        return payload
     return {"session_id": session_id}
 
 
@@ -171,13 +184,62 @@ def _external_seed_health_payload(config: ProductionConfig) -> Dict[str, Any]:
 class DashboardHandler(BaseHTTPRequestHandler):
     config: ProductionConfig
 
+    def _request_id(self) -> str:
+        current = getattr(self, "_dashboard_request_id", "")
+        if current:
+            return str(current)
+        headers = getattr(self, "headers", None)
+        request_id = safe_request_id(
+            headers.get("X-Request-ID") if headers is not None else None
+        )
+        self._dashboard_request_id = request_id
+        return request_id
+
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
-        body = json.dumps(payload, sort_keys=True).encode("utf-8")
+        body = json.dumps(
+            public_payload(payload),
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Request-ID", self._request_id())
         self.end_headers()
         self.wfile.write(body)
+
+    def _require_read(self) -> bool:
+        read_token = str(getattr(self.config, "dashboard_read_token", "") or "")
+        decision = authorize_read(
+            self.headers.get("Authorization"),
+            read_token,
+            allow_anonymous=(
+                not read_token
+                and is_loopback_host(str(getattr(self.config, "dashboard_host", "")))
+            ),
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
+
+    def _require_write(self) -> bool:
+        decision = authorize_write(
+            self.headers.get("Authorization"),
+            str(getattr(self.config, "dashboard_read_token", "") or ""),
+            str(getattr(self.config, "dashboard_write_token", "") or ""),
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
 
     def _read_json_body(self) -> Dict[str, Any]:
         try:
@@ -198,6 +260,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path != "/analyst-feedback":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
+        if not self._require_write():
+            return
         payload = self._read_json_body()
         storage = open_storage(self.config.database_url)
         try:
@@ -216,8 +280,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/health":
+        if parsed.path in {"/health", "/health/live", "/live"}:
             self._send_json(HTTPStatus.OK, {"ok": True, "service": "dashboard_api", "timestamp": utc_now()})
+            return
+        if parsed.path in {"/health/ready", "/ready"}:
+            try:
+                ready = bool(open_storage(self.config.database_url).health_check().get("ok"))
+            except Exception:
+                ready = False
+            self._send_json(
+                HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "ok": ready,
+                    "service": "dashboard_api",
+                    "timestamp": utc_now(),
+                },
+            )
+            return
+        if not self._require_read():
             return
         if parsed.path == "/predictions/current":
             query = parse_qs(parsed.query)
@@ -241,7 +321,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.OK,
                 {
-                    "item": snapshot,
+                    "item": api_row_view("prediction_snapshots", snapshot),
                     "current_prediction": _current_prediction_payload(snapshot, feedback_rows),
                     "smb_decision": _current_decision_payload(self.config, storage, session_id, snapshot),
                     "session_id": session_id,
@@ -277,11 +357,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 feedback_filter = "all"
             storage = open_storage(self.config.database_url)
             rows = storage.list_rows("analyst_feedback", limit=limit)
+            filtered_rows = filter_feedback_rows(rows, feedback_filter)[:100]
             self._send_json(
                 HTTPStatus.OK,
                 {
                     "filter": feedback_filter,
-                    "items": filter_feedback_rows(rows, feedback_filter)[:100],
+                    "items": [
+                        api_row_view("analyst_feedback", row)
+                        for row in filtered_rows
+                    ],
                     "review": build_feedback_review(rows),
                     "timestamp": utc_now(),
                 },
@@ -324,7 +408,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._send_json(
             HTTPStatus.OK,
             {
-                "items": storage.list_rows(table, limit=limit),
+                "items": [
+                    api_row_view(table, row)
+                    for row in storage.list_rows(table, limit=limit)
+                ],
                 "limit": limit,
                 "table": table,
                 "timestamp": utc_now(),
@@ -332,14 +419,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
         )
 
     def log_message(self, fmt: str, *args: Any) -> None:
+        del fmt
+        status = ""
+        if len(args) > 1 and str(args[1]).isdigit():
+            status = str(args[1])
         print(
             json.dumps(
-                {
+                log_payload({
                     "service": "dashboard_api",
-                    "client": self.address_string(),
-                    "message": fmt % args,
+                    "client": str(self.client_address[0]) if self.client_address else "",
+                    "method": str(getattr(self, "command", "") or ""),
+                    "path": sanitize_request_target(str(getattr(self, "path", "") or "")),
+                    "status": status,
+                    "request_id": self._request_id(),
                     "timestamp": utc_now(),
-                },
+                }),
                 sort_keys=True,
             ),
             flush=True,
@@ -347,6 +441,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def build_server(config: ProductionConfig) -> ThreadingHTTPServer:
+    validate_bind_auth(
+        str(config.dashboard_host),
+        auth_configured=bool(
+            str(getattr(config, "dashboard_read_token", "") or "")
+        ),
+        service_name="dashboard_api",
+    )
     DashboardHandler.config = config
     return ThreadingHTTPServer((config.dashboard_host, config.dashboard_port), DashboardHandler)
 
@@ -360,6 +461,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = ProductionConfig.from_env(args.config)
+    validate_bind_auth(
+        str(config.dashboard_host),
+        auth_configured=bool(
+            str(getattr(config, "dashboard_read_token", "") or "")
+        ),
+        service_name="dashboard_api",
+    )
     storage = open_storage(config.database_url)
     storage.initialize()
     server = build_server(config)

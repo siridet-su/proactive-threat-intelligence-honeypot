@@ -44,6 +44,21 @@ def _env_json(name: str, default: Dict[str, Any]) -> Dict[str, Any]:
     return parsed
 
 
+def _token_mapping(value: Dict[str, Any], name: str) -> Dict[str, str]:
+    normalized: Dict[str, str] = {}
+    for raw_identity, raw_token in value.items():
+        identity = str(raw_identity).strip()
+        token = raw_token if isinstance(raw_token, str) else ""
+        if not identity or not token or token != token.strip():
+            raise ValueError(
+                f"{name} must map non-empty identities to non-empty, unpadded token strings"
+            )
+        if identity in normalized:
+            raise ValueError(f"{name} contains duplicate normalized identities")
+        normalized[identity] = token
+    return normalized
+
+
 def _split_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -116,6 +131,7 @@ class ProductionConfig:
     sensor_id: str = "demo-sensor"
     session_source: str = SESSION_SOURCE_PRODUCTION_LIVE
     api_token: str = ""
+    ingest_sensor_tokens: Dict[str, str] = field(default_factory=dict)
 
     # Explicit backend fields are authoritative. ``database_url`` remains as a
     # compatibility input and canonical runtime URL for existing callers.
@@ -124,10 +140,17 @@ class ProductionConfig:
     mongodb_uri: str = ""
     mongodb_database: str = ""
     database_url: str = ""
-    ingest_host: str = "0.0.0.0"
+    ingest_host: str = "127.0.0.1"
     ingest_port: int = 8080
-    dashboard_host: str = "0.0.0.0"
+    ingest_max_body_bytes: int = 5 * 1024 * 1024
+    ingest_max_batch_events: int = 500
+    ingest_max_event_bytes: int = 256 * 1024
+    ingest_request_timeout_seconds: float = 15.0
+    dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8081
+    dashboard_read_token: str = ""
+    dashboard_write_token: str = ""
+    monitor_allow_feedback: bool = False
 
     cowrie_log_path: str = "data/samples/demo_cowrie_realistic.json"
     spool_path: str = "sensor_spool.ndjson"
@@ -563,10 +586,45 @@ class ProductionConfig:
             SESSION_SOURCE_PRODUCTION_LIVE,
         )
         cfg.api_token = os.getenv("HONEYPOT_API_TOKEN", cfg.api_token)
+        cfg.ingest_sensor_tokens = _token_mapping(
+            _env_json(
+                "INGEST_SENSOR_TOKENS_JSON",
+                cfg.ingest_sensor_tokens,
+            ),
+            "INGEST_SENSOR_TOKENS_JSON",
+        )
         cfg.ingest_host = os.getenv("INGEST_HOST", cfg.ingest_host)
         cfg.ingest_port = _env_int("INGEST_PORT", cfg.ingest_port)
+        cfg.ingest_max_body_bytes = _env_int(
+            "INGEST_MAX_BODY_BYTES",
+            cfg.ingest_max_body_bytes,
+        )
+        cfg.ingest_max_batch_events = _env_int(
+            "INGEST_MAX_BATCH_EVENTS",
+            cfg.ingest_max_batch_events,
+        )
+        cfg.ingest_max_event_bytes = _env_int(
+            "INGEST_MAX_EVENT_BYTES",
+            cfg.ingest_max_event_bytes,
+        )
+        cfg.ingest_request_timeout_seconds = _env_float(
+            "INGEST_REQUEST_TIMEOUT_SECONDS",
+            cfg.ingest_request_timeout_seconds,
+        )
         cfg.dashboard_host = os.getenv("DASHBOARD_HOST", cfg.dashboard_host)
         cfg.dashboard_port = _env_int("DASHBOARD_PORT", cfg.dashboard_port)
+        cfg.dashboard_read_token = os.getenv(
+            "DASHBOARD_READ_TOKEN",
+            cfg.dashboard_read_token,
+        )
+        cfg.dashboard_write_token = os.getenv(
+            "DASHBOARD_WRITE_TOKEN",
+            cfg.dashboard_write_token,
+        )
+        cfg.monitor_allow_feedback = _env_bool(
+            "MONITOR_ALLOW_FEEDBACK",
+            cfg.monitor_allow_feedback,
+        )
         cfg.cowrie_log_path = os.getenv("COWRIE_LOG_PATH", cfg.cowrie_log_path)
         cfg.spool_path = os.getenv("FORWARDER_SPOOL_PATH", cfg.spool_path)
         cfg.ingest_url = os.getenv("INGEST_URL", cfg.ingest_url)

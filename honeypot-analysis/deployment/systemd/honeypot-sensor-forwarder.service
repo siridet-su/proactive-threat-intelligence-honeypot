@@ -1,0 +1,22 @@
+[Unit]
+Description=Honeypot Cowrie sensor forwarder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honeypot-forwarder
+Group=honeypot-forwarder
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=/etc/honeypot/honeypot.env
+ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.sensor_forwarder --config /etc/honeypot/production_config.json
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot-forwarder
+ReadOnlyPaths=/var/log/cowrie
+
+[Install]
+WantedBy=multi-user.target
