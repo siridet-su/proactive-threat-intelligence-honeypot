@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
@@ -18,6 +19,104 @@ SUPPORTED_DATABASE_BACKENDS = {
 MONGODB_SCHEMES = {"mongodb", "mongodb+srv"}
 POSTGRESQL_SCHEMES = {"postgres", "postgresql"}
 DEFAULT_SQLITE_DATABASE_PATH = "production_state.db"
+
+EVENT_FAILURE_CODES = frozenset(
+    {
+        "database_unavailable",
+        "event_lease_attempts_exhausted",
+        "event_processing_dependency",
+        "event_processing_failed",
+        "event_processing_invalid",
+        "event_processing_timeout",
+        "invalid_event",
+        "session_processing_failed",
+        "stale_leader",
+        "stale_worker",
+        "temporary_dependency",
+        "temporary_failure",
+    }
+)
+EVENT_FAILURE_TYPES = frozenset(
+    {
+        "BaseException",
+        "ConnectionError",
+        "DependencyUnavailable",
+        "Exception",
+        "FileExistsError",
+        "FileNotFoundError",
+        "ImportError",
+        "IsADirectoryError",
+        "LeadershipLost",
+        "LeaseExpired",
+        "NotADirectoryError",
+        "OSError",
+        "PermissionError",
+        "RuntimeError",
+        "StorageError",
+        "TimeoutError",
+        "TypeError",
+        "ValidationError",
+        "ValueError",
+        "WorkerError",
+    }
+)
+
+EVENT_EFFECT_SUMMARY_KEYS = frozenset(
+    {
+        "analysis_job_enqueued",
+        "alerts_created",
+        "campaign_updated",
+        "enrichment_jobs_enqueued",
+        "event_applied",
+        "observable_sightings_recorded",
+        "prediction_saved",
+        "session_closed",
+        "session_saved",
+        "threat_hunt_jobs_enqueued",
+    }
+)
+MAX_EVENT_EFFECT_COUNT = 1_000_000
+
+
+def validate_event_failure_fields(error_code: str, error_type: str) -> tuple[str, str]:
+    """Accept only developer-defined event failure identifiers.
+
+    These fields are persisted and operator-visible. An explicit registry keeps
+    attacker-controlled exception text or secret-shaped identifiers out of the
+    durable queue without creating another plaintext redaction system.
+    """
+
+    code = str(error_code or "").strip()
+    failure_type = str(error_type or "").strip()
+    if code not in EVENT_FAILURE_CODES:
+        raise ValueError("error_code is not a registered event failure code")
+    if failure_type not in EVENT_FAILURE_TYPES:
+        raise ValueError("error_type is not a registered event failure type")
+    return code, failure_type
+
+
+def validate_event_effect_summary(
+    effect_summary: Any,
+) -> Optional[Dict[str, bool | int]]:
+    """Validate the small, non-sensitive event-processing effect schema."""
+
+    if effect_summary is None:
+        return None
+    if not isinstance(effect_summary, Mapping):
+        raise ValueError("effect_summary must be a mapping or null")
+    normalized: Dict[str, bool | int] = {}
+    for key, value in effect_summary.items():
+        if key not in EVENT_EFFECT_SUMMARY_KEYS:
+            raise ValueError("effect_summary contains an unsupported key")
+        if type(value) is bool:
+            normalized[key] = value
+            continue
+        if type(value) is not int or value < 0 or value > MAX_EVENT_EFFECT_COUNT:
+            raise ValueError(
+                "effect_summary values must be booleans or bounded non-negative integers"
+            )
+        normalized[key] = value
+    return normalized
 
 
 class DatabaseConfigurationError(ValueError):
@@ -260,6 +359,100 @@ class StorageBackend(Protocol):
     ) -> tuple[str, bool]: ...
 
     def fetch_unprocessed_events(self, limit: int) -> List[Dict[str, Any]]: ...
+
+    def claim_events(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int = 5,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> List[Dict[str, Any]]: ...
+
+    def renew_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool: ...
+
+    def complete_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        effect_summary: Optional[Dict[str, Any]] = None,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool: ...
+
+    def fail_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> str: ...
+
+    def release_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool: ...
+
+    def list_failed_events(self, limit: int = 100) -> List[Dict[str, Any]]: ...
+
+    def acquire_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool: ...
+
+    def renew_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool: ...
+
+    def release_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool: ...
 
     def fetch_events(
         self,

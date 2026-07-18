@@ -7,10 +7,52 @@ CREATE TABLE IF NOT EXISTS events (
     timestamp TIMESTAMPTZ,
     payload_json JSONB NOT NULL,
     received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    processed BOOLEAN NOT NULL DEFAULT false
+    processed BOOLEAN NOT NULL DEFAULT false,
+    claim_owner TEXT,
+    claim_token TEXT,
+    claim_leader_scope TEXT,
+    claim_leader_token TEXT,
+    claim_expires_at TIMESTAMPTZ,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    last_error_code TEXT,
+    last_error_type TEXT,
+    last_error_at TIMESTAMPTZ,
+    processing_outcome TEXT,
+    processed_at TIMESTAMPTZ,
+    effect_summary_json JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_events_processed ON events(processed, received_at);
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
+ALTER TABLE events ADD COLUMN IF NOT EXISTS claim_owner TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS claim_token TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS claim_leader_scope TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS claim_leader_token TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS last_error_code TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS last_error_type TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS processing_outcome TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS effect_summary_json JSONB;
+CREATE INDEX IF NOT EXISTS idx_events_claimable
+    ON events(processed, next_retry_at, claim_expires_at, attempts, received_at, event_id);
+CREATE INDEX IF NOT EXISTS idx_events_failed
+    ON events(processing_outcome, processed_at, event_id);
+CREATE INDEX IF NOT EXISTS idx_events_session_queue
+    ON events(session_id, processed, received_at, event_id);
+CREATE INDEX IF NOT EXISTS idx_events_leader_claims
+    ON events(claim_leader_scope, processed, claim_expires_at, claim_owner, claim_leader_token);
+
+CREATE TABLE IF NOT EXISTS worker_leases (
+    scope TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    token TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,

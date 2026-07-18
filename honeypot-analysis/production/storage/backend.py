@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
+import uuid
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,6 +17,8 @@ from production.storage.contract import (
     POSTGRESQL_BACKEND,
     SQLITE_BACKEND,
     StorageBackend,
+    validate_event_effect_summary,
+    validate_event_failure_fields,
 )
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
@@ -36,6 +41,24 @@ def _decode_json(value: Any) -> Any:
     return json.loads(value)
 
 
+def _decode_event_payload(value: Any) -> tuple[Dict[str, Any], str]:
+    try:
+        decoded = _decode_json(value)
+        if not isinstance(decoded, Mapping):
+            raise ValueError("event payload must be a mapping")
+        payload = dict(decoded)
+        return payload, stable_json(payload)
+    except Exception as exc:
+        raise ValueError("event payload is not a valid JSON mapping") from exc
+
+
+def _safe_event_payload(value: Any) -> tuple[Dict[str, Any], str]:
+    try:
+        return _decode_event_payload(value)
+    except ValueError:
+        return {}, "{}"
+
+
 def _parse_dt(value: Any) -> Optional[datetime]:
     if not value:
         return None
@@ -56,6 +79,62 @@ def _is_future(value: Any) -> bool:
 
 def _retry_at(seconds: float) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=max(seconds, 0))).isoformat()
+
+
+def _utc_timestamp(value: Any = None) -> str:
+    if value is None:
+        parsed = datetime.now(timezone.utc)
+    elif isinstance(value, datetime):
+        parsed = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    else:
+        parsed = _parse_dt(value)
+        if parsed is None:
+            raise ValueError("now must be an ISO-8601 timestamp or datetime")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _future_timestamp(now: str, seconds: float, *, field: str) -> str:
+    try:
+        duration = float(seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a positive number") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError(f"{field} must be a positive number")
+    parsed = _parse_dt(now)
+    if parsed is None:  # pragma: no cover - _utc_timestamp guarantees this
+        raise ValueError("now must be a valid timestamp")
+    return (parsed + timedelta(seconds=duration)).isoformat()
+
+
+def _required_identity(value: str, field: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or len(normalized) > 256:
+        raise ValueError(f"{field} must be non-empty and at most 256 characters")
+    return normalized
+
+
+def _uuid_token(value: str, field: str) -> str:
+    normalized = _required_identity(value, field)
+    try:
+        return str(uuid.UUID(normalized))
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"{field} must be a UUID fencing token") from exc
+
+
+def _claim_leader_binding_matches(
+    row: Any,
+    leader_scope: str,
+    leader_token: str,
+) -> bool:
+    stored_scope = str(row["claim_leader_scope"] or "")
+    stored_token = str(row["claim_leader_token"] or "")
+    if not stored_scope and not stored_token:
+        return not leader_scope and not leader_token
+    return stored_scope == leader_scope and stored_token == leader_token
+
+
+def _optional_utc_timestamp(value: Any) -> Optional[str]:
+    return _utc_timestamp(value) if value else None
 
 
 PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
@@ -132,10 +211,31 @@ class SQLiteStorage:
                     timestamp TEXT,
                     payload_json TEXT NOT NULL,
                     received_at TEXT NOT NULL,
-                    processed INTEGER NOT NULL DEFAULT 0
+                    processed INTEGER NOT NULL DEFAULT 0,
+                    claim_owner TEXT,
+                    claim_token TEXT,
+                    claim_leader_scope TEXT,
+                    claim_leader_token TEXT,
+                    claim_expires_at TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_retry_at TEXT,
+                    last_error_code TEXT,
+                    last_error_type TEXT,
+                    last_error_at TEXT,
+                    processing_outcome TEXT,
+                    processed_at TEXT,
+                    effect_summary_json TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_processed ON events(processed, received_at);
                 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
+
+                CREATE TABLE IF NOT EXISTS worker_leases (
+                    scope TEXT PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    token TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY,
@@ -147,11 +247,6 @@ class SQLiteStorage:
                     payload_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS idx_sessions_source_updated
-                    ON sessions(session_source, updated_at);
-                CREATE INDEX IF NOT EXISTS idx_sessions_source_external_updated
-                    ON sessions(session_source, is_external_source, updated_at);
-
                 CREATE TABLE IF NOT EXISTS alerts (
                     alert_id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
@@ -429,6 +524,7 @@ class SQLiteStorage:
                     ON campaign_sessions(session_id, created_at);
                 """
             )
+            self._ensure_sqlite_event_processing_columns(conn)
             self._ensure_sqlite_session_source_column(conn)
             self._ensure_sqlite_enrichment_priority_columns(conn)
 
@@ -456,6 +552,55 @@ class SQLiteStorage:
             """
             CREATE INDEX IF NOT EXISTS idx_sessions_source_external_updated
                 ON sessions(session_source, is_external_source, updated_at)
+            """
+        )
+
+    def _ensure_sqlite_event_processing_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(events)").fetchall()
+        }
+        additions = {
+            "claim_owner": "TEXT",
+            "claim_token": "TEXT",
+            "claim_leader_scope": "TEXT",
+            "claim_leader_token": "TEXT",
+            "claim_expires_at": "TEXT",
+            "attempts": "INTEGER NOT NULL DEFAULT 0",
+            "next_retry_at": "TEXT",
+            "last_error_code": "TEXT",
+            "last_error_type": "TEXT",
+            "last_error_at": "TEXT",
+            "processing_outcome": "TEXT",
+            "processed_at": "TEXT",
+            "effect_summary_json": "TEXT",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE events ADD COLUMN {name} {declaration}")
+        # These indexes must be created only after legacy events tables have
+        # acquired every referenced lifecycle column.
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_claimable
+                ON events(processed, next_retry_at, claim_expires_at, attempts, received_at, event_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_failed
+                ON events(processing_outcome, processed_at, event_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_session_queue
+                ON events(session_id, processed, received_at, event_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_leader_claims
+                ON events(claim_leader_scope, processed, claim_expires_at, claim_owner, claim_leader_token)
             """
         )
 
@@ -516,6 +661,772 @@ class SQLiteStorage:
             for row in rows
         ]
 
+    def claim_events(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int = 5,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> List[Dict[str, Any]]:
+        claim_owner = _required_identity(owner, "owner")
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        try:
+            claim_limit = max(0, int(limit))
+            attempt_limit = int(max_attempts)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit and max_attempts must be integers") from exc
+        if attempt_limit <= 0:
+            raise ValueError("max_attempts must be positive")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        claimed: List[Dict[str, Any]] = []
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if lease_scope:
+                leader = conn.execute(
+                    """
+                    SELECT 1
+                    FROM worker_leases
+                    WHERE scope = ?
+                      AND owner = ?
+                      AND token = ?
+                      AND expires_at >= ?
+                    """,
+                    (lease_scope, claim_owner, lease_token, expires_at),
+                ).fetchone()
+                if leader is None:
+                    return []
+            conn.execute(
+                """
+                UPDATE events
+                SET processed = 1,
+                    processing_outcome = 'dead_letter',
+                    processed_at = ?,
+                    next_retry_at = NULL,
+                    last_error_code = 'event_lease_attempts_exhausted',
+                    last_error_type = 'LeaseExpired',
+                    last_error_at = ?,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE processed = 0
+                  AND attempts >= ?
+                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                  AND (
+                      claim_token IS NULL
+                      OR claim_expires_at IS NULL
+                      OR claim_expires_at <= ?
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM events AS predecessor
+                      WHERE predecessor.session_id = events.session_id
+                        AND predecessor.processed = 0
+                        AND (
+                            predecessor.received_at < events.received_at
+                            OR (
+                                predecessor.received_at = events.received_at
+                                AND predecessor.event_id < events.event_id
+                            )
+                        )
+                  )
+                """,
+                (
+                    current_time,
+                    current_time,
+                    attempt_limit,
+                    current_time,
+                    current_time,
+                ),
+            )
+            if claim_limit == 0:
+                return []
+            invalid_budget = 1_000
+            while len(claimed) < claim_limit and invalid_budget > 0:
+                remaining = claim_limit - len(claimed)
+                rows = conn.execute(
+                    """
+                    SELECT event_id, sensor_id, payload_json, attempts
+                    FROM events AS candidate
+                    WHERE candidate.processed = 0
+                      AND candidate.attempts < ?
+                      AND (candidate.next_retry_at IS NULL OR candidate.next_retry_at <= ?)
+                      AND (
+                          candidate.claim_token IS NULL
+                          OR candidate.claim_expires_at IS NULL
+                          OR candidate.claim_expires_at <= ?
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM events AS predecessor
+                          WHERE predecessor.session_id = candidate.session_id
+                            AND predecessor.processed = 0
+                            AND (
+                                predecessor.received_at < candidate.received_at
+                                OR (
+                                    predecessor.received_at = candidate.received_at
+                                    AND predecessor.event_id < candidate.event_id
+                                )
+                            )
+                      )
+                    ORDER BY candidate.received_at, candidate.event_id
+                    LIMIT ?
+                    """,
+                    (attempt_limit, current_time, current_time, remaining),
+                ).fetchall()
+                if not rows:
+                    break
+                progressed = False
+                for row in rows:
+                    try:
+                        event_payload, payload_json = _decode_event_payload(
+                            row["payload_json"]
+                        )
+                    except ValueError:
+                        cursor = conn.execute(
+                            """
+                            UPDATE events
+                            SET processed = 1,
+                                processing_outcome = 'dead_letter',
+                                processed_at = ?,
+                                next_retry_at = NULL,
+                                last_error_code = 'event_processing_invalid',
+                                last_error_type = 'ValidationError',
+                                last_error_at = ?,
+                                effect_summary_json = NULL,
+                                claim_owner = NULL,
+                                claim_token = NULL,
+                                claim_leader_scope = NULL,
+                                claim_leader_token = NULL,
+                                claim_expires_at = NULL
+                            WHERE event_id = ? AND processed = 0
+                            """,
+                            (current_time, current_time, row["event_id"]),
+                        )
+                        if cursor.rowcount == 1:
+                            invalid_budget -= 1
+                            progressed = True
+                        continue
+                    token = str(uuid.uuid4())
+                    cursor = conn.execute(
+                        """
+                        UPDATE events
+                        SET claim_owner = ?,
+                            claim_token = ?,
+                            claim_leader_scope = ?,
+                            claim_leader_token = ?,
+                            claim_expires_at = ?,
+                            attempts = attempts + 1,
+                            processing_outcome = NULL,
+                            effect_summary_json = NULL
+                        WHERE event_id = ?
+                          AND processed = 0
+                          AND attempts < ?
+                          AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                          AND (
+                              claim_token IS NULL
+                              OR claim_expires_at IS NULL
+                              OR claim_expires_at <= ?
+                          )
+                        """,
+                        (
+                            claim_owner,
+                            token,
+                            lease_scope or None,
+                            lease_token or None,
+                            expires_at,
+                            row["event_id"],
+                            attempt_limit,
+                            current_time,
+                            current_time,
+                        ),
+                    )
+                    if cursor.rowcount != 1:  # pragma: no cover - exclusive transaction
+                        continue
+                    progressed = True
+                    claimed.append(
+                        {
+                            "event_id": row["event_id"],
+                            "sensor_id": row["sensor_id"],
+                            "event": event_payload,
+                            "payload_json": payload_json,
+                            "claim_owner": claim_owner,
+                            "claim_token": token,
+                            "claim_leader_scope": lease_scope,
+                            "claim_leader_token": lease_token,
+                            "claim_expires_at": expires_at,
+                            "attempts": int(row["attempts"] or 0) + 1,
+                        }
+                    )
+                if not progressed:
+                    break
+        return claimed
+
+    def renew_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        event_identity = _required_identity(event_id, "event_id")
+        event_claim_token = _uuid_token(token, "token")
+        claim_owner = _required_identity(owner, "owner")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            claim = conn.execute(
+                """
+                SELECT claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (event_identity, claim_owner, event_claim_token, current_time),
+            ).fetchone()
+            if claim is None or not _claim_leader_binding_matches(
+                claim, lease_scope, lease_token
+            ):
+                return False
+            if lease_scope:
+                leader = conn.execute(
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = ?
+                      AND owner = ?
+                      AND token = ?
+                      AND expires_at >= ?
+                    """,
+                    (lease_scope, claim_owner, lease_token, expires_at),
+                ).fetchone()
+                if leader is None:
+                    return False
+            cursor = conn.execute(
+                """
+                UPDATE events
+                SET claim_expires_at = ?
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    expires_at,
+                    event_identity,
+                    claim_owner,
+                    event_claim_token,
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def complete_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        effect_summary: Optional[Dict[str, Any]] = None,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        claim_owner = _required_identity(owner, "owner")
+        event_identity = _required_identity(event_id, "event_id")
+        event_claim_token = _uuid_token(token, "token")
+        current_time = _utc_timestamp(now)
+        validated_effect_summary = validate_event_effect_summary(effect_summary)
+        effect_summary_json = (
+            stable_json(validated_effect_summary)
+            if validated_effect_summary is not None
+            else None
+        )
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            claim = conn.execute(
+                """
+                SELECT claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (event_identity, claim_owner, event_claim_token, current_time),
+            ).fetchone()
+            if claim is None or not _claim_leader_binding_matches(
+                claim, lease_scope, lease_token
+            ):
+                return False
+            if lease_scope:
+                leader = conn.execute(
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = ?
+                      AND owner = ?
+                      AND token = ?
+                      AND expires_at > ?
+                    """,
+                    (lease_scope, claim_owner, lease_token, current_time),
+                ).fetchone()
+                if leader is None:
+                    return False
+            cursor = conn.execute(
+                """
+                UPDATE events
+                SET processed = 1,
+                    processing_outcome = 'succeeded',
+                    processed_at = ?,
+                    effect_summary_json = ?,
+                    next_retry_at = NULL,
+                    last_error_code = NULL,
+                    last_error_type = NULL,
+                    last_error_at = NULL,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    current_time,
+                    effect_summary_json,
+                    event_identity,
+                    claim_owner,
+                    event_claim_token,
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def fail_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> str:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        event_identity = _required_identity(event_id, "event_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        stable_error_code, stable_error_type = validate_event_failure_fields(
+            error_code,
+            error_type,
+        )
+        try:
+            attempt_limit = int(max_attempts)
+            retry_delay = float(retry_delay_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "max_attempts must be an integer and retry_delay_seconds must be numeric"
+            ) from exc
+        if attempt_limit <= 0:
+            raise ValueError("max_attempts must be positive")
+        if not math.isfinite(retry_delay) or retry_delay < 0:
+            raise ValueError("retry_delay_seconds must be non-negative")
+        current_time = _utc_timestamp(now)
+        parsed_now = _parse_dt(current_time)
+        if parsed_now is None:  # pragma: no cover - _utc_timestamp guarantees this
+            raise ValueError("now must be a valid timestamp")
+        next_retry_at = (parsed_now + timedelta(seconds=retry_delay)).isoformat()
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT attempts, claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (event_identity, claim_owner, claim_token, current_time),
+            ).fetchone()
+            if row is None or not _claim_leader_binding_matches(
+                row, lease_scope, lease_token
+            ):
+                return "stale_claim"
+            if lease_scope:
+                leader = conn.execute(
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = ?
+                      AND owner = ?
+                      AND token = ?
+                      AND expires_at > ?
+                    """,
+                    (lease_scope, claim_owner, lease_token, current_time),
+                ).fetchone()
+                if leader is None:
+                    return "stale_claim"
+            if bool(retryable) and int(row["attempts"] or 0) < attempt_limit:
+                conn.execute(
+                    """
+                    UPDATE events
+                    SET processing_outcome = 'retry_scheduled',
+                        next_retry_at = ?,
+                        last_error_code = ?,
+                        last_error_type = ?,
+                        last_error_at = ?,
+                        claim_owner = NULL,
+                        claim_token = NULL,
+                        claim_leader_scope = NULL,
+                        claim_leader_token = NULL,
+                        claim_expires_at = NULL
+                    WHERE event_id = ?
+                      AND processed = 0
+                      AND claim_owner = ?
+                      AND claim_token = ?
+                      AND claim_expires_at > ?
+                    """,
+                    (
+                        next_retry_at,
+                        stable_error_code,
+                        stable_error_type,
+                        current_time,
+                        event_identity,
+                        claim_owner,
+                        claim_token,
+                        current_time,
+                    ),
+                )
+                return "retry_scheduled"
+            conn.execute(
+                """
+                UPDATE events
+                SET processed = 1,
+                    processing_outcome = 'dead_letter',
+                    processed_at = ?,
+                    next_retry_at = NULL,
+                    last_error_code = ?,
+                    last_error_type = ?,
+                    last_error_at = ?,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    current_time,
+                    stable_error_code,
+                    stable_error_type,
+                    current_time,
+                    event_identity,
+                    claim_owner,
+                    claim_token,
+                    current_time,
+                ),
+            )
+            return "dead_letter"
+
+    def release_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        claim_owner = _required_identity(owner, "owner")
+        event_identity = _required_identity(event_id, "event_id")
+        event_claim_token = _uuid_token(token, "token")
+        current_time = _utc_timestamp(now)
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            claim = conn.execute(
+                """
+                SELECT claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (event_identity, claim_owner, event_claim_token, current_time),
+            ).fetchone()
+            if claim is None or not _claim_leader_binding_matches(
+                claim, lease_scope, lease_token
+            ):
+                return False
+            if lease_scope:
+                leader = conn.execute(
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = ?
+                      AND owner = ?
+                      AND token = ?
+                      AND expires_at > ?
+                    """,
+                    (lease_scope, claim_owner, lease_token, current_time),
+                ).fetchone()
+                if leader is None:
+                    return False
+            cursor = conn.execute(
+                """
+                UPDATE events
+                SET claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL,
+                    processing_outcome = NULL
+                WHERE event_id = ?
+                  AND processed = 0
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    event_identity,
+                    claim_owner,
+                    event_claim_token,
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def list_failed_events(self, limit: int = 100) -> List[Dict[str, Any]]:
+        try:
+            row_limit = max(0, int(limit))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, sensor_id, payload_json, attempts,
+                       last_error_code, last_error_type, last_error_at,
+                       processing_outcome, processed_at
+                FROM events
+                WHERE processed = 1
+                  AND processing_outcome = 'dead_letter'
+                ORDER BY processed_at DESC, event_id
+                LIMIT ?
+                """,
+                (row_limit,),
+            ).fetchall()
+        return [
+            {
+                "event_id": row["event_id"],
+                "sensor_id": row["sensor_id"],
+                "event": _safe_event_payload(row["payload_json"])[0],
+                "payload_json": _safe_event_payload(row["payload_json"])[1],
+                "attempts": int(row["attempts"] or 0),
+                "last_error_code": row["last_error_code"],
+                "last_error_type": row["last_error_type"],
+                "last_error_at": row["last_error_at"],
+                "processing_outcome": row["processing_outcome"],
+                "processed_at": row["processed_at"],
+            }
+            for row in rows
+        ]
+
+    def acquire_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        lease_scope = _required_identity(scope, "scope")
+        lease_owner = _required_identity(owner, "owner")
+        lease_token = _uuid_token(token, "token")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT owner, token, expires_at FROM worker_leases WHERE scope = ?",
+                (lease_scope,),
+            ).fetchone()
+            if row is not None and row["expires_at"] > current_time:
+                if row["owner"] != lease_owner or row["token"] != lease_token:
+                    return False
+                conn.execute(
+                    """
+                    UPDATE worker_leases
+                    SET expires_at = ?, updated_at = ?
+                    WHERE scope = ? AND owner = ? AND token = ?
+                    """,
+                    (
+                        expires_at,
+                        current_time,
+                        lease_scope,
+                        lease_owner,
+                        lease_token,
+                    ),
+                )
+                return True
+            conflicting_claim = conn.execute(
+                """
+                SELECT 1
+                FROM events
+                WHERE processed = 0
+                  AND claim_leader_scope = ?
+                  AND (
+                      claim_owner <> ?
+                      OR COALESCE(claim_leader_token, '') <> ?
+                  )
+                  AND claim_expires_at > ?
+                LIMIT 1
+                """,
+                (lease_scope, lease_owner, lease_token, current_time),
+            ).fetchone()
+            if conflicting_claim is not None:
+                return False
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO worker_leases(scope, owner, token, expires_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (lease_scope, lease_owner, lease_token, expires_at, current_time),
+                )
+                return True
+            conn.execute(
+                """
+                UPDATE worker_leases
+                SET owner = ?, token = ?, expires_at = ?, updated_at = ?
+                WHERE scope = ?
+                """,
+                (lease_owner, lease_token, expires_at, current_time, lease_scope),
+            )
+            return True
+
+    def renew_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE worker_leases
+                SET expires_at = ?, updated_at = ?
+                WHERE scope = ?
+                  AND owner = ?
+                  AND token = ?
+                  AND expires_at > ?
+                """,
+                (
+                    expires_at,
+                    current_time,
+                    _required_identity(scope, "scope"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def release_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM worker_leases
+                WHERE scope = ?
+                  AND owner = ?
+                  AND token = ?
+                  AND expires_at > ?
+                """,
+                (
+                    _required_identity(scope, "scope"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
     def fetch_events(self, limit: int = 1000, processed: Optional[bool] = None) -> List[Dict[str, Any]]:
         where = ""
         params: List[Any] = []
@@ -545,8 +1456,28 @@ class SQLiteStorage:
         ]
 
     def mark_event_processed(self, event_id: str) -> None:
+        now = utc_now()
         with self.connection() as conn:
-            conn.execute("UPDATE events SET processed = 1 WHERE event_id = ?", (event_id,))
+            conn.execute(
+                """
+                UPDATE events
+                SET processed = 1,
+                    processing_outcome = 'succeeded',
+                    processed_at = ?,
+                    next_retry_at = NULL,
+                    last_error_code = NULL,
+                    last_error_type = NULL,
+                    last_error_at = NULL,
+                    effect_summary_json = NULL,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE event_id = ?
+                """,
+                (now, event_id),
+            )
 
     def save_session(self, session_payload: Dict[str, Any]) -> None:
         now = utc_now()
@@ -2116,11 +3047,811 @@ class PostgresStorage:
             {
                 "event_id": row["event_id"],
                 "sensor_id": row["sensor_id"],
-                "event": _decode_json(row["payload_json"]),
-                "payload_json": stable_json(_decode_json(row["payload_json"])),
+                "event": _safe_event_payload(row["payload_json"])[0],
+                "payload_json": _safe_event_payload(row["payload_json"])[1],
             }
             for row in rows
         ]
+
+    def claim_events(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int = 5,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> List[Dict[str, Any]]:
+        claim_owner = _required_identity(owner, "owner")
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        try:
+            claim_limit = max(0, int(limit))
+            attempt_limit = int(max_attempts)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit and max_attempts must be integers") from exc
+        if attempt_limit <= 0:
+            raise ValueError("max_attempts must be positive")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        claimed: List[Dict[str, Any]] = []
+        with self.connection() as conn:
+            if lease_scope:
+                leader = self._execute(
+                    conn,
+                    """
+                    SELECT 1
+                    FROM worker_leases
+                    WHERE scope = %s
+                      AND owner = %s
+                      AND token = %s
+                      AND expires_at >= %s
+                    FOR SHARE
+                    """,
+                    (lease_scope, claim_owner, lease_token, expires_at),
+                ).fetchone()
+                if leader is None:
+                    return []
+            self._execute(
+                conn,
+                """
+                UPDATE events
+                SET processed = true,
+                    processing_outcome = 'dead_letter',
+                    processed_at = %s,
+                    next_retry_at = NULL,
+                    last_error_code = 'event_lease_attempts_exhausted',
+                    last_error_type = 'LeaseExpired',
+                    last_error_at = %s,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE processed = false
+                  AND attempts >= %s
+                  AND (next_retry_at IS NULL OR next_retry_at <= %s)
+                  AND (
+                      claim_token IS NULL
+                      OR claim_expires_at IS NULL
+                      OR claim_expires_at <= %s
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM events AS predecessor
+                      WHERE predecessor.session_id = events.session_id
+                        AND predecessor.processed = false
+                        AND (
+                            predecessor.received_at < events.received_at
+                            OR (
+                                predecessor.received_at = events.received_at
+                                AND predecessor.event_id < events.event_id
+                            )
+                        )
+                  )
+                """,
+                (
+                    current_time,
+                    current_time,
+                    attempt_limit,
+                    current_time,
+                    current_time,
+                ),
+            )
+            if claim_limit == 0:
+                return []
+            invalid_budget = 1_000
+            while len(claimed) < claim_limit and invalid_budget > 0:
+                remaining = claim_limit - len(claimed)
+                cursor = self._execute(
+                    conn,
+                    """
+                    SELECT event_id, sensor_id, payload_json, attempts
+                    FROM events AS candidate
+                    WHERE candidate.processed = false
+                      AND candidate.attempts < %s
+                      AND (candidate.next_retry_at IS NULL OR candidate.next_retry_at <= %s)
+                      AND (
+                          candidate.claim_token IS NULL
+                          OR candidate.claim_expires_at IS NULL
+                          OR candidate.claim_expires_at <= %s
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM events AS predecessor
+                          WHERE predecessor.session_id = candidate.session_id
+                            AND predecessor.processed = false
+                            AND (
+                                predecessor.received_at < candidate.received_at
+                                OR (
+                                    predecessor.received_at = candidate.received_at
+                                    AND predecessor.event_id < candidate.event_id
+                                )
+                            )
+                    )
+                    ORDER BY candidate.received_at, candidate.event_id
+                    LIMIT %s
+                    FOR UPDATE OF candidate SKIP LOCKED
+                    """,
+                    (attempt_limit, current_time, current_time, remaining),
+                )
+                rows = cursor.fetchall()
+                if not rows:
+                    break
+                progressed = False
+                for row in rows:
+                    try:
+                        event_payload, payload_json = _decode_event_payload(
+                            row["payload_json"]
+                        )
+                    except ValueError:
+                        invalid = self._execute(
+                            conn,
+                            """
+                            UPDATE events
+                            SET processed = true,
+                                processing_outcome = 'dead_letter',
+                                processed_at = %s,
+                                next_retry_at = NULL,
+                                last_error_code = 'event_processing_invalid',
+                                last_error_type = 'ValidationError',
+                                last_error_at = %s,
+                                effect_summary_json = NULL,
+                                claim_owner = NULL,
+                                claim_token = NULL,
+                                claim_leader_scope = NULL,
+                                claim_leader_token = NULL,
+                                claim_expires_at = NULL
+                            WHERE event_id = %s AND processed = false
+                            RETURNING event_id
+                            """,
+                            (current_time, current_time, row["event_id"]),
+                        ).fetchone()
+                        if invalid is not None:
+                            invalid_budget -= 1
+                            progressed = True
+                        continue
+                    token = str(uuid.uuid4())
+                    updated = self._execute(
+                        conn,
+                        """
+                        UPDATE events
+                        SET claim_owner = %s,
+                            claim_token = %s,
+                            claim_leader_scope = %s,
+                            claim_leader_token = %s,
+                            claim_expires_at = %s,
+                            attempts = attempts + 1,
+                            processing_outcome = NULL,
+                            effect_summary_json = NULL
+                        WHERE event_id = %s
+                        RETURNING attempts
+                        """,
+                        (
+                            claim_owner,
+                            token,
+                            lease_scope or None,
+                            lease_token or None,
+                            expires_at,
+                            row["event_id"],
+                        ),
+                    ).fetchone()
+                    if updated is None:  # pragma: no cover - selected row is locked
+                        continue
+                    progressed = True
+                    claimed.append(
+                        {
+                            "event_id": row["event_id"],
+                            "sensor_id": row["sensor_id"],
+                            "event": event_payload,
+                            "payload_json": payload_json,
+                            "claim_owner": claim_owner,
+                            "claim_token": token,
+                            "claim_leader_scope": lease_scope,
+                            "claim_leader_token": lease_token,
+                            "claim_expires_at": expires_at,
+                            "attempts": int(updated["attempts"]),
+                        }
+                    )
+                if not progressed:
+                    break
+        return claimed
+
+    def renew_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        event_identity = _required_identity(event_id, "event_id")
+        event_claim_token = _uuid_token(token, "token")
+        claim_owner = _required_identity(owner, "owner")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        with self.connection() as conn:
+            claim = self._execute(
+                conn,
+                """
+                SELECT claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = %s
+                  AND processed = false
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                FOR UPDATE
+                """,
+                (event_identity, claim_owner, event_claim_token, current_time),
+            ).fetchone()
+            if claim is None or not _claim_leader_binding_matches(
+                claim, lease_scope, lease_token
+            ):
+                return False
+            if lease_scope:
+                leader = self._execute(
+                    conn,
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = %s
+                      AND owner = %s
+                      AND token = %s
+                      AND expires_at >= %s
+                    FOR SHARE
+                    """,
+                    (lease_scope, claim_owner, lease_token, expires_at),
+                ).fetchone()
+                if leader is None:
+                    return False
+            row = self._execute(
+                conn,
+                """
+                UPDATE events
+                SET claim_expires_at = %s
+                WHERE event_id = %s
+                  AND processed = false
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                RETURNING event_id
+                """,
+                (
+                    expires_at,
+                    event_identity,
+                    claim_owner,
+                    event_claim_token,
+                    current_time,
+                ),
+            ).fetchone()
+        return row is not None
+
+    def complete_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        effect_summary: Optional[Dict[str, Any]] = None,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        claim_owner = _required_identity(owner, "owner")
+        event_identity = _required_identity(event_id, "event_id")
+        event_claim_token = _uuid_token(token, "token")
+        current_time = _utc_timestamp(now)
+        validated_effect_summary = validate_event_effect_summary(effect_summary)
+        effect_summary_json = (
+            stable_json(validated_effect_summary)
+            if validated_effect_summary is not None
+            else None
+        )
+        with self.connection() as conn:
+            claim = self._execute(
+                conn,
+                """
+                SELECT claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = %s
+                  AND processed = false
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                FOR UPDATE
+                """,
+                (event_identity, claim_owner, event_claim_token, current_time),
+            ).fetchone()
+            if claim is None or not _claim_leader_binding_matches(
+                claim, lease_scope, lease_token
+            ):
+                return False
+            if lease_scope:
+                leader = self._execute(
+                    conn,
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = %s
+                      AND owner = %s
+                      AND token = %s
+                      AND expires_at > %s
+                    FOR SHARE
+                    """,
+                    (lease_scope, claim_owner, lease_token, current_time),
+                ).fetchone()
+                if leader is None:
+                    return False
+            row = self._execute(
+                conn,
+                """
+                UPDATE events
+                SET processed = true,
+                    processing_outcome = 'succeeded',
+                    processed_at = %s,
+                    effect_summary_json = %s::jsonb,
+                    next_retry_at = NULL,
+                    last_error_code = NULL,
+                    last_error_type = NULL,
+                    last_error_at = NULL,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE event_id = %s
+                  AND processed = false
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                RETURNING event_id
+                """,
+                (
+                    current_time,
+                    effect_summary_json,
+                    event_identity,
+                    claim_owner,
+                    event_claim_token,
+                    current_time,
+                ),
+            ).fetchone()
+        return row is not None
+
+    def fail_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> str:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        event_identity = _required_identity(event_id, "event_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        stable_error_code, stable_error_type = validate_event_failure_fields(
+            error_code,
+            error_type,
+        )
+        try:
+            attempt_limit = int(max_attempts)
+            retry_delay = float(retry_delay_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "max_attempts must be an integer and retry_delay_seconds must be numeric"
+            ) from exc
+        if attempt_limit <= 0:
+            raise ValueError("max_attempts must be positive")
+        if not math.isfinite(retry_delay) or retry_delay < 0:
+            raise ValueError("retry_delay_seconds must be non-negative")
+        current_time = _utc_timestamp(now)
+        parsed_now = _parse_dt(current_time)
+        if parsed_now is None:  # pragma: no cover - _utc_timestamp guarantees this
+            raise ValueError("now must be a valid timestamp")
+        next_retry_at = (parsed_now + timedelta(seconds=retry_delay)).isoformat()
+        with self.connection() as conn:
+            row = self._execute(
+                conn,
+                """
+                SELECT attempts, claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = %s
+                  AND processed = false
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                FOR UPDATE
+                """,
+                (event_identity, claim_owner, claim_token, current_time),
+            ).fetchone()
+            if row is None or not _claim_leader_binding_matches(
+                row, lease_scope, lease_token
+            ):
+                return "stale_claim"
+            if lease_scope:
+                leader = self._execute(
+                    conn,
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = %s
+                      AND owner = %s
+                      AND token = %s
+                      AND expires_at > %s
+                    FOR SHARE
+                    """,
+                    (lease_scope, claim_owner, lease_token, current_time),
+                ).fetchone()
+                if leader is None:
+                    return "stale_claim"
+            if bool(retryable) and int(row["attempts"] or 0) < attempt_limit:
+                self._execute(
+                    conn,
+                    """
+                    UPDATE events
+                    SET processing_outcome = 'retry_scheduled',
+                        next_retry_at = %s,
+                        last_error_code = %s,
+                        last_error_type = %s,
+                        last_error_at = %s,
+                        claim_owner = NULL,
+                        claim_token = NULL,
+                        claim_leader_scope = NULL,
+                        claim_leader_token = NULL,
+                        claim_expires_at = NULL
+                    WHERE event_id = %s
+                      AND claim_owner = %s
+                      AND claim_token = %s
+                    RETURNING event_id
+                    """,
+                    (
+                        next_retry_at,
+                        stable_error_code,
+                        stable_error_type,
+                        current_time,
+                        event_identity,
+                        claim_owner,
+                        claim_token,
+                    ),
+                ).fetchone()
+                return "retry_scheduled"
+            self._execute(
+                conn,
+                """
+                UPDATE events
+                SET processed = true,
+                    processing_outcome = 'dead_letter',
+                    processed_at = %s,
+                    next_retry_at = NULL,
+                    last_error_code = %s,
+                    last_error_type = %s,
+                    last_error_at = %s,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE event_id = %s
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                RETURNING event_id
+                """,
+                (
+                    current_time,
+                    stable_error_code,
+                    stable_error_type,
+                    current_time,
+                    event_identity,
+                    claim_owner,
+                    claim_token,
+                ),
+            ).fetchone()
+            return "dead_letter"
+
+    def release_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        lease_scope = _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        lease_token = _uuid_token(leader_token, "leader_token") if leader_token else ""
+        claim_owner = _required_identity(owner, "owner")
+        event_identity = _required_identity(event_id, "event_id")
+        event_claim_token = _uuid_token(token, "token")
+        current_time = _utc_timestamp(now)
+        with self.connection() as conn:
+            claim = self._execute(
+                conn,
+                """
+                SELECT claim_leader_scope, claim_leader_token
+                FROM events
+                WHERE event_id = %s
+                  AND processed = false
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                FOR UPDATE
+                """,
+                (event_identity, claim_owner, event_claim_token, current_time),
+            ).fetchone()
+            if claim is None or not _claim_leader_binding_matches(
+                claim, lease_scope, lease_token
+            ):
+                return False
+            if lease_scope:
+                leader = self._execute(
+                    conn,
+                    """
+                    SELECT 1 FROM worker_leases
+                    WHERE scope = %s
+                      AND owner = %s
+                      AND token = %s
+                      AND expires_at > %s
+                    FOR SHARE
+                    """,
+                    (lease_scope, claim_owner, lease_token, current_time),
+                ).fetchone()
+                if leader is None:
+                    return False
+            row = self._execute(
+                conn,
+                """
+                UPDATE events
+                SET claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL,
+                    processing_outcome = NULL
+                WHERE event_id = %s
+                  AND processed = false
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                RETURNING event_id
+                """,
+                (
+                    event_identity,
+                    claim_owner,
+                    event_claim_token,
+                    current_time,
+                ),
+            ).fetchone()
+        return row is not None
+
+    def list_failed_events(self, limit: int = 100) -> List[Dict[str, Any]]:
+        try:
+            row_limit = max(0, int(limit))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+        with self.connection() as conn:
+            rows = self._execute(
+                conn,
+                """
+                SELECT event_id, sensor_id, payload_json, attempts,
+                       last_error_code, last_error_type, last_error_at,
+                       processing_outcome, processed_at
+                FROM events
+                WHERE processed = true
+                  AND processing_outcome = 'dead_letter'
+                ORDER BY processed_at DESC, event_id
+                LIMIT %s
+                """,
+                (row_limit,),
+            ).fetchall()
+        return [
+            {
+                "event_id": row["event_id"],
+                "sensor_id": row["sensor_id"],
+                "event": _safe_event_payload(row["payload_json"])[0],
+                "payload_json": _safe_event_payload(row["payload_json"])[1],
+                "attempts": int(row["attempts"] or 0),
+                "last_error_code": row["last_error_code"],
+                "last_error_type": row["last_error_type"],
+                "last_error_at": _optional_utc_timestamp(row["last_error_at"]),
+                "processing_outcome": row["processing_outcome"],
+                "processed_at": _optional_utc_timestamp(row["processed_at"]),
+            }
+            for row in rows
+        ]
+
+    def acquire_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        lease_scope = _required_identity(scope, "scope")
+        lease_owner = _required_identity(owner, "owner")
+        lease_token = _uuid_token(token, "token")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        with self.connection() as conn:
+            row = self._execute(
+                conn,
+                """
+                INSERT INTO worker_leases(scope, owner, token, expires_at, updated_at)
+                SELECT %s, %s, %s, %s, %s
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM worker_leases AS existing
+                    WHERE existing.scope = %s
+                      AND existing.owner = %s
+                      AND existing.token = %s
+                      AND existing.expires_at > %s
+                )
+                   OR NOT EXISTS (
+                       SELECT 1
+                       FROM events
+                       WHERE processed = false
+                         AND claim_leader_scope = %s
+                         AND (
+                             claim_owner <> %s
+                             OR COALESCE(claim_leader_token, '') <> %s
+                         )
+                         AND claim_expires_at > %s
+                   )
+                ON CONFLICT(scope) DO UPDATE SET
+                    owner = excluded.owner,
+                    token = excluded.token,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                WHERE (
+                    worker_leases.expires_at > %s
+                    AND worker_leases.owner = excluded.owner
+                    AND worker_leases.token = excluded.token
+                )
+                   OR (
+                       worker_leases.expires_at <= %s
+                       AND NOT EXISTS (
+                           SELECT 1
+                           FROM events
+                           WHERE processed = false
+                             AND claim_leader_scope = %s
+                             AND (
+                                 claim_owner <> %s
+                                 OR COALESCE(claim_leader_token, '') <> %s
+                             )
+                             AND claim_expires_at > %s
+                       )
+                   )
+                RETURNING scope
+                """,
+                (
+                    lease_scope,
+                    lease_owner,
+                    lease_token,
+                    expires_at,
+                    current_time,
+                    lease_scope,
+                    lease_owner,
+                    lease_token,
+                    current_time,
+                    lease_scope,
+                    lease_owner,
+                    lease_token,
+                    current_time,
+                    current_time,
+                    current_time,
+                    lease_scope,
+                    lease_owner,
+                    lease_token,
+                    current_time,
+                ),
+            ).fetchone()
+        return row is not None
+
+    def renew_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        with self.connection() as conn:
+            row = self._execute(
+                conn,
+                """
+                UPDATE worker_leases
+                SET expires_at = %s, updated_at = %s
+                WHERE scope = %s
+                  AND owner = %s
+                  AND token = %s
+                  AND expires_at > %s
+                RETURNING scope
+                """,
+                (
+                    expires_at,
+                    current_time,
+                    _required_identity(scope, "scope"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            ).fetchone()
+        return row is not None
+
+    def release_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
+        with self.connection() as conn:
+            row = self._execute(
+                conn,
+                """
+                DELETE FROM worker_leases
+                WHERE scope = %s
+                  AND owner = %s
+                  AND token = %s
+                  AND expires_at > %s
+                RETURNING scope
+                """,
+                (
+                    _required_identity(scope, "scope"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            ).fetchone()
+        return row is not None
 
     def fetch_events(self, limit: int = 1000, processed: Optional[bool] = None) -> List[Dict[str, Any]]:
         where = ""
@@ -2153,8 +3884,29 @@ class PostgresStorage:
         ]
 
     def mark_event_processed(self, event_id: str) -> None:
+        now = utc_now()
         with self.connection() as conn:
-            self._execute(conn, "UPDATE events SET processed = true WHERE event_id = %s", (event_id,))
+            self._execute(
+                conn,
+                """
+                UPDATE events
+                SET processed = true,
+                    processing_outcome = 'succeeded',
+                    processed_at = %s,
+                    next_retry_at = NULL,
+                    last_error_code = NULL,
+                    last_error_type = NULL,
+                    last_error_at = NULL,
+                    effect_summary_json = NULL,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_leader_scope = NULL,
+                    claim_leader_token = NULL,
+                    claim_expires_at = NULL
+                WHERE event_id = %s
+                """,
+                (now, event_id),
+            )
 
     def save_session(self, session_payload: Dict[str, Any]) -> None:
         now = utc_now()

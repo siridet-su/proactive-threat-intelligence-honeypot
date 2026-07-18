@@ -17,13 +17,18 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import math
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from production.storage.backend import StorageError
+from production.storage.contract import (
+    validate_event_effect_summary,
+    validate_event_failure_fields,
+)
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     is_external_source_ip,
@@ -47,7 +52,7 @@ except ImportError:  # pragma: no cover - constants are exercised via fakes.
 
 
 MONGODB_DRIVER_AVAILABLE = MongoClient is not None
-MONGODB_SCHEMA_VERSION = 1
+MONGODB_SCHEMA_VERSION = 2
 
 
 def mongodb_dependency_diagnostic() -> Dict[str, Any]:
@@ -84,6 +89,69 @@ def _is_future(value: Any) -> bool:
 
 def _retry_at(seconds: float) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=max(seconds, 0))).isoformat()
+
+
+def _utc_timestamp(value: Any = None) -> str:
+    if value is None:
+        parsed = datetime.now(timezone.utc)
+    elif isinstance(value, datetime):
+        parsed = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    else:
+        parsed = _parse_dt(value)
+        if parsed is None:
+            raise ValueError("now must be an ISO-8601 timestamp or datetime")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _future_timestamp(now: str, seconds: float, *, field: str) -> str:
+    try:
+        duration = float(seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a positive number") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError(f"{field} must be a positive number")
+    parsed = _parse_dt(now)
+    if parsed is None:  # pragma: no cover - _utc_timestamp guarantees this
+        raise ValueError("now must be a valid timestamp")
+    return (parsed + timedelta(seconds=duration)).isoformat()
+
+
+def _retry_timestamp(now: str, seconds: float) -> str:
+    try:
+        duration = float(seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("retry_delay_seconds must be a non-negative number") from exc
+    if not math.isfinite(duration) or duration < 0:
+        raise ValueError("retry_delay_seconds must be a non-negative number")
+    parsed = _parse_dt(now)
+    if parsed is None:  # pragma: no cover - _utc_timestamp guarantees this
+        raise ValueError("now must be a valid timestamp")
+    return (parsed + timedelta(seconds=duration)).isoformat()
+
+
+def _required_identity(value: str, field: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or len(normalized) > 256:
+        raise ValueError(f"{field} must be non-empty and at most 256 characters")
+    return normalized
+
+
+def _uuid_token(value: str, field: str) -> str:
+    normalized = _required_identity(value, field)
+    try:
+        return str(UUID(normalized))
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"{field} must be a UUID fencing token") from exc
+
+
+def _positive_attempt_limit(value: int) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_attempts must be a positive integer") from exc
+    if normalized <= 0:
+        raise ValueError("max_attempts must be positive")
+    return normalized
 
 
 PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
@@ -285,6 +353,44 @@ INDEX_DEFINITIONS: Dict[str, Sequence[IndexDefinition]] = {
         IndexDefinition((("event_id", ASCENDING),), "uq_events_event_id", True),
         IndexDefinition((("processed", ASCENDING), ("received_at", ASCENDING)), "idx_events_processed_received"),
         IndexDefinition((("session_id", ASCENDING),), "idx_events_session"),
+        IndexDefinition(
+            (
+                ("processed", ASCENDING),
+                ("next_retry_at", ASCENDING),
+                ("claim_expires_at", ASCENDING),
+                ("attempts", ASCENDING),
+                ("received_at", ASCENDING),
+                ("event_id", ASCENDING),
+            ),
+            "idx_events_claimable",
+        ),
+        IndexDefinition(
+            (("processed", ASCENDING), ("next_retry_at", ASCENDING), ("received_at", ASCENDING)),
+            "idx_events_retry",
+        ),
+        IndexDefinition(
+            (("processing_outcome", ASCENDING), ("processed_at", DESCENDING), ("event_id", ASCENDING)),
+            "idx_events_failed",
+        ),
+        IndexDefinition(
+            (
+                ("session_id", ASCENDING),
+                ("processed", ASCENDING),
+                ("received_at", ASCENDING),
+                ("event_id", ASCENDING),
+            ),
+            "idx_events_session_queue",
+        ),
+        IndexDefinition(
+            (
+                ("processed", ASCENDING),
+                ("claim_leader_scope", ASCENDING),
+                ("claim_expires_at", ASCENDING),
+                ("claim_leader_token", ASCENDING),
+                ("claim_owner", ASCENDING),
+            ),
+            "idx_events_leader_fence",
+        ),
     ),
     "sessions": (
         IndexDefinition((("session_id", ASCENDING),), "uq_sessions_session_id", True),
@@ -411,6 +517,25 @@ INDEX_DEFINITIONS: Dict[str, Sequence[IndexDefinition]] = {
 }
 
 
+STORAGE_LEASE_INDEX_DEFINITIONS: Sequence[IndexDefinition] = (
+    IndexDefinition((("scope", ASCENDING),), "uq_storage_leases_scope", True),
+    IndexDefinition((("expires_at", ASCENDING),), "idx_storage_leases_expiry"),
+)
+
+MONGODB_FENCED_TRANSACTION_ATTEMPTS = 3
+MONGODB_EVENT_SCAN_LIMIT = 1000
+
+
+def _has_transaction_error_label(exc: BaseException, label: str) -> bool:
+    checker = getattr(exc, "has_error_label", None)
+    if not callable(checker):
+        return False
+    try:
+        return bool(checker(label))
+    except Exception:
+        return False
+
+
 def _domain_id(table: str, document: Mapping[str, Any]) -> str:
     fields = TABLE_ID_FIELDS[table]
     values = [str(document.get(field) or "") for field in fields]
@@ -444,6 +569,17 @@ def document_from_sqlite_row(table: str, row: Mapping[str, Any]) -> Dict[str, An
         priority = _normalize_priority(str(document.get("priority") or "normal"))
         document["priority"] = priority
         document["priority_rank"] = PRIORITY_RANK[priority]
+    if table == "events":
+        if "effect_summary_json" in document:
+            raw_summary = document.pop("effect_summary_json")
+            document["effect_summary"] = (
+                None if raw_summary in (None, "") else _decode_json_field(raw_summary, {})
+            )
+        # SQLite exposes booleans as integers.  Normalize them here because
+        # MongoDB distinguishes BSON booleans from numbers in query matching.
+        document["processed"] = bool(document.get("processed", False))
+        if "attempts" in document:
+            document["attempts"] = int(document.get("attempts") or 0)
     document["schema_version"] = MONGODB_SCHEMA_VERSION
     document["_id"] = _domain_id(table, document)
     return to_bson_safe(document)
@@ -461,6 +597,13 @@ def row_from_document(table: str, document: Mapping[str, Any]) -> Dict[str, Any]
     for json_column, native_field in JSON_FIELDS.get(table, {}).items():
         native = item.pop(native_field, [] if native_field in {"confirmed_tactics", "match_reasons"} else {})
         item[json_column] = stable_json(native)
+    if table == "events":
+        native_summary = item.pop("effect_summary", None)
+        item["effect_summary_json"] = (
+            None if native_summary is None else stable_json(native_summary)
+        )
+        if "processed" in item:
+            item["processed"] = int(bool(item["processed"]))
     return item
 
 
@@ -521,6 +664,61 @@ class MongoStorage:
     def connection(self) -> Iterator[Any]:
         yield self.database
 
+    def _run_fenced_transaction(self, operation: Any) -> Any:
+        """Run one leader-fenced operation in a bounded Mongo transaction."""
+
+        start_session = getattr(self.client, "start_session", None)
+        if not callable(start_session):
+            raise StorageError(
+                "MongoDB leader fencing requires transaction-capable sessions"
+            )
+
+        last_error: Optional[BaseException] = None
+        for transaction_attempt in range(MONGODB_FENCED_TRANSACTION_ATTEMPTS):
+            try:
+                with start_session() as session:
+                    session.start_transaction()
+                    try:
+                        result = operation(session)
+                    except Exception:
+                        if bool(getattr(session, "in_transaction", False)):
+                            session.abort_transaction()
+                        raise
+
+                    for commit_attempt in range(MONGODB_FENCED_TRANSACTION_ATTEMPTS):
+                        try:
+                            session.commit_transaction()
+                            return result
+                        except Exception as exc:
+                            last_error = exc
+                            if (
+                                _has_transaction_error_label(
+                                    exc,
+                                    "UnknownTransactionCommitResult",
+                                )
+                                and commit_attempt
+                                < MONGODB_FENCED_TRANSACTION_ATTEMPTS - 1
+                            ):
+                                continue
+                            raise
+            except Exception as exc:
+                last_error = exc
+                if (
+                    _has_transaction_error_label(exc, "TransientTransactionError")
+                    and transaction_attempt < MONGODB_FENCED_TRANSACTION_ATTEMPTS - 1
+                ):
+                    continue
+                raise StorageError(
+                    f"MongoDB fenced transaction failed: {_safe_error(exc)}"
+                ) from exc
+
+        # The loop always returns or raises; this keeps the failure mode stable
+        # if a nonstandard driver violates that expectation.
+        raise StorageError(
+            "MongoDB fenced transaction failed: "
+            + (_safe_error(last_error) if last_error else "operation_failed")
+        )
+
     def _collection(self, table: str) -> Any:
         if table not in ALLOWED_TABLES:
             raise ValueError(f"unsupported table: {table}")
@@ -536,6 +734,21 @@ class MongoStorage:
                         name=definition.name,
                         unique=definition.unique,
                     )
+            self.database["_migration_checkpoints"].create_index(
+                [("migration_id", ASCENDING), ("table", ASCENDING)],
+                name="uq_migration_checkpoint",
+                unique=True,
+            )
+            lease_collection = self.database["_storage_leases"]
+            for definition in STORAGE_LEASE_INDEX_DEFINITIONS:
+                lease_collection.create_index(
+                    list(definition.keys),
+                    name=definition.name,
+                    unique=definition.unique,
+                )
+            # Publish the schema version only after every required index has
+            # been created successfully.  A partial initialization must never
+            # advertise itself as a usable v2 backend.
             self.database["_storage_metadata"].replace_one(
                 {"_id": "schema"},
                 {
@@ -545,11 +758,6 @@ class MongoStorage:
                     "updated_at": utc_now(),
                 },
                 upsert=True,
-            )
-            self.database["_migration_checkpoints"].create_index(
-                [("migration_id", ASCENDING), ("table", ASCENDING)],
-                name="uq_migration_checkpoint",
-                unique=True,
             )
         except Exception as exc:
             raise StorageError(f"MongoDB initialization failed: {_safe_error(exc)}") from exc
@@ -613,11 +821,12 @@ class MongoStorage:
             "payload": dict(event),
             "received_at": utc_now(),
             "processed": False,
+            "attempts": 0,
         }
         return event_key, self._insert_once("events", document)
 
     def fetch_unprocessed_events(self, limit: int) -> List[Dict[str, Any]]:
-        cursor = self._collection("events").find({"processed": False}).sort(
+        cursor = self._collection("events").find({"processed": {"$in": [False, 0]}}).sort(
             [("received_at", ASCENDING), ("event_id", ASCENDING)]
         ).limit(max(int(limit), 0))
         output = []
@@ -634,10 +843,1157 @@ class MongoStorage:
             )
         return output
 
+    @staticmethod
+    def _event_due_and_unleased_query(now: str) -> Dict[str, Any]:
+        return {
+            "$and": [
+                {
+                    "$or": [
+                        {"next_retry_at": None},
+                        {"next_retry_at": {"$exists": False}},
+                        {"next_retry_at": {"$lte": now}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"claim_expires_at": None},
+                        {"claim_expires_at": {"$exists": False}},
+                        {"claim_expires_at": {"$lte": now}},
+                    ]
+                },
+            ]
+        }
+
+    def _leader_allows_event_claim(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        event_claim_expires_at: str,
+        *,
+        session: Any = None,
+        touch: bool = False,
+    ) -> bool:
+        query = {
+            "_id": scope,
+            "scope": scope,
+            "owner": owner,
+            "token": token,
+            "expires_at": {"$gte": event_claim_expires_at},
+        }
+        collection = self.database["_storage_leases"]
+        if touch:
+            return collection.find_one_and_update(
+                query,
+                {"$inc": {"fence_revision": 1}},
+                return_document=ReturnDocument.AFTER,
+                session=session,
+            ) is not None
+        return collection.find_one(query, session=session) is not None
+
+    def _leader_is_active(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        now: str,
+        *,
+        session: Any = None,
+        touch: bool = False,
+    ) -> bool:
+        query = {
+            "_id": scope,
+            "scope": scope,
+            "owner": owner,
+            "token": token,
+            "expires_at": {"$gt": now},
+        }
+        collection = self.database["_storage_leases"]
+        if touch:
+            return collection.find_one_and_update(
+                query,
+                {"$inc": {"fence_revision": 1}},
+                return_document=ReturnDocument.AFTER,
+                session=session,
+            ) is not None
+        return collection.find_one(query, session=session) is not None
+
+    def _event_claim_leader_guard(
+        self,
+        event_id: str,
+        owner: str,
+        claim_token: str,
+        now: str,
+        leader_scope: str,
+        leader_token: str,
+        *,
+        required_leader_expiry: str = "",
+        session: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the CAS binding filter for an authorized active claim.
+
+        Schema-v1 and explicitly ungated claims have no stored leader binding
+        and remain compatible with ungated lifecycle calls.  Once a claim is
+        bound, however, omitting or changing its leader context fails closed.
+        """
+
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        requested_scope = (
+            _required_identity(leader_scope, "leader_scope") if leader_scope else ""
+        )
+        requested_token = (
+            _uuid_token(leader_token, "leader_token") if leader_token else ""
+        )
+        claim = self._collection("events").find_one(
+            {
+                "event_id": event_id,
+                "processed": {"$in": [False, 0]},
+                "claim_owner": owner,
+                "claim_token": claim_token,
+                "claim_expires_at": {"$gt": now},
+            },
+            session=session,
+        )
+        if claim is None:
+            return None
+
+        stored_scope = str(claim.get("claim_leader_scope") or "").strip()
+        stored_token = str(claim.get("claim_leader_token") or "").strip()
+        if bool(stored_scope) != bool(stored_token):
+            return None
+        if stored_scope:
+            if requested_scope != stored_scope or requested_token != stored_token:
+                return None
+            effective_scope = stored_scope
+            effective_token = stored_token
+            binding_filter: Dict[str, Any] = {
+                "claim_leader_scope": stored_scope,
+                "claim_leader_token": stored_token,
+            }
+        else:
+            if requested_scope or requested_token:
+                return None
+            effective_scope = requested_scope
+            effective_token = requested_token
+            binding_filter = {
+                "$and": [
+                    {
+                        "$or": [
+                            {"claim_leader_scope": {"$exists": False}},
+                            {"claim_leader_scope": None},
+                            {"claim_leader_scope": ""},
+                        ]
+                    },
+                    {
+                        "$or": [
+                            {"claim_leader_token": {"$exists": False}},
+                            {"claim_leader_token": None},
+                            {"claim_leader_token": ""},
+                        ]
+                    },
+                ]
+            }
+
+        if effective_scope:
+            leader_ok = (
+                self._leader_allows_event_claim(
+                    effective_scope,
+                    owner,
+                    effective_token,
+                    required_leader_expiry,
+                    session=session,
+                    touch=session is not None,
+                )
+                if required_leader_expiry
+                else self._leader_is_active(
+                    effective_scope,
+                    owner,
+                    effective_token,
+                    now,
+                    session=session,
+                    touch=session is not None,
+                )
+            )
+            if not leader_ok:
+                return None
+        return binding_filter
+
+    def _claim_has_stored_leader_binding(
+        self,
+        event_id: str,
+        owner: str,
+        claim_token: str,
+    ) -> bool:
+        claim = self._collection("events").find_one(
+            {
+                "event_id": event_id,
+                "processed": {"$in": [False, 0]},
+                "claim_owner": owner,
+                "claim_token": claim_token,
+            }
+        )
+        return bool(
+            claim
+            and (
+                claim.get("claim_leader_scope")
+                or claim.get("claim_leader_token")
+            )
+        )
+
+    def claim_events(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int = 5,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> List[Dict[str, Any]]:
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        if leader_scope:
+            return self._run_fenced_transaction(
+                lambda session: self._claim_events_once(
+                    owner,
+                    limit,
+                    lease_seconds,
+                    max_attempts,
+                    now=now,
+                    leader_scope=leader_scope,
+                    leader_token=leader_token,
+                    session=session,
+                )
+            )
+        return self._claim_events_once(
+            owner,
+            limit,
+            lease_seconds,
+            max_attempts,
+            now=now,
+        )
+
+    def _claim_events_once(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int = 5,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+        session: Any = None,
+    ) -> List[Dict[str, Any]]:
+        owner = _required_identity(owner, "owner")
+        try:
+            requested = max(int(limit), 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+        attempt_limit = _positive_attempt_limit(max_attempts)
+        claimed_at = _utc_timestamp(now)
+        claim_expires_at = _future_timestamp(
+            claimed_at,
+            lease_seconds,
+            field="lease_seconds",
+        )
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        if leader_scope:
+            leader_scope = _required_identity(leader_scope, "leader_scope")
+            leader_token = _uuid_token(leader_token, "leader_token")
+
+        collection = self._collection("events")
+        due_and_unleased = self._event_due_and_unleased_query(claimed_at)
+        base_query: Dict[str, Any] = {
+            "processed": {"$in": [False, 0]},
+            **due_and_unleased,
+        }
+
+        if leader_scope and not self._leader_allows_event_claim(
+            leader_scope,
+            owner,
+            leader_token,
+            claim_expires_at,
+            session=session,
+            touch=session is not None,
+        ):
+            return []
+
+        def is_session_head(candidate: Mapping[str, Any]) -> bool:
+            head = collection.find_one(
+                {
+                    "session_id": candidate.get("session_id"),
+                    "processed": {"$in": [False, 0]},
+                },
+                sort=[("received_at", ASCENDING), ("event_id", ASCENDING)],
+                session=session,
+            )
+            return bool(head and head.get("_id") == candidate.get("_id"))
+
+        # Rows that have exhausted their attempt budget cannot be claimed
+        # again.  Transition them atomically so operators can see the terminal
+        # failure even when they originated as schema-v1 documents.
+        maintenance_count = 0
+        while maintenance_count < MONGODB_EVENT_SCAN_LIMIT:
+            progressed = False
+            exhausted_cursor = collection.find(
+                {**base_query, "attempts": {"$gte": attempt_limit}},
+                session=session,
+            ).sort([("received_at", ASCENDING), ("event_id", ASCENDING)]).limit(
+                MONGODB_EVENT_SCAN_LIMIT - maintenance_count
+            )
+            for candidate in exhausted_cursor:
+                if leader_scope and not self._leader_allows_event_claim(
+                    leader_scope,
+                    owner,
+                    leader_token,
+                    claim_expires_at,
+                    session=session,
+                    touch=session is not None,
+                ):
+                    return []
+                if not is_session_head(candidate):
+                    continue
+                exhausted = collection.find_one_and_update(
+                    {
+                        "_id": candidate["_id"],
+                        **base_query,
+                        "attempts": {"$gte": attempt_limit},
+                    },
+                    {
+                        "$set": {
+                            "processed": True,
+                            "processing_outcome": "dead_letter",
+                            "processed_at": claimed_at,
+                            "last_error_code": "event_lease_attempts_exhausted",
+                            "last_error_type": "LeaseExpired",
+                            "last_error_at": claimed_at,
+                            "schema_version": MONGODB_SCHEMA_VERSION,
+                        },
+                        "$unset": {
+                            "claim_owner": "",
+                            "claim_token": "",
+                            "claim_expires_at": "",
+                            "claimed_at": "",
+                            "claim_leader_scope": "",
+                            "claim_leader_token": "",
+                            "next_retry_at": "",
+                            "effect_summary": "",
+                        },
+                    },
+                    return_document=ReturnDocument.AFTER,
+                    session=session,
+                )
+                if exhausted is not None:
+                    progressed = True
+                    maintenance_count += 1
+                    if maintenance_count >= MONGODB_EVENT_SCAN_LIMIT:
+                        break
+            if not progressed:
+                break
+
+        output: List[Dict[str, Any]] = []
+        eligible_query = {
+            **base_query,
+            "$and": [
+                *base_query["$and"],
+                {
+                    "$or": [
+                        {"attempts": {"$exists": False}},
+                        {"attempts": {"$lt": attempt_limit}},
+                    ]
+                },
+            ],
+        }
+        candidates = collection.find(eligible_query, session=session).sort(
+            [("received_at", ASCENDING), ("event_id", ASCENDING)]
+        ).limit(MONGODB_EVENT_SCAN_LIMIT)
+        invalid_event_update = {
+            "$set": {
+                "processed": True,
+                "processing_outcome": "dead_letter",
+                "processed_at": claimed_at,
+                "last_error_code": "event_processing_invalid",
+                "last_error_type": "ValidationError",
+                "last_error_at": claimed_at,
+                "schema_version": MONGODB_SCHEMA_VERSION,
+            },
+            "$unset": {
+                "claim_owner": "",
+                "claim_token": "",
+                "claim_expires_at": "",
+                "claimed_at": "",
+                "claim_leader_scope": "",
+                "claim_leader_token": "",
+                "next_retry_at": "",
+                "effect_summary": "",
+            },
+        }
+        for candidate in candidates:
+            if len(output) >= requested:
+                break
+            if leader_scope and not self._leader_allows_event_claim(
+                leader_scope,
+                owner,
+                leader_token,
+                claim_expires_at,
+                session=session,
+                touch=session is not None,
+            ):
+                break
+            if not is_session_head(candidate):
+                continue
+            if not isinstance(candidate.get("payload"), Mapping):
+                collection.find_one_and_update(
+                    {"_id": candidate["_id"], **eligible_query},
+                    invalid_event_update,
+                    return_document=ReturnDocument.AFTER,
+                    session=session,
+                )
+                continue
+            claim_token = str(uuid4())
+            claim_set: Dict[str, Any] = {
+                "claim_owner": owner,
+                "claim_token": claim_token,
+                "claim_expires_at": claim_expires_at,
+                "claimed_at": claimed_at,
+                "schema_version": MONGODB_SCHEMA_VERSION,
+            }
+            claim_unset: Dict[str, Any] = {
+                "processing_outcome": "",
+                "effect_summary": "",
+            }
+            if leader_scope:
+                claim_set["claim_leader_scope"] = leader_scope
+                claim_set["claim_leader_token"] = leader_token
+            else:
+                claim_unset["claim_leader_scope"] = ""
+                claim_unset["claim_leader_token"] = ""
+            raw = collection.find_one_and_update(
+                {
+                    "_id": candidate["_id"],
+                    **eligible_query,
+                },
+                {
+                    "$set": claim_set,
+                    "$unset": claim_unset,
+                    "$inc": {"attempts": 1},
+                },
+                sort=[("received_at", ASCENDING), ("event_id", ASCENDING)],
+                return_document=ReturnDocument.AFTER,
+                session=session,
+            )
+            if raw is None:
+                # Another claimant may have won this exact document between
+                # the head check and CAS.  Other sessions can still progress.
+                continue
+            item = from_bson_safe(raw)
+            payload_value = item.get("payload")
+            if not isinstance(payload_value, Mapping):
+                collection.update_one(
+                    {
+                        "event_id": item["event_id"],
+                        "processed": {"$in": [False, 0]},
+                        "claim_owner": owner,
+                        "claim_token": claim_token,
+                    },
+                    invalid_event_update,
+                    session=session,
+                )
+                continue
+            payload = dict(payload_value)
+            output.append(
+                {
+                    "event_id": item["event_id"],
+                    "sensor_id": item["sensor_id"],
+                    "event": payload,
+                    "payload_json": stable_json(payload),
+                    "claim_owner": item["claim_owner"],
+                    "claim_token": item["claim_token"],
+                    "claim_expires_at": item["claim_expires_at"],
+                    "claim_leader_scope": str(item.get("claim_leader_scope") or ""),
+                    "claim_leader_token": str(item.get("claim_leader_token") or ""),
+                    "attempts": int(item.get("attempts") or 0),
+                }
+            )
+        return output
+
+    def renew_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        event_identity = _required_identity(event_id, "event_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        validation_now = _utc_timestamp(now)
+        _future_timestamp(validation_now, lease_seconds, field="lease_seconds")
+        requires_transaction = bool(leader_scope) or self._claim_has_stored_leader_binding(
+            event_identity,
+            claim_owner,
+            claim_token,
+        )
+        operation = lambda session: self._renew_event_claim_once(
+            event_identity,
+            claim_owner,
+            claim_token,
+            lease_seconds,
+            now=now,
+            leader_scope=leader_scope,
+            leader_token=leader_token,
+            session=session,
+        )
+        return (
+            self._run_fenced_transaction(operation)
+            if requires_transaction
+            else operation(None)
+        )
+
+    def _renew_event_claim_once(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+        session: Any = None,
+    ) -> bool:
+        event_id = _required_identity(event_id, "event_id")
+        owner = _required_identity(owner, "owner")
+        token = _uuid_token(token, "token")
+        renewed_at = _utc_timestamp(now)
+        expires_at = _future_timestamp(renewed_at, lease_seconds, field="lease_seconds")
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        if leader_scope:
+            leader_scope = _required_identity(leader_scope, "leader_scope")
+            leader_token = _uuid_token(leader_token, "leader_token")
+        binding_filter = self._event_claim_leader_guard(
+            event_id,
+            owner,
+            token,
+            renewed_at,
+            leader_scope,
+            leader_token,
+            required_leader_expiry=expires_at,
+            session=session,
+        )
+        if binding_filter is None:
+            return False
+        set_values: Dict[str, Any] = {
+            "claim_expires_at": expires_at,
+            "claimed_at": renewed_at,
+            "schema_version": MONGODB_SCHEMA_VERSION,
+        }
+        if leader_scope:
+            set_values["claim_leader_scope"] = leader_scope
+            set_values["claim_leader_token"] = leader_token
+        result = self._collection("events").update_one(
+            {
+                "event_id": event_id,
+                "processed": {"$in": [False, 0]},
+                "claim_owner": owner,
+                "claim_token": token,
+                "claim_expires_at": {"$gt": renewed_at},
+                **binding_filter,
+            },
+            {"$set": set_values},
+            session=session,
+        )
+        return bool(getattr(result, "matched_count", 0))
+
+    def complete_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        effect_summary: Optional[Dict[str, Any]] = None,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        event_identity = _required_identity(event_id, "event_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        validate_event_effect_summary(effect_summary)
+        requires_transaction = bool(leader_scope) or self._claim_has_stored_leader_binding(
+            event_identity,
+            claim_owner,
+            claim_token,
+        )
+        operation = lambda session: self._complete_event_once(
+            event_identity,
+            claim_owner,
+            claim_token,
+            effect_summary,
+            now=now,
+            leader_scope=leader_scope,
+            leader_token=leader_token,
+            session=session,
+        )
+        return (
+            self._run_fenced_transaction(operation)
+            if requires_transaction
+            else operation(None)
+        )
+
+    def _complete_event_once(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        effect_summary: Optional[Dict[str, Any]] = None,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+        session: Any = None,
+    ) -> bool:
+        event_id = _required_identity(event_id, "event_id")
+        owner = _required_identity(owner, "owner")
+        token = _uuid_token(token, "token")
+        completed_at = _utc_timestamp(now)
+        validated_effect_summary = validate_event_effect_summary(effect_summary)
+        binding_filter = self._event_claim_leader_guard(
+            event_id,
+            owner,
+            token,
+            completed_at,
+            leader_scope,
+            leader_token,
+            session=session,
+        )
+        if binding_filter is None:
+            return False
+        result = self._collection("events").update_one(
+            {
+                "event_id": event_id,
+                "processed": {"$in": [False, 0]},
+                "claim_owner": owner,
+                "claim_token": token,
+                "claim_expires_at": {"$gt": completed_at},
+                **binding_filter,
+            },
+            {
+                "$set": to_bson_safe(
+                    {
+                        "processed": True,
+                        "processing_outcome": "succeeded",
+                        "processed_at": completed_at,
+                        "effect_summary": validated_effect_summary,
+                        "schema_version": MONGODB_SCHEMA_VERSION,
+                    }
+                ),
+                "$unset": {
+                    "claim_owner": "",
+                    "claim_token": "",
+                    "claim_expires_at": "",
+                    "claimed_at": "",
+                    "claim_leader_scope": "",
+                    "claim_leader_token": "",
+                    "next_retry_at": "",
+                    "last_error_code": "",
+                    "last_error_type": "",
+                    "last_error_at": "",
+                },
+            },
+            session=session,
+        )
+        return bool(getattr(result, "matched_count", 0))
+
+    def fail_event(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> str:
+        event_identity = _required_identity(event_id, "event_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        validate_event_failure_fields(error_code, error_type)
+        _positive_attempt_limit(max_attempts)
+        validation_now = _utc_timestamp(now)
+        _retry_timestamp(validation_now, retry_delay_seconds)
+        requires_transaction = bool(leader_scope) or self._claim_has_stored_leader_binding(
+            event_identity,
+            claim_owner,
+            claim_token,
+        )
+        operation = lambda session: self._fail_event_once(
+            event_identity,
+            claim_owner,
+            claim_token,
+            error_code,
+            error_type,
+            retryable,
+            max_attempts,
+            retry_delay_seconds,
+            now=now,
+            leader_scope=leader_scope,
+            leader_token=leader_token,
+            session=session,
+        )
+        return (
+            self._run_fenced_transaction(operation)
+            if requires_transaction
+            else operation(None)
+        )
+
+    def _fail_event_once(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+        session: Any = None,
+    ) -> str:
+        event_id = _required_identity(event_id, "event_id")
+        owner = _required_identity(owner, "owner")
+        token = _uuid_token(token, "token")
+        error_code, error_type = validate_event_failure_fields(error_code, error_type)
+        attempt_limit = _positive_attempt_limit(max_attempts)
+        failed_at = _utc_timestamp(now)
+        next_retry_at = _retry_timestamp(failed_at, retry_delay_seconds)
+        binding_filter = self._event_claim_leader_guard(
+            event_id,
+            owner,
+            token,
+            failed_at,
+            leader_scope,
+            leader_token,
+            session=session,
+        )
+        if binding_filter is None:
+            return "stale_claim"
+        active_claim = {
+            "event_id": event_id,
+            "processed": {"$in": [False, 0]},
+            "claim_owner": owner,
+            "claim_token": token,
+            "claim_expires_at": {"$gt": failed_at},
+            **binding_filter,
+        }
+        collection = self._collection("events")
+        if retryable:
+            retry_result = collection.update_one(
+                {**active_claim, "attempts": {"$lt": attempt_limit}},
+                {
+                    "$set": {
+                        "next_retry_at": next_retry_at,
+                        "last_error_code": error_code,
+                        "last_error_type": error_type,
+                        "last_error_at": failed_at,
+                        "processing_outcome": "retry_scheduled",
+                        "schema_version": MONGODB_SCHEMA_VERSION,
+                    },
+                    "$unset": {
+                        "claim_owner": "",
+                        "claim_token": "",
+                        "claim_expires_at": "",
+                        "claimed_at": "",
+                        "claim_leader_scope": "",
+                        "claim_leader_token": "",
+                    },
+                },
+                session=session,
+            )
+            if getattr(retry_result, "matched_count", 0):
+                return "retry_scheduled"
+
+        dead_letter_result = collection.update_one(
+            active_claim,
+            {
+                "$set": {
+                    "processed": True,
+                    "processing_outcome": "dead_letter",
+                    "processed_at": failed_at,
+                    "last_error_code": error_code,
+                    "last_error_type": error_type,
+                    "last_error_at": failed_at,
+                    "schema_version": MONGODB_SCHEMA_VERSION,
+                },
+                "$unset": {
+                    "claim_owner": "",
+                    "claim_token": "",
+                    "claim_expires_at": "",
+                    "claimed_at": "",
+                    "claim_leader_scope": "",
+                    "claim_leader_token": "",
+                    "next_retry_at": "",
+                    "effect_summary": "",
+                },
+            },
+            session=session,
+        )
+        return (
+            "dead_letter"
+            if getattr(dead_letter_result, "matched_count", 0)
+            else "stale_claim"
+        )
+
+    def release_event_claim(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+    ) -> bool:
+        event_identity = _required_identity(event_id, "event_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        if bool(leader_scope) != bool(leader_token):
+            raise ValueError("leader_scope and leader_token must be provided together")
+        requires_transaction = bool(leader_scope) or self._claim_has_stored_leader_binding(
+            event_identity,
+            claim_owner,
+            claim_token,
+        )
+        operation = lambda session: self._release_event_claim_once(
+            event_identity,
+            claim_owner,
+            claim_token,
+            now=now,
+            leader_scope=leader_scope,
+            leader_token=leader_token,
+            session=session,
+        )
+        return (
+            self._run_fenced_transaction(operation)
+            if requires_transaction
+            else operation(None)
+        )
+
+    def _release_event_claim_once(
+        self,
+        event_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+        leader_scope: str = "",
+        leader_token: str = "",
+        session: Any = None,
+    ) -> bool:
+        event_id = _required_identity(event_id, "event_id")
+        owner = _required_identity(owner, "owner")
+        token = _uuid_token(token, "token")
+        released_at = _utc_timestamp(now)
+        binding_filter = self._event_claim_leader_guard(
+            event_id,
+            owner,
+            token,
+            released_at,
+            leader_scope,
+            leader_token,
+            session=session,
+        )
+        if binding_filter is None:
+            return False
+        result = self._collection("events").update_one(
+            {
+                "event_id": event_id,
+                "processed": {"$in": [False, 0]},
+                "claim_owner": owner,
+                "claim_token": token,
+                "claim_expires_at": {"$gt": released_at},
+                **binding_filter,
+            },
+            {
+                "$set": {"schema_version": MONGODB_SCHEMA_VERSION},
+                "$unset": {
+                    "claim_owner": "",
+                    "claim_token": "",
+                    "claim_expires_at": "",
+                    "claimed_at": "",
+                    "claim_leader_scope": "",
+                    "claim_leader_token": "",
+                    "processing_outcome": "",
+                },
+            },
+            session=session,
+        )
+        return bool(getattr(result, "matched_count", 0))
+
+    def list_failed_events(self, limit: int = 100) -> List[Dict[str, Any]]:
+        cursor = self._collection("events").find(
+            {
+                "processed": {"$in": [True, 1]},
+                "processing_outcome": "dead_letter",
+            }
+        ).sort([("processed_at", DESCENDING), ("event_id", ASCENDING)]).limit(
+            max(int(limit), 0)
+        )
+        output: List[Dict[str, Any]] = []
+        for raw in cursor:
+            item = from_bson_safe(raw)
+            payload_value = item.get("payload")
+            payload = dict(payload_value) if isinstance(payload_value, Mapping) else {}
+            output.append(
+                {
+                    "event_id": item["event_id"],
+                    "sensor_id": item["sensor_id"],
+                    "event": payload,
+                    "payload_json": stable_json(payload),
+                    "attempts": int(item.get("attempts") or 0),
+                    "last_error_code": item.get("last_error_code"),
+                    "last_error_type": item.get("last_error_type"),
+                    "last_error_at": item.get("last_error_at"),
+                    "processing_outcome": item.get("processing_outcome"),
+                    "processed_at": item.get("processed_at"),
+                }
+            )
+        return output
+
+    def acquire_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        lease_scope = _required_identity(scope, "scope")
+        _required_identity(owner, "owner")
+        _uuid_token(token, "token")
+        validation_now = _utc_timestamp(now)
+        _future_timestamp(validation_now, lease_seconds, field="lease_seconds")
+        self._ensure_worker_lease_placeholder(lease_scope)
+        return self._run_fenced_transaction(
+            lambda session: self._acquire_worker_lease_once(
+                lease_scope,
+                owner,
+                token,
+                lease_seconds,
+                now=now,
+                session=session,
+            )
+        )
+
+    def _ensure_worker_lease_placeholder(self, scope: str) -> None:
+        collection = self.database["_storage_leases"]
+        try:
+            collection.update_one(
+                {"_id": scope},
+                {
+                    "$setOnInsert": {
+                        "_id": scope,
+                        "scope": scope,
+                        "schema_version": MONGODB_SCHEMA_VERSION,
+                    }
+                },
+                upsert=True,
+            )
+        except Exception as exc:
+            if (
+                exc.__class__.__name__ != "DuplicateKeyError"
+                or collection.find_one({"_id": scope, "scope": scope}) is None
+            ):
+                raise
+
+    def _acquire_worker_lease_once(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+        session: Any = None,
+    ) -> bool:
+        scope = _required_identity(scope, "scope")
+        owner = _required_identity(owner, "owner")
+        token = _uuid_token(token, "token")
+        acquired_at = _utc_timestamp(now)
+        expires_at = _future_timestamp(acquired_at, lease_seconds, field="lease_seconds")
+        collection = self.database["_storage_leases"]
+        existing_lease = collection.find_one({"_id": scope}, session=session)
+        same_lease = bool(
+            existing_lease
+            and existing_lease.get("owner") == owner
+            and existing_lease.get("token") == token
+        )
+        if not same_lease:
+            active_foreign_claim = self._collection("events").find_one(
+                {
+                    "processed": {"$in": [False, 0]},
+                    "claim_leader_scope": scope,
+                    "claim_expires_at": {"$gt": acquired_at},
+                    "$or": [
+                        {"claim_leader_token": {"$ne": token}},
+                        {"claim_owner": {"$ne": owner}},
+                    ],
+                },
+                session=session,
+            )
+            if active_foreign_claim is not None:
+                return False
+        raw = collection.find_one_and_update(
+            {
+                "_id": scope,
+                "$or": [
+                    {"expires_at": {"$lte": acquired_at}},
+                    {"expires_at": None},
+                    {"expires_at": {"$exists": False}},
+                    {"owner": owner, "token": token},
+                ],
+            },
+            {
+                "$set": {
+                    "scope": scope,
+                    "owner": owner,
+                    "token": token,
+                    "expires_at": expires_at,
+                    "updated_at": acquired_at,
+                    "schema_version": MONGODB_SCHEMA_VERSION,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
+        return raw is not None
+
+    def renew_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        _required_identity(scope, "scope")
+        _required_identity(owner, "owner")
+        _uuid_token(token, "token")
+        validation_now = _utc_timestamp(now)
+        _future_timestamp(validation_now, lease_seconds, field="lease_seconds")
+        return self._run_fenced_transaction(
+            lambda session: self._renew_worker_lease_once(
+                scope,
+                owner,
+                token,
+                lease_seconds,
+                now=now,
+                session=session,
+            )
+        )
+
+    def _renew_worker_lease_once(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+        session: Any = None,
+    ) -> bool:
+        scope = _required_identity(scope, "scope")
+        owner = _required_identity(owner, "owner")
+        token = _uuid_token(token, "token")
+        renewed_at = _utc_timestamp(now)
+        expires_at = _future_timestamp(renewed_at, lease_seconds, field="lease_seconds")
+        result = self.database["_storage_leases"].update_one(
+            {
+                "_id": scope,
+                "owner": owner,
+                "token": token,
+                "expires_at": {"$gt": renewed_at},
+            },
+            {"$set": {"expires_at": expires_at, "updated_at": renewed_at}},
+            session=session,
+        )
+        return bool(getattr(result, "matched_count", 0))
+
+    def release_worker_lease(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        _required_identity(scope, "scope")
+        _required_identity(owner, "owner")
+        _uuid_token(token, "token")
+        _utc_timestamp(now)
+        return self._run_fenced_transaction(
+            lambda session: self._release_worker_lease_once(
+                scope,
+                owner,
+                token,
+                now=now,
+                session=session,
+            )
+        )
+
+    def _release_worker_lease_once(
+        self,
+        scope: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+        session: Any = None,
+    ) -> bool:
+        scope = _required_identity(scope, "scope")
+        owner = _required_identity(owner, "owner")
+        token = _uuid_token(token, "token")
+        released_at = _utc_timestamp(now)
+        result = self.database["_storage_leases"].delete_one(
+            {
+                "_id": scope,
+                "owner": owner,
+                "token": token,
+                "expires_at": {"$gt": released_at},
+            },
+            session=session,
+        )
+        return bool(getattr(result, "deleted_count", 0))
+
     def fetch_events(self, limit: int = 1000, processed: Optional[bool] = None) -> List[Dict[str, Any]]:
         query: Dict[str, Any] = {}
         if processed is not None:
-            query["processed"] = bool(processed)
+            query["processed"] = {"$in": [bool(processed), int(bool(processed))]}
         cursor = self._collection("events").find(query).sort(
             [("received_at", ASCENDING), ("event_id", ASCENDING)]
         ).limit(max(int(limit), 0))
@@ -657,7 +2013,30 @@ class MongoStorage:
         return output
 
     def mark_event_processed(self, event_id: str) -> None:
-        self._collection("events").update_one({"event_id": event_id}, {"$set": {"processed": True}})
+        self._collection("events").update_one(
+            {"event_id": event_id},
+            {
+                "$set": {
+                    "processed": True,
+                    "processing_outcome": "succeeded",
+                    "processed_at": utc_now(),
+                    "effect_summary": None,
+                    "schema_version": MONGODB_SCHEMA_VERSION,
+                },
+                "$unset": {
+                    "claim_owner": "",
+                    "claim_token": "",
+                    "claim_expires_at": "",
+                    "claimed_at": "",
+                    "claim_leader_scope": "",
+                    "claim_leader_token": "",
+                    "next_retry_at": "",
+                    "last_error_code": "",
+                    "last_error_type": "",
+                    "last_error_at": "",
+                },
+            },
+        )
 
     def save_session(self, session_payload: Dict[str, Any]) -> None:
         payload = dict(session_payload)
@@ -1977,6 +3356,7 @@ __all__ = [
     "MongoDBStorage",
     "MongoStorage",
     "SESSION_SCOPED_TABLES",
+    "STORAGE_LEASE_INDEX_DEFINITIONS",
     "document_from_sqlite_row",
     "from_bson_safe",
     "mongodb_dependency_diagnostic",
