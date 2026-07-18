@@ -17,8 +17,10 @@ from production.storage.contract import (
     POSTGRESQL_BACKEND,
     SQLITE_BACKEND,
     StorageBackend,
+    JOB_QUEUE_TABLES,
     validate_event_effect_summary,
     validate_event_failure_fields,
+    validate_job_failure_fields,
 )
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
@@ -265,6 +267,14 @@ class SQLiteStorage:
                     report_id TEXT,
                     error TEXT,
                     attempts INTEGER NOT NULL DEFAULT 0,
+                    next_retry_at TEXT,
+                    claim_owner TEXT,
+                    claim_token TEXT,
+                    claim_expires_at TEXT,
+                    last_error_code TEXT,
+                    last_error_type TEXT,
+                    last_error_at TEXT,
+                    completed_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -339,6 +349,13 @@ class SQLiteStorage:
                     payload_json TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     next_retry_at TEXT,
+                    claim_owner TEXT,
+                    claim_token TEXT,
+                    claim_expires_at TEXT,
+                    last_error_code TEXT,
+                    last_error_type TEXT,
+                    last_error_at TEXT,
+                    completed_at TEXT,
                     error TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -451,6 +468,14 @@ class SQLiteStorage:
                     result_json TEXT,
                     payload_json TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
+                    next_retry_at TEXT,
+                    claim_owner TEXT,
+                    claim_token TEXT,
+                    claim_expires_at TEXT,
+                    last_error_code TEXT,
+                    last_error_type TEXT,
+                    last_error_at TEXT,
+                    completed_at TEXT,
                     error TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -525,6 +550,7 @@ class SQLiteStorage:
                 """
             )
             self._ensure_sqlite_event_processing_columns(conn)
+            self._ensure_sqlite_job_processing_columns(conn)
             self._ensure_sqlite_session_source_column(conn)
             self._ensure_sqlite_enrichment_priority_columns(conn)
 
@@ -609,6 +635,32 @@ class SQLiteStorage:
                 ON events(claim_leader_scope, processed, claim_expires_at, claim_owner, claim_leader_token)
             """
         )
+
+    def _ensure_sqlite_job_processing_columns(self, conn: sqlite3.Connection) -> None:
+        additions = {
+            "next_retry_at": "TEXT",
+            "claim_owner": "TEXT",
+            "claim_token": "TEXT",
+            "claim_expires_at": "TEXT",
+            "last_error_code": "TEXT",
+            "last_error_type": "TEXT",
+            "last_error_at": "TEXT",
+            "completed_at": "TEXT",
+        }
+        for table in ("analysis_jobs", "enrichment_jobs", "threat_hunt_jobs"):
+            columns = {
+                row["name"]
+                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for name, definition in additions.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{table}_claimable
+                    ON {table}(status, next_retry_at, claim_expires_at, created_at)
+                """
+            )
 
     def _ensure_sqlite_enrichment_priority_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(enrichment_jobs)").fetchall()}
@@ -1626,89 +1678,518 @@ class SQLiteStorage:
             )
         return job_id
 
-    def claim_analysis_jobs(self, limit: int) -> List[Dict[str, Any]]:
-        now = utc_now()
+    def claim_jobs(
+        self,
+        queue: str,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        table = JOB_QUEUE_TABLES[queue_name]
+        claim_owner = _required_identity(owner, "owner")
+        claim_limit = max(int(limit), 0)
+        attempt_limit = int(max_attempts)
+        if attempt_limit < 1:
+            raise ValueError("max_attempts must be positive")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(current_time, lease_seconds, field="lease_seconds")
+        order_by = (
+            "CASE priority WHEN 'urgent' THEN 3 WHEN 'high' THEN 2 "
+            "WHEN 'normal' THEN 1 ELSE 0 END DESC, created_at, job_id"
+            if queue_name == "enrichment"
+            else "created_at, job_id"
+        )
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                f"""
+                UPDATE {table}
+                SET status='failed',
+                    error='job_attempts_exhausted:LeaseExpired',
+                    last_error_code='job_attempts_exhausted',
+                    last_error_type='LeaseExpired',
+                    last_error_at=?,
+                    next_retry_at=NULL,
+                    claim_owner=NULL,
+                    claim_token=NULL,
+                    claim_expires_at=NULL,
+                    completed_at=?,
+                    updated_at=?
+                WHERE attempts >= ?
+                  AND status IN ('queued', 'retry', 'running')
+                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                  AND (
+                      status <> 'running'
+                      OR claim_token IS NULL
+                      OR claim_expires_at IS NULL
+                      OR claim_expires_at <= ?
+                  )
+                """,
+                (
+                    current_time,
+                    current_time,
+                    current_time,
+                    attempt_limit,
+                    current_time,
+                    current_time,
+                ),
+            )
+            if claim_limit == 0:
+                return []
             rows = conn.execute(
-                """
-                SELECT job_id, session_id, payload_json, attempts FROM analysis_jobs
-                WHERE status IN ('queued', 'retry')
-                ORDER BY created_at, job_id
+                f"""
+                SELECT * FROM {table}
+                WHERE attempts < ?
+                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                  AND (
+                      status IN ('queued', 'retry')
+                      OR (
+                          status = 'running'
+                          AND (
+                              claim_token IS NULL
+                              OR claim_expires_at IS NULL
+                              OR claim_expires_at <= ?
+                          )
+                      )
+                  )
+                ORDER BY {order_by}
                 LIMIT ?
                 """,
-                (limit,),
+                (attempt_limit, current_time, current_time, claim_limit),
             ).fetchall()
-            job_ids = [row["job_id"] for row in rows]
-            for job_id in job_ids:
-                conn.execute(
-                    """
-                    UPDATE analysis_jobs
-                    SET status='running', attempts=attempts+1, updated_at=?
+            claimed: List[Dict[str, Any]] = []
+            for row in rows:
+                token = str(uuid.uuid4())
+                cursor = conn.execute(
+                    f"""
+                    UPDATE {table}
+                    SET status='running',
+                        attempts=attempts+1,
+                        next_retry_at=NULL,
+                        claim_owner=?,
+                        claim_token=?,
+                        claim_expires_at=?,
+                        completed_at=NULL,
+                        updated_at=?
                     WHERE job_id=?
+                      AND attempts < ?
+                      AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                      AND (
+                          status IN ('queued', 'retry')
+                          OR (
+                              status='running'
+                              AND (
+                                  claim_token IS NULL
+                                  OR claim_expires_at IS NULL
+                                  OR claim_expires_at <= ?
+                              )
+                          )
+                      )
                     """,
-                    (now, job_id),
+                    (
+                        claim_owner,
+                        token,
+                        expires_at,
+                        current_time,
+                        row["job_id"],
+                        attempt_limit,
+                        current_time,
+                        current_time,
+                    ),
                 )
+                if cursor.rowcount != 1:
+                    continue
+                item = dict(row)
+                item.update(
+                    {
+                        "status": "running",
+                        "attempts": int(row["attempts"] or 0) + 1,
+                        "claim_owner": claim_owner,
+                        "claim_token": token,
+                        "claim_expires_at": expires_at,
+                    }
+                )
+                claimed.append(item)
+            return claimed
+
+    def renew_job_claim(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(current_time, lease_seconds, field="lease_seconds")
+        with self.connection() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE {JOB_QUEUE_TABLES[queue_name]}
+                SET claim_expires_at=?, updated_at=?
+                WHERE job_id=? AND status='running'
+                  AND claim_owner=? AND claim_token=?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    expires_at,
+                    current_time,
+                    _required_identity(job_id, "job_id"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def fail_job(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        queue_name, stable_code, stable_type = validate_job_failure_fields(
+            queue,
+            error_code,
+            error_type,
+        )
+        attempt_limit = int(max_attempts)
+        delay = float(retry_delay_seconds)
+        if attempt_limit < 1 or not math.isfinite(delay) or delay < 0:
+            raise ValueError("job retry policy is invalid")
+        current_time = _utc_timestamp(now)
+        parsed_now = _parse_dt(current_time)
+        if parsed_now is None:  # pragma: no cover
+            raise ValueError("now must be a valid timestamp")
+        next_retry = (parsed_now + timedelta(seconds=delay)).isoformat()
+        table = JOB_QUEUE_TABLES[queue_name]
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                f"""
+                SELECT attempts FROM {table}
+                WHERE job_id=? AND status='running'
+                  AND claim_owner=? AND claim_token=?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    _required_identity(job_id, "job_id"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            ).fetchone()
+            if row is None:
+                return "stale_claim"
+            retry = bool(retryable) and int(row["attempts"] or 0) < attempt_limit
+            status = "retry" if retry else "failed"
+            conn.execute(
+                f"""
+                UPDATE {table}
+                SET status=?,
+                    error=?,
+                    next_retry_at=?,
+                    last_error_code=?,
+                    last_error_type=?,
+                    last_error_at=?,
+                    claim_owner=NULL,
+                    claim_token=NULL,
+                    claim_expires_at=NULL,
+                    completed_at=?,
+                    updated_at=?
+                WHERE job_id=? AND status='running'
+                  AND claim_owner=? AND claim_token=?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    status,
+                    f"{stable_code}:{stable_type}",
+                    next_retry if retry else None,
+                    stable_code,
+                    stable_type,
+                    current_time,
+                    None if retry else current_time,
+                    current_time,
+                    job_id,
+                    owner,
+                    token,
+                    current_time,
+                ),
+            )
+            return "retry_scheduled" if retry else "failed"
+
+    def release_job_claim(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE {JOB_QUEUE_TABLES[queue_name]}
+                SET status='retry', next_retry_at=?, claim_owner=NULL,
+                    claim_token=NULL, claim_expires_at=NULL, updated_at=?
+                WHERE job_id=? AND status='running'
+                  AND claim_owner=? AND claim_token=?
+                  AND claim_expires_at > ?
+                """,
+                (current_time, current_time, job_id, owner, token, current_time),
+            )
+            return cursor.rowcount == 1
+
+    def retry_failed_job(
+        self,
+        queue: str,
+        job_id: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE {JOB_QUEUE_TABLES[queue_name]}
+                SET status='retry', attempts=0, next_retry_at=?,
+                    claim_owner=NULL, claim_token=NULL, claim_expires_at=NULL,
+                    completed_at=NULL, updated_at=?
+                WHERE job_id=? AND status='failed'
+                """,
+                (current_time, current_time, _required_identity(job_id, "job_id")),
+            )
+            return cursor.rowcount == 1
+
+    def job_queue_metrics(self, queue: str, *, now: Any = None) -> Dict[str, Any]:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        table = JOB_QUEUE_TABLES[queue_name]
+        with self.connection() as conn:
+            counts = conn.execute(
+                f"SELECT status, COUNT(*) AS count FROM {table} GROUP BY status"
+            ).fetchall()
+            ready = conn.execute(
+                f"""
+                SELECT COUNT(*) AS count, MIN(created_at) AS oldest
+                FROM {table}
+                WHERE status IN ('queued', 'retry')
+                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                """,
+                (current_time,),
+            ).fetchone()
+            stale = conn.execute(
+                f"""
+                SELECT COUNT(*) AS count FROM {table}
+                WHERE status='running'
+                  AND (claim_expires_at IS NULL OR claim_expires_at <= ?)
+                """,
+                (current_time,),
+            ).fetchone()
+        oldest = ready["oldest"] if ready else None
+        oldest_dt = _parse_dt(oldest)
+        current_dt = _parse_dt(current_time)
+        age = (
+            max((current_dt - oldest_dt).total_seconds(), 0.0)
+            if current_dt is not None and oldest_dt is not None
+            else None
+        )
+        return {
+            "queue": queue_name,
+            "status_counts": {row["status"]: int(row["count"]) for row in counts},
+            "ready": int(ready["count"] if ready else 0),
+            "stale_running": int(stale["count"] if stale else 0),
+            "oldest_ready_at": oldest,
+            "oldest_ready_age_seconds": age,
+            "checked_at": current_time,
+        }
+
+    def claim_analysis_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        rows = self.claim_jobs(
+            "analysis", owner, limit, lease_seconds, max_attempts, now=now
+        )
         return [
             {
                 "job_id": row["job_id"],
                 "session_id": row["session_id"],
                 "session": json.loads(row["payload_json"]),
-                "attempts": row["attempts"] + 1,
+                "attempts": row["attempts"],
+                "claim_owner": row["claim_owner"],
+                "claim_token": row["claim_token"],
+                "claim_expires_at": row["claim_expires_at"],
             }
             for row in rows
         ]
 
-    def complete_analysis_job(self, job_id: str, report_payload: Dict[str, Any]) -> str:
+    def complete_analysis_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        report_payload: Dict[str, Any],
+        *,
+        now: Any = None,
+    ) -> Optional[str]:
         report_id = stable_id("report", {"job_id": job_id, "report": report_payload})
-        now = utc_now()
+        current_time = _utc_timestamp(now)
         session_id = report_payload.get("session_id") or report_payload.get("data_provenance", {}).get("session", {}).get("session_id", "unknown")
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            claim = conn.execute(
+                """
+                SELECT 1 FROM analysis_jobs
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
+                """,
+                (job_id, owner, token, current_time),
+            ).fetchone()
+            if claim is None:
+                return None
             conn.execute(
                 """
                 INSERT OR REPLACE INTO reports (report_id, session_id, payload_json, created_at)
                 VALUES (?, ?, ?, ?)
                 """,
-                (report_id, session_id, stable_json(report_payload), now),
+                (report_id, session_id, stable_json(report_payload), current_time),
             )
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE analysis_jobs
-                SET status='succeeded', report_id=?, error=NULL, updated_at=?
-                WHERE job_id=?
+                SET status='succeeded', report_id=?, error=NULL,
+                    next_retry_at=NULL, claim_owner=NULL, claim_token=NULL,
+                    claim_expires_at=NULL, completed_at=?, updated_at=?
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
                 """,
-                (report_id, now, job_id),
+                (
+                    report_id,
+                    current_time,
+                    current_time,
+                    job_id,
+                    owner,
+                    token,
+                    current_time,
+                ),
             )
+            if cursor.rowcount != 1:  # pragma: no cover - same transaction
+                raise StorageError("analysis job claim changed during completion")
         self.update_session_analysis_status(session_id, "succeeded", report_id=report_id)
         return report_id
 
-    def fail_analysis_job(self, job_id: str, error: str, retry: bool = False) -> None:
-        now = utc_now()
-        status = "retry" if retry else "failed"
+    def fail_analysis_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
         with self.connection() as conn:
             row = conn.execute(
                 "SELECT session_id FROM analysis_jobs WHERE job_id=? LIMIT 1",
                 (job_id,),
             ).fetchone()
-            conn.execute(
-                "UPDATE analysis_jobs SET status=?, error=?, updated_at=? WHERE job_id=?",
-                (status, error, now, job_id),
+        result = self.fail_job(
+            "analysis",
+            job_id,
+            owner,
+            token,
+            error_code,
+            error_type,
+            retryable,
+            max_attempts,
+            retry_delay_seconds,
+            now=now,
+        )
+        if row and result in {"retry_scheduled", "failed"}:
+            status = "retry" if result == "retry_scheduled" else "failed"
+            self.update_session_analysis_status(
+                row["session_id"],
+                status,
+                error=f"{error_code}:{error_type}",
             )
-        if row:
-            self.update_session_analysis_status(row["session_id"], status, error=error)
+        return result
 
-    def skip_analysis_job(self, job_id: str, reason: str) -> None:
-        now = utc_now()
+    def skip_analysis_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        reason: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT session_id FROM analysis_jobs WHERE job_id=? LIMIT 1",
-                (job_id,),
+                """
+                SELECT session_id FROM analysis_jobs
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
+                LIMIT 1
+                """,
+                (job_id, owner, token, current_time),
             ).fetchone()
-            conn.execute(
-                "UPDATE analysis_jobs SET status='skipped', error=?, updated_at=? WHERE job_id=?",
-                (reason, now, job_id),
+            if row is None:
+                return False
+            cursor = conn.execute(
+                """
+                UPDATE analysis_jobs
+                SET status='skipped', error=?, next_retry_at=NULL,
+                    claim_owner=NULL, claim_token=NULL, claim_expires_at=NULL,
+                    completed_at=?, updated_at=?
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
+                """,
+                (reason, current_time, current_time, job_id, owner, token, current_time),
             )
-        if row:
+        if cursor.rowcount == 1:
             self.update_session_analysis_status(row["session_id"], "skipped", skip_reason=reason)
+            return True
+        return False
 
     def save_feed_status(self, status: Dict[str, Any]) -> None:
         now = utc_now()
@@ -1889,32 +2370,18 @@ class SQLiteStorage:
             )
         return job_id, cur.rowcount > 0
 
-    def claim_enrichment_jobs(self, limit: int) -> List[Dict[str, Any]]:
-        now = utc_now()
-        with self.connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT job_id, observable_type, observable_value, session_id, priority, priority_reason, payload_json, attempts
-                FROM enrichment_jobs
-                WHERE status IN ('queued', 'retry')
-                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
-                ORDER BY
-                  CASE priority WHEN 'urgent' THEN 3 WHEN 'high' THEN 2 WHEN 'normal' THEN 1 ELSE 0 END DESC,
-                  created_at,
-                  job_id
-                LIMIT ?
-                """,
-                (now, limit),
-            ).fetchall()
-            for row in rows:
-                conn.execute(
-                    """
-                    UPDATE enrichment_jobs
-                    SET status='running', attempts=attempts+1, updated_at=?
-                    WHERE job_id=?
-                    """,
-                    (now, row["job_id"]),
-                )
+    def claim_enrichment_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        rows = self.claim_jobs(
+            "enrichment", owner, limit, lease_seconds, max_attempts, now=now
+        )
         return [
             {
                 "job_id": row["job_id"],
@@ -1924,7 +2391,10 @@ class SQLiteStorage:
                 "priority": row["priority"],
                 "priority_reason": row["priority_reason"],
                 "payload": json.loads(row["payload_json"]),
-                "attempts": row["attempts"] + 1,
+                "attempts": row["attempts"],
+                "claim_owner": row["claim_owner"],
+                "claim_token": row["claim_token"],
+                "claim_expires_at": row["claim_expires_at"],
             }
             for row in rows
         ]
@@ -1978,27 +2448,54 @@ class SQLiteStorage:
             )
         return int(cur.rowcount or 0)
 
-    def complete_enrichment_job(self, job_id: str) -> None:
-        now = utc_now()
+    def complete_enrichment_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
         with self.connection() as conn:
-            conn.execute(
-                "UPDATE enrichment_jobs SET status='succeeded', error=NULL, next_retry_at=NULL, updated_at=? WHERE job_id=?",
-                (now, job_id),
-            )
-
-    def fail_enrichment_job(self, job_id: str, error: str, retry: bool = False, retry_seconds: float = 300.0) -> None:
-        now = utc_now()
-        status = "retry" if retry else "failed"
-        next_retry_at = _retry_at(retry_seconds) if retry else None
-        with self.connection() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE enrichment_jobs
-                SET status=?, error=?, next_retry_at=?, updated_at=?
-                WHERE job_id=?
+                SET status='succeeded', error=NULL, next_retry_at=NULL,
+                    claim_owner=NULL, claim_token=NULL, claim_expires_at=NULL,
+                    completed_at=?, updated_at=?
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
                 """,
-                (status, error, next_retry_at, now, job_id),
+                (current_time, current_time, job_id, owner, token, current_time),
             )
+            return cursor.rowcount == 1
+
+    def fail_enrichment_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        return self.fail_job(
+            "enrichment",
+            job_id,
+            owner,
+            token,
+            error_code,
+            error_type,
+            retryable,
+            max_attempts,
+            retry_delay_seconds,
+            now=now,
+        )
 
     def record_observable_sighting(self, sighting: Dict[str, Any]) -> str:
         observable_type = str(sighting.get("observable_type") or "").strip().lower()
@@ -2133,60 +2630,83 @@ class SQLiteStorage:
             )
         return job_id, cur.rowcount == 1
 
-    def claim_threat_hunt_jobs(self, limit: int) -> List[Dict[str, Any]]:
-        now = utc_now()
-        with self.connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM threat_hunt_jobs
-                WHERE status IN ('queued', 'retry')
-                ORDER BY created_at, job_id
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-            for row in rows:
-                conn.execute(
-                    """
-                    UPDATE threat_hunt_jobs
-                    SET status='running', attempts=attempts+1, updated_at=?
-                    WHERE job_id=?
-                    """,
-                    (now, row["job_id"]),
-                )
+    def claim_threat_hunt_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        rows = self.claim_jobs(
+            "threat_hunt", owner, limit, lease_seconds, max_attempts, now=now
+        )
         jobs = []
         for row in rows:
             item = dict(row)
             item["payload"] = json.loads(item.get("payload_json") or "{}")
             item["result"] = json.loads(item.get("result_json") or "{}") if item.get("result_json") else {}
-            item["attempts"] = int(item.get("attempts") or 0) + 1
             jobs.append(item)
         return jobs
 
-    def complete_threat_hunt_job(self, job_id: str, result: Dict[str, Any]) -> None:
-        now = utc_now()
+    def complete_threat_hunt_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        result: Dict[str, Any],
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
         with self.connection() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE threat_hunt_jobs
-                SET status='succeeded', result_json=?, error=NULL, updated_at=?
-                WHERE job_id=?
+                SET status='succeeded', result_json=?, error=NULL,
+                    next_retry_at=NULL, claim_owner=NULL, claim_token=NULL,
+                    claim_expires_at=NULL, completed_at=?, updated_at=?
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
                 """,
-                (stable_json(result), now, job_id),
+                (
+                    stable_json(result),
+                    current_time,
+                    current_time,
+                    job_id,
+                    owner,
+                    token,
+                    current_time,
+                ),
             )
+            return cursor.rowcount == 1
 
-    def fail_threat_hunt_job(self, job_id: str, error: str, retry: bool = False) -> None:
-        now = utc_now()
-        status = "retry" if retry else "failed"
-        with self.connection() as conn:
-            conn.execute(
-                """
-                UPDATE threat_hunt_jobs
-                SET status=?, error=?, updated_at=?
-                WHERE job_id=?
-                """,
-                (status, error, now, job_id),
-            )
+    def fail_threat_hunt_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        return self.fail_job(
+            "threat_hunt",
+            job_id,
+            owner,
+            token,
+            error_code,
+            error_type,
+            retryable,
+            max_attempts,
+            retry_delay_seconds,
+            now=now,
+        )
 
     def find_sessions_by_observable(
         self,
@@ -5524,6 +6044,110 @@ class PostgresStorage:
             if alert_id and status in {"succeeded", "delivered"}:
                 self._execute(conn, "UPDATE alerts SET delivered = true WHERE alert_id = %s", (alert_id,))
         return delivery_id
+
+    # PostgreSQL remains a compatibility backend. The remediation scope keeps
+    # SQLite supported and targets MongoDB for production; fail explicitly
+    # instead of silently using the legacy unfenced job state machine.
+    @staticmethod
+    def _durable_job_leases_unsupported() -> None:
+        raise StorageError(
+            "durable job leases are not implemented for the PostgreSQL compatibility backend"
+        )
+
+    def claim_jobs(
+        self, queue: str, owner: str, limit: int, lease_seconds: float,
+        max_attempts: int, *, now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        self._durable_job_leases_unsupported()
+
+    def renew_job_claim(
+        self, queue: str, job_id: str, owner: str, token: str,
+        lease_seconds: float, *, now: Any = None,
+    ) -> bool:
+        self._durable_job_leases_unsupported()
+
+    def fail_job(
+        self, queue: str, job_id: str, owner: str, token: str,
+        error_code: str, error_type: str, retryable: bool, max_attempts: int,
+        retry_delay_seconds: float, *, now: Any = None,
+    ) -> str:
+        self._durable_job_leases_unsupported()
+
+    def release_job_claim(
+        self, queue: str, job_id: str, owner: str, token: str,
+        *, now: Any = None,
+    ) -> bool:
+        self._durable_job_leases_unsupported()
+
+    def retry_failed_job(
+        self, queue: str, job_id: str, *, now: Any = None,
+    ) -> bool:
+        self._durable_job_leases_unsupported()
+
+    def job_queue_metrics(self, queue: str, *, now: Any = None) -> Dict[str, Any]:
+        self._durable_job_leases_unsupported()
+
+    def claim_analysis_jobs(
+        self, owner: str, limit: int, lease_seconds: float, max_attempts: int,
+        *, now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        self._durable_job_leases_unsupported()
+
+    def complete_analysis_job(
+        self, job_id: str, owner: str, token: str,
+        report_payload: Dict[str, Any], *, now: Any = None,
+    ) -> Optional[str]:
+        self._durable_job_leases_unsupported()
+
+    def fail_analysis_job(
+        self, job_id: str, owner: str, token: str, error_code: str,
+        error_type: str, retryable: bool, max_attempts: int,
+        retry_delay_seconds: float, *, now: Any = None,
+    ) -> str:
+        self._durable_job_leases_unsupported()
+
+    def skip_analysis_job(
+        self, job_id: str, owner: str, token: str, reason: str,
+        *, now: Any = None,
+    ) -> bool:
+        self._durable_job_leases_unsupported()
+
+    def claim_enrichment_jobs(
+        self, owner: str, limit: int, lease_seconds: float, max_attempts: int,
+        *, now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        self._durable_job_leases_unsupported()
+
+    def complete_enrichment_job(
+        self, job_id: str, owner: str, token: str, *, now: Any = None,
+    ) -> bool:
+        self._durable_job_leases_unsupported()
+
+    def fail_enrichment_job(
+        self, job_id: str, owner: str, token: str, error_code: str,
+        error_type: str, retryable: bool, max_attempts: int,
+        retry_delay_seconds: float, *, now: Any = None,
+    ) -> str:
+        self._durable_job_leases_unsupported()
+
+    def claim_threat_hunt_jobs(
+        self, owner: str, limit: int, lease_seconds: float, max_attempts: int,
+        *, now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        self._durable_job_leases_unsupported()
+
+    def complete_threat_hunt_job(
+        self, job_id: str, owner: str, token: str, result: Dict[str, Any],
+        *, now: Any = None,
+    ) -> bool:
+        self._durable_job_leases_unsupported()
+
+    def fail_threat_hunt_job(
+        self, job_id: str, owner: str, token: str, error_code: str,
+        error_type: str, retryable: bool, max_attempts: int,
+        retry_delay_seconds: float, *, now: Any = None,
+    ) -> str:
+        self._durable_job_leases_unsupported()
 
 
 def safe_database_descriptor(database_url: str) -> Dict[str, str]:

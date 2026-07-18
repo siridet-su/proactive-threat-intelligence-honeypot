@@ -26,8 +26,10 @@ from uuid import UUID, uuid4
 
 from production.storage.backend import StorageError
 from production.storage.contract import (
+    JOB_QUEUE_TABLES,
     validate_event_effect_summary,
     validate_event_failure_fields,
+    validate_job_failure_fields,
 )
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
@@ -413,6 +415,15 @@ INDEX_DEFINITIONS: Dict[str, Sequence[IndexDefinition]] = {
         IndexDefinition((("job_id", ASCENDING),), "uq_analysis_jobs_job_id", True),
         IndexDefinition((("status", ASCENDING), ("created_at", ASCENDING), ("job_id", ASCENDING)), "idx_analysis_claim"),
         IndexDefinition((("session_id", ASCENDING),), "idx_analysis_session"),
+        IndexDefinition(
+            (
+                ("status", ASCENDING),
+                ("next_retry_at", ASCENDING),
+                ("claim_expires_at", ASCENDING),
+                ("created_at", ASCENDING),
+            ),
+            "idx_analysis_jobs_claimable",
+        ),
     ),
     "reports": (
         IndexDefinition((("report_id", ASCENDING),), "uq_reports_report_id", True),
@@ -459,6 +470,15 @@ INDEX_DEFINITIONS: Dict[str, Sequence[IndexDefinition]] = {
             ),
             "idx_enrichment_claim",
         ),
+        IndexDefinition(
+            (
+                ("status", ASCENDING),
+                ("next_retry_at", ASCENDING),
+                ("claim_expires_at", ASCENDING),
+                ("created_at", ASCENDING),
+            ),
+            "idx_enrichment_jobs_claimable",
+        ),
     ),
     "webhook_deliveries": (
         IndexDefinition((("delivery_id", ASCENDING),), "uq_webhook_deliveries_id", True),
@@ -497,6 +517,15 @@ INDEX_DEFINITIONS: Dict[str, Sequence[IndexDefinition]] = {
         ),
         IndexDefinition((("status", ASCENDING), ("created_at", ASCENDING), ("job_id", ASCENDING)), "idx_threat_hunt_claim"),
         IndexDefinition((("observable_type", ASCENDING), ("observable_value", ASCENDING)), "idx_threat_hunt_observable"),
+        IndexDefinition(
+            (
+                ("status", ASCENDING),
+                ("next_retry_at", ASCENDING),
+                ("claim_expires_at", ASCENDING),
+                ("created_at", ASCENDING),
+            ),
+            "idx_threat_hunt_jobs_claimable",
+        ),
     ),
     "session_links": (
         IndexDefinition((("link_id", ASCENDING),), "uq_session_links_id", True),
@@ -2152,66 +2181,515 @@ class MongoStorage:
         )
         return job_id
 
-    def claim_analysis_jobs(self, limit: int) -> List[Dict[str, Any]]:
-        output = []
-        for _ in range(max(int(limit), 0)):
-            now = utc_now()
-            raw = self._collection("analysis_jobs").find_one_and_update(
-                {"status": {"$in": ["queued", "retry"]}},
-                {"$set": {"status": "running", "updated_at": now}, "$inc": {"attempts": 1}},
-                sort=[("created_at", ASCENDING), ("job_id", ASCENDING)],
+    def claim_jobs(
+        self,
+        queue: str,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        claim_owner = _required_identity(owner, "owner")
+        requested = max(int(limit), 0)
+        attempt_limit = int(max_attempts)
+        if attempt_limit < 1:
+            raise ValueError("max_attempts must be positive")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(current_time, lease_seconds, field="lease_seconds")
+        collection = self._collection(JOB_QUEUE_TABLES[queue_name])
+        exhausted_query = {
+            "status": {"$in": ["queued", "retry", "running"]},
+            "attempts": {"$gte": attempt_limit},
+            "$and": [
+                {
+                    "$or": [
+                        {"next_retry_at": None},
+                        {"next_retry_at": {"$exists": False}},
+                        {"next_retry_at": {"$lte": current_time}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"status": {"$in": ["queued", "retry"]}},
+                        {"claim_token": None},
+                        {"claim_token": {"$exists": False}},
+                        {"claim_expires_at": None},
+                        {"claim_expires_at": {"$exists": False}},
+                        {"claim_expires_at": {"$lte": current_time}},
+                    ]
+                },
+            ],
+        }
+        while collection.find_one_and_update(
+            exhausted_query,
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": "job_attempts_exhausted:LeaseExpired",
+                    "last_error_code": "job_attempts_exhausted",
+                    "last_error_type": "LeaseExpired",
+                    "last_error_at": current_time,
+                    "next_retry_at": None,
+                    "claim_owner": None,
+                    "claim_token": None,
+                    "claim_expires_at": None,
+                    "completed_at": current_time,
+                    "updated_at": current_time,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        ) is not None:
+            pass
+        output: List[Dict[str, Any]] = []
+        sort = (
+            [
+                ("priority_rank", DESCENDING),
+                ("created_at", ASCENDING),
+                ("job_id", ASCENDING),
+            ]
+            if queue_name == "enrichment"
+            else [("created_at", ASCENDING), ("job_id", ASCENDING)]
+        )
+        for _ in range(requested):
+            token = str(uuid4())
+            query = {
+                "attempts": {"$lt": attempt_limit},
+                "$and": [
+                    {
+                        "$or": [
+                            {"next_retry_at": None},
+                            {"next_retry_at": {"$exists": False}},
+                            {"next_retry_at": {"$lte": current_time}},
+                        ]
+                    },
+                    {
+                        "$or": [
+                            {"status": {"$in": ["queued", "retry"]}},
+                            {
+                                "$and": [
+                                    {"status": "running"},
+                                    {
+                                        "$or": [
+                                            {"claim_token": None},
+                                            {"claim_token": {"$exists": False}},
+                                            {"claim_expires_at": None},
+                                            {"claim_expires_at": {"$exists": False}},
+                                            {"claim_expires_at": {"$lte": current_time}},
+                                        ]
+                                    },
+                                ]
+                            },
+                        ]
+                    },
+                ],
+            }
+            raw = collection.find_one_and_update(
+                query,
+                {
+                    "$set": {
+                        "status": "running",
+                        "next_retry_at": None,
+                        "claim_owner": claim_owner,
+                        "claim_token": token,
+                        "claim_expires_at": expires_at,
+                        "completed_at": None,
+                        "updated_at": current_time,
+                    },
+                    "$inc": {"attempts": 1},
+                },
+                sort=sort,
                 return_document=ReturnDocument.AFTER,
             )
             if raw is None:
                 break
             item = from_bson_safe(raw)
-            output.append(
-                {
-                    "job_id": item["job_id"],
-                    "session_id": item["session_id"],
-                    "session": dict(item.get("payload") or {}),
-                    "attempts": int(item.get("attempts") or 0),
-                }
-            )
+            output.append(dict(item))
         return output
 
-    def complete_analysis_job(self, job_id: str, report_payload: Dict[str, Any]) -> str:
+    def renew_job_claim(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(current_time, lease_seconds, field="lease_seconds")
+        result = self._collection(JOB_QUEUE_TABLES[queue_name]).update_one(
+            {
+                "job_id": _required_identity(job_id, "job_id"),
+                "status": "running",
+                "claim_owner": _required_identity(owner, "owner"),
+                "claim_token": _uuid_token(token, "token"),
+                "claim_expires_at": {"$gt": current_time},
+            },
+            {"$set": {"claim_expires_at": expires_at, "updated_at": current_time}},
+        )
+        return bool(getattr(result, "matched_count", 0))
+
+    def fail_job(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        queue_name, stable_code, stable_type = validate_job_failure_fields(
+            queue, error_code, error_type
+        )
+        attempt_limit = int(max_attempts)
+        delay = float(retry_delay_seconds)
+        if attempt_limit < 1 or not math.isfinite(delay) or delay < 0:
+            raise ValueError("job retry policy is invalid")
+        current_time = _utc_timestamp(now)
+        parsed_now = _parse_dt(current_time)
+        if parsed_now is None:  # pragma: no cover
+            raise ValueError("now must be a valid timestamp")
+        next_retry = (parsed_now + timedelta(seconds=delay)).isoformat()
+        collection = self._collection(JOB_QUEUE_TABLES[queue_name])
+        claim_query: Dict[str, Any] = {
+            "job_id": _required_identity(job_id, "job_id"),
+            "status": "running",
+            "claim_owner": _required_identity(owner, "owner"),
+            "claim_token": _uuid_token(token, "token"),
+            "claim_expires_at": {"$gt": current_time},
+        }
+        if retryable:
+            retry_query = dict(claim_query)
+            retry_query["attempts"] = {"$lt": attempt_limit}
+            raw = collection.find_one_and_update(
+                retry_query,
+                {
+                    "$set": {
+                        "status": "retry",
+                        "error": f"{stable_code}:{stable_type}",
+                        "next_retry_at": next_retry,
+                        "last_error_code": stable_code,
+                        "last_error_type": stable_type,
+                        "last_error_at": current_time,
+                        "claim_owner": None,
+                        "claim_token": None,
+                        "claim_expires_at": None,
+                        "completed_at": None,
+                        "updated_at": current_time,
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+            if raw is not None:
+                return "retry_scheduled"
+        raw = collection.find_one_and_update(
+            claim_query,
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": f"{stable_code}:{stable_type}",
+                    "next_retry_at": None,
+                    "last_error_code": stable_code,
+                    "last_error_type": stable_type,
+                    "last_error_at": current_time,
+                    "claim_owner": None,
+                    "claim_token": None,
+                    "claim_expires_at": None,
+                    "completed_at": current_time,
+                    "updated_at": current_time,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        return "failed" if raw is not None else "stale_claim"
+
+    def release_job_claim(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        result = self._collection(JOB_QUEUE_TABLES[queue_name]).update_one(
+            {
+                "job_id": job_id,
+                "status": "running",
+                "claim_owner": owner,
+                "claim_token": token,
+                "claim_expires_at": {"$gt": current_time},
+            },
+            {
+                "$set": {
+                    "status": "retry",
+                    "next_retry_at": current_time,
+                    "claim_owner": None,
+                    "claim_token": None,
+                    "claim_expires_at": None,
+                    "updated_at": current_time,
+                }
+            },
+        )
+        return bool(getattr(result, "matched_count", 0))
+
+    def retry_failed_job(
+        self,
+        queue: str,
+        job_id: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        result = self._collection(JOB_QUEUE_TABLES[queue_name]).update_one(
+            {"job_id": _required_identity(job_id, "job_id"), "status": "failed"},
+            {
+                "$set": {
+                    "status": "retry",
+                    "attempts": 0,
+                    "next_retry_at": current_time,
+                    "claim_owner": None,
+                    "claim_token": None,
+                    "claim_expires_at": None,
+                    "completed_at": None,
+                    "updated_at": current_time,
+                }
+            },
+        )
+        return bool(getattr(result, "matched_count", 0))
+
+    def job_queue_metrics(self, queue: str, *, now: Any = None) -> Dict[str, Any]:
+        queue_name = str(queue or "").strip()
+        if queue_name not in JOB_QUEUE_TABLES:
+            raise ValueError("queue is not a registered durable job queue")
+        current_time = _utc_timestamp(now)
+        collection = self._collection(JOB_QUEUE_TABLES[queue_name])
+        status_counts = {
+            status: int(collection.count_documents({"status": status}))
+            for status in ("queued", "retry", "running", "succeeded", "failed", "skipped")
+        }
+        status_counts = {key: value for key, value in status_counts.items() if value}
+        ready_query = {
+            "status": {"$in": ["queued", "retry"]},
+            "$or": [
+                {"next_retry_at": None},
+                {"next_retry_at": {"$exists": False}},
+                {"next_retry_at": {"$lte": current_time}},
+            ],
+        }
+        ready = int(collection.count_documents(ready_query))
+        stale = int(
+            collection.count_documents(
+                {
+                    "status": "running",
+                    "$or": [
+                        {"claim_expires_at": None},
+                        {"claim_expires_at": {"$exists": False}},
+                        {"claim_expires_at": {"$lte": current_time}},
+                    ],
+                }
+            )
+        )
+        oldest_rows = list(
+            collection.find(ready_query).sort(
+                [("created_at", ASCENDING), ("job_id", ASCENDING)]
+            ).limit(1)
+        )
+        oldest = oldest_rows[0].get("created_at") if oldest_rows else None
+        oldest_dt = _parse_dt(oldest)
+        current_dt = _parse_dt(current_time)
+        age = (
+            max((current_dt - oldest_dt).total_seconds(), 0.0)
+            if current_dt is not None and oldest_dt is not None
+            else None
+        )
+        return {
+            "queue": queue_name,
+            "status_counts": status_counts,
+            "ready": ready,
+            "stale_running": stale,
+            "oldest_ready_at": oldest,
+            "oldest_ready_age_seconds": age,
+            "checked_at": current_time,
+        }
+
+    def claim_analysis_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        rows = self.claim_jobs(
+            "analysis", owner, limit, lease_seconds, max_attempts, now=now
+        )
+        return [
+            {
+                "job_id": item["job_id"],
+                "session_id": item["session_id"],
+                "session": dict(item.get("payload") or {}),
+                "attempts": int(item.get("attempts") or 0),
+                "claim_owner": item["claim_owner"],
+                "claim_token": item["claim_token"],
+                "claim_expires_at": item["claim_expires_at"],
+            }
+            for item in rows
+        ]
+
+    def complete_analysis_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        report_payload: Dict[str, Any],
+        *,
+        now: Any = None,
+    ) -> Optional[str]:
         report_id = stable_id("report", {"job_id": job_id, "report": report_payload})
-        now = utc_now()
+        current_time = _utc_timestamp(now)
         session_id = report_payload.get("session_id") or report_payload.get("data_provenance", {}).get(
             "session", {}
         ).get("session_id", "unknown")
-        self._replace(
-            "reports",
-            {
-                "_id": report_id,
-                "report_id": report_id,
-                "session_id": session_id,
-                "payload": dict(report_payload),
-                "created_at": now,
-            },
-        )
-        self._collection("analysis_jobs").update_one(
-            {"job_id": job_id},
-            {"$set": {"status": "succeeded", "report_id": report_id, "error": None, "updated_at": now}},
-        )
+        claim_query = {
+            "job_id": job_id,
+            "status": "running",
+            "claim_owner": owner,
+            "claim_token": token,
+            "claim_expires_at": {"$gt": current_time},
+        }
+
+        def operation(session: Any) -> bool:
+            claim = self._collection("analysis_jobs").find_one(
+                claim_query,
+                session=session,
+            )
+            if claim is None:
+                return False
+            report = to_bson_safe(
+                {
+                    "_id": report_id,
+                    "report_id": report_id,
+                    "session_id": session_id,
+                    "payload": dict(report_payload),
+                    "created_at": current_time,
+                    "schema_version": MONGODB_SCHEMA_VERSION,
+                }
+            )
+            self._collection("reports").replace_one(
+                {"_id": report_id}, report, upsert=True, session=session
+            )
+            result = self._collection("analysis_jobs").update_one(
+                claim_query,
+                {
+                    "$set": {
+                        "status": "succeeded",
+                        "report_id": report_id,
+                        "error": None,
+                        "next_retry_at": None,
+                        "claim_owner": None,
+                        "claim_token": None,
+                        "claim_expires_at": None,
+                        "completed_at": current_time,
+                        "updated_at": current_time,
+                    }
+                },
+                session=session,
+            )
+            return bool(getattr(result, "matched_count", 0))
+
+        if not self._run_fenced_transaction(operation):
+            return None
         self.update_session_analysis_status(str(session_id), "succeeded", report_id=report_id)
         return report_id
 
-    def fail_analysis_job(self, job_id: str, error: str, retry: bool = False) -> None:
-        status = "retry" if retry else "failed"
-        raw = self._collection("analysis_jobs").find_one_and_update(
-            {"job_id": job_id},
-            {"$set": {"status": status, "error": error, "updated_at": utc_now()}},
-            return_document=ReturnDocument.AFTER,
+    def fail_analysis_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        result = self.fail_job(
+            "analysis",
+            job_id,
+            owner,
+            token,
+            error_code,
+            error_type,
+            retryable,
+            max_attempts,
+            retry_delay_seconds,
+            now=now,
         )
-        if raw:
-            self.update_session_analysis_status(str(raw.get("session_id") or ""), status, error=error)
+        if result in {"retry_scheduled", "failed"}:
+            raw = self._find("analysis_jobs", {"job_id": job_id}) or {}
+            status = "retry" if result == "retry_scheduled" else "failed"
+            self.update_session_analysis_status(
+                str(raw.get("session_id") or ""),
+                status,
+                error=f"{error_code}:{error_type}",
+            )
+        return result
 
-    def skip_analysis_job(self, job_id: str, reason: str) -> None:
+    def skip_analysis_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        reason: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
         raw = self._collection("analysis_jobs").find_one_and_update(
-            {"job_id": job_id},
-            {"$set": {"status": "skipped", "error": reason, "updated_at": utc_now()}},
+            {
+                "job_id": job_id,
+                "status": "running",
+                "claim_owner": owner,
+                "claim_token": token,
+                "claim_expires_at": {"$gt": current_time},
+            },
+            {
+                "$set": {
+                    "status": "skipped",
+                    "error": reason,
+                    "next_retry_at": None,
+                    "claim_owner": None,
+                    "claim_token": None,
+                    "claim_expires_at": None,
+                    "completed_at": current_time,
+                    "updated_at": current_time,
+                }
+            },
             return_document=ReturnDocument.AFTER,
         )
         if raw:
@@ -2220,6 +2698,8 @@ class MongoStorage:
                 "skipped",
                 skip_reason=reason,
             )
+            return True
+        return False
 
     def save_feed_status(self, status: Dict[str, Any]) -> None:
         now = utc_now()
@@ -2405,43 +2885,34 @@ class MongoStorage:
             return job_id, bool(getattr(update_result, "matched_count", 0))
         return job_id, True
 
-    def claim_enrichment_jobs(self, limit: int) -> List[Dict[str, Any]]:
-        output = []
-        for _ in range(max(int(limit), 0)):
-            now = utc_now()
-            raw = self._collection("enrichment_jobs").find_one_and_update(
-                {
-                    "status": {"$in": ["queued", "retry"]},
-                    "$or": [
-                        {"next_retry_at": None},
-                        {"next_retry_at": {"$exists": False}},
-                        {"next_retry_at": {"$lte": now}},
-                    ],
-                },
-                {"$set": {"status": "running", "updated_at": now}, "$inc": {"attempts": 1}},
-                sort=[
-                    ("priority_rank", DESCENDING),
-                    ("created_at", ASCENDING),
-                    ("job_id", ASCENDING),
-                ],
-                return_document=ReturnDocument.AFTER,
-            )
-            if raw is None:
-                break
-            item = from_bson_safe(raw)
-            output.append(
-                {
-                    "job_id": item["job_id"],
-                    "observable_type": item["observable_type"],
-                    "observable_value": item["observable_value"],
-                    "session_id": item.get("session_id"),
-                    "priority": item.get("priority", "normal"),
-                    "priority_reason": item.get("priority_reason"),
-                    "payload": dict(item.get("payload") or {}),
-                    "attempts": int(item.get("attempts") or 0),
-                }
-            )
-        return output
+    def claim_enrichment_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        rows = self.claim_jobs(
+            "enrichment", owner, limit, lease_seconds, max_attempts, now=now
+        )
+        return [
+            {
+                "job_id": item["job_id"],
+                "observable_type": item["observable_type"],
+                "observable_value": item["observable_value"],
+                "session_id": item.get("session_id"),
+                "priority": item.get("priority", "normal"),
+                "priority_reason": item.get("priority_reason"),
+                "payload": dict(item.get("payload") or {}),
+                "attempts": int(item.get("attempts") or 0),
+                "claim_owner": item["claim_owner"],
+                "claim_token": item["claim_token"],
+                "claim_expires_at": item["claim_expires_at"],
+            }
+            for item in rows
+        ]
 
     def reprioritize_enrichment_jobs(
         self,
@@ -2490,36 +2961,62 @@ class MongoStorage:
             )
         return int(getattr(result, "matched_count", 0) or 0)
 
-    def complete_enrichment_job(self, job_id: str) -> None:
-        self._collection("enrichment_jobs").update_one(
-            {"job_id": job_id},
+    def complete_enrichment_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
+        result = self._collection("enrichment_jobs").update_one(
+            {
+                "job_id": job_id,
+                "status": "running",
+                "claim_owner": owner,
+                "claim_token": token,
+                "claim_expires_at": {"$gt": current_time},
+            },
             {
                 "$set": {
                     "status": "succeeded",
                     "error": None,
                     "next_retry_at": None,
-                    "updated_at": utc_now(),
+                    "claim_owner": None,
+                    "claim_token": None,
+                    "claim_expires_at": None,
+                    "completed_at": current_time,
+                    "updated_at": current_time,
                 }
             },
         )
+        return bool(getattr(result, "matched_count", 0))
 
     def fail_enrichment_job(
         self,
         job_id: str,
-        error: str,
-        retry: bool = False,
-        retry_seconds: float = 300.0,
-    ) -> None:
-        self._collection("enrichment_jobs").update_one(
-            {"job_id": job_id},
-            {
-                "$set": {
-                    "status": "retry" if retry else "failed",
-                    "error": error,
-                    "next_retry_at": _retry_at(retry_seconds) if retry else None,
-                    "updated_at": utc_now(),
-                }
-            },
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        return self.fail_job(
+            "enrichment",
+            job_id,
+            owner,
+            token,
+            error_code,
+            error_type,
+            retryable,
+            max_attempts,
+            retry_delay_seconds,
+            now=now,
         )
 
     def record_observable_sighting(self, sighting: Dict[str, Any]) -> str:
@@ -2685,48 +3182,85 @@ class MongoStorage:
             )
         return job_id, inserted
 
-    def claim_threat_hunt_jobs(self, limit: int) -> List[Dict[str, Any]]:
+    def claim_threat_hunt_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
         output = []
-        for _ in range(max(int(limit), 0)):
-            raw = self._collection("threat_hunt_jobs").find_one_and_update(
-                {"status": {"$in": ["queued", "retry"]}},
-                {"$set": {"status": "running", "updated_at": utc_now()}, "$inc": {"attempts": 1}},
-                sort=[("created_at", ASCENDING), ("job_id", ASCENDING)],
-                return_document=ReturnDocument.AFTER,
-            )
-            if raw is None:
-                break
+        for raw in self.claim_jobs(
+            "threat_hunt", owner, limit, lease_seconds, max_attempts, now=now
+        ):
             item = from_bson_safe(raw)
             item["payload"] = dict(item.get("payload") or {})
             item["result"] = dict(item.get("result") or {})
             output.append(dict(item))
         return output
 
-    def complete_threat_hunt_job(self, job_id: str, result: Dict[str, Any]) -> None:
-        self._collection("threat_hunt_jobs").update_one(
-            {"job_id": job_id},
+    def complete_threat_hunt_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        result: Dict[str, Any],
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
+        update = self._collection("threat_hunt_jobs").update_one(
+            {
+                "job_id": job_id,
+                "status": "running",
+                "claim_owner": owner,
+                "claim_token": token,
+                "claim_expires_at": {"$gt": current_time},
+            },
             {
                 "$set": to_bson_safe(
                     {
                         "status": "succeeded",
                         "result": result,
                         "error": None,
-                        "updated_at": utc_now(),
+                        "next_retry_at": None,
+                        "claim_owner": None,
+                        "claim_token": None,
+                        "claim_expires_at": None,
+                        "completed_at": current_time,
+                        "updated_at": current_time,
                     }
                 )
             },
         )
+        return bool(getattr(update, "matched_count", 0))
 
-    def fail_threat_hunt_job(self, job_id: str, error: str, retry: bool = False) -> None:
-        self._collection("threat_hunt_jobs").update_one(
-            {"job_id": job_id},
-            {
-                "$set": {
-                    "status": "retry" if retry else "failed",
-                    "error": error,
-                    "updated_at": utc_now(),
-                }
-            },
+    def fail_threat_hunt_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        return self.fail_job(
+            "threat_hunt",
+            job_id,
+            owner,
+            token,
+            error_code,
+            error_type,
+            retryable,
+            max_attempts,
+            retry_delay_seconds,
+            now=now,
         )
 
     def find_sessions_by_observable(

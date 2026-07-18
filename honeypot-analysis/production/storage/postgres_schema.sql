@@ -94,9 +94,27 @@ CREATE TABLE IF NOT EXISTS analysis_jobs (
     report_id TEXT,
     error TEXT,
     attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    claim_owner TEXT,
+    claim_token UUID,
+    claim_expires_at TIMESTAMPTZ,
+    last_error_code TEXT,
+    last_error_type TEXT,
+    last_error_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS claim_owner TEXT;
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS claim_token UUID;
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS last_error_code TEXT;
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS last_error_type TEXT;
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_analysis_jobs_claimable
+    ON analysis_jobs(status, next_retry_at, claim_expires_at, created_at);
 
 CREATE TABLE IF NOT EXISTS reports (
     report_id TEXT PRIMARY KEY,
@@ -153,11 +171,29 @@ CREATE TABLE IF NOT EXISTS threat_hunt_jobs (
     result_json JSONB,
     payload_json JSONB NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    claim_owner TEXT,
+    claim_token UUID,
+    claim_expires_at TIMESTAMPTZ,
+    last_error_code TEXT,
+    last_error_type TEXT,
+    last_error_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
     error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (session_id, observable_type, observable_value)
 );
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS claim_owner TEXT;
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS claim_token UUID;
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS last_error_code TEXT;
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS last_error_type TEXT;
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+ALTER TABLE threat_hunt_jobs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_threat_hunt_jobs_claimable
+    ON threat_hunt_jobs(status, next_retry_at, claim_expires_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_threat_hunt_jobs_status
     ON threat_hunt_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_threat_hunt_jobs_observable
@@ -250,6 +286,13 @@ CREATE TABLE IF NOT EXISTS enrichment_jobs (
     payload_json JSONB NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     next_retry_at TIMESTAMPTZ,
+    claim_owner TEXT,
+    claim_token UUID,
+    claim_expires_at TIMESTAMPTZ,
+    last_error_code TEXT,
+    last_error_type TEXT,
+    last_error_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
     error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -261,6 +304,15 @@ ALTER TABLE enrichment_jobs
     ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE enrichment_jobs
     ADD COLUMN IF NOT EXISTS priority_reason TEXT;
+ALTER TABLE enrichment_jobs ADD COLUMN IF NOT EXISTS claim_owner TEXT;
+ALTER TABLE enrichment_jobs ADD COLUMN IF NOT EXISTS claim_token UUID;
+ALTER TABLE enrichment_jobs ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+ALTER TABLE enrichment_jobs ADD COLUMN IF NOT EXISTS last_error_code TEXT;
+ALTER TABLE enrichment_jobs ADD COLUMN IF NOT EXISTS last_error_type TEXT;
+ALTER TABLE enrichment_jobs ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+ALTER TABLE enrichment_jobs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_enrichment_jobs_claimable
+    ON enrichment_jobs(status, next_retry_at, claim_expires_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_enrichment_jobs_priority
     ON enrichment_jobs(status, priority, next_retry_at, created_at);
 

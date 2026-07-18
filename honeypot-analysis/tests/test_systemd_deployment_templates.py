@@ -120,3 +120,8 @@ def test_example_config_documents_event_processing_defaults() -> None:
     assert config["worker_leader_lease_seconds"] == 90.0
     assert config["worker_leader_heartbeat_seconds"] == 10.0
     assert config["active_session_recovery_limit"] == 10_000
+    assert config["job_lease_seconds"] == 600.0
+    assert config["job_lease_heartbeat_seconds"] == 60.0
+    assert config["job_retry_base_seconds"] == 30.0
+    assert config["job_retry_max_seconds"] == 1800.0
+    assert config["threat_hunt_max_attempts"] == 3

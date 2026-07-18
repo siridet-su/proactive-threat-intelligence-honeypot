@@ -263,6 +263,7 @@ class FakeCollection:
         query: Mapping[str, Any],
         replacement: Mapping[str, Any],
         upsert: bool = False,
+        **kwargs: Any,
     ) -> FakeResult:
         for identifier, existing in list(self.documents.items()):
             if _matches(existing, query):
@@ -360,8 +361,10 @@ class FakeDatabase:
 
 
 class FakeSession:
-    def __init__(self, lock: threading.RLock):
+    def __init__(self, lock: threading.RLock, database: FakeDatabase | None = None):
         self._lock = lock
+        self._database = database
+        self._snapshot: dict[str, dict[Any, dict[str, Any]]] | None = None
         self.in_transaction = False
 
     def __enter__(self) -> "FakeSession":
@@ -373,30 +376,42 @@ class FakeSession:
 
     def start_transaction(self) -> None:
         self._lock.acquire()
+        if self._database is not None:
+            self._snapshot = {
+                name: copy.deepcopy(collection.documents)
+                for name, collection in self._database.collections.items()
+            }
         self.in_transaction = True
 
     def commit_transaction(self) -> None:
         if self.in_transaction:
+            self._snapshot = None
             self.in_transaction = False
             self._lock.release()
 
     def abort_transaction(self) -> None:
         if self.in_transaction:
+            if self._database is not None and self._snapshot is not None:
+                for name in set(self._database.collections) | set(self._snapshot):
+                    collection = self._database[name]
+                    collection.documents = copy.deepcopy(self._snapshot.get(name, {}))
+            self._snapshot = None
             self.in_transaction = False
             self._lock.release()
 
 
 class FakeClient:
-    def __init__(self):
+    def __init__(self, database: FakeDatabase | None = None):
         self._transaction_lock = threading.RLock()
+        self._database = database
 
     def start_session(self) -> FakeSession:
-        return FakeSession(self._transaction_lock)
+        return FakeSession(self._transaction_lock, self._database)
 
 
 def make_storage() -> tuple[MongoStorage, FakeDatabase]:
     database = FakeDatabase()
-    client = FakeClient()
+    client = FakeClient(database)
     storage = MongoStorage(
         "mongodb://unit-test.invalid/honeypot_test",
         "honeypot_test",
@@ -671,13 +686,13 @@ def test_idempotent_events_atomic_claims_and_session_counts() -> None:
             {"session_id": session_id, "src_ip": "8.8.8.8"}
         )
 
-    first_claim = storage.claim_analysis_jobs(1)
-    second_claim = storage.claim_analysis_jobs(10)
+    first_claim = storage.claim_analysis_jobs("analysis-a", 1, 30, 3)
+    second_claim = storage.claim_analysis_jobs("analysis-b", 10, 30, 3)
     assert len(first_claim) == 1
     assert len(second_claim) == 1
     assert first_claim[0]["job_id"] != second_claim[0]["job_id"]
     assert first_claim[0]["attempts"] == second_claim[0]["attempts"] == 1
-    assert storage.claim_analysis_jobs(10) == []
+    assert storage.claim_analysis_jobs("analysis-c", 10, 30, 3) == []
     assert storage.count_sessions() == 2
     assert storage.count_sessions(ended_only=True) == 1
     assert storage.count_sessions(external_only=True) == 2
@@ -1979,7 +1994,7 @@ def test_priority_claim_sighting_deduplication_and_webhook_idempotency() -> None
         priority="urgent",
         priority_reason="confirmed attack",
     )
-    claimed = storage.claim_enrichment_jobs(2)
+    claimed = storage.claim_enrichment_jobs("enrichment-a", 2, 30, 3)
     assert [item["job_id"] for item in claimed] == [low_id, high_id]
     assert claimed[0]["priority"] == "urgent"
     assert claimed[0]["priority_reason"] == "confirmed attack"
@@ -2032,9 +2047,12 @@ def test_critical_entity_parity_across_reports_predictions_campaigns_and_feedbac
     job_id = storage.enqueue_analysis_job(
         {"session_id": "session-report", "src_ip": "8.8.4.4"}
     )
-    assert storage.claim_analysis_jobs(1)[0]["job_id"] == job_id
+    claim = storage.claim_analysis_jobs("analysis-a", 1, 30, 3)[0]
+    assert claim["job_id"] == job_id
     report_id = storage.complete_analysis_job(
         job_id,
+        claim["claim_owner"],
+        claim["claim_token"],
         {"session_id": "session-report", "summary": {"severity": "high"}},
     )
     reports = storage.list_rows("reports")

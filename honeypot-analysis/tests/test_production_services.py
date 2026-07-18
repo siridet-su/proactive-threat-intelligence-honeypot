@@ -7039,7 +7039,9 @@ def test_analysis_worker_resolves_job_when_fallback_redaction_fails(
         jobs = storage.list_rows("analysis_jobs")
         assert len(jobs) == 1
         assert jobs[0]["status"] == "failed"
-        assert "fallback report failed" in jobs[0]["error"]
+        assert jobs[0]["error"] == "job_invalid:ValidationError"
+        assert jobs[0]["last_error_code"] == "job_invalid"
+        assert jobs[0]["last_error_type"] == "ValidationError"
         assert secret not in jobs[0]["error"]
         assert storage.list_rows("reports") == []
         assert secret not in capsys.readouterr().out
@@ -7320,7 +7322,7 @@ def test_enrichment_jobs_claim_urgent_priority_first() -> None:
             priority_reason="unit predictive alert",
         )
 
-        jobs = storage.claim_enrichment_jobs(2)
+        jobs = storage.claim_enrichment_jobs("priority-test", 2, 30, 3)
         assert [job["observable_value"] for job in jobs] == ["203.0.113.11", "203.0.113.10"]
         assert jobs[0]["priority"] == "urgent"
         assert jobs[0]["priority_reason"] == "unit predictive alert"

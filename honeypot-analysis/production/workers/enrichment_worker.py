@@ -17,6 +17,12 @@ from production.enrichment.enrichment_providers import (
 from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import utc_now
 from production.storage import open_storage
+from production.workers.job_lifecycle import (
+    JobLeaseHeartbeat,
+    job_failure_identity,
+    job_retry_delay,
+    new_job_owner,
+)
 
 
 class EnrichmentWorker:
@@ -26,6 +32,7 @@ class EnrichmentWorker:
         self.config = config
         self.storage = open_storage(config.database_url)
         self.providers = providers if providers is not None else build_default_providers(config)
+        self.worker_owner = new_job_owner("enrichment")
 
     def _run_providers(self, observable_type: str, observable_value: str) -> List[ProviderResult]:
         results: List[ProviderResult] = []
@@ -54,49 +61,74 @@ class EnrichmentWorker:
         return results
 
     def process_once(self) -> int:
-        jobs = self.storage.claim_enrichment_jobs(self.config.enrichment_batch_size)
         processed = 0
-        for job in jobs:
+        for _ in range(self.config.enrichment_batch_size):
+            jobs = self.storage.claim_enrichment_jobs(
+                self.worker_owner,
+                1,
+                self.config.job_lease_seconds,
+                self.config.enrichment_max_attempts,
+            )
+            if not jobs:
+                break
+            job = jobs[0]
             observable_type = job["observable_type"]
             observable_value = job["observable_value"]
-            try:
-                results = self._run_providers(observable_type, observable_value)
-                payload, provider_status, expires_at = merge_provider_results(
-                    observable_type,
-                    observable_value,
-                    results,
-                    default_ttl_seconds=self.config.enrichment_ttl_seconds,
-                )
-                self.storage.save_enrichment_record(
-                    observable_type,
-                    observable_value,
-                    payload,
-                    provider_status,
-                    expires_at=expires_at,
-                )
-                self.storage.complete_enrichment_job(job["job_id"])
-                processed += 1
-            except Exception as exc:
-                retry = int(job["attempts"]) < self.config.enrichment_max_attempts
-                self.storage.fail_enrichment_job(
-                    job["job_id"],
-                    redact_exception_for_log(exc),
-                    retry=retry,
-                    retry_seconds=self.config.enrichment_retry_seconds,
-                )
-                print(
-                    json.dumps(
-                        {
-                            "service": "enrichment_worker",
-                            "job_id": job["job_id"],
-                            "status": "retry" if retry else "failed",
-                            "error": redact_exception_for_log(exc),
-                            "timestamp": utc_now(),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
+            with JobLeaseHeartbeat(self.storage, self.config, "enrichment", job) as heartbeat:
+                try:
+                    results = self._run_providers(observable_type, observable_value)
+                    payload, provider_status, expires_at = merge_provider_results(
+                        observable_type,
+                        observable_value,
+                        results,
+                        default_ttl_seconds=self.config.enrichment_ttl_seconds,
+                    )
+                    self.storage.save_enrichment_record(
+                        observable_type,
+                        observable_value,
+                        payload,
+                        provider_status,
+                        expires_at=expires_at,
+                    )
+                    if any(result.status == "error" for result in results):
+                        # Preserve per-provider status in the cache, but keep the
+                        # durable job retryable instead of declaring a partial
+                        # provider outage to be complete enrichment success.
+                        raise ConnectionError("one or more enrichment providers failed")
+                    heartbeat.check(renew=True)
+                    completed = self.storage.complete_enrichment_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                    )
+                    processed += int(completed)
+                except Exception as exc:
+                    error_code, error_type, retryable = job_failure_identity(
+                        "enrichment", exc
+                    )
+                    status = self.storage.fail_enrichment_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                        error_code,
+                        error_type,
+                        retryable,
+                        self.config.enrichment_max_attempts,
+                        job_retry_delay(self.config, int(job.get("attempts") or 1)),
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "service": "enrichment_worker",
+                                "job_id": job["job_id"],
+                                "status": status,
+                                "error": redact_exception_for_log(exc),
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
         return processed
 
     def run_forever(self) -> None:

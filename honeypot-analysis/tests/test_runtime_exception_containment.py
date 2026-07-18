@@ -119,25 +119,50 @@ def test_threat_hunt_failure_persistence_does_not_render_exception_arguments(mon
         def __init__(self) -> None:
             self.failure = None
 
-        def claim_threat_hunt_jobs(self, _limit):
-            return [{"job_id": "job-1", "attempts": 1}]
+        def claim_threat_hunt_jobs(self, owner, _limit, _lease, _attempts):
+            return [{
+                "job_id": "job-1",
+                "attempts": 1,
+                "claim_owner": owner,
+                "claim_token": "00000000-0000-4000-8000-000000000001",
+            }]
 
-        def fail_threat_hunt_job(self, job_id, error, *, retry):
-            self.failure = {"job_id": job_id, "error": error, "retry": retry}
+        def fail_threat_hunt_job(
+            self, job_id, owner, token, error_code, error_type,
+            retryable, max_attempts, retry_delay,
+        ):
+            self.failure = {
+                "job_id": job_id,
+                "owner": owner,
+                "token": token,
+                "error_code": error_code,
+                "error_type": error_type,
+                "retryable": retryable,
+                "max_attempts": max_attempts,
+                "retry_delay": retry_delay,
+            }
+            return "retry_scheduled"
 
     storage = Storage()
     worker = object.__new__(ThreatHuntWorker)
-    worker.config = SimpleNamespace(threat_hunt_batch_size=1)
+    worker.config = SimpleNamespace(
+        threat_hunt_batch_size=1,
+        threat_hunt_max_attempts=3,
+        job_lease_seconds=60,
+        job_lease_heartbeat_seconds=20,
+        job_retry_base_seconds=5,
+        job_retry_max_seconds=30,
+    )
     worker.policy = {"enabled": True}
     worker.storage = storage
+    worker.worker_owner = "threat-hunt-worker:test"
     monkeypatch.setattr(worker, "_process_job", _raise_runtime_error)
 
     assert worker.process_once() == 0
-    assert storage.failure == {
-        "job_id": "job-1",
-        "error": "RuntimeError: operation_failed",
-        "retry": True,
-    }
+    assert storage.failure["job_id"] == "job-1"
+    assert storage.failure["error_code"] == "threat_hunt_failed"
+    assert storage.failure["error_type"] == "RuntimeError"
+    assert storage.failure["retryable"] is True
     assert BARE_SENTINEL not in json.dumps(storage.failure)
 
 

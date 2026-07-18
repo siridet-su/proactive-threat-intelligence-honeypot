@@ -18,6 +18,11 @@ def test_event_processing_config_defaults_are_safe() -> None:
     assert config.worker_leader_lease_seconds == 90.0
     assert config.worker_leader_heartbeat_seconds == 10.0
     assert config.active_session_recovery_limit == 10_000
+    assert config.job_lease_seconds == 600.0
+    assert config.job_lease_heartbeat_seconds == 60.0
+    assert config.job_retry_base_seconds == 30.0
+    assert config.job_retry_max_seconds == 1800.0
+    assert config.threat_hunt_max_attempts == 3
 
 
 def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -30,6 +35,11 @@ def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPat
         "WORKER_LEADER_LEASE_SECONDS": "150.5",
         "WORKER_LEADER_HEARTBEAT_SECONDS": "15.5",
         "ACTIVE_SESSION_RECOVERY_LIMIT": "4321",
+        "JOB_LEASE_SECONDS": "240.5",
+        "JOB_LEASE_HEARTBEAT_SECONDS": "20.5",
+        "JOB_RETRY_BASE_SECONDS": "4.5",
+        "JOB_RETRY_MAX_SECONDS": "90.5",
+        "THREAT_HUNT_MAX_ATTEMPTS": "6",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -44,6 +54,11 @@ def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPat
     assert config.worker_leader_lease_seconds == 150.5
     assert config.worker_leader_heartbeat_seconds == 15.5
     assert config.active_session_recovery_limit == 4321
+    assert config.job_lease_seconds == 240.5
+    assert config.job_lease_heartbeat_seconds == 20.5
+    assert config.job_retry_base_seconds == 4.5
+    assert config.job_retry_max_seconds == 90.5
+    assert config.threat_hunt_max_attempts == 6
 
 
 def test_event_processing_config_loads_config_file(tmp_path) -> None:
@@ -59,6 +74,11 @@ def test_event_processing_config_loads_config_file(tmp_path) -> None:
                 "worker_leader_lease_seconds": 120.0,
                 "worker_leader_heartbeat_seconds": 12.0,
                 "active_session_recovery_limit": 7654,
+                "job_lease_seconds": 300.0,
+                "job_lease_heartbeat_seconds": 30.0,
+                "job_retry_base_seconds": 6.0,
+                "job_retry_max_seconds": 120.0,
+                "threat_hunt_max_attempts": 8,
             }
         ),
         encoding="utf-8",
@@ -74,6 +94,11 @@ def test_event_processing_config_loads_config_file(tmp_path) -> None:
     assert config.worker_leader_lease_seconds == 120.0
     assert config.worker_leader_heartbeat_seconds == 12.0
     assert config.active_session_recovery_limit == 7654
+    assert config.job_lease_seconds == 300.0
+    assert config.job_lease_heartbeat_seconds == 30.0
+    assert config.job_retry_base_seconds == 6.0
+    assert config.job_retry_max_seconds == 120.0
+    assert config.threat_hunt_max_attempts == 8
 
 
 @pytest.mark.parametrize(
@@ -92,6 +117,11 @@ def test_event_processing_config_loads_config_file(tmp_path) -> None:
         ("event_retry_base_seconds", 301.0),
         ("active_session_recovery_limit", 0),
         ("active_session_recovery_limit", True),
+        ("job_lease_seconds", 0),
+        ("job_lease_heartbeat_seconds", 600.0),
+        ("job_retry_base_seconds", 1801.0),
+        ("threat_hunt_max_attempts", 0),
+        ("threat_hunt_max_attempts", True),
     ],
 )
 def test_event_processing_config_rejects_invalid_file_values(
@@ -118,6 +148,10 @@ def test_event_processing_config_rejects_invalid_file_values(
         ("WORKER_LEADER_HEARTBEAT_SECONDS", "90"),
         ("WORKER_LEADER_LEASE_SECONDS", "79"),
         ("ACTIVE_SESSION_RECOVERY_LIMIT", "0"),
+        ("JOB_LEASE_SECONDS", "0"),
+        ("JOB_LEASE_HEARTBEAT_SECONDS", "600"),
+        ("JOB_RETRY_BASE_SECONDS", "1801"),
+        ("THREAT_HUNT_MAX_ATTEMPTS", "0"),
     ],
 )
 def test_event_processing_config_rejects_invalid_environment_values(

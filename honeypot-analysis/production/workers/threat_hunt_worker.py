@@ -19,6 +19,12 @@ from production.correlation.observable_sightings import extract_session_observab
 from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, utc_now
 from production.storage import open_storage
+from production.workers.job_lifecycle import (
+    JobLeaseHeartbeat,
+    job_failure_identity,
+    job_retry_delay,
+    new_job_owner,
+)
 
 
 SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -203,6 +209,7 @@ class ThreatHuntWorker:
         self.config = config
         self.policy = _policy(config)
         self.storage = open_storage(config.database_url)
+        self.worker_owner = new_job_owner("threat-hunt")
 
     def _alert_payload(
         self,
@@ -313,21 +320,42 @@ class ThreatHuntWorker:
     def process_once(self) -> int:
         if not self.policy.get("enabled", True):
             return 0
-        jobs = self.storage.claim_threat_hunt_jobs(self.config.threat_hunt_batch_size)
         processed = 0
-        for job in jobs:
-            try:
-                result = self._process_job(job)
-            except Exception as exc:
-                retry = int(job.get("attempts") or 0) < 3
-                self.storage.fail_threat_hunt_job(
-                    job.get("job_id", ""),
-                    redact_exception_for_log(exc),
-                    retry=retry,
-                )
-                continue
-            self.storage.complete_threat_hunt_job(job.get("job_id", ""), result)
-            processed += 1
+        for _ in range(self.config.threat_hunt_batch_size):
+            jobs = self.storage.claim_threat_hunt_jobs(
+                self.worker_owner,
+                1,
+                self.config.job_lease_seconds,
+                self.config.threat_hunt_max_attempts,
+            )
+            if not jobs:
+                break
+            job = jobs[0]
+            with JobLeaseHeartbeat(self.storage, self.config, "threat_hunt", job) as heartbeat:
+                try:
+                    result = self._process_job(job)
+                    heartbeat.check(renew=True)
+                    completed = self.storage.complete_threat_hunt_job(
+                        job.get("job_id", ""),
+                        job["claim_owner"],
+                        job["claim_token"],
+                        result,
+                    )
+                    processed += int(completed)
+                except Exception as exc:
+                    error_code, error_type, retryable = job_failure_identity(
+                        "threat_hunt", exc
+                    )
+                    self.storage.fail_threat_hunt_job(
+                        job.get("job_id", ""),
+                        job["claim_owner"],
+                        job["claim_token"],
+                        error_code,
+                        error_type,
+                        retryable,
+                        self.config.threat_hunt_max_attempts,
+                        job_retry_delay(self.config, int(job.get("attempts") or 1)),
+                    )
         return processed
 
     def enqueue_existing_sessions(self, limit: int = 1000, ended_only: bool = True) -> Dict[str, Any]:

@@ -176,8 +176,13 @@ class ProductionConfig:
     event_retry_max_seconds: float = 300.0
     worker_leader_lease_seconds: float = 90.0
     worker_leader_heartbeat_seconds: float = 10.0
+    job_lease_seconds: float = 600.0
+    job_lease_heartbeat_seconds: float = 60.0
+    job_retry_base_seconds: float = 30.0
+    job_retry_max_seconds: float = 1800.0
     threat_hunt_batch_size: int = 20
     threat_hunt_poll_seconds: float = 10.0
+    threat_hunt_max_attempts: int = 3
     analysis_batch_size: int = 1
     analysis_max_attempts: int = 3
     analysis_max_tokens: int = 4000
@@ -524,6 +529,10 @@ class ProductionConfig:
             "event_retry_max_seconds": self.event_retry_max_seconds,
             "worker_leader_lease_seconds": self.worker_leader_lease_seconds,
             "worker_leader_heartbeat_seconds": self.worker_leader_heartbeat_seconds,
+            "job_lease_seconds": self.job_lease_seconds,
+            "job_lease_heartbeat_seconds": self.job_lease_heartbeat_seconds,
+            "job_retry_base_seconds": self.job_retry_base_seconds,
+            "job_retry_max_seconds": self.job_retry_max_seconds,
         }
         for name, value in positive_durations.items():
             if (
@@ -571,6 +580,21 @@ class ProductionConfig:
                 "event_retry_max_seconds must be greater than or equal to "
                 "event_retry_base_seconds"
             )
+        if self.job_lease_heartbeat_seconds >= self.job_lease_seconds:
+            raise ValueError(
+                "job_lease_heartbeat_seconds must be less than job_lease_seconds"
+            )
+        if self.job_retry_max_seconds < self.job_retry_base_seconds:
+            raise ValueError(
+                "job_retry_max_seconds must be greater than or equal to "
+                "job_retry_base_seconds"
+            )
+        if (
+            isinstance(self.threat_hunt_max_attempts, bool)
+            or not isinstance(self.threat_hunt_max_attempts, Integral)
+            or self.threat_hunt_max_attempts < 1
+        ):
+            raise ValueError("threat_hunt_max_attempts must be an integer of at least 1")
 
     def database_settings(self) -> DatabaseSettings:
         """Validate and return the selected storage backend settings."""
@@ -741,8 +765,25 @@ class ProductionConfig:
             "WORKER_LEADER_HEARTBEAT_SECONDS",
             cfg.worker_leader_heartbeat_seconds,
         )
+        cfg.job_lease_seconds = _env_float("JOB_LEASE_SECONDS", cfg.job_lease_seconds)
+        cfg.job_lease_heartbeat_seconds = _env_float(
+            "JOB_LEASE_HEARTBEAT_SECONDS",
+            cfg.job_lease_heartbeat_seconds,
+        )
+        cfg.job_retry_base_seconds = _env_float(
+            "JOB_RETRY_BASE_SECONDS",
+            cfg.job_retry_base_seconds,
+        )
+        cfg.job_retry_max_seconds = _env_float(
+            "JOB_RETRY_MAX_SECONDS",
+            cfg.job_retry_max_seconds,
+        )
         cfg.threat_hunt_batch_size = _env_int("THREAT_HUNT_BATCH_SIZE", cfg.threat_hunt_batch_size)
         cfg.threat_hunt_poll_seconds = _env_float("THREAT_HUNT_POLL_SECONDS", cfg.threat_hunt_poll_seconds)
+        cfg.threat_hunt_max_attempts = _env_int(
+            "THREAT_HUNT_MAX_ATTEMPTS",
+            cfg.threat_hunt_max_attempts,
+        )
         cfg.analysis_batch_size = _env_int("ANALYSIS_BATCH_SIZE", cfg.analysis_batch_size)
         cfg.analysis_max_attempts = _env_int("ANALYSIS_MAX_ATTEMPTS", cfg.analysis_max_attempts)
         cfg.analysis_max_tokens = _env_int("ANALYSIS_MAX_TOKENS", cfg.analysis_max_tokens)

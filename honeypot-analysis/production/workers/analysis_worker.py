@@ -40,6 +40,12 @@ from production.utils.sensitive_data import (
 )
 from production.utils.serialization import command_observation_provenance, utc_now
 from production.storage import open_storage
+from production.workers.job_lifecycle import (
+    JobLeaseHeartbeat,
+    job_failure_identity,
+    job_retry_delay,
+    new_job_owner,
+)
 
 
 def _safe_exception_text(exc: BaseException) -> str:
@@ -593,12 +599,36 @@ class AnalysisWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
         self.storage = open_storage(config.database_url)
+        self.worker_owner = new_job_owner("analysis")
+
+    def _fail_claim(self, job: Dict[str, Any], exc: Exception, *, retryable: bool) -> str:
+        error_code, error_type, classified_retryable = job_failure_identity(
+            "analysis", exc
+        )
+        return self.storage.fail_analysis_job(
+            job["job_id"],
+            job["claim_owner"],
+            job["claim_token"],
+            error_code,
+            error_type,
+            retryable and classified_retryable,
+            self.config.analysis_max_attempts,
+            job_retry_delay(self.config, int(job.get("attempts") or 1)),
+        )
 
     async def process_once(self, coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator) -> int:
         save_feed_status(self.storage, self.config)
-        jobs = self.storage.claim_analysis_jobs(self.config.analysis_batch_size)
         processed = 0
-        for job in jobs:
+        for _ in range(self.config.analysis_batch_size):
+            jobs = self.storage.claim_analysis_jobs(
+                self.worker_owner,
+                1,
+                self.config.job_lease_seconds,
+                self.config.analysis_max_attempts,
+            )
+            if not jobs:
+                break
+            job = jobs[0]
             session_payload = job.get("session") or {}
             session_id = job.get("session_id") or session_payload.get("session_id", "unknown")
             latest_prediction_row = self.storage.get_latest_prediction_snapshot(session_id)
@@ -611,8 +641,13 @@ class AnalysisWorker:
             if self.config.analysis_skip_empty_sessions:
                 skip_reason = session_analysis_skip_reason(job["session"])
             if skip_reason:
-                self.storage.skip_analysis_job(job["job_id"], skip_reason)
-                processed += 1
+                skipped = self.storage.skip_analysis_job(
+                    job["job_id"],
+                    job["claim_owner"],
+                    job["claim_token"],
+                    skip_reason,
+                )
+                processed += int(skipped)
                 print(
                     _safe_log_json(
                         {
@@ -627,83 +662,97 @@ class AnalysisWorker:
                     flush=True,
                 )
                 continue
-            try:
-                report = await analyze_job(
-                    job,
-                    self.config,
-                    coordinator_class=coordinator_class,
-                    prediction_snapshot=latest_prediction,
-                )
-            except Exception as exc:
-                safe_error = _safe_exception_text(exc)
-                retry = int(job["attempts"]) < self.config.analysis_max_attempts
-                status = "retry" if retry else "failed"
-                if retry or not self.config.analysis_fallback_on_failure:
-                    self.storage.fail_analysis_job(
-                        job["job_id"],
-                        safe_error,
-                        retry=retry,
+            with JobLeaseHeartbeat(self.storage, self.config, "analysis", job) as heartbeat:
+                try:
+                    report = await analyze_job(
+                        job,
+                        self.config,
+                        coordinator_class=coordinator_class,
+                        prediction_snapshot=latest_prediction,
                     )
-                else:
-                    try:
-                        fallback = deterministic_baseline_report(
-                            job["session"],
-                            safe_error,
-                            prediction_snapshot=latest_prediction,
-                        )
-                        if self.config.enable_actor_attribution:
-                            fallback = enrich_report_with_actor_attribution(
+                except Exception as exc:
+                    safe_error = _safe_exception_text(exc)
+                    retry = int(job["attempts"]) < self.config.analysis_max_attempts
+                    status = "retry" if retry else "failed"
+                    if retry or not self.config.analysis_fallback_on_failure:
+                        transition = self._fail_claim(job, exc, retryable=retry)
+                        status = transition
+                    else:
+                        try:
+                            fallback = deterministic_baseline_report(
+                                job["session"],
+                                safe_error,
+                                prediction_snapshot=latest_prediction,
+                            )
+                            if self.config.enable_actor_attribution:
+                                fallback = enrich_report_with_actor_attribution(
+                                    fallback,
+                                    job["session"],
+                                    self.config.actor_db_path,
+                                )
+                            fallback = attach_report_artifacts(
                                 fallback,
                                 job["session"],
-                                self.config.actor_db_path,
+                                self.config,
                             )
-                        fallback = attach_report_artifacts(
-                            fallback,
-                            job["session"],
-                            self.config,
-                        )
-                        self.storage.complete_analysis_job(job["job_id"], fallback)
-                    except Exception as fallback_exc:
-                        safe_error = (
-                            "fallback report failed: "
-                            f"{_safe_exception_text(fallback_exc)}"
-                        )
-                        self.storage.fail_analysis_job(
-                            job["job_id"],
-                            safe_error,
-                            retry=False,
-                        )
-                        status = "fallback_failed"
-                    else:
-                        processed += 1
-                        status = "fallback_reported"
+                            heartbeat.check(renew=True)
+                            report_id = self.storage.complete_analysis_job(
+                                job["job_id"],
+                                job["claim_owner"],
+                                job["claim_token"],
+                                fallback,
+                            )
+                            if report_id is None:
+                                status = "stale_claim"
+                            else:
+                                processed += 1
+                                status = "fallback_reported"
+                        except Exception as fallback_exc:
+                            safe_error = _safe_exception_text(fallback_exc)
+                            status = self._fail_claim(
+                                job,
+                                fallback_exc,
+                                retryable=False,
+                            )
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "job_id": job["job_id"],
+                                "status": status,
+                                "error": safe_error,
+                                "timestamp": utc_now(),
+                            },
+                        ),
+                        flush=True,
+                    )
+                    continue
+                try:
+                    heartbeat.check(renew=True)
+                    report_id = self.storage.complete_analysis_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                        report,
+                    )
+                except Exception as exc:
+                    self._fail_claim(job, exc, retryable=True)
+                    continue
+                if report_id is None:
+                    continue
+                processed += 1
                 print(
                     _safe_log_json(
                         {
                             "service": "analysis_worker",
                             "job_id": job["job_id"],
-                            "status": status,
-                            "error": safe_error,
+                            "session_id": job.get("session_id", "unknown"),
+                            "status": "succeeded",
                             "timestamp": utc_now(),
                         },
                     ),
                     flush=True,
                 )
-                continue
-            self.storage.complete_analysis_job(job["job_id"], report)
-            processed += 1
-            print(
-                _safe_log_json(
-                    {
-                        "service": "analysis_worker",
-                        "job_id": job["job_id"],
-                        "session_id": job.get("session_id", "unknown"),
-                        "status": "succeeded",
-                        "timestamp": utc_now(),
-                    },
-                ),
-                flush=True,
-            )
         return processed
 
     def run_forever(self) -> None:

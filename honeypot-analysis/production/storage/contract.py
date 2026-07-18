@@ -61,6 +61,24 @@ EVENT_FAILURE_TYPES = frozenset(
     }
 )
 
+JOB_QUEUE_TABLES = {
+    "analysis": "analysis_jobs",
+    "enrichment": "enrichment_jobs",
+    "threat_hunt": "threat_hunt_jobs",
+}
+JOB_FAILURE_CODES = frozenset(
+    {
+        "analysis_failed",
+        "enrichment_failed",
+        "job_attempts_exhausted",
+        "job_dependency_unavailable",
+        "job_invalid",
+        "job_processing_failed",
+        "job_timeout",
+        "threat_hunt_failed",
+    }
+)
+
 EVENT_EFFECT_SUMMARY_KEYS = frozenset(
     {
         "analysis_job_enqueued",
@@ -117,6 +135,23 @@ def validate_event_effect_summary(
             )
         normalized[key] = value
     return normalized
+
+
+def validate_job_failure_fields(
+    queue: str,
+    error_code: str,
+    error_type: str,
+) -> tuple[str, str, str]:
+    queue_name = str(queue or "").strip()
+    if queue_name not in JOB_QUEUE_TABLES:
+        raise ValueError("queue is not a registered durable job queue")
+    code = str(error_code or "").strip()
+    failure_type = str(error_type or "").strip()
+    if code not in JOB_FAILURE_CODES:
+        raise ValueError("error_code is not a registered job failure code")
+    if failure_type not in EVENT_FAILURE_TYPES:
+        raise ValueError("error_type is not a registered job failure type")
+    return queue_name, code, failure_type
 
 
 class DatabaseConfigurationError(ValueError):
@@ -480,22 +515,106 @@ class StorageBackend(Protocol):
 
     def enqueue_analysis_job(self, session_payload: Dict[str, Any]) -> str: ...
 
-    def claim_analysis_jobs(self, limit: int) -> List[Dict[str, Any]]: ...
+    def claim_jobs(
+        self,
+        queue: str,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]: ...
+
+    def renew_job_claim(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        lease_seconds: float,
+        *,
+        now: Any = None,
+    ) -> bool: ...
+
+    def fail_job(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str: ...
+
+    def release_job_claim(
+        self,
+        queue: str,
+        job_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool: ...
+
+    def retry_failed_job(
+        self,
+        queue: str,
+        job_id: str,
+        *,
+        now: Any = None,
+    ) -> bool: ...
+
+    def job_queue_metrics(self, queue: str, *, now: Any = None) -> Dict[str, Any]: ...
+
+    def claim_analysis_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]: ...
 
     def complete_analysis_job(
         self,
         job_id: str,
+        owner: str,
+        token: str,
         report_payload: Dict[str, Any],
-    ) -> str: ...
+        *,
+        now: Any = None,
+    ) -> Optional[str]: ...
 
     def fail_analysis_job(
         self,
         job_id: str,
-        error: str,
-        retry: bool = False,
-    ) -> None: ...
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str: ...
 
-    def skip_analysis_job(self, job_id: str, reason: str) -> None: ...
+    def skip_analysis_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        reason: str,
+        *,
+        now: Any = None,
+    ) -> bool: ...
 
     def save_feed_status(self, status: Dict[str, Any]) -> None: ...
 
@@ -532,7 +651,15 @@ class StorageBackend(Protocol):
         priority_reason: str = "",
     ) -> tuple[str, bool]: ...
 
-    def claim_enrichment_jobs(self, limit: int) -> List[Dict[str, Any]]: ...
+    def claim_enrichment_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]: ...
 
     def reprioritize_enrichment_jobs(
         self,
@@ -543,15 +670,28 @@ class StorageBackend(Protocol):
         session_id: str = "",
     ) -> int: ...
 
-    def complete_enrichment_job(self, job_id: str) -> None: ...
+    def complete_enrichment_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        *,
+        now: Any = None,
+    ) -> bool: ...
 
     def fail_enrichment_job(
         self,
         job_id: str,
-        error: str,
-        retry: bool = False,
-        retry_seconds: float = 300.0,
-    ) -> None: ...
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str: ...
 
     def record_observable_sighting(self, sighting: Dict[str, Any]) -> str: ...
 
@@ -564,20 +704,39 @@ class StorageBackend(Protocol):
         payload: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, bool]: ...
 
-    def claim_threat_hunt_jobs(self, limit: int) -> List[Dict[str, Any]]: ...
+    def claim_threat_hunt_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]: ...
 
     def complete_threat_hunt_job(
         self,
         job_id: str,
+        owner: str,
+        token: str,
         result: Dict[str, Any],
-    ) -> None: ...
+        *,
+        now: Any = None,
+    ) -> bool: ...
 
     def fail_threat_hunt_job(
         self,
         job_id: str,
-        error: str,
-        retry: bool = False,
-    ) -> None: ...
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str: ...
 
     def find_sessions_by_observable(
         self,
