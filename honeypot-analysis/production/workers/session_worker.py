@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 import time
+import uuid
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -51,6 +53,7 @@ from production.correlation.session_ttp_correlation import apply_session_ttp_cor
 from production.reporting.smb_decision import RISK_ORDER, build_smb_decision_from_paths
 from production.classification.securebert_classifier import load_securebert_classifier
 from production.storage import open_storage, safe_database_label
+from production.storage.contract import EVENT_FAILURE_TYPES
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     normalize_session_source,
@@ -75,6 +78,65 @@ DEFAULT_PREDICTION_TRIGGER_EVENTIDS = [
 DEFAULT_PREDICTION_TRIGGER_PREFIXES = [
     "cowrie.command.",
 ]
+
+WORKER_LEADER_SCOPE = "session-worker"
+
+
+class WorkerError(RuntimeError):
+    """Stable, non-sensitive base class for event lifecycle failures."""
+
+
+class LeadershipLost(WorkerError):
+    """Raised when this process no longer owns the session-worker lease."""
+
+
+class LeaseExpired(WorkerError):
+    """Raised when this process can no longer renew an event claim."""
+
+
+class _EventLeaseHeartbeat:
+    """Renew a claimed event while analytical callbacks are running."""
+
+    def __init__(self, worker: "SessionWorker", row: Dict[str, Any]) -> None:
+        self.worker = worker
+        self.row = row
+        self._stop = threading.Event()
+        self._lost: Optional[type[WorkerError]] = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name="session-worker-event-heartbeat",
+            daemon=True,
+        )
+
+    def __enter__(self) -> "_EventLeaseHeartbeat":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        self._stop.set()
+        self._thread.join(timeout=max(1.0, self.worker.config.event_lease_heartbeat_seconds))
+
+    def _run(self) -> None:
+        interval = float(self.worker.config.event_lease_heartbeat_seconds)
+        while not self._stop.wait(interval):
+            try:
+                self.worker._renew_claim(self.row)
+            except LeadershipLost:
+                self._lost = LeadershipLost
+                return
+            except LeaseExpired:
+                self._lost = LeaseExpired
+                return
+            except Exception:
+                # The main processing thread performs the authoritative renewal
+                # and failure transition. Never persist or print exception text
+                # from this best-effort heartbeat thread.
+                self._lost = LeaseExpired
+                return
+
+    def check(self) -> None:
+        if self._lost is not None:
+            raise self._lost("event lifecycle lease was lost")
 
 
 def _safe_exception_text(exc: BaseException) -> str:
@@ -102,6 +164,10 @@ class SessionWorker:
         self.credential_hasher = load_credential_hmac_keyring(keyring_path)
         config.apply_environment()
         self.storage = open_storage(config.database_url)
+        self.worker_owner = f"session-worker:{uuid.uuid4()}"
+        self.worker_token = str(uuid.uuid4())
+        self._leader_held = False
+        self._current_event_effects: Optional[Dict[str, bool | int]] = None
         self.feeds = None
         self.mitre_db = None
         self.enrichment_db: Dict[str, Any] = {}
@@ -150,6 +216,117 @@ class SessionWorker:
         if not isinstance(redacted, dict):
             raise TypeError("session state redaction must return an object")
         return redacted
+
+    def _record_event_effect(self, key: str, value: bool | int = True) -> None:
+        effects = self._current_event_effects
+        if effects is None:
+            return
+        if type(value) is bool:
+            effects[key] = bool(effects.get(key, False)) or value
+            return
+        effects[key] = int(effects.get(key, 0)) + int(value)
+
+    def _ensure_leadership(self) -> bool:
+        try:
+            if self._leader_held:
+                held = self.storage.renew_worker_lease(
+                    WORKER_LEADER_SCOPE,
+                    self.worker_owner,
+                    self.worker_token,
+                    self.config.worker_leader_lease_seconds,
+                )
+            else:
+                held = self.storage.acquire_worker_lease(
+                    WORKER_LEADER_SCOPE,
+                    self.worker_owner,
+                    self.worker_token,
+                    self.config.worker_leader_lease_seconds,
+                )
+        except Exception:
+            self._leader_held = False
+            raise
+        self._leader_held = bool(held)
+        return self._leader_held
+
+    def _renew_claim(self, row: Dict[str, Any]) -> None:
+        if not self._ensure_leadership():
+            raise LeadershipLost("session worker leadership was lost")
+        renewed = self.storage.renew_event_claim(
+            row["event_id"],
+            self.worker_owner,
+            row["claim_token"],
+            self.config.event_lease_seconds,
+            leader_scope=WORKER_LEADER_SCOPE,
+            leader_token=self.worker_token,
+        )
+        if not renewed:
+            raise LeaseExpired("event claim could not be renewed")
+
+    def _event_state_checkpoint(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        session_id = str(event.get("session", "unknown"))
+        state = self.monitor._sessions.get(session_id)
+        return {
+            "session_id": session_id,
+            "session_existed": state is not None,
+            "session": deepcopy(state),
+            "stats": deepcopy(self.monitor._stats),
+            "campaign_profiles": deepcopy(self.monitor.campaign_tracker._profiles),
+            "latest_existed": session_id in self._session_latest_snapshots,
+            "latest": deepcopy(self._session_latest_snapshots.get(session_id)),
+            "history_existed": session_id in self._session_prediction_snapshots,
+            "history": deepcopy(self._session_prediction_snapshots.get(session_id)),
+        }
+
+    def _restore_event_state(self, checkpoint: Dict[str, Any]) -> None:
+        session_id = checkpoint["session_id"]
+        if checkpoint["session_existed"]:
+            self.monitor._sessions[session_id] = checkpoint["session"]
+        else:
+            self.monitor._sessions.pop(session_id, None)
+        self.monitor._stats = checkpoint["stats"]
+        self.monitor.campaign_tracker._profiles = checkpoint["campaign_profiles"]
+        if checkpoint["latest_existed"]:
+            self._session_latest_snapshots[session_id] = checkpoint["latest"]
+        else:
+            self._session_latest_snapshots.pop(session_id, None)
+        if checkpoint["history_existed"]:
+            self._session_prediction_snapshots[session_id] = checkpoint["history"]
+        else:
+            self._session_prediction_snapshots.pop(session_id, None)
+
+    def _retry_delay_seconds(self, attempts: int) -> float:
+        exponent = min(max(int(attempts) - 1, 0), 31)
+        return min(
+            float(self.config.event_retry_max_seconds),
+            float(self.config.event_retry_base_seconds) * (2**exponent),
+        )
+
+    @staticmethod
+    def _failure_identity(exc: Exception) -> tuple[str, str, bool]:
+        if isinstance(exc, LeadershipLost):
+            return "stale_leader", "LeadershipLost", True
+        if isinstance(exc, LeaseExpired):
+            return "stale_worker", "LeaseExpired", True
+        if isinstance(exc, (TypeError, ValueError)):
+            return "event_processing_invalid", "ValidationError", False
+        error_type = type(exc).__name__
+        if error_type not in EVENT_FAILURE_TYPES:
+            error_type = "Exception"
+        return "event_processing_failed", error_type, True
+
+    def close(self) -> None:
+        if not self._leader_held:
+            return
+        try:
+            self.storage.release_worker_lease(
+                WORKER_LEADER_SCOPE,
+                self.worker_owner,
+                self.worker_token,
+            )
+        except Exception:
+            pass
+        finally:
+            self._leader_held = False
 
     def _load_session_ttp_correlation_policy(self) -> Dict[str, Any]:
         if not self.config.enable_session_ttp_correlation:
@@ -456,6 +633,7 @@ class SessionWorker:
             prediction_fn=self._predict_next_for_alert,
             on_alert=self._on_alert,
             on_session_end=self._on_session_end,
+            propagate_session_end_errors=True,
             classification_policy=self.config.classification_policy,
             credential_policy=self.config.credential_policy,
             credential_hasher=self.credential_hasher,
@@ -496,6 +674,7 @@ class SessionWorker:
 
     def _on_alert(self, alert: Any) -> None:
         self.storage.store_alert(alert_payload(alert))
+        self._record_event_effect("alerts_created", 1)
 
     def _prediction_trigger_for_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Return whether a Cowrie event should create a prediction snapshot.
@@ -596,6 +775,7 @@ class SessionWorker:
                 },
             }
         )
+        self._record_event_effect("alerts_created", 1)
 
     def _maybe_store_predictive_alert(self, snapshot: Dict[str, Any]) -> None:
         alert, evaluation = evaluate_predictive_alert(snapshot, self.config.prediction_policy or {})
@@ -603,6 +783,7 @@ class SessionWorker:
         if not alert:
             return
         self.storage.store_alert(alert)
+        self._record_event_effect("alerts_created", 1)
         escalation = {
             "status": "not_attempted",
             "observable_type": "ip",
@@ -685,6 +866,7 @@ class SessionWorker:
         payload["campaign_summary"] = summary
         if summary.get("campaign_id"):
             payload["campaign_id"] = summary.get("campaign_id")
+            self._record_event_effect("campaign_updated")
         return summary
 
     def _predict_next_for_alert(self, state: Any) -> List[str]:
@@ -716,9 +898,9 @@ class SessionWorker:
         event: Dict[str, Any],
         event_id: str = "",
         trigger_info: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> bool:
         if not self.prediction_engine.enabled:
-            return
+            return False
         if hasattr(self.monitor, "_apply_session_enrichment"):
             self.monitor._apply_session_enrichment(state)
         self._apply_session_ttp_correlations(state)
@@ -742,6 +924,7 @@ class SessionWorker:
             self._maybe_store_smb_decision_alert(decision, snapshot)
         self._maybe_store_predictive_alert(snapshot)
         self.storage.save_prediction_snapshot(snapshot)
+        self._record_event_effect("prediction_saved")
         session_id = str(snapshot.get("session_id") or "")
         if session_id:
             self._session_latest_snapshots[session_id] = snapshot
@@ -756,6 +939,7 @@ class SessionWorker:
                 history_limit = 25
             if len(snapshot_history) > history_limit:
                 del snapshot_history[:-history_limit]
+        return True
 
     def _on_session_end(self, state: Any) -> None:
         attach_runtime_context(state)
@@ -764,20 +948,37 @@ class SessionWorker:
         payload["status"] = "closed"
         mark_session_outcome(payload)
         self._apply_campaign_clustering(payload, "closed")
-        record_sightings(self.storage, extract_session_observable_sightings(payload))
-        enqueue_session_observables(self.storage, payload, enabled=self.config.enable_enrichment_jobs)
+        self._record_event_effect(
+            "observable_sightings_recorded",
+            record_sightings(self.storage, extract_session_observable_sightings(payload)),
+        )
+        self._record_event_effect(
+            "enrichment_jobs_enqueued",
+            enqueue_session_observables(
+                self.storage,
+                payload,
+                enabled=self.config.enable_enrichment_jobs,
+            ),
+        )
         skip_reason = ""
         if self.config.analysis_skip_empty_sessions:
             skip_reason = session_analysis_skip_reason(payload)
         if skip_reason:
             mark_session_analysis_skipped(payload, skip_reason)
             self.storage.save_session(payload)
+            self._record_event_effect("session_saved")
             payload["threat_hunt_enqueue"] = enqueue_threat_hunts_for_session(
                 self.storage,
                 payload,
                 self.config.threat_hunt_policy,
             )
+            self._record_event_effect(
+                "threat_hunt_jobs_enqueued",
+                int(payload["threat_hunt_enqueue"].get("queued") or 0),
+            )
             self.storage.save_session(payload)
+            self._record_event_effect("session_saved")
+            self._record_event_effect("session_closed")
             print(
                 json.dumps(
                     {
@@ -793,14 +994,22 @@ class SessionWorker:
             )
             return
         job_id = self.storage.enqueue_analysis_job(payload)
+        self._record_event_effect("analysis_job_enqueued")
         mark_session_analysis_queued(payload, job_id)
         self.storage.save_session(payload)
+        self._record_event_effect("session_saved")
         payload["threat_hunt_enqueue"] = enqueue_threat_hunts_for_session(
             self.storage,
             payload,
             self.config.threat_hunt_policy,
         )
+        self._record_event_effect(
+            "threat_hunt_jobs_enqueued",
+            int(payload["threat_hunt_enqueue"].get("queued") or 0),
+        )
         self.storage.save_session(payload)
+        self._record_event_effect("session_saved")
+        self._record_event_effect("session_closed")
         self._try_generate_auto_evidence(payload)
 
     def _try_generate_auto_evidence(self, payload: Dict[str, Any]) -> None:
@@ -845,47 +1054,134 @@ class SessionWorker:
                 flush=True,
             )
 
+    def _save_active_session(self, state: Any) -> None:
+        if getattr(state, "is_ended", False):
+            return
+        self._apply_session_ttp_correlations(state)
+        payload = self._session_payload(state)
+        payload.setdefault("status", "active")
+        mark_session_outcome(payload)
+        self._apply_campaign_clustering(payload, "active")
+        self.storage.save_session(payload)
+        self._record_event_effect("session_saved")
+
     def _save_active_sessions(self) -> None:
         for state in self.monitor._sessions.values():
-            if getattr(state, "is_ended", False):
-                continue
-            self._apply_session_ttp_correlations(state)
-            payload = self._session_payload(state)
-            payload.setdefault("status", "active")
-            mark_session_outcome(payload)
-            self._apply_campaign_clustering(payload, "active")
-            self.storage.save_session(payload)
+            self._save_active_session(state)
 
     def process_unprocessed(self) -> int:
+        if not self._ensure_leadership():
+            return 0
         self._refresh_enrichment_cache()
         self._refresh_prediction_engine()
-        rows = self.storage.fetch_unprocessed_events(self.config.worker_batch_size)
         processed = 0
-        for row in rows:
-            event = row["event"]
-            record_sightings(
-                self.storage,
-                extract_event_observable_sightings(
-                    event,
-                    event_id=row["event_id"],
-                    sensor_id=row.get("sensor_id", self.config.sensor_id),
-                ),
+        attempted = 0
+        while attempted < self.config.worker_batch_size:
+            if not self._ensure_leadership():
+                break
+            rows = self.storage.claim_events(
+                self.worker_owner,
+                1,
+                self.config.event_lease_seconds,
+                max_attempts=self.config.event_max_attempts,
+                leader_scope=WORKER_LEADER_SCOPE,
+                leader_token=self.worker_token,
             )
-            enqueue_event_observables(self.storage, event, enabled=self.config.enable_enrichment_jobs)
-            self.monitor.on_event(event)
-            state = self.monitor.get_session(str(event.get("session", "unknown")))
-            trigger_info = self._prediction_trigger_for_event(event)
-            if state is not None and trigger_info.get("matched"):
-                self._save_prediction_snapshot(
-                    state,
-                    event,
-                    event_id=row["event_id"],
-                    trigger_info=trigger_info,
+            if not rows:
+                break
+            row = rows[0]
+            attempted += 1
+            event = row["event"]
+            checkpoint = self._event_state_checkpoint(event)
+            effects: Dict[str, bool | int] = {}
+            self._current_event_effects = effects
+            try:
+                with _EventLeaseHeartbeat(self, row) as heartbeat:
+                    self._record_event_effect(
+                        "observable_sightings_recorded",
+                        record_sightings(
+                            self.storage,
+                            extract_event_observable_sightings(
+                                event,
+                                event_id=row["event_id"],
+                                sensor_id=row.get("sensor_id", self.config.sensor_id),
+                            ),
+                        ),
+                    )
+                    self._record_event_effect(
+                        "enrichment_jobs_enqueued",
+                        enqueue_event_observables(
+                            self.storage,
+                            event,
+                            enabled=self.config.enable_enrichment_jobs,
+                        ),
+                    )
+                    self._renew_claim(row)
+                    heartbeat.check()
+                    self.monitor.on_event(event)
+                    self._record_event_effect("event_applied")
+                    self._renew_claim(row)
+                    heartbeat.check()
+                    state = self.monitor.get_session(str(event.get("session", "unknown")))
+                    trigger_info = self._prediction_trigger_for_event(event)
+                    if state is not None and trigger_info.get("matched"):
+                        self._save_prediction_snapshot(
+                            state,
+                            event,
+                            event_id=row["event_id"],
+                            trigger_info=trigger_info,
+                        )
+                    if state is not None and not getattr(state, "is_ended", False):
+                        self._save_active_session(state)
+                    self._renew_claim(row)
+                    heartbeat.check()
+                    if not self.storage.complete_event(
+                        row["event_id"],
+                        self.worker_owner,
+                        row["claim_token"],
+                        effects,
+                        leader_scope=WORKER_LEADER_SCOPE,
+                        leader_token=self.worker_token,
+                    ):
+                        raise LeaseExpired("event completion lost its claim")
+                processed += 1
+            except Exception as exc:
+                self._restore_event_state(checkpoint)
+                error_code, error_type, retryable = self._failure_identity(exc)
+                try:
+                    failure_status = self.storage.fail_event(
+                        row["event_id"],
+                        self.worker_owner,
+                        row["claim_token"],
+                        error_code,
+                        error_type,
+                        retryable,
+                        self.config.event_max_attempts,
+                        self._retry_delay_seconds(int(row.get("attempts") or 1)),
+                        leader_scope=WORKER_LEADER_SCOPE,
+                        leader_token=self.worker_token,
+                    )
+                except Exception:
+                    failure_status = "failure_transition_unavailable"
+                print(
+                    json.dumps(
+                        {
+                            "service": "session_worker",
+                            "event_id": row["event_id"],
+                            "event_status": failure_status,
+                            "error_code": error_code,
+                            "error_type": error_type,
+                            "attempts": int(row.get("attempts") or 1),
+                            "timestamp": utc_now(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
                 )
-            self.storage.mark_event_processed(row["event_id"])
-            processed += 1
-        if processed:
-            self._save_active_sessions()
+                if isinstance(exc, LeadershipLost):
+                    break
+            finally:
+                self._current_event_effects = None
         return processed
 
     def rebuild_from_events(self, limit: int = 100000) -> int:
@@ -915,21 +1211,24 @@ class SessionWorker:
         return len(rows)
 
     def run_forever(self) -> None:
-        while True:
-            processed = self.process_unprocessed()
-            print(
-                json.dumps(
-                    {
-                        "service": "session_worker",
-                        "processed": processed,
-                        "active_sessions": len(self.monitor._sessions),
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            time.sleep(self.config.worker_poll_seconds)
+        try:
+            while True:
+                processed = self.process_unprocessed()
+                print(
+                    json.dumps(
+                        {
+                            "service": "session_worker",
+                            "processed": processed,
+                            "active_sessions": len(self.monitor._sessions),
+                            "timestamp": utc_now(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+                time.sleep(self.config.worker_poll_seconds)
+        finally:
+            self.close()
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -944,15 +1243,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = ProductionConfig.from_env(args.config)
     worker = SessionWorker(config)
-    if args.rebuild:
-        count = worker.rebuild_from_events()
-        print(json.dumps({"service": "session_worker", "rebuilt_events": count}, sort_keys=True), flush=True)
-    if args.once:
-        processed = worker.process_unprocessed()
-        print(json.dumps({"service": "session_worker", "processed": processed}, sort_keys=True))
+    try:
+        if args.rebuild:
+            count = worker.rebuild_from_events()
+            print(json.dumps({"service": "session_worker", "rebuilt_events": count}, sort_keys=True), flush=True)
+        if args.once:
+            processed = worker.process_unprocessed()
+            print(json.dumps({"service": "session_worker", "processed": processed}, sort_keys=True))
+            return 0
+        worker.run_forever()
         return 0
-    worker.run_forever()
-    return 0
+    finally:
+        worker.close()
 
 
 if __name__ == "__main__":

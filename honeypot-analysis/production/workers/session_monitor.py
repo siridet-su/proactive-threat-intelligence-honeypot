@@ -406,6 +406,8 @@ class SessionMonitor:
                   omitted or when the callback fails.
     on_alert    : Optional callback(AlertEvent) â€” called immediately on alert.
     on_session_end : Optional callback(SessionState) â€” called when session closes.
+    propagate_session_end_errors : re-raise close callback failures so a durable
+                  queue owner can retry the event. Defaults to legacy containment.
     thresholds  : dict override (else reads from defaults below).
     classification_policy : dict override for SecureBERT/rule fallback behavior.
     credential_policy : dict override for captured credential redaction/hash behavior.
@@ -450,6 +452,7 @@ class SessionMonitor:
         prediction_fn: Optional[Callable[[SessionState], List[str]]] = None,
         on_alert: Optional[Callable[[AlertEvent], None]] = None,
         on_session_end: Optional[Callable[[SessionState], None]] = None,
+        propagate_session_end_errors: bool = False,
         thresholds: Optional[dict] = None,
         classification_policy: Optional[dict] = None,
         credential_policy: Optional[dict] = None,
@@ -463,6 +466,7 @@ class SessionMonitor:
         self.prediction_fn  = prediction_fn
         self.on_alert       = on_alert or self._default_alert_handler
         self.on_session_end = on_session_end
+        self.propagate_session_end_errors = bool(propagate_session_end_errors)
         self.thresholds     = {**self.DEFAULT_THRESHOLDS, **(thresholds or {})}
         self.classification_policy = {
             **self.DEFAULT_CLASSIFICATION_POLICY,
@@ -1330,6 +1334,8 @@ class SessionMonitor:
             try:
                 self.on_session_end(state)
             except Exception as e:
+                if self.propagate_session_end_errors:
+                    raise
                 print(f"  [Monitor] on_session_end failed: {_safe_exception_text(e)}")
 
         return alerts
