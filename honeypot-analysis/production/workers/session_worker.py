@@ -793,8 +793,10 @@ class SessionWorker:
             classification_fn=self.classifier.classify if self.classifier else None,
             prediction_fn=self._predict_next_for_alert,
             on_alert=self._on_alert,
-            on_session_end=self._on_session_end,
-            propagate_session_end_errors=True,
+            # The durable worker invokes the close stage explicitly after the
+            # final close-event prediction has been persisted. SessionMonitor
+            # retains callback support for standalone/legacy callers.
+            on_session_end=None,
             classification_policy=self.config.classification_policy,
             credential_policy=self.config.credential_policy,
             credential_hasher=self.credential_hasher,
@@ -1128,20 +1130,18 @@ class SessionWorker:
             skip_reason = session_analysis_skip_reason(payload)
         if skip_reason:
             mark_session_analysis_skipped(payload, skip_reason)
-            self.storage.save_session(payload)
-            self._record_event_effect("session_saved")
-            payload["threat_hunt_enqueue"] = enqueue_threat_hunts_for_session(
-                self.storage,
-                payload,
-                self.config.threat_hunt_policy,
+
+        # Durable close order: prediction persistence happens in the caller;
+        # persist the finalized closed session before making work visible.
+        self.storage.save_session(payload)
+        self._record_event_effect("session_saved")
+
+        if skip_reason:
+            self.storage.update_session_analysis_status(
+                str(payload.get("session_id") or ""),
+                "skipped",
+                skip_reason=skip_reason,
             )
-            self._record_event_effect(
-                "threat_hunt_jobs_enqueued",
-                int(payload["threat_hunt_enqueue"].get("queued") or 0),
-            )
-            self.storage.save_session(payload)
-            self._record_event_effect("session_saved")
-            self._record_event_effect("session_closed")
             print(
                 json.dumps(
                     {
@@ -1155,12 +1155,16 @@ class SessionWorker:
                 ),
                 flush=True,
             )
-            return
-        job_id = self.storage.enqueue_analysis_job(payload)
-        self._record_event_effect("analysis_job_enqueued")
-        mark_session_analysis_queued(payload, job_id)
-        self.storage.save_session(payload)
-        self._record_event_effect("session_saved")
+        else:
+            job_id = self.storage.enqueue_analysis_job(payload)
+            self._record_event_effect("analysis_job_enqueued")
+            mark_session_analysis_queued(payload, job_id)
+            self.storage.update_session_analysis_status(
+                str(payload.get("session_id") or ""),
+                "queued",
+                job_id=job_id,
+            )
+
         payload["threat_hunt_enqueue"] = enqueue_threat_hunts_for_session(
             self.storage,
             payload,
@@ -1173,7 +1177,8 @@ class SessionWorker:
         self.storage.save_session(payload)
         self._record_event_effect("session_saved")
         self._record_event_effect("session_closed")
-        self._try_generate_auto_evidence(payload)
+        if not skip_reason:
+            self._try_generate_auto_evidence(payload)
 
     def _try_generate_auto_evidence(self, payload: Dict[str, Any]) -> None:
         """Generate auto-evidence feedback at session close using recent prediction snapshots.
@@ -1292,6 +1297,18 @@ class SessionWorker:
                         self._recalculate_monitor_stats()
                         self._record_event_effect("event_applied")
                         if state.is_ended:
+                            trigger_info = self._prediction_trigger_for_event(event)
+                            latest = self._session_latest_snapshots.get(session_id) or {}
+                            if (
+                                trigger_info.get("matched")
+                                and latest.get("event_id") != row["event_id"]
+                            ):
+                                self._save_prediction_snapshot(
+                                    state,
+                                    event,
+                                    event_id=row["event_id"],
+                                    trigger_info=trigger_info,
+                                )
                             self._on_session_end(state)
                         else:
                             self._save_active_session(state)
@@ -1309,8 +1326,11 @@ class SessionWorker:
                                 event_id=row["event_id"],
                                 trigger_info=trigger_info,
                             )
-                        if state is not None and not getattr(state, "is_ended", False):
-                            self._save_active_session(state)
+                        if state is not None:
+                            if getattr(state, "is_ended", False):
+                                self._on_session_end(state)
+                            else:
+                                self._save_active_session(state)
                     self._renew_claim(row)
                     heartbeat.check()
                     if not self.storage.complete_event(

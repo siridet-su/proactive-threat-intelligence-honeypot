@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 from production.storage.backend import StorageError
 from production.storage.contract import (
     JOB_QUEUE_TABLES,
+    SESSION_ANALYSIS_FIELDS,
     validate_event_effect_summary,
     validate_event_failure_fields,
     validate_job_failure_fields,
@@ -2081,9 +2082,19 @@ class MongoStorage:
         payload["session_source"] = session_source
         payload["is_external_source"] = external
         session_id = str(payload.get("session_id") or "unknown")
-        self._replace(
-            "sessions",
-            {
+        collection = self._collection("sessions")
+
+        def operation(session: Any) -> None:
+            existing = collection.find_one({"session_id": session_id}, session=session)
+            revision = int((existing or {}).get("revision") or 0)
+            if existing:
+                stored_payload = dict(existing.get("payload") or {})
+                for key in SESSION_ANALYSIS_FIELDS:
+                    if key in stored_payload:
+                        payload[key] = stored_payload[key]
+                    else:
+                        payload.pop(key, None)
+            document = to_bson_safe({
                 "_id": session_id,
                 "session_id": session_id,
                 "src_ip": payload.get("src_ip", "unknown"),
@@ -2092,9 +2103,26 @@ class MongoStorage:
                 "session_source": session_source,
                 "is_external_source": external,
                 "payload": payload,
+                "revision": revision + 1,
                 "updated_at": utc_now(),
-            },
-        )
+                "schema_version": MONGODB_SCHEMA_VERSION,
+            })
+            query: Dict[str, Any] = {"_id": session_id}
+            if existing:
+                if "revision" in existing:
+                    query["revision"] = revision
+                else:
+                    query["revision"] = {"$exists": False}
+            result = collection.replace_one(
+                query,
+                document,
+                upsert=not bool(existing),
+                session=session,
+            )
+            if existing and not getattr(result, "matched_count", 0):
+                raise StorageError("session revision changed during save")
+
+        self._run_fenced_transaction(operation)
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         if not session_id:
@@ -2111,6 +2139,7 @@ class MongoStorage:
         session_id: str,
         status: str,
         *,
+        job_id: str = "",
         report_id: str = "",
         error: str = "",
         skip_reason: str = "",
@@ -2124,6 +2153,8 @@ class MongoStorage:
             "updated_at": now,
         }
         unset_values: Dict[str, Any] = {}
+        if job_id:
+            set_values["payload.analysis_job_id"] = job_id
         if report_id:
             set_values["payload.report_id"] = report_id
         if error:
@@ -2137,7 +2168,8 @@ class MongoStorage:
         # The keys here are intentional MongoDB dotted update paths.  Encode
         # their values, not the controlled path names themselves.
         update: Dict[str, Any] = {
-            "$set": {key: to_bson_safe(value) for key, value in set_values.items()}
+            "$set": {key: to_bson_safe(value) for key, value in set_values.items()},
+            "$inc": {"revision": 1},
         }
         if unset_values:
             update["$unset"] = unset_values
@@ -2618,11 +2650,29 @@ class MongoStorage:
                 },
                 session=session,
             )
-            return bool(getattr(result, "matched_count", 0))
+            if not getattr(result, "matched_count", 0):
+                return False
+            self._collection("sessions").update_one(
+                {"session_id": str(session_id)},
+                {
+                    "$set": {
+                        "payload.analysis_status": "succeeded",
+                        "payload.analysis_updated_at": current_time,
+                        "payload.report_id": report_id,
+                        "updated_at": current_time,
+                    },
+                    "$unset": {
+                        "payload.analysis_error": "",
+                        "payload.analysis_skip_reason": "",
+                    },
+                    "$inc": {"revision": 1},
+                },
+                session=session,
+            )
+            return True
 
         if not self._run_fenced_transaction(operation):
             return None
-        self.update_session_analysis_status(str(session_id), "succeeded", report_id=report_id)
         return report_id
 
     def fail_analysis_job(

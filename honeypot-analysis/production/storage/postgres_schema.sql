@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_source TEXT NOT NULL DEFAULT 'unknown_legacy'
         CHECK (session_source IN ('production_live', 'e2e_test', 'seed_data', 'demo_fixture', 'unknown_legacy')),
     is_external_source BOOLEAN NOT NULL DEFAULT false,
+    revision BIGINT NOT NULL DEFAULT 0,
     payload_json JSONB NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -69,6 +70,8 @@ ALTER TABLE sessions
     ADD COLUMN IF NOT EXISTS session_source TEXT NOT NULL DEFAULT 'unknown_legacy';
 ALTER TABLE sessions
     ADD COLUMN IF NOT EXISTS is_external_source BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_sessions_source_updated
     ON sessions(session_source, updated_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_source_external_updated

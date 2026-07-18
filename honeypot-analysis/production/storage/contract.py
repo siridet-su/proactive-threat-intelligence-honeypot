@@ -79,6 +79,17 @@ JOB_FAILURE_CODES = frozenset(
     }
 )
 
+SESSION_ANALYSIS_FIELDS = frozenset(
+    {
+        "analysis_status",
+        "analysis_updated_at",
+        "analysis_job_id",
+        "analysis_error",
+        "analysis_skip_reason",
+        "report_id",
+    }
+)
+
 EVENT_EFFECT_SUMMARY_KEYS = frozenset(
     {
         "analysis_job_enqueued",
@@ -506,6 +517,7 @@ class StorageBackend(Protocol):
         session_id: str,
         status: str,
         *,
+        job_id: str = "",
         report_id: str = "",
         error: str = "",
         skip_reason: str = "",

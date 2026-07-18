@@ -18,6 +18,7 @@ from production.storage.contract import (
     SQLITE_BACKEND,
     StorageBackend,
     JOB_QUEUE_TABLES,
+    SESSION_ANALYSIS_FIELDS,
     validate_event_effect_summary,
     validate_event_failure_fields,
     validate_job_failure_fields,
@@ -59,6 +60,34 @@ def _safe_event_payload(value: Any) -> tuple[Dict[str, Any], str]:
         return _decode_event_payload(value)
     except ValueError:
         return {}, "{}"
+
+
+def _apply_analysis_status(
+    payload: Dict[str, Any],
+    status: str,
+    updated_at: str,
+    *,
+    job_id: str = "",
+    report_id: str = "",
+    error: str = "",
+    skip_reason: str = "",
+) -> Dict[str, Any]:
+    updated = dict(payload)
+    updated["analysis_status"] = status
+    updated["analysis_updated_at"] = updated_at
+    if job_id:
+        updated["analysis_job_id"] = job_id
+    if report_id:
+        updated["report_id"] = report_id
+    if error:
+        updated["analysis_error"] = error
+    else:
+        updated.pop("analysis_error", None)
+    if skip_reason:
+        updated["analysis_skip_reason"] = skip_reason
+    elif status != "skipped":
+        updated.pop("analysis_skip_reason", None)
+    return updated
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
@@ -246,6 +275,7 @@ class SQLiteStorage:
                     ended INTEGER NOT NULL DEFAULT 0,
                     session_source TEXT NOT NULL DEFAULT 'unknown_legacy',
                     is_external_source INTEGER NOT NULL DEFAULT 0,
+                    revision INTEGER NOT NULL DEFAULT 0,
                     payload_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -568,6 +598,8 @@ class SQLiteStorage:
             conn.execute("ALTER TABLE sessions ADD COLUMN session_source TEXT NOT NULL DEFAULT 'unknown_legacy'")
         if "is_external_source" not in columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN is_external_source INTEGER NOT NULL DEFAULT 0")
+        if "revision" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_sessions_source_updated
@@ -1545,17 +1577,31 @@ class SQLiteStorage:
         session_payload["session_source"] = session_source
         session_payload["is_external_source"] = is_external_source
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT payload_json FROM sessions WHERE session_id = ? LIMIT 1",
+                (session_payload.get("session_id", "unknown"),),
+            ).fetchone()
+            if existing:
+                stored_payload = json.loads(existing["payload_json"] or "{}")
+                for key in SESSION_ANALYSIS_FIELDS:
+                    if key in stored_payload:
+                        session_payload[key] = stored_payload[key]
+                    else:
+                        session_payload.pop(key, None)
             conn.execute(
                 """
                 INSERT INTO sessions
-                    (session_id, src_ip, start_time, ended, session_source, is_external_source, payload_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (session_id, src_ip, start_time, ended, session_source,
+                     is_external_source, revision, payload_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     src_ip=excluded.src_ip,
                     start_time=excluded.start_time,
                     ended=excluded.ended,
                     session_source=excluded.session_source,
                     is_external_source=excluded.is_external_source,
+                    revision=sessions.revision + 1,
                     payload_json=excluded.payload_json,
                     updated_at=excluded.updated_at
                 """,
@@ -1594,6 +1640,7 @@ class SQLiteStorage:
         session_id: str,
         status: str,
         *,
+        job_id: str = "",
         report_id: str = "",
         error: str = "",
         skip_reason: str = "",
@@ -1609,29 +1656,26 @@ class SQLiteStorage:
             return
         now = utc_now()
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT payload_json FROM sessions WHERE session_id = ? LIMIT 1",
                 (session_id,),
             ).fetchone()
             if not row:
                 return
-            payload = json.loads(row["payload_json"] or "{}")
-            payload["analysis_status"] = status
-            payload["analysis_updated_at"] = now
-            if report_id:
-                payload["report_id"] = report_id
-            if error:
-                payload["analysis_error"] = error
-            elif "analysis_error" in payload:
-                payload.pop("analysis_error", None)
-            if skip_reason:
-                payload["analysis_skip_reason"] = skip_reason
-            elif status != "skipped":
-                payload.pop("analysis_skip_reason", None)
+            payload = _apply_analysis_status(
+                json.loads(row["payload_json"] or "{}"),
+                status,
+                now,
+                job_id=job_id,
+                report_id=report_id,
+                error=error,
+                skip_reason=skip_reason,
+            )
             conn.execute(
                 """
                 UPDATE sessions
-                SET payload_json = ?, updated_at = ?
+                SET payload_json = ?, revision = revision + 1, updated_at = ?
                 WHERE session_id = ?
                 """,
                 (stable_json(payload), now, session_id),
@@ -2110,7 +2154,25 @@ class SQLiteStorage:
             )
             if cursor.rowcount != 1:  # pragma: no cover - same transaction
                 raise StorageError("analysis job claim changed during completion")
-        self.update_session_analysis_status(session_id, "succeeded", report_id=report_id)
+            session = conn.execute(
+                "SELECT payload_json FROM sessions WHERE session_id=? LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if session:
+                payload = _apply_analysis_status(
+                    json.loads(session["payload_json"] or "{}"),
+                    "succeeded",
+                    current_time,
+                    report_id=report_id,
+                )
+                conn.execute(
+                    """
+                    UPDATE sessions
+                    SET payload_json=?, revision=revision + 1, updated_at=?
+                    WHERE session_id=?
+                    """,
+                    (stable_json(payload), current_time, session_id),
+                )
         return report_id
 
     def fail_analysis_job(
@@ -4466,18 +4528,33 @@ class PostgresStorage:
         session_payload["session_source"] = session_source
         session_payload["is_external_source"] = is_external_source
         with self.connection() as conn:
+            cur = self._execute(
+                conn,
+                "SELECT payload_json FROM sessions WHERE session_id = %s FOR UPDATE",
+                (session_payload.get("session_id", "unknown"),),
+            )
+            existing = cur.fetchone()
+            if existing:
+                stored_payload = _decode_json(existing["payload_json"] or "{}")
+                for key in SESSION_ANALYSIS_FIELDS:
+                    if key in stored_payload:
+                        session_payload[key] = stored_payload[key]
+                    else:
+                        session_payload.pop(key, None)
             self._execute(
                 conn,
                 """
                 INSERT INTO sessions
-                    (session_id, src_ip, start_time, ended, session_source, is_external_source, payload_json, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    (session_id, src_ip, start_time, ended, session_source,
+                     is_external_source, revision, payload_json, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, 1, %s::jsonb, %s)
                 ON CONFLICT(session_id) DO UPDATE SET
                     src_ip=excluded.src_ip,
                     start_time=excluded.start_time,
                     ended=excluded.ended,
                     session_source=excluded.session_source,
                     is_external_source=excluded.is_external_source,
+                    revision=sessions.revision + 1,
                     payload_json=excluded.payload_json,
                     updated_at=excluded.updated_at
                 """,
@@ -4518,6 +4595,7 @@ class PostgresStorage:
         session_id: str,
         status: str,
         *,
+        job_id: str = "",
         report_id: str = "",
         error: str = "",
         skip_reason: str = "",
@@ -4535,24 +4613,22 @@ class PostgresStorage:
             row = cur.fetchone()
             if not row:
                 return
-            payload = _decode_json(row["payload_json"] or "{}")
-            payload["analysis_status"] = status
-            payload["analysis_updated_at"] = now
-            if report_id:
-                payload["report_id"] = report_id
-            if error:
-                payload["analysis_error"] = error
-            else:
-                payload.pop("analysis_error", None)
-            if skip_reason:
-                payload["analysis_skip_reason"] = skip_reason
-            elif status != "skipped":
-                payload.pop("analysis_skip_reason", None)
+            payload = _apply_analysis_status(
+                _decode_json(row["payload_json"] or "{}"),
+                status,
+                now,
+                job_id=job_id,
+                report_id=report_id,
+                error=error,
+                skip_reason=skip_reason,
+            )
             self._execute(
                 conn,
                 """
                 UPDATE sessions
-                SET payload_json = %s::jsonb, updated_at = %s
+                SET payload_json = %s::jsonb,
+                    revision = revision + 1,
+                    updated_at = %s
                 WHERE session_id = %s
                 """,
                 (stable_json(payload), now, session_id),
