@@ -18,6 +18,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from production.utils.sensitive_data import redact_exception_for_log
+
 
 ID_RE = re.compile(r"^[a-z0-9-]+--[0-9a-fA-F-]{36}$")
 REQUIRED_REF_FIELDS = {
@@ -207,17 +212,18 @@ def run_external_stix_validation(
         )
     except Exception as exc:  # pragma: no cover - defensive around optional tool
         result["status"] = "failed"
-        result["errors"] = [f"external STIX validator failed to run: {exc}"]
+        result["errors"] = [redact_exception_for_log(exc)]
         return result
 
-    result["stdout"] = completed.stdout.strip()
-    result["stderr"] = completed.stderr.strip()
+    # Validator output may quote arbitrary STIX values. Keep only whether
+    # diagnostics existed; never return or print the raw child-process streams.
+    result["output_suppressed"] = bool(completed.stdout.strip() or completed.stderr.strip())
     if completed.returncode == 0:
         result["status"] = "passed"
     else:
         result["status"] = "failed"
-        details = result["stderr"] or result["stdout"] or f"exit code {completed.returncode}"
-        result["errors"] = [f"external STIX validator failed: {details}"]
+        result["errors"] = ["external_stix_validator_failed"]
+        result["exit_code"] = int(completed.returncode)
     return result
 
 

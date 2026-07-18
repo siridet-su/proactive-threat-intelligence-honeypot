@@ -438,9 +438,7 @@ def test_driver_exception_redaction_removes_credentials() -> None:
             "cannot connect mongodb://alice:correct-horse@example.invalid:27017/honeypot"
         )
     )
-    assert "alice" not in message
-    assert "correct-horse" not in message
-    assert "mongodb://<redacted>@example.invalid:27017/honeypot" in message
+    assert message == "RuntimeError: operation_failed"
 
     query_message = _safe_error(
         RuntimeError(
@@ -448,8 +446,7 @@ def test_driver_exception_redaction_removes_credentials() -> None:
             "?token=query-secret&retry=true"
         )
     )
-    assert "query-secret" not in query_message
-    assert "?token=" not in query_message
+    assert query_message == "RuntimeError: operation_failed"
 
     compound_auth_message = _safe_error(
         RuntimeError(
@@ -457,8 +454,7 @@ def test_driver_exception_redaction_removes_credentials() -> None:
             "?authMechanismProperties=AWS_SESSION_TOKEN:compound-secret"
         )
     )
-    assert "compound-secret" not in compound_auth_message
-    assert "authMechanismProperties" not in compound_auth_message
+    assert compound_auth_message == "RuntimeError: operation_failed"
 
 
 def test_idempotent_events_atomic_claims_and_session_counts() -> None:

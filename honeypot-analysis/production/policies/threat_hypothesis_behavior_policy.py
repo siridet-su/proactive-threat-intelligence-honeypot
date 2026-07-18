@@ -10,6 +10,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from production.utils.sensitive_data import redact_exception_for_log
+
 
 SCHEMA_VERSION = "threat_hypothesis_behavior_policy.v1"
 DEFAULT_POLICY_PATH = "configs/threat_hypothesis_behavior.trusted.json"
@@ -109,8 +111,8 @@ def _validate_pattern(value: Any, path: str, errors: List[str]) -> None:
         return
     try:
         re.compile(value, re.IGNORECASE)
-    except re.error as exc:
-        errors.append(f"{path}: invalid regex: {exc}")
+    except re.error:
+        errors.append(f"{path}: invalid regex")
 
 
 def _validate_action_types(values: Any, path: str, errors: List[str], *, allow_empty: bool = False) -> None:
@@ -304,7 +306,7 @@ def _load_cached(path_text: str, env_path: str, cwd_text: str) -> Dict[str, Any]
                 raise ValueError("JSON root must be an object")
             validation_errors = validate_behavior_policy(loaded)
             if validation_errors:
-                errors.extend(f"{candidate}: {error}" for error in validation_errors)
+                errors.append("policy_validation_failed")
                 continue
             document = deepcopy(loaded)
             document["load_status"] = {
@@ -315,7 +317,7 @@ def _load_cached(path_text: str, env_path: str, cwd_text: str) -> Dict[str, Any]
             }
             return document
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
+            errors.append(redact_exception_for_log(exc))
     document = deepcopy(FAIL_CLOSED_POLICY)
     document["load_status"] = {
         "status": "fail_closed",

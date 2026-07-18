@@ -27,12 +27,53 @@ from production.reporting.threat_hypothesis import (
     attach_model_prediction,
     build_v2_report,
 )
+from production.utils.credential_hmac import credential_metadata_for_provenance
 from production.utils.config import ProductionConfig
 from production.enrichment.enrichment_cache import load_combined_ip_enrichment
 from production.enrichment.feed_status import save_feed_status
 from production.utils.runtime_context import attach_runtime_context
+from production.utils.sensitive_data import (
+    redact_error_for_log,
+    redact_exception_for_log,
+    redact_for_artifact,
+    redact_for_log,
+)
 from production.utils.serialization import command_observation_provenance, utc_now
 from production.storage import open_storage
+
+
+def _safe_exception_text(exc: BaseException) -> str:
+    return redact_exception_for_log(exc)
+
+
+def _safe_error_text(value: Any) -> str:
+    return redact_error_for_log(value)
+
+
+def _safe_log_json(value: Any) -> str:
+    try:
+        redacted = redact_for_log(value, max_string_chars=1_000)
+        if isinstance(redacted, dict) and "error" in redacted:
+            redacted = dict(redacted)
+            redacted["error"] = redact_error_for_log(redacted["error"])
+        return json.dumps(
+            redacted,
+            sort_keys=True,
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except Exception:
+        return '{"service": "analysis_worker", "status": "log_redaction_failed"}'
+
+
+def _safe_report_mapping(value: Any) -> Dict[str, Any]:
+    try:
+        redacted = redact_for_artifact(value)
+    except Exception:
+        raise ValueError("report redaction failed") from None
+    if not isinstance(redacted, dict):
+        raise TypeError("report must redact to an object")
+    return redacted
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -366,6 +407,7 @@ def deterministic_baseline_report(
     error: str,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    safe_error = _safe_error_text(error)
     commands = session_payload.get("commands", [])
     trusted = _trusted_payload_views(session_payload)
     ttps = trusted["ttps"]
@@ -412,7 +454,7 @@ def deterministic_baseline_report(
             "hypothesis_status": "insufficient_evidence",
             "scope": "post_session_cowrie_observable_behavior",
         },
-        "error": error,
+        "error": safe_error,
         "data_provenance": {
             "session": {
                 "session_id": session_payload.get("session_id", "unknown"),
@@ -430,16 +472,20 @@ def deterministic_baseline_report(
                 "ttp_sources": session_payload.get("ttp_sources", {}),
             },
             "session_ttp_correlation": session_payload.get("session_ttp_correlation_summary", {}),
-            "credentials": session_payload.get("credential_metadata", {}),
+            "credential_metadata": credential_metadata_for_provenance(
+                session_payload.get("credential_metadata", {})
+            ),
             "enrichment": session_payload.get("enrichment_status", {}),
             "ai": {
                 "status": "failed",
                 "fallback": "deterministic_baseline",
-                "error": error,
+                "error": safe_error,
             },
         },
     }
-    return attach_threat_evidence_layers(report, session_payload, prediction_snapshot)
+    return _safe_report_mapping(
+        attach_threat_evidence_layers(report, session_payload, prediction_snapshot)
+    )
 
 
 def load_json_config(path: str) -> Dict[str, Any]:
@@ -503,7 +549,14 @@ async def analyze_job(
     else:
         result = trigger(state)
     if not result:
-        raise RuntimeError(getattr(state, "pipeline_error", "analysis pipeline returned no report"))
+        safe_pipeline_error = _safe_error_text(
+            getattr(
+                state,
+                "pipeline_error",
+                "analysis pipeline returned no report",
+            )
+        )
+        raise RuntimeError(safe_pipeline_error) from None
     result.setdefault("session_id", state.session_id)
     result.setdefault("created_at", utc_now())
     result.setdefault("worker", "analysis_worker")
@@ -561,7 +614,7 @@ class AnalysisWorker:
                 self.storage.skip_analysis_job(job["job_id"], skip_reason)
                 processed += 1
                 print(
-                    json.dumps(
+                    _safe_log_json(
                         {
                             "service": "analysis_worker",
                             "job_id": job["job_id"],
@@ -570,7 +623,6 @@ class AnalysisWorker:
                             "reason": skip_reason,
                             "timestamp": utc_now(),
                         },
-                        sort_keys=True,
                     ),
                     flush=True,
                 )
@@ -583,34 +635,57 @@ class AnalysisWorker:
                     prediction_snapshot=latest_prediction,
                 )
             except Exception as exc:
+                safe_error = _safe_exception_text(exc)
                 retry = int(job["attempts"]) < self.config.analysis_max_attempts
+                status = "retry" if retry else "failed"
                 if retry or not self.config.analysis_fallback_on_failure:
-                    self.storage.fail_analysis_job(job["job_id"], str(exc), retry=retry)
-                else:
-                    fallback = deterministic_baseline_report(
-                        job["session"],
-                        str(exc),
-                        prediction_snapshot=latest_prediction,
+                    self.storage.fail_analysis_job(
+                        job["job_id"],
+                        safe_error,
+                        retry=retry,
                     )
-                    if self.config.enable_actor_attribution:
-                        fallback = enrich_report_with_actor_attribution(
+                else:
+                    try:
+                        fallback = deterministic_baseline_report(
+                            job["session"],
+                            safe_error,
+                            prediction_snapshot=latest_prediction,
+                        )
+                        if self.config.enable_actor_attribution:
+                            fallback = enrich_report_with_actor_attribution(
+                                fallback,
+                                job["session"],
+                                self.config.actor_db_path,
+                            )
+                        fallback = attach_report_artifacts(
                             fallback,
                             job["session"],
-                            self.config.actor_db_path,
+                            self.config,
                         )
-                    fallback = attach_report_artifacts(fallback, job["session"], self.config)
-                    self.storage.complete_analysis_job(job["job_id"], fallback)
-                    processed += 1
+                        self.storage.complete_analysis_job(job["job_id"], fallback)
+                    except Exception as fallback_exc:
+                        safe_error = (
+                            "fallback report failed: "
+                            f"{_safe_exception_text(fallback_exc)}"
+                        )
+                        self.storage.fail_analysis_job(
+                            job["job_id"],
+                            safe_error,
+                            retry=False,
+                        )
+                        status = "fallback_failed"
+                    else:
+                        processed += 1
+                        status = "fallback_reported"
                 print(
-                    json.dumps(
+                    _safe_log_json(
                         {
                             "service": "analysis_worker",
                             "job_id": job["job_id"],
-                            "status": "retry" if retry else ("fallback_reported" if self.config.analysis_fallback_on_failure else "failed"),
-                            "error": str(exc),
+                            "status": status,
+                            "error": safe_error,
                             "timestamp": utc_now(),
                         },
-                        sort_keys=True,
                     ),
                     flush=True,
                 )
@@ -618,7 +693,7 @@ class AnalysisWorker:
             self.storage.complete_analysis_job(job["job_id"], report)
             processed += 1
             print(
-                json.dumps(
+                _safe_log_json(
                     {
                         "service": "analysis_worker",
                         "job_id": job["job_id"],
@@ -626,7 +701,6 @@ class AnalysisWorker:
                         "status": "succeeded",
                         "timestamp": utc_now(),
                     },
-                    sort_keys=True,
                 ),
                 flush=True,
             )
@@ -636,13 +710,12 @@ class AnalysisWorker:
         while True:
             processed = asyncio.run(self.process_once())
             print(
-                json.dumps(
+                _safe_log_json(
                     {
                         "service": "analysis_worker",
                         "processed": processed,
                         "timestamp": utc_now(),
                     },
-                    sort_keys=True,
                 ),
                 flush=True,
             )
@@ -662,7 +735,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     worker = AnalysisWorker(config)
     if args.once:
         processed = asyncio.run(worker.process_once())
-        print(json.dumps({"service": "analysis_worker", "processed": processed}, sort_keys=True))
+        print(_safe_log_json({"service": "analysis_worker", "processed": processed}))
         return 0
     worker.run_forever()
     return 0

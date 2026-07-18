@@ -56,7 +56,11 @@ from production.storage.session_provenance import (
     normalize_session_source,
 )
 from production.utils.feedback import build_auto_evidence_feedback
-from production.utils.sensitive_data import redact_for_artifact, redact_for_log
+from production.utils.sensitive_data import (
+    redact_for_artifact,
+    redact_exception_for_log,
+    redact_for_session_state,
+)
 from production.workers.threat_hunt_worker import enqueue_threat_hunts_for_session
 
 
@@ -74,9 +78,9 @@ DEFAULT_PREDICTION_TRIGGER_PREFIXES = [
 
 
 def _safe_exception_text(exc: BaseException) -> str:
-    """Return a bounded exception description using the central redactor."""
+    """Return a stable exception description without rendering its arguments."""
 
-    return f"{type(exc).__name__}: {redact_for_log(exc, max_string_chars=1_000)}"
+    return redact_exception_for_log(exc)
 
 
 def alert_payload(alert: Any) -> Dict[str, Any]:
@@ -142,7 +146,10 @@ class SessionWorker:
     def _session_payload(self, state: Any) -> Dict[str, Any]:
         payload = session_to_payload(state)
         payload["session_source"] = self._session_source()
-        return payload
+        redacted = redact_for_session_state(payload)
+        if not isinstance(redacted, dict):
+            raise TypeError("session state redaction must return an object")
+        return redacted
 
     def _load_session_ttp_correlation_policy(self) -> Dict[str, Any]:
         if not self.config.enable_session_ttp_correlation:

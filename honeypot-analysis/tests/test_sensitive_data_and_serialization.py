@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -13,14 +14,17 @@ from production.utils.sensitive_data import (
     MAX_EMBEDDED_JSON_CHARS,
     OVERSIZED_JSON_MARKER,
     REDACTION_MARKER,
+    redact_error_for_log,
+    redact_exception_for_log,
     redact_for_api,
     redact_for_artifact,
     redact_for_log,
+    redact_for_session_state,
     redact_for_webhook,
     sanitize_url,
 )
 from production.utils.feedback import normalize_feedback_payload
-from production.utils.serialization import html_script_json, stable_json, to_jsonable
+from production.utils.serialization import html_script_json, stable_id, stable_json, to_jsonable
 
 
 REDACTORS = (
@@ -126,7 +130,7 @@ def test_sanitize_url_redacts_userinfo_and_only_sensitive_parameters() -> None:
         sanitize_url(None)  # type: ignore[arg-type]
 
 
-def test_log_redaction_scrubs_plaintext_headers_assignments_urls_and_exceptions() -> None:
+def test_exception_redaction_never_inspects_exception_arguments() -> None:
     error = RuntimeError(
         "connect mongodb://db-user:db-password@example.invalid/honeypot"
         "?token=query-token\n"
@@ -137,20 +141,544 @@ def test_log_redaction_scrubs_plaintext_headers_assignments_urls_and_exceptions(
 
     redacted = redact_for_log(error)
 
-    for secret in (
-        "db-user",
-        "db-password",
-        "query-token",
-        "bearer-token",
-        "cookie-token",
-        "credential-digest",
-    ):
-        assert secret not in redacted
-    assert "mongodb://<redacted>@example.invalid/honeypot" in redacted
-    assert "?token=" not in redacted
-    assert "Authorization: [REDACTED]" in redacted
+    assert redacted == "RuntimeError: operation_failed"
+    assert redact_exception_for_log(error) == redacted
+    assert redact_error_for_log(redacted) == redacted
+    assert redact_error_for_log("opaque-unlabelled-secret") == "operation_failed"
+    for redactor in (*REDACTORS, redact_for_session_state):
+        assert redactor(RuntimeError("opaque-unlabelled-secret")) == redacted
+
+
+def test_derived_raw_event_projection_drops_unknown_fields_and_login_credentials() -> None:
+    secret = "opaque-event-field-secret"
+    digest = "hmac-sha256-v1:active-key:" + ("a" * 64)
+    payload = {
+        "login_username": secret,
+        "raw_events": [
+            {
+                "eventid": "cowrie.login.success",
+                "timestamp": "2026-07-18T00:00:00Z",
+                "username": secret,
+                "password_hash": digest,
+                "unexpected_sensor_field": secret,
+            }
+        ],
+    }
+
+    session_safe = redact_for_session_state(payload)
+    artifact_safe = redact_for_artifact(payload)
+
+    assert secret not in json.dumps(session_safe, sort_keys=True)
+    assert session_safe["login_username"] == REDACTION_MARKER
+    assert session_safe["raw_events"][0]["username"] == REDACTION_MARKER
+    assert session_safe["raw_events"][0]["password_hash"] == digest
+    assert "unexpected_sensor_field" not in session_safe["raw_events"][0]
+    assert artifact_safe["raw_events"][0]["password_hash"] == REDACTION_MARKER
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sshpass -p command-secret ssh root@example.invalid",
+        "sshpass -p'command-secret' ssh root@example.invalid",
+        "curl -u user:command-secret https://example.invalid/api",
+        'curl --user="user:command-secret" https://example.invalid/api',
+        "curl -U proxy:command-secret https://example.invalid/api",
+        "curl --proxy-user proxy:command-secret https://example.invalid/api",
+        "mysql -pcommand-secret -h db.example.invalid",
+        "mysqldump --password='command-secret' exampledb",
+        "redis-cli -a command-secret ping",
+        "redis-cli --pass=command-secret ping",
+        "AWS_SECRET_ACCESS_KEY=command-secret aws s3 ls",
+        "PGPASSWORD=command-secret psql exampledb",
+        "MYSQL_PWD=command-secret mysql exampledb",
+        "REDISCLI_AUTH=command-secret redis-cli ping",
+        "SSHPASS=command-secret sshpass ssh root@example.invalid",
+        "PROVIDER_CLIENT_SECRET=command-secret run-client",
+        'export API_TOKEN="command-secret"; run-client',
+        "kubectl --token command-secret get pods",
+        "docker login --password command-secret registry.example.invalid",
+        "mongosh --password command-secret mongodb://example.invalid/db",
+        "run-client --api-key command-secret",
+        "run-client --client-secret=command-secret",
+    ],
+)
+def test_artifact_redactor_scrubs_credential_bearing_command_forms(
+    command: str,
+) -> None:
+    redacted = redact_for_artifact({"command": command})["command"]
+
+    assert "command-secret" not in redacted
+    assert REDACTION_MARKER in redacted
+
+
+def test_artifact_redactor_scrubs_private_key_blocks() -> None:
+    value = (
+        "prefix\n-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "private-key-secret\n"
+        "-----END OPENSSH PRIVATE KEY-----\nsuffix"
+    )
+
+    redacted = redact_for_artifact({"evidence": value})["evidence"]
+
+    assert "private-key-secret" not in redacted
+    assert "BEGIN OPENSSH PRIVATE KEY" not in redacted
+    assert redacted == f"prefix\n{REDACTION_MARKER}\nsuffix"
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["ED25519 PRIVATE KEY", "SSH2 ENCRYPTED PRIVATE KEY"],
+)
+def test_artifact_redactor_scrubs_vendor_private_key_labels(label: str) -> None:
+    value = f"-----BEGIN {label}-----\nprivate-key-secret\n-----END {label}-----"
+    assert redact_for_artifact({"evidence": value})["evidence"] == REDACTION_MARKER
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "sshpass --help",
+        "sshpass -P 'Password:' ssh root@example.invalid",
+        "curl -I https://example.invalid/public",
+        "mysql -p",
+        "mysql -P3306 exampledb",
+        "mysql --password exampledb",
+        "redis-cli ping",
+        "nmap -p 22 example.invalid",
+        "ls -a /tmp",
+        "sort -u names.txt",
+        "ssh -i /run/operator-key root@example.invalid",
+        "echo SECRETARY=public",
+        "password_policy=strict",
+        "token_count=3",
+        "PRIVATE_KEY_PATH=/run/key",
+        "-----BEGIN PUBLIC KEY-----\npublic-material\n-----END PUBLIC KEY-----",
+    ],
+)
+def test_command_redactor_preserves_benign_command_evidence(value: str) -> None:
+    assert redact_for_artifact({"command": value})["command"] == value
+
+
+def test_inline_quoted_headers_preserve_command_structure() -> None:
+    command = (
+        "curl -H 'Authorization: Bearer header-secret' "
+        "-H \"Cookie: session=cookie-secret\" https://example.invalid/path"
+    )
+
+    redacted = redact_for_artifact({"command": command})["command"]
+
+    assert "header-secret" not in redacted
+    assert "cookie-secret" not in redacted
+    assert "-H 'Authorization: [REDACTED]'" in redacted
+    assert '-H "Cookie: [REDACTED]"' in redacted
+    assert redacted.endswith("https://example.invalid/path")
+
+
+def test_curl_user_without_password_is_not_over_redacted() -> None:
+    command = "curl -u alice https://example.invalid/public"
+    assert redact_for_artifact({"command": command})["command"] == command
+
+
+def test_plaintext_redaction_is_idempotent_across_repeated_report_boundaries() -> None:
+    secret = "multi-boundary-secret"
+    value = {
+        "detail": (
+            "headers={'Cookie': 'sid=" + secret + "', 'safe': 'retained'}"
+        ),
+        "command": f"sshpass -p '{secret}' ssh root@example.invalid",
+    }
+
+    once = redact_for_artifact(value)
+    twice = redact_for_artifact(once)
+    three_times = redact_for_artifact(twice)
+
+    assert once == twice == three_times
+    assert secret not in json.dumps(three_times, sort_keys=True)
+
+
+def test_midline_cookie_redaction_consumes_the_complete_cookie_value() -> None:
+    secret_one = "cookie-secret-one"
+    secret_two = "cookie-secret-two"
+    value = f"request failed Cookie: sid={secret_one}; csrf={secret_two}\nnext line"
+
+    redacted = redact_for_log(value)
+
+    assert secret_one not in redacted
+    assert secret_two not in redacted
     assert "Cookie: [REDACTED]" in redacted
-    assert "password_hash=[REDACTED]" in redacted
+    assert redacted.endswith("\nnext line")
+
+
+def test_large_plaintext_redaction_remains_bounded_and_scrubs_tail_secret() -> None:
+    secret = "tail-command-secret"
+    value = ("x" * 100_000) + f" sshpass -p {secret} ssh root@example.invalid"
+
+    redacted = redact_for_artifact(value)
+
+    assert secret not in redacted
+    assert len(redacted) <= 100_100
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sshpass " + ("arg " * 150) + "-p padded-command-secret ssh host",
+        "curl " + ("-H x " * 60) + "-u user:padded-command-secret https://host",
+        "mysql " + ("--connect-timeout=1 " * 20) + "-ppadded-command-secret db",
+        "redis-cli " + ("--raw " * 60) + "-a padded-command-secret ping",
+        "curl -H 'X-Test: a;b' -u user:padded-command-secret https://host",
+        "sshpass -P 'P;rompt:' -p padded-command-secret ssh host",
+        "mysql --init-command='SET a=1; SET b=2' -ppadded-command-secret db",
+        "redis-cli --eval 'return a|b' -a padded-command-secret ping",
+    ],
+)
+def test_command_redactor_handles_padding_and_quoted_separators(command: str) -> None:
+    redacted = redact_for_artifact({"command": command})["command"]
+    assert "padded-command-secret" not in redacted
+    assert REDACTION_MARKER in redacted
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "password='malformed-command-secret",
+        'export API_TOKEN="malformed-command-secret',
+        "sshpass -p 'malformed-command-secret ssh host",
+        'curl -u "user:malformed-command-secret https://host',
+        "headers={'Cookie': 'malformed-command-secret}",
+    ],
+)
+def test_redactor_fails_closed_on_unterminated_secret_quotes(value: str) -> None:
+    redacted = redact_for_artifact({"detail": value})["detail"]
+    assert "malformed-command-secret" not in redacted
+    assert REDACTION_MARKER in redacted
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "passwords",
+        "user_passwords",
+        "tokens",
+        "api_tokens",
+        "secrets",
+        "client_secrets",
+        "private_keys",
+        "access_keys",
+        "authorization_headers",
+        "password_list",
+        "password_value",
+        "token_values",
+        "credential_values",
+        "credential_value",
+        "secret_key",
+        "aws_secret_access_key",
+        "aws_access_key_id",
+        "auth",
+        "bearer",
+        "credentials_metadata",
+        "password_metadata",
+        "token_metadata",
+        "client_secret_metadata",
+        "authorization_metadata",
+        "api_key_status",
+        "client_secret_type",
+        "password_source",
+        "token_name",
+        "private_key_path",
+        "credential_access_token",
+        "my_credential_access_password",
+        "credential_targets",
+        "credential_policy",
+    ],
+)
+def test_structured_sensitive_key_variants_fail_closed(key: str) -> None:
+    redacted = redact_for_artifact({key: "structured-key-secret"})
+    assert redacted[key] == REDACTION_MARKER
+
+
+def test_sensitive_metadata_suffixes_require_safe_value_types() -> None:
+    redacted = redact_for_artifact(
+        {
+            "token_count": 3,
+            "password_hash_present": True,
+            "token_count_bad": "metadata-secret",
+            "api_key_configured": "metadata-secret",
+            "password_enabled": "metadata-secret",
+        }
+    )
+    assert redacted["token_count"] == 3
+    assert redacted["password_hash_present"] is True
+    assert redacted["token_count_bad"] == REDACTION_MARKER
+    assert redacted["api_key_configured"] == REDACTION_MARKER
+    assert redacted["password_enabled"] == REDACTION_MARKER
+
+
+@pytest.mark.parametrize(
+    "redactor",
+    [
+        redact_for_api,
+        redact_for_log,
+        redact_for_artifact,
+        redact_for_webhook,
+    ],
+)
+def test_canonical_credential_path_entities_preserve_safe_shape(redactor) -> None:
+    secret = "credential-path-secret"
+    entity_id = stable_id("entity", {"type": "path", "value": "/etc/shadow"})
+    entity = {
+        "entity_id": entity_id,
+        "entity_type": "path",
+        "normalized_value": "/etc/shadow",
+        "original_value": "/etc/shadow",
+        "uncertain": False,
+        "linkable": True,
+        "password": secret,
+        "unknown": secret,
+    }
+
+    redacted = redactor({"credential_paths": [entity]})
+
+    assert redacted["credential_paths"] == [{
+        "entity_id": entity["entity_id"],
+        "entity_type": "path",
+        "normalized_value": "/etc/shadow",
+        "original_value": "/etc/shadow",
+        "uncertain": False,
+        "linkable": True,
+    }]
+    assert secret not in json.dumps(redacted, sort_keys=True)
+
+
+def test_noncanonical_credential_path_entities_fail_closed() -> None:
+    redacted = redact_for_artifact(
+        {
+            "credential_paths": [
+                "credential-path-secret",
+                {"entity_type": "path", "original_value": "/etc/shadow"},
+                {
+                    "entity_id": "entity_" + ("a" * 32),
+                    "entity_type": "token",
+                    "normalized_value": "credential-path-secret",
+                    "original_value": "credential-path-secret",
+                    "uncertain": False,
+                    "linkable": True,
+                },
+            ]
+        }
+    )
+
+    assert redacted["credential_paths"] == []
+
+
+def test_smb_credential_path_strings_preserve_only_trusted_vocabulary() -> None:
+    redacted = redact_for_artifact(
+        {
+            "credential_paths": [
+                "/etc/shadow",
+                "/root/.ssh/id_ed25519",
+                "/home/alice/.aws/credentials",
+                "/home/alice/.config/gcloud/application_default_credentials.json",
+                "/root/.env",
+                "/tmp/credential-path-secret",
+                "/etc/shadow",
+            ]
+        }
+    )
+
+    assert redacted["credential_paths"] == [
+        "/etc/shadow",
+        "/root/.ssh/id_ed25519",
+        "/home/alice/.aws/credentials",
+        "/home/alice/.config/gcloud/application_default_credentials.json",
+        "/root/.env",
+    ]
+
+
+def test_credential_evidence_collapses_dynamic_suffixes_and_rejects_oversize() -> None:
+    secret = "dynamic-credential-evidence-secret"
+    targets = redact_for_artifact(
+        {
+            "credential_targets": [
+                f".config/gcloud/{secret}",
+                f".azure/{secret})",
+                f'.ssh/id_{secret}"',
+                ".aws/credentials;",
+                ".config/gcloud/" + ("x" * 10_000),
+            ]
+        }
+    )["credential_targets"]
+    paths = redact_for_artifact(
+        {
+            "credential_paths": [
+                f"/home/alice/.config/gcloud/{secret}",
+                f"/home/alice/.ssh/id_{secret}",
+                "/home/alice/.config/gcloud/" + ("x" * 10_000),
+            ]
+        }
+    )["credential_paths"]
+
+    assert targets == [
+        ".config/gcloud/<credential-file>",
+        ".azure/<credential-file>",
+        ".ssh/<private-key>",
+        ".aws/credentials",
+    ]
+    assert paths == []
+    assert secret not in json.dumps(targets)
+
+
+def test_credential_path_shape_is_homogeneous_bounded_and_strict() -> None:
+    valid_entity = {
+        "entity_id": stable_id(
+            "entity",
+            {"type": "path", "value": "/etc/shadow"},
+        ),
+        "entity_type": "path",
+        "normalized_value": "/etc/shadow",
+        "original_value": "/etc/shadow",
+        "uncertain": False,
+        "linkable": True,
+    }
+    mixed = redact_for_artifact(
+        {"credential_paths": [valid_entity, "/etc/shadow"]}
+    )
+    bad_reason = redact_for_artifact(
+        {
+            "credential_paths": [
+                {**valid_entity, "uncertainty_reason": "password=secret"}
+            ]
+        }
+    )
+    malformed_reason = redact_for_artifact(
+        {
+            "credential_paths": [
+                {**valid_entity, "uncertainty_reason": {"password": "secret"}}
+            ]
+        }
+    )
+    oversized = redact_for_artifact(
+        {"credential_paths": ["/etc/shadow"] * 256}
+    )
+
+    assert mixed["credential_paths"] == []
+    assert bad_reason["credential_paths"] == []
+    assert malformed_reason["credential_paths"] == []
+    assert oversized["credential_paths"] == ["/etc/shadow"]
+
+
+def test_credential_path_entities_reject_forged_identity_or_normalization() -> None:
+    canonical = {
+        "entity_id": stable_id(
+            "entity",
+            {"type": "path", "value": "/etc/shadow"},
+        ),
+        "entity_type": "path",
+        "normalized_value": "/etc/shadow",
+        "original_value": "/etc/shadow",
+        "uncertain": False,
+        "linkable": True,
+    }
+    forged_id = {**canonical, "entity_id": "entity_" + ("f" * 32)}
+    forged_path = {
+        **canonical,
+        "normalized_value": "/tmp/opaque-secret-value",
+    }
+
+    assert redact_for_artifact(
+        {"credential_paths": [forged_id]}
+    )["credential_paths"] == []
+    assert redact_for_artifact(
+        {"credential_paths": [forged_path]}
+    )["credential_paths"] == []
+
+
+def test_evaluation_only_account_credential_label_remains_sensitive() -> None:
+    redacted = redact_for_artifact(
+        {"account_and_credential_entities": "evaluation-label-secret"}
+    )
+    assert redacted["account_and_credential_entities"] == REDACTION_MARKER
+
+
+def test_docker_and_credential_target_scans_remain_bounded() -> None:
+    secret = "bounded-docker-secret"
+    command = " ".join(
+        ["docker", *(f"--flag-{index}" for index in range(6_000)), "login", "-p", secret]
+    )
+    targets = [f".config/gcloud/profile-{index}" for index in range(50_000)]
+
+    started = time.perf_counter()
+    safe_command = redact_for_artifact({"command": command})["command"]
+    safe_targets = redact_for_artifact({"credential_targets": targets})[
+        "credential_targets"
+    ]
+    elapsed = time.perf_counter() - started
+
+    assert secret not in safe_command
+    assert REDACTION_MARKER in safe_command
+    assert safe_targets == [".config/gcloud/<credential-file>"]
+    assert elapsed < 1.0
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "API_TOKEN_STATUS=env-command-secret run-client",
+        "PASSWORD_SOURCE=env-command-secret run-client",
+        "CLIENT_SECRET_TYPE=env-command-secret run-client",
+        "kubectl '--token' env-command-secret get pods",
+        "sshpass '-p' env-command-secret ssh host",
+        "redis-cli '-a' env-command-secret ping",
+        "curl '-u' user:env-command-secret https://host",
+        "sshpass '-penv-command-secret' ssh host",
+        "(sshpass -p env-command-secret ssh host)",
+        "$(sshpass -p env-command-secret ssh host)",
+        "docker login mysql --password env-command-secret",
+        "echo mysql --password env-command-secret",
+        "sshpass \\\n-p env-command-secret ssh host",
+        "docker login -p env-command-secret registry.example.invalid",
+        "mongosh -p env-command-secret mongodb://example.invalid/db",
+        "`sshpass -p env-command-secret ssh host`",
+        "smbclient //server/share -U user%env-command-secret",
+        "openssl pkcs12 -passin pass:env-command-secret -in bundle.p12",
+    ],
+)
+def test_shell_scanner_handles_quoted_options_wrappers_and_env_metadata(
+    command: str,
+) -> None:
+    redacted = redact_for_artifact({"command": command})["command"]
+    assert "env-command-secret" not in redacted
+    assert REDACTION_MARKER in redacted
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kubectl --token-count 3 get pods",
+        "kubectl --token-endpoint https://example.invalid/token get pods",
+    ],
+)
+def test_generic_long_option_scanner_preserves_benign_token_metadata(
+    command: str,
+) -> None:
+    assert redact_for_artifact({"command": command})["command"] == command
+
+
+def test_quoted_header_with_escaped_quote_cannot_leak_tail() -> None:
+    command = (
+        'curl -H "Cookie: sid=public\\"escaped-header-secret" '
+        "https://example.invalid"
+    )
+    redacted = redact_for_artifact({"command": command})["command"]
+    assert "escaped-header-secret" not in redacted
+    assert "Cookie: [REDACTED]" in redacted
+
+
+def test_shell_scanner_is_linear_for_repeated_executable_tokens() -> None:
+    command = ("curl " * 5_000) + "-u user:repeated-command-secret https://host"
+    redacted = redact_for_artifact({"command": command})["command"]
+    assert "repeated-command-secret" not in redacted
 
 
 def test_embedded_json_is_bounded_and_plain_strings_are_truncated() -> None:

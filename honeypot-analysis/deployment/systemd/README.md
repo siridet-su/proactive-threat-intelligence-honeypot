@@ -11,9 +11,26 @@ Adjust those paths if your VM uses a different checkout location.
 
 ```bash
 sudo useradd --system --home /opt/honeypot --shell /usr/sbin/nologin honeypot
-sudo mkdir -p /opt/honeypot /etc/honeypot /var/lib/honeypot/feeds /var/lib/honeypot/reports
-sudo chown -R honeypot:honeypot /opt/honeypot /var/lib/honeypot
+sudo install -d -o honeypot -g honeypot -m 0750 /opt/honeypot /var/lib/honeypot /var/lib/honeypot/feeds
+sudo install -d -o honeypot -g honeypot -m 0700 /var/lib/honeypot/reports
+sudo install -d -o root -g honeypot -m 0750 /etc/honeypot
 ```
+
+For an existing deployment, run the same `install -d` commands before the
+artifact-writer upgrade so the configured directory is owned by the service
+account and mode `0700`. Migrate existing artifact permissions before the
+analysis worker is restarted:
+
+```bash
+sudo find /var/lib/honeypot/reports -xdev -type d -exec chmod 0700 {} +
+sudo find /var/lib/honeypot/reports -xdev -type f -exec chmod 0600 {} +
+sudo chown -R honeypot:honeypot /var/lib/honeypot/reports
+```
+
+Back up the report directory and verify available disk space before this
+migration. Deploy the directory migration, worker unit, configuration, and
+artifact code as one reviewed change; otherwise the strict writer will fail
+closed on the old public modes.
 
 2. Put the project in `/opt/honeypot`.
 
@@ -37,7 +54,7 @@ sudo -u honeypot .venv/bin/pip install requests reportlab google-genai torch tra
 4. Install config and secrets.
 
 ```bash
-sudo cp configs/production_config.example.json /etc/honeypot/production_config.json
+sudo install -o root -g honeypot -m 0640 configs/production_config.example.json /etc/honeypot/production_config.json
 sudo cp deployment/systemd/honeypot.env.example /etc/honeypot/honeypot.env
 sudo chmod 600 /etc/honeypot/honeypot.env
 sudo chown root:root /etc/honeypot/honeypot.env

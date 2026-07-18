@@ -14,6 +14,7 @@ from production.enrichment.enrichment_providers import (
     build_default_providers,
     merge_provider_results,
 )
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import utc_now
 from production.storage import open_storage
 
@@ -38,7 +39,7 @@ class EnrichmentWorker:
                     ProviderResult(
                         provider=provider.name,
                         status="error",
-                        error=f"{type(exc).__name__}: {exc}",
+                        error=redact_exception_for_log(exc),
                         ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
                     )
                 )
@@ -79,7 +80,7 @@ class EnrichmentWorker:
                 retry = int(job["attempts"]) < self.config.enrichment_max_attempts
                 self.storage.fail_enrichment_job(
                     job["job_id"],
-                    f"{type(exc).__name__}: {exc}",
+                    redact_exception_for_log(exc),
                     retry=retry,
                     retry_seconds=self.config.enrichment_retry_seconds,
                 )
@@ -89,7 +90,7 @@ class EnrichmentWorker:
                             "service": "enrichment_worker",
                             "job_id": job["job_id"],
                             "status": "retry" if retry else "failed",
-                            "error": f"{type(exc).__name__}: {exc}",
+                            "error": redact_exception_for_log(exc),
                             "timestamp": utc_now(),
                         },
                         sort_keys=True,

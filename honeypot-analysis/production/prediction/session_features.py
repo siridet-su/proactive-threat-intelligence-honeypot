@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from production.enrichment.enrichment_cache import iter_session_observables
 from production.classification.trust import is_trusted_classification_event
+from production.utils.sensitive_data import redact_for_session_state
 from production.utils.serialization import session_to_payload, stable_id
 from production.correlation.session_ttp_knowledge import main_ttp_id
 from production.correlation.campaign_clustering import build_session_fingerprint
@@ -75,9 +76,11 @@ def _extract_cves(commands: Iterable[str]) -> List[str]:
 
 
 def _payload_from_session(session: Any) -> Dict[str, Any]:
-    if isinstance(session, dict):
-        return dict(session)
-    return session_to_payload(session)
+    payload = dict(session) if isinstance(session, dict) else session_to_payload(session)
+    redacted = redact_for_session_state(payload)
+    if not isinstance(redacted, dict):
+        raise TypeError("session feature input redaction must return an object")
+    return redacted
 
 
 def _confidence_stats(confidences: List[float], has_classifications: bool) -> Dict[str, Any]:
@@ -168,6 +171,11 @@ def build_session_features(
     in prediction snapshots and replay later during backtesting.
     """
     payload = _payload_from_session(session)
+    safe_current_event: Optional[Dict[str, Any]] = None
+    if current_event is not None:
+        redacted_current_event = redact_for_session_state(current_event)
+        if isinstance(redacted_current_event, dict):
+            safe_current_event = redacted_current_event
     commands = _clean_strings(_as_list(payload.get("commands")))
     raw_events = [event for event in _as_list(payload.get("raw_events")) if isinstance(event, dict)]
     classification_events = [
@@ -256,7 +264,11 @@ def build_session_features(
         session_fingerprint = build_session_fingerprint(payload)
     except Exception:
         session_fingerprint = {}
-    timing_events = command_timing_events(raw_events, classification_events, current_event)
+    timing_events = command_timing_events(
+        raw_events,
+        classification_events,
+        safe_current_event,
+    )
 
     features: Dict[str, Any] = {
         "schema_version": "session_features.v1",
@@ -267,14 +279,14 @@ def build_session_features(
         "session_outcome": str(payload.get("session_outcome") or ""),
         "is_ended": bool(payload.get("is_ended")),
         "start_time": str(payload.get("start_time") or ""),
-        "event_time": _event_time(payload, current_event),
+        "event_time": _event_time(payload, safe_current_event),
         "duration": payload.get("duration"),
         "login_success": bool(payload.get("login_success")),
         "login_attempts": int(payload.get("login_attempts") or 0),
         "commands": commands,
         "command_count": len(commands),
         "raw_event_count": len(raw_events),
-        "current_eventid": str((current_event or {}).get("eventid") or ""),
+        "current_eventid": str((safe_current_event or {}).get("eventid") or ""),
         "observed_ttps": observed_ttps,
         "ttp_sequence": ttp_sequence,
         "last_ttp": ttp_sequence[-1] if ttp_sequence else "",

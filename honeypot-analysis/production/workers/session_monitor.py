@@ -32,8 +32,45 @@ from production.classification.trust import (
 from production.utils.credential_hmac import (
     CREDENTIAL_HMAC_SCHEME,
     CredentialHasher,
+    credential_metadata_for_provenance,
+)
+from production.utils.sensitive_data import (
+    redact_exception_for_log,
+    redact_for_artifact,
+    redact_for_log,
 )
 from production.utils.serialization import command_observation_provenance, stable_id
+
+
+def _safe_log_text(value: Any, *, max_chars: int = 1_000) -> str:
+    try:
+        detail = redact_for_log(value, max_string_chars=max_chars)
+    except Exception:
+        return "[REDACTION FAILED]"
+    return str(detail)
+
+
+def _safe_exception_text(exc: BaseException) -> str:
+    return redact_exception_for_log(exc)
+
+
+def _safe_reporting_mapping(value: Any, label: str) -> Dict[str, Any]:
+    try:
+        redacted = redact_for_artifact(value)
+    except Exception:
+        raise ValueError(f"{label} redaction failed") from None
+    if not isinstance(redacted, dict):
+        raise TypeError(f"{label} must redact to an object")
+    return redacted
+
+
+def _safe_command_text(value: Any) -> str:
+    try:
+        redacted = redact_for_artifact({"command": str(value)})
+    except Exception:
+        return "[REDACTION FAILED]"
+    command = redacted.get("command") if isinstance(redacted, dict) else None
+    return command if isinstance(command, str) else "[REDACTION FAILED]"
 
 try:
     from production.correlation.session_ttp_knowledge import (
@@ -435,6 +472,21 @@ class SessionMonitor:
             **self.DEFAULT_CREDENTIAL_POLICY,
             **(credential_policy or {}),
         }
+        if self.credential_policy.get("store_raw_credentials") is not False:
+            raise ValueError(
+                "SessionMonitor must not store plaintext credentials in derived sessions"
+            )
+        if self.credential_policy.get("sanitize_raw_events") is not True:
+            raise ValueError("SessionMonitor must sanitize derived raw events")
+        if self.credential_policy.get("redaction") != "[REDACTED]":
+            raise ValueError("SessionMonitor requires the canonical redaction marker")
+        if set(self.credential_policy.get("redact_fields") or []) != {
+            "password",
+            "passwd",
+        }:
+            raise ValueError(
+                "SessionMonitor credential redact_fields must be password and passwd"
+            )
         self.credential_hasher = credential_hasher
         requested_hash_algorithm = str(
             self.credential_policy.get("hash_algorithm", "disabled")
@@ -504,17 +556,19 @@ class SessionMonitor:
 
         elif eid in ("cowrie.command.input", "cowrie.command.success",
                      "cowrie.command.failed"):
-            cmd = event.get("input", "").strip()
+            raw_command = event.get("input", "")
+            cmd = "" if raw_command is None else str(raw_command).strip()
             if cmd:
-                state.commands.append(cmd)
+                safe_cmd = _safe_command_text(cmd)
+                state.commands.append(safe_cmd)
                 compound_command_index = len(state.commands) - 1
                 # Use 'success' field from Cowrie (1=success) or eventid
                 is_success = (event.get("success") == 1 or
                               eid == "cowrie.command.success")
                 if is_success:
-                    state.commands_success.append(cmd)
+                    state.commands_success.append(safe_cmd)
                 elif eid == "cowrie.command.failed" or event.get("success") == 0:
-                    state.commands_failed.append(cmd)
+                    state.commands_failed.append(safe_cmd)
 
                 if is_success:
                     command_outcome = "cowrie_reported_success"
@@ -525,8 +579,24 @@ class SessionMonitor:
 
                 # Classify command â†’ TTP
                 for classification_index, classification in enumerate(self._classify_many_with_source(cmd)):
-                    classification = dict(classification)
-                    classified_command = classification.get("subcommand") or classification.get("command") or cmd
+                    try:
+                        classification = _safe_reporting_mapping(
+                            dict(classification),
+                            "classification",
+                        )
+                    except Exception:
+                        classification = {
+                            "command": "[REDACTION FAILED]",
+                            "ttp": None,
+                            "tactic": "unknown",
+                            "source": "redaction_failed",
+                            "confidence": 0.0,
+                        }
+                    classified_command = (
+                        classification.get("subcommand")
+                        or classification.get("command")
+                        or safe_cmd
+                    )
                     classification["cowrie_eventid"] = eid
                     classification["event_timestamp"] = timestamp
                     classification["command_outcome"] = command_outcome
@@ -652,9 +722,25 @@ class SessionMonitor:
         return self._hash_secret_bundle(value)
 
     def _sanitize_event(self, event: dict) -> dict:
-        sanitized = dict(event)
-        if not self.credential_policy.get("sanitize_raw_events", True):
-            return sanitized
+        try:
+            projection = _safe_reporting_mapping(
+                {"raw_events": [event]},
+                "derived event",
+            )
+            projected_events = projection.get("raw_events")
+            if (
+                not isinstance(projected_events, list)
+                or len(projected_events) != 1
+                or not isinstance(projected_events[0], dict)
+            ):
+                raise ValueError("derived event projection failed")
+            sanitized = projected_events[0]
+        except Exception:
+            sanitized = {
+                "eventid": _safe_command_text(event.get("eventid", "")),
+                "session": _safe_command_text(event.get("session", "unknown")),
+                "redaction_status": "failed_closed",
+            }
 
         redaction = str(self.credential_policy.get("redaction", "[REDACTED]"))
         for field in self.credential_policy.get("redact_fields", ["password", "passwd"]):
@@ -674,22 +760,27 @@ class SessionMonitor:
         password = "" if raw_password is None else str(raw_password)
         redaction = str(self.credential_policy.get("redaction", "[REDACTED]"))
 
-        state.login_username = event.get("username", "")
+        raw_username = event.get("username", "")
+        state.login_username = redaction if raw_username not in (None, "") else ""
         active_digest, digest_aliases = self._event_secret_bundle(event, "password")
         state.login_password_hash = active_digest
         state.login_password_hash_aliases = list(digest_aliases)
         state.login_password_redacted = redaction if password else ""
-        state.login_password = (
-            password if self.credential_policy.get("store_raw_credentials", False)
-            else state.login_password_redacted
+        state.login_password = state.login_password_redacted
+        state.credential_metadata = credential_metadata_for_provenance(
+            {
+                "credential_observed": bool(password),
+                "raw_password_stored": bool(
+                    self.credential_policy.get("store_raw_credentials", False)
+                ),
+                "password_hash_present": bool(state.login_password_hash),
+                "password_hash_alias_count": len(state.login_password_hash_aliases),
+                "raw_events_sanitized": bool(
+                    self.credential_policy.get("sanitize_raw_events", True)
+                ),
+                **self._credential_hash_summary(),
+            }
         )
-        state.credential_metadata = {
-            "raw_password_stored": bool(self.credential_policy.get("store_raw_credentials", False)),
-            "password_hash_present": bool(state.login_password_hash),
-            "password_hash_alias_count": len(state.login_password_hash_aliases),
-            "raw_events_sanitized": bool(self.credential_policy.get("sanitize_raw_events", True)),
-            **self._credential_hash_summary(),
-        }
 
     def _apply_session_enrichment(self, state: SessionState) -> None:
         if not self.enrichment_db:
@@ -729,7 +820,7 @@ class SessionMonitor:
             state.enrichment_status = {
                 "status": "failed",
                 "source": "enrichment_db",
-                "error": f"{type(e).__name__}: {e}",
+                "error": _safe_exception_text(e),
             }
 
 
@@ -832,7 +923,7 @@ class SessionMonitor:
                     "tactic": "unknown",
                     "source": "notebook_merge_error",
                     "confidence": 0.0,
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "error": _safe_exception_text(exc),
                 }]
 
         events: List[dict] = []
@@ -1239,7 +1330,7 @@ class SessionMonitor:
             try:
                 self.on_session_end(state)
             except Exception as e:
-                print(f"  [Monitor] on_session_end failed: {e}")
+                print(f"  [Monitor] on_session_end failed: {_safe_exception_text(e)}")
 
         return alerts
 
@@ -1257,11 +1348,21 @@ class SessionMonitor:
     @staticmethod
     def _default_alert_handler(alert: AlertEvent) -> None:
         icons = {"CRITICAL": "!! CRITICAL", "HIGH": "!  HIGH", "MEDIUM": "~  MEDIUM", "LOW": "   LOW"}
-        print(f"\n  {icons.get(alert.severity, alert.severity)} ALERT: {alert}")
+        print(
+            f"\n  {_safe_log_text(icons.get(alert.severity, alert.severity), max_chars=40)} ALERT: "
+            f"{_safe_log_text(alert)}"
+        )
         if alert.kev_matches:
             for m in alert.kev_matches:
-                print(f"    KEV: {m.get('cve_id','')} â€” {m.get('name','')[:60]}")
-                print(f"    Action: {m.get('required_action','')[:80]}")
+                print(
+                    "    KEV: "
+                    f"{_safe_log_text(m.get('cve_id', ''), max_chars=80)} â€” "
+                    f"{_safe_log_text(m.get('name', ''), max_chars=60)}"
+                )
+                print(
+                    "    Action: "
+                    f"{_safe_log_text(m.get('required_action', ''), max_chars=80)}"
+                )
 
 
 def _build_trusted_reporting_views(state: SessionState, mitre_db: Any = None) -> tuple[dict, dict]:
@@ -1339,17 +1440,88 @@ def build_pipeline_trigger(
     import asyncio
 
     def _on_session_end(state: SessionState) -> None:
+        safe_session_label = _safe_log_text(state.session_id, max_chars=32)[:8]
         if not state.commands and not state.login_success:
-            print(f"  [Pipeline] Session {state.session_id[:8]} skipped (no commands)")
+            print(f"  [Pipeline] Session {safe_session_label} skipped (no commands)")
             return
 
-        print(f"\n  [Pipeline] Session {state.session_id[:8]} ended - "
+        print(f"\n  [Pipeline] Session {safe_session_label} ended - "
               f"{len(state.commands)} cmds | {len(state.ttps)} TTPs | "
               f"{len(state.kev_matches)} KEV hits")
 
+        try:
+            tactic_summary, raw_ttp_command_map = _build_trusted_reporting_views(
+                state,
+                mitre_db,
+            )
+            reporting_view = _safe_reporting_mapping(
+                {
+                    "src_ip": state.src_ip,
+                    "session_id": state.session_id,
+                    "start_time": state.start_time,
+                    "commands": state.commands,
+                    "commands_success": state.commands_success,
+                    "commands_failed": getattr(state, "commands_failed", []),
+                    "classification_events": getattr(
+                        state, "classification_events", []
+                    ),
+                    "raw_events": getattr(state, "raw_events", []),
+                    "session_evidence_graph": getattr(
+                        state, "session_evidence_graph", {}
+                    ),
+                    "ttp_sources": getattr(state, "ttp_sources", {}),
+                    "tactic_summary": tactic_summary,
+                    "ttp_command_map": raw_ttp_command_map,
+                    "session_ttp_correlations": getattr(
+                        state, "session_ttp_correlations", []
+                    ),
+                    "session_ttp_correlation_summary": getattr(
+                        state, "session_ttp_correlation_summary", {}
+                    ),
+                    "bpg_list": getattr(state, "bpg_list", []),
+                    "login_attempts": state.login_attempts,
+                    "login_success": state.login_success,
+                    "login_username": getattr(state, "login_username", ""),
+                    "login_password": getattr(
+                        state, "login_password_redacted", ""
+                    ),
+                    "credential_metadata": credential_metadata_for_provenance(
+                        getattr(state, "credential_metadata", {})
+                    ),
+                    "enrichment_status": getattr(state, "enrichment_status", {}),
+                    "classification_policy": getattr(
+                        state, "classification_policy", {}
+                    ),
+                    "ioc_summary": getattr(state, "ioc_summary", {}),
+                    "process_tree_status": getattr(
+                        state, "process_tree_status", {}
+                    ),
+                    "src_port": getattr(state, "src_port", 0),
+                    "dst_ip": getattr(state, "dst_ip", ""),
+                    "dst_port": getattr(state, "dst_port", 22),
+                    "sensor": getattr(state, "sensor", ""),
+                    "protocol": getattr(state, "protocol", "ssh"),
+                    "duration": getattr(state, "duration", 0.0),
+                    "client_version": getattr(state, "client_version", ""),
+                    "hassh": getattr(state, "hassh", None),
+                    "ja3": getattr(state, "ja3", None),
+                    "asn": getattr(state, "asn", None),
+                    "geo": getattr(state, "geo", None),
+                    "isp": getattr(state, "isp", None),
+                    "kev_matches": getattr(state, "kev_matches", []),
+                    "sigma_hits": getattr(state, "sigma_hits", []),
+                },
+                "session reporting view",
+            )
+        except Exception as exc:
+            safe_error = _safe_exception_text(exc)
+            print(f"  [Pipeline] Reporting view failed: {safe_error}")
+            state.pipeline_error = safe_error
+            return None
+
         # All fields match what enrichment_mapping_1b / improved_3c expect.
         class _IP:
-            def __init__(self, ip, sess):
+            def __init__(self, ip, view):
                 self.value       = ip
                 self.risk_score  = 0
 
@@ -1359,15 +1531,15 @@ def build_pipeline_trigger(
 
                 # HASSH is captured live from cowrie.client.kex
                 # ja3 would come from Zeek/Suricata enrichment (None until then)
-                self.hassh_label       = sess.hassh           # â† REAL value from Cowrie
-                self.ja3_label         = sess.ja3             # â† None until Zeek added
-                self.hassh             = sess.hassh           # raw hash (same value)
-                self.ja3               = sess.ja3
-                self.ssh_client        = getattr(sess, 'client_version', '')
+                self.hassh_label       = view.get('hassh')
+                self.ja3_label         = view.get('ja3')
+                self.hassh             = view.get('hassh')
+                self.ja3               = view.get('ja3')
+                self.ssh_client        = view.get('client_version', '')
 
-                self.asn               = getattr(sess, 'asn', None)
-                self.geo               = getattr(sess, 'geo', None)
-                self.isp               = getattr(sess, 'isp', None)
+                self.asn               = view.get('asn')
+                self.geo               = view.get('geo')
+                self.isp               = view.get('isp')
 
                 self.abuseipdb_categories = []
                 self.abuse_tags           = []
@@ -1388,41 +1560,40 @@ def build_pipeline_trigger(
                 self.first_seen           = None
                 self.last_seen            = None
 
-                self.kev_matches          = sess.kev_matches
-                self.sigma_hits           = sess.sigma_hits
+                self.kev_matches          = view.get('kev_matches', [])
+                self.sigma_hits           = view.get('sigma_hits', [])
 
         class _Sess:
             """Bridge from SessionState to pipeline session format."""
-            def __init__(self, s):
-                self.src_ip             = s.src_ip
-                self.session_id         = s.session_id
-                self.start_time         = s.start_time
-                self.commands           = s.commands
-                self.commands_success   = s.commands_success
-                self.commands_failed    = getattr(s, 'commands_failed', [])
-                self.classification_events = getattr(s, 'classification_events', [])
-                self.raw_events          = getattr(s, 'raw_events', [])
-                self.session_evidence_graph = getattr(s, 'session_evidence_graph', {})
-                self.ttp_sources        = getattr(s, 'ttp_sources', {})
-                self.login_attempts     = s.login_attempts
-                self.login_success      = s.login_success
-                self.login_username     = getattr(s, 'login_username', '')
-                self.login_password     = getattr(s, 'login_password_redacted', '')
-                self.login_password_hash = getattr(s, 'login_password_hash', '')
-                self.credential_metadata = getattr(s, 'credential_metadata', {})
-                self.enrichment_status  = getattr(s, 'enrichment_status', {})
+            def __init__(self, view):
+                self.src_ip             = view.get('src_ip', '')
+                self.session_id         = view.get('session_id', '')
+                self.start_time         = view.get('start_time', '')
+                self.commands           = view.get('commands', [])
+                self.commands_success   = view.get('commands_success', [])
+                self.commands_failed    = view.get('commands_failed', [])
+                self.classification_events = view.get('classification_events', [])
+                self.raw_events          = view.get('raw_events', [])
+                self.session_evidence_graph = view.get('session_evidence_graph', {})
+                self.ttp_sources        = view.get('ttp_sources', {})
+                self.login_attempts     = view.get('login_attempts', 0)
+                self.login_success      = view.get('login_success', False)
+                self.login_username     = view.get('login_username', '')
+                self.login_password     = view.get('login_password', '')
+                self.credential_metadata = view.get('credential_metadata', {})
+                self.enrichment_status  = view.get('enrichment_status', {})
                 # Real Cowrie fields
-                self.src_port           = getattr(s, 'src_port', 0)
-                self.dst_ip             = getattr(s, 'dst_ip', '')
-                self.dst_port           = getattr(s, 'dst_port', 22)
-                self.sensor             = getattr(s, 'sensor', '')
-                self.protocol           = getattr(s, 'protocol', 'ssh')
-                self.duration           = getattr(s, 'duration', 0.0)
-                self.client_version     = getattr(s, 'client_version', '')
+                self.src_port           = view.get('src_port', 0)
+                self.dst_ip             = view.get('dst_ip', '')
+                self.dst_port           = view.get('dst_port', 22)
+                self.sensor             = view.get('sensor', '')
+                self.protocol           = view.get('protocol', 'ssh')
+                self.duration           = view.get('duration', 0.0)
+                self.client_version     = view.get('client_version', '')
 
         class _Bundle:
-            def __init__(self, s):
-                self.ips     = [_IP(s.src_ip, s)]
+            def __init__(self, view):
+                self.ips     = [_IP(view.get('src_ip', ''), view)]
                 self.urls    = []
                 self.hashes  = []
                 self.domains = []
@@ -1438,8 +1609,8 @@ def build_pipeline_trigger(
                         self.note = payload.get("note", "")
                         self.risk_score = 0
 
-                ioc_summary = getattr(s, "ioc_summary", {}) or {}
-                existing_ips = {s.src_ip}
+                ioc_summary = view.get("ioc_summary", {}) or {}
+                existing_ips = {view.get('src_ip', '')}
                 for item in ioc_summary.get("ips", []):
                     if item.get("value") and item.get("value") not in existing_ips:
                         self.ips.append(_SimpleIOC(item))
@@ -1449,8 +1620,8 @@ def build_pipeline_trigger(
                 self.domains = [_SimpleIOC(item) for item in ioc_summary.get("domains", [])]
                 self.ports = [_SimpleIOC(item) for item in ioc_summary.get("ports", [])]
 
-        ioc_bundle   = _Bundle(state)
-        sessions_obj = [_Sess(state)]
+        ioc_bundle   = _Bundle(reporting_view)
+        sessions_obj = [_Sess(reporting_view)]
 
         # enrichment_db contains pre-fetched API data keyed by IP.
         # If enrichment_db is None (no pre-fetched data), the _IP object above
@@ -1468,11 +1639,37 @@ def build_pipeline_trigger(
                     "source": "pipeline_trigger.enrichment_db",
                     "fields": sorted(record.keys()),
                 }
-                print(f"  [Pipeline] Enrichment applied for {state.src_ip}")
+                print(
+                    "  [Pipeline] Enrichment applied for "
+                    f"{_safe_log_text(state.src_ip, max_chars=80)}"
+                )
             else:
-                print(f"  [Pipeline] No enrichment record for {state.src_ip} â€” using Cowrie-only data")
+                print(
+                    "  [Pipeline] No enrichment record for "
+                    f"{_safe_log_text(state.src_ip, max_chars=80)} â€” "
+                    "using Cowrie-only data"
+                )
         except Exception as e:
-            print(f"  [Pipeline] Enrichment skipped [{type(e).__name__}]: {e}")
+            print(f"  [Pipeline] Enrichment skipped: {_safe_exception_text(e)}")
+
+        try:
+            reporting_view["enrichment_status"] = _safe_reporting_mapping(
+                getattr(state, "enrichment_status", {}),
+                "enrichment status",
+            )
+            sessions_obj[0].enrichment_status = reporting_view[
+                "enrichment_status"
+            ]
+            for collection_name in ("ips", "urls", "hashes", "domains", "ports"):
+                for ioc in getattr(ioc_bundle, collection_name, []) or []:
+                    safe_ioc = _safe_reporting_mapping(vars(ioc), "enriched IOC")
+                    for field_name, field_value in safe_ioc.items():
+                        setattr(ioc, field_name, field_value)
+        except Exception as exc:
+            safe_error = _safe_exception_text(exc)
+            print(f"  [Pipeline] Enriched IOC redaction failed: {safe_error}")
+            state.pipeline_error = safe_error
+            return None
 
         try:
             # base_url='' and model='' â†’ VertexAI client reads from COLAB_CONFIG
@@ -1485,46 +1682,56 @@ def build_pipeline_trigger(
             coord.recommendation_asset_profile_path = str(smb_asset_profile_path or "")
             coord.recommendation_action_policy_path = str(smb_action_policy_path or "")
 
-            # MitreAttackDB.get_tactics(tid) returns list of tactic names
-            tactic_summary, ttp_command_map = _build_trusted_reporting_views(
-                state,
-                mitre_db,
+            # Reporting inputs are the centrally redacted projection built
+            # above; the raw SessionState remains available to storage.
+            tactic_summary = reporting_view.get("tactic_summary", {})
+            ttp_command_map = reporting_view.get("ttp_command_map", {})
+            session_correlations = reporting_view.get(
+                "session_ttp_correlations", []
             )
-            session_correlations = list(getattr(state, "session_ttp_correlations", []) or [])
-            raw_events = list(state.raw_events)
-            bpg_list = list(getattr(state, "bpg_list", []) or [])
+            raw_events = reporting_view.get("raw_events", [])
+            bpg_list = reporting_view.get("bpg_list", [])
             data_provenance = {
                 "session": {
-                    "session_id": state.session_id,
-                    "src_ip": state.src_ip,
+                    "session_id": reporting_view.get("session_id", ""),
+                    "src_ip": reporting_view.get("src_ip", ""),
                     "raw_event_count": len(raw_events),
                     **command_observation_provenance(
-                        state.commands,
-                        state.commands_success,
-                        state.commands_failed,
+                        reporting_view.get("commands", []),
+                        reporting_view.get("commands_success", []),
+                        reporting_view.get("commands_failed", []),
                     ),
                 },
                 "classification": {
-                    "policy": dict(getattr(state, 'classification_policy', {})),
-                    "event_count": len(getattr(state, 'classification_events', [])),
-                    "ttp_sources": dict(getattr(state, 'ttp_sources', {})),
+                    "policy": reporting_view.get("classification_policy", {}),
+                    "event_count": len(
+                        reporting_view.get("classification_events", [])
+                    ),
+                    "ttp_sources": reporting_view.get("ttp_sources", {}),
                 },
-                "session_ttp_correlation": dict(getattr(state, 'session_ttp_correlation_summary', {}) or {}),
-                "credentials": dict(getattr(state, 'credential_metadata', {})),
-                "enrichment": dict(getattr(state, 'enrichment_status', {})),
-                "ioc_extraction": dict(getattr(state, 'ioc_summary', {}) or {}),
+                "session_ttp_correlation": reporting_view.get(
+                    "session_ttp_correlation_summary", {}
+                ),
+                "credential_metadata": reporting_view.get(
+                    "credential_metadata", {}
+                ),
+                "enrichment": reporting_view.get("enrichment_status", {}),
+                "ioc_extraction": reporting_view.get("ioc_summary", {}),
                 "behavior_graph": {
-                    "status": dict(getattr(state, 'process_tree_status', {}) or {}),
+                    "status": reporting_view.get("process_tree_status", {}),
                     "bpg_count": len(bpg_list),
                 },
             }
             try:
                 from production.enrichment.threat_feed_loader import check_feeds_status
-                data_provenance["feeds"] = check_feeds_status()
+                data_provenance["feeds"] = _safe_reporting_mapping(
+                    check_feeds_status(),
+                    "feed status",
+                )
             except Exception as e:
                 data_provenance["feeds"] = {
                     "status": "unavailable",
-                    "error": f"{type(e).__name__}: {e}",
+                    "error": _safe_exception_text(e),
                 }
 
             try:
@@ -1580,14 +1787,22 @@ def build_pipeline_trigger(
             if not isinstance(result, dict):
                 raise RuntimeError("Coordinator returned no report")
             result.setdefault("data_provenance", {}).update(data_provenance)
-            result.setdefault("ioc_summary", getattr(state, "ioc_summary", {}) or {})
+            result.setdefault(
+                "ioc_summary",
+                reporting_view.get("ioc_summary", {}),
+            )
             result.setdefault("bpg_list", bpg_list)
+            result = _safe_reporting_mapping(result, "report")
             level = _extract_level(result)
-            print(f"  [Pipeline] Done - analytical_evidence_strength={level}")
+            print(
+                "  [Pipeline] Done - analytical_evidence_strength="
+                f"{_safe_log_text(level, max_chars=40)}"
+            )
             return result
         except Exception as e:
-            print(f"  [Pipeline] Failed [{type(e).__name__}]: {e}")
-            state.pipeline_error = f"{type(e).__name__}: {e}"
+            safe_error = _safe_exception_text(e)
+            print(f"  [Pipeline] Failed: {safe_error}")
+            state.pipeline_error = safe_error
             return None
 
     return _on_session_end
@@ -1617,9 +1832,12 @@ class CowrieLogReplayer:
                         self._events.append(json.loads(line))
                     except json.JSONDecodeError:
                         continue
-            print(f"  [Replayer] Loaded {len(self._events)} events from {self.log_path}")
+            print(
+                f"  [Replayer] Loaded {len(self._events)} events from "
+                f"{_safe_log_text(self.log_path)}"
+            )
         except FileNotFoundError:
-            print(f"  [Replayer] File not found: {self.log_path}")
+            print(f"  [Replayer] File not found: {_safe_log_text(self.log_path)}")
 
     def stream(self, delay: float = 0.05, realtime_scale: float = 0.0):
         """
@@ -1674,21 +1892,24 @@ if __name__ == "__main__":
     try:
         from production.enrichment.threat_feed_loader import load_threat_feeds
         feeds = load_threat_feeds()
-        print(f"  Feeds loaded: {feeds}")
+        print(f"  Feeds loaded: {_safe_log_text(feeds)}")
     except Exception as e:
-        print(f"  Feeds unavailable ({e}) â€” running without KEV/Sigma")
+        print(
+            f"  Feeds unavailable ({_safe_exception_text(e)}) â€” "
+            "running without KEV/Sigma"
+        )
 
     try:
         from production.enrichment.mitre_attack_loader import load_mitre_attack_db
         mitre_db = load_mitre_attack_db()
-        print(f"  MITRE DB: {mitre_db}")
+        print(f"  MITRE DB: {_safe_log_text(mitre_db)}")
     except Exception as e:
-        print(f"  MITRE DB unavailable ({e})")
+        print(f"  MITRE DB unavailable ({_safe_exception_text(e)})")
 
     all_alerts: List[AlertEvent] = []
 
     def on_session_done(state: SessionState):
-        print(f"\n  [Pipeline] Session {state.session_id[:8]} ended â€” "
+        print(f"\n  [Pipeline] Session {_safe_log_text(state.session_id, max_chars=32)[:8]} ended â€” "
               f"{len(state.commands)} commands, {len(state.ttps)} TTPs, "
               f"{len(state.kev_matches)} KEV matches")
         print(f"  [Pipeline] Would now trigger: SecureBERT + AI full analysis")
@@ -1701,7 +1922,7 @@ if __name__ == "__main__":
 
     replayer = CowrieLogReplayer(log_file)
 
-    print(f"\n=== Starting real-time replay of {log_file} ===\n")
+    print(f"\n=== Starting real-time replay of {_safe_log_text(log_file)} ===\n")
     for event in replayer.stream(delay=0.02):
         monitor.on_event(event)
 

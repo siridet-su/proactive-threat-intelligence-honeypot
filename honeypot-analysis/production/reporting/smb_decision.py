@@ -18,6 +18,7 @@ from string import Formatter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, utc_now
 
 
@@ -97,7 +98,7 @@ def _load_json_file(path_text: str, default: Dict[str, Any]) -> Dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         return {
             **dict(default),
-            "load_error": f"{type(exc).__name__}: {exc}",
+            "load_error": redact_exception_for_log(exc),
             "source_path": str(path),
         }
     if not isinstance(loaded, dict):
@@ -249,7 +250,7 @@ def _canonical_recommendation_evidence(session_payload: Dict[str, Any]) -> Dict[
     except Exception as exc:
         return {
             "status": "unavailable",
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": redact_exception_for_log(exc),
             "observed_behavior": {},
             "supported_assessment": {},
             "follow_on_hypothesis": {},

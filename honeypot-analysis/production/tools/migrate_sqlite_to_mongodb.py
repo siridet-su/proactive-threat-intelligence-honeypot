@@ -69,6 +69,10 @@ class MigrationError(RuntimeError):
     pass
 
 
+class MigrationSourceChangedError(MigrationError):
+    """A stable operator-actionable checkpoint/source mismatch."""
+
+
 @dataclass(frozen=True)
 class SourceIdentity:
     source_id: str
@@ -200,7 +204,7 @@ class SQLiteToMongoMigrator:
                 {"migration_id": self.migration_id, "table": table}
             )
         if checkpoint and checkpoint.get("source_id") != self.source.source_id:
-            raise MigrationError(
+            raise MigrationSourceChangedError(
                 f"checkpoint source identity mismatch for table {table}; use --restart or a new migration id"
             )
         if checkpoint and (
@@ -210,7 +214,7 @@ class SQLiteToMongoMigrator:
             or int(checkpoint.get("source_wal_modified_ns") or -1)
             != self.source.wal_modified_ns
         ):
-            raise MigrationError(
+            raise MigrationSourceChangedError(
                 f"SQLite source changed after the {table} checkpoint; use --restart to reconcile all rows"
             )
         return dict(checkpoint) if checkpoint else None
@@ -488,7 +492,11 @@ class SQLiteToMongoMigrator:
                 "counters": counters,
             }
         except Exception as exc:
-            error = _safe_error(exc)
+            error = (
+                "migration_source_changed: use --restart to reconcile all rows"
+                if isinstance(exc, MigrationSourceChangedError)
+                else _safe_error(exc)
+            )
             failures.append({"last_rowid": last_rowid, "error": error})
             if checkpoint_loaded:
                 self._save_checkpoint(

@@ -3,22 +3,302 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 from production.utils.config import ProductionConfig
-from production.utils.serialization import stable_json, utc_now
+from production.utils.sensitive_data import (
+    redact_exception_for_log,
+    redact_for_artifact,
+)
+from production.utils.serialization import stable_id, stable_json, utc_now
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
 
 
-def _safe_name(value: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value)[:120] or "unknown"
+class _PDFExportUnavailable(RuntimeError):
+    """Raised when the optional PDF renderer is not installed."""
+
+
+class _ReportsDirectoryIdentityChanged(ValueError):
+    """Raised when the configured path no longer names the trusted directory."""
+
+
+def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
+    """Return a redacted mapping or fail without exposing the input."""
+
+    try:
+        redacted = redact_for_artifact(value)
+    except Exception:
+        raise ValueError(f"{label} redaction failed") from None
+    if not isinstance(redacted, dict):
+        raise TypeError(f"{label} must redact to an object")
+    return redacted
+
+
+def _safe_artifact_text(value: Any, label: str) -> str:
+    try:
+        redacted = redact_for_artifact(str(value))
+    except Exception:
+        raise ValueError(f"{label} redaction failed") from None
+    if not isinstance(redacted, str):
+        raise TypeError(f"{label} must redact to text")
+    return redacted
+
+
+def _safe_artifact_error(exc: BaseException) -> str:
+    return redact_exception_for_log(exc)
+
+
+@dataclass(frozen=True)
+class _ReportsDirectory:
+    path: Path
+    descriptor: int
+
+
+def _directory_open_flags() -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return flags
+
+
+def _open_reports_directory(
+    configured_path: Any,
+    *,
+    create_leaf: bool,
+) -> _ReportsDirectory:
+    """Open a private directory by component and keep the trusted fd alive."""
+
+    directory_descriptor = -1
+    try:
+        configured = str(configured_path or "").strip()
+        if not configured:
+            raise ValueError
+        output_dir = Path(os.path.abspath(configured))
+        working_directory = Path(os.path.abspath(os.getcwd()))
+        if output_dir == Path("/") or output_dir == working_directory:
+            raise ValueError
+        components = output_dir.parts[1:]
+        if not components:
+            raise ValueError
+        flags = _directory_open_flags()
+        directory_descriptor = os.open(os.sep, flags)
+        for index, component in enumerate(components):
+            is_leaf = index == len(components) - 1
+            try:
+                next_descriptor = os.open(
+                    component,
+                    flags,
+                    dir_fd=directory_descriptor,
+                )
+            except FileNotFoundError:
+                if not (create_leaf and is_leaf):
+                    raise
+                os.mkdir(component, mode=0o700, dir_fd=directory_descriptor)
+                next_descriptor = os.open(
+                    component,
+                    flags,
+                    dir_fd=directory_descriptor,
+                )
+                os.fchmod(next_descriptor, 0o700)
+            os.close(directory_descriptor)
+            directory_descriptor = next_descriptor
+        metadata = os.fstat(directory_descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError
+        if hasattr(os, "geteuid") and metadata.st_uid != os.geteuid():
+            raise PermissionError
+        if stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise PermissionError
+        return _ReportsDirectory(output_dir, directory_descriptor)
+    except Exception:
+        if directory_descriptor >= 0:
+            os.close(directory_descriptor)
+        raise ValueError("reports directory preparation failed") from None
+
+
+def _assert_reports_directory_identity(directory: _ReportsDirectory) -> None:
+    """Verify that the configured path still resolves to the held directory."""
+
+    reopened: Optional[_ReportsDirectory] = None
+    try:
+        reopened = _open_reports_directory(directory.path, create_leaf=False)
+        trusted_metadata = os.fstat(directory.descriptor)
+        current_metadata = os.fstat(reopened.descriptor)
+        if (
+            trusted_metadata.st_dev,
+            trusted_metadata.st_ino,
+        ) != (
+            current_metadata.st_dev,
+            current_metadata.st_ino,
+        ):
+            raise _ReportsDirectoryIdentityChanged
+    except _ReportsDirectoryIdentityChanged:
+        raise _ReportsDirectoryIdentityChanged(
+            "reports directory identity changed"
+        ) from None
+    except Exception:
+        raise _ReportsDirectoryIdentityChanged(
+            "reports directory identity changed"
+        ) from None
+    finally:
+        if reopened is not None:
+            os.close(reopened.descriptor)
+
+
+@contextmanager
+def _prepare_reports_directory(
+    configured_path: Any,
+) -> Iterator[_ReportsDirectory]:
+    directory = _open_reports_directory(configured_path, create_leaf=True)
+    try:
+        yield directory
+    finally:
+        os.close(directory.descriptor)
+
+
+@contextmanager
+def _reports_directory_handle(
+    output_dir: Any,
+) -> Iterator[_ReportsDirectory]:
+    if isinstance(output_dir, _ReportsDirectory):
+        yield output_dir
+        return
+    directory = _open_reports_directory(output_dir, create_leaf=False)
+    try:
+        yield directory
+    finally:
+        os.close(directory.descriptor)
+
+
+def _safe_name(value: Any) -> str:
+    text = str(value)
+    return "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in text
+    )[:120] or "unknown"
+
+
+_ARTIFACT_VERSION_PATTERN = re.compile(r"^artifact_[0-9a-f]{32}$")
+
+
+def _artifact_version_id(
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+) -> str:
+    """Derive a retry-stable version before artifact paths are attached."""
+
+    report_basis = dict(report)
+    report_basis.pop("artifacts", None)
+    session_basis = dict(session_payload)
+    session_basis.pop("artifacts", None)
+    return stable_id(
+        "artifact",
+        {
+            "report": report_basis,
+            "session": session_basis,
+        },
+    )
+
+
+def _resolve_artifact_version(
+    artifact_version: str,
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+) -> str:
+    if artifact_version:
+        if not _ARTIFACT_VERSION_PATTERN.fullmatch(artifact_version):
+            raise ValueError("artifact version is invalid")
+        return artifact_version
+    return _artifact_version_id(report, session_payload)
+
+
+def _verified_artifact_path(
+    directory: _ReportsDirectory,
+    filename: str,
+) -> str:
+    _assert_reports_directory_identity(directory)
+    return str(directory.path / filename)
+
+
+@contextmanager
+def _private_artifact_path(
+    directory: _ReportsDirectory,
+    filename: str,
+) -> Iterator[Path]:
+    """Build and replace an artifact relative to a trusted directory fd."""
+
+    if Path(filename).name != filename:
+        raise ValueError("artifact filename must not contain path components")
+    temporary_name = ""
+    file_descriptor = -1
+    create_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    create_flags |= getattr(os, "O_CLOEXEC", 0)
+    create_flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        _assert_reports_directory_identity(directory)
+        for _attempt in range(10):
+            temporary_name = f".{filename}.{uuid.uuid4().hex}.tmp"
+            try:
+                file_descriptor = os.open(
+                    temporary_name,
+                    create_flags,
+                    0o600,
+                    dir_fd=directory.descriptor,
+                )
+                break
+            except FileExistsError:
+                continue
+        if file_descriptor < 0:
+            raise FileExistsError("could not allocate private artifact temporary file")
+        os.fchmod(file_descriptor, 0o600)
+        os.close(file_descriptor)
+        file_descriptor = -1
+        temporary_path = (
+            Path("/proc/self/fd")
+            / str(directory.descriptor)
+            / temporary_name
+        )
+        yield temporary_path
+        _assert_reports_directory_identity(directory)
+        verify_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        verify_flags |= getattr(os, "O_NOFOLLOW", 0)
+        file_descriptor = os.open(
+            temporary_name,
+            verify_flags,
+            dir_fd=directory.descriptor,
+        )
+        try:
+            os.fsync(file_descriptor)
+            os.fchmod(file_descriptor, 0o600)
+        finally:
+            os.close(file_descriptor)
+            file_descriptor = -1
+        os.replace(
+            temporary_name,
+            filename,
+            src_dir_fd=directory.descriptor,
+            dst_dir_fd=directory.descriptor,
+        )
+        os.fsync(directory.descriptor)
+        _assert_reports_directory_identity(directory)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if temporary_name:
+            try:
+                os.unlink(temporary_name, dir_fd=directory.descriptor)
+            except FileNotFoundError:
+                pass
 
 
 def _stix_timestamp(value: str) -> str:
@@ -79,10 +359,31 @@ def _trusted_ttp_ids(report: Dict[str, Any], session_payload: Dict[str, Any]) ->
     ))
 
 
-def write_json_report(report: Dict[str, Any], session_id: str, output_dir: Path) -> str:
-    path = output_dir / f"{_safe_name(session_id)}_report.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    return str(path)
+def write_json_report(
+    report: Dict[str, Any],
+    session_id: str,
+    output_dir: Path,
+    *,
+    artifact_version: str = "",
+) -> str:
+    safe_report = _safe_artifact_mapping(report, "report")
+    safe_session_id = _safe_artifact_text(session_id, "session_id")
+    version = _resolve_artifact_version(
+        artifact_version,
+        safe_report,
+        {"session_id": safe_session_id},
+    )
+    filename = f"{_safe_name(safe_session_id)}_{version}_report.json"
+    rendered = json.dumps(
+        safe_report,
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    )
+    with _reports_directory_handle(output_dir) as directory:
+        with _private_artifact_path(directory, filename) as temporary_path:
+            temporary_path.write_text(rendered, encoding="utf-8")
+        return _verified_artifact_path(directory, filename)
 
 
 def _stix_id(object_type: str, key: str) -> str:
@@ -227,6 +528,8 @@ def _build_identity(now: str, session_payload: Dict[str, Any]) -> Dict[str, Any]
 
 
 def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -> Dict[str, Any]:
+    report = _safe_artifact_mapping(report, "report")
+    session_payload = _safe_artifact_mapping(session_payload, "session")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     session_id = session_payload.get("session_id", "unknown")
     objects: List[Dict[str, Any]] = []
@@ -500,15 +803,49 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
     return {"type": "bundle", "id": f"bundle--{uuid.uuid4()}", "objects": [report_obj] + objects}
 
 
-def write_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any], output_dir: Path) -> str:
+def write_stix_bundle(
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+    output_dir: Path,
+    *,
+    artifact_version: str = "",
+) -> str:
+    report = _safe_artifact_mapping(report, "report")
+    session_payload = _safe_artifact_mapping(session_payload, "session")
     session_id = session_payload.get("session_id", report.get("session_id", "unknown"))
-    path = output_dir / f"{_safe_name(session_id)}_threat_bundle.json"
-    path.write_text(json.dumps(build_stix_bundle(report, session_payload), indent=2, sort_keys=True), encoding="utf-8")
-    return str(path)
+    version = _resolve_artifact_version(
+        artifact_version,
+        report,
+        session_payload,
+    )
+    filename = f"{_safe_name(session_id)}_{version}_threat_bundle.json"
+    rendered = json.dumps(
+        build_stix_bundle(report, session_payload),
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    )
+    with _reports_directory_handle(output_dir) as directory:
+        with _private_artifact_path(directory, filename) as temporary_path:
+            temporary_path.write_text(rendered, encoding="utf-8")
+        return _verified_artifact_path(directory, filename)
 
 
-def write_markdown_report(report: Dict[str, Any], session_payload: Dict[str, Any], output_dir: Path) -> str:
+def write_markdown_report(
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+    output_dir: Path,
+    *,
+    artifact_version: str = "",
+) -> str:
+    report = _safe_artifact_mapping(report, "report")
+    session_payload = _safe_artifact_mapping(session_payload, "session")
     session_id = session_payload.get("session_id", report.get("session_id", "unknown"))
+    version = _resolve_artifact_version(
+        artifact_version,
+        report,
+        session_payload,
+    )
     ioc_summary = report.get("ioc_summary") or session_payload.get("ioc_summary") or {}
     lines = [
         "# Threat Intelligence Report",
@@ -594,24 +931,38 @@ def write_markdown_report(report: Dict[str, Any], session_payload: Dict[str, Any
     lines.extend(["", "## IoCs"])
     for item in _ioc_items(ioc_summary):
         lines.append(f"- {item.get('type')}: {item.get('value')} ({item.get('confidence', 'unknown')})")
-    path = output_dir / f"{_safe_name(session_id)}_threat_report.md"
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return str(path)
+    filename = f"{_safe_name(session_id)}_{version}_threat_report.md"
+    with _reports_directory_handle(output_dir) as directory:
+        with _private_artifact_path(directory, filename) as temporary_path:
+            temporary_path.write_text("\n".join(lines), encoding="utf-8")
+        return _verified_artifact_path(directory, filename)
 
 
-def write_pdf_report(report: Dict[str, Any], session_payload: Dict[str, Any], output_dir: Path) -> str:
+def write_pdf_report(
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+    output_dir: Path,
+    *,
+    artifact_version: str = "",
+) -> str:
+    report = _safe_artifact_mapping(report, "report")
+    session_payload = _safe_artifact_mapping(session_payload, "session")
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import cm
         from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-    except ImportError:
-        return write_markdown_report(report, session_payload, output_dir)
+    except ImportError as exc:
+        raise _PDFExportUnavailable("PDF renderer is unavailable") from exc
 
     session_id = session_payload.get("session_id", report.get("session_id", "unknown"))
-    path = output_dir / f"{_safe_name(session_id)}_threat_report.pdf"
-    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm, topMargin=2 * cm, bottomMargin=2 * cm)
+    version = _resolve_artifact_version(
+        artifact_version,
+        report,
+        session_payload,
+    )
+    filename = f"{_safe_name(session_id)}_{version}_threat_report.pdf"
     styles = getSampleStyleSheet()
     title = ParagraphStyle("TitleCustom", parent=styles["Title"], fontSize=20, textColor=colors.HexColor("#C0392B"), spaceAfter=4)
     h2 = ParagraphStyle("HeadingCustom", parent=styles["Heading2"], fontSize=13, textColor=colors.HexColor("#2C3E50"), spaceBefore=14, spaceAfter=4)
@@ -622,7 +973,17 @@ def write_pdf_report(report: Dict[str, Any], session_payload: Dict[str, Any], ou
         Paragraph(f"Generated: {utc_now()}", meta),
         HRFlowable(width="100%", thickness=2, color=colors.HexColor("#C0392B"), spaceAfter=12),
         Paragraph("Executive Summary", h2),
-        Paragraph(str((report.get("presentation") or {}).get("summary") or report.get("executive_summary") or report.get("summary") or "No summary available."), body),
+        Paragraph(
+            escape(
+                str(
+                    (report.get("presentation") or {}).get("summary")
+                    or report.get("executive_summary")
+                    or report.get("summary")
+                    or "No summary available."
+                )
+            ),
+            body,
+        ),
         Spacer(1, 8),
     ]
 
@@ -691,29 +1052,79 @@ def write_pdf_report(report: Dict[str, Any], session_payload: Dict[str, Any], ou
         HRFlowable(width="100%", thickness=1, color=colors.HexColor("#95A5A6")),
         Paragraph("CONFIDENTIAL - For authorised recipients only. Do not redistribute.", meta),
     ])
-    doc.build(story)
-    return str(path)
+    with _reports_directory_handle(output_dir) as directory:
+        with _private_artifact_path(directory, filename) as temporary_path:
+            doc = SimpleDocTemplate(
+                str(temporary_path),
+                pagesize=A4,
+                leftMargin=2 * cm,
+                rightMargin=2 * cm,
+                topMargin=2 * cm,
+                bottomMargin=2 * cm,
+            )
+            doc.build(story)
+        return _verified_artifact_path(directory, filename)
 
 
 def attach_report_artifacts(report: Dict[str, Any], session_payload: Dict[str, Any], config: ProductionConfig) -> Dict[str, Any]:
+    safe_report = _safe_artifact_mapping(report, "report")
     if not config.enable_artifacts:
-        return report
-    output_dir = Path(config.reports_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+        return safe_report
+    safe_report.pop("artifacts", None)
+    safe_session = _safe_artifact_mapping(session_payload, "session")
+    artifact_version = _artifact_version_id(safe_report, safe_session)
     artifacts: Dict[str, Any] = {}
-    try:
-        artifacts["json"] = write_json_report(report, session_payload.get("session_id", report.get("session_id", "unknown")), output_dir)
-    except Exception as exc:
-        artifacts["json_error"] = f"{type(exc).__name__}: {exc}"
-    if config.enable_stix_export:
+    with _prepare_reports_directory(config.reports_dir) as output_dir:
         try:
-            artifacts["stix"] = write_stix_bundle(report, session_payload, output_dir)
+            artifacts["json"] = write_json_report(
+                safe_report,
+                safe_session.get(
+                    "session_id",
+                    safe_report.get("session_id", "unknown"),
+                ),
+                output_dir,
+                artifact_version=artifact_version,
+            )
+        except _ReportsDirectoryIdentityChanged:
+            raise
         except Exception as exc:
-            artifacts["stix_error"] = f"{type(exc).__name__}: {exc}"
-    if config.enable_pdf_export:
-        try:
-            artifacts["pdf"] = write_pdf_report(report, session_payload, output_dir)
-        except Exception as exc:
-            artifacts["pdf_error"] = f"{type(exc).__name__}: {exc}"
-    report["artifacts"] = artifacts
-    return report
+            artifacts["json_error"] = _safe_artifact_error(exc)
+        if config.enable_stix_export:
+            try:
+                artifacts["stix"] = write_stix_bundle(
+                    safe_report,
+                    safe_session,
+                    output_dir,
+                    artifact_version=artifact_version,
+                )
+            except _ReportsDirectoryIdentityChanged:
+                raise
+            except Exception as exc:
+                artifacts["stix_error"] = _safe_artifact_error(exc)
+        if config.enable_pdf_export:
+            try:
+                artifacts["pdf"] = write_pdf_report(
+                    safe_report,
+                    safe_session,
+                    output_dir,
+                    artifact_version=artifact_version,
+                )
+            except _PDFExportUnavailable:
+                try:
+                    artifacts["pdf_fallback_markdown"] = write_markdown_report(
+                        safe_report,
+                        safe_session,
+                        output_dir,
+                        artifact_version=artifact_version,
+                    )
+                except _ReportsDirectoryIdentityChanged:
+                    raise
+                except Exception as exc:
+                    artifacts["pdf_error"] = _safe_artifact_error(exc)
+            except _ReportsDirectoryIdentityChanged:
+                raise
+            except Exception as exc:
+                artifacts["pdf_error"] = _safe_artifact_error(exc)
+        _assert_reports_directory_identity(output_dir)
+    safe_report["artifacts"] = artifacts
+    return _safe_artifact_mapping(safe_report, "report")

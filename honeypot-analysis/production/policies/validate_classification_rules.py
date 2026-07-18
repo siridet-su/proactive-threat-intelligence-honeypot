@@ -123,8 +123,8 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
         else:
             try:
                 re.compile(pattern, re.IGNORECASE)
-            except re.error as exc:
-                errors.append(f"{path}: invalid regex: {exc}")
+            except re.error:
+                errors.append(f"{path}: invalid regex")
         ttp = str(rule.get("ttp") or "").strip().upper()
         if not TTP_RE.match(ttp):
             errors.append(f"{path}: invalid ttp {ttp!r}")

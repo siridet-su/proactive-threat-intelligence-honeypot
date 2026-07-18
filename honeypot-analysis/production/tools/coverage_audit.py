@@ -20,6 +20,7 @@ from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 
 from production.classification.classification_pipeline import RULE_POLICY, RULE_SPECS
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import redact_exception_for_log
 from production.correlation.session_ttp_knowledge import load_correlation_knowledge, main_ttp_id, parse_path_list
 
 
@@ -113,7 +114,7 @@ def _session_correlation_ttps(policy_path: str, knowledge_pack_paths: Any) -> Di
     try:
         document = load_correlation_knowledge(policy_path, knowledge_pack_paths)
     except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}", "ttps": [], "summary": {}}
+        return {"error": redact_exception_for_log(exc), "ttps": [], "summary": {}}
     rules = ((document.get("policy") or {}).get("rules") or [])
     ttps = {
         main_ttp_id(rule.get("ttp"))

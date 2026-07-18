@@ -10,8 +10,10 @@ import pytest
 from production.utils.config import ProductionConfig
 from production.utils.credential_hmac import (
     CREDENTIAL_HMAC_SCHEME,
+    CREDENTIAL_METADATA_SCHEMA,
     CredentialHMACError,
     CredentialHasher,
+    credential_metadata_for_provenance,
     load_credential_hmac_keyring,
     resolve_credential_hmac_keyring_path,
     validate_production_credential_policy,
@@ -107,6 +109,7 @@ def test_session_monitor_redacts_but_omits_hashes_without_injected_key() -> None
 
     state = monitor.get_session("no-key")
     assert state is not None
+    assert state.login_username == REDACTION_MARKER
     assert state.login_password == REDACTION_MARKER
     assert state.login_password_hash == ""
     assert state.login_password_hash_aliases == []
@@ -210,6 +213,77 @@ def test_session_monitor_emits_active_and_rotation_alias_hashes() -> None:
     )
     assert public["login_password_hash"] == REDACTION_MARKER
     assert public["login_password_hash_aliases"] == REDACTION_MARKER
+
+
+def test_credential_metadata_is_strict_safe_and_idempotent() -> None:
+    raw = {
+        "credential_observed": True,
+        "raw_password_stored": False,
+        "password_hash_present": True,
+        "raw_events_sanitized": True,
+        "hashing_enabled": True,
+        "password_hash_alias_count": 1,
+        "hash_algorithm": CREDENTIAL_HMAC_SCHEME,
+        "active_key_id": "active-key",
+        "correlation_key_ids": ["prior-key"],
+        "password": "metadata-secret",
+        "login_password_hash": "hmac-sha256-v1:active-key:" + ("a" * 64),
+        "unknown": "must-not-survive",
+    }
+    expected = {
+        "schema_version": CREDENTIAL_METADATA_SCHEMA,
+        "metadata_status": "available",
+        "credential_observed": True,
+        "raw_password_stored": False,
+        "password_hash_present": True,
+        "raw_events_sanitized": True,
+        "hashing_enabled": True,
+        "password_hash_alias_count": 1,
+        "hash_algorithm": CREDENTIAL_HMAC_SCHEME,
+        "active_key_id": "active-key",
+        "correlation_key_ids": ["prior-key"],
+    }
+
+    assert credential_metadata_for_provenance(raw) == expected
+    redacted = redact_for_artifact(
+        {"credential_metadata": raw, "credentials": raw}
+    )
+    assert redacted == {
+        "credential_metadata": expected,
+        "credentials": REDACTION_MARKER,
+    }
+    assert redact_for_artifact(redacted) == redacted
+
+    malformed = {
+        "credential_observed": 1,
+        "raw_password_stored": "false",
+        "password_hash_present": None,
+        "raw_events_sanitized": [],
+        "hashing_enabled": {},
+        "password_hash_alias_count": True,
+        "hash_algorithm": [],
+        "active_key_id": [],
+        "correlation_key_ids": ["valid-key", []],
+    }
+    unavailable = {
+        "schema_version": CREDENTIAL_METADATA_SCHEMA,
+        "metadata_status": "unavailable",
+    }
+    assert credential_metadata_for_provenance(malformed) == unavailable
+    assert redact_for_artifact({"credential_metadata": malformed}) == {
+        "credential_metadata": unavailable
+    }
+
+    partial_or_incoherent = (
+        {"raw_password_stored": False},
+        {**raw, "active_key_id": "prior-key"},
+        {**raw, "password_hash_alias_count": 0},
+        {**raw, "raw_password_stored": True},
+        {**raw, "raw_events_sanitized": False},
+        {**raw, "password_hash_present": False},
+    )
+    for candidate in partial_or_incoherent:
+        assert credential_metadata_for_provenance(candidate) == unavailable
 
 
 def test_secure_keyring_file_loads_and_resolver_prefers_explicit_path(

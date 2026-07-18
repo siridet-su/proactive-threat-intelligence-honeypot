@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -10,6 +13,7 @@ if str(ROOT) not in sys.path:
 from production.workers.session_monitor import SessionMonitor, SessionState, build_pipeline_trigger
 from production.classification.classification_pipeline import NotebookParityClassifier
 from production.utils.credential_hmac import CredentialHasher
+from production.utils.serialization import session_to_payload
 
 
 def _command_event(session="s1", src_ip="203.0.113.10", command="whoami"):
@@ -47,26 +51,68 @@ def test_credentials_are_redacted_and_hashed():
     assert state.raw_events[0]["password_hash"] == state.login_password_hash
 
 
-def test_raw_credentials_require_explicit_opt_in():
-    monitor = SessionMonitor(
-        credential_policy={
-            "store_raw_credentials": True,
-            "sanitize_raw_events": False,
-        }
-    )
-    monitor.on_event({
-        "eventid": "cowrie.login.success",
-        "session": "cred-2",
-        "src_ip": "203.0.113.10",
-        "timestamp": "2026-05-12T00:00:00Z",
-        "username": "root",
-        "password": "secret123",
-    })
+def test_raw_credentials_cannot_be_enabled_in_derived_session_state():
+    with pytest.raises(ValueError, match="must not store plaintext credentials"):
+        SessionMonitor(
+            credential_policy={
+                "store_raw_credentials": True,
+            }
+        )
 
-    state = monitor.get_session("cred-2")
-    assert state.login_password == "secret123"
-    assert state.raw_events[0]["password"] == "secret123"
-    assert state.credential_metadata["raw_password_stored"] is True
+
+def test_command_credentials_are_transient_but_not_in_derived_session_payload() -> None:
+    observed_raw_commands: list[str] = []
+
+    def classify(command: str) -> list[dict]:
+        observed_raw_commands.append(command)
+        return [{
+            "command": command,
+            "ttp": "T1059",
+            "tactic": "execution",
+            "source": "rule",
+            "confidence": 1.0,
+        }]
+
+    monitor = SessionMonitor(
+        classification_fn=classify,
+        classification_policy={"strategy": "notebook_merge"},
+    )
+    secret = "derived-command-secret"
+    commands = [
+        f"sshpass -p {secret} ssh host",
+        f"curl -u user:{secret} https://example.invalid",
+        f"mysql -p{secret} exampledb",
+        f"redis-cli -a {secret} ping",
+    ]
+    raw_events = []
+    for index, command in enumerate(commands):
+        event = _command_event(
+            session="derived-command",
+            command=command,
+        )
+        event["timestamp"] = f"2026-05-12T00:00:0{index}Z"
+        raw_events.append(event)
+        monitor.on_event(event)
+
+    state = monitor.get_session("derived-command")
+    assert state is not None
+    payload = session_to_payload(state)
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert any(secret in command for command in observed_raw_commands)
+    assert all(secret in event["input"] for event in raw_events)
+    assert secret not in encoded
+    assert all(secret not in command for command in state.commands)
+    assert all(secret not in event["input"] for event in state.raw_events)
+    assert all(
+        secret not in json.dumps(event, sort_keys=True)
+        for event in state.classification_events
+    )
+    assert all(
+        secret not in command
+        for commands_for_ttp in state.ttp_command_map.values()
+        for command in commands_for_ttp
+    )
 
 
 def test_classification_policy_fallback_sources():
@@ -197,20 +243,34 @@ def test_pipeline_trigger_adds_data_provenance():
     state.ttp_command_map["T1033"] = ["whoami"]
     state.ttp_sources["T1033"] = ["keyword"]
     state.classification_policy = {"strategy": "rules_first"}
-    state.credential_metadata = {"raw_password_stored": False}
+    state.credential_metadata = {
+        "credential_observed": True,
+        "raw_password_stored": False,
+        "password_hash_present": True,
+        "raw_events_sanitized": True,
+        "hashing_enabled": True,
+        "password_hash_alias_count": 0,
+        "hash_algorithm": "hmac-sha256-v1",
+        "active_key_id": "unit-key",
+        "correlation_key_ids": [],
+    }
     state.raw_events.append(_command_event(session="s-prov"))
 
     trigger = build_pipeline_trigger(FakeCoordinator)
     result = trigger(state)
     assert result["data_provenance"]["session"]["session_id"] == "s-prov"
     assert result["data_provenance"]["classification"]["ttp_sources"]["T1033"] == ["keyword"]
-    assert result["data_provenance"]["credentials"]["raw_password_stored"] is False
+    credential_metadata = result["data_provenance"]["credential_metadata"]
+    assert credential_metadata["schema_version"] == "credential_metadata.v1"
+    assert credential_metadata["metadata_status"] == "available"
+    assert credential_metadata["raw_password_stored"] is False
 
 
 if __name__ == "__main__":
     tests = [
         test_credentials_are_redacted_and_hashed,
-        test_raw_credentials_require_explicit_opt_in,
+        test_raw_credentials_cannot_be_enabled_in_derived_session_state,
+        test_command_credentials_are_transient_but_not_in_derived_session_payload,
         test_classification_policy_fallback_sources,
         test_session_monitor_records_ordered_subcommand_classifications,
         test_enrichment_is_available_before_campaign_registration,

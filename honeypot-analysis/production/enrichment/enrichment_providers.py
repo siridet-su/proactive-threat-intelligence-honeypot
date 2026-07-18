@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import redact_error_for_log, redact_exception_for_log
 from production.utils.serialization import utc_now
 
 
@@ -31,7 +32,7 @@ class ProviderResult:
     def to_status(self) -> Dict[str, Any]:
         return {
             "status": self.status,
-            "error": self.error,
+            "error": redact_error_for_log(self.error) if self.error else "",
             "fetched_at": self.fetched_at,
             "ttl_seconds": self.ttl_seconds,
         }
@@ -94,7 +95,7 @@ class HTTPProvider(EnrichmentProvider):
             self.name,
             "error",
             ttl_seconds=min(self.ttl_seconds, 3600),
-            error=f"{type(exc).__name__}: {exc}",
+            error=redact_exception_for_log(exc),
         )
 
 
@@ -162,7 +163,7 @@ class ShodanProvider(HTTPProvider):
         try:
             data = self._json_get(url, headers={"Accept": "application/json", "User-Agent": "honeypot-shodan-internetdb/1.0"})
             data["_shodan_api"] = "internetdb"
-            data["_shodan_primary_error"] = f"{type(primary_error).__name__}: {primary_error}"
+            data["_shodan_primary_error"] = redact_exception_for_log(primary_error)
             return ProviderResult(self.name, "ok", data, self.ttl_seconds)
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
@@ -171,7 +172,7 @@ class ShodanProvider(HTTPProvider):
                     "not_found",
                     data={"_shodan_api": "internetdb"},
                     ttl_seconds=self.ttl_seconds,
-                    error=f"primary lookup failed; InternetDB has no record: {type(primary_error).__name__}: {primary_error}",
+                    error=redact_exception_for_log(primary_error),
                 )
             return self._error(exc)
         except Exception as exc:

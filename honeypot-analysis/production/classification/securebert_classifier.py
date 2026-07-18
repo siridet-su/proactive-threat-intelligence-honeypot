@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import utc_now
 
 
@@ -145,7 +146,7 @@ def load_securebert_classifier(config: ProductionConfig):
                 {
                     "service": "securebert_classifier",
                     "status": "unavailable",
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "error": redact_exception_for_log(exc),
                     "timestamp": utc_now(),
                 },
                 sort_keys=True,

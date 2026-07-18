@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import redact_exception_for_log
 
 
 def _age_days(raw_fetched: str) -> float | None:
@@ -40,7 +41,11 @@ def _cache_status(path: str, count_field: str, max_age_days: int) -> Dict[str, A
             "records": count,
         }
     except Exception as exc:
-        return {"status": "corrupt", "path": str(cache_path), "error": f"{type(exc).__name__}: {exc}"}
+        return {
+            "status": "corrupt",
+            "path": str(cache_path),
+            "error": redact_exception_for_log(exc),
+        }
 
 
 def collect_feed_status(config: ProductionConfig) -> Dict[str, Any]:

@@ -33,9 +33,15 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from production.utils.sensitive_data import redact_exception_for_log
 
 CISA_KEV_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -100,7 +106,7 @@ def _save_cache(path: str, data: dict) -> None:
         size_kb = os.path.getsize(path) // 1024
         print(f"  [FeedLoader] Cache saved: {os.path.basename(path)} ({size_kb}KB)")
     except Exception as e:
-        print(f"  [FeedLoader] Cache save failed (non-fatal): {e}")
+        print(f"  [FeedLoader] Cache save failed (non-fatal): {redact_exception_for_log(e)}")
 
 
 # Part 1: CISA Known Exploited Vulnerabilities (KEV)
@@ -190,7 +196,7 @@ def _fetch_cisa_kev() -> Optional[CisaKevDB]:
         print("  [CISA KEV] requests not available")
         return None
     except Exception as e:
-        print(f"  [CISA KEV] Download failed: {type(e).__name__}: {e}")
+        print(f"  [CISA KEV] Download failed: {redact_exception_for_log(e)}")
         return None
 
 
@@ -214,7 +220,7 @@ def _load_cisa_cache(path: str, label: str = "cache") -> Optional[CisaKevDB]:
         print(f"  [CISA KEV] Loaded {db.count} CVEs from {label}")
         return db
     except Exception as e:
-        print(f"  [CISA KEV] Cache load failed: {e}")
+        print(f"  [CISA KEV] Cache load failed: {redact_exception_for_log(e)}")
         return None
 
 
@@ -453,7 +459,7 @@ def _fetch_sigma_rules() -> Optional[SigmaRuleDB]:
         print("  [Sigma] requests not available")
         return None
     except Exception as e:
-        print(f"  [Sigma] Download failed: {type(e).__name__}: {e}")
+        print(f"  [Sigma] Download failed: {redact_exception_for_log(e)}")
         return None
 
 
@@ -502,7 +508,7 @@ def _load_sigma_cache(path: str, label: str = "cache") -> Optional[SigmaRuleDB]:
         print(f"  [Sigma] Loaded {db.count} rules from {label}")
         return db
     except Exception as e:
-        print(f"  [Sigma] Cache load failed: {e}")
+        print(f"  [Sigma] Cache load failed: {redact_exception_for_log(e)}")
         return None
 
 
@@ -637,7 +643,7 @@ def check_feeds_status() -> dict:
                 "catalog": raw.get("catalog_version", "unknown"),
             }
         except Exception as e:
-            kev_info = {"status": "corrupt", "error": str(e)}
+            kev_info = {"status": "corrupt", "error": redact_exception_for_log(e)}
     result["cisa_kev"] = kev_info
 
     sigma_path = _cache_path(SIGMA_CACHE_FILENAME)
@@ -656,7 +662,7 @@ def check_feeds_status() -> dict:
                 "rules":  len(raw.get("rules", {})),
             }
         except Exception as e:
-            sigma_info = {"status": "corrupt", "error": str(e)}
+            sigma_info = {"status": "corrupt", "error": redact_exception_for_log(e)}
     result["sigma"] = sigma_info
 
     try:
@@ -678,7 +684,10 @@ def check_feeds_status() -> dict:
             }
         result["mitre"] = mitre_info
     except Exception as _e:
-        result["mitre"] = {"status": "unavailable", "error": str(_e)}
+        result["mitre"] = {
+            "status": "unavailable",
+            "error": redact_exception_for_log(_e),
+        }
 
     kev_s   = f"KEV: {kev_info.get('entries', 0)} CVEs [{kev_info['status']}]"
     sigma_s = f"Sigma: {sigma_info.get('rules', 0)} rules [{sigma_info['status']}]"
@@ -801,4 +810,3 @@ if __name__ == "__main__":
     kws = feeds.get_bruteforce_keywords()
     print(f"  Total keywords: {len(kws)}")
     print(f"  Sample: {kws[:10]}")
-

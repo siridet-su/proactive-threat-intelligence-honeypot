@@ -639,14 +639,14 @@ def validate_policy_document(document: Dict[str, Any]) -> List[str]:
                     if pattern_text:
                         try:
                             re.compile(pattern_text, re.IGNORECASE)
-                        except re.error as exc:
-                            errors.append(f"{condition_path}.pattern invalid regex: {exc}")
+                        except re.error:
+                            errors.append(f"{condition_path}.pattern invalid regex")
                     command_regex = _clean_text(condition.get("command_regex"))
                     if command_regex:
                         try:
                             re.compile(command_regex, re.IGNORECASE)
-                        except re.error as exc:
-                            errors.append(f"{condition_path}.command_regex invalid regex: {exc}")
+                        except re.error:
+                            errors.append(f"{condition_path}.command_regex invalid regex")
                     if condition_type in {"ordered_tactics", "ordered_ttps"} and not _as_list(condition.get("sequence")):
                         errors.append(f"{condition_path}.sequence is required for {condition_type}")
     return errors

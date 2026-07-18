@@ -18,6 +18,7 @@ from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 from production.classification.classification_pipeline import NotebookParityClassifier, is_shell_noise, rule_based_ttp
 from production.prediction.realtime_prediction import build_transition_model
 from production.utils.serialization import stable_id, utc_now
+from production.utils.sensitive_data import redact_exception_for_log
 from production.classification.securebert_classifier import SecureBertCommandClassifier
 
 
@@ -121,12 +122,12 @@ def _load_bert_fn(
         }
     except Exception as exc:
         if not allow_securebert_unavailable:
-            raise
+            raise RuntimeError(redact_exception_for_log(exc)) from None
         return None, {
             "securebert_used": False,
             "securebert_source": "unavailable_fallback_to_rules",
             "securebert_available": False,
-            "securebert_error": f"{type(exc).__name__}: {exc}",
+            "securebert_error": redact_exception_for_log(exc),
         }
 
 

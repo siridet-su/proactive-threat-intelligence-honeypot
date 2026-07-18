@@ -82,6 +82,76 @@ from production.reporting.threat_hypothesis import (
     build_observed_behavior,
     build_v2_report,
 )
+from production.utils.sensitive_data import (
+    redact_exception_for_log,
+    redact_for_artifact,
+    redact_for_log,
+)
+
+
+def _safe_log_text(value: Any, *, max_chars: int = 1_000) -> str:
+    try:
+        redacted = redact_for_log(value, max_string_chars=max_chars)
+    except Exception:
+        return "[REDACTION FAILED]"
+    return str(redacted)
+
+
+def _safe_exception_text(exc: BaseException) -> str:
+    return redact_exception_for_log(exc)
+
+
+def _exception_http_status(exc: BaseException) -> Optional[int]:
+    """Read a structured HTTP status without rendering exception text."""
+
+    try:
+        response = getattr(exc, "response", None)
+    except Exception:
+        response = None
+    owners = (exc, response)
+    for owner in owners:
+        if owner is None:
+            continue
+        for attribute in ("status_code", "status", "code"):
+            try:
+                status = int(getattr(owner, attribute, None))
+            except Exception:
+                continue
+            if 100 <= status <= 599:
+                return status
+    return None
+
+
+def _exception_retry_after(exc: BaseException, *, maximum: int = 120) -> Optional[int]:
+    """Return a bounded structured Retry-After delay, if one is available."""
+
+    try:
+        headers = getattr(getattr(exc, "response", None), "headers", None)
+        raw_value = headers.get("retry-after") if hasattr(headers, "get") else None
+        delay = int(float(raw_value))
+    except Exception:
+        return None
+    return min(max(delay, 0), maximum)
+
+
+def _safe_reporting_text(value: Any, label: str) -> str:
+    try:
+        redacted = redact_for_artifact(value)
+    except Exception:
+        raise ValueError(f"{label} redaction failed") from None
+    if not isinstance(redacted, str):
+        raise TypeError(f"{label} must redact to text")
+    return redacted
+
+
+def _safe_reporting_mapping(value: Any, label: str) -> Dict[str, Any]:
+    try:
+        redacted = redact_for_artifact(value)
+    except Exception:
+        raise ValueError(f"{label} redaction failed") from None
+    if not isinstance(redacted, dict):
+        raise TypeError(f"{label} must redact to an object")
+    return redacted
 
 try:
     import requests as _requests_lib
@@ -242,7 +312,7 @@ class TokenBudget:
             )
         self.used += est
         self.turns += 1
-        print(f"  Turn {self.turns}: {est} tokens ({reason}) | "
+        print(f"  Turn {self.turns}: {est} tokens ({_safe_log_text(reason)}) | "
               f"Total: {self.used}/{self.max_tokens}")
 
     def consume_safe(self, text: str, reason: str = "") -> None:
@@ -253,9 +323,9 @@ class TokenBudget:
         self.turns += 1
         if self.used > self.max_tokens:
             print(f"  [Budget] WARN: Budget exceeded â€” "
-                  f"{self.used}/{self.max_tokens} tokens ({reason})")
+                  f"{self.used}/{self.max_tokens} tokens ({_safe_log_text(reason)})")
         else:
-            print(f"  Turn {self.turns}: {est} tokens ({reason}) | "
+            print(f"  Turn {self.turns}: {est} tokens ({_safe_log_text(reason)}) | "
                   f"Total: {self.used}/{self.max_tokens}")
 
     def remaining(self) -> int:
@@ -329,7 +399,10 @@ class JSONValidator:
             if ttp_id in detected_set:
                 pruned_chain.append(phase)
             else:
-                print(f"    PRUNING: Removing ungrounded TTP {ttp_id}")
+                print(
+                    "    PRUNING: Removing ungrounded TTP "
+                    f"{_safe_log_text(ttp_id)}"
+                )
         data['kill_chain_analysis'] = pruned_chain
         return data
 
@@ -417,7 +490,10 @@ class JSONValidator:
                 print(f"    JSON repair succeeded (attempt {i})")
                 return True, result
             except Exception as e:
-                print(f"    Repair attempt {i} failed: {str(e)[:60]}")
+                print(
+                    f"    Repair attempt {i} failed: "
+                    f"{_safe_exception_text(e)[:100]}"
+                )
                 continue
         return False, {}
 
@@ -513,7 +589,7 @@ class VertexAIClient:
             except ImportError:
                 pass   # not running in Colab â€” OK
             except Exception as e:
-                print(f"  [GenAI] Colab auth warning: {e}")
+                print(f"  [GenAI] Colab auth warning: {_safe_exception_text(e)}")
         self._colab_auth_done = True
 
     def _get_client(self):
@@ -533,7 +609,7 @@ class VertexAIClient:
             print("  [GenAI] google-genai not installed â€” run: pip install google-genai")
             return None
         except Exception as e:
-            print(f"  [GenAI] Failed to create client: {e}")
+            print(f"  [GenAI] Failed to create client: {_safe_exception_text(e)}")
             return None
 
     def available(self) -> bool:
@@ -554,9 +630,6 @@ class VertexAIClient:
         from google.genai import types as _genai_types
 
         model  = model_override or self._resolve_model()
-        client = self._get_client()
-        if client is None:
-            raise RuntimeError("genai.Client could not be initialized")
 
         # Split system instruction and user content
         system_parts: list = []
@@ -566,13 +639,22 @@ class VertexAIClient:
             content = str(msg.get("content", ""))
             if not content:
                 continue
+            try:
+                safe_content = redact_for_artifact(content)
+            except Exception:
+                raise RuntimeError("Vertex prompt redaction failed") from None
+            if not isinstance(safe_content, str):
+                raise RuntimeError("Vertex prompt redaction returned invalid text")
             if role == "system":
-                system_parts.append(content)
+                system_parts.append(safe_content)
             else:
-                user_parts.append(content)
+                user_parts.append(safe_content)
 
         user_text   = "\n".join(user_parts).strip()
         system_text = "\n".join(system_parts).strip()
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("genai.Client could not be initialized")
 
         config = _genai_types.GenerateContentConfig(
             temperature=0.1,
@@ -704,10 +786,14 @@ class VertexAIClient:
             )
             print(f"  Prompt capped at {self.MAX_PROMPT_CHARS} chars ({omitted} omitted)")
 
-        print(f"\n  Vertex Inference [{phase.value}] model={self._resolve_model()}")
+        safe_phase = _safe_log_text(getattr(phase, "value", phase), max_chars=40)
+        print(
+            f"\n  Vertex Inference [{safe_phase}] "
+            f"model={_safe_log_text(self._resolve_model())}"
+        )
         if detected_ttps:
-            print(f"  Grounding Lock: {detected_ttps}")
-        self.budget.consume(prompt, f"Initial prompt ({phase.value})")
+            print(f"  Grounding Lock: {_safe_log_text(detected_ttps)}")
+        self.budget.consume(prompt, f"Initial prompt ({safe_phase})")
 
         thinking_prefix = build_structured_prompt(phase, detected_ttps)
         full_system = f"{thinking_prefix}\n\n{system}" if system else thinking_prefix
@@ -723,7 +809,7 @@ class VertexAIClient:
             timeout = self._TIMEOUTS[attempt - 1]
             model_label = current_model or self._resolve_model()
             print(f"    Attempt {attempt}/{self.MAX_RETRIES} "
-                  f"(timeout={timeout}s) model={model_label}")
+                  f"(timeout={timeout}s) model={_safe_log_text(model_label)}")
             try:
                 loop = asyncio.get_event_loop()
                 raw_text = await loop.run_in_executor(
@@ -738,12 +824,18 @@ class VertexAIClient:
                 if not raw_text:
                     if fallback_queue:
                         current_model = fallback_queue.pop(0)
-                        print(f"       Empty response â€” switching to {current_model}")
+                        print(
+                            "       Empty response â€” switching to "
+                            f"{_safe_log_text(current_model)}"
+                        )
                     raise ValueError("Empty response from Vertex model")
 
                 extracted_json = self._extract_json(raw_text)
                 if not extracted_json:
-                    preview = raw_text[:200].replace("\n", " ")
+                    preview = _safe_log_text(
+                        raw_text[:200].replace("\n", " "),
+                        max_chars=200,
+                    )
                     print(f"       [DEBUG] No extractable JSON. Preview: {preview}...")
                     raise ValueError("No JSON found in Vertex response")
 
@@ -752,14 +844,18 @@ class VertexAIClient:
                 except json.JSONDecodeError as jde:
                     success, parsed = JSONValidator.repair(extracted_json)
                     if not success:
-                        raise ValueError(f"JSON repair failed: {jde}")
+                        raise ValueError(
+                            f"JSON repair failed: {_safe_exception_text(jde)}"
+                        )
+
+                parsed = _safe_reporting_mapping(parsed, "Vertex response")
 
                 is_valid, error_msg = JSONValidator.validate(
                     parsed, detected_ttps=detected_ttps,
                     tactic_summary=tactic_summary
                 )
                 if not is_valid:
-                    print(f"       Schema error: {error_msg}")
+                    print(f"       Schema error: {_safe_log_text(error_msg)}")
                     if attempt < self.MAX_RETRIES:
                         delay = self._RETRY_DELAYS[attempt - 1]
                         print(f"       Waiting {delay}s before retry...")
@@ -768,26 +864,19 @@ class VertexAIClient:
                     raise ValueError(f"Schema validation failed: {error_msg}")
 
                 print(f"    Parse succeeded on attempt {attempt} "
-                      f"(model={model_label})")
+                      f"(model={_safe_log_text(model_label)})")
                 return parsed
 
             except Exception as e:
-                err_type = type(e).__name__
-                err_msg = repr(e) if not str(e) else str(e)
-                print(f"       Attempt {attempt} failed [{err_type}]: {err_msg[:120]}")
+                safe_error = _safe_exception_text(e)
+                print(f"       Attempt {attempt} failed: {safe_error[:160]}")
                 if attempt == self.MAX_RETRIES:
-                    import traceback as _tb
-                    _tb.print_exc()
                     return {}
                 delay = self._RETRY_DELAYS[attempt - 1]
-                if "429" in str(e) or "Too Many Requests" in str(e):
-                    resp = getattr(e, "response", None)
-                    retry_after = getattr(resp, "headers", {}).get("retry-after")
-                    if retry_after:
-                        try:
-                            delay = max(delay, int(float(retry_after)) + 2)
-                        except (ValueError, TypeError):
-                            pass
+                if _exception_http_status(e) == 429:
+                    retry_after = _exception_retry_after(e)
+                    if retry_after is not None:
+                        delay = max(delay, retry_after + 2)
                     delay = max(delay, 30)
                 print(f"       Waiting {delay}s before retry...")
                 await asyncio.sleep(delay)
@@ -826,7 +915,7 @@ class VertexAIClient:
             model = models_to_try[min(attempt - 1, len(models_to_try) - 1)]
             attempted_models.add(model)
             print(f"    [Analyst] Attempt {attempt}/{self.MAX_RETRIES} "
-                  f"model={model} timeout={timeout}s")
+                  f"model={_safe_log_text(model)} timeout={timeout}s")
             try:
                 loop = asyncio.get_event_loop()
                 raw_text = await loop.run_in_executor(
@@ -836,13 +925,20 @@ class VertexAIClient:
                     )
                 )
                 if not raw_text:
-                    print(f"    [Analyst] Empty response from {model}")
+                    print(
+                        "    [Analyst] Empty response from "
+                        f"{_safe_log_text(model)}"
+                    )
                     continue
 
                 extracted = self._extract_json(raw_text)
                 if not extracted:
+                    preview = _safe_log_text(
+                        raw_text[:120].replace(chr(10), " "),
+                        max_chars=120,
+                    )
                     print(f"    [Analyst] No JSON found in response (preview: "
-                          f"{raw_text[:120].replace(chr(10), ' ')})")
+                          f"{preview})")
                     continue
 
                 try:
@@ -850,12 +946,17 @@ class VertexAIClient:
                 except json.JSONDecodeError as jde:
                     success, parsed = JSONValidator.repair(extracted)
                     if not success:
-                        print(f"    [Analyst] JSON repair failed: {jde}")
+                        print(
+                            "    [Analyst] JSON repair failed: "
+                            f"{_safe_exception_text(jde)}"
+                        )
                         continue
+
+                parsed = _safe_reporting_mapping(parsed, "Vertex response")
 
                 is_valid, msg = JSONValidator.validate_analytical(parsed)
                 if not is_valid:
-                    print(f"    [Analyst] Schema error: {msg}")
+                    print(f"    [Analyst] Schema error: {_safe_log_text(msg)}")
                     if attempt < self.MAX_RETRIES:
                         delay = self._RETRY_DELAYS[attempt - 1]
                         print(f"    [Analyst] Waiting {delay}s before retry...")
@@ -867,20 +968,19 @@ class VertexAIClient:
                 return parsed
 
             except Exception as e:
-                err_msg = str(e)
                 print(f"    [Analyst] Attempt {attempt} failed: "
-                      f"{type(e).__name__}: {err_msg[:120]}")
-                if "404" in err_msg:
-                    print(f"    [Analyst] 404 â€” model '{model}' not found/not enabled. "
-                          f"Check Vertex AI Model Garden.")
+                      f"{_safe_exception_text(e)[:160]}")
+                status = _exception_http_status(e)
+                if status == 404:
+                    print(
+                        "    [Analyst] 404 â€” model "
+                        f"'{_safe_log_text(model)}' not found/not enabled. "
+                        "Check Vertex AI Model Garden."
+                    )
                     continue  # à¸¥à¸­à¸‡à¹‚à¸¡à¹€à¸”à¸¥à¸•à¸±à¸§à¸–à¸±à¸”à¹„à¸›
-                if "429" in err_msg or "Too Many Requests" in err_msg:
-                    resp = getattr(e, "response", None)
-                    retry_after = getattr(resp, "headers", {}).get("retry-after")
-                    try:
-                        wait = int(retry_after) if retry_after else self._RETRY_DELAYS[attempt - 1]
-                    except Exception:
-                        wait = self._RETRY_DELAYS[attempt - 1]
+                if status == 429:
+                    retry_after = _exception_retry_after(e)
+                    wait = retry_after if retry_after is not None else self._RETRY_DELAYS[attempt - 1]
                     print(f"    [Analyst] Rate limited â€” waiting {wait}s")
                     await asyncio.sleep(wait)
                 elif attempt < self.MAX_RETRIES:
@@ -965,7 +1065,10 @@ async def _legacy_synthesize_campaign_name_disabled(
     # If there's no OTX data and no tags, skip AI and return deterministic
     if not raw_pulses and not all_otx_tags and not all_infra_tags:
         name = _deterministic_fallback()
-        print(f"  [Campaign Name] No OTX data â€” deterministic: {name}")
+        print(
+            "  [Campaign Name] No OTX data â€” deterministic: "
+            f"{_safe_log_text(name)}"
+        )
         return name
 
     evidence_block = (
@@ -1013,16 +1116,26 @@ async def _legacy_synthesize_campaign_name_disabled(
                     model_override=model,
                     response_mime_type="text/plain",
                 )
+                raw_name = _safe_reporting_text(raw_name, "campaign name")
                 name = re.sub(
                     r'<think>.*?</think>', '', raw_name, flags=re.DOTALL
                 ).strip().strip('"\'')
                 if name and len(name) >= 4:
-                    print(f"  [Campaign Name] Got response from Vertex model={model}")
+                    print(
+                        "  [Campaign Name] Got response from Vertex model="
+                        f"{_safe_log_text(model)}"
+                    )
                     break
-                print(f"  [Campaign Name] model={model} returned empty - trying next")
+                print(
+                    "  [Campaign Name] model="
+                    f"{_safe_log_text(model)} returned empty - trying next"
+                )
             except Exception as model_err:
-                print(f"  [Campaign Name] model={model} failed: "
-                      f"{type(model_err).__name__}: {str(model_err)[:60]} - trying next")
+                print(
+                    "  [Campaign Name] model="
+                    f"{_safe_log_text(model)} failed: "
+                    f"{_safe_exception_text(model_err)[:100]} - trying next"
+                )
                 import time
                 time.sleep(2)
                 continue
@@ -1034,7 +1147,10 @@ async def _legacy_synthesize_campaign_name_disabled(
             if name.lower().strip() == pulse.lower().strip():
                 raise ValueError("Vertex echoed raw pulse name verbatim - rejecting")
 
-        print(f"  [Campaign Name] Vertex synthesized: {name}")
+        print(
+            "  [Campaign Name] Vertex synthesized: "
+            f"{_safe_log_text(name)}"
+        )
 
         best_ip = max(ioc_bundle.ips, key=lambda x: getattr(x, 'risk_score', 0),
                       default=None)
@@ -1045,9 +1161,18 @@ async def _legacy_synthesize_campaign_name_disabled(
 
 
     except Exception as e:
-        fallback = _deterministic_fallback()
-        print(f"  [Campaign Name] Vertex synthesis failed ({type(e).__name__}: "
-              f"{str(e)[:80]}) â€” using deterministic: {fallback}")
+        try:
+            fallback = _safe_reporting_text(
+                _deterministic_fallback(),
+                "campaign fallback",
+            )
+        except Exception:
+            fallback = "Cowrie SSH Session Assessment"
+        print(
+            "  [Campaign Name] Vertex synthesis failed "
+            f"({_safe_exception_text(e)[:120]}) â€” using deterministic: "
+            f"{_safe_log_text(fallback)}"
+        )
         return fallback
 
 
@@ -1506,7 +1631,7 @@ def _build_trusted_recommendation_decision(
     except Exception as exc:
         return {
             "status": "unavailable",
-            "reason": f"policy engine import failed: {type(exc).__name__}: {exc}",
+            "reason": f"policy engine import failed: {_safe_exception_text(exc)}",
             "immediate_actions": [],
         }
 
@@ -1531,7 +1656,7 @@ def _build_trusted_recommendation_decision(
     except Exception as exc:
         return {
             "status": "error",
-            "reason": f"policy engine failed: {type(exc).__name__}: {exc}",
+            "reason": f"policy engine failed: {_safe_exception_text(exc)}",
             "immediate_actions": [],
         }
 
@@ -2300,11 +2425,11 @@ _TIMELINE_LABEL_FNS = {
         f"Connection from {e.get('src_ip', '?')}:{e.get('src_port', '?')}"
     ),
     "cowrie.login.failed": lambda e: (
-        f"Failed login â€” {e.get('username', '?')} / {e.get('password', '?')} "
+        f"Failed login â€” user {e.get('username', '?')} "
         f"from {e.get('src_ip', '?')}"
     ),
     "cowrie.login.success": lambda e: (
-        f"Successful login â€” {e.get('username', '?')} / {e.get('password', '?')} "
+        f"Successful login â€” user {e.get('username', '?')} "
         f"from {e.get('src_ip', '?')}"
     ),
     "cowrie.session.file_download": lambda e: (
@@ -2340,7 +2465,6 @@ def _timeline_event_key(event: dict) -> tuple:
         timestamp,
         event.get("src_ip", ""),
         event.get("username", ""),
-        event.get("password_hash") or event.get("password") or "",
         event.get("url", ""),
         event.get("outfile", ""),
         event.get("shasum", ""),
@@ -2362,7 +2486,7 @@ def _build_attack_timeline(raw_events: List[dict]) -> dict:
              "_is_shell_node": True, "_file_hash": "...", "_success": True}
          Produced by: raw_input from cowrie_to_events() â€” this is the WRONG
          variable to pass. The timeline will only show session-start and file
-         download events. Login usernames/passwords will not appear.
+         download events. Login usernames will not appear.
          Root cause: cowrie_to_events() discards original eventid structure.
          Fix: use cowrie_raw_events (3rd return value from updated 1A adapter).
 
@@ -2372,8 +2496,19 @@ def _build_attack_timeline(raw_events: List[dict]) -> dict:
     if not raw_events:
         return {}
 
+    # Raw telemetry remains authoritative in storage.  The reporting timeline
+    # operates only on a centrally redacted projection so credentials embedded
+    # in commands, URLs, exception text, or unexpected fields cannot escape.
+    safe_events = [
+        _safe_reporting_mapping(event, "timeline event")
+        for event in raw_events
+        if isinstance(event, dict)
+    ]
+    if not safe_events:
+        return {}
+
     # Inspect the first event to determine which format we have.
-    sample = raw_events[0] if raw_events else {}
+    sample = safe_events[0]
     is_raw_cowrie = 'eventid' in sample
     is_processed  = 'UtcTime' in sample and '_src_ip' in sample
 
@@ -2382,16 +2517,16 @@ def _build_attack_timeline(raw_events: List[dict]) -> dict:
         print(
             "[Timeline] WARNING: received processed process-tree events (raw_input), "
             "not raw Cowrie events (cowrie_raw_events). "
-            "Timeline will be incomplete â€” login usernames/passwords unavailable. "
+            "Timeline will be incomplete â€” login usernames unavailable. "
             "Fix: update 1A adapter call to unpack 3-tuple and pass cowrie_raw_events."
         )
-        return _build_attack_timeline_from_processed(raw_events)
+        return _build_attack_timeline_from_processed(safe_events)
 
     if not is_raw_cowrie:
         print("[Timeline] WARNING: unrecognised event format â€” timeline skipped.")
         return {}
 
-    timestamps = [e.get('timestamp', '') for e in raw_events if e.get('timestamp')]
+    timestamps = [e.get('timestamp', '') for e in safe_events if e.get('timestamp')]
     if not timestamps:
         return {}
 
@@ -2400,7 +2535,7 @@ def _build_attack_timeline(raw_events: List[dict]) -> dict:
 
     key_events = []
     seen_event_keys = set()
-    for event in raw_events:
+    for event in safe_events:
         eid = event.get('eventid', '')
         if eid in _SIGNIFICANT_EVENTS and eid in _TIMELINE_LABEL_FNS:
             event_key = _timeline_event_key(event)
@@ -3254,9 +3389,12 @@ class ImprovedAsyncSwarmCoordinator:
                     self.attack_type_rules = config_data.get("attack_type_rules", {})
                     self.config = config_data
             else:
-                print(f"Config not found at {config_path} â€” using internal defaults.")
+                print(
+                    "Config not found at "
+                    f"{_safe_log_text(config_path)} â€” using internal defaults."
+                )
         except Exception as e:
-            print(f"Could not load config [{type(e).__name__}]: {e}")
+            print(f"Could not load config: {_safe_exception_text(e)}")
 
         # Load asynchronously-safe: cached after first call, graceful on failure
         try:
@@ -3295,7 +3433,10 @@ class ImprovedAsyncSwarmCoordinator:
                   "CISA KEV and Sigma enrichment disabled")
         except Exception as e:
             self.threat_feeds = None
-            print(f"  [Coordinator] threat feeds init failed (non-fatal): {e}")
+            print(
+                "  [Coordinator] threat feeds init failed (non-fatal): "
+                f"{_safe_exception_text(e)}"
+            )
 
     def _truncate_to_budget(self, text: str, max_chars: int) -> str:
         if len(text) <= max_chars:
@@ -3333,7 +3474,10 @@ class ImprovedAsyncSwarmCoordinator:
 
         detected_ttps = list(set().union(*tactic_summary.values())) if tactic_summary else []
         self.detected_ttps = detected_ttps
-        print(f"Detected TTPs (Grounding Lock): {detected_ttps}")
+        print(
+            "Detected TTPs (Grounding Lock): "
+            f"{_safe_log_text(detected_ttps)}"
+        )
 
         if not detected_ttps:
             print("\nEARLY EXIT: No TTPs detected â€” returning fallback hypothesis")
@@ -3366,10 +3510,13 @@ class ImprovedAsyncSwarmCoordinator:
                 "rejected_action_count": len(decision.get("rejected_actions") or []),
                 "fallback_actions_allowed": False,
             }
-            return build_v2_report(
-                fallback,
-                sessions,
-                raw_events=raw_events,
+            return _safe_reporting_mapping(
+                build_v2_report(
+                    fallback,
+                    sessions,
+                    raw_events=raw_events,
+                ),
+                "report",
             )
 
         # STEP 1: Deterministic baseline
@@ -3386,7 +3533,7 @@ class ImprovedAsyncSwarmCoordinator:
         )
         if not base_is_grounded:
             raise RuntimeError(f"Baseline hallucination detected: {base_msg}")
-        print(f"  Baseline validated: {base_msg}")
+        print(f"  Baseline validated: {_safe_log_text(base_msg)}")
 
         normalized_base = self._normalize_hypothesis(
             base_hypothesis,
@@ -3408,11 +3555,14 @@ class ImprovedAsyncSwarmCoordinator:
 
         if not self.enable_vertex_narrative:
             print("\n[Step 2] Vertex narrative disabled; returning deterministic v2 claims")
-            return apply_validated_vertex_presentation(canonical_report, None)
+            return _safe_reporting_mapping(
+                apply_validated_vertex_presentation(canonical_report, None),
+                "report",
+            )
 
         # Vertex receives only validated canonical claims and can edit wording only.
         print("\n[Step 2] Optional Vertex presentation wording...")
-        evidence_brief = json.dumps(
+        vertex_evidence = _safe_reporting_mapping(
             {
                 "schema_version": canonical_report.get("schema_version"),
                 "observed_behavior": canonical_report.get("observed_behavior"),
@@ -3420,8 +3570,13 @@ class ImprovedAsyncSwarmCoordinator:
                 "follow_on_hypothesis": canonical_report.get("follow_on_hypothesis"),
                 "limitations": canonical_report.get("limitations"),
             },
+            "Vertex evidence",
+        )
+        evidence_brief = json.dumps(
+            vertex_evidence,
             sort_keys=True,
             ensure_ascii=False,
+            allow_nan=False,
         )
         analytical_result = await self.ai_client.infer_analytical(
             evidence_brief=evidence_brief,
@@ -3433,15 +3588,15 @@ class ImprovedAsyncSwarmCoordinator:
                 "status": "unavailable",
                 "reason": "no_valid_model_output",
             }
-            return canonical_report
+            return _safe_reporting_mapping(canonical_report, "report")
 
         report = apply_validated_vertex_presentation(canonical_report, analytical_result)
         print(
             "Final: presentation="
-            f"{report.get('presentation', {}).get('vertex_validation', {}).get('status', 'unknown')} "
+            f"{_safe_log_text(report.get('presentation', {}).get('vertex_validation', {}).get('status', 'unknown'))} "
             f"| tokens={self.budget.used}/{self.budget.max_tokens}"
         )
-        return report
+        return _safe_reporting_mapping(report, "report")
 
     def _verify_analytical_claims(
             self,
@@ -3524,8 +3679,10 @@ class ImprovedAsyncSwarmCoordinator:
                 analytical[field] = text + marker
 
         if flagged_total:
-            print(f"  [Verify] âš  Unverified tool claims flagged in analytical output: "
-                  f"{list(set(flagged_total))}")
+            print(
+                "  [Verify] âš  Unverified tool claims flagged in analytical output: "
+                f"{_safe_log_text(list(set(flagged_total)))}"
+            )
         else:
             print("  [Verify] âœ“ All tool claims in analytical output match session evidence")
 
@@ -3593,7 +3750,10 @@ class ImprovedAsyncSwarmCoordinator:
         grounding_warnings = analytical.get("_grounding_warnings", [])
         _reject_ai_operator_actions(analytical, grounding_warnings)
         if grounding_warnings:
-            print(f"  [Verify] AI grounding warnings: {grounding_warnings}")
+            print(
+                "  [Verify] AI grounding warnings: "
+                f"{_safe_log_text(grounding_warnings)}"
+            )
 
         exec_summary = (
             analytical.get('executive_summary') or
@@ -3926,7 +4086,7 @@ class ImprovedAsyncSwarmCoordinator:
             if cisa_kev_matches:
                 print(f"  [CISA KEV] {len(cisa_kev_matches)} actively-exploited CVE(s) "
                       f"in observed OTX pulses: "
-                      f"{[m['cve_id'] for m in cisa_kev_matches]}")
+                      f"{_safe_log_text([m.get('cve_id', '') for m in cisa_kev_matches])}")
 
         sigma_matched_commands = []
         if self.threat_feeds:
@@ -4357,9 +4517,12 @@ class ImprovedAsyncSwarmCoordinator:
         else:
             sophistication_level = 'Low'
 
-        print(f"Behavioral complexity heuristic: {sophistication_level} (Score: {score})")
+        print(
+            "Behavioral complexity heuristic: "
+            f"{_safe_log_text(sophistication_level)} (Score: {score})"
+        )
         for r in score_reasons:
-            print(f"    - {r}")
+            print(f"    - {_safe_log_text(r)}")
 
         ttps_flat = set().union(*tactic_summary.values()) if tactic_summary else set()
         command_evidence = self._extract_command_evidence_for_ttps(
@@ -4388,8 +4551,10 @@ class ImprovedAsyncSwarmCoordinator:
 
         vt_intel = _extract_vt_intelligence(ioc_bundle)
         if vt_intel["has_hits"]:
-            print(f"  VT intel: {vt_intel['hit_count']} hit(s), "
-                  f"families: {vt_intel['malware_families']}")
+            print(
+                f"  VT intel: {vt_intel['hit_count']} hit(s), families: "
+                f"{_safe_log_text(vt_intel['malware_families'])}"
+            )
         else:
             print("  VT intel: no confirmed hits "
                   "(absence does not mean clean â€” polymorphic malware evades AV)")
@@ -4909,6 +5074,12 @@ def print_hypothesis_report(result: dict) -> None:
     Previously: print(result['threat_actor_profile']) â†’ raw Python dict.
     Now: each field extracted and formatted explicitly.
     """
+    try:
+        result = _safe_reporting_mapping(result, "report")
+    except Exception:
+        print("\n[Report unavailable: redaction failed]")
+        return
+
     print("\n" + "=" * 70)
     print("[OK] Threat Hypothesis Complete")
     print("=" * 70)

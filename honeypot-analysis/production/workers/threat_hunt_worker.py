@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from production.classification.trust import is_trusted_classification_event
 from production.utils.config import ProductionConfig
 from production.correlation.observable_sightings import extract_session_observable_sightings
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, utc_now
 from production.storage import open_storage
 
@@ -319,7 +320,11 @@ class ThreatHuntWorker:
                 result = self._process_job(job)
             except Exception as exc:
                 retry = int(job.get("attempts") or 0) < 3
-                self.storage.fail_threat_hunt_job(job.get("job_id", ""), f"{type(exc).__name__}: {exc}", retry=retry)
+                self.storage.fail_threat_hunt_job(
+                    job.get("job_id", ""),
+                    redact_exception_for_log(exc),
+                    retry=retry,
+                )
                 continue
             self.storage.complete_threat_hunt_job(job.get("job_id", ""), result)
             processed += 1

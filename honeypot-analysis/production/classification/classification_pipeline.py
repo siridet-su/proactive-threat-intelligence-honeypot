@@ -17,6 +17,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from production.utils.sensitive_data import redact_exception_for_log
+
 
 @dataclass
 class TTPPrediction:
@@ -129,7 +131,7 @@ def load_classification_rule_policy(path_text: str = "") -> Dict[str, Any]:
             loaded.setdefault("source_path", str(path))
             return loaded
         except (OSError, json.JSONDecodeError) as exc:
-            errors.append(f"{path}: {type(exc).__name__}: {exc}")
+            errors.append(redact_exception_for_log(exc))
     return {
         "schema_version": CLASSIFICATION_RULE_POLICY_SCHEMA,
         "policy_id": "emergency-python-fallback",

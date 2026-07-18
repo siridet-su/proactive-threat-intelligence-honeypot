@@ -53,7 +53,7 @@
   "securebert_checkpoint_path": "",
   "securebert_device": "auto",
   "securebert_max_length": 128,
-  "reports_dir": "reports",
+  "reports_dir": "/var/lib/honeypot/reports",
   "enable_artifacts": true,
   "enable_pdf_export": true,
   "enable_stix_export": true,

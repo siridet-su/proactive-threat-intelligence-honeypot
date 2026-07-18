@@ -30,7 +30,7 @@ from production.storage.session_provenance import (
     normalize_session_source,
 )
 from production.utils.feedback import normalize_feedback_payload
-from production.utils.sensitive_data import redact_for_log
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
 
@@ -95,9 +95,9 @@ def _normalize_priority(priority: str) -> str:
 
 
 def _safe_error(exc: BaseException) -> str:
-    """Apply the central log policy when a driver embeds request details."""
+    """Return a stable driver error category without request details."""
 
-    return str(redact_for_log(exc, max_string_chars=1000))
+    return redact_exception_for_log(exc)
 
 
 def _encode_key(value: Any) -> str:

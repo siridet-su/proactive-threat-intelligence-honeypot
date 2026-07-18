@@ -24,10 +24,16 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from production.utils.sensitive_data import redact_exception_for_log
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 MITRE_STIX_URL = (
@@ -330,7 +336,7 @@ def _load_from_cache(path: str) -> Optional[MitreAttackDB]:
               f"(version={db.version}, age={age_days}d)")
         return db
     except Exception as e:
-        print(f"  [MITRE] Cache load failed: {e}")
+        print(f"  [MITRE] Cache load failed: {redact_exception_for_log(e)}")
         return None
 
 
@@ -342,7 +348,7 @@ def _save_to_cache(db: MitreAttackDB, path: str) -> None:
         size_kb = os.path.getsize(path) // 1024
         print(f"  [MITRE] Cache saved to {path} ({size_kb}KB)")
     except Exception as e:
-        print(f"  [MITRE] Cache save failed (non-fatal): {e}")
+        print(f"  [MITRE] Cache save failed (non-fatal): {redact_exception_for_log(e)}")
 
 
 def _fetch_from_mitre(url: str = MITRE_STIX_URL,
@@ -373,7 +379,7 @@ def _fetch_from_mitre(url: str = MITRE_STIX_URL,
         print("  [MITRE] requests not available — cannot download ATT&CK data")
         return None
     except Exception as e:
-        print(f"  [MITRE] Download failed: {type(e).__name__}: {e}")
+        print(f"  [MITRE] Download failed: {redact_exception_for_log(e)}")
         return None
 
 

@@ -219,11 +219,15 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert report["session_id"] == "e2e-session-1"
         assert report["raw_event_count"] == len(events)
         assert report["data_provenance"]["session"]["raw_event_count"] == len(events)
-        assert report["data_provenance"]["credentials"]["raw_password_stored"] is False
+        assert report["data_provenance"]["credential_metadata"]["raw_password_stored"] is False
         assert report["data_provenance"]["behavior_graph"]["bpg_count"] >= 1
         assert report["artifacts"]["json"]
         assert report["artifacts"]["stix"]
-        assert report["artifacts"]["pdf"]
+        rendered_report = (
+            report["artifacts"].get("pdf")
+            or report["artifacts"].get("pdf_fallback_markdown")
+        )
+        assert rendered_report
         for artifact_path in report["artifacts"].values():
             assert Path(artifact_path).exists()
 

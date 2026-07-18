@@ -64,6 +64,8 @@ FIELD MAPPING (enrichment JSON key → IP object attribute):
 
 from typing import Any, Dict, List, Optional
 
+from production.utils.sensitive_data import redact_exception_for_log
+
 
 # FIELD MAPPING TABLE  (v2)
 #
@@ -382,7 +384,7 @@ def load_enrichment_db(path: str) -> Dict[str, Dict]:
               f"[1B] Field coverage: {len(mapped)} mapped fields, none unmapped")
         return data
     except Exception as e:
-        print(f"[1B] Failed to load enrichment DB [{type(e).__name__}]: {e}")
+        print(f"[1B] Failed to load enrichment DB: {redact_exception_for_log(e)}")
         return {}
 
 

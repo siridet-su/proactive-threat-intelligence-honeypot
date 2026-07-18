@@ -81,8 +81,11 @@ def test_trusted_behavior_policy_is_valid_and_records_provenance() -> None:
 
 def test_policy_validator_rejects_invalid_regex_and_unsafe_claim_text() -> None:
     invalid_regex = _policy()
-    invalid_regex["policy"]["extraction"]["patterns"]["url"] = "("
-    assert any("invalid regex" in error for error in validate_behavior_policy(invalid_regex))
+    bare_sentinel = "behavior-policy-bare-secret-25c7"
+    invalid_regex["policy"]["extraction"]["patterns"]["url"] = f"(?P<{bare_sentinel}>"
+    regex_errors = validate_behavior_policy(invalid_regex)
+    assert any("invalid regex" in error for error in regex_errors)
+    assert bare_sentinel not in json.dumps(regex_errors)
 
     unsafe_claim = _policy()
     unsafe_claim["policy"]["claims"]["connected"][0]["text"] = (

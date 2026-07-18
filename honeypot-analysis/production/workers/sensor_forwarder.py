@@ -18,7 +18,19 @@ if __package__ == "production":
     from .serialization import utc_now
 else:
     from production.utils.config import ProductionConfig
+    from production.utils.sensitive_data import redact_exception_for_log
     from production.utils.serialization import utc_now
+
+
+def _safe_exception_text(exc: BaseException) -> str:
+    """Summarize failures without rendering attacker-controlled arguments."""
+
+    if __package__ != "production":
+        return redact_exception_for_log(exc)
+    # The legacy Pi compatibility package has only config/serialization.  A
+    # constant fallback preserves containment without maintaining a second
+    # independent redaction policy there.
+    return "operation_failed"
 
 
 @dataclass
@@ -142,7 +154,13 @@ def post_events(config: ProductionConfig, events: List[Dict[str, Any]]) -> Dict[
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=config.forwarder_timeout_seconds) as response:
-        return json.loads(response.read().decode("utf-8"))
+        encoded = response.read(1_048_577)
+        if len(encoded) > 1_048_576:
+            raise ValueError("ingest response exceeds size limit")
+        parsed = json.loads(encoded.decode("utf-8"))
+        if not isinstance(parsed, dict):
+            raise ValueError("ingest response must be an object")
+        return parsed
 
 
 def forward_once(config: ProductionConfig) -> ForwardResult:
@@ -157,8 +175,15 @@ def forward_once(config: ProductionConfig) -> ForwardResult:
 
     try:
         response = post_events(config, events)
-    except (OSError, urllib.error.URLError, TimeoutError) as exc:
-        return ForwardResult(sent=0, remaining=spool.count(), error=str(exc))
+    except Exception as exc:
+        return ForwardResult(sent=0, remaining=spool.count(), error=_safe_exception_text(exc))
+
+    if not isinstance(response, dict):
+        return ForwardResult(
+            sent=0,
+            remaining=spool.count(),
+            error="ingest returned an invalid response object",
+        )
 
     try:
         accepted = max(int(response.get("accepted", len(events))), 0)

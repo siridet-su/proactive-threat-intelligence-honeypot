@@ -11,6 +11,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, utc_now
 from production.storage import open_storage
 
@@ -23,19 +24,19 @@ def target_hash(url: str) -> str:
 
 
 def post_webhook(url: str, payload: Dict[str, Any], timeout_seconds: float) -> Tuple[bool, str]:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
     try:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             if 200 <= response.status < 300:
                 return True, ""
             return False, f"HTTP {response.status}"
-    except (OSError, urllib.error.URLError, TimeoutError) as exc:
-        return False, str(exc)
+    except Exception as exc:
+        return False, redact_exception_for_log(exc)
 
 
 class WebhookDispatcher:

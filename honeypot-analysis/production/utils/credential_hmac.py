@@ -23,8 +23,13 @@ from typing import Any, Dict, Tuple
 
 CREDENTIAL_HMAC_SCHEME = "hmac-sha256-v1"
 CREDENTIAL_HMAC_KEYRING_SCHEMA = "credential_hmac_keyring.v1"
+CREDENTIAL_METADATA_SCHEMA = "credential_metadata.v1"
 _CREDENTIAL_HMAC_DOMAIN = b"honeypot-analysis/credential/v1\0"
 _KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_CREDENTIAL_HMAC_DIGEST_PATTERN = re.compile(
+    rf"^{re.escape(CREDENTIAL_HMAC_SCHEME)}:"
+    r"[A-Za-z0-9._-]{1,64}:[0-9a-f]{64}$"
+)
 _MAX_KEYRING_BYTES = 64 * 1024
 _MIN_KEY_BYTES = 32
 _MAX_KEY_BYTES = 128
@@ -194,6 +199,14 @@ def _validate_key_id(value: Any, field_name: str) -> str:
     return value
 
 
+def is_credential_hmac_digest(value: Any) -> bool:
+    """Return whether a value is one canonical versioned credential digest."""
+
+    return isinstance(value, str) and bool(
+        _CREDENTIAL_HMAC_DIGEST_PATTERN.fullmatch(value)
+    )
+
+
 def _reject_json_constant(_value: str) -> None:
     raise ValueError("non-finite JSON constants are not permitted")
 
@@ -272,6 +285,101 @@ def resolve_credential_hmac_keyring_path(configured_path: str = "") -> str:
     if not credentials_directory:
         return ""
     return str(Path(credentials_directory) / _SYSTEMD_CREDENTIAL_NAME)
+
+
+def credential_metadata_for_provenance(value: Any) -> Dict[str, Any]:
+    """Return the strict non-secret credential metadata schema for reports."""
+
+    result: Dict[str, Any] = {
+        "schema_version": CREDENTIAL_METADATA_SCHEMA,
+        "metadata_status": "unavailable",
+    }
+    if not isinstance(value, Mapping):
+        return result
+
+    boolean_fields = (
+        "credential_observed",
+        "raw_password_stored",
+        "password_hash_present",
+        "raw_events_sanitized",
+        "hashing_enabled",
+    )
+    if any(not isinstance(value.get(field_name), bool) for field_name in boolean_fields):
+        return result
+    parsed_booleans = {
+        field_name: value[field_name]
+        for field_name in boolean_fields
+    }
+
+    alias_count = value.get("password_hash_alias_count")
+    if not (
+        isinstance(alias_count, int)
+        and not isinstance(alias_count, bool)
+        and 0 <= alias_count <= _MAX_CORRELATION_KEYS
+    ):
+        return result
+
+    algorithm = value.get("hash_algorithm")
+    if not (isinstance(algorithm, str) and algorithm in {
+        CREDENTIAL_HMAC_SCHEME,
+        "disabled",
+    }):
+        return result
+
+    active_key_id = value.get("active_key_id")
+    if not (active_key_id == "" or (
+        isinstance(active_key_id, str) and _KEY_ID_PATTERN.fullmatch(active_key_id)
+    )):
+        return result
+
+    correlation_key_ids = value.get("correlation_key_ids")
+    if not (
+        isinstance(correlation_key_ids, (list, tuple))
+        and len(correlation_key_ids) <= _MAX_CORRELATION_KEYS
+        and all(
+            isinstance(key_id, str) and _KEY_ID_PATTERN.fullmatch(key_id)
+            for key_id in correlation_key_ids
+        )
+        and len(set(correlation_key_ids)) == len(correlation_key_ids)
+    ):
+        return result
+    correlation_ids = list(correlation_key_ids)
+
+    credential_observed = parsed_booleans["credential_observed"]
+    password_hash_present = parsed_booleans["password_hash_present"]
+    hashing_enabled = parsed_booleans["hashing_enabled"]
+    if (
+        parsed_booleans["raw_password_stored"]
+        or not parsed_booleans["raw_events_sanitized"]
+    ):
+        return result
+    if algorithm == CREDENTIAL_HMAC_SCHEME:
+        if (
+            not hashing_enabled
+            or not active_key_id
+            or active_key_id in correlation_ids
+            or password_hash_present is not credential_observed
+            or alias_count != (len(correlation_ids) if password_hash_present else 0)
+        ):
+            return result
+    elif (
+        hashing_enabled
+        or active_key_id
+        or correlation_ids
+        or alias_count
+        or password_hash_present
+    ):
+        return result
+
+    return {
+        "schema_version": CREDENTIAL_METADATA_SCHEMA,
+        "metadata_status": "available",
+        **parsed_booleans,
+        "password_hash_alias_count": alias_count,
+        "hash_algorithm": algorithm,
+        "active_key_id": active_key_id,
+        "correlation_key_ids": correlation_ids,
+    }
 
 
 def validate_production_credential_policy(policy: Mapping[str, Any]) -> Dict[str, Any]:

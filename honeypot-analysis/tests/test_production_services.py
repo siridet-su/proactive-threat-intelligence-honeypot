@@ -130,7 +130,7 @@ from production.reporting.reporting_pipeline import (
     _reject_ai_operator_actions,
     _validate_ai_grounding,
 )
-from production.workers.session_monitor import _build_trusted_reporting_views
+from production.workers.session_monitor import SessionState, _build_trusted_reporting_views
 from production.reporting.artifacts import build_stix_bundle
 
 
@@ -174,11 +174,102 @@ def test_session_worker_exception_text_uses_central_redaction() -> None:
         )
     )
 
-    assert message.startswith("RuntimeError: ")
+    assert message == "RuntimeError: operation_failed"
     assert "unit-user" not in message
     assert "unit-password" not in message
     assert "unit-token" not in message
-    assert "mongodb://<redacted>@example.invalid/honeypot" in message
+
+
+def test_session_worker_redacts_derived_session_payload_and_preserves_valid_hmacs() -> None:
+    worker = object.__new__(SessionWorker)
+    worker.config = ProductionConfig()
+    marker = "derived-session-boundary-probe"
+    valid_digest = "hmac-sha256-v1:active-key:" + ("a" * 64)
+    valid_alias = "hmac-sha256-v1:prior-key:" + ("b" * 64)
+    forged_digest = "hmac-sha256-v1:active-key:" + ("z" * 64)
+    state = SessionState(
+        session_id="session-redaction",
+        src_ip="203.0.113.10",
+        start_time="2026-07-18T00:00:00Z",
+    )
+    state.client_version = f"password={marker}"
+    state.login_username = f"Authorization: Bearer {marker}"
+    state.login_password_hash = valid_digest
+    state.login_password_hash_aliases = [valid_alias]
+    state.credential_metadata = {
+        "credential_observed": True,
+        "raw_password_stored": False,
+        "password_hash_present": True,
+        "raw_events_sanitized": True,
+        "hashing_enabled": True,
+        "password_hash_alias_count": 1,
+        "hash_algorithm": "hmac-sha256-v1",
+        "active_key_id": "active-key",
+        "correlation_key_ids": ["prior-key"],
+        "password": marker,
+    }
+    state.raw_events = [
+        {
+            "eventid": "cowrie.login.success",
+            "password": marker,
+            "password_hash": valid_digest,
+        },
+        {
+            "eventid": "cowrie.client.version",
+            "password_hash": forged_digest,
+            "version": f"token={marker}",
+        },
+    ]
+
+    payload = worker._session_payload(state)
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert marker not in encoded
+    assert payload["login_password_hash"] == valid_digest
+    assert payload["login_password_hash_aliases"] == [valid_alias]
+    assert payload["raw_events"][0]["password_hash"] == valid_digest
+    assert payload["raw_events"][1]["password_hash"] == "[REDACTED]"
+    assert payload["credential_metadata"]["raw_password_stored"] is False
+    assert "password" not in payload["credential_metadata"]
+
+
+def test_session_feature_boundary_redacts_object_and_mapping_inputs() -> None:
+    marker = "session-feature-boundary-probe"
+    current_marker = "current-event-boundary-probe"
+    command = f"curl -u analyst:{marker} https://example.invalid/upload"
+    current_command = (
+        f"sshpass -p {current_marker} ssh analyst@example.invalid"
+    )
+    state = SessionState(
+        session_id="feature-redaction",
+        src_ip="203.0.113.11",
+        start_time="2026-07-18T00:00:00Z",
+    )
+    state.commands = [command]
+    state.raw_events = [
+        {
+            "eventid": "cowrie.command.input",
+            "input": command,
+            "password": marker,
+        }
+    ]
+
+    for source in (state, session_to_payload(state)):
+        features = build_session_features(
+            source,
+            current_event={
+                "eventid": "cowrie.command.input",
+                "timestamp": "2026-07-18T00:00:01Z",
+                "input": current_command,
+                "password": current_marker,
+            },
+        )
+        encoded = json.dumps(features, sort_keys=True)
+
+        assert marker not in encoded
+        assert current_marker not in encoded
+        assert "[REDACTED]" in features["commands"][0]
+        assert "[REDACTED]" in features["command_timing_events"][-1]["command"]
 
 
 def _demo_events() -> list[dict]:
@@ -5044,6 +5135,64 @@ def test_session_close_creates_exactly_one_analysis_job_and_redacts_credentials(
         assert "secret-pass" not in serialized
 
 
+def test_session_worker_persists_redacted_attacker_controlled_session_strings() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _config(tmp)
+        storage = open_storage(cfg.database_url)
+        marker = "persisted-session-boundary-probe"
+        username_marker = "opaque-login-username-probe"
+        base = {
+            "session": "persisted-redaction",
+            "src_ip": "203.0.113.12",
+            "timestamp": "2026-07-18T00:00:00Z",
+            "sensor": cfg.sensor_id,
+        }
+        events = [
+            {**base, "eventid": "cowrie.session.connect"},
+            {
+                **base,
+                "eventid": "cowrie.client.version",
+                "version": f"password={marker}",
+            },
+            {
+                **base,
+                "eventid": "cowrie.login.success",
+                "username": username_marker,
+                "password": marker,
+            },
+            {
+                **base,
+                "eventid": "cowrie.command.input",
+                "input": f"sshpass -p {marker} ssh analyst@example.invalid",
+            },
+            {
+                **base,
+                "eventid": "cowrie.session.closed",
+                "duration": 1.0,
+            },
+        ]
+        for event in events:
+            storage.store_event(cfg.sensor_id, event)
+
+        assert SessionWorker(cfg).process_unprocessed() == len(events)
+
+        rows = storage.list_rows("sessions")
+        assert len(rows) == 1
+        payload = json.loads(rows[0]["payload_json"])
+        encoded = json.dumps(payload, sort_keys=True)
+        assert marker not in encoded
+        assert username_marker not in encoded
+        assert "[REDACTED]" in payload["client_version"]
+        assert "[REDACTED]" in payload["login_username"]
+        assert payload["login_password_hash"].startswith(
+            "hmac-sha256-v1:unit-test-key:"
+        )
+        snapshots = storage.list_rows("prediction_snapshots")
+        assert snapshots
+        assert marker not in json.dumps(snapshots, sort_keys=True)
+        assert username_marker not in json.dumps(snapshots, sort_keys=True)
+
+
 def test_session_worker_skips_prediction_for_non_behavior_events() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _config(tmp)
@@ -6743,7 +6892,7 @@ def test_analysis_worker_stores_report_with_provenance() -> None:
         assert report["data_provenance"]["session"]["failed_command_count"] == 0
         assert report["data_provenance"]["session"]["unknown_command_outcome_count"] == 0
         assert report["data_provenance"]["session"]["command_outcome_observed"] is True
-        assert report["data_provenance"]["credentials"]["raw_password_stored"] is False
+        assert report["data_provenance"]["credential_metadata"]["raw_password_stored"] is False
         assert report["data_provenance"]["enrichment"]["status"] == "applied"
         assert report["data_provenance"]["behavior_graph"]["bpg_count"] >= 1
         assert Path(report["artifacts"]["json"]).exists()
@@ -6804,6 +6953,8 @@ def test_attack_timeline_deduplicates_duplicate_login_success_events() -> None:
     timeline = _build_attack_timeline(raw_events)
     assert len(timeline["key_events"]) == 2
     assert timeline["key_events"][0]["event"].startswith("Successful login")
+    assert "codexlive13" not in json.dumps(timeline, sort_keys=True)
+    assert "[REDACTED]" in timeline["key_events"][0]["event"]
     assert timeline["key_events"][1]["event"].startswith("File downloaded")
 
 
@@ -6855,8 +7006,43 @@ def test_analysis_worker_writes_deterministic_fallback_report() -> None:
         report = json.loads(reports[0]["payload_json"])
         assert report["analysis_mode"] == "deterministic_fallback"
         assert report["data_provenance"]["ai"]["fallback"] == "deterministic_baseline"
-        assert "vertex unavailable" in report["error"]
+        assert report["error"] == "RuntimeError: operation_failed"
         assert Path(report["artifacts"]["json"]).exists()
+
+
+def test_analysis_worker_resolves_job_when_fallback_redaction_fails(
+    monkeypatch,
+    capsys,
+) -> None:
+    secret = "fallback-redaction-secret"
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _config(tmp)
+        storage = open_storage(cfg.database_url)
+        for event in _demo_events():
+            storage.store_event(cfg.sensor_id, event)
+        SessionWorker(cfg).process_unprocessed()
+
+        def fail_redaction(_value):
+            raise RuntimeError(f"Authorization: Bearer {secret}")
+
+        monkeypatch.setattr(
+            "production.workers.analysis_worker.redact_for_artifact",
+            fail_redaction,
+        )
+        processed = asyncio.run(
+            AnalysisWorker(cfg).process_once(
+                coordinator_class=FailingCoordinator,
+            )
+        )
+
+        assert processed == 0
+        jobs = storage.list_rows("analysis_jobs")
+        assert len(jobs) == 1
+        assert jobs[0]["status"] == "failed"
+        assert "fallback report failed" in jobs[0]["error"]
+        assert secret not in jobs[0]["error"]
+        assert storage.list_rows("reports") == []
+        assert secret not in capsys.readouterr().out
 
 
 def test_closed_session_report_exposes_threat_hunting_correlation_context() -> None:
@@ -7244,7 +7430,7 @@ def test_shodan_provider_falls_back_to_internetdb() -> None:
     result = provider.enrich("ip", "198.51.100.45")
     assert result.status == "ok"
     assert result.data["_shodan_api"] == "internetdb"
-    assert "HTTPError" in result.data["_shodan_primary_error"]
+    assert result.data["_shodan_primary_error"] == "OSError: operation_failed"
     assert captured[1][1]["User-Agent"] == "honeypot-shodan-internetdb/1.0"
 
     payload, provider_status, _ = merge_provider_results("ip", "198.51.100.45", [result])
@@ -8280,6 +8466,29 @@ def test_classification_rule_policy_validates_and_loads_command_rules() -> None:
     assert any("reviewed rules must include reviewer" in error for error in errors)
     assert any("reviewed rules must include last_reviewed" in error for error in errors)
     assert any("reviewed rules must include review_status" in error for error in errors)
+
+    bare_sentinel = "classification-regex-bare-secret-896b"
+    invalid_regex = json.loads(json.dumps(policy))
+    invalid_regex["policy"]["rules"][0]["pattern"] = f"(?P<{bare_sentinel}>"
+    regex_errors = validate_classification_rule_policy(invalid_regex)
+    assert any("invalid regex" in error for error in regex_errors)
+    assert bare_sentinel not in json.dumps(regex_errors)
+
+
+def test_session_ttp_policy_regex_errors_do_not_echo_pattern_text() -> None:
+    bare_sentinel = "correlation-regex-bare-secret-639d"
+    policy = load_session_ttp_correlation_policy(
+        Path("configs") / "session_ttp_correlation.trusted.json"
+    )
+    policy = json.loads(json.dumps(policy))
+    policy["policy"]["rules"][0]["conditions"]["any"] = [
+        {"type": "command_regex", "pattern": f"(?P<{bare_sentinel}>"}
+    ]
+
+    errors = validate_session_ttp_correlation_policy(policy)
+
+    assert any("invalid regex" in error for error in errors)
+    assert bare_sentinel not in json.dumps(errors)
 
 
 if __name__ == "__main__":
