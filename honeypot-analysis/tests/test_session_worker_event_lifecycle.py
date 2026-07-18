@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import os
 import sqlite3
@@ -12,7 +13,8 @@ import pytest
 from production.storage import open_storage
 from production.utils.config import ProductionConfig
 from production.workers.session_monitor import SessionMonitor
-from production.workers.session_worker import SessionWorker
+from production.workers.analysis_worker import AnalysisWorker
+from production.workers.session_worker import SessionWorker, WorkerError
 
 
 def _config(tmp_path: Path, *, batch_size: int = 10) -> ProductionConfig:
@@ -49,6 +51,7 @@ def _config(tmp_path: Path, *, batch_size: int = 10) -> ProductionConfig:
         calibration_policy={"enabled": False},
         campaign_policy={"enabled": False},
         threat_hunt_policy={"enabled": False},
+        reports_dir=str(tmp_path / "reports"),
     )
 
 
@@ -370,3 +373,286 @@ def test_monitor_can_preserve_legacy_callback_containment_or_propagate() -> None
     strict = SessionMonitor(on_session_end=fail, propagate_session_end_errors=True)
     with pytest.raises(RuntimeError, match="callback failed"):
         strict.on_event(close)
+
+
+class _RecoveryCoordinator:
+    def __init__(self, **_kwargs: object) -> None:
+        pass
+
+    async def analyze(self, _ioc_bundle: object, tactic_summary: object, _sessions: object, **kwargs: object) -> dict:
+        return {
+            "campaign_name": "Restart Recovery Test",
+            "confidence": "Low - deterministic test",
+            "executive_summary": "Recovered active session retained complete history.",
+            "tactic_summary": tactic_summary,
+            "raw_event_count": len(kwargs.get("raw_events", [])),
+        }
+
+
+def test_active_session_restart_preserves_ordered_analysis_and_prediction_history(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.prediction_policy = ProductionConfig().prediction_policy
+    storage = open_storage(config.database_url)
+    events = [
+        _event("session-restart", "cowrie.session.connect", 0),
+        _event(
+            "session-restart",
+            "cowrie.login.success",
+            1,
+            username="root",
+            password="fixture-only-password",
+        ),
+        _event(
+            "session-restart",
+            "cowrie.command.input",
+            2,
+            input="whoami",
+            success=1,
+        ),
+    ]
+    first_event_ids = [storage.store_event("sensor-a", event)[0] for event in events]
+    first = SessionWorker(config)
+    try:
+        assert first.process_unprocessed() == 3
+        before = first.monitor.get_session("session-restart")
+        assert before is not None
+        assert before.commands == ["whoami"]
+    finally:
+        first.close()
+
+    second_command_id, _ = storage.store_event(
+        "sensor-a",
+        _event(
+            "session-restart",
+            "cowrie.command.input",
+            3,
+            input="cat /etc/passwd",
+            success=1,
+        ),
+    )
+    close_id, _ = storage.store_event(
+        "sensor-a",
+        _event("session-restart", "cowrie.session.closed", 4, duration=12.0),
+    )
+    restarted = SessionWorker(config)
+    try:
+        assert restarted._ensure_leadership()
+        recovered = restarted.monitor.get_session("session-restart")
+        assert recovered is not None
+        assert recovered.commands == ["whoami"]
+        assert len(restarted._session_prediction_snapshots["session-restart"]) == 2
+        assert restarted.process_unprocessed() == 2
+    finally:
+        restarted.close()
+
+    final_payload = storage.get_session("session-restart")["payload"]
+    assert final_payload["is_ended"] is True
+    assert final_payload["last_applied_event_id"] == close_id
+    assert final_payload["commands"] == ["whoami", "cat /etc/passwd"]
+    assert len(final_payload["raw_events"]) == 5
+    assert len(final_payload["classification_events"]) >= 2
+    trusted_ttps = {
+        event.get("ttp")
+        for event in final_payload["classification_events"]
+        if event.get("evidence_tier") == "trusted_observation"
+    }
+    assert {"T1033", "T1003"} <= trusted_ttps
+
+    snapshots = storage.list_rows_for_session(
+        "prediction_snapshots",
+        "session-restart",
+        limit=20,
+    )
+    snapshot_event_ids = {row["event_id"] for row in snapshots}
+    assert first_event_ids[1] in snapshot_event_ids
+    assert first_event_ids[2] in snapshot_event_ids
+    assert second_command_id in snapshot_event_ids
+    assert close_id in snapshot_event_ids
+
+    jobs = storage.list_rows("analysis_jobs", limit=10)
+    assert len(jobs) == 1
+    queued_payload = json.loads(jobs[0]["payload_json"])
+    assert queued_payload["commands"] == ["whoami", "cat /etc/passwd"]
+    assert queued_payload["last_applied_event_id"] == close_id
+
+    assert asyncio.run(
+        AnalysisWorker(config).process_once(coordinator_class=_RecoveryCoordinator)
+    ) == 1
+    report = json.loads(storage.list_rows("reports", limit=1)[0]["payload_json"])
+    assert report["session_id"] == "session-restart"
+    assert report["data_provenance"]["session"]["raw_event_count"] == 5
+
+
+def test_restart_after_durable_session_save_does_not_reapply_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path, batch_size=1)
+    storage = open_storage(config.database_url)
+    event_id, _ = storage.store_event(
+        "sensor-a",
+        _event(
+            "session-complete-crash",
+            "cowrie.command.input",
+            0,
+            input="whoami",
+            success=1,
+        ),
+    )
+    crashed = SessionWorker(config)
+    original_complete = crashed.storage.complete_event
+    calls = 0
+
+    def lose_completion_once(*args: object, **kwargs: object) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False
+        return original_complete(*args, **kwargs)
+
+    monkeypatch.setattr(crashed.storage, "complete_event", lose_completion_once)
+    try:
+        assert crashed.process_unprocessed() == 0
+        durable = storage.get_session("session-complete-crash")["payload"]
+        assert durable["last_applied_event_id"] == event_id
+        assert durable["commands"] == ["whoami"]
+    finally:
+        crashed.close()
+
+    database_path = Path(config.database_url.removeprefix("sqlite:///"))
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            "UPDATE events SET next_retry_at = '2000-01-01T00:00:00+00:00' "
+            "WHERE event_id = ?",
+            (event_id,),
+        )
+
+    recovered = SessionWorker(config)
+    try:
+        assert recovered.process_unprocessed() == 1
+        state = recovered.monitor.get_session("session-complete-crash")
+        assert state is not None
+        assert state.commands == ["whoami"]
+        assert len(state.raw_events) == 1
+    finally:
+        recovered.close()
+    assert _event_row(storage, event_id)["attempts"] == 2
+
+
+def test_restart_resumes_already_persisted_close_without_duplicate_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    storage = open_storage(config.database_url)
+    storage.store_event("sensor-a", _event("session-close-crash", "cowrie.session.connect", 0))
+    storage.store_event(
+        "sensor-a",
+        _event(
+            "session-close-crash",
+            "cowrie.command.input",
+            1,
+            input="id",
+            success=1,
+        ),
+    )
+    crashed = SessionWorker(config)
+    assert crashed.process_unprocessed() == 2
+    close_id, _ = storage.store_event(
+        "sensor-a",
+        _event("session-close-crash", "cowrie.session.closed", 2, duration=3.0),
+    )
+    crashed.config.worker_batch_size = 1
+    original_complete = crashed.storage.complete_event
+
+    def lose_close_completion(*args: object, **kwargs: object) -> bool:
+        if args[0] == close_id:
+            return False
+        return original_complete(*args, **kwargs)
+
+    monkeypatch.setattr(crashed.storage, "complete_event", lose_close_completion)
+    try:
+        assert crashed.process_unprocessed() == 0
+        persisted = storage.get_session("session-close-crash")["payload"]
+        assert persisted["is_ended"] is True
+        assert persisted["last_applied_event_id"] == close_id
+        assert len(persisted["raw_events"]) == 3
+    finally:
+        crashed.close()
+
+    database_path = Path(config.database_url.removeprefix("sqlite:///"))
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            "UPDATE events SET next_retry_at = '2000-01-01T00:00:00+00:00' "
+            "WHERE event_id = ?",
+            (close_id,),
+        )
+
+    resumed = SessionWorker(config)
+    try:
+        assert resumed.process_unprocessed() == 1
+    finally:
+        resumed.close()
+    final_payload = storage.get_session("session-close-crash")["payload"]
+    assert final_payload["commands"] == ["id"]
+    assert len(final_payload["raw_events"]) == 3
+    assert len(storage.list_rows("analysis_jobs", limit=10)) == 1
+    assert _event_row(storage, close_id)["attempts"] == 2
+
+
+def test_active_session_recovery_limit_fails_closed_and_releases_leadership(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    storage = open_storage(config.database_url)
+    for session_id in ("active-one", "active-two"):
+        storage.save_session(
+            {
+                "session_id": session_id,
+                "src_ip": "203.0.113.27",
+                "start_time": "2026-07-18T02:00:00Z",
+                "is_ended": False,
+                "session_source": "production_live",
+            }
+        )
+    config.active_session_recovery_limit = 1
+    worker = SessionWorker(config)
+    with pytest.raises(WorkerError, match="recovery limit exceeded"):
+        worker.process_unprocessed()
+    assert worker._leader_held is False
+
+
+def test_legacy_rebuild_flag_only_loads_snapshots_and_never_marks_events(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    storage = open_storage(config.database_url)
+    storage.save_session(
+        {
+            "session_id": "active-rebuild",
+            "src_ip": "203.0.113.27",
+            "start_time": "2026-07-18T02:00:00Z",
+            "is_ended": False,
+            "session_source": "production_live",
+            "commands": ["whoami"],
+            "raw_events": [_event("active-rebuild", "cowrie.command.input", 0)],
+        }
+    )
+    queued_id, _ = storage.store_event(
+        "sensor-a",
+        _event("active-rebuild", "cowrie.command.input", 1, input="id", success=1),
+    )
+    worker = SessionWorker(config)
+    try:
+        assert worker.rebuild_from_events() == 1
+        recovered = worker.monitor.get_session("active-rebuild")
+        assert recovered is not None
+        assert recovered.commands == ["whoami"]
+        queued = _event_row(storage, queued_id)
+        assert queued["processed"] == 0
+        assert queued["attempts"] == 0
+        assert queued["claim_token"] is None
+    finally:
+        worker.close()

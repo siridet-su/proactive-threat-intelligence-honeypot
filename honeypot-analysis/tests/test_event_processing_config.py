@@ -17,6 +17,7 @@ def test_event_processing_config_defaults_are_safe() -> None:
     assert config.event_retry_max_seconds == 300.0
     assert config.worker_leader_lease_seconds == 90.0
     assert config.worker_leader_heartbeat_seconds == 10.0
+    assert config.active_session_recovery_limit == 10_000
 
 
 def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -28,6 +29,7 @@ def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPat
         "EVENT_RETRY_MAX_SECONDS": "45.5",
         "WORKER_LEADER_LEASE_SECONDS": "150.5",
         "WORKER_LEADER_HEARTBEAT_SECONDS": "15.5",
+        "ACTIVE_SESSION_RECOVERY_LIMIT": "4321",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -41,6 +43,7 @@ def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPat
     assert config.event_retry_max_seconds == 45.5
     assert config.worker_leader_lease_seconds == 150.5
     assert config.worker_leader_heartbeat_seconds == 15.5
+    assert config.active_session_recovery_limit == 4321
 
 
 def test_event_processing_config_loads_config_file(tmp_path) -> None:
@@ -55,6 +58,7 @@ def test_event_processing_config_loads_config_file(tmp_path) -> None:
                 "event_retry_max_seconds": 90.0,
                 "worker_leader_lease_seconds": 120.0,
                 "worker_leader_heartbeat_seconds": 12.0,
+                "active_session_recovery_limit": 7654,
             }
         ),
         encoding="utf-8",
@@ -69,6 +73,7 @@ def test_event_processing_config_loads_config_file(tmp_path) -> None:
     assert config.event_retry_max_seconds == 90.0
     assert config.worker_leader_lease_seconds == 120.0
     assert config.worker_leader_heartbeat_seconds == 12.0
+    assert config.active_session_recovery_limit == 7654
 
 
 @pytest.mark.parametrize(
@@ -85,6 +90,8 @@ def test_event_processing_config_loads_config_file(tmp_path) -> None:
         ("worker_leader_heartbeat_seconds", 90.0),
         ("worker_leader_lease_seconds", 79.0),
         ("event_retry_base_seconds", 301.0),
+        ("active_session_recovery_limit", 0),
+        ("active_session_recovery_limit", True),
     ],
 )
 def test_event_processing_config_rejects_invalid_file_values(
@@ -110,6 +117,7 @@ def test_event_processing_config_rejects_invalid_file_values(
         ("WORKER_LEADER_LEASE_SECONDS", "0"),
         ("WORKER_LEADER_HEARTBEAT_SECONDS", "90"),
         ("WORKER_LEADER_LEASE_SECONDS", "79"),
+        ("ACTIVE_SESSION_RECOVERY_LIMIT", "0"),
     ],
 )
 def test_event_processing_config_rejects_invalid_environment_values(

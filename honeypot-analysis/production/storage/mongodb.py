@@ -396,6 +396,10 @@ INDEX_DEFINITIONS: Dict[str, Sequence[IndexDefinition]] = {
         IndexDefinition((("session_id", ASCENDING),), "uq_sessions_session_id", True),
         IndexDefinition((("session_source", ASCENDING), ("updated_at", DESCENDING)), "idx_sessions_source_updated"),
         IndexDefinition(
+            (("ended", ASCENDING), ("session_source", ASCENDING), ("updated_at", ASCENDING)),
+            "idx_sessions_active_source_updated",
+        ),
+        IndexDefinition(
             (("session_source", ASCENDING), ("is_external_source", ASCENDING), ("updated_at", DESCENDING)),
             "idx_sessions_source_external_updated",
         ),
@@ -3235,6 +3239,23 @@ class MongoStorage:
         cursor = self._collection("sessions").find(query).sort(
             [("updated_at", DESCENDING)]
         ).limit(max(int(limit), 0))
+        return [row_from_document("sessions", raw) for raw in cursor]
+
+    def list_active_session_rows(
+        self,
+        limit: int = 10_000,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+    ) -> List[Dict[str, Any]]:
+        row_limit = max(int(limit), 0)
+        if row_limit == 0:
+            return []
+        query: Dict[str, Any] = {"ended": False}
+        source = normalize_session_source(session_source, "") if session_source else ""
+        if source:
+            query["session_source"] = source
+        cursor = self._collection("sessions").find(query).sort(
+            [("updated_at", ASCENDING), ("session_id", ASCENDING)]
+        ).limit(row_limit)
         return [row_from_document("sessions", raw) for raw in cursor]
 
     def count_sessions(

@@ -119,3 +119,4 @@ def test_example_config_documents_event_processing_defaults() -> None:
     assert config["event_retry_max_seconds"] == 300.0
     assert config["worker_leader_lease_seconds"] == 90.0
     assert config["worker_leader_heartbeat_seconds"] == 10.0
+    assert config["active_session_recovery_limit"] == 10_000

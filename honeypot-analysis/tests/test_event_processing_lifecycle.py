@@ -102,6 +102,9 @@ def test_initialize_migrates_legacy_event_and_session_schema(tmp_path: Path) -> 
         indexes = {
             row["name"] for row in conn.execute("PRAGMA index_list(events)")
         }
+        session_indexes = {
+            row["name"] for row in conn.execute("PRAGMA index_list(sessions)")
+        }
         legacy = conn.execute(
             """
             SELECT processed, attempts, processing_outcome, processed_at
@@ -134,6 +137,7 @@ def test_initialize_migrates_legacy_event_and_session_schema(tmp_path: Path) -> 
         "idx_events_leader_claims",
         "idx_events_session_queue",
     } <= indexes
+    assert "idx_sessions_active_source_updated" in session_indexes
     assert worker_table is not None
     assert dict(legacy) == {
         "processed": 1,
@@ -176,6 +180,7 @@ def test_postgres_lifecycle_contract_and_schema_are_structurally_complete() -> N
     assert "CREATE INDEX IF NOT EXISTS idx_events_failed" in schema
     assert "CREATE INDEX IF NOT EXISTS idx_events_leader_claims" in schema
     assert "CREATE INDEX IF NOT EXISTS idx_events_session_queue" in schema
+    assert "CREATE INDEX IF NOT EXISTS idx_sessions_active_source_updated" in schema
 
     backend_source = (root / "production/storage/backend.py").read_text(
         encoding="utf-8"

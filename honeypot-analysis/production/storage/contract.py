@@ -676,6 +676,12 @@ class StorageBackend(Protocol):
         external_only: bool = False,
     ) -> List[Dict[str, Any]]: ...
 
+    def list_active_session_rows(
+        self,
+        limit: int = 10_000,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+    ) -> List[Dict[str, Any]]: ...
+
     def count_sessions(
         self,
         session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,

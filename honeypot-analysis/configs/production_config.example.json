@@ -17,6 +17,7 @@
   "forwarder_poll_seconds": 2.0,
   "worker_batch_size": 100,
   "worker_poll_seconds": 2.0,
+  "active_session_recovery_limit": 10000,
   "event_lease_seconds": 60.0,
   "event_lease_heartbeat_seconds": 20.0,
   "event_max_attempts": 5,

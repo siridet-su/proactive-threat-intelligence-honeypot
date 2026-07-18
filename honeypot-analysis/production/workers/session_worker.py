@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
-from production.workers.session_monitor import SessionMonitor
+from production.workers.session_monitor import SessionMonitor, SessionState
 from production.enrichment.threat_feed_loader import load_threat_feeds
 
 from production.classification.classification_pipeline import NotebookParityClassifier
@@ -168,6 +168,7 @@ class SessionWorker:
         self.worker_token = str(uuid.uuid4())
         self._leader_held = False
         self._current_event_effects: Optional[Dict[str, bool | int]] = None
+        self._processing_event_id = ""
         self.feeds = None
         self.mitre_db = None
         self.enrichment_db: Dict[str, Any] = {}
@@ -227,6 +228,7 @@ class SessionWorker:
         effects[key] = int(effects.get(key, 0)) + int(value)
 
     def _ensure_leadership(self) -> bool:
+        newly_acquired = not self._leader_held
         try:
             if self._leader_held:
                 held = self.storage.renew_worker_lease(
@@ -246,6 +248,20 @@ class SessionWorker:
             self._leader_held = False
             raise
         self._leader_held = bool(held)
+        if self._leader_held and newly_acquired:
+            try:
+                self._recover_active_sessions()
+            except Exception:
+                try:
+                    self.storage.release_worker_lease(
+                        WORKER_LEADER_SCOPE,
+                        self.worker_owner,
+                        self.worker_token,
+                    )
+                except Exception:
+                    pass
+                self._leader_held = False
+                raise
         return self._leader_held
 
     def _renew_claim(self, row: Dict[str, Any]) -> None:
@@ -293,6 +309,151 @@ class SessionWorker:
             self._session_prediction_snapshots[session_id] = checkpoint["history"]
         else:
             self._session_prediction_snapshots.pop(session_id, None)
+
+    def _session_state_from_payload(
+        self,
+        payload: Any,
+        *,
+        expected_session_id: str,
+    ) -> SessionState:
+        if not isinstance(payload, dict):
+            raise WorkerError("active session recovery payload must be an object")
+        try:
+            safe_payload = redact_for_session_state(payload)
+        except Exception:
+            raise WorkerError("active session recovery redaction failed") from None
+        if not isinstance(safe_payload, dict):
+            raise WorkerError("active session recovery payload must remain an object")
+        session_id = safe_payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id or session_id != expected_session_id:
+            raise WorkerError("active session recovery session identity mismatch")
+        src_ip = safe_payload.get("src_ip", "unknown")
+        start_time = safe_payload.get("start_time", utc_now())
+        if not isinstance(src_ip, str) or not isinstance(start_time, str):
+            raise WorkerError("active session recovery scalar validation failed")
+        state = SessionState(session_id=session_id, src_ip=src_ip, start_time=start_time)
+        for field_name in state.__dataclass_fields__:
+            if field_name not in safe_payload:
+                continue
+            value = safe_payload[field_name]
+            default_value = getattr(state, field_name)
+            if isinstance(default_value, list) and not isinstance(value, list):
+                raise WorkerError("active session recovery list validation failed")
+            if isinstance(default_value, dict) and not isinstance(value, dict):
+                raise WorkerError("active session recovery mapping validation failed")
+            if type(default_value) is bool and type(value) is not bool:
+                raise WorkerError("active session recovery boolean validation failed")
+            if type(default_value) is int and type(value) is not int:
+                raise WorkerError("active session recovery integer validation failed")
+            if type(default_value) is float and (
+                type(value) not in {int, float}
+            ):
+                raise WorkerError("active session recovery number validation failed")
+            if isinstance(default_value, str) and not isinstance(value, str):
+                raise WorkerError("active session recovery text validation failed")
+            setattr(state, field_name, deepcopy(value))
+        return state
+
+    @staticmethod
+    def _payload_from_storage_row(row: Dict[str, Any]) -> Dict[str, Any]:
+        payload = row.get("payload")
+        if isinstance(payload, dict):
+            return payload
+        raw = row.get("payload_json")
+        if isinstance(raw, dict):
+            return raw
+        if not isinstance(raw, str):
+            raise WorkerError("durable session payload is missing")
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError:
+            raise WorkerError("durable session payload is invalid JSON") from None
+        if not isinstance(decoded, dict):
+            raise WorkerError("durable session payload must be an object")
+        return decoded
+
+    def _recalculate_monitor_stats(self) -> None:
+        sessions = list(self.monitor._sessions.values())
+        self.monitor._stats = {
+            "events": sum(len(state.raw_events) for state in sessions),
+            "alerts": sum(len(state.alerts_fired) for state in sessions),
+            "sessions": len(sessions),
+        }
+
+    def _recover_prediction_cache(self, session_id: str) -> None:
+        try:
+            history_limit = max(
+                1,
+                int(
+                    (self.config.calibration_policy or {}).get(
+                        "auto_evidence_snapshot_cache_limit",
+                        25,
+                    )
+                ),
+            )
+        except (TypeError, ValueError):
+            history_limit = 25
+        rows = self.storage.list_rows_for_session(
+            "prediction_snapshots",
+            session_id,
+            limit=history_limit,
+        )
+        snapshots: List[Dict[str, Any]] = []
+        for row in reversed(rows):
+            snapshot = self._payload_from_storage_row(row)
+            redacted = redact_for_artifact(snapshot)
+            if not isinstance(redacted, dict):
+                raise WorkerError("prediction recovery payload must be an object")
+            snapshots.append(redacted)
+        if snapshots:
+            self._session_prediction_snapshots[session_id] = snapshots
+            self._session_latest_snapshots[session_id] = snapshots[-1]
+        else:
+            self._session_prediction_snapshots.pop(session_id, None)
+            self._session_latest_snapshots.pop(session_id, None)
+
+    def _recover_active_sessions(self) -> int:
+        limit = int(self.config.active_session_recovery_limit)
+        rows = self.storage.list_active_session_rows(
+            limit=limit + 1,
+            session_source=self._session_source(),
+        )
+        if len(rows) > limit:
+            raise WorkerError("active session recovery limit exceeded")
+        self.monitor._sessions.clear()
+        self.monitor.campaign_tracker._profiles.clear()
+        self._session_latest_snapshots.clear()
+        self._session_prediction_snapshots.clear()
+        for row in rows:
+            session_id = str(row.get("session_id") or "")
+            state = self._session_state_from_payload(
+                self._payload_from_storage_row(row),
+                expected_session_id=session_id,
+            )
+            if state.is_ended:
+                raise WorkerError("active session recovery returned a closed session")
+            self.monitor._sessions[session_id] = state
+            self._recover_prediction_cache(session_id)
+        self._recalculate_monitor_stats()
+        return len(rows)
+
+    def _durable_state_for_event(
+        self,
+        session_id: str,
+        event_id: str,
+    ) -> Optional[SessionState]:
+        row = self.storage.get_session(session_id)
+        if not row:
+            return None
+        payload = self._payload_from_storage_row(row)
+        if payload.get("last_applied_event_id") != event_id:
+            return None
+        state = self._session_state_from_payload(
+            payload,
+            expected_session_id=session_id,
+        )
+        self._recover_prediction_cache(session_id)
+        return state
 
     def _retry_delay_seconds(self, attempts: int) -> float:
         exponent = min(max(int(attempts) - 1, 0), 31)
@@ -942,6 +1103,8 @@ class SessionWorker:
         return True
 
     def _on_session_end(self, state: Any) -> None:
+        if self._processing_event_id:
+            state.last_applied_event_id = self._processing_event_id
         attach_runtime_context(state)
         self._apply_session_ttp_correlations(state)
         payload = self._session_payload(state)
@@ -1095,6 +1258,7 @@ class SessionWorker:
             checkpoint = self._event_state_checkpoint(event)
             effects: Dict[str, bool | int] = {}
             self._current_event_effects = effects
+            self._processing_event_id = row["event_id"]
             try:
                 with _EventLeaseHeartbeat(self, row) as heartbeat:
                     self._record_event_effect(
@@ -1118,21 +1282,35 @@ class SessionWorker:
                     )
                     self._renew_claim(row)
                     heartbeat.check()
-                    self.monitor.on_event(event)
-                    self._record_event_effect("event_applied")
-                    self._renew_claim(row)
-                    heartbeat.check()
-                    state = self.monitor.get_session(str(event.get("session", "unknown")))
-                    trigger_info = self._prediction_trigger_for_event(event)
-                    if state is not None and trigger_info.get("matched"):
-                        self._save_prediction_snapshot(
-                            state,
-                            event,
-                            event_id=row["event_id"],
-                            trigger_info=trigger_info,
-                        )
-                    if state is not None and not getattr(state, "is_ended", False):
-                        self._save_active_session(state)
+                    session_id = str(event.get("session", "unknown"))
+                    state = self._durable_state_for_event(
+                        session_id,
+                        row["event_id"],
+                    )
+                    if state is not None:
+                        self.monitor._sessions[session_id] = state
+                        self._recalculate_monitor_stats()
+                        self._record_event_effect("event_applied")
+                        if state.is_ended:
+                            self._on_session_end(state)
+                        else:
+                            self._save_active_session(state)
+                    else:
+                        self.monitor.on_event(event)
+                        self._record_event_effect("event_applied")
+                        state = self.monitor.get_session(session_id)
+                        if state is not None and not getattr(state, "is_ended", False):
+                            state.last_applied_event_id = row["event_id"]
+                        trigger_info = self._prediction_trigger_for_event(event)
+                        if state is not None and trigger_info.get("matched"):
+                            self._save_prediction_snapshot(
+                                state,
+                                event,
+                                event_id=row["event_id"],
+                                trigger_info=trigger_info,
+                            )
+                        if state is not None and not getattr(state, "is_ended", False):
+                            self._save_active_session(state)
                     self._renew_claim(row)
                     heartbeat.check()
                     if not self.storage.complete_event(
@@ -1182,33 +1360,14 @@ class SessionWorker:
                     break
             finally:
                 self._current_event_effects = None
+                self._processing_event_id = ""
         return processed
 
     def rebuild_from_events(self, limit: int = 100000) -> int:
-        self.monitor = self._new_monitor()
-        rows = self.storage.fetch_events(limit=limit)
-        for row in rows:
-            record_sightings(
-                self.storage,
-                extract_event_observable_sightings(
-                    row["event"],
-                    event_id=row["event_id"],
-                    sensor_id=row.get("sensor_id", self.config.sensor_id),
-                ),
-            )
-            self.monitor.on_event(row["event"])
-            state = self.monitor.get_session(str(row["event"].get("session", "unknown")))
-            trigger_info = self._prediction_trigger_for_event(row["event"])
-            if state is not None and trigger_info.get("matched"):
-                self._save_prediction_snapshot(
-                    state,
-                    row["event"],
-                    event_id=row["event_id"],
-                    trigger_info=trigger_info,
-                )
-            self.storage.mark_event_processed(row["event_id"])
-        self._save_active_sessions()
-        return len(rows)
+        del limit  # Compatibility argument; recovery uses the validated config bound.
+        if not self._ensure_leadership():
+            return 0
+        return len(self.monitor._sessions)
 
     def run_forever(self) -> None:
         try:
@@ -1235,7 +1394,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the session monitor worker.")
     parser.add_argument("--config", help="Path to production JSON config.")
     parser.add_argument("--once", action="store_true", help="Process one batch and exit.")
-    parser.add_argument("--rebuild", action="store_true", help="Replay stored events before processing new ones.")
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Reload durable active-session snapshots before processing new events.",
+    )
     return parser
 
 
@@ -1246,7 +1409,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         if args.rebuild:
             count = worker.rebuild_from_events()
-            print(json.dumps({"service": "session_worker", "rebuilt_events": count}, sort_keys=True), flush=True)
+            print(
+                json.dumps(
+                    {"service": "session_worker", "recovered_active_sessions": count},
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
         if args.once:
             processed = worker.process_unprocessed()
             print(json.dumps({"service": "session_worker", "processed": processed}, sort_keys=True))

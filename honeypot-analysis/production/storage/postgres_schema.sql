@@ -73,6 +73,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_source_updated
     ON sessions(session_source, updated_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_source_external_updated
     ON sessions(session_source, is_external_source, updated_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_active_source_updated
+    ON sessions(ended, session_source, updated_at);
 
 CREATE TABLE IF NOT EXISTS alerts (
     alert_id TEXT PRIMARY KEY,

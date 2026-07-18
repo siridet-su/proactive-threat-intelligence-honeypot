@@ -681,6 +681,9 @@ def test_idempotent_events_atomic_claims_and_session_counts() -> None:
     assert storage.count_sessions() == 2
     assert storage.count_sessions(ended_only=True) == 1
     assert storage.count_sessions(external_only=True) == 2
+    active_rows = storage.list_active_session_rows()
+    assert [row["session_id"] for row in active_rows] == ["session-2"]
+    assert storage.list_active_session_rows(limit=0) == []
 
     storage.mark_event_processed(event_id)
     assert storage.fetch_events(processed=True)[0]["processed"] is True

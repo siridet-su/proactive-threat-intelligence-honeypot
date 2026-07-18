@@ -554,6 +554,12 @@ class SQLiteStorage:
                 ON sessions(session_source, is_external_source, updated_at)
             """
         )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sessions_active_source_updated
+                ON sessions(ended, session_source, updated_at)
+            """
+        )
 
     def _ensure_sqlite_event_processing_columns(self, conn: sqlite3.Connection) -> None:
         columns = {
@@ -2853,6 +2859,30 @@ class SQLiteStorage:
                 SELECT * FROM sessions
                 {where}
                 ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_active_session_rows(
+        self,
+        limit: int = 10_000,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+    ) -> List[Dict[str, Any]]:
+        source = normalize_session_source(session_source, "") if session_source else ""
+        clauses = ["ended = 0"]
+        params: List[Any] = []
+        if source:
+            clauses.append("session_source = ?")
+            params.append(source)
+        params.append(max(int(limit), 0))
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM sessions
+                WHERE {' AND '.join(clauses)}
+                ORDER BY updated_at, session_id
                 LIMIT ?
                 """,
                 params,
@@ -5379,6 +5409,31 @@ class PostgresStorage:
                 SELECT * FROM sessions
                 {where}
                 ORDER BY updated_at DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def list_active_session_rows(
+        self,
+        limit: int = 10_000,
+        session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
+    ) -> List[Dict[str, Any]]:
+        source = normalize_session_source(session_source, "") if session_source else ""
+        clauses = ["ended = false"]
+        params: List[Any] = []
+        if source:
+            clauses.append("session_source = %s")
+            params.append(source)
+        params.append(max(int(limit), 0))
+        with self.connection() as conn:
+            cur = self._execute(
+                conn,
+                f"""
+                SELECT * FROM sessions
+                WHERE {' AND '.join(clauses)}
+                ORDER BY updated_at, session_id
                 LIMIT %s
                 """,
                 tuple(params),

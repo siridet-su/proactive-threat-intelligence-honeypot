@@ -168,6 +168,7 @@ class ProductionConfig:
 
     worker_batch_size: int = 100
     worker_poll_seconds: float = 2.0
+    active_session_recovery_limit: int = 10_000
     event_lease_seconds: float = 60.0
     event_lease_heartbeat_seconds: float = 20.0
     event_max_attempts: int = 5
@@ -539,6 +540,14 @@ class ProductionConfig:
             or self.event_max_attempts < 1
         ):
             raise ValueError("event_max_attempts must be an integer of at least 1")
+        if (
+            isinstance(self.active_session_recovery_limit, bool)
+            or not isinstance(self.active_session_recovery_limit, Integral)
+            or self.active_session_recovery_limit < 1
+        ):
+            raise ValueError(
+                "active_session_recovery_limit must be an integer of at least 1"
+            )
         if self.event_lease_heartbeat_seconds >= self.event_lease_seconds:
             raise ValueError(
                 "event_lease_heartbeat_seconds must be less than event_lease_seconds"
@@ -703,6 +712,10 @@ class ProductionConfig:
         cfg.event_lease_seconds = _env_float(
             "EVENT_LEASE_SECONDS",
             cfg.event_lease_seconds,
+        )
+        cfg.active_session_recovery_limit = _env_int(
+            "ACTIVE_SESSION_RECOVERY_LIMIT",
+            cfg.active_session_recovery_limit,
         )
         cfg.event_lease_heartbeat_seconds = _env_float(
             "EVENT_LEASE_HEARTBEAT_SECONDS",

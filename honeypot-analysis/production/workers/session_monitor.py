@@ -367,6 +367,9 @@ class SessionState:
     bpg_list:         List[dict]   = field(default_factory=list)
     ioc_summary:      dict         = field(default_factory=dict)
     process_tree_status: dict      = field(default_factory=dict)
+    # Durable per-session head-of-line watermark. SessionWorker owns this
+    # field; Cowrie input cannot set it.
+    last_applied_event_id: str     = ""
 
     @property
     def unique_tactics(self) -> List[str]:
