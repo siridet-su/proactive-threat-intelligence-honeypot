@@ -94,3 +94,28 @@ def test_analysis_artifact_directory_contract_is_private_and_absolute() -> None:
     assert "chown -R honeypot:honeypot /var/lib/honeypot/reports" in (
         deployment_readme
     )
+
+
+def test_session_worker_has_bounded_graceful_stop_settings() -> None:
+    session_worker = (
+        SYSTEMD_DIR / "honeypot-session-worker.service"
+    ).read_text(encoding="utf-8")
+
+    assert "TimeoutStopSec=45" in session_worker
+    assert "KillSignal=SIGTERM" in session_worker
+
+
+def test_example_config_documents_event_processing_defaults() -> None:
+    config = json.loads(
+        (ROOT / "configs" / "production_config.example.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert config["event_lease_seconds"] == 60.0
+    assert config["event_lease_heartbeat_seconds"] == 20.0
+    assert config["event_max_attempts"] == 5
+    assert config["event_retry_base_seconds"] == 5.0
+    assert config["event_retry_max_seconds"] == 300.0
+    assert config["worker_leader_lease_seconds"] == 90.0
+    assert config["worker_leader_heartbeat_seconds"] == 10.0

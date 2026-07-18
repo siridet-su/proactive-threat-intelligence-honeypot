@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, field
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -166,6 +168,13 @@ class ProductionConfig:
 
     worker_batch_size: int = 100
     worker_poll_seconds: float = 2.0
+    event_lease_seconds: float = 60.0
+    event_lease_heartbeat_seconds: float = 20.0
+    event_max_attempts: int = 5
+    event_retry_base_seconds: float = 5.0
+    event_retry_max_seconds: float = 300.0
+    worker_leader_lease_seconds: float = 90.0
+    worker_leader_heartbeat_seconds: float = 10.0
     threat_hunt_batch_size: int = 20
     threat_hunt_poll_seconds: float = 10.0
     analysis_batch_size: int = 1
@@ -503,6 +512,56 @@ class ProductionConfig:
 
     def __post_init__(self) -> None:
         self._apply_database_settings(self.database_settings())
+        self.validate_event_processing()
+
+    def validate_event_processing(self) -> None:
+        """Reject unsafe event-processing lease and retry configuration."""
+        positive_durations = {
+            "event_lease_seconds": self.event_lease_seconds,
+            "event_lease_heartbeat_seconds": self.event_lease_heartbeat_seconds,
+            "event_retry_base_seconds": self.event_retry_base_seconds,
+            "event_retry_max_seconds": self.event_retry_max_seconds,
+            "worker_leader_lease_seconds": self.worker_leader_lease_seconds,
+            "worker_leader_heartbeat_seconds": self.worker_leader_heartbeat_seconds,
+        }
+        for name, value in positive_durations.items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(float(value))
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be a positive finite number")
+
+        if (
+            isinstance(self.event_max_attempts, bool)
+            or not isinstance(self.event_max_attempts, Integral)
+            or self.event_max_attempts < 1
+        ):
+            raise ValueError("event_max_attempts must be an integer of at least 1")
+        if self.event_lease_heartbeat_seconds >= self.event_lease_seconds:
+            raise ValueError(
+                "event_lease_heartbeat_seconds must be less than event_lease_seconds"
+            )
+        if self.worker_leader_heartbeat_seconds >= self.worker_leader_lease_seconds:
+            raise ValueError(
+                "worker_leader_heartbeat_seconds must be less than "
+                "worker_leader_lease_seconds"
+            )
+        minimum_leader_lease = self.event_lease_seconds + max(
+            self.event_lease_heartbeat_seconds,
+            self.worker_leader_heartbeat_seconds,
+        )
+        if self.worker_leader_lease_seconds < minimum_leader_lease:
+            raise ValueError(
+                "worker_leader_lease_seconds must be at least event_lease_seconds "
+                "plus the larger event or leader heartbeat interval"
+            )
+        if self.event_retry_max_seconds < self.event_retry_base_seconds:
+            raise ValueError(
+                "event_retry_max_seconds must be greater than or equal to "
+                "event_retry_base_seconds"
+            )
 
     def database_settings(self) -> DatabaseSettings:
         """Validate and return the selected storage backend settings."""
@@ -641,6 +700,34 @@ class ProductionConfig:
         cfg.forwarder_timeout_seconds = _env_int("FORWARDER_TIMEOUT_SECONDS", cfg.forwarder_timeout_seconds)
         cfg.worker_batch_size = _env_int("WORKER_BATCH_SIZE", cfg.worker_batch_size)
         cfg.worker_poll_seconds = _env_float("WORKER_POLL_SECONDS", cfg.worker_poll_seconds)
+        cfg.event_lease_seconds = _env_float(
+            "EVENT_LEASE_SECONDS",
+            cfg.event_lease_seconds,
+        )
+        cfg.event_lease_heartbeat_seconds = _env_float(
+            "EVENT_LEASE_HEARTBEAT_SECONDS",
+            cfg.event_lease_heartbeat_seconds,
+        )
+        cfg.event_max_attempts = _env_int(
+            "EVENT_MAX_ATTEMPTS",
+            cfg.event_max_attempts,
+        )
+        cfg.event_retry_base_seconds = _env_float(
+            "EVENT_RETRY_BASE_SECONDS",
+            cfg.event_retry_base_seconds,
+        )
+        cfg.event_retry_max_seconds = _env_float(
+            "EVENT_RETRY_MAX_SECONDS",
+            cfg.event_retry_max_seconds,
+        )
+        cfg.worker_leader_lease_seconds = _env_float(
+            "WORKER_LEADER_LEASE_SECONDS",
+            cfg.worker_leader_lease_seconds,
+        )
+        cfg.worker_leader_heartbeat_seconds = _env_float(
+            "WORKER_LEADER_HEARTBEAT_SECONDS",
+            cfg.worker_leader_heartbeat_seconds,
+        )
         cfg.threat_hunt_batch_size = _env_int("THREAT_HUNT_BATCH_SIZE", cfg.threat_hunt_batch_size)
         cfg.threat_hunt_poll_seconds = _env_float("THREAT_HUNT_POLL_SECONDS", cfg.threat_hunt_poll_seconds)
         cfg.analysis_batch_size = _env_int("ANALYSIS_BATCH_SIZE", cfg.analysis_batch_size)
@@ -739,6 +826,7 @@ class ProductionConfig:
             "CREDENTIAL_HMAC_KEYRING_FILE",
             cfg.credential_hmac_keyring_file,
         )
+        cfg.validate_event_processing()
         return cfg
 
     def apply_environment(self) -> None:
