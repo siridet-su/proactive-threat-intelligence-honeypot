@@ -150,8 +150,11 @@ class CampaignTracker:
             print(f"Returning actor! Linked to: {result['linked_sessions']}")
     """
 
-    def __init__(self, min_overlap: float = 0.60):
+    def __init__(self, min_overlap: float = 0.60, max_profiles: int = 10_000):
         self.min_overlap = min_overlap
+        if isinstance(max_profiles, bool) or int(max_profiles) < 1:
+            raise ValueError("max_profiles must be a positive integer")
+        self.max_profiles = int(max_profiles)
         self._profiles: list = []   # list of session fingerprint dicts
 
     def check_and_register(self, state: "SessionState") -> dict:
@@ -203,6 +206,8 @@ class CampaignTracker:
 
         # Register this session's fingerprint
         self._profiles.append(fp)
+        if len(self._profiles) > self.max_profiles:
+            del self._profiles[: len(self._profiles) - self.max_profiles]
         return result
 
     def _build_fingerprint(self, state: "SessionState") -> dict:
@@ -460,6 +465,8 @@ class SessionMonitor:
         classification_policy: Optional[dict] = None,
         credential_policy: Optional[dict] = None,
         credential_hasher: Optional[CredentialHasher] = None,
+        campaign_profile_cache_limit: int = 10_000,
+        session_event_history_limit: int = 10_000,
     ):
         self.feeds          = feeds
         self.mitre_db       = mitre_db
@@ -518,7 +525,15 @@ class SessionMonitor:
         self._sessions:     Dict[str, SessionState] = {}
         self._sigma_kws:    List[str] = self._load_sigma_keywords()
         self._stats         = {"events": 0, "alerts": 0, "sessions": 0}
-        self.campaign_tracker = CampaignTracker()  # cross-session correlation
+        self.campaign_tracker = CampaignTracker(
+            max_profiles=campaign_profile_cache_limit
+        )  # cross-session correlation
+        if (
+            isinstance(session_event_history_limit, bool)
+            or int(session_event_history_limit) < 1
+        ):
+            raise ValueError("session_event_history_limit must be a positive integer")
+        self.session_event_history_limit = int(session_event_history_limit)
 
 
     def on_event(self, event: dict) -> List[AlertEvent]:
@@ -670,9 +685,37 @@ class SessionMonitor:
             alerts += self._finalize_session(state)
 
         self._stats["alerts"] += len(alerts)
+        self._bound_session_history(state)
         for a in alerts:
             self.on_alert(a)
         return alerts
+
+    def _bound_session_history(self, state: SessionState) -> None:
+        """Bound realtime evidence while durable raw events remain authoritative."""
+
+        limit = self.session_event_history_limit
+        for field_name in (
+            "raw_events",
+            "commands",
+            "commands_success",
+            "commands_failed",
+            "classification_events",
+            "sigma_hits",
+            "kev_matches",
+            "process_events",
+            "process_sessions_summary",
+            "bpg_list",
+        ):
+            values = getattr(state, field_name, None)
+            if isinstance(values, list) and len(values) > limit:
+                del values[:-limit]
+        for mapping_name in ("ttp_command_map", "ttp_sources"):
+            mapping = getattr(state, mapping_name, None)
+            if not isinstance(mapping, dict):
+                continue
+            for values in mapping.values():
+                if isinstance(values, list) and len(values) > limit:
+                    del values[:-limit]
 
     def get_session(self, session_id: str) -> Optional[SessionState]:
         return self._sessions.get(session_id)

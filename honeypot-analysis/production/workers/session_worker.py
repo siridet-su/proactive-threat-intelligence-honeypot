@@ -9,7 +9,7 @@ import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 from production.workers.session_monitor import SessionMonitor, SessionState
@@ -48,6 +48,8 @@ from production.prediction.realtime_prediction import (
 from production.prediction.predictive_alerts import evaluate_predictive_alert
 from production.utils.runtime_context import attach_runtime_context
 from production.utils.serialization import session_to_payload, stable_id, utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
+from production.utils.http_security import safe_correlation_id
 from production.prediction.session_features import build_session_features
 from production.correlation.session_ttp_correlation import apply_session_ttp_correlations, load_knowledge as load_session_ttp_correlation_knowledge
 from production.reporting.smb_decision import RISK_ORDER, build_smb_decision_from_paths
@@ -169,6 +171,10 @@ class SessionWorker:
         self._leader_held = False
         self._current_event_effects: Optional[Dict[str, bool | int]] = None
         self._processing_event_id = ""
+        self._last_recovered_active_sessions = 0
+        self._prediction_generation_errors = 0
+        self._events_processed_total = 0
+        self._worker_started_at = time.monotonic()
         self.feeds = None
         self.mitre_db = None
         self.enrichment_db: Dict[str, Any] = {}
@@ -213,6 +219,15 @@ class SessionWorker:
     def _session_payload(self, state: Any) -> Dict[str, Any]:
         payload = session_to_payload(state)
         payload["session_source"] = self._session_source()
+        correlation_id = str(payload.get("last_applied_event_id") or "").strip()
+        if correlation_id:
+            payload["correlation_id"] = safe_correlation_id(
+                correlation_id,
+                stable_id(
+                    "session-correlation",
+                    {"session_id": payload.get("session_id") or "unknown"},
+                ),
+            )
         redacted = redact_for_session_state(payload)
         if not isinstance(redacted, dict):
             raise TypeError("session state redaction must return an object")
@@ -250,7 +265,19 @@ class SessionWorker:
         self._leader_held = bool(held)
         if self._leader_held and newly_acquired:
             try:
-                self._recover_active_sessions()
+                self._last_recovered_active_sessions = self._recover_active_sessions()
+                print(
+                    json.dumps(
+                        {
+                            "service": "session_worker",
+                            "event": "active_session_recovery",
+                            "recovered_active_sessions": self._last_recovered_active_sessions,
+                            "timestamp": utc_now(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
             except Exception:
                 try:
                     self.storage.release_worker_lease(
@@ -430,6 +457,7 @@ class SessionWorker:
                 self._payload_from_storage_row(row),
                 expected_session_id=session_id,
             )
+            self.monitor._bound_session_history(state)
             if state.is_ended:
                 raise WorkerError("active session recovery returned a closed session")
             self.monitor._sessions[session_id] = state
@@ -452,6 +480,7 @@ class SessionWorker:
             payload,
             expected_session_id=session_id,
         )
+        self.monitor._bound_session_history(state)
         self._recover_prediction_cache(session_id)
         return state
 
@@ -800,6 +829,8 @@ class SessionWorker:
             classification_policy=self.config.classification_policy,
             credential_policy=self.config.credential_policy,
             credential_hasher=self.credential_hasher,
+            campaign_profile_cache_limit=self.config.campaign_profile_cache_limit,
+            session_event_history_limit=self.config.session_event_history_limit,
         )
 
     def _refresh_enrichment_cache(self) -> None:
@@ -1055,7 +1086,7 @@ class SessionWorker:
             if str(tactic or "").strip()
         ]
 
-    def _save_prediction_snapshot(
+    def _save_prediction_snapshot_unobserved(
         self,
         state: Any,
         event: Dict[str, Any],
@@ -1103,6 +1134,38 @@ class SessionWorker:
             if len(snapshot_history) > history_limit:
                 del snapshot_history[:-history_limit]
         return True
+
+    def _save_prediction_snapshot(
+        self,
+        state: Any,
+        event: Dict[str, Any],
+        event_id: str = "",
+        trigger_info: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        try:
+            return self._save_prediction_snapshot_unobserved(
+                state,
+                event,
+                event_id=event_id,
+                trigger_info=trigger_info,
+            )
+        except Exception as exc:
+            self._prediction_generation_errors += 1
+            print(
+                json.dumps(
+                    {
+                        "service": "session_worker",
+                        "event": "prediction_generation_failed",
+                        "correlation_id": event_id,
+                        "prediction_generation_errors": self._prediction_generation_errors,
+                        "error": _safe_exception_text(exc),
+                        "timestamp": utc_now(),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            raise
 
     def _on_session_end(self, state: Any) -> None:
         if self._processing_event_id:
@@ -1237,7 +1300,13 @@ class SessionWorker:
         for state in self.monitor._sessions.values():
             self._save_active_session(state)
 
-    def process_unprocessed(self) -> int:
+    def process_unprocessed(
+        self,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
+        if should_stop is not None and should_stop():
+            return 0
         if not self._ensure_leadership():
             return 0
         self._refresh_enrichment_cache()
@@ -1245,6 +1314,8 @@ class SessionWorker:
         processed = 0
         attempted = 0
         while attempted < self.config.worker_batch_size:
+            if should_stop is not None and should_stop():
+                break
             if not self._ensure_leadership():
                 break
             rows = self.storage.claim_events(
@@ -1258,6 +1329,15 @@ class SessionWorker:
             if not rows:
                 break
             row = rows[0]
+            if should_stop is not None and should_stop():
+                self.storage.release_event_claim(
+                    row["event_id"],
+                    self.worker_owner,
+                    row["claim_token"],
+                    leader_scope=WORKER_LEADER_SCOPE,
+                    leader_token=self.worker_token,
+                )
+                break
             attempted += 1
             event = row["event"]
             checkpoint = self._event_state_checkpoint(event)
@@ -1366,6 +1446,7 @@ class SessionWorker:
                         {
                             "service": "session_worker",
                             "event_id": row["event_id"],
+                            "correlation_id": row["event_id"],
                             "event_status": failure_status,
                             "error_code": error_code,
                             "error_type": error_type,
@@ -1383,29 +1464,58 @@ class SessionWorker:
                 self._processing_event_id = ""
         return processed
 
+    def _evict_closed_sessions(self) -> int:
+        """Drop closed states only at a completed long-running loop boundary."""
+
+        closed = [
+            session_id
+            for session_id, state in self.monitor._sessions.items()
+            if getattr(state, "is_ended", False)
+        ]
+        for session_id in closed:
+            self.monitor._sessions.pop(session_id, None)
+            self._session_latest_snapshots.pop(session_id, None)
+            self._session_prediction_snapshots.pop(session_id, None)
+        return len(closed)
+
     def rebuild_from_events(self, limit: int = 100000) -> int:
         del limit  # Compatibility argument; recovery uses the validated config bound.
         if not self._ensure_leadership():
             return 0
         return len(self.monitor._sessions)
 
-    def run_forever(self) -> None:
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
         try:
-            while True:
-                processed = self.process_unprocessed()
-                print(
-                    json.dumps(
-                        {
-                            "service": "session_worker",
-                            "processed": processed,
-                            "active_sessions": len(self.monitor._sessions),
-                            "timestamp": utc_now(),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-                time.sleep(self.config.worker_poll_seconds)
+            with control.signal_handlers():
+                while not control.stopping:
+                    processed = self.process_unprocessed(
+                        should_stop=lambda: control.stopping
+                    )
+                    evicted_closed_sessions = self._evict_closed_sessions()
+                    if processed:
+                        self._events_processed_total += processed
+                        elapsed = max(time.monotonic() - self._worker_started_at, 0.001)
+                        print(
+                            json.dumps(
+                                {
+                                    "service": "session_worker",
+                                    "processed": processed,
+                                    "active_sessions": len(self.monitor._sessions),
+                                    "evicted_closed_sessions": evicted_closed_sessions,
+                                    "recovered_active_sessions": self._last_recovered_active_sessions,
+                                    "event_processing_rate_per_second": round(
+                                        self._events_processed_total / elapsed,
+                                        6,
+                                    ),
+                                    "prediction_generation_errors": self._prediction_generation_errors,
+                                    "timestamp": utc_now(),
+                                },
+                                sort_keys=True,
+                            ),
+                            flush=True,
+                        )
+                    control.wait(self.config.worker_poll_seconds)
         finally:
             self.close()
 

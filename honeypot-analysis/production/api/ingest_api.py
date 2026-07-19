@@ -7,6 +7,8 @@ import json
 import math
 import re
 import socket
+import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -29,6 +31,7 @@ from production.utils.http_security import (
 )
 from production.utils.sensitive_data import redact_for_log
 from production.utils.serialization import utc_now
+from production.utils.service_lifecycle import serve_http_until_stopped
 
 
 _SENSOR_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -204,11 +207,41 @@ class IngestHTTPServer(BoundedThreadingHTTPServer):
         self.storage = storage
         self.sensor_tokens = dict(sensor_tokens)
         self.request_timeout_seconds = float(config.ingest_request_timeout_seconds)
+        self._metrics_lock = threading.Lock()
+        self._metrics_started_at = time.monotonic()
+        self._ingest_counts = {
+            "accepted": 0,
+            "duplicates": 0,
+            "rejected": 0,
+        }
         super().__init__(
             address,
             IngestHandler,
             request_timeout_seconds=self.request_timeout_seconds,
         )
+
+    def record_ingest_outcome(
+        self,
+        *,
+        accepted: int,
+        duplicates: int,
+        rejected: int,
+    ) -> Dict[str, Any]:
+        with self._metrics_lock:
+            self._ingest_counts["accepted"] += max(int(accepted), 0)
+            self._ingest_counts["duplicates"] += max(int(duplicates), 0)
+            self._ingest_counts["rejected"] += max(int(rejected), 0)
+            counts = dict(self._ingest_counts)
+        total_stored = counts["accepted"] + counts["duplicates"]
+        elapsed = max(time.monotonic() - self._metrics_started_at, 0.001)
+        return {
+            **counts,
+            "event_ingest_rate_per_second": round(total_stored / elapsed, 6),
+            "duplicate_event_rate": round(
+                counts["duplicates"] / total_stored if total_stored else 0.0,
+                6,
+            ),
+        }
 
 
 class IngestHandler(BaseHTTPRequestHandler):
@@ -459,6 +492,7 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         accepted = 0
         duplicates = 0
+        event_ids: List[str] = []
         rejected: List[Dict[str, Any]] = []
         for index, event in enumerate(events):
             encoded_event = json.dumps(
@@ -488,7 +522,9 @@ class IngestHandler(BaseHTTPRequestHandler):
                 )
                 continue
             try:
-                _, inserted = self.server.storage.store_event(sensor_id, event)
+                stored_event_id, inserted = self.server.storage.store_event(
+                    sensor_id, event
+                )
             except Exception as exc:
                 self._log_event(
                     "storage_write_failed",
@@ -502,6 +538,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                     close_connection=True,
                 )
                 return
+            event_ids.append(stored_event_id)
             if inserted:
                 accepted += 1
             else:
@@ -523,12 +560,21 @@ class IngestHandler(BaseHTTPRequestHandler):
             http_status = HTTPStatus.BAD_REQUEST
             outcome = "rejected"
 
+        ingest_metrics = self.server.record_ingest_outcome(
+            accepted=accepted,
+            duplicates=duplicates,
+            rejected=len(rejected),
+        )
         self._log_event(
             "batch_processed",
             outcome=outcome,
             accepted=accepted,
             duplicates=duplicates,
             rejected=len(rejected),
+            event_ingest_rate_per_second=ingest_metrics[
+                "event_ingest_rate_per_second"
+            ],
+            duplicate_event_rate=ingest_metrics["duplicate_event_rate"],
         )
         self._send_json(
             http_status,
@@ -540,6 +586,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                 "rejected": rejected,
                 "total": len(events),
                 "sensor_id": sensor_id,
+                "event_ids": event_ids,
                 "timestamp": utc_now(),
             },
             close_connection=outcome == "rejected",
@@ -587,7 +634,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         flush=True,
     )
-    server.serve_forever()
+    serve_http_until_stopped(server)
     return 0
 
 

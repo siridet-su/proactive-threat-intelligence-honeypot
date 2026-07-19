@@ -48,6 +48,7 @@ from production.utils.http_security import (
     validate_bind_auth,
 )
 from production.utils.serialization import html_script_json, stable_id, utc_now
+from production.utils.service_lifecycle import serve_http_until_stopped
 from production.reporting.smb_decision import build_smb_decision_from_paths
 from production.storage import open_storage, safe_database_descriptor
 
@@ -4965,7 +4966,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         flush=True,
     )
-    server.serve_forever()
+    serve_http_until_stopped(server)
     return 0
 
 

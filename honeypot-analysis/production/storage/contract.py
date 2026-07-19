@@ -67,6 +67,19 @@ JOB_QUEUE_TABLES = {
     "enrichment": "enrichment_jobs",
     "threat_hunt": "threat_hunt_jobs",
 }
+
+OPERATIONAL_COUNT_TABLES = (
+    "events",
+    "sessions",
+    "alerts",
+    "analysis_jobs",
+    "reports",
+    "enrichment_records",
+    "enrichment_jobs",
+    "prediction_snapshots",
+    "threat_hunt_jobs",
+    "webhook_deliveries",
+)
 JOB_FAILURE_CODES = frozenset(
     {
         "analysis_failed",
@@ -478,6 +491,8 @@ class StorageBackend(Protocol):
     def initialize(self) -> None: ...
 
     def health_check(self) -> Dict[str, Any]: ...
+
+    def operational_metrics(self, *, now: Any = None) -> Dict[str, Any]: ...
 
     def store_event(
         self,

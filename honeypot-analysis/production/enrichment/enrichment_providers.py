@@ -28,6 +28,7 @@ class ProviderResult:
     ttl_seconds: int = 86400
     error: str = ""
     fetched_at: str = field(default_factory=utc_now)
+    latency_ms: float = 0.0
 
     def to_status(self) -> Dict[str, Any]:
         return {
@@ -35,6 +36,7 @@ class ProviderResult:
             "error": redact_error_for_log(self.error) if self.error else "",
             "fetched_at": self.fetched_at,
             "ttl_seconds": self.ttl_seconds,
+            "latency_ms": round(max(float(self.latency_ms), 0.0), 3),
         }
 
 

@@ -25,6 +25,7 @@ from production.utils.http_security import (
     validate_bind_auth,
 )
 from production.utils.serialization import utc_now
+from production.utils.service_lifecycle import serve_http_until_stopped
 from production.reporting.smb_decision import build_smb_decision_from_paths
 from production.storage import open_storage
 from production.api.security import (
@@ -350,6 +351,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if not self._require_read():
             return
+        if parsed.path == "/operational/metrics":
+            storage = open_storage(self.config.database_url)
+            metrics = storage.operational_metrics()
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": bool(
+                        (metrics.get("backend_connectivity") or {}).get("ok")
+                    ),
+                    "service": "dashboard_api",
+                    "request_id": self._request_id(),
+                    "metrics": metrics,
+                    "timestamp": utc_now(),
+                },
+            )
+            return
         if parsed.path == "/predictions/current":
             query = parse_qs(parsed.query)
             session_id = query.get("session_id", [""])[0].strip()
@@ -565,7 +582,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         ),
         flush=True,
     )
-    server.serve_forever()
+    serve_http_until_stopped(server)
     return 0
 
 

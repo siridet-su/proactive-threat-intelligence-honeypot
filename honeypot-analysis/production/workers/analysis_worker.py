@@ -9,7 +9,7 @@ import io
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from production.classification.trust import (
     classification_audit_reason,
@@ -40,6 +40,8 @@ from production.utils.sensitive_data import (
     redact_for_log,
 )
 from production.utils.serialization import command_observation_provenance, utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
+from production.utils.http_security import safe_correlation_id
 from production.storage import open_storage
 from production.workers.job_lifecycle import (
     JobLeaseHeartbeat,
@@ -598,6 +600,13 @@ async def analyze_job(
     result.setdefault("session_id", state.session_id)
     result.setdefault("created_at", utc_now())
     result.setdefault("worker", "analysis_worker")
+    result.setdefault(
+        "correlation_id",
+        safe_correlation_id(
+            session_payload.get("correlation_id"),
+            str(job.get("job_id") or ""),
+        ),
+    )
     hunting_context = _build_session_correlation_hunting_context(
         session_payload.get("session_ttp_correlations", []),
         session_payload.get("session_id", state.session_id),
@@ -648,10 +657,17 @@ class AnalysisWorker:
             job_retry_delay(self.config, int(job.get("attempts") or 1)),
         )
 
-    async def process_once(self, coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator) -> int:
+    async def process_once(
+        self,
+        coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         save_feed_status(self.storage, self.config)
         processed = 0
         for _ in range(self.config.analysis_batch_size):
+            if should_stop is not None and should_stop():
+                break
             jobs = self.storage.claim_analysis_jobs(
                 self.worker_owner,
                 1,
@@ -661,8 +677,21 @@ class AnalysisWorker:
             if not jobs:
                 break
             job = jobs[0]
+            if should_stop is not None and should_stop():
+                self.storage.release_job_claim(
+                    "analysis",
+                    job["job_id"],
+                    job["claim_owner"],
+                    job["claim_token"],
+                )
+                break
+            started_at = time.monotonic()
             session_payload = job.get("session") or {}
             session_id = job.get("session_id") or session_payload.get("session_id", "unknown")
+            correlation_id = safe_correlation_id(
+                session_payload.get("correlation_id"),
+                str(job["job_id"]),
+            )
             latest_prediction_row = self.storage.get_latest_prediction_snapshot(session_id)
             latest_prediction = (
                 latest_prediction_row.get("payload")
@@ -686,6 +715,7 @@ class AnalysisWorker:
                             "service": "analysis_worker",
                             "job_id": job["job_id"],
                             "session_id": job.get("session_id", "unknown"),
+                            "correlation_id": correlation_id,
                             "status": "skipped",
                             "reason": skip_reason,
                             "timestamp": utc_now(),
@@ -716,6 +746,7 @@ class AnalysisWorker:
                                 safe_error,
                                 prediction_snapshot=latest_prediction,
                             )
+                            fallback.setdefault("correlation_id", correlation_id)
                             if self.config.enable_actor_attribution:
                                 fallback = enrich_report_with_actor_attribution(
                                     fallback,
@@ -751,8 +782,13 @@ class AnalysisWorker:
                             {
                                 "service": "analysis_worker",
                                 "job_id": job["job_id"],
+                                "correlation_id": correlation_id,
                                 "status": status,
                                 "error": safe_error,
+                                "report_generation_latency_ms": round(
+                                    max(time.monotonic() - started_at, 0.0) * 1000,
+                                    3,
+                                ),
                                 "timestamp": utc_now(),
                             },
                         ),
@@ -760,6 +796,7 @@ class AnalysisWorker:
                     )
                     continue
                 try:
+                    report.setdefault("correlation_id", correlation_id)
                     heartbeat.check(renew=True)
                     report_id = self.storage.complete_analysis_job(
                         job["job_id"],
@@ -769,6 +806,23 @@ class AnalysisWorker:
                     )
                 except Exception as exc:
                     self._fail_claim(job, exc, retryable=True)
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "job_id": job["job_id"],
+                                "correlation_id": correlation_id,
+                                "status": "completion_failed",
+                                "error": _safe_exception_text(exc),
+                                "report_generation_latency_ms": round(
+                                    max(time.monotonic() - started_at, 0.0) * 1000,
+                                    3,
+                                ),
+                                "timestamp": utc_now(),
+                            }
+                        ),
+                        flush=True,
+                    )
                     continue
                 if report_id is None:
                     continue
@@ -779,7 +833,12 @@ class AnalysisWorker:
                             "service": "analysis_worker",
                             "job_id": job["job_id"],
                             "session_id": job.get("session_id", "unknown"),
+                            "correlation_id": correlation_id,
                             "status": "succeeded",
+                            "report_generation_latency_ms": round(
+                                max(time.monotonic() - started_at, 0.0) * 1000,
+                                3,
+                            ),
                             "timestamp": utc_now(),
                         },
                     ),
@@ -787,20 +846,25 @@ class AnalysisWorker:
                 )
         return processed
 
-    def run_forever(self) -> None:
-        while True:
-            processed = asyncio.run(self.process_once())
-            print(
-                _safe_log_json(
-                    {
-                        "service": "analysis_worker",
-                        "processed": processed,
-                        "timestamp": utc_now(),
-                    },
-                ),
-                flush=True,
-            )
-            time.sleep(self.config.worker_poll_seconds)
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
+        with control.signal_handlers():
+            while not control.stopping:
+                processed = asyncio.run(
+                    self.process_once(should_stop=lambda: control.stopping)
+                )
+                if processed:
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "processed": processed,
+                                "timestamp": utc_now(),
+                            },
+                        ),
+                        flush=True,
+                    )
+                control.wait(self.config.worker_poll_seconds)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

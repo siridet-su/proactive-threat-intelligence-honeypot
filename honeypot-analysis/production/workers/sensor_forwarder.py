@@ -21,9 +21,11 @@ if __package__ == "production":
     # config/serialization dependencies.
     from .config import ProductionConfig
     from .serialization import utc_now
+    from .service_lifecycle import ServiceLifecycle
 else:
     from production.utils.config import ProductionConfig
     from production.utils.sensitive_data import redact_exception_for_log
+    from production.utils.service_lifecycle import ServiceLifecycle
     from production.utils.serialization import utc_now
 
 
@@ -770,14 +772,49 @@ def _log_result(result: ForwardResult) -> None:
     )
 
 
-def run_forever(config: ProductionConfig) -> None:
+def _forwarder_status_signature(result: ForwardResult) -> Tuple[Any, ...]:
+    return (
+        result.remaining,
+        result.error,
+        result.spool_bytes,
+        result.lock_contended,
+        result.disk_limited,
+    )
+
+
+def run_forever(
+    config: ProductionConfig,
+    lifecycle: Optional[ServiceLifecycle] = None,
+) -> None:
     # Hold the process lock across sleeps so a second service instance fails
     # closed instead of alternating access to the same cursor and spool.
+    control = lifecycle or ServiceLifecycle()
+    previous_status: Optional[Tuple[Any, ...]] = None
+    last_status_log = 0.0
     try:
-        with ForwarderInstanceLock(config.spool_path):
-            while True:
-                _log_result(_forward_once_unlocked(config))
-                time.sleep(config.forwarder_poll_seconds)
+        with control.signal_handlers():
+            with ForwarderInstanceLock(config.spool_path):
+                while not control.stopping:
+                    result = _forward_once_unlocked(config)
+                    current_status = _forwarder_status_signature(result)
+                    now = time.monotonic()
+                    activity = bool(
+                        result.sent
+                        or result.spooled
+                        or result.duplicates
+                        or result.rejected
+                        or result.spool_parse_errors
+                        or result.error
+                    )
+                    if (
+                        activity
+                        or current_status != previous_status
+                        or now - last_status_log >= 60.0
+                    ):
+                        _log_result(result)
+                        previous_status = current_status
+                        last_status_log = now
+                    control.wait(config.forwarder_poll_seconds)
     except BlockingIOError as exc:
         raise SystemExit("sensor forwarder instance already running") from exc
 

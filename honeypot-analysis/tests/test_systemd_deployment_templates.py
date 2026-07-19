@@ -101,8 +101,26 @@ def test_session_worker_has_bounded_graceful_stop_settings() -> None:
         SYSTEMD_DIR / "honeypot-session-worker.service"
     ).read_text(encoding="utf-8")
 
-    assert "TimeoutStopSec=45" in session_worker
+    assert "TimeoutStopSec=120" in session_worker
     assert "KillSignal=SIGTERM" in session_worker
+
+
+def test_all_long_running_units_have_bounded_graceful_stop_settings() -> None:
+    services = (
+        "honeypot-analysis-worker.service",
+        "honeypot-dashboard-api.service",
+        "honeypot-enrichment-worker.service",
+        "honeypot-ingest-api.service",
+        "honeypot-monitor-web.service",
+        "honeypot-sensor-forwarder.service",
+        "honeypot-session-worker.service",
+        "honeypot-threat-hunt-worker.service",
+        "honeypot-webhook-dispatcher.service",
+    )
+    for name in services:
+        unit = (SYSTEMD_DIR / name).read_text(encoding="utf-8")
+        assert "TimeoutStopSec=120" in unit, name
+        assert "KillSignal=SIGTERM" in unit, name
 
 
 def test_example_config_documents_event_processing_defaults() -> None:
@@ -120,6 +138,8 @@ def test_example_config_documents_event_processing_defaults() -> None:
     assert config["worker_leader_lease_seconds"] == 90.0
     assert config["worker_leader_heartbeat_seconds"] == 10.0
     assert config["active_session_recovery_limit"] == 10_000
+    assert config["campaign_profile_cache_limit"] == 10_000
+    assert config["session_event_history_limit"] == 10_000
     assert config["job_lease_seconds"] == 600.0
     assert config["job_lease_heartbeat_seconds"] == 60.0
     assert config["job_retry_base_seconds"] == 30.0

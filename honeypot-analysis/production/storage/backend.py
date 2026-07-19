@@ -18,6 +18,7 @@ from production.storage.contract import (
     SQLITE_BACKEND,
     StorageBackend,
     JOB_QUEUE_TABLES,
+    OPERATIONAL_COUNT_TABLES,
     SESSION_ANALYSIS_FIELDS,
     validate_event_effect_summary,
     validate_event_failure_fields,
@@ -603,6 +604,63 @@ class SQLiteStorage:
         return {
             "ok": bool(row and int(row["ready"]) == 1),
             "backend": SQLITE_BACKEND,
+        }
+
+    def operational_metrics(self, *, now: Any = None) -> Dict[str, Any]:
+        checked_at = _utc_timestamp(now)
+        with self.connection() as conn:
+            collection_counts = {
+                table: int(
+                    conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
+                        "count"
+                    ]
+                )
+                for table in OPERATIONAL_COUNT_TABLES
+            }
+            event_counts = {
+                (str(row["processing_outcome"] or "pending")):
+                int(row["count"])
+                for row in conn.execute(
+                    """
+                    SELECT processing_outcome, COUNT(*) AS count
+                    FROM events GROUP BY processing_outcome
+                    """
+                ).fetchall()
+            }
+            webhook_status = {
+                str(row["status"]): int(row["count"])
+                for row in conn.execute(
+                    "SELECT status, COUNT(*) AS count FROM webhook_deliveries GROUP BY status"
+                ).fetchall()
+            }
+            active_sessions = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS count FROM sessions WHERE ended = 0"
+                ).fetchone()["count"]
+            )
+        database_bytes = 0
+        for candidate in (
+            self.path,
+            Path(f"{self.path}-wal"),
+            Path(f"{self.path}-shm"),
+        ):
+            try:
+                database_bytes += candidate.stat().st_size
+            except FileNotFoundError:
+                pass
+        return {
+            "backend": SQLITE_BACKEND,
+            "backend_connectivity": self.health_check(),
+            "database_bytes": database_bytes,
+            "collection_counts": collection_counts,
+            "event_processing_outcomes": event_counts,
+            "active_sessions": active_sessions,
+            "queues": {
+                queue: self.job_queue_metrics(queue, now=checked_at)
+                for queue in JOB_QUEUE_TABLES
+            },
+            "webhook_delivery_status": webhook_status,
+            "checked_at": checked_at,
         }
 
     def _ensure_sqlite_session_source_column(self, conn: sqlite3.Connection) -> None:
@@ -3935,6 +3993,96 @@ class PostgresStorage:
         return {
             "ok": bool(row and int(row["ready"]) == 1),
             "backend": POSTGRESQL_BACKEND,
+        }
+
+    def operational_metrics(self, *, now: Any = None) -> Dict[str, Any]:
+        checked_at = _utc_timestamp(now)
+        current_dt = _parse_dt(checked_at)
+        with self.connection() as conn:
+            collection_counts: Dict[str, int] = {}
+            for table in OPERATIONAL_COUNT_TABLES:
+                row = self._execute(
+                    conn, f"SELECT COUNT(*) AS count FROM {table}"
+                ).fetchone()
+                collection_counts[table] = int(row["count"] if row else 0)
+            event_counts = {
+                str(row["processing_outcome"] or "pending"): int(row["count"])
+                for row in self._execute(
+                    conn,
+                    """
+                    SELECT processing_outcome, COUNT(*) AS count
+                    FROM events GROUP BY processing_outcome
+                    """,
+                ).fetchall()
+            }
+            webhook_status = {
+                str(row["status"]): int(row["count"])
+                for row in self._execute(
+                    conn,
+                    "SELECT status, COUNT(*) AS count FROM webhook_deliveries GROUP BY status",
+                ).fetchall()
+            }
+            active_row = self._execute(
+                conn, "SELECT COUNT(*) AS count FROM sessions WHERE ended = false"
+            ).fetchone()
+            size_row = self._execute(
+                conn, "SELECT pg_database_size(current_database()) AS size"
+            ).fetchone()
+            queues: Dict[str, Dict[str, Any]] = {}
+            for queue, table in JOB_QUEUE_TABLES.items():
+                statuses = {
+                    str(row["status"]): int(row["count"])
+                    for row in self._execute(
+                        conn,
+                        f"SELECT status, COUNT(*) AS count FROM {table} GROUP BY status",
+                    ).fetchall()
+                }
+                ready_row = self._execute(
+                    conn,
+                    f"""
+                    SELECT COUNT(*) AS count, MIN(created_at) AS oldest
+                    FROM {table}
+                    WHERE status IN ('queued', 'retry')
+                      AND (next_retry_at IS NULL OR next_retry_at <= %s)
+                    """,
+                    (checked_at,),
+                ).fetchone()
+                stale_row = self._execute(
+                    conn,
+                    f"""
+                    SELECT COUNT(*) AS count FROM {table}
+                    WHERE status = 'running'
+                      AND (claim_expires_at IS NULL OR claim_expires_at <= %s)
+                    """,
+                    (checked_at,),
+                ).fetchone()
+                oldest = ready_row["oldest"] if ready_row else None
+                oldest_dt = _parse_dt(oldest)
+                queues[queue] = {
+                    "queue": queue,
+                    "status_counts": statuses,
+                    "ready": int(ready_row["count"] if ready_row else 0),
+                    "stale_running": int(stale_row["count"] if stale_row else 0),
+                    "oldest_ready_at": (
+                        oldest.isoformat() if isinstance(oldest, datetime) else oldest
+                    ),
+                    "oldest_ready_age_seconds": (
+                        max((current_dt - oldest_dt).total_seconds(), 0.0)
+                        if current_dt is not None and oldest_dt is not None
+                        else None
+                    ),
+                    "checked_at": checked_at,
+                }
+        return {
+            "backend": POSTGRESQL_BACKEND,
+            "backend_connectivity": self.health_check(),
+            "database_bytes": int(size_row["size"] if size_row else 0),
+            "collection_counts": collection_counts,
+            "event_processing_outcomes": event_counts,
+            "active_sessions": int(active_row["count"] if active_row else 0),
+            "queues": queues,
+            "webhook_delivery_status": webhook_status,
+            "checked_at": checked_at,
         }
 
     def store_event(self, sensor_id: str, event: Dict[str, Any]) -> tuple[str, bool]:

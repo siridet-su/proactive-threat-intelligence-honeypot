@@ -466,6 +466,16 @@ def safe_request_id(value: Optional[str] = None) -> str:
     return uuid.uuid4().hex
 
 
+def safe_correlation_id(value: Any, fallback: str) -> str:
+    """Select a bounded identifier without ever logging an invalid candidate."""
+
+    if isinstance(value, str) and _REQUEST_ID_RE.fullmatch(value):
+        return value
+    if isinstance(fallback, str) and _REQUEST_ID_RE.fullmatch(fallback):
+        return fallback
+    return uuid.uuid4().hex
+
+
 def validate_bind_auth(
     host: str,
     *,

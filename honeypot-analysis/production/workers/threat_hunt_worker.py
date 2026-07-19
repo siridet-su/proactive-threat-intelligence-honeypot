@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
 from production.correlation.session_ttp_correlation import correlation_allows_influence
@@ -19,6 +18,7 @@ from production.utils.config import ProductionConfig
 from production.correlation.observable_sightings import extract_session_observable_sightings
 from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
 from production.storage import open_storage
 from production.workers.job_lifecycle import (
     JobLeaseHeartbeat,
@@ -327,11 +327,17 @@ class ThreatHuntWorker:
             "timestamp": utc_now(),
         }
 
-    def process_once(self) -> int:
+    def process_once(
+        self,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         if not self.policy.get("enabled", True):
             return 0
         processed = 0
         for _ in range(self.config.threat_hunt_batch_size):
+            if should_stop is not None and should_stop():
+                break
             jobs = self.storage.claim_threat_hunt_jobs(
                 self.worker_owner,
                 1,
@@ -341,6 +347,14 @@ class ThreatHuntWorker:
             if not jobs:
                 break
             job = jobs[0]
+            if should_stop is not None and should_stop():
+                self.storage.release_job_claim(
+                    "threat_hunt",
+                    job["job_id"],
+                    job["claim_owner"],
+                    job["claim_token"],
+                )
+                break
             with JobLeaseHeartbeat(self.storage, self.config, "threat_hunt", job) as heartbeat:
                 try:
                     result = self._process_job(job)
@@ -352,11 +366,24 @@ class ThreatHuntWorker:
                         result,
                     )
                     processed += int(completed)
+                    print(
+                        json.dumps(
+                            {
+                                "service": "threat_hunt_worker",
+                                "job_id": job.get("job_id", ""),
+                                "correlation_id": job.get("job_id", ""),
+                                "status": "succeeded" if completed else "stale_claim",
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
                 except Exception as exc:
                     error_code, error_type, retryable = job_failure_identity(
                         "threat_hunt", exc
                     )
-                    self.storage.fail_threat_hunt_job(
+                    status = self.storage.fail_threat_hunt_job(
                         job.get("job_id", ""),
                         job["claim_owner"],
                         job["claim_token"],
@@ -365,6 +392,20 @@ class ThreatHuntWorker:
                         retryable,
                         self.config.threat_hunt_max_attempts,
                         job_retry_delay(self.config, int(job.get("attempts") or 1)),
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "service": "threat_hunt_worker",
+                                "job_id": job.get("job_id", ""),
+                                "correlation_id": job.get("job_id", ""),
+                                "status": status,
+                                "error": redact_exception_for_log(exc),
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
                     )
         return processed
 
@@ -405,21 +446,24 @@ class ThreatHuntWorker:
             "timestamp": utc_now(),
         }
 
-    def run_forever(self) -> None:
-        while True:
-            processed = self.process_once()
-            print(
-                json.dumps(
-                    {
-                        "service": "threat_hunt_worker",
-                        "processed": processed,
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            time.sleep(self.config.threat_hunt_poll_seconds)
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
+        with control.signal_handlers():
+            while not control.stopping:
+                processed = self.process_once(should_stop=lambda: control.stopping)
+                if processed:
+                    print(
+                        json.dumps(
+                            {
+                                "service": "threat_hunt_worker",
+                                "processed": processed,
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                control.wait(self.config.threat_hunt_poll_seconds)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

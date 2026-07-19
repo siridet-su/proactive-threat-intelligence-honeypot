@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from production.utils.config import ProductionConfig
 from production.enrichment.enrichment_providers import (
@@ -16,6 +16,7 @@ from production.enrichment.enrichment_providers import (
 )
 from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
 from production.storage import open_storage
 from production.workers.job_lifecycle import (
     JobLeaseHeartbeat,
@@ -39,8 +40,14 @@ class EnrichmentWorker:
         for provider in self.providers:
             if not provider.supports(observable_type):
                 continue
+            started_at = time.monotonic()
             try:
-                results.append(provider.enrich(observable_type, observable_value))
+                result = provider.enrich(observable_type, observable_value)
+                result.latency_ms = round(
+                    max(time.monotonic() - started_at, 0.0) * 1000,
+                    3,
+                )
+                results.append(result)
             except Exception as exc:
                 results.append(
                     ProviderResult(
@@ -48,6 +55,10 @@ class EnrichmentWorker:
                         status="error",
                         error=redact_exception_for_log(exc),
                         ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
+                        latency_ms=round(
+                            max(time.monotonic() - started_at, 0.0) * 1000,
+                            3,
+                        ),
                     )
                 )
         if not results:
@@ -60,9 +71,15 @@ class EnrichmentWorker:
             )
         return results
 
-    def process_once(self) -> int:
+    def process_once(
+        self,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         processed = 0
         for _ in range(self.config.enrichment_batch_size):
+            if should_stop is not None and should_stop():
+                break
             jobs = self.storage.claim_enrichment_jobs(
                 self.worker_owner,
                 1,
@@ -72,11 +89,39 @@ class EnrichmentWorker:
             if not jobs:
                 break
             job = jobs[0]
+            if should_stop is not None and should_stop():
+                self.storage.release_job_claim(
+                    "enrichment",
+                    job["job_id"],
+                    job["claim_owner"],
+                    job["claim_token"],
+                )
+                break
             observable_type = job["observable_type"]
             observable_value = job["observable_value"]
             with JobLeaseHeartbeat(self.storage, self.config, "enrichment", job) as heartbeat:
                 try:
                     results = self._run_providers(observable_type, observable_value)
+                    print(
+                        json.dumps(
+                            {
+                                "service": "enrichment_worker",
+                                "job_id": job["job_id"],
+                                "correlation_id": job["job_id"],
+                                "provider_results": [
+                                    {
+                                        "provider": result.provider,
+                                        "status": result.status,
+                                        "latency_ms": result.latency_ms,
+                                    }
+                                    for result in results
+                                ],
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
                     payload, provider_status, expires_at = merge_provider_results(
                         observable_type,
                         observable_value,
@@ -121,6 +166,7 @@ class EnrichmentWorker:
                             {
                                 "service": "enrichment_worker",
                                 "job_id": job["job_id"],
+                                "correlation_id": job["job_id"],
                                 "status": status,
                                 "error": redact_exception_for_log(exc),
                                 "timestamp": utc_now(),
@@ -131,21 +177,24 @@ class EnrichmentWorker:
                     )
         return processed
 
-    def run_forever(self) -> None:
-        while True:
-            processed = self.process_once()
-            print(
-                json.dumps(
-                    {
-                        "service": "enrichment_worker",
-                        "processed": processed,
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            time.sleep(self.config.worker_poll_seconds)
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
+        with control.signal_handlers():
+            while not control.stopping:
+                processed = self.process_once(should_stop=lambda: control.stopping)
+                if processed:
+                    print(
+                        json.dumps(
+                            {
+                                "service": "enrichment_worker",
+                                "processed": processed,
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                control.wait(self.config.worker_poll_seconds)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

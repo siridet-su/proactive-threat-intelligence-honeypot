@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 from production.storage.backend import StorageError
 from production.storage.contract import (
     JOB_QUEUE_TABLES,
+    OPERATIONAL_COUNT_TABLES,
     SESSION_ANALYSIS_FIELDS,
     validate_event_effect_summary,
     validate_event_failure_fields,
@@ -828,6 +829,61 @@ class MongoStorage:
         except Exception as exc:
             result["error"] = _safe_error(exc)
         return result
+
+    def operational_metrics(self, *, now: Any = None) -> Dict[str, Any]:
+        checked_at = _utc_timestamp(now)
+        collection_counts = {
+            table: int(self._collection(table).count_documents({}))
+            for table in OPERATIONAL_COUNT_TABLES
+        }
+        event_counts: Dict[str, int] = {}
+        for outcome in (None, "succeeded", "retry_scheduled", "dead_letter"):
+            count = int(
+                self._collection("events").count_documents(
+                    {"processing_outcome": outcome}
+                )
+            )
+            if count:
+                event_counts["pending" if outcome is None else outcome] = count
+        webhook_status: Dict[str, int] = {}
+        for status in (
+            "pending",
+            "in_progress",
+            "retryable",
+            "delivered",
+            "permanent_failure",
+            "filtered",
+        ):
+            count = int(
+                self._collection("webhook_deliveries").count_documents(
+                    {"status": status}
+                )
+            )
+            if count:
+                webhook_status[status] = count
+        database_bytes: Optional[int] = None
+        try:
+            stats = self.database.command("dbStats", scale=1)
+            if isinstance(stats, Mapping):
+                database_bytes = int(stats.get("storageSize") or stats.get("dataSize") or 0)
+        except Exception:
+            pass
+        return {
+            "backend": "mongodb",
+            "backend_connectivity": self.health_check(),
+            "database_bytes": database_bytes,
+            "collection_counts": collection_counts,
+            "event_processing_outcomes": event_counts,
+            "active_sessions": int(
+                self._collection("sessions").count_documents({"ended": False})
+            ),
+            "queues": {
+                queue: self.job_queue_metrics(queue, now=checked_at)
+                for queue in JOB_QUEUE_TABLES
+            },
+            "webhook_delivery_status": webhook_status,
+            "checked_at": checked_at,
+        }
 
     def _insert_once(self, table: str, document: Mapping[str, Any]) -> bool:
         versioned = dict(document)

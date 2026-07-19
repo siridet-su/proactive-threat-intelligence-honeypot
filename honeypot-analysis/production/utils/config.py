@@ -182,6 +182,8 @@ class ProductionConfig:
     worker_batch_size: int = 100
     worker_poll_seconds: float = 2.0
     active_session_recovery_limit: int = 10_000
+    campaign_profile_cache_limit: int = 10_000
+    session_event_history_limit: int = 10_000
     event_lease_seconds: float = 60.0
     event_lease_heartbeat_seconds: float = 20.0
     event_max_attempts: int = 5
@@ -644,6 +646,22 @@ class ProductionConfig:
                 "active_session_recovery_limit must be an integer of at least 1"
             )
         if (
+            isinstance(self.campaign_profile_cache_limit, bool)
+            or not isinstance(self.campaign_profile_cache_limit, Integral)
+            or self.campaign_profile_cache_limit < 1
+        ):
+            raise ValueError(
+                "campaign_profile_cache_limit must be an integer of at least 1"
+            )
+        if (
+            isinstance(self.session_event_history_limit, bool)
+            or not isinstance(self.session_event_history_limit, Integral)
+            or self.session_event_history_limit < 1
+        ):
+            raise ValueError(
+                "session_event_history_limit must be an integer of at least 1"
+            )
+        if (
             isinstance(self.vertex_max_retries, bool)
             or not isinstance(self.vertex_max_retries, Integral)
             or not 1 <= self.vertex_max_retries <= 5
@@ -855,6 +873,14 @@ class ProductionConfig:
         cfg.active_session_recovery_limit = _env_int(
             "ACTIVE_SESSION_RECOVERY_LIMIT",
             cfg.active_session_recovery_limit,
+        )
+        cfg.campaign_profile_cache_limit = _env_int(
+            "CAMPAIGN_PROFILE_CACHE_LIMIT",
+            cfg.campaign_profile_cache_limit,
+        )
+        cfg.session_event_history_limit = _env_int(
+            "SESSION_EVENT_HISTORY_LIMIT",
+            cfg.session_event_history_limit,
         )
         cfg.event_lease_heartbeat_seconds = _env_float(
             "EVENT_LEASE_HEARTBEAT_SECONDS",

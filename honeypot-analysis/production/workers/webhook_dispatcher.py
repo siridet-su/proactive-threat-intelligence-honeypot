@@ -20,13 +20,14 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from production.storage import open_storage
 from production.utils.config import ProductionConfig
 from production.utils.sensitive_data import redact_exception_for_log, redact_for_webhook
 from production.utils.serialization import stable_id, stable_json, utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
 
 
 SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -458,15 +459,49 @@ class WebhookDispatcher:
             now=timestamp,
         )
 
-    def dispatch_once(self) -> int:
+    def _log_delivery(
+        self,
+        claim: Dict[str, Any],
+        outcome: str,
+        started_at: float,
+        *,
+        response_status: Optional[int] = None,
+    ) -> None:
+        print(
+            json.dumps(
+                {
+                    "service": "webhook_dispatcher",
+                    "delivery_id": claim.get("delivery_id", ""),
+                    "target_url_hash": claim.get("target_url_hash", ""),
+                    "status": outcome,
+                    "response_status": response_status,
+                    "delivery_latency_ms": round(
+                        max(time.monotonic() - started_at, 0.0) * 1000, 3
+                    ),
+                    "timestamp": utc_now(),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
+    def dispatch_once(
+        self,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         attempted = 0
         for target in self.targets:
+            if should_stop is not None and should_stop():
+                break
             rows = self.storage.pending_webhooks(
                 limit=100,
                 target_url_hash=target.url_hash,
                 max_attempts=self.config.webhook_max_attempts,
             )
             for row in rows:
+                if should_stop is not None and should_stop():
+                    break
                 alert = dict(row["payload"])
                 safe_alert = self._filtered_payload(alert)
                 if not self._alert_should_send(alert):
@@ -499,6 +534,7 @@ class WebhookDispatcher:
                 )
                 if claim is None:
                     continue
+                started_at = time.monotonic()
 
                 try:
                     validate_resolved_endpoint(
@@ -508,6 +544,12 @@ class WebhookDispatcher:
                     )
                 except WebhookEndpointError as exc:
                     self._complete_endpoint_failure(claim, exc, timestamp)
+                    self._log_delivery(
+                        claim,
+                        "retryable" if exc.retryable else "permanent_failure",
+                        started_at,
+                    )
+                    attempted += 1
                     continue
 
                 result = post_webhook(
@@ -547,26 +589,21 @@ class WebhookDispatcher:
                     ),
                     now=timestamp,
                 )
+                self._log_delivery(
+                    claim,
+                    outcome,
+                    started_at,
+                    response_status=result.response_status,
+                )
                 attempted += 1
         return attempted
 
-    def run_forever(self) -> None:
-        while True:
-            attempted = self.dispatch_once()
-            if attempted:
-                print(
-                    json.dumps(
-                        {
-                            "service": "webhook_dispatcher",
-                            "attempted": attempted,
-                            "targets": len(self.targets),
-                            "timestamp": utc_now(),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-            time.sleep(self.config.webhook_retry_seconds)
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
+        with control.signal_handlers():
+            while not control.stopping:
+                self.dispatch_once(should_stop=lambda: control.stopping)
+                control.wait(self.config.webhook_retry_seconds)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
