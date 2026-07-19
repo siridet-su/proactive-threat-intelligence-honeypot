@@ -32,7 +32,10 @@ from production.prediction.realtime_prediction import (
 )
 from production.prediction.session_features import build_session_features
 from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
-from production.tools.primary_transition_evaluation import chronological_split
+from production.tools.primary_transition_evaluation import (
+    chronological_split,
+    live_model_training_payloads,
+)
 from production.utils.serialization import utc_now
 
 
@@ -710,11 +713,15 @@ def _logistic_predictor(
     )
 
 
-def _case_result(case: EvaluationCase, probabilities: Mapping[str, float]) -> Dict[str, Any]:
+def _case_result(
+    case: EvaluationCase,
+    probabilities: Mapping[str, float],
+    vocabulary: Sequence[str] | None = None,
+) -> Dict[str, Any]:
     ranking = _ranking(probabilities)
     predicted = [str(item["tactic"]) for item in ranking]
     rank = predicted.index(case.actual) + 1 if case.actual in predicted else 0
-    brier_score = _brier_score(ranking, case.actual)
+    brier_score = _brier_score(ranking, case.actual, vocabulary)
     return {
         "session_id": case.session_id,
         "actual": case.actual,
@@ -843,6 +850,7 @@ def _metric_core(
     return {
         "evaluated_examples": total,
         "covered_examples": len(covered),
+        "metric_tactic_vocabulary": tactics,
         "top1_accuracy": round(top1_hits / total, 6) if total else None,
         "all_case_accuracy": round(top1_hits / total, 6) if total else None,
         "top3_accuracy_secondary": round(top3_hits / total, 6) if total else None,
@@ -957,7 +965,10 @@ def summarize_predictions(
     min_per_tactic_support: int,
     target_vocabulary: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
-    results = [_case_result(case, predictor.predict(case)) for case in cases]
+    results = [
+        _case_result(case, predictor.predict(case), target_vocabulary)
+        for case in cases
+    ]
     metrics = _metric_core(
         results,
         min_per_tactic_support,
@@ -1094,16 +1105,21 @@ def evaluate_scope(
     test_cases = build_cases(test)
     fit_payloads = list(train) + list(calibration)
     fit_cases = list(train_cases) + list(calibration_cases)
+    recency_half_life = float(policy.get("recency_decay_half_life_sessions") or 0.0)
+    live_fit_payloads = live_model_training_payloads(fit_payloads, policy)
+    live_train_payloads = live_model_training_payloads(train, policy)
     local_fit_model = build_transition_model(
-        fit_payloads if scope == "local" else [],
+        live_fit_payloads if scope == "local" else [],
         prefix_max_length=int(policy.get("prefix_max_length", 3)),
         source_name="local_transition",
+        recency_half_life_sessions=recency_half_life,
     )
     external_fit_model = (
         build_transition_model(
-            fit_payloads,
+            live_fit_payloads,
             prefix_max_length=int(policy.get("prefix_max_length", 3)),
             source_name="external_seed_transition",
+            recency_half_life_sessions=recency_half_life,
         )
         if scope == "external"
         else selected_external_model
@@ -1114,9 +1130,10 @@ def evaluate_scope(
         local_fit_model,
     )
     local_train_model = build_transition_model(
-        train if scope == "local" else [],
+        live_train_payloads if scope == "local" else [],
         prefix_max_length=int(policy.get("prefix_max_length", 3)),
         source_name="local_transition",
+        recency_half_life_sessions=recency_half_life,
     )
     kappa_selection = _calibrate_kappa(
         calibration_cases if scope == "local" else [],

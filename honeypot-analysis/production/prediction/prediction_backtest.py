@@ -56,6 +56,22 @@ SWEEP_BASELINE_METRIC_FIELDS = {
     "scorer_disagreement_rate",
 }
 SWEEP_BOOTSTRAP_METRIC_FIELDS = {"mean", "std", "ci95"}
+METRIC_TACTIC_VOCABULARY = (
+    "reconnaissance",
+    "resource-development",
+    "initial-access",
+    "execution",
+    "persistence",
+    "privilege-escalation",
+    "defense-evasion",
+    "credential-access",
+    "discovery",
+    "lateral-movement",
+    "collection",
+    "command-and-control",
+    "exfiltration",
+    "impact",
+)
 
 
 def _decode_payload(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -176,8 +192,53 @@ def _prefix_payload(payload: Dict[str, Any], steps: List[Dict[str, Any]], step_i
         for event in prefix_events
         if str(event.get("command") or "").strip()
     ]
-    if commands:
-        prefix["commands"] = commands
+    # A stored closed-session payload contains final derived state. Only retain
+    # fields that can be reconstructed at this prefix; otherwise later events,
+    # correlations, enrichment, or IOCs can leak into an earlier prediction.
+    prefix["commands"] = commands
+    prefix["raw_events"] = []
+    prefix["session_ttp_correlations"] = []
+    prefix["session_ttp_correlation_summary"] = {}
+    prefix["session_evidence_graph"] = {}
+    prefix["session_evidence_graph_summary"] = {}
+    prefix["sigma_hits"] = []
+    prefix["kev_matches"] = []
+    prefix["ioc_summary"] = {}
+    prefix["enrichment_status"] = {}
+    prefix["duration"] = None
+    prefix["session_outcome"] = ""
+    prefix["login_success"] = False
+    prefix["login_attempts"] = 0
+    for field in (
+        "asn",
+        "geo",
+        "country",
+        "isp",
+        "risk_score",
+        "vt_hit",
+        "vt_detection_ratio",
+        "vt_malware_family",
+        "is_tor_exit",
+        "is_vpn",
+        "host_type",
+        "infrastructure_tags",
+        "otx_tags",
+        "abuse_tags",
+        "abuseipdb_categories",
+        "shodan_tags",
+        "censys_labels",
+        "open_ports",
+        "running_services",
+        "provider_status",
+        "total_reports",
+        "raw_otx_pulse",
+        "shodan_hostnames",
+        "shodan_cpes",
+        "shodan_vulns",
+        "censys_api",
+        "shodan_api",
+    ):
+        prefix.pop(field, None)
 
     tactics: List[str] = []
     ttps: List[str] = []
@@ -254,9 +315,18 @@ def _ranking_probabilities(final_ranking: List[Dict[str, Any]]) -> Dict[str, flo
     return {tactic: score / total for tactic, score in scores.items()}
 
 
-def _brier_score(final_ranking: List[Dict[str, Any]], actual: str) -> float:
+def _brier_score(
+    final_ranking: List[Dict[str, Any]],
+    actual: str,
+    vocabulary: Iterable[str] | None = None,
+) -> float:
     probabilities = _ranking_probabilities(final_ranking)
-    labels = set(probabilities)
+    labels = {
+        str(label)
+        for label in (vocabulary or METRIC_TACTIC_VOCABULARY)
+        if str(label)
+    }
+    labels.update(probabilities)
     labels.add(actual)
     return sum(
         (float(probabilities.get(label, 0.0)) - (1.0 if label == actual else 0.0)) ** 2
@@ -1116,6 +1186,7 @@ def backtest_sessions(
     weight_fit_include_context: bool | None = None,
     weight_fit_loss: str | None = None,
 ) -> Dict[str, Any]:
+    policy = policy or {}
     payloads = [payload for payload in session_payloads if isinstance(payload, dict) and _completed(payload)]
     candidate_sessions = []
     for payload in payloads:
@@ -1157,34 +1228,53 @@ def backtest_sessions(
     cases: List[Dict[str, Any]] = []
     weight_fit_cases: List[Dict[str, Any]] = []
 
-    prefix_max_length = int((policy or {}).get("prefix_max_length", 3))
-    shared_model = build_transition_model(payloads, prefix_max_length=prefix_max_length)
+    prefix_max_length = int(policy.get("prefix_max_length", 3))
+    history_limit = max(int(policy.get("transition_history_limit", 500)), 1)
+    recency_half_life = float(policy.get("recency_decay_half_life_sessions") or 0.0)
+    model_payloads = payloads[:history_limit]
+    shared_model = build_transition_model(
+        model_payloads,
+        prefix_max_length=prefix_max_length,
+        source_name="local_transition",
+        recency_half_life_sessions=recency_half_life,
+    )
+    actor_policy = policy.get("actor_fingerprint_prior") or {}
+    if not isinstance(actor_policy, dict):
+        actor_policy = {}
+    actor_history_limit = max(int(actor_policy.get("history_limit") or history_limit), 1)
     shared_actor_model = build_actor_fingerprint_transition_model(
-        payloads,
+        payloads[:actor_history_limit],
         policy=policy,
         prefix_max_length=prefix_max_length,
+        recency_half_life_sessions=recency_half_life,
     )
     external_transition_model = load_external_transition_model(policy)
     for payload, steps in candidate_sessions:
         session_id = str(payload.get("session_id") or "unknown")
         evidence_origin = _evidence_origin(payload)
-        training_payloads = payloads
+        training_payloads = model_payloads
         if leave_one_out:
             training_payloads = [
                 item
                 for item in payloads
                 if str(item.get("session_id") or "unknown") != session_id
-            ]
+            ][:history_limit]
         transition_model = (
-            build_transition_model(training_payloads, prefix_max_length=prefix_max_length)
+            build_transition_model(
+                training_payloads,
+                prefix_max_length=prefix_max_length,
+                source_name="local_transition",
+                recency_half_life_sessions=recency_half_life,
+            )
             if leave_one_out
             else shared_model
         )
         actor_fingerprint_transition_model = (
             build_actor_fingerprint_transition_model(
-                training_payloads,
+                training_payloads[:actor_history_limit],
                 policy=policy,
                 prefix_max_length=prefix_max_length,
+                recency_half_life_sessions=recency_half_life,
             )
             if leave_one_out
             else shared_actor_model
@@ -1471,6 +1561,21 @@ def backtest_sessions(
             "usage": "Copy this object into prediction_policy.calibration after enough cases exist.",
         },
         "policy": policy or {},
+        "metric_tactic_vocabulary": list(METRIC_TACTIC_VOCABULARY),
+        "model_construction": {
+            "transition_history_limit": history_limit,
+            "actor_history_limit": actor_history_limit,
+            "prefix_max_length": prefix_max_length,
+            "recency_decay_half_life_sessions": recency_half_life,
+            "completed_sessions_only": True,
+            "classification_eligibility": "central_trusted_classification_predicate",
+            "storage_scope": (
+                "backtest_from_storage defaults to production_live external sessions; "
+                "direct callers must supply an explicit reviewed scope"
+            ),
+            "prefix_context": "reconstructed_observations_only",
+            "training_order": "supplied_newest_first_matching_storage_query",
+        },
     }
     if include_comparisons:
         result["evaluation_comparisons"] = _evaluation_comparisons(

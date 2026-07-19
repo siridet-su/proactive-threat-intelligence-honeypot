@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 
 from production.classification.classification_pipeline import NotebookParityClassifier, is_shell_noise, rule_based_ttp
+from production.classification.trust import is_trusted_classification_event
 from production.prediction.realtime_prediction import build_transition_model
 from production.utils.serialization import stable_id, utc_now
 from production.utils.sensitive_data import redact_exception_for_log
@@ -182,19 +183,25 @@ def _accepted_classifications(
                 review_records.append(_review_record(command, "low_confidence", classifications))
             continue
 
-        if source_bucket in {"both_disagree", "both_tactic_disagree"}:
+        disagreement = source_bucket in {"both_disagree", "both_tactic_disagree"}
+        if disagreement and drop_disagreements:
             skipped_any = True
             stats["disagreement_commands_skipped"] += 1
             if len(review_records) < review_limit:
                 review_records.append(_review_record(command, "classifier_disagreement", classifications))
             continue
+        if disagreement:
+            stats["disagreement_commands_retained_audit_only"] += 1
 
         event = dict(item)
         event["external_seed_validation"] = {
-            "status": "auto_accepted",
+            "status": "audit_only_retained" if disagreement else "auto_accepted",
             "min_label_confidence": min_label_confidence,
             "source_bucket": source_bucket,
             "validation_source": (
+                "classifier_disagreement_audit_only"
+                if disagreement
+                else
                 "auto_rule_securebert_consensus"
                 if source_bucket == "both_agree"
                 else "auto_rule_securebert_tactic_consensus"
@@ -203,9 +210,14 @@ def _accepted_classifications(
                 if source == "securebert"
                 else "auto_rule_high_confidence"
             ),
-            "technique_disagreement": source_bucket == "both_tactic_agree",
+            "technique_disagreement": source_bucket in {
+                "both_tactic_agree",
+                "both_tactic_disagree",
+            },
             "review_note": (
-                "rule and SecureBERT disagree on technique but agree on tactic; keep tactic-level evidence only"
+                "classifier disagreement retained as audit-only evidence; excluded from transition counts"
+                if disagreement
+                else "rule and SecureBERT disagree on technique but agree on tactic; keep tactic-level evidence only"
                 if source_bucket == "both_tactic_agree"
                 else ""
             ),
@@ -329,6 +341,7 @@ def build_external_seed_model(
         "unknown_commands_skipped": 0,
         "low_confidence_commands_skipped": 0,
         "disagreement_commands_skipped": 0,
+        "disagreement_commands_retained_audit_only": 0,
         "filtered_known_commands_skipped": 0,
         "accepted_command_events": 0,
         "accepted_classification_events": 0,
@@ -405,9 +418,13 @@ def build_external_seed_model(
                 continue
             session["commands"].append(command)
             session["classification_events"].extend(known)
-            stats["accepted_command_events"] += 1
-            stats["accepted_classification_events"] += len(known)
-            stats["known_tactic_commands"] += len(known)
+            trusted_known = [
+                item for item in known if is_trusted_classification_event(item)
+            ]
+            if trusted_known:
+                stats["accepted_command_events"] += 1
+                stats["accepted_classification_events"] += len(trusted_known)
+                stats["known_tactic_commands"] += len(trusted_known)
         if max_commands > 0 and stats["raw_command_events"] >= max_commands:
             break
 
@@ -416,7 +433,11 @@ def build_external_seed_model(
         for session_id, item in sessions.items()
     ]
     stats["closed_sessions"] = sum(1 for item in sessions.values() if item.get("closed"))
-    model = build_transition_model(payloads, prefix_max_length=prefix_max_length)
+    model = build_transition_model(
+        payloads,
+        prefix_max_length=prefix_max_length,
+        source_name=source_name,
+    )
     model["schema_version"] = "external_transition_model.v1"
     model["source_type"] = source_name
     model["built_at"] = utc_now()
@@ -431,6 +452,9 @@ def build_external_seed_model(
         "noise_commands_skipped": stats["noise_commands_skipped"],
         "low_confidence_commands_skipped": stats["low_confidence_commands_skipped"],
         "disagreement_commands_skipped": stats["disagreement_commands_skipped"],
+        "disagreement_commands_retained_audit_only": stats[
+            "disagreement_commands_retained_audit_only"
+        ],
         "filtered_known_commands_skipped": stats["filtered_known_commands_skipped"],
         "unknown_rate": _rate(stats["unknown_commands_skipped"], stats["raw_command_events"]),
         "shell_noise_rate": _rate(stats["noise_commands_skipped"], stats["raw_command_events"]),
@@ -505,7 +529,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--securebert-high-confidence", type=float, default=0.55)
     parser.add_argument("--allow-securebert-unavailable", action="store_true")
     parser.add_argument("--min-label-confidence", type=float, default=0.90)
-    parser.add_argument("--keep-disagreements", action="store_true", help="Keep rule/SecureBERT disagreements instead of sending them to review.")
+    parser.add_argument(
+        "--keep-disagreements",
+        action="store_true",
+        help=(
+            "Retain rule/SecureBERT disagreements as audit-only session evidence "
+            "instead of adding them to the review queue; never promotes them to trusted model input."
+        ),
+    )
     parser.add_argument("--session-output", default="", help="Optional JSON/NDJSON session payload output for validation.")
     parser.add_argument("--review-output", default="", help="Optional JSON review queue for unknown/low-confidence/disagreement commands.")
     parser.add_argument("--review-limit", type=int, default=500)

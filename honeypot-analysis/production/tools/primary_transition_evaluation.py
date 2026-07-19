@@ -65,6 +65,32 @@ def chronological_split(
     }
 
 
+def live_model_training_payloads(
+    payloads: Iterable[Dict[str, Any]],
+    policy: Dict[str, Any],
+    *,
+    history_limit: int | None = None,
+) -> List[Dict[str, Any]]:
+    """Order and cap offline training exactly as the live newest-first query."""
+
+    ordered = [payload for payload in payloads if isinstance(payload, dict)]
+    minimum_time = datetime.min.replace(tzinfo=timezone.utc)
+    if any(_time(payload) != minimum_time for payload in ordered):
+        ordered.sort(
+            key=lambda payload: (_time(payload), str(payload.get("session_id") or "")),
+            reverse=True,
+        )
+    limit = max(
+        int(
+            history_limit
+            if history_limit is not None
+            else policy.get("transition_history_limit", 500)
+        ),
+        1,
+    )
+    return ordered[:limit]
+
+
 def _policy_variant(
     policy: Dict[str, Any],
     *,
@@ -170,11 +196,30 @@ def evaluate_variant(
     external_model: Dict[str, Any],
 ) -> Dict[str, Any]:
     prefix_max_length = int(policy.get("prefix_max_length", 3))
-    local_model = build_transition_model(train, prefix_max_length=prefix_max_length)
-    actor_model = build_actor_fingerprint_transition_model(
+    recency_half_life = float(policy.get("recency_decay_half_life_sessions") or 0.0)
+    model_train = live_model_training_payloads(train, policy)
+    local_model = build_transition_model(
+        model_train,
+        prefix_max_length=prefix_max_length,
+        source_name="local_transition",
+        recency_half_life_sessions=recency_half_life,
+    )
+    actor_policy = policy.get("actor_fingerprint_prior") or {}
+    if not isinstance(actor_policy, dict):
+        actor_policy = {}
+    actor_train = live_model_training_payloads(
         train,
+        policy,
+        history_limit=int(
+            actor_policy.get("history_limit")
+            or policy.get("transition_history_limit", 500)
+        ),
+    )
+    actor_model = build_actor_fingerprint_transition_model(
+        actor_train,
         policy=policy,
         prefix_max_length=prefix_max_length,
+        recency_half_life_sessions=recency_half_life,
     )
     engine = RealtimePredictionEngine(
         policy,

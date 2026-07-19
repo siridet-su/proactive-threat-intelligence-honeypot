@@ -146,6 +146,7 @@ DEFAULT_PREDICTION_POLICY: Dict[str, Any] = {
     "enabled": True,
     "prediction_mode": "primary_transition_with_fallback",
     "compute_weighted_ensemble_baseline": True,
+    "weight_influence_scope": "diagnostic_only",
     "primary_transition": {
         "primary_model": "transition_frequency",
         "source_order": ["local_transition", "external_seed_transition"],
@@ -3480,8 +3481,32 @@ class RealtimePredictionEngine:
             "generated_at": utc_now(),
             "weights": configured_weights,
             "effective_weights": weights,
+            "weight_influence_scope": (
+                "production_ranking"
+                if prediction_mode == "weighted_ensemble_baseline"
+                else "diagnostic_only"
+            ),
             "active_weights": active_weights,
             "active_scorers": active_scorers,
+            "ranking_influence": {
+                "production_mode": prediction_mode,
+                "production_effective_scorers": list(active_scorers),
+                "configured_weights": (
+                    "production_effective"
+                    if prediction_mode == "weighted_ensemble_baseline"
+                    else "diagnostic_only"
+                ),
+                "effective_weights": (
+                    "production_effective"
+                    if prediction_mode == "weighted_ensemble_baseline"
+                    else "diagnostic_only"
+                ),
+                "weighted_ensemble_baseline": (
+                    "production_ranking"
+                    if prediction_mode == "weighted_ensemble_baseline"
+                    else "diagnostic_only"
+                ),
+            },
             "external_seed_weight_policy": external_seed_weight_policy,
             "enrichment_context_mode": enrichment_context_summary,
             "coverage": {

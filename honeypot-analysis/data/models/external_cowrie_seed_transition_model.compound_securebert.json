@@ -155,7 +155,7 @@
   "recency_decay_half_life_sessions": 0.0,
   "schema_version": "external_transition_model.v1",
   "source_database": "",
-  "source_name": "local_transition",
+  "source_name": "external_cowrie_seed",
   "source_type": "external_cowrie_seed",
   "start_counts": {
     "command-and-control": 23.0,

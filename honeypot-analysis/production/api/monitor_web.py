@@ -3240,6 +3240,7 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     engine = payload.get("engine") or {}
     weights = payload.get("weights") or {}
     effective_weights = payload.get("effective_weights") or {}
+    weight_influence_scope = str(payload.get("weight_influence_scope") or "")
     active_weights = payload.get("active_weights") or {}
     external_weight_policy = payload.get("external_seed_weight_policy") or {}
     coverage = payload.get("coverage") or {}
@@ -3303,6 +3304,7 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         ("calibration", calibration_status.get("status") or "-"),
         ("calibration_ready_bins", f"{calibration_status.get('ready_bin_count', 0)}/{calibration_status.get('bin_count', 0)}"),
         ("weight_calibration", weight_calibration.get("status") or "-"),
+        ("weight_influence_scope", weight_influence_scope or "-"),
         ("weight_calibration_run", weight_calibration.get("run_id") or "-"),
         ("scorer_disagreement", agreement.get("disagreement")),
         ("divergent_scorers", _format_list(agreement.get("divergent_scorers") or [], limit=8)),
@@ -3445,9 +3447,17 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         + "<h3>Ranked Next-Step Hypotheses</h3>"
         + ranking_html
         + why_html
-        + "<h3>Configured Weights</h3>"
+        + (
+            "<h3>Configured Weights (Diagnostic Baseline Only)</h3>"
+            if weight_influence_scope == "diagnostic_only"
+            else "<h3>Configured Production Weights</h3>"
+        )
         + weights_html
-        + "<h3>Effective Weights After Maturity Policy</h3>"
+        + (
+            "<h3>Effective Diagnostic Weights After Maturity Policy</h3>"
+            if weight_influence_scope == "diagnostic_only"
+            else "<h3>Effective Production Weights After Maturity Policy</h3>"
+        )
         + effective_weights_html
         + "<h3>Normalized Active Weights</h3>"
         + active_weights_html

@@ -1239,17 +1239,19 @@
         </div>`;
     }
 
-    // Fields: effective_weights, external_seed_weight_policy, source_breakdown [2]
-    function modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown) {
+    // Fields: effective_weights, weight_influence_scope, external_seed_weight_policy, source_breakdown [2]
+    function modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown, influenceScope) {
         const ew = effectiveWeights || {};
         const entries = Object.entries(ew);
         if (!entries.length) return '';
         const total = entries.reduce((s,[,v])=>s+(v||0),0)||1;
+        const diagnosticOnly = influenceScope === 'diagnostic_only';
         return `<div class="card p-5">
             <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Model Composition</h3>
+                <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">${diagnosticOnly?'Diagnostic Weighted Baseline':'Production Model Composition'}</h3>
                 <i data-lucide="layers" style="width:13px;height:13px;color:#52525b"></i>
             </div>
+            ${diagnosticOnly?'<p class="text-[10px] text-amber-400 mb-3">These weights do not affect the production final ranking in primary-transition mode.</p>':''}
             <div class="space-y-3">
                 ${entries.map(([name,w])=>{
                     const pctVal = Math.round((w/total)*100);
@@ -2034,6 +2036,7 @@
         const agreement = cp.agreement || {};
         const coverage = cp.coverage || {};
         const effectiveWeights = cp.effective_weights || {};
+        const weightInfluenceScope = cp.weight_influence_scope || '';
         const weightPolicy = cp.external_seed_weight_policy || {};
         const sourceBreakdown = cp.source_breakdown || {};
         const ttpCorrelations = cp.session_ttp_correlations || [];
@@ -2250,7 +2253,7 @@
                     ${signalQualityMeter(agreement, coverage)}
 
                     <!-- Model composition (effective_weights + source_breakdown [2]) -->
-                    ${modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown)}
+                    ${modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown, weightInfluenceScope)}
 
                     <!-- Calibration status (calibration_status + weight_calibration [2]) -->
                     ${(calibrationStatus.calibrated!==undefined||weightCalibration.status)?`
@@ -2263,6 +2266,7 @@
                             ${calibrationStatus.method?metaRow('Method',`<span class="font-mono text-xs">${calibrationStatus.method}</span>`):''}
                             ${calibrationStatus.last_run?metaRow('Last run',relativeTime(calibrationStatus.last_run)):''}
                             ${weightCalibration.status?metaRow('Weight status',`<span class="font-mono text-xs">${weightCalibration.status}</span>`):''}
+                            ${weightCalibration.influence_scope?metaRow('Weight influence',`<span class="font-mono text-xs">${weightCalibration.influence_scope}</span>`):''}
                             ${weightCalibration.drift!==undefined?metaRow('Drift',`<span class="font-mono text-xs ${weightCalibration.drift>0.1?'text-amber-400':'text-zinc-400'}">${weightCalibration.drift}</span>`):''}
                         </dl>
                     </div>`:''}

@@ -55,9 +55,25 @@ Optional imports must remain lazy. A core-only install must import every
   repository-policy commands under `production.tools` are supported offline
   operational tools when invoked for their documented scope. Migration remains
   dry-run/preflight first and never changes SQLite.
-- Evaluation, fitting, benchmark, review-template, Zenodo, and external-seed
-  tools under `production.tools` are `INTENTIONALLY_DEFERRED` from runtime.
-  Their outputs are research evidence, not active model policy.
+- `production.prediction.prediction_backtest`,
+  `production.tools.primary_transition_evaluation`, and
+  `production.tools.evaluate_next_tactic_model_comparison` are
+  `COMPLETE_AND_VERIFIED` supported offline evaluators. They share the live
+  primary-mode construction settings and one recorded run-wide
+  probability-metric vocabulary;
+  their outputs never update production policy automatically.
+- `production.tools.external_seed_weight_fit` and calibration/weight-sweep
+  paths are `COMPLETE_AND_VERIFIED` diagnostic-only tools. Their weights affect
+  only the weighted baseline while the trusted policy uses primary-transition
+  mode. Promoting weighted ranking requires a separate reviewed policy and
+  held-out evidence.
+- External-seed building is `COMPLETE_AND_VERIFIED` supported offline for
+  supplied data; the historical private source dataset and SecureBERT
+  checkpoint are not distributed. The `--keep-disagreements` option retains
+  disagreement records as audit-only and cannot promote them into model facts.
+- Zenodo-specific and historical benchmark/review-template tools are
+  `EXPERIMENTAL` or `INTENTIONALLY_DEFERRED` from runtime. Checked-in outputs
+  are research evidence, not active model policy.
 - `demo/realtime_pipeline_demo.py` and `data/samples` are `NOT_APPLICABLE` to
   production evidence. They are synthetic demonstrations/fixtures.
 - Legacy report aliases, `DATABASE_URL`, old sensor checkpoint parsing, and

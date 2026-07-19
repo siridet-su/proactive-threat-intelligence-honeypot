@@ -84,6 +84,22 @@ def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None
         bool,
     ):
         errors.append("policy.compute_weighted_ensemble_baseline must be boolean")
+    influence_scope = str(policy.get("weight_influence_scope") or "").strip()
+    if influence_scope:
+        expected_scope = (
+            "production_ranking"
+            if mode == "weighted_ensemble_baseline"
+            else "diagnostic_only"
+        )
+        if influence_scope not in {"diagnostic_only", "production_ranking"}:
+            errors.append(
+                "policy.weight_influence_scope must be diagnostic_only or production_ranking"
+            )
+        elif influence_scope != expected_scope:
+            errors.append(
+                "policy.weight_influence_scope must match the configured prediction_mode "
+                f"({expected_scope})"
+            )
     primary_transition = policy.get("primary_transition")
     if primary_transition is None:
         return

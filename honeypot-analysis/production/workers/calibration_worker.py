@@ -408,12 +408,23 @@ def build_calibration_run(config: ProductionConfig, storage: Any) -> Dict[str, A
         status = "disabled"
 
     generated_at = utc_now()
+    prediction_mode = str(
+        prediction_policy.get("prediction_mode") or "primary_transition_with_fallback"
+    )
+    influence_scope = (
+        "production_ranking"
+        if prediction_mode == "weighted_ensemble_baseline"
+        else "diagnostic_only"
+    )
     result = {
         "schema_version": "prediction_weight_calibration.v1",
         "generated_at": generated_at,
         "status": status,
         "applied": applied,
         "apply": applied,
+        "prediction_mode": prediction_mode,
+        "influence_scope": influence_scope,
+        "production_ranking_changed": bool(applied and influence_scope == "production_ranking"),
         "reason": "; ".join(reasons) if reasons else "bounded calibration overlay generated",
         "inputs": {
             "feedback_rows_read": len(feedback_rows),

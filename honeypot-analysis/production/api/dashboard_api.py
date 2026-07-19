@@ -141,7 +141,12 @@ def _current_prediction_payload(snapshot: Dict[str, Any], feedback_rows: list[Di
         "confidence_damping": payload.get("confidence_damping") or {},
         "prediction_trigger": payload.get("prediction_trigger") or {},
         "predictive_alert": payload.get("predictive_alert") or {},
+        "prediction_mode": payload.get("prediction_mode") or "",
+        "weight_influence_scope": payload.get("weight_influence_scope") or "",
+        "ranking_influence": payload.get("ranking_influence") or {},
         "effective_weights": payload.get("effective_weights") or {},
+        "active_weights": payload.get("active_weights") or {},
+        "active_scorers": payload.get("active_scorers") or [],
         "external_seed_weight_policy": payload.get("external_seed_weight_policy") or {},
         "feedback_summary": _feedback_summary(feedback_rows),
     }

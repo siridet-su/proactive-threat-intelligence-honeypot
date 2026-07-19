@@ -805,6 +805,12 @@ class SessionWorker:
                 "generated_at": loaded.get("generated_at") or "",
                 "reason": loaded.get("reason") or "",
                 "applied": apply_output and applied,
+                "influence_scope": (
+                    "production_ranking"
+                    if str(self.config.prediction_policy.get("prediction_mode") or "")
+                    == "weighted_ensemble_baseline"
+                    else "diagnostic_only"
+                ),
                 "inputs": loaded.get("inputs") or {},
             }
         )
@@ -1312,9 +1318,9 @@ class SessionWorker:
         if not self._ensure_leadership():
             return 0
         self._refresh_enrichment_cache()
-        self._refresh_prediction_engine()
         processed = 0
         attempted = 0
+        prediction_refreshed = False
         while attempted < self.config.worker_batch_size:
             if should_stop is not None and should_stop():
                 break
@@ -1340,6 +1346,9 @@ class SessionWorker:
                     leader_token=self.worker_token,
                 )
                 break
+            if not prediction_refreshed:
+                self._refresh_prediction_engine()
+                prediction_refreshed = True
             attempted += 1
             event = row["event"]
             checkpoint = self._event_state_checkpoint(event)
