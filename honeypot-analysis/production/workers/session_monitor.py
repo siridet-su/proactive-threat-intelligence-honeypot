@@ -1428,10 +1428,29 @@ def build_pipeline_trigger(
     mitre_db=None,
     config: dict = None,
     enrichment_db: dict = None,
+    feed_loading_enabled: Optional[bool] = None,
+    feed_status: Optional[Dict[str, Any]] = None,
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
+    classification_policy: Optional[Dict[str, Any]] = None,
+    classification_rules_path: str = "",
+    prediction_policy: Optional[Dict[str, Any]] = None,
+    prediction_policy_path: str = "",
+    prediction_context: Optional[Dict[str, Any]] = None,
     max_tokens: int = 4000,
     enable_vertex_narrative: bool = False,
     smb_asset_profile_path: str = "",
     smb_action_policy_path: str = "",
+    cisa_cache_path: str = "",
+    sigma_cache_path: str = "",
+    mitre_cache_path: str = "",
+    vertex_project_id: str = "",
+    vertex_location: str = "",
+    vertex_model: str = "",
+    vertex_request_timeout_seconds: float = 45.0,
+    vertex_outer_timeout_seconds: float = 50.0,
+    vertex_max_retries: int = 2,
+    vertex_retry_delay_seconds: float = 2.0,
 ):
     """
     Returns an on_session_end callback that runs the full analysis pipeline
@@ -1500,7 +1519,7 @@ def build_pipeline_trigger(
                     "enrichment_status": getattr(state, "enrichment_status", {}),
                     "classification_policy": getattr(
                         state, "classification_policy", {}
-                    ),
+                    ) or classification_policy or {},
                     "ioc_summary": getattr(state, "ioc_summary", {}),
                     "process_tree_status": getattr(
                         state, "process_tree_status", {}
@@ -1591,6 +1610,7 @@ def build_pipeline_trigger(
                 self.login_password     = view.get('login_password', '')
                 self.credential_metadata = view.get('credential_metadata', {})
                 self.enrichment_status  = view.get('enrichment_status', {})
+                self.classification_policy = view.get('classification_policy', {})
                 # Real Cowrie fields
                 self.src_port           = view.get('src_port', 0)
                 self.dst_ip             = view.get('dst_ip', '')
@@ -1681,15 +1701,66 @@ def build_pipeline_trigger(
             return None
 
         try:
-            # base_url='' and model='' â†’ VertexAI client reads from COLAB_CONFIG
-            coord = coordinator_class(
-                base_url='',
-                model='',
-                max_tokens=max_tokens,
+            # Production dependencies are resolved by the worker and injected
+            # here. Signature filtering preserves compatibility with notebook
+            # and test coordinators that implement only the legacy constructor.
+            import inspect
+
+            coordinator_kwargs = {
+                "base_url": "",
+                "model": vertex_model or "",
+                "max_tokens": max_tokens,
+                "enable_vertex_narrative": bool(enable_vertex_narrative),
+                "threat_intel_config": config if config is not None else {},
+                "threat_feeds": feeds,
+                "mitre_db": mitre_db,
+                "behavior_policy_document": behavior_policy_document,
+                "behavior_policy_path": behavior_policy_path,
+                "classification_policy": classification_policy or {},
+                "classification_rules_path": classification_rules_path,
+                "prediction_policy": prediction_policy,
+                "prediction_policy_path": prediction_policy_path,
+                "prediction_context": prediction_context or {},
+                "recommendation_asset_profile_path": smb_asset_profile_path,
+                "recommendation_action_policy_path": smb_action_policy_path,
+                "cisa_cache_path": cisa_cache_path,
+                "sigma_cache_path": sigma_cache_path,
+                "mitre_cache_path": mitre_cache_path,
+                "vertex_project_id": vertex_project_id,
+                "vertex_location": vertex_location,
+                "vertex_request_timeout_seconds": vertex_request_timeout_seconds,
+                "vertex_outer_timeout_seconds": vertex_outer_timeout_seconds,
+                "vertex_max_retries": vertex_max_retries,
+                "vertex_retry_delay_seconds": vertex_retry_delay_seconds,
+            }
+            signature = inspect.signature(coordinator_class)
+            accepts_kwargs = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
             )
-            coord.enable_vertex_narrative = bool(enable_vertex_narrative)
-            coord.recommendation_asset_profile_path = str(smb_asset_profile_path or "")
-            coord.recommendation_action_policy_path = str(smb_action_policy_path or "")
+            constructor_kwargs = {
+                key: value
+                for key, value in coordinator_kwargs.items()
+                if accepts_kwargs or key in signature.parameters
+            }
+            coord = coordinator_class(**constructor_kwargs)
+            injected_attributes = {
+                "enable_vertex_narrative": bool(enable_vertex_narrative),
+                "threat_feeds": feeds,
+                "mitre_db": mitre_db,
+                "behavior_policy_document": behavior_policy_document,
+                "behavior_policy_path": str(behavior_policy_path or ""),
+                "classification_policy": classification_policy or {},
+                "classification_rules_path": str(classification_rules_path or ""),
+                "prediction_policy": prediction_policy,
+                "prediction_policy_path": str(prediction_policy_path or ""),
+                "prediction_context": prediction_context or {},
+                "recommendation_asset_profile_path": str(smb_asset_profile_path or ""),
+                "recommendation_action_policy_path": str(smb_action_policy_path or ""),
+            }
+            for attribute, value in injected_attributes.items():
+                if not hasattr(coord, attribute):
+                    setattr(coord, attribute, value)
 
             # Reporting inputs are the centrally redacted projection built
             # above; the raw SessionState remains available to storage.
@@ -1731,17 +1802,28 @@ def build_pipeline_trigger(
                     "bpg_count": len(bpg_list),
                 },
             }
-            try:
-                from production.enrichment.threat_feed_loader import check_feeds_status
+            if feed_status is not None:
                 data_provenance["feeds"] = _safe_reporting_mapping(
-                    check_feeds_status(),
+                    feed_status,
                     "feed status",
                 )
-            except Exception as e:
+            elif feed_loading_enabled is False:
                 data_provenance["feeds"] = {
-                    "status": "unavailable",
-                    "error": _safe_exception_text(e),
+                    "status": "disabled",
+                    "loading_enabled": False,
                 }
+            else:
+                try:
+                    from production.enrichment.threat_feed_loader import check_feeds_status
+                    data_provenance["feeds"] = _safe_reporting_mapping(
+                        check_feeds_status(),
+                        "feed status",
+                    )
+                except Exception as e:
+                    data_provenance["feeds"] = {
+                        "status": "unavailable",
+                        "error": _safe_exception_text(e),
+                    }
 
             try:
                 asyncio.get_running_loop()

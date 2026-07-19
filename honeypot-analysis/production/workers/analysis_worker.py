@@ -23,6 +23,7 @@ from production.enrichment.threat_feed_loader import load_threat_feeds
 from production.reporting.actor_attribution import enrich_report_with_actor_attribution
 from production.reporting.analysis_policy import session_analysis_skip_reason
 from production.reporting.artifacts import attach_report_artifacts
+from production.policies.threat_hypothesis_behavior_policy import load_behavior_policy
 from production.reporting.threat_hypothesis import (
     attach_model_prediction,
     build_v2_report,
@@ -30,7 +31,7 @@ from production.reporting.threat_hypothesis import (
 from production.utils.credential_hmac import credential_metadata_for_provenance
 from production.utils.config import ProductionConfig
 from production.enrichment.enrichment_cache import load_combined_ip_enrichment
-from production.enrichment.feed_status import save_feed_status
+from production.enrichment.feed_status import collect_feed_status, save_feed_status
 from production.utils.runtime_context import attach_runtime_context
 from production.utils.sensitive_data import (
     redact_error_for_log,
@@ -514,6 +515,14 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
             cache_path=config.mitre_attack_path or None,
             silent=True,
         )
+        feed_status = collect_feed_status(config)
+        feed_status["status"] = "loaded"
+        feed_status["loading_enabled"] = True
+    else:
+        feed_status = {
+            "status": "disabled",
+            "loading_enabled": False,
+        }
     enrichment_db = load_combined_ip_enrichment(
         storage=storage,
         file_path=config.enrichment_db_path,
@@ -524,6 +533,10 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
         "feeds": feeds,
         "mitre_attack": mitre_attack,
         "enrichment_db": enrichment_db,
+        "feed_status": feed_status,
+        "behavior_policy": load_behavior_policy(
+            config.threat_hypothesis_behavior_policy_path
+        ),
     }
 
 
@@ -544,10 +557,29 @@ async def analyze_job(
         mitre_db=context["mitre_attack"],
         config=context["config"],
         enrichment_db=context["enrichment_db"],
+        feed_loading_enabled=config.enable_feed_loading,
+        feed_status=context["feed_status"],
+        behavior_policy_document=context["behavior_policy"],
+        behavior_policy_path=config.threat_hypothesis_behavior_policy_path,
+        classification_policy=config.classification_policy,
+        classification_rules_path=config.classification_rules_path,
+        prediction_policy=config.prediction_policy,
+        prediction_policy_path=config.prediction_policy_path,
+        prediction_context=prediction_snapshot,
         max_tokens=config.analysis_max_tokens,
         enable_vertex_narrative=config.enable_vertex_narrative,
         smb_asset_profile_path=config.smb_asset_profile_path,
         smb_action_policy_path=config.smb_action_policy_path,
+        cisa_cache_path=config.cisa_cache_path,
+        sigma_cache_path=config.sigma_cache_path,
+        mitre_cache_path=config.mitre_attack_path,
+        vertex_project_id=config.vertex_project_id,
+        vertex_location=config.vertex_location,
+        vertex_model=config.vertex_model,
+        vertex_request_timeout_seconds=config.vertex_request_timeout_seconds,
+        vertex_outer_timeout_seconds=config.vertex_outer_timeout_seconds,
+        vertex_max_retries=config.vertex_max_retries,
+        vertex_retry_delay_seconds=config.vertex_retry_delay_seconds,
     )
     if config.analysis_suppress_stdout:
         with contextlib.redirect_stdout(io.StringIO()):

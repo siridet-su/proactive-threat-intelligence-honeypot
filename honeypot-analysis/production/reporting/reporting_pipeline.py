@@ -68,10 +68,13 @@ Hardcoding policy (strictly enforced):
 """
 
 import asyncio
+import copy
 import re
 import json
 import os
 import sys
+import threading
+from collections.abc import Callable
 from typing import Dict, Any, List, Optional, Tuple
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -79,6 +82,7 @@ from collections import Counter
 
 from production.reporting.threat_hypothesis import (
     apply_validated_vertex_presentation,
+    attach_model_prediction,
     build_observed_behavior,
     build_v2_report,
 )
@@ -543,19 +547,41 @@ class VertexAIClient:
     _VERTEX_MODEL = "gemini-2.5-pro"
     _FALLBACK_MODELS: list = []
 
-    def __init__(self, token_budget: TokenBudget,
-                 base_url: str = "", model: str = ""):
+    def __init__(
+        self,
+        token_budget: TokenBudget,
+        base_url: str = "",
+        model: str = "",
+        *,
+        project_id: str = "",
+        location: str = "",
+        request_timeout_seconds: float = 45.0,
+        outer_timeout_seconds: float = 50.0,
+        max_retries: int = 2,
+        retry_delay_seconds: float = 2.0,
+    ):
         self.budget = token_budget
-        self.MAX_RETRIES = 4
+        self.MAX_RETRIES = max(1, min(int(max_retries), 5))
         self.MAX_PROMPT_CHARS = 6000
-        self._TIMEOUTS = [45, 30, 25, 20]
-        self._RETRY_DELAYS = [5, 20, 40, 60]
+        request_timeout = max(float(request_timeout_seconds), 0.001)
+        self.OUTER_TIMEOUT_SECONDS = max(
+            float(outer_timeout_seconds),
+            request_timeout,
+        )
+        self._TIMEOUTS = [request_timeout] * self.MAX_RETRIES
+        self._RETRY_DELAYS = [
+            max(float(retry_delay_seconds), 0.0)
+        ] * self.MAX_RETRIES
+        self._project_id = str(project_id or "").strip()
+        self._location = str(location or "").strip()
         self._model_override = model or ""
-        self._genai_client = None            # lazy-initialized via _get_client()
+        self._genai_client = None            # compatibility injection hook
+        self._genai_clients: Dict[int, Any] = {}
         self._colab_auth_done: bool = False  # auth once per instance
 
     def _resolve_project_id(self) -> str:
         return (
+            self._project_id or
             os.environ.get("VERTEX_PROJECT_ID", "") or
             os.environ.get("GOOGLE_CLOUD_PROJECT", "") or
             os.environ.get("GCLOUD_PROJECT", "") or
@@ -564,6 +590,7 @@ class VertexAIClient:
 
     def _resolve_location(self) -> str:
         return (
+            self._location or
             os.environ.get("VERTEX_LOCATION", "") or
             COLAB_CONFIG.get("location", "") or
             self._VERTEX_LOCATION
@@ -592,19 +619,30 @@ class VertexAIClient:
                 print(f"  [GenAI] Colab auth warning: {_safe_exception_text(e)}")
         self._colab_auth_done = True
 
-    def _get_client(self):
-        """Lazy-initialize and cache a genai.Client (Vertex AI backend)."""
+    def _get_client(self, timeout_seconds: Optional[float] = None):
+        """Return a Vertex client with an actual bounded SDK HTTP timeout."""
         if self._genai_client is not None:
             return self._genai_client
+        timeout = max(float(timeout_seconds or self._TIMEOUTS[0]), 0.001)
+        timeout_ms = max(1, int(timeout * 1_000))
+        if timeout_ms in self._genai_clients:
+            return self._genai_clients[timeout_ms]
         self._ensure_colab_auth()
         try:
             from google import genai          # pip install google-genai
-            self._genai_client = genai.Client(
+            from google.genai import types as _genai_types
+
+            client = genai.Client(
                 vertexai=True,
                 project=self._resolve_project_id(),
                 location=self._resolve_location(),
+                http_options=_genai_types.HttpOptions(
+                    timeout=timeout_ms,
+                    retry_options=_genai_types.HttpRetryOptions(attempts=1),
+                ),
             )
-            return self._genai_client
+            self._genai_clients[timeout_ms] = client
+            return client
         except ImportError:
             print("  [GenAI] google-genai not installed â€” run: pip install google-genai")
             return None
@@ -652,7 +690,7 @@ class VertexAIClient:
 
         user_text   = "\n".join(user_parts).strip()
         system_text = "\n".join(system_parts).strip()
-        client = self._get_client()
+        client = self._get_client(timeout)
         if client is None:
             raise RuntimeError("genai.Client could not be initialized")
 
@@ -676,6 +714,62 @@ class VertexAIClient:
             self.budget.consume_safe(response_text, f"vertex/{model}")
 
         return response_text
+
+    async def _run_with_outer_timeout(
+        self,
+        call: Callable[[], str],
+        timeout_seconds: float,
+    ) -> str:
+        """Run one SDK call without occupying asyncio's shared executor forever.
+
+        The SDK timeout is the primary cancellation mechanism. The daemon thread
+        is a final containment boundary for a client implementation that ignores
+        its timeout; a timed-out call cannot keep the analysis coroutine or the
+        event loop's default executor blocked.
+        """
+
+        loop = asyncio.get_running_loop()
+        result_future = loop.create_future()
+
+        def deliver_result(value: Any = None, error: Optional[BaseException] = None) -> None:
+            if result_future.done():
+                return
+            if error is not None:
+                result_future.set_exception(error)
+            else:
+                result_future.set_result(value)
+
+        def run() -> None:
+            try:
+                value = call()
+            except BaseException as exc:
+                try:
+                    loop.call_soon_threadsafe(deliver_result, None, exc)
+                except RuntimeError:
+                    return
+            else:
+                try:
+                    loop.call_soon_threadsafe(deliver_result, value, None)
+                except RuntimeError:
+                    return
+
+        thread = threading.Thread(
+            target=run,
+            name="vertex-sdk-request",
+            daemon=True,
+        )
+        thread.start()
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(result_future),
+                timeout=max(float(timeout_seconds), 0.001),
+            )
+        except asyncio.CancelledError:
+            result_future.cancel()
+            raise
+        except TimeoutError:
+            result_future.cancel()
+            raise TimeoutError("Vertex request exceeded outer timeout") from None
 
 
     def _extract_json(self, text: str) -> Optional[str]:
@@ -811,12 +905,13 @@ class VertexAIClient:
             print(f"    Attempt {attempt}/{self.MAX_RETRIES} "
                   f"(timeout={timeout}s) model={_safe_log_text(model_label)}")
             try:
-                loop = asyncio.get_event_loop()
-                raw_text = await loop.run_in_executor(
-                    None,
+                raw_text = await self._run_with_outer_timeout(
                     lambda m=current_model: self._post_sync(
-                        messages, timeout, model_override=m
-                    )
+                        messages,
+                        timeout,
+                        model_override=m,
+                    ),
+                    max(timeout, self.OUTER_TIMEOUT_SECONDS),
                 )
                 print(f"       Response: {len(raw_text)} chars")
                 # Consume response tokens (safe â€” doesn't raise after receiving data)
@@ -867,6 +962,11 @@ class VertexAIClient:
                       f"(model={_safe_log_text(model_label)})")
                 return parsed
 
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                print("       Vertex request exceeded the outer timeout; using deterministic fallback")
+                return {}
             except Exception as e:
                 safe_error = _safe_exception_text(e)
                 print(f"       Attempt {attempt} failed: {safe_error[:160]}")
@@ -917,12 +1017,13 @@ class VertexAIClient:
             print(f"    [Analyst] Attempt {attempt}/{self.MAX_RETRIES} "
                   f"model={_safe_log_text(model)} timeout={timeout}s")
             try:
-                loop = asyncio.get_event_loop()
-                raw_text = await loop.run_in_executor(
-                    None,
+                raw_text = await self._run_with_outer_timeout(
                     lambda m=model: self._post_sync(
-                        messages, timeout, model_override=m
-                    )
+                        messages,
+                        timeout,
+                        model_override=m,
+                    ),
+                    max(timeout, self.OUTER_TIMEOUT_SECONDS),
                 )
                 if not raw_text:
                     print(
@@ -967,6 +1068,14 @@ class VertexAIClient:
                       f"({len(raw_text)} chars, attempt {attempt})")
                 return parsed
 
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                print(
+                    "    [Analyst] Vertex request exceeded the outer timeout; "
+                    "using deterministic fallback"
+                )
+                return {}
             except Exception as e:
                 print(f"    [Analyst] Attempt {attempt} failed: "
                       f"{_safe_exception_text(e)[:160]}")
@@ -1484,7 +1593,10 @@ def _default_prediction_policy_path() -> str:
     return os.path.join(candidates[0], "configs", "prediction_policy.trusted.json")
 
 
-def _prediction_tactic_severity_map(policy_path: str = "") -> Dict[str, str]:
+def _prediction_tactic_severity_map(
+    policy_path: str = "",
+    policy_document: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
     """Load tactic severity from the realtime prediction policy.
 
     This keeps report emphasis aligned with the predictive-alert policy instead
@@ -1498,10 +1610,15 @@ def _prediction_tactic_severity_map(policy_path: str = "") -> Dict[str, str]:
         severity.update(DEFAULT_TACTIC_SEVERITY)
     except Exception:
         pass
-    path = policy_path or _default_prediction_policy_path()
+    document: Any = policy_document
+    if document is None:
+        path = policy_path or _default_prediction_policy_path()
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                document = json.load(f)
+        except Exception:
+            document = {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            document = json.load(f)
         policy = document.get("policy", document) if isinstance(document, dict) else {}
         configured = ((policy.get("predictive_alerts") or {}).get("tactic_severity") or {})
         if isinstance(configured, dict):
@@ -1519,9 +1636,13 @@ def _completed_actions_from_observed_ttps(
         tactic_summary: Dict[str, List[str]],
         ttp_command_map: Dict[str, List[str]],
         policy_path: str = "",
+        policy_document: Optional[Dict[str, Any]] = None,
         limit: int = 20) -> List[str]:
     severity_rank = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
-    tactic_severity = _prediction_tactic_severity_map(policy_path)
+    tactic_severity = _prediction_tactic_severity_map(
+        policy_path,
+        policy_document,
+    )
     ttp_to_tactic: Dict[str, str] = {}
     for tactic, ttps in (tactic_summary or {}).items():
         for ttp in ttps or []:
@@ -3317,29 +3438,94 @@ def _threat_hypothesis_semantics(follow_on: str) -> Dict[str, Any]:
 
 # MAIN COORDINATOR
 
+_DEPENDENCY_UNSET = object()
+
+
 class ImprovedAsyncSwarmCoordinator:
     """
     Enhanced async swarm coordinator â€” honeypot-aware threat hypothesis edition.
     """
 
-    def __init__(self, base_url: str, model: str, max_tokens: int = 4000,
-                 mitre_name_map: dict = None,
-                 enable_vertex_narrative: bool = False):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        max_tokens: int = 4000,
+        mitre_name_map: dict = None,
+        enable_vertex_narrative: bool = False,
+        *,
+        threat_intel_config: Optional[Dict[str, Any]] = None,
+        threat_feeds: Any = _DEPENDENCY_UNSET,
+        mitre_db: Any = _DEPENDENCY_UNSET,
+        behavior_policy_document: Optional[Dict[str, Any]] = None,
+        behavior_policy_path: str = "",
+        classification_policy: Optional[Dict[str, Any]] = None,
+        classification_rules_path: str = "",
+        prediction_policy: Optional[Dict[str, Any]] = None,
+        prediction_policy_path: str = "",
+        prediction_context: Optional[Dict[str, Any]] = None,
+        recommendation_asset_profile_path: str = "",
+        recommendation_action_policy_path: str = "",
+        cisa_cache_path: str = "",
+        sigma_cache_path: str = "",
+        mitre_cache_path: str = "",
+        vertex_project_id: str = "",
+        vertex_location: str = "",
+        vertex_request_timeout_seconds: float = 45.0,
+        vertex_outer_timeout_seconds: float = 50.0,
+        vertex_max_retries: int = 2,
+        vertex_retry_delay_seconds: float = 2.0,
+    ):
         # base_url and model are accepted for backward compatibility with
         # existing notebook call sites, but VertexAIClient reads endpoint,
         # project, location, model, and auth from VERTEX_* / Google env vars.
         self.base_url = base_url
         self.model    = model
         self.budget   = TokenBudget(max_tokens=max_tokens)
-        self.ai_client = GroqClient(self.budget)
+        self.ai_client = GroqClient(
+            self.budget,
+            base_url=base_url,
+            model=model,
+            project_id=vertex_project_id,
+            location=vertex_location,
+            request_timeout_seconds=vertex_request_timeout_seconds,
+            outer_timeout_seconds=vertex_outer_timeout_seconds,
+            max_retries=vertex_max_retries,
+            retry_delay_seconds=vertex_retry_delay_seconds,
+        )
         self.enable_vertex_narrative = bool(enable_vertex_narrative)
-        self.recommendation_asset_profile_path = ""
-        self.recommendation_action_policy_path = ""
+        self.recommendation_asset_profile_path = str(
+            recommendation_asset_profile_path or ""
+        )
+        self.recommendation_action_policy_path = str(
+            recommendation_action_policy_path or ""
+        )
+        self.behavior_policy_document = (
+            copy.deepcopy(behavior_policy_document)
+            if isinstance(behavior_policy_document, dict)
+            else None
+        )
+        self.behavior_policy_path = str(behavior_policy_path or "")
+        self.classification_policy = copy.deepcopy(classification_policy or {})
+        self.classification_rules_path = str(classification_rules_path or "")
+        self.prediction_policy = (
+            copy.deepcopy(prediction_policy)
+            if isinstance(prediction_policy, dict)
+            else None
+        )
+        self.prediction_policy_path = str(prediction_policy_path or "")
+        self.prediction_context = copy.deepcopy(prediction_context or {})
+        self.cisa_cache_path = str(cisa_cache_path or "")
+        self.sigma_cache_path = str(sigma_cache_path or "")
+        self.mitre_cache_path = str(mitre_cache_path or "")
         self.detected_ttps = []
 
-        # Priority: caller-provided dict -> auto-load from production.enrichment.mitre_attack_loader
-        # MitreAttackDB exposes .get() so it's a drop-in for the old dict
-        if mitre_name_map is not None:
+        # Production passes an explicitly resolved MITRE dependency, including
+        # None when loading is disabled. Legacy callers that omit it retain the
+        # historical auto-load behavior.
+        if mitre_db is not _DEPENDENCY_UNSET and mitre_db is not None:
+            self.mitre_db = mitre_db
+        elif mitre_name_map is not None:
             # Wrap legacy dict in a thin adapter so .get_tactics() etc. work
             from production.enrichment.mitre_attack_loader import MitreAttackDB, TechniqueRecord
             techniques = {
@@ -3347,7 +3533,7 @@ class ImprovedAsyncSwarmCoordinator:
                 for tid, name in mitre_name_map.items()
             }
             self.mitre_db = MitreAttackDB(techniques, version="custom")
-        else:
+        elif mitre_db is _DEPENDENCY_UNSET:
             # Best-practice path: load live data from MITRE ATT&CK STIX
             try:
                 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
@@ -3357,86 +3543,109 @@ class ImprovedAsyncSwarmCoordinator:
                 self.mitre_db = MitreAttackDB({}, version="unavailable")
                 print("  [Coordinator] production.enrichment.mitre_attack_loader not found - "
                       "technique IDs will display as-is")
+        else:
+            from production.enrichment.mitre_attack_loader import MitreAttackDB
+
+            self.mitre_db = MitreAttackDB({}, version="disabled")
 
         # Backward-compat alias (existing code uses self.mitre_name_map.get())
         self.mitre_name_map = self.mitre_db
 
-        # Load config
-        base_dir = os.path.dirname(__file__)
-        local_path = os.path.join(base_dir, 'configs', 'threat_intel_config.json')
-        legacy_local_path = os.path.join(base_dir, 'threat_intel_config.json')
-        colab_path = '/content/threat_intel_config.json'
-        if os.path.exists(colab_path):
-            config_path = colab_path
-        elif os.path.exists(local_path):
-            config_path = local_path
+        if threat_intel_config is not None:
+            self.config = copy.deepcopy(threat_intel_config)
         else:
-            config_path = legacy_local_path
-
-        self.sophistication_rules = {}
-        self.behavioral_rules = {}
-        self.platform_rules = {}
-        self.attack_type_rules = {}
-        self.config = {}
-
-        try:
-            if os.path.exists(config_path):
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config_data = json.load(f)
-                    self.sophistication_rules = config_data.get("sophistication_rules", {})
-                    self.behavioral_rules = config_data.get("behavioral_rules", {})
-                    self.platform_rules = config_data.get("platform_rules", {})
-                    self.attack_type_rules = config_data.get("attack_type_rules", {})
-                    self.config = config_data
+            # Legacy notebook compatibility only. Production injects the
+            # resolved document, including an explicit empty dictionary.
+            base_dir = os.path.dirname(__file__)
+            local_path = os.path.join(base_dir, 'configs', 'threat_intel_config.json')
+            legacy_local_path = os.path.join(base_dir, 'threat_intel_config.json')
+            colab_path = '/content/threat_intel_config.json'
+            if os.path.exists(colab_path):
+                config_path = colab_path
+            elif os.path.exists(local_path):
+                config_path = local_path
             else:
-                print(
-                    "Config not found at "
-                    f"{_safe_log_text(config_path)} â€” using internal defaults."
-                )
-        except Exception as e:
-            print(f"Could not load config: {_safe_exception_text(e)}")
+                config_path = legacy_local_path
+            self.config = {}
+            try:
+                if os.path.exists(config_path):
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        loaded_config = json.load(f)
+                    if isinstance(loaded_config, dict):
+                        self.config = loaded_config
+                else:
+                    print(
+                        "Config not found at "
+                        f"{_safe_log_text(config_path)} â€” using internal defaults."
+                    )
+            except Exception as e:
+                print(f"Could not load config: {_safe_exception_text(e)}")
 
-        # Load asynchronously-safe: cached after first call, graceful on failure
-        try:
-            from production.enrichment.threat_feed_loader import load_threat_feeds
-            self.threat_feeds = load_threat_feeds()
+        self.sophistication_rules = copy.deepcopy(
+            self.config.get("sophistication_rules", {})
+        )
+        self.behavioral_rules = copy.deepcopy(
+            self.config.get("behavioral_rules", {})
+        )
+        self.platform_rules = copy.deepcopy(
+            self.config.get("platform_rules", {})
+        )
+        self.attack_type_rules = copy.deepcopy(
+            self.config.get("attack_type_rules", {})
+        )
+
+        if threat_feeds is _DEPENDENCY_UNSET:
+            try:
+                from production.enrichment.threat_feed_loader import load_threat_feeds
+
+                self.threat_feeds = load_threat_feeds()
+            except ImportError:
+                self.threat_feeds = None
+                print("  [Coordinator] threat_feed_loader not found â€” "
+                      "CISA KEV and Sigma enrichment disabled")
+            except Exception as e:
+                self.threat_feeds = None
+                print(
+                    "  [Coordinator] threat feeds init failed (non-fatal): "
+                    f"{_safe_exception_text(e)}"
+                )
+        else:
+            self.threat_feeds = threat_feeds
+
+        if self.threat_feeds is not None:
+            try:
             # Merge Sigma community keywords into sophistication_rules so the
             # scorer uses community-maintained detection terms alongside config.json
-            sigma_high_kws   = self.threat_feeds.sigma.get_keywords_for_level("high")
-            sigma_medium_kws = self.threat_feeds.sigma.get_keywords_for_level("medium")
-            sigma_brute_kws  = self.threat_feeds.get_bruteforce_keywords()
-            if sigma_high_kws:
-                existing_high = self.sophistication_rules.setdefault("high", {})
-                existing_high.setdefault("keywords", [])
-                existing_high["keywords"] = list(set(
-                    existing_high["keywords"] + sigma_high_kws
-                ))
-            if sigma_medium_kws:
-                existing_med = self.sophistication_rules.setdefault("medium", {})
-                existing_med.setdefault("keywords", [])
-                existing_med["keywords"] = list(set(
-                    existing_med["keywords"] + sigma_medium_kws
-                ))
-            if sigma_brute_kws:
-                existing_low = self.sophistication_rules.setdefault("low", {})
-                existing_low.setdefault("keywords", [])
-                existing_low["keywords"] = list(set(
-                    existing_low["keywords"] + sigma_brute_kws
-                ))
-            print(f"  [Coordinator] Sigma keywords merged: "
-                  f"{len(sigma_high_kws)} high / "
-                  f"{len(sigma_medium_kws)} medium / "
-                  f"{len(sigma_brute_kws)} brute-force")
-        except ImportError:
-            self.threat_feeds = None
-            print("  [Coordinator] threat_feed_loader not found â€” "
-                  "CISA KEV and Sigma enrichment disabled")
-        except Exception as e:
-            self.threat_feeds = None
-            print(
-                "  [Coordinator] threat feeds init failed (non-fatal): "
-                f"{_safe_exception_text(e)}"
-            )
+                sigma_high_kws = self.threat_feeds.sigma.get_keywords_for_level("high")
+                sigma_medium_kws = self.threat_feeds.sigma.get_keywords_for_level("medium")
+                sigma_brute_kws = self.threat_feeds.get_bruteforce_keywords()
+                if sigma_high_kws:
+                    existing_high = self.sophistication_rules.setdefault("high", {})
+                    existing_high.setdefault("keywords", [])
+                    existing_high["keywords"] = list(set(
+                        existing_high["keywords"] + sigma_high_kws
+                    ))
+                if sigma_medium_kws:
+                    existing_med = self.sophistication_rules.setdefault("medium", {})
+                    existing_med.setdefault("keywords", [])
+                    existing_med["keywords"] = list(set(
+                        existing_med["keywords"] + sigma_medium_kws
+                    ))
+                if sigma_brute_kws:
+                    existing_low = self.sophistication_rules.setdefault("low", {})
+                    existing_low.setdefault("keywords", [])
+                    existing_low["keywords"] = list(set(
+                        existing_low["keywords"] + sigma_brute_kws
+                    ))
+                print(f"  [Coordinator] Sigma keywords merged: "
+                      f"{len(sigma_high_kws)} high / "
+                      f"{len(sigma_medium_kws)} medium / "
+                      f"{len(sigma_brute_kws)} brute-force")
+            except Exception as e:
+                print(
+                    "  [Coordinator] injected threat feeds could not provide "
+                    f"Sigma keywords: {_safe_exception_text(e)}"
+                )
 
     def _truncate_to_budget(self, text: str, max_chars: int) -> str:
         if len(text) <= max_chars:
@@ -3510,12 +3719,15 @@ class ImprovedAsyncSwarmCoordinator:
                 "rejected_action_count": len(decision.get("rejected_actions") or []),
                 "fallback_actions_allowed": False,
             }
+            fallback_report = build_v2_report(
+                fallback,
+                sessions,
+                raw_events=raw_events,
+                behavior_policy_document=self.behavior_policy_document,
+                behavior_policy_path=self.behavior_policy_path,
+            )
             return _safe_reporting_mapping(
-                build_v2_report(
-                    fallback,
-                    sessions,
-                    raw_events=raw_events,
-                ),
+                attach_model_prediction(fallback_report, self.prediction_context),
                 "report",
             )
 
@@ -3551,6 +3763,12 @@ class ImprovedAsyncSwarmCoordinator:
             normalized_base,
             sessions,
             raw_events=raw_events,
+            behavior_policy_document=self.behavior_policy_document,
+            behavior_policy_path=self.behavior_policy_path,
+        )
+        canonical_report = attach_model_prediction(
+            canonical_report,
+            self.prediction_context,
         )
 
         if not self.enable_vertex_narrative:
@@ -3946,7 +4164,14 @@ class ImprovedAsyncSwarmCoordinator:
             confidence_source="claim_evidence_summary_v2",
             ai_enriched=False,
         )
-        report = build_v2_report(normalized, sessions, raw_events=raw_events or [])
+        report = build_v2_report(
+            normalized,
+            sessions,
+            raw_events=raw_events or [],
+            behavior_policy_document=self.behavior_policy_document,
+            behavior_policy_path=self.behavior_policy_path,
+        )
+        report = attach_model_prediction(report, self.prediction_context)
         return apply_validated_vertex_presentation(report, analytical)
 
     def _build_evidence_brief(self,
@@ -4066,6 +4291,8 @@ class ImprovedAsyncSwarmCoordinator:
         completed_actions = _completed_actions_from_observed_ttps(
             tactic_summary,
             ttp_command_map or {},
+            policy_path=self.prediction_policy_path,
+            policy_document=self.prediction_policy,
         )
 
         cisa_kev_matches = []
@@ -4585,7 +4812,12 @@ class ImprovedAsyncSwarmCoordinator:
         campaign_correlation = _build_campaign_correlation(ioc_bundle, source_ips=source_ips)
         playbook = _extract_attacker_playbook(ttp_command_map)
 
-        ordered_chain = build_observed_behavior(sessions, raw_events).get("ordered_behavior_chain", [])
+        ordered_chain = build_observed_behavior(
+            sessions,
+            raw_events,
+            behavior_policy_document=self.behavior_policy_document,
+            behavior_policy_path=self.behavior_policy_path,
+        ).get("ordered_behavior_chain", [])
         predicted_next = _predict_next_action(
             ttp_command_map,
             ioc_bundle,

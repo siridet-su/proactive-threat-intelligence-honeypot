@@ -78,6 +78,10 @@
   "vertex_project_id": "<GCP_PROJECT_ID>",
   "vertex_location": "us-central1",
   "vertex_model": "gemini-2.5-pro",
+  "vertex_request_timeout_seconds": 45.0,
+  "vertex_outer_timeout_seconds": 50.0,
+  "vertex_max_retries": 2,
+  "vertex_retry_delay_seconds": 2.0,
   "classification_policy": {
     "strategy": "notebook_merge",
     "bert_min_confidence": 0.55,

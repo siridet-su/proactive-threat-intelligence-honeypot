@@ -242,6 +242,10 @@ class ProductionConfig:
     vertex_project_id: str = ""
     vertex_location: str = "us-central1"
     vertex_model: str = "gemini-2.5-pro"
+    vertex_request_timeout_seconds: float = 45.0
+    vertex_outer_timeout_seconds: float = 50.0
+    vertex_max_retries: int = 2
+    vertex_retry_delay_seconds: float = 2.0
 
     classification_policy: Dict[str, Any] = field(default_factory=lambda: {
         "strategy": "notebook_merge",
@@ -537,6 +541,8 @@ class ProductionConfig:
             "job_lease_heartbeat_seconds": self.job_lease_heartbeat_seconds,
             "job_retry_base_seconds": self.job_retry_base_seconds,
             "job_retry_max_seconds": self.job_retry_max_seconds,
+            "vertex_request_timeout_seconds": self.vertex_request_timeout_seconds,
+            "vertex_outer_timeout_seconds": self.vertex_outer_timeout_seconds,
         }
         for name, value in positive_durations.items():
             if (
@@ -560,6 +566,26 @@ class ProductionConfig:
         ):
             raise ValueError(
                 "active_session_recovery_limit must be an integer of at least 1"
+            )
+        if (
+            isinstance(self.vertex_max_retries, bool)
+            or not isinstance(self.vertex_max_retries, Integral)
+            or not 1 <= self.vertex_max_retries <= 5
+        ):
+            raise ValueError("vertex_max_retries must be an integer between 1 and 5")
+        if (
+            isinstance(self.vertex_retry_delay_seconds, bool)
+            or not isinstance(self.vertex_retry_delay_seconds, Real)
+            or not math.isfinite(float(self.vertex_retry_delay_seconds))
+            or self.vertex_retry_delay_seconds < 0
+        ):
+            raise ValueError(
+                "vertex_retry_delay_seconds must be a non-negative finite number"
+            )
+        if self.vertex_outer_timeout_seconds < self.vertex_request_timeout_seconds:
+            raise ValueError(
+                "vertex_outer_timeout_seconds must be greater than or equal to "
+                "vertex_request_timeout_seconds"
             )
         if self.event_lease_heartbeat_seconds >= self.event_lease_seconds:
             raise ValueError(
@@ -847,6 +873,22 @@ class ProductionConfig:
         cfg.vertex_project_id = os.getenv("VERTEX_PROJECT_ID", cfg.vertex_project_id)
         cfg.vertex_location = os.getenv("VERTEX_LOCATION", cfg.vertex_location)
         cfg.vertex_model = os.getenv("VERTEX_MODEL", cfg.vertex_model)
+        cfg.vertex_request_timeout_seconds = _env_float(
+            "VERTEX_REQUEST_TIMEOUT_SECONDS",
+            cfg.vertex_request_timeout_seconds,
+        )
+        cfg.vertex_outer_timeout_seconds = _env_float(
+            "VERTEX_OUTER_TIMEOUT_SECONDS",
+            cfg.vertex_outer_timeout_seconds,
+        )
+        cfg.vertex_max_retries = _env_int(
+            "VERTEX_MAX_RETRIES",
+            cfg.vertex_max_retries,
+        )
+        cfg.vertex_retry_delay_seconds = _env_float(
+            "VERTEX_RETRY_DELAY_SECONDS",
+            cfg.vertex_retry_delay_seconds,
+        )
         cfg.classification_policy = _env_json("CLASSIFICATION_POLICY_JSON", cfg.classification_policy)
         cfg.classification_rules_path = os.getenv("CLASSIFICATION_RULES_PATH", cfg.classification_rules_path)
         cfg.threat_hypothesis_behavior_policy_path = os.getenv(

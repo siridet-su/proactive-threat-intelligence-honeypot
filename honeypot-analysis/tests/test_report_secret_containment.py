@@ -474,7 +474,7 @@ def test_vertex_sdk_boundary_redacts_all_prompt_content(
         models=SimpleNamespace(generate_content=generate_content)
     )
     client = VertexAIClient(TokenBudget(max_tokens=1_000))
-    monkeypatch.setattr(client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(client, "_get_client", lambda _timeout=None: fake_client)
     user_content = json.dumps(
         {
             "command": f"sshpass -p {SECRET} ssh root@example.invalid",
@@ -508,7 +508,7 @@ def test_vertex_prompt_redaction_failure_never_calls_sdk(
         calls += 1
         return SimpleNamespace(text="{}")
 
-    def get_client():
+    def get_client(_timeout=None):
         nonlocal client_initializations
         client_initializations += 1
         return SimpleNamespace(
