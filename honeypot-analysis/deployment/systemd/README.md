@@ -48,6 +48,8 @@ cd /opt/honeypot
 python3 -m venv .venv
 sudo chown -R honeypot:honeypot .venv
 sudo -u honeypot .venv/bin/pip install --upgrade pip
+sudo -u honeypot .venv/bin/pip install -r requirements.txt
+# Install this only after a private MongoDB deployment is explicitly selected:
 sudo -u honeypot .venv/bin/pip install -r requirements-mongodb.txt
 # Install only explicitly enabled optional groups, for example:
 sudo -u honeypot .venv/bin/pip install -r requirements-artifacts.txt

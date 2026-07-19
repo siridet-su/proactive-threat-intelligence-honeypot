@@ -12,7 +12,7 @@ remediation handoff.
 | `production.api.ingest_api` | `COMPLETE_AND_VERIFIED` | Authenticated, sensor-bound bounded ingest; local socket and storage tests pass. |
 | `production.api.dashboard_api` | `COMPLETE_AND_VERIFIED` | Authenticated JSON API, readiness/liveness and operational metrics. |
 | `production.api.monitor_web` | `COMPLETE_AND_VERIFIED` | Authenticated monitor/API; primary static frontend plus compatibility `/legacy` rendering. |
-| Session, analysis, enrichment, threat-hunt and webhook workers | `COMPLETE_AND_VERIFIED` | Durable fenced work on SQLite and MongoDB test backends; optional external services remain configuration-dependent. |
+| Session, analysis, enrichment, threat-hunt and webhook workers | `COMPLETE_AND_VERIFIED` | Durable fenced work on SQLite and mocked MongoDB test backends; real MongoDB and optional external services remain configuration-dependent. |
 | Sensor forwarder | `COMPLETE_AND_VERIFIED` | Crash-durable local spool/checkpoint semantics; current changes are not deployed to Raspberry Pi. |
 | Scheduled feed refresh | `COMPLETE_AND_VERIFIED` | Atomic last-good local implementation; timer is committed but not deployed or network-tested. |
 | Prediction backtest/calibration/retention and session-count timers | `COMPLETE_AND_VERIFIED` | Offline/oneshot operations. Retention timer is dry-run only. |
@@ -51,6 +51,13 @@ Optional imports must remain lazy. A core-only install must import every
 - `configs/*.trusted.json` and validators in `production.policies` are
   `COMPLETE_AND_VERIFIED` production policy inputs. Files named `*.example.json`
   are templates, not trusted deployment state.
+- The SMB recommendation-policy path is `COMPLETE_AND_VERIFIED` locally. File
+  and direct runtime inputs use the same validator; reviewed provenance,
+  registered conditions, unique IDs, deterministic ordering, asset selector
+  presence, and automation-safety consistency are enforced before influence.
+  Trusted actions, default guidance, and audit-only candidates are distinct;
+  report, monitor, and artifact consumers reject unreviewed or label-only
+  serialized actions. Invalid or unavailable policy fails closed.
 - Migration, backfill, normalization, job inspection, coverage, review, and
   repository-policy commands under `production.tools` are supported offline
   operational tools when invoked for their documented scope. Migration remains
@@ -112,3 +119,18 @@ virtual environments, caches, deployment archives, handoff files, and new
 generated evaluation outputs are not committable. See `.gitignore` and
 `docs/RETENTION_POLICY.md`. No existing tracked artifact was removed or
 rewritten during the reproducibility remediation.
+
+## Deployment readiness boundary
+
+Local verification does not authorize or establish deployment. Before updating
+an existing SQLite installation, operators must have a current backend-
+consistent backup or infrastructure snapshot, a restore rehearsal, a reviewed
+code/unit/config-metadata manifest, and an approved maintenance/rollback window.
+The session-worker hardening also requires a secret-manager-provisioned
+worker-only `hmac-sha256-v1` keyring and an atomic credential-policy update;
+never generate or expose that key in repository files, shared environment
+files, command output, or logs. Private report-directory permissions, the
+analysis-worker unit, configuration, and artifact writer must change as one
+rollback-capable deployment. MongoDB selection remains blocked until private
+live parity, migration, and recovery are separately proven; SQLite remains the
+supported fallback.

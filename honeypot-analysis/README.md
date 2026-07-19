@@ -15,7 +15,8 @@ network configuration.
 > to the Internet. Do not expose Cowrie or any related service without explicit
 > authorization, network isolation, egress controls, monitoring, and a tested
 > recovery procedure. Public-exposure and private-infrastructure deployment
-> material is intentionally excluded.
+> state is intentionally excluded. The repository includes generic hardened
+> deployment templates, but they are not evidence of any live host's state.
 
 ## Scope And Claim Boundary
 
@@ -50,10 +51,11 @@ authorized Cowrie event or synthetic fixture
   -> dashboard API and local read-only monitor
 ```
 
-The public package covers the analysis pipeline. Sensor exposure, cloud
-firewall rules, SSH administration, HAProxy relays, overlay-network policy,
-systemd units, and emergency rollback tooling are private operational concerns
-and are not included.
+The public package covers the analysis pipeline and generic systemd templates.
+Sensor exposure, cloud firewall rules, SSH administration, HAProxy relays,
+overlay-network policy, populated service configuration, host manifests,
+backups, and emergency rollback bundles are private operational concerns and
+are not included.
 
 ## Methodology
 
@@ -167,6 +169,16 @@ as distinct evidence states; none establishes execution or real-host impact.
 Reputation and prediction may prioritize defensive review but remain labeled
 context or forecast evidence and cannot strengthen behavioral claims.
 
+The recommendation policy is schema-validated on both file and in-memory
+runtime paths before it can influence risk, goals, or actions. Rule and action
+provenance must be explicitly reviewed; rule/action IDs and supported condition
+fields are validated; configured asset selectors do not match missing session
+fields. Strong operator actions, low-evidence default guidance, and rejected
+audit-only candidates use separate tiers. A missing, malformed, contradictory,
+unreviewed, or duplicate-ID policy fails closed and cannot emit a trusted
+operator action. Report, monitor, and artifact consumers recheck the same
+trusted-action contract rather than trusting an authority label alone.
+
 `enable_vertex_narrative` and `enable_actor_attribution` both default to
 `false`. When explicitly enabled, Vertex can only rewrite presentation text
 from cited canonical claim IDs; ungrounded output is rejected as a whole and
@@ -234,6 +246,10 @@ pip install -r requirements-mongodb.txt
 MongoDB must remain on a private management network and must not be exposed
 directly to the public Internet. Adapter initialization creates the reviewed
 unique and queue/query indexes before readiness succeeds.
+
+The repository's MongoDB evidence uses mocked adapter tests unless the opt-in
+test is explicitly pointed at an authorized private disposable server. A green
+default suite is not proof of a live MongoDB deployment, migration, or rollback.
 
 The migration tool opens SQLite read-only, never deletes it, uses stable
 idempotency keys, checkpoints each completed batch, and verifies collection
