@@ -1752,6 +1752,7 @@ def _build_trusted_recommendation_decision(
     except Exception as exc:
         return {
             "status": "unavailable",
+            "authority": "policy_unavailable",
             "reason": f"policy engine import failed: {_safe_exception_text(exc)}",
             "immediate_actions": [],
         }
@@ -1771,12 +1772,13 @@ def _build_trusted_recommendation_decision(
             action_policy=load_action_policy(policy_path),
             mitre_db=mitre_db,
         )
-        decision["status"] = "available"
-        decision["authority"] = "trusted_policy_engine"
+        decision.setdefault("status", "unavailable")
+        decision.setdefault("authority", "policy_unavailable")
         return decision
     except Exception as exc:
         return {
             "status": "error",
+            "authority": "policy_unavailable",
             "reason": f"policy engine failed: {_safe_exception_text(exc)}",
             "immediate_actions": [],
         }
@@ -3712,7 +3714,7 @@ class ImprovedAsyncSwarmCoordinator:
                 if str(item.get("action") or "").strip()
             ]
             fallback["recommendation_provenance"] = {
-                "authority": "trusted_policy_engine",
+                "authority": decision.get("authority") or "policy_unavailable",
                 "status": decision.get("status") or "unavailable",
                 "policy": (decision.get("trust") or {}).get("policy") or {},
                 "policy_action_count": len(actions),
@@ -4955,7 +4957,10 @@ class ImprovedAsyncSwarmCoordinator:
             "trusted_recommendation_decision": trusted_recommendation_decision,
             "artifact_recommendations": artifact_recommendations,
             "recommendation_provenance": {
-                "authority": "trusted_policy_engine",
+                "authority": (
+                    trusted_recommendation_decision.get("authority")
+                    or "policy_unavailable"
+                ),
                 "status": trusted_recommendation_decision.get("status") or "unavailable",
                 "policy": (
                     (trusted_recommendation_decision.get("trust") or {}).get("policy")
@@ -5276,7 +5281,7 @@ class ImprovedAsyncSwarmCoordinator:
             "recommended_actions_structured": [],
             "trusted_recommendation_decision": {},
             "recommendation_provenance": {
-                "authority": "trusted_policy_engine",
+                "authority": "policy_unavailable",
                 "status": "pending_policy_evaluation",
                 "policy_action_count": 0,
                 "fallback_actions_allowed": False,

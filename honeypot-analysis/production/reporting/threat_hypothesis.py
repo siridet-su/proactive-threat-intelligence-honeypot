@@ -18,6 +18,11 @@ from production.policies.threat_hypothesis_behavior_policy import (
     policy_summary,
     resolve_behavior_policy,
 )
+from production.reporting.smb_decision import (
+    is_trusted_recommendation_action,
+    is_trusted_recommendation_decision,
+    is_trusted_recommendation_provenance,
+)
 from production.utils.serialization import stable_id
 
 
@@ -837,9 +842,7 @@ def _canonical_operator_actions(
     output: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for action in candidates:
-        provenance = action.get("provenance") or {}
-        authority = _clean(action.get("authority") or provenance.get("authority"))
-        if action.get("approved_by_policy") is not True or authority != "trusted_policy_engine":
+        if not is_trusted_recommendation_action(action):
             continue
         action_id = _clean(action.get("action_id") or action.get("action"))
         if not action_id or action_id in seen:
@@ -899,13 +902,18 @@ def build_v2_report(
     )
     evidence_summary = build_claim_evidence_summary(assessment, follow_on)
     operator_actions = _canonical_operator_actions(report, observed)
+    recommendation_provenance = report.get("recommendation_provenance") or {}
+    trusted_decision = report.get("trusted_recommendation_decision")
+    recommendation_authority = "trusted_policy_engine" if (
+        is_trusted_recommendation_provenance(recommendation_provenance)
+        or is_trusted_recommendation_decision(trusted_decision)
+    ) else "policy_unavailable"
     report["recommended_actions_structured"] = operator_actions
     report["recommended_mitigations"] = [
         _clean(action.get("action"))
         for action in operator_actions
         if _clean(action.get("action"))
     ]
-    trusted_decision = report.get("trusted_recommendation_decision")
     if isinstance(trusted_decision, dict):
         trusted_decision = dict(trusted_decision)
         trusted_decision["immediate_actions"] = operator_actions
@@ -926,7 +934,7 @@ def build_v2_report(
             "operator_actions": operator_actions,
             "mitigations": report.get("recommended_mitigations") or [],
             "strategic": report.get("strategic_recommendations") or [],
-            "authority": "trusted_policy_engine",
+            "authority": recommendation_authority,
             "grounding_contract": "canonical_v2_evidence_or_explicit_context_only",
             "manual_approval_required": True,
         },

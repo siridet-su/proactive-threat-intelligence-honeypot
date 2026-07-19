@@ -20,6 +20,7 @@ from production.utils.sensitive_data import (
     redact_for_artifact,
 )
 from production.utils.serialization import stable_id, stable_json, utc_now
+from production.reporting.smb_decision import is_trusted_recommendation_action
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
@@ -423,11 +424,7 @@ def _trusted_recommendation_actions(report: Dict[str, Any]) -> List[Dict[str, An
     for item in candidates:
         if not isinstance(item, dict):
             continue
-        provenance = item.get("provenance") if isinstance(item.get("provenance"), dict) else {}
-        authority = str(item.get("authority") or provenance.get("authority") or "").strip()
-        if item.get("approved_by_policy") is not True:
-            continue
-        if authority and authority != "trusted_policy_engine":
+        if not is_trusted_recommendation_action(item):
             continue
         key = str(item.get("action_id") or item.get("rule_id") or item.get("action") or stable_json(item))
         if key in seen:

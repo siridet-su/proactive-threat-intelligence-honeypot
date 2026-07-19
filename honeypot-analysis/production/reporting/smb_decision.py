@@ -18,7 +18,13 @@ from string import Formatter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
-from production.utils.sensitive_data import redact_exception_for_log
+from production.policies.validate_smb_policy import (
+    BEHAVIOR_FLAG_KEYS,
+    ENRICHMENT_FLAG_KEYS,
+    validate_action_policy,
+    validate_asset_profile,
+)
+from production.utils.sensitive_data import redact_exception_for_log, redact_for_artifact
 from production.utils.serialization import stable_id, utc_now
 
 
@@ -111,12 +117,136 @@ def _load_json_file(path_text: str, default: Dict[str, Any]) -> Dict[str, Any]:
     return loaded
 
 
+def _safe_validation_errors(values: Iterable[Any]) -> List[str]:
+    redacted = redact_for_artifact([str(value or "") for value in values])
+    if not isinstance(redacted, list):
+        return ["policy validation failed"]
+    return [str(value) for value in redacted[:50] if str(value).strip()]
+
+
+def is_trusted_recommendation_action(value: Any) -> bool:
+    """Return true only for a reviewed action emitted by the trusted policy engine."""
+
+    if not isinstance(value, dict):
+        return False
+    provenance = value.get("provenance")
+    if not isinstance(provenance, dict):
+        return False
+    policy = provenance.get("policy")
+    rule = provenance.get("rule")
+    action_template = provenance.get("action_template")
+    return bool(
+        value.get("approved_by_policy") is True
+        and value.get("authority") == "trusted_policy_engine"
+        and value.get("recommendation_tier") == "trusted_recommendation"
+        and provenance.get("authority") == "trusted_policy_engine"
+        and isinstance(policy, dict)
+        and str(policy.get("policy_id") or "").strip()
+        and str(policy.get("version") or "").strip()
+        and isinstance(rule, dict)
+        and rule.get("reviewed") is True
+        and isinstance(action_template, dict)
+        and action_template.get("reviewed") is True
+    )
+
+
+def is_trusted_recommendation_decision(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    validation = (value.get("trust") or {}).get("policy_validation")
+    policy = (value.get("trust") or {}).get("policy")
+    return bool(
+        value.get("status") == "available"
+        and value.get("authority") == "trusted_policy_engine"
+        and isinstance(validation, dict)
+        and validation.get("status") == "valid"
+        and isinstance(policy, dict)
+        and str(policy.get("policy_id") or "").strip()
+        and str(policy.get("version") or "").strip()
+    )
+
+
+def is_trusted_recommendation_provenance(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    policy = value.get("policy")
+    return bool(
+        value.get("authority") == "trusted_policy_engine"
+        and value.get("status") == "available"
+        and isinstance(policy, dict)
+        and str(policy.get("policy_id") or "").strip()
+        and str(policy.get("version") or "").strip()
+    )
+
+
+def _runtime_action_policy(policy: Any, *, unavailable: bool = False) -> Dict[str, Any]:
+    raw = dict(policy) if isinstance(policy, dict) else {}
+    unavailable = unavailable or raw.get("policy_status") == "unavailable"
+    errors: List[str] = []
+    if raw.get("load_error"):
+        errors.append(str(raw.get("load_error")))
+    try:
+        errors.extend(validate_action_policy(raw))
+    except Exception as exc:
+        errors.append(redact_exception_for_log(exc))
+    if errors:
+        return {
+            "schema_version": "smb_action_policy.v1",
+            "policy_status": "unavailable" if unavailable else "invalid",
+            "load_error": "action policy unavailable" if unavailable else "action policy validation failed",
+            "validation_errors": _safe_validation_errors(errors),
+            "source_path": str(raw.get("source_path") or ""),
+            "trusted_sources": {},
+            "risk_rules": [],
+            "goal_rules": [],
+            "action_playbooks": [],
+            "default_guidance": {"actions": []},
+        }
+    raw["policy_status"] = "valid"
+    raw["validation_errors"] = []
+    return raw
+
+
+def _runtime_asset_profile(profile: Any, *, unavailable: bool = False) -> Dict[str, Any]:
+    raw = dict(profile) if isinstance(profile, dict) else {}
+    unavailable = unavailable or raw.get("profile_status") == "unavailable"
+    errors: List[str] = []
+    if raw.get("load_error"):
+        errors.append(str(raw.get("load_error")))
+    try:
+        errors.extend(validate_asset_profile(raw))
+    except Exception as exc:
+        errors.append(redact_exception_for_log(exc))
+    if errors:
+        return {
+            "schema_version": "smb_asset_profile.v1",
+            "profile_status": "unavailable" if unavailable else "invalid",
+            "load_error": "asset profile unavailable" if unavailable else "asset profile validation failed",
+            "validation_errors": _safe_validation_errors(errors),
+            "source_path": str(raw.get("source_path") or ""),
+            "assets": [],
+        }
+    raw["profile_status"] = "valid"
+    raw["validation_errors"] = []
+    return raw
+
+
 def load_asset_profile(path_text: str) -> Dict[str, Any]:
-    return _load_json_file(path_text, {"schema_version": "smb_asset_profile.v1", "assets": []})
+    if not path_text:
+        return _runtime_asset_profile({}, unavailable=True)
+    return _runtime_asset_profile(
+        _load_json_file(path_text, {"schema_version": "smb_asset_profile.v1", "assets": []}),
+        unavailable=not Path(path_text).exists(),
+    )
 
 
 def load_action_policy(path_text: str) -> Dict[str, Any]:
-    return _load_json_file(path_text, {"schema_version": "smb_action_policy.v1", "action_playbooks": []})
+    if not path_text:
+        return _runtime_action_policy({}, unavailable=True)
+    return _runtime_action_policy(
+        _load_json_file(path_text, {"schema_version": "smb_action_policy.v1", "action_playbooks": []}),
+        unavailable=not Path(path_text).exists(),
+    )
 
 
 def _nested_get(payload: Dict[str, Any], dotted_key: str) -> Any:
@@ -384,11 +514,11 @@ def _match_asset(asset: Dict[str, Any], session_payload: Dict[str, Any]) -> bool
     protocols = _lower_set(asset.get("protocols") or [])
     ports = {str(port) for port in _as_list(asset.get("ports"))}
     sensors = {str(value) for value in _as_list(asset.get("sensor_ids")) if str(value)}
-    if protocols and protocol and protocol not in protocols:
+    if protocols and (not protocol or protocol not in protocols):
         return False
-    if ports and dst_port and dst_port not in ports:
+    if ports and (not dst_port or dst_port not in ports):
         return False
-    if sensors and sensor and sensor not in sensors:
+    if sensors and (not sensor or sensor not in sensors):
         return False
     return bool(protocols or ports or sensors)
 
@@ -445,7 +575,7 @@ def _features(
     risk_score = _float_value(enrichment_context.get("risk_score"), 0.0)
     total_reports = _float_value(enrichment_context.get("total_reports"), 0.0)
     vt_hit = bool(enrichment_context.get("vt_hit"))
-    enrichment_flags = {
+    raw_enrichment_flags = {
         "is_tor_exit": bool(enrichment_context.get("is_tor_exit")),
         "is_vpn": bool(enrichment_context.get("is_vpn")),
         "has_high_reputation_risk": risk_score >= 75 or total_reports >= 25,
@@ -453,6 +583,9 @@ def _features(
         "has_vt_hit": vt_hit,
         "has_malware_family": bool(enrichment_context.get("vt_malware_family")),
         "has_open_ports": bool(enrichment_context.get("open_ports")),
+    }
+    enrichment_flags = {
+        key: bool(raw_enrichment_flags.get(key)) for key in ENRICHMENT_FLAG_KEYS
     }
     usernames = _clean_strings(
         [session_payload.get("login_username")]
@@ -485,7 +618,7 @@ def _features(
             command_text,
             re.IGNORECASE,
         ))
-    behavior_flags = {
+    raw_behavior_flags = {
         "has_commands": bool(commands),
         "has_login_success": bool(session_payload.get("login_success")),
         "has_downloader": has_transfer_attempt,
@@ -499,6 +632,7 @@ def _features(
         "has_credential_paths": bool(artifact_values.get("credential_paths")),
         "has_hashes": bool(artifact_values.get("hashes")),
     }
+    behavior_flags = {key: bool(raw_behavior_flags.get(key)) for key in BEHAVIOR_FLAG_KEYS}
     for tactic in tactics:
         behavior_flags[f"has_tactic_{str(tactic).lower()}"] = True
     return {
@@ -681,10 +815,12 @@ def _condition_matches(
         if "configured_asset_context" not in evidence_scopes:
             evidence_scopes.append("configured_asset_context")
 
-    if condition.get("internet_exposed_asset") is True and not features["internet_exposed_asset"]:
-        return no_match()
-    if condition.get("internet_exposed_asset") is True:
-        evidence.append("matched asset is marked internet-exposed")
+    if "internet_exposed_asset" in condition:
+        expected_exposure = condition.get("internet_exposed_asset")
+        if features["internet_exposed_asset"] is not expected_exposure:
+            return no_match()
+        exposure_label = "internet-exposed" if expected_exposure else "not internet-exposed"
+        evidence.append(f"matched asset is marked {exposure_label}")
         if "configured_asset_context" not in evidence_scopes:
             evidence_scopes.append("configured_asset_context")
 
@@ -848,6 +984,7 @@ def _build_action_payload(
     action_policy: Dict[str, Any],
     default_rule_id: str = "",
     default_playbook: str = "",
+    recommendation_tier: str = "trusted_recommendation",
 ) -> Dict[str, Any]:
     rendered_evidence = list(evidence or [])
     if not rendered_evidence:
@@ -857,6 +994,11 @@ def _build_action_payload(
         else:
             rendered_evidence.append("matched trusted policy default guidance")
     safety = _automation_safety(rule, action_item)
+    authority = (
+        "policy_default_guidance"
+        if recommendation_tier == "default_guidance"
+        else "trusted_policy_engine"
+    )
     visibility_limitations = _clean_strings(
         _as_list(rule.get("visibility_limitations"))
         + _as_list(action_item.get("visibility_limitations"))
@@ -885,10 +1027,11 @@ def _build_action_payload(
         "references": _rule_references(rule or action_item, action_policy),
         "automation_safety": safety,
         "requires_manual_approval": bool(safety.get("requires_manual_approval")),
-        "authority": "trusted_policy_engine",
+        "recommendation_tier": recommendation_tier,
+        "authority": authority,
         "approved_by_policy": True,
         "provenance": {
-            "authority": "trusted_policy_engine",
+            "authority": authority,
             "policy": _policy_metadata(action_policy),
             "rule": _entry_provenance(rule),
             "action_template": _entry_provenance(action_item),
@@ -923,7 +1066,15 @@ def _action_contract_errors(action: Dict[str, Any]) -> List[str]:
             errors.append("automation_safety missing requires_manual_approval")
         if not str(safety.get("level") or "").strip():
             errors.append("automation_safety missing level")
-    if action.get("authority") != "trusted_policy_engine":
+    tier = str(action.get("recommendation_tier") or "trusted_recommendation")
+    expected_authority = (
+        "policy_default_guidance"
+        if tier == "default_guidance"
+        else "trusted_policy_engine"
+    )
+    if tier not in {"trusted_recommendation", "default_guidance"}:
+        errors.append("invalid recommendation_tier")
+    if action.get("authority") != expected_authority:
         errors.append("invalid authority")
     if action.get("approved_by_policy") is not True:
         errors.append("not policy approved")
@@ -931,7 +1082,7 @@ def _action_contract_errors(action: Dict[str, Any]) -> List[str]:
     if not isinstance(provenance, dict):
         errors.append("missing provenance")
     else:
-        if provenance.get("authority") != "trusted_policy_engine":
+        if provenance.get("authority") != expected_authority:
             errors.append("invalid provenance authority")
         if not isinstance(provenance.get("policy"), dict) or not provenance["policy"].get("policy_id"):
             errors.append("missing policy provenance")
@@ -1038,8 +1189,9 @@ def build_smb_decision(
 ) -> Dict[str, Any]:
     """Build a small-business friendly proactive CTI decision object."""
     session_payload = session_payload if isinstance(session_payload, dict) else {}
-    asset_profile = asset_profile if isinstance(asset_profile, dict) else {"assets": []}
-    action_policy = action_policy if isinstance(action_policy, dict) else {"action_playbooks": []}
+    asset_profile = _runtime_asset_profile(asset_profile)
+    action_policy = _runtime_action_policy(action_policy)
+    policy_valid = action_policy.get("policy_status") == "valid"
     features = _features(session_payload, prediction_snapshot, asset_profile, action_policy)
     context = _template_context(features)
     matched_actions: List[Dict[str, Any]] = []
@@ -1126,10 +1278,11 @@ def build_smb_decision(
                 )
             )
 
-    if not matched_actions:
+    default_actions: List[Dict[str, Any]] = []
+    if not matched_actions and policy_valid:
         for action in _as_list((action_policy.get("default_guidance") or {}).get("actions")):
             if isinstance(action, dict):
-                matched_actions.append(
+                default_actions.append(
                     _build_action_payload(
                         rule={
                             **action,
@@ -1145,46 +1298,68 @@ def build_smb_decision(
                         action_policy=action_policy,
                         default_rule_id="default_guidance",
                         default_playbook="Default guidance",
+                        recommendation_tier="default_guidance",
                     )
                 )
 
     rejected_actions: List[Dict[str, Any]] = []
     valid_actions: List[Dict[str, Any]] = []
-    for action in matched_actions:
-        errors = _action_contract_errors(action)
-        if errors:
-            rejected_actions.append(
-                {
-                    "action_id": action.get("action_id") or "",
-                    "rule_id": action.get("rule_id") or "",
-                    "errors": errors,
-                }
-            )
-            continue
-        valid_actions.append(action)
+    valid_default_actions: List[Dict[str, Any]] = []
+    for candidates, output in (
+        (matched_actions, valid_actions),
+        (default_actions, valid_default_actions),
+    ):
+        seen_action_ids: set[str] = set()
+        for action in candidates:
+            errors = _action_contract_errors(action)
+            action_id = str(action.get("action_id") or "").strip()
+            if action_id in seen_action_ids:
+                errors.append("duplicate action_id in runtime result")
+            elif action_id:
+                seen_action_ids.add(action_id)
+            if errors:
+                rejected_actions.append(
+                    {
+                        "action_id": action_id,
+                        "rule_id": action.get("rule_id") or "",
+                        "recommendation_tier": action.get("recommendation_tier") or "audit_only_candidate",
+                        "errors": sorted(set(errors)),
+                    }
+                )
+                continue
+            output.append(action)
 
-    deduplicated_actions: Dict[str, Dict[str, Any]] = {}
-    for action in valid_actions:
-        key = str(action.get("action_id") or action.get("action") or "").strip()
-        if not key:
-            continue
-        existing = deduplicated_actions.get(key)
-        if existing is None:
-            deduplicated_actions[key] = action
-            continue
-        existing["evidence"] = _clean_strings(
-            _as_list(existing.get("evidence")) + _as_list(action.get("evidence"))
+    matched_actions = sorted(
+        valid_actions,
+        key=lambda item: (
+            int(item.get("priority", 50)),
+            str(item.get("action_id") or ""),
+            str(item.get("action") or ""),
+            str(item.get("rule_id") or ""),
+        ),
+    )
+    default_actions = sorted(
+        valid_default_actions,
+        key=lambda item: (
+            int(item.get("priority", 50)),
+            str(item.get("action_id") or ""),
+            str(item.get("action") or ""),
+        ),
+    )
+    matched_risks.sort(
+        key=lambda item: (
+            -RISK_ORDER.get(str(item.get("severity") or "low"), 1),
+            str(item.get("rule_id") or ""),
+            str(item.get("reason") or ""),
         )
-        existing["evidence_refs"] = _clean_strings(
-            _as_list(existing.get("evidence_refs")) + _as_list(action.get("evidence_refs"))
+    )
+    matched_goals.sort(
+        key=lambda item: (
+            -CONFIDENCE_ORDER.get(str(item.get("confidence") or "low"), 1),
+            str(item.get("rule_id") or ""),
+            str(item.get("likely_goal") or ""),
         )
-        existing["evidence_scope"] = _clean_strings(
-            _as_list(existing.get("evidence_scope")) + _as_list(action.get("evidence_scope"))
-        )
-        existing["priority"] = min(int(existing.get("priority", 50)), int(action.get("priority", 50)))
-
-    matched_actions = list(deduplicated_actions.values())
-    matched_actions.sort(key=lambda item: (item.get("priority", 50), item.get("action", "")))
+    )
     strongest_risk = max(matched_risks, key=lambda item: RISK_ORDER.get(item.get("severity", "low"), 1), default=None)
     if not strongest_risk:
         strongest_risk = {
@@ -1207,6 +1382,16 @@ def build_smb_decision(
     }
     prediction = features.get("top_prediction") or {}
     reference_guidance = _mitre_reference_guidance(features, mitre_db)
+    audit_only_candidates = list(rejected_actions)
+    if not policy_valid:
+        audit_only_candidates.insert(
+            0,
+            {
+                "candidate_type": "action_policy",
+                "recommendation_tier": "audit_only_candidate",
+                "errors": list(action_policy.get("validation_errors") or []),
+            },
+        )
     decision = {
         "schema_version": SCHEMA_VERSION,
         "decision_id": stable_id(
@@ -1219,6 +1404,8 @@ def build_smb_decision(
             },
         ),
         "generated_at": utc_now(),
+        "status": "available" if policy_valid else "unavailable",
+        "authority": "trusted_policy_engine" if policy_valid else "policy_unavailable",
         "session_id": features["session_id"],
         "mode": "smb_proactive_threat_intelligence",
         "risk": strongest_risk,
@@ -1231,8 +1418,14 @@ def build_smb_decision(
             "source": "realtime_prediction" if prediction else "not_available",
         },
         "immediate_actions": matched_actions[:8],
+        "default_guidance": default_actions[:8],
         "reference_guidance": reference_guidance[:8],
         "rejected_actions": rejected_actions,
+        "recommendation_tiers": {
+            "trusted_recommendations": matched_actions[:8],
+            "default_guidance": default_actions[:8],
+            "audit_only_candidates": audit_only_candidates[:20],
+        },
         "matched_risk_rules": matched_risks,
         "matched_goal_rules": matched_goals,
         "asset_context": {
@@ -1289,6 +1482,14 @@ def build_smb_decision(
         "trust": {
             "policy": _policy_metadata(action_policy),
             "policy_load_error": action_policy.get("load_error", ""),
+            "policy_validation": {
+                "status": action_policy.get("policy_status") or "invalid",
+                "errors": list(action_policy.get("validation_errors") or []),
+            },
+            "asset_profile_validation": {
+                "status": asset_profile.get("profile_status") or "invalid",
+                "errors": list(asset_profile.get("validation_errors") or []),
+            },
             "trusted_source_count": len(action_policy.get("trusted_sources") or {}),
             "reference_guidance_source": (
                 "MITRE ATT&CK STIX/cache" if reference_guidance else ""

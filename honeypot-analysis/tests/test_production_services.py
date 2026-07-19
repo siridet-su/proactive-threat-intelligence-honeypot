@@ -7485,10 +7485,21 @@ def test_monitor_extracts_report_recommendations() -> None:
                 "requires_manual_approval": True,
                 "authority": "trusted_policy_engine",
                 "approved_by_policy": True,
+                "recommendation_tier": "trusted_recommendation",
+                "provenance": {
+                    "authority": "trusted_policy_engine",
+                    "policy": {"policy_id": "test-policy", "version": "1.0"},
+                    "rule": {"reviewed": True},
+                    "action_template": {"reviewed": True},
+                },
             }
         ],
         "strategic_recommendations": ["Require segmented honeypot networks."],
-        "recommendation_provenance": {"authority": "trusted_policy_engine"},
+        "recommendation_provenance": {
+            "authority": "trusted_policy_engine",
+            "status": "available",
+            "policy": {"policy_id": "test-policy", "version": "1.0"},
+        },
         "threat_hypothesis": {
             "predicted_next_action": "Possible persistence setup after payload staging.",
             "post_session_follow_on_hypothesis": "Possible persistence setup after payload staging.",
@@ -7720,6 +7731,13 @@ def test_stix_bundle_exports_policy_actions_observations_sightings_and_campaign(
                 "requires_manual_approval": True,
                 "approved_by_policy": True,
                 "authority": "trusted_policy_engine",
+                "recommendation_tier": "trusted_recommendation",
+                "provenance": {
+                    "authority": "trusted_policy_engine",
+                    "policy": {"policy_id": "test-policy", "version": "1.0"},
+                    "rule": {"reviewed": True},
+                    "action_template": {"reviewed": True},
+                },
             }
         ],
     }

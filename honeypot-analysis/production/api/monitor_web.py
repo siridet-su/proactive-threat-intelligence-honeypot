@@ -49,7 +49,12 @@ from production.utils.http_security import (
 )
 from production.utils.serialization import html_script_json, stable_id, utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
-from production.reporting.smb_decision import build_smb_decision_from_paths
+from production.reporting.smb_decision import (
+    build_smb_decision_from_paths,
+    is_trusted_recommendation_action,
+    is_trusted_recommendation_decision,
+    is_trusted_recommendation_provenance,
+)
 from production.storage import open_storage, safe_database_descriptor
 
 
@@ -1524,20 +1529,13 @@ def _report_recommendations(
         ]
     policy_actions: List[Dict[str, Any]] = []
     for item in structured_actions:
-        action_provenance = item.get("provenance")
-        if not isinstance(action_provenance, dict):
-            action_provenance = {}
-        authority = str(item.get("authority") or action_provenance.get("authority") or "").strip()
-        if item.get("approved_by_policy") is True and authority == "trusted_policy_engine":
+        if is_trusted_recommendation_action(item):
             policy_actions.append(item)
     structured_actions = policy_actions
     provenance = merged.get("recommendation_provenance") or {}
     policy_authoritative = (
-        isinstance(provenance, dict)
-        and provenance.get("authority") == "trusted_policy_engine"
-    ) or (
-        isinstance(trusted_decision, dict)
-        and trusted_decision.get("authority") == "trusted_policy_engine"
+        is_trusted_recommendation_provenance(provenance)
+        or is_trusted_recommendation_decision(trusted_decision)
     )
     recommended_actions = [
         str(item.get("action") or "").strip()
