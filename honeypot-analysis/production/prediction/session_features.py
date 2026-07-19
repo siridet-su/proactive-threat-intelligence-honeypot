@@ -15,6 +15,7 @@ from production.classification.trust import is_trusted_classification_event
 from production.utils.sensitive_data import redact_for_session_state
 from production.utils.serialization import session_to_payload, stable_id
 from production.correlation.session_ttp_knowledge import main_ttp_id
+from production.correlation.session_ttp_correlation import correlation_allows_influence
 from production.correlation.campaign_clustering import build_session_fingerprint
 from production.prediction.behavior_regime import command_timing_events
 
@@ -55,14 +56,7 @@ def _unique_ordered(values: Iterable[Any]) -> List[str]:
 def _is_prediction_eligible_correlation(item: Dict[str, Any]) -> bool:
     """Reject legacy ``apply_to_prediction`` flags without review/evaluation proof."""
 
-    if not item.get("apply_to_prediction", False):
-        return False
-    eligibility = item.get("prediction_eligibility") or {}
-    return bool(
-        eligibility.get("effective")
-        and eligibility.get("reviewed")
-        and eligibility.get("evaluated")
-    )
+    return correlation_allows_influence(item, "prediction")
 
 
 CVE_PATTERN = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)

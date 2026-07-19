@@ -377,7 +377,45 @@ def extract_command_entities(
         account_definition.get("authorized_keys_account_pattern"),
     )
     account_action_type = _clean(account_definition.get("action_type"))
-    if authorized_keys_marker and authorized_keys_marker in command:
+    non_option_arguments = [
+        token
+        for token in tokens[1:]
+        if not token.startswith("-")
+    ]
+    authorized_keys_is_copy_destination = bool(
+        executable in {"cp", "install"}
+        and non_option_arguments
+        and authorized_keys_marker in non_option_arguments[-1]
+    )
+    in_place_sed = any(
+        token == "--in-place" or token.startswith("-i")
+        for token in tokens[1:]
+    )
+    authorized_keys_modified = bool(
+        authorized_keys_marker
+        and authorized_keys_marker in command
+        and (
+            re.search(
+                rf"(?:>>?|\btee(?:\s+-a)?\b)[^\n]*{re.escape(authorized_keys_marker)}",
+                command,
+                re.IGNORECASE,
+            )
+            or (
+                executable in {
+                    "chmod",
+                    "chown",
+                    "mv",
+                    "rm",
+                    "sed",
+                    "touch",
+                    "truncate",
+                }
+                and not (executable == "sed" and not in_place_sed)
+            )
+            or authorized_keys_is_copy_destination
+        )
+    )
+    if authorized_keys_modified:
         for value in _path_values(command, path_pattern):
             if authorized_keys_marker in value:
                 _add_entity(entities, "modified_paths", "path", value, cwd)

@@ -74,6 +74,8 @@ EXTERNAL_REFERENCE_SOURCE_TYPES = {
     "external_cowrie_seed",
 }
 
+INFLUENCE_CONSUMERS = ("report", "prediction", "campaign", "threat_hunt", "alert")
+
 
 def _as_list(value: Any) -> List[Any]:
     if value is None:
@@ -419,6 +421,58 @@ def _prediction_eligibility(rule: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _reviewed_consumer_eligibility(
+    rule: Dict[str, Any],
+    consumer: str,
+) -> Dict[str, Any]:
+    requested = bool(rule.get(f"apply_to_{consumer}", False))
+    provenance = rule.get("provenance") or {}
+    reviewed = provenance.get("reviewed") is True
+    effective = requested and reviewed
+    if effective:
+        reason = f"rule explicitly permits reviewed {consumer} influence"
+    elif not requested:
+        reason = f"rule is not permitted to influence {consumer}"
+    else:
+        reason = f"{consumer} influence requested but rule is not reviewed"
+    return {
+        "requested": requested,
+        "reviewed": reviewed,
+        "effective": effective,
+        "reason": reason,
+    }
+
+
+def correlation_allows_influence(item: Dict[str, Any], consumer: str) -> bool:
+    """Fail closed when a correlation lacks an explicit downstream scope."""
+
+    name = _clean_text(consumer).lower()
+    if name not in INFLUENCE_CONSUMERS:
+        return False
+    if name == "report":
+        return True
+    scope = item.get("influence_scope") or {}
+    entry = scope.get(name) if isinstance(scope, dict) else None
+    if isinstance(entry, dict):
+        return entry.get("effective") is True
+    if entry is True:
+        return True
+    if name != "prediction":
+        return False
+
+    # Correlations persisted before influence_scope was introduced already
+    # carried a strict prediction contract. Preserve those reviewed/evaluated
+    # records without accepting the legacy apply_to_prediction flag by itself.
+    eligibility = item.get("prediction_eligibility") or {}
+    return bool(
+        item.get("apply_to_prediction") is True
+        and isinstance(eligibility, dict)
+        and eligibility.get("effective") is True
+        and eligibility.get("reviewed") is True
+        and eligibility.get("evaluated") is True
+    )
+
+
 def correlate_session(
     session_payload: Dict[str, Any],
     policy_document: Dict[str, Any],
@@ -450,6 +504,18 @@ def correlate_session(
         rule_id = _clean_text(rule.get("rule_id"))
         confidence = _clamp_confidence(rule.get("confidence"), 0.5)
         prediction_eligibility = _prediction_eligibility(rule)
+        influence_scope = {
+            "report": {
+                "requested": True,
+                "reviewed": True,
+                "effective": True,
+                "reason": "matched correlations are report-visible",
+            },
+            "prediction": prediction_eligibility,
+            "campaign": _reviewed_consumer_eligibility(rule, "campaign"),
+            "threat_hunt": _reviewed_consumer_eligibility(rule, "threat_hunt"),
+            "alert": _reviewed_consumer_eligibility(rule, "alert"),
+        }
         correlation = {
             "correlation_id": stable_id(
                 "sessionttp",
@@ -477,6 +543,7 @@ def correlate_session(
             "apply_to_prediction": prediction_eligibility["effective"],
             "apply_to_prediction_requested": prediction_eligibility["requested"],
             "prediction_eligibility": prediction_eligibility,
+            "influence_scope": influence_scope,
             "reason": _clean_text(rule.get("reason")),
             "matched_conditions": condition_results,
             "evidence": [item for result in condition_results for item in result.get("evidence", [])][:20],
@@ -512,6 +579,14 @@ def correlate_session(
         "source_types": sorted({item.get("source_type") for item in correlations if item.get("source_type")}),
         "correlated_ttps_for_prediction": _unique(ttps_for_prediction),
         "correlated_tactics_for_prediction": _unique(tactics_for_prediction),
+        "effective_influence_counts": {
+            consumer: sum(
+                1
+                for item in correlations
+                if correlation_allows_influence(item, consumer)
+            )
+            for consumer in INFLUENCE_CONSUMERS
+        },
         "session_evidence_graph_summary": evidence_graph.get("summary") or {},
         "knowledge_summary": knowledge_summary,
         "knowledge_pack_ids": knowledge_summary.get("knowledge_pack_ids") or [],
@@ -590,8 +665,10 @@ def validate_policy_document(document: Dict[str, Any]) -> List[str]:
             errors.append(f"{path}.confidence must be between 0 and 1")
         if "temporal_claim" in rule and not isinstance(rule.get("temporal_claim"), bool):
             errors.append(f"{path}.temporal_claim must be boolean")
-        if "apply_to_prediction" in rule and not isinstance(rule.get("apply_to_prediction"), bool):
-            errors.append(f"{path}.apply_to_prediction must be boolean")
+        for consumer in ("prediction", "campaign", "threat_hunt", "alert"):
+            field = f"apply_to_{consumer}"
+            if field in rule and not isinstance(rule.get(field), bool):
+                errors.append(f"{path}.{field} must be boolean")
         provenance = rule.get("provenance")
         if not isinstance(provenance, dict) or not provenance:
             errors.append(f"{path}.provenance is required")
@@ -610,6 +687,11 @@ def validate_policy_document(document: Dict[str, Any]) -> List[str]:
                 if not eligibility["reviewed"] or not eligibility["evaluated"]:
                     errors.append(
                         f"{path}.apply_to_prediction requires explicit reviewed=true and evaluated=true"
+                    )
+            for consumer in ("campaign", "threat_hunt", "alert"):
+                if rule.get(f"apply_to_{consumer}") and provenance.get("reviewed") is not True:
+                    errors.append(
+                        f"{path}.apply_to_{consumer} requires provenance.reviewed=true"
                     )
         references = _normalize_refs(rule.get("references") or [])
         if not references:

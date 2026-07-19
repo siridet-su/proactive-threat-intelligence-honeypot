@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
+from production.correlation.session_ttp_correlation import correlation_allows_influence
 from production.utils.config import ProductionConfig
 from production.utils.serialization import stable_id, utc_now
 from production.storage import open_storage
@@ -50,6 +51,10 @@ def _policy(config_or_policy: ProductionConfig | Dict[str, Any]) -> Dict[str, An
     policy.setdefault("min_commands_active", 1)
     policy.setdefault("min_commands_closed", 1)
     policy.setdefault("min_match_score", 0.35)
+    policy.setdefault("min_match_raw_score", 0.25)
+    policy.setdefault("min_independent_evidence_classes", 1)
+    policy.setdefault("allow_source_ip_only_match", False)
+    policy.setdefault("source_ip_only_confidence", 0.2)
     policy.setdefault("max_matches", 10)
     policy.setdefault("command_pattern_command_limit", 6)
     policy.setdefault("command_pattern_token_limit", 3)
@@ -137,7 +142,7 @@ def _confirmed_tactics(session_payload: Dict[str, Any]) -> List[str]:
         if tactic not in output:
             output.append(tactic)
     for item in session_payload.get("session_ttp_correlations") or []:
-        if isinstance(item, dict):
+        if isinstance(item, dict) and correlation_allows_influence(item, "campaign"):
             tactic = str(item.get("tactic") or "").strip().lower()
             if tactic and tactic != "unknown" and tactic not in output:
                 output.append(tactic)
@@ -261,12 +266,28 @@ def score_campaign_match(campaign: Dict[str, Any], fingerprint: Dict[str, Any], 
                 score += weight
                 reasons.append(f"matched {key}")
     normalized = score / total_possible if total_possible > 0 else 0.0
+    matched_fields = [reason.removeprefix("matched ") for reason in reasons]
+    source_ip_only = matched_fields == ["source_ip"]
+    if source_ip_only:
+        try:
+            source_ip_cap = float(policy.get("source_ip_only_confidence", 0.2))
+        except (TypeError, ValueError):
+            source_ip_cap = 0.2
+        normalized = min(normalized, max(0.0, min(source_ip_cap, 1.0)))
     return {
         "campaign_id": campaign.get("campaign_id") or "",
         "score": round(normalized, 4),
         "raw_score": round(score, 4),
         "total_possible": round(total_possible, 4),
         "match_reasons": reasons,
+        "matched_evidence_classes": matched_fields,
+        "independent_evidence_class_count": len(matched_fields),
+        "source_ip_only": source_ip_only,
+        "match_category": (
+            "source_ip_only_low_confidence"
+            if source_ip_only
+            else "multi_signal" if len(matched_fields) > 1 else "single_non_ip_signal"
+        ),
         "campaign": campaign,
     }
 
@@ -275,16 +296,31 @@ def find_matching_campaigns(storage: Any, fingerprint: Dict[str, Any], policy: D
     candidates = storage.find_matching_campaigns(fingerprint, limit=int(policy.get("max_matches") or 10) * 5)
     matches = [score_campaign_match(candidate, fingerprint, policy) for candidate in candidates]
     minimum = float(policy.get("min_match_score") or 0.0)
-    matches = [item for item in matches if item["score"] >= minimum]
+    minimum_raw = float(policy.get("min_match_raw_score") or 0.0)
+    minimum_classes = int(policy.get("min_independent_evidence_classes") or 1)
+    allow_source_ip_only = bool(policy.get("allow_source_ip_only_match", False))
+    matches = [
+        item
+        for item in matches
+        if item["score"] >= minimum
+        and item["raw_score"] >= minimum_raw
+        and item["independent_evidence_class_count"] >= minimum_classes
+        and (allow_source_ip_only or not item["source_ip_only"])
+    ]
     return sorted(matches, key=lambda item: item["score"], reverse=True)[: int(policy.get("max_matches") or 10)]
 
 
-def _campaign_id_for_fingerprint(fingerprint: Dict[str, Any]) -> str:
+def _campaign_id_for_fingerprint(
+    fingerprint: Dict[str, Any],
+    session_id: str = "",
+) -> str:
+    source_ip_only = fingerprint.get("primary_fingerprint_type") == "src_ip"
     return stable_id(
         "campaign",
         {
             "primary_fingerprint_type": fingerprint.get("primary_fingerprint_type") or "",
             "primary_fingerprint_value": fingerprint.get("primary_fingerprint_value") or "",
+            "source_ip_only_session_id": session_id if source_ip_only else "",
         },
     )
 
@@ -400,7 +436,10 @@ def create_or_update_campaign(
     best_match = matches[0] if matches else {}
     existing_campaign = best_match.get("campaign") if best_match else None
     matched_existing = bool(existing_campaign)
-    campaign_id = str((existing_campaign or {}).get("campaign_id") or _campaign_id_for_fingerprint(fingerprint))
+    campaign_id = str(
+        (existing_campaign or {}).get("campaign_id")
+        or _campaign_id_for_fingerprint(fingerprint, session_id)
+    )
     prior_campaign_sessions = []
     if matched_existing:
         try:
@@ -416,7 +455,13 @@ def create_or_update_campaign(
     )
     campaign = _campaign_payload(campaign_id, fingerprint, session_payload, policy, existing_campaign)
     storage.save_campaign(campaign)
-    link_confidence = float(best_match.get("score") or (0.0 if matched_existing else 1.0))
+    source_ip_only = fingerprint.get("primary_fingerprint_type") == "src_ip"
+    if matched_existing:
+        link_confidence = float(best_match.get("score") or 0.0)
+    elif source_ip_only:
+        link_confidence = float(policy.get("source_ip_only_confidence", 0.2))
+    else:
+        link_confidence = 1.0
     link_id, inserted = storage.link_campaign_session(
         campaign_id,
         session_id,
@@ -444,7 +489,13 @@ def create_or_update_campaign(
     if alert:
         alert_id = storage.store_alert(alert)
     return {
-        "status": "matched" if matched_existing else "created",
+        "status": (
+            "matched"
+            if matched_existing
+            else "created_source_ip_only_low_confidence"
+            if source_ip_only
+            else "created"
+        ),
         "session_id": session_id,
         "campaign_id": campaign_id,
         "matched_existing_campaign": matched_existing,

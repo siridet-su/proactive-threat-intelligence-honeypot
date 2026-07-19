@@ -218,6 +218,11 @@ def load_rule_specs(path_text: str = "", rule_review_mode: str = "") -> List[Tup
 
 RULE_POLICY = load_classification_rule_policy()
 RULE_SPECS: List[Tuple[str, str, str]] = load_rule_specs()
+RULE_EVIDENCE_SOURCE = (
+    "emergency_python_fallback"
+    if RULE_POLICY.get("policy_id") == "emergency-python-fallback"
+    else "rule"
+)
 
 
 def _compile_rules(rule_specs: Sequence[Tuple[str, str, str]]) -> List[Tuple[re.Pattern[str], str, str]]:
@@ -365,6 +370,7 @@ def _rule_based_ttp_with_rules(
     command: str,
     rules: Sequence[Tuple[re.Pattern[str], str, str]],
     combined_pattern: re.Pattern[str],
+    source: str = "rule",
 ) -> List[TTPPrediction]:
     command = command or ""
     if not combined_pattern.search(command):
@@ -374,13 +380,26 @@ def _rule_based_ttp_with_rules(
     seen = set()
     for pattern, tid, name in rules:
         if tid not in seen and pattern.search(command):
-            matched.append(TTPPrediction(tid=tid, name=name, confidence=1.0, high_conf=True, source="rule"))
+            matched.append(
+                TTPPrediction(
+                    tid=tid,
+                    name=name,
+                    confidence=1.0,
+                    high_conf=source != "emergency_python_fallback",
+                    source=source,
+                )
+            )
             seen.add(tid)
     return matched
 
 
 def rule_based_ttp(command: str) -> List[TTPPrediction]:
-    return _rule_based_ttp_with_rules(command, RULES, _COMBINED_PATTERN)
+    return _rule_based_ttp_with_rules(
+        command,
+        RULES,
+        _COMBINED_PATTERN,
+        RULE_EVIDENCE_SOURCE,
+    )
 
 
 def is_shell_noise(
@@ -427,6 +446,11 @@ class NotebookParityClassifier:
         )
         self.rule_policy_id = _clean_text(self.rule_policy.get("policy_id"))
         self.rule_policy_version = _clean_text(self.rule_policy.get("version"))
+        self.rule_evidence_source = (
+            "emergency_python_fallback"
+            if self.rule_policy_id == "emergency-python-fallback"
+            else "rule"
+        )
 
     def _policy_provenance(self) -> Dict[str, Any]:
         return {
@@ -479,7 +503,12 @@ class NotebookParityClassifier:
         if not command:
             return []
 
-        rule_predictions = _rule_based_ttp_with_rules(command, self.rules, self.combined_pattern)
+        rule_predictions = _rule_based_ttp_with_rules(
+            command,
+            self.rules,
+            self.combined_pattern,
+            self.rule_evidence_source,
+        )
         if is_shell_noise(command, self.rules, self.combined_pattern) and not rule_predictions:
             return [{
                 "command": command,
@@ -502,15 +531,23 @@ class NotebookParityClassifier:
             events: List[Dict[str, Any]] = []
             for prediction in rule_predictions:
                 rule_tactic = self._tactic(prediction.tid)
-                source = "rule"
-                agreement_status = "rule_only"
-                high_confidence = True
-                confidence_semantics = "reviewed_rule_policy_match_not_calibrated_probability"
+                emergency_rule = prediction.source == "emergency_python_fallback"
+                source = prediction.source or "rule"
+                agreement_status = "emergency_rule_only" if emergency_rule else "rule_only"
+                high_confidence = not emergency_rule
+                confidence_semantics = (
+                    "unreviewed_emergency_rule_audit_only"
+                    if emergency_rule
+                    else "reviewed_rule_policy_match_not_calibrated_probability"
+                )
                 if has_bert:
                     if prediction.tid.upper() == bert_prediction.tid.upper():
-                        source = "both"
-                        agreement_status = "exact_technique_agreement"
-                        confidence_semantics = "rule_model_agreement_not_calibrated_probability"
+                        if emergency_rule:
+                            agreement_status = "emergency_rule_model_agreement_audit_only"
+                        else:
+                            source = "both"
+                            agreement_status = "exact_technique_agreement"
+                            confidence_semantics = "rule_model_agreement_not_calibrated_probability"
                     else:
                         source = "rule_securebert_disagreement"
                         high_confidence = False

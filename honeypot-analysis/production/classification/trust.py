@@ -11,6 +11,7 @@ from typing import Any, Dict
 
 
 AUDIT_ONLY_CLASSIFICATION_SOURCES = {
+    "emergency_python_fallback",
     "rule_securebert_disagreement",
     "shell_noise",
     "securebert_low_confidence",
@@ -87,6 +88,8 @@ def classification_audit_reason(event: Dict[str, Any]) -> str:
     agreement_status = str(event.get("agreement_status") or "").strip().lower()
     if source == "shell_noise":
         return "shell noise is retained for audit and excluded from ATT&CK evidence"
+    if source == "emergency_python_fallback":
+        return "unreviewed emergency rule match is retained for audit and excluded from trusted evidence"
     if source == "rule_securebert_disagreement" or "disagreement" in agreement_status:
         return "rule and SecureBERT disagree; the candidate is retained for audit and excluded from trusted evidence"
     if is_opaque_securebert_probe(event):

@@ -14,6 +14,7 @@ import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
+from production.correlation.session_ttp_correlation import correlation_allows_influence
 from production.utils.config import ProductionConfig
 from production.correlation.observable_sightings import extract_session_observable_sightings
 from production.utils.sensitive_data import redact_exception_for_log
@@ -86,7 +87,10 @@ def _login_success(session_payload: Dict[str, Any]) -> bool:
     return bool(session_payload.get("login_success") or session_payload.get("successful_login"))
 
 
-def _tactics(session_payload: Dict[str, Any]) -> List[str]:
+def _tactics(
+    session_payload: Dict[str, Any],
+    correlation_scope: str = "threat_hunt",
+) -> List[str]:
     output: List[str] = []
     classification_events = [
         event for event in session_payload.get("classification_events") or []
@@ -105,7 +109,10 @@ def _tactics(session_payload: Dict[str, Any]) -> List[str]:
             if text and text not in output:
                 output.append(text)
     for item in session_payload.get("session_ttp_correlations") or []:
-        if isinstance(item, dict):
+        if (
+            isinstance(item, dict)
+            and correlation_allows_influence(item, correlation_scope)
+        ):
             text = str(item.get("tactic") or "").strip()
             if text and text not in output:
                 output.append(text)
@@ -115,7 +122,10 @@ def _tactics(session_payload: Dict[str, Any]) -> List[str]:
 def _source_severity(policy: Dict[str, Any], observable_type: str, source_payload: Dict[str, Any]) -> str:
     base = str((policy.get("severity_by_observable_type") or {}).get(observable_type) or "medium")
     tactic_map = policy.get("tactic_severity") or {}
-    tactic_severities = [str(tactic_map.get(tactic) or "") for tactic in _tactics(source_payload)]
+    tactic_severities = [
+        str(tactic_map.get(tactic) or "")
+        for tactic in _tactics(source_payload, "alert")
+    ]
     return _severity_max(base, *tactic_severities)
 
 

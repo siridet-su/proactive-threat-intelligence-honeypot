@@ -276,14 +276,26 @@ def _edges(
     observables: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     edges: List[Dict[str, Any]] = []
+    classification_occurrences: Dict[str, int] = {}
     for index, event in enumerate(classification_events):
         original_command = _clean_text(event.get("original_command"))
         command = _clean_text(event.get("command"))
         target_command = original_command or command
-        try:
-            command_index = commands.index(target_command)
-        except ValueError:
-            command_index = -1
+        command_index = -1
+        declared_index = event.get("compound_command_index")
+        if (
+            isinstance(declared_index, int)
+            and 0 <= declared_index < len(commands)
+            and commands[declared_index] == target_command
+        ):
+            command_index = declared_index
+        else:
+            start = classification_occurrences.get(target_command, 0)
+            for candidate in range(start, len(commands)):
+                if commands[candidate] == target_command:
+                    command_index = candidate
+                    classification_occurrences[target_command] = candidate + 1
+                    break
         if command_index >= 0:
             edges.append(
                 {
@@ -292,15 +304,23 @@ def _edges(
                     "relation": "classified_as",
                 }
             )
+    raw_occurrences: Dict[str, int] = {}
     for index, event in enumerate(raw_events):
         eventid = _clean_text(event.get("eventid"))
         if eventid.startswith("cowrie.command."):
             command_text = _clean_text(event.get("input"))
-            if command_text in commands:
+            command_index = -1
+            start = raw_occurrences.get(command_text, 0)
+            for candidate in range(start, len(commands)):
+                if commands[candidate] == command_text:
+                    command_index = candidate
+                    raw_occurrences[command_text] = candidate + 1
+                    break
+            if command_index >= 0:
                 edges.append(
                     {
                         "source": f"event:{index}",
-                        "target": f"command:{commands.index(command_text)}",
+                        "target": f"command:{command_index}",
                         "relation": "emitted_command",
                     }
                 )
