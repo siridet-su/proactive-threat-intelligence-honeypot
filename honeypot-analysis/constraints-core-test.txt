@@ -1,0 +1,13 @@
+# Exact versions used for the verified Python 3.14 core/test environment.
+# Optional production groups stay bounded in their dedicated requirements files
+# and should receive a platform-specific compiled lock after resolution.
+certifi==2026.1.4
+charset-normalizer==3.4.4
+idna==3.18
+iniconfig==2.3.0
+packaging==25.0
+pluggy==1.6.0
+Pygments==2.20.0
+pytest==9.1.1
+requests==2.33.1
+urllib3==2.7.0

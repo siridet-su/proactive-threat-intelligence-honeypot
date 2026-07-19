@@ -1,2 +1,2 @@
+-c constraints-core-test.txt
 requests>=2.31,<3
-pytest>=8,<10

@@ -48,7 +48,9 @@ cd /opt/honeypot
 python3 -m venv .venv
 sudo chown -R honeypot:honeypot .venv
 sudo -u honeypot .venv/bin/pip install --upgrade pip
-sudo -u honeypot .venv/bin/pip install requests reportlab google-genai torch transformers psycopg[binary]
+sudo -u honeypot .venv/bin/pip install -r requirements-mongodb.txt
+# Install only explicitly enabled optional groups, for example:
+sudo -u honeypot .venv/bin/pip install -r requirements-artifacts.txt
 ```
 
 4. Install config and secrets.
@@ -88,10 +90,11 @@ defined correlation-retention window, then restart only the session worker.
 Each listed prior key must also be present in `keys`. For a suspected key
 compromise, do not retain the compromised key as a correlation alias.
 
-For a production pilot, set `DATABASE_URL` to Cloud SQL Postgres unless the
-MongoDB adapter has been implemented and tested. MongoDB is a reasonable target
-for this document-heavy pipeline, but it is not a drop-in replacement yet
-because the storage layer also claims durable worker jobs. Keep
+Select MongoDB only after private provisioning, index validation, migration
+preflight, backup, and rollback approval. SQLite remains the supported local
+and emergency fallback. PostgreSQL is a legacy compatibility adapter and its
+modern durable job-lease methods fail closed, so it must not run this worker
+topology. Use explicit `DATABASE_BACKEND` and backend-specific settings; keep
 `ANALYSIS_SKIP_EMPTY_SESSIONS=true`, and keep `ANALYSIS_SUPPRESS_STDOUT=true`.
 
 5. Install backend services.
@@ -100,6 +103,8 @@ because the storage layer also claims durable worker jobs. Keep
 sudo cp deployment/systemd/honeypot-ingest-api.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-session-worker.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-enrichment-worker.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-feed-refresh.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-feed-refresh.timer /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-analysis-worker.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-dashboard-api.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-webhook-dispatcher.service /etc/systemd/system/
@@ -120,6 +125,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now honeypot-ingest-api
 sudo systemctl enable --now honeypot-session-worker
 sudo systemctl enable --now honeypot-enrichment-worker
+sudo systemctl enable --now honeypot-feed-refresh.timer
 sudo systemctl enable --now honeypot-analysis-worker
 sudo systemctl enable --now honeypot-dashboard-api
 sudo systemctl enable --now honeypot-webhook-dispatcher

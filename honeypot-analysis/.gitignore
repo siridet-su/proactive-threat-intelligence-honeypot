@@ -6,6 +6,9 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+build/
+dist/
+*.egg-info/
 
 # Virtual environments and local editor state
 .venv/
@@ -33,6 +36,7 @@ Thumbs.db
 *service-account*.json
 *credential*hmac*keyring*.json
 *credential*keyring*.json
+CODEX_REMEDIATION_HANDOFF.md
 
 # Runtime databases, queues, logs, and reports
 *.db
@@ -47,6 +51,9 @@ logs/
 reports/
 downloads/
 tty/
+backups/
+*.bak
+*.backup
 
 # Generated models, review queues, and temporary evaluation output
 external_cowrie_seed_transition_model.json
@@ -58,6 +65,18 @@ data/models/external_seed_health*.json
 data/models/external_seed_minimal_events*
 data/classification_review_queue*.json
 evaluation/generated/
+evaluation/*.json
+evaluation/*.jsonl
+evaluation/*.csv
+configs/*generated*.json
+data/feeds/*_cache.json
+data/feeds/*.lock
+data/feeds/.*.tmp
+models/
+*.pt
+*.pth
+*.bin
+*.safetensors
 
 # Generated deployment bundles and local artifacts
 deployment/artifacts/

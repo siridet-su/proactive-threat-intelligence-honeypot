@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=77,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "honeypot-analysis"
+version = "0.1.0"
+description = "Evidence-bounded Cowrie honeypot analysis and reporting services"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.31,<3",
+]
+
+[project.optional-dependencies]
+mongodb = [
+  "pymongo>=4.6,<5",
+]
+postgresql = [
+  "psycopg[binary]>=3.1,<4",
+]
+securebert = [
+  "torch>=2.2,<3",
+  "transformers>=4.40,<5",
+]
+training = [
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<4",
+  "scikit-learn>=1.4,<2",
+  "torch>=2.2,<3",
+  "transformers>=4.40,<5",
+]
+vertex = [
+  "google-genai>=1,<2",
+]
+artifacts = [
+  "reportlab>=4,<5",
+  "stix2-validator>=3.2,<4",
+]
+evaluation = [
+  "numpy>=1.26,<3",
+  "scikit-learn>=1.4,<2",
+]
+test = [
+  "pytest>=8,<10",
+]
+
+[project.scripts]
+honeypot-ingest-api = "production.api.ingest_api:main"
+honeypot-dashboard-api = "production.api.dashboard_api:main"
+honeypot-monitor-web = "production.api.monitor_web:main"
+honeypot-session-worker = "production.workers.session_worker:main"
+honeypot-analysis-worker = "production.workers.analysis_worker:main"
+honeypot-enrichment-worker = "production.workers.enrichment_worker:main"
+honeypot-sensor-forwarder = "production.workers.sensor_forwarder:main"
+honeypot-threat-hunt-worker = "production.workers.threat_hunt_worker:main"
+honeypot-webhook-dispatcher = "production.workers.webhook_dispatcher:main"
+honeypot-feed-refresh = "production.enrichment.refresh_feeds:main"
+honeypot-prediction-retention = "production.prediction.prune_prediction_snapshots:main"
+
+[tool.setuptools.packages.find]
+include = ["production*"]
+
+[tool.setuptools.package-data]
+"production.api" = ["static/*.html"]
+"production.storage" = ["*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

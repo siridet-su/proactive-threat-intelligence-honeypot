@@ -40,7 +40,7 @@ perform autonomous blocking or response.
 ```text
 authorized Cowrie event or synthetic fixture
   -> authenticated ingest API
-  -> SQLite/Postgres storage adapter
+  -> SQLite or MongoDB storage adapter
   -> session worker and SessionMonitor
   -> command splitting and candidate ATT&CK classification
   -> report-only session behavior correlation
@@ -185,14 +185,14 @@ data/feeds/    Reproducible public threat-reference caches
 data/models/   Selected aggregate external transition model
 data/samples/  Synthetic Cowrie and enrichment fixtures
 demo/          Local synthetic event replay tool
-evaluation/    Compact, non-sensitive evaluation summaries
+evaluation/    Reviewed summaries and privacy-minimized research payloads
 production/    Runtime package, workers, APIs, analysis, and offline tools
 tests/         Unit, service, provenance, regression, and local E2E tests
 ```
 
 ## Local Setup
 
-Python 3.10 or newer is required.
+Python 3.11 or newer is required.
 
 ```bash
 python3 -m venv .venv
@@ -276,12 +276,25 @@ Print a synthetic Cowrie session without sending it:
 python demo/realtime_pipeline_demo.py --print-only
 ```
 
-Optional capabilities require additional packages:
+Optional capabilities use separate, bounded dependency groups:
 
 ```bash
-# PDF reports, Gemini, Postgres, and SecureBERT/training support
-pip install reportlab google-genai 'psycopg[binary]' torch transformers pandas scikit-learn numpy
+pip install -r requirements-mongodb.txt
+pip install -r requirements-postgresql.txt  # legacy compatibility only
+pip install -r requirements-securebert.txt  # inference
+pip install -r requirements-training.txt    # offline training
+pip install -r requirements-vertex.txt
+pip install -r requirements-artifacts.txt   # PDF + external STIX validation
+pip install -r requirements-evaluation.txt  # offline comparisons
+pip install -r requirements-dev.txt         # tests
 ```
+
+Equivalent `pyproject.toml` extras are `mongodb`, `postgresql`, `securebert`,
+`training`, `vertex`, `artifacts`, `evaluation`, and `test`. Core/test direct
+and transitive versions verified in this workspace are pinned in
+`constraints-core-test.txt`; optional compiled groups are bounded and require a
+platform-specific resolved lock before production deployment. See
+`docs/SUPPORT_STATUS.md` for the authoritative support boundary.
 
 ## Tests And Policy Validation
 
@@ -566,8 +579,9 @@ weights.
 
 Intentionally excluded from the public package:
 
-- cloud, VM, Raspberry Pi, systemd, firewall, SSH, HAProxy, Tailscale, and
-  Internet-exposure deployment material
+- host-specific cloud, VM, Raspberry Pi, firewall, SSH, HAProxy, Tailscale, and
+  Internet-exposure deployment material (generic hardened systemd templates are
+  included for review)
 - real environment files, machine addresses, usernames, and absolute user paths
 - raw Cowrie logs, session exports, databases, spools, reports, and payloads
 - private shutdown/rollback bundles and historical task reports
@@ -591,8 +605,8 @@ Before publishing:
 
 1. Run all tests and policy validators.
 2. Run `git diff --check` and a secret scanner over the public repository.
-3. Confirm no deployment directory, environment file, key, database, log,
-   session export, or generated report is staged.
+3. Confirm no host-specific deployment state, populated environment file, key,
+   database, log, session export, or unreviewed generated report is staged.
 4. Add the license selected by the project team.
 
 **License decision required by project team.**
