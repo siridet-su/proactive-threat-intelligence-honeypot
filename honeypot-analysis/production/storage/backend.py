@@ -3244,27 +3244,69 @@ class SQLiteStorage:
         retention_days: int = 90,
         keep_latest_per_session: bool = True,
         now: Optional[str] = None,
+        dry_run: bool = True,
     ) -> Dict[str, Any]:
         retention_days = max(int(retention_days), 0)
         reference = _parse_dt(now) or datetime.now(timezone.utc)
         cutoff = (reference - timedelta(days=retention_days)).isoformat()
         with self.connection() as conn:
             total_before = conn.execute("SELECT COUNT(*) FROM prediction_snapshots").fetchone()[0]
+            old_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM prediction_snapshots WHERE created_at < ?",
+                    (cutoff,),
+                ).fetchone()[0]
+            )
+            feedback_protected = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) FROM prediction_snapshots AS ps
+                    WHERE ps.created_at < ?
+                      AND EXISTS (
+                          SELECT 1 FROM analyst_feedback AS af
+                          WHERE af.snapshot_id = ps.snapshot_id
+                      )
+                    """,
+                    (cutoff,),
+                ).fetchone()[0]
+            )
+            latest_protected = 0
             latest_clause = ""
             if keep_latest_per_session:
                 latest_clause = """
                     AND snapshot_id NOT IN (
-                        SELECT snapshot_id FROM prediction_snapshots AS latest
-                        WHERE latest.created_at = (
-                            SELECT MAX(inner_latest.created_at)
-                            FROM prediction_snapshots AS inner_latest
-                            WHERE inner_latest.session_id = latest.session_id
-                        )
+                        SELECT snapshot_id FROM (
+                            SELECT snapshot_id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY session_id
+                                       ORDER BY created_at DESC, snapshot_id DESC
+                                   ) AS retention_rank
+                            FROM prediction_snapshots
+                        ) AS ranked
+                        WHERE retention_rank = 1
                     )
                 """
-            cur = conn.execute(
-                f"""
-                DELETE FROM prediction_snapshots
+                latest_protected = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) FROM prediction_snapshots AS ps
+                        WHERE ps.created_at < ? AND ps.snapshot_id IN (
+                            SELECT snapshot_id FROM (
+                                SELECT snapshot_id,
+                                       ROW_NUMBER() OVER (
+                                           PARTITION BY session_id
+                                           ORDER BY created_at DESC, snapshot_id DESC
+                                       ) AS retention_rank
+                                FROM prediction_snapshots
+                            ) AS ranked
+                            WHERE retention_rank = 1
+                        )
+                        """,
+                        (cutoff,),
+                    ).fetchone()[0]
+                )
+            eligibility_sql = f"""
+                FROM prediction_snapshots
                 WHERE created_at < ?
                   AND snapshot_id NOT IN (
                       SELECT COALESCE(snapshot_id, '')
@@ -3272,15 +3314,32 @@ class SQLiteStorage:
                       WHERE snapshot_id IS NOT NULL AND snapshot_id != ''
                   )
                   {latest_clause}
-                """,
-                (cutoff,),
+            """
+            eligible = int(
+                conn.execute(f"SELECT COUNT(*) {eligibility_sql}", (cutoff,)).fetchone()[0]
             )
-            deleted = int(cur.rowcount if cur.rowcount is not None else 0)
+            deleted = 0
+            if not dry_run:
+                cur = conn.execute(
+                    f"""
+                    DELETE FROM prediction_snapshots WHERE snapshot_id IN (
+                        SELECT snapshot_id {eligibility_sql}
+                    )
+                    """,
+                    (cutoff,),
+                )
+                deleted = int(cur.rowcount if cur.rowcount is not None else 0)
             total_after = conn.execute("SELECT COUNT(*) FROM prediction_snapshots").fetchone()[0]
         return {
             "retention_days": retention_days,
             "cutoff": cutoff,
             "keep_latest_per_session": bool(keep_latest_per_session),
+            "dry_run": bool(dry_run),
+            "candidates_older_than_cutoff": old_count,
+            "protected_by_feedback": feedback_protected,
+            "protected_by_retention_marker": 0,
+            "protected_as_latest": latest_protected,
+            "eligible": eligible,
             "deleted": deleted,
             "before": int(total_before),
             "after": int(total_after),
@@ -6145,6 +6204,7 @@ class PostgresStorage:
         retention_days: int = 90,
         keep_latest_per_session: bool = True,
         now: Optional[str] = None,
+        dry_run: bool = True,
     ) -> Dict[str, Any]:
         retention_days = max(int(retention_days), 0)
         reference = _parse_dt(now) or datetime.now(timezone.utc)
@@ -6152,6 +6212,25 @@ class PostgresStorage:
         with self.connection() as conn:
             total_cur = self._execute(conn, "SELECT COUNT(*) AS count FROM prediction_snapshots")
             total_before = int(total_cur.fetchone()["count"])
+            old_cur = self._execute(
+                conn,
+                "SELECT COUNT(*) AS count FROM prediction_snapshots WHERE created_at < %s",
+                (cutoff,),
+            )
+            old_count = int(old_cur.fetchone()["count"])
+            feedback_cur = self._execute(
+                conn,
+                """
+                SELECT COUNT(*) AS count FROM prediction_snapshots AS ps
+                WHERE ps.created_at < %s AND EXISTS (
+                    SELECT 1 FROM analyst_feedback AS af
+                    WHERE af.snapshot_id = ps.snapshot_id
+                )
+                """,
+                (cutoff,),
+            )
+            feedback_protected = int(feedback_cur.fetchone()["count"])
+            latest_protected = 0
             latest_clause = ""
             if keep_latest_per_session:
                 latest_clause = """
@@ -6161,27 +6240,59 @@ class PostgresStorage:
                         ORDER BY session_id, created_at DESC, snapshot_id DESC
                     )
                 """
-            cur = self._execute(
-                conn,
-                f"""
-                DELETE FROM prediction_snapshots AS ps
+                latest_cur = self._execute(
+                    conn,
+                    """
+                    SELECT COUNT(*) AS count FROM prediction_snapshots AS ps
+                    WHERE ps.created_at < %s AND ps.snapshot_id IN (
+                        SELECT DISTINCT ON (session_id) snapshot_id
+                        FROM prediction_snapshots
+                        ORDER BY session_id, created_at DESC, snapshot_id DESC
+                    )
+                    """,
+                    (cutoff,),
+                )
+                latest_protected = int(latest_cur.fetchone()["count"])
+            eligibility_sql = f"""
+                FROM prediction_snapshots AS ps
                 WHERE ps.created_at < %s
                   AND NOT EXISTS (
-                      SELECT 1
-                      FROM analyst_feedback AS af
+                      SELECT 1 FROM analyst_feedback AS af
                       WHERE af.snapshot_id = ps.snapshot_id
                   )
                   {latest_clause}
-                """,
+            """
+            eligible_cur = self._execute(
+                conn,
+                f"SELECT COUNT(*) AS count {eligibility_sql}",
                 (cutoff,),
             )
-            deleted = int(getattr(cur, "rowcount", 0) or 0)
+            eligible = int(eligible_cur.fetchone()["count"])
+            deleted = 0
+            if not dry_run:
+                cur = self._execute(
+                    conn,
+                    f"""
+                    DELETE FROM prediction_snapshots AS target
+                    WHERE target.snapshot_id IN (
+                        SELECT ps.snapshot_id {eligibility_sql}
+                    )
+                    """,
+                    (cutoff,),
+                )
+                deleted = int(getattr(cur, "rowcount", 0) or 0)
             after_cur = self._execute(conn, "SELECT COUNT(*) AS count FROM prediction_snapshots")
             total_after = int(after_cur.fetchone()["count"])
         return {
             "retention_days": retention_days,
             "cutoff": cutoff,
             "keep_latest_per_session": bool(keep_latest_per_session),
+            "dry_run": bool(dry_run),
+            "candidates_older_than_cutoff": old_count,
+            "protected_by_feedback": feedback_protected,
+            "protected_by_retention_marker": 0,
+            "protected_as_latest": latest_protected,
+            "eligible": eligible,
             "deleted": deleted,
             "before": total_before,
             "after": total_after,

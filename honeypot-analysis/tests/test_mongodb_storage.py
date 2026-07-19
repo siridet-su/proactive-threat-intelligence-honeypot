@@ -2140,7 +2140,7 @@ def test_webhook_mongodb_indexes_include_target_claim_state() -> None:
 
 
 def test_critical_entity_parity_across_reports_predictions_campaigns_and_feedback() -> None:
-    storage, _ = make_storage()
+    storage, database = make_storage()
     storage.save_session(
         {
             "session_id": "session-report",
@@ -2242,11 +2242,23 @@ def test_critical_entity_parity_across_reports_predictions_campaigns_and_feedbac
         }
     )
     assert storage.list_rows("analyst_feedback")[0]["feedback_id"] == feedback_id
+    assert database["prediction_snapshots"].find_one(
+        {"snapshot_id": protected_snapshot}
+    )["retention_protected"] is True
     assert storage.get_latest_prediction_snapshot("session-report")["snapshot_id"] == latest_snapshot
     assert storage.get_prediction_snapshot(protected_snapshot)["snapshot_id"] == protected_snapshot
+    dry_run = storage.prune_prediction_snapshots(
+        retention_days=90,
+        now="2026-07-16T00:00:00+00:00",
+    )
+    assert dry_run["dry_run"] is True
+    assert dry_run["eligible"] == 1
+    assert dry_run["deleted"] == 0
+    assert storage.get_prediction_snapshot("snapshot-delete") is not None
     pruned = storage.prune_prediction_snapshots(
         retention_days=90,
         now="2026-07-16T00:00:00+00:00",
+        dry_run=False,
     )
     assert pruned["deleted"] == 1
     remaining = {

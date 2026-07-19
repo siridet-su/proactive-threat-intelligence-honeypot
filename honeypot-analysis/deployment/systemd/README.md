@@ -142,8 +142,10 @@ curl "http://127.0.0.1:8081/predictions/current?session_id=SESSION_ID"
 ```
 
 Prediction snapshots are written after every processed event. The retention
-timer prunes old intermediate snapshots while keeping feedback-linked snapshots
-and the latest snapshot per session by default. Configure retention with
+timer audits eligible old intermediate snapshots without deleting them, while
+reporting feedback-linked and latest-per-session reference protections. Review
+the journal output, take a database backup, and run the command manually with
+`--apply` only after the eligible count and rollback path are approved. Configure retention with
 `PREDICTION_SNAPSHOT_RETENTION_DAYS` and
 `PREDICTION_SNAPSHOT_KEEP_LATEST_PER_SESSION`.
 

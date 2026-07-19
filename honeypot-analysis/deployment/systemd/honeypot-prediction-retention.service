@@ -1,5 +1,5 @@
 [Unit]
-Description=Honeypot Prediction Snapshot Retention
+Description=Audit Honeypot Prediction Snapshot Retention (dry run)
 After=network-online.target
 Wants=network-online.target
 

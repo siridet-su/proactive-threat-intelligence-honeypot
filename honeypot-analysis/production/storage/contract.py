@@ -912,6 +912,7 @@ class StorageBackend(Protocol):
         retention_days: int = 90,
         keep_latest_per_session: bool = True,
         now: Optional[str] = None,
+        dry_run: bool = True,
     ) -> Dict[str, Any]: ...
 
     def save_prediction_backtest_run(self, result: Dict[str, Any]) -> str: ...

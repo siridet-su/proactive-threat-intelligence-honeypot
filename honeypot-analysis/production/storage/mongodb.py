@@ -3682,41 +3682,89 @@ class MongoStorage:
         retention_days: int = 90,
         keep_latest_per_session: bool = True,
         now: Optional[str] = None,
+        dry_run: bool = True,
     ) -> Dict[str, Any]:
         retention_days = max(int(retention_days), 0)
         reference = _parse_dt(now) or datetime.now(timezone.utc)
         cutoff = (reference - timedelta(days=retention_days)).isoformat()
         collection = self._collection("prediction_snapshots")
         total_before = int(collection.count_documents({}))
-        protected = {
+        feedback_ids = {
             str(item.get("snapshot_id"))
             for item in self._collection("analyst_feedback").find(
                 {"snapshot_id": {"$nin": [None, ""]}}
             )
             if item.get("snapshot_id")
         }
+        protected = set(feedback_ids)
+        old_rows = list(collection.find({"created_at": {"$lt": cutoff}}))
+        marker_protected = {
+            str(raw.get("snapshot_id") or "")
+            for raw in old_rows
+            if raw.get("retention_protected") is True
+        }
+        protected.update(marker_protected)
+        feedback_protected = len(
+            {
+                str(raw.get("snapshot_id") or "")
+                for raw in old_rows
+                if str(raw.get("snapshot_id") or "") in feedback_ids
+            }
+        )
         seen_sessions: set[str] = set()
+        latest_ids: set[str] = set()
         if keep_latest_per_session:
             for raw in collection.find({}).sort(
-                [("session_id", ASCENDING), ("created_at", DESCENDING)]
+                [
+                    ("session_id", ASCENDING),
+                    ("created_at", DESCENDING),
+                    ("snapshot_id", DESCENDING),
+                ]
             ):
                 session_id = str(raw.get("session_id") or "")
                 snapshot_id = str(raw.get("snapshot_id") or "")
                 if session_id not in seen_sessions:
                     seen_sessions.add(session_id)
                     protected.add(snapshot_id)
+                    latest_ids.add(snapshot_id)
+        latest_protected = sum(
+            str(raw.get("snapshot_id") or "") in latest_ids for raw in old_rows
+        )
         delete_ids = [
             raw["_id"]
-            for raw in collection.find({"created_at": {"$lt": cutoff}})
+            for raw in old_rows
             if str(raw.get("snapshot_id") or "") not in protected
         ]
-        result = collection.delete_many({"_id": {"$in": delete_ids}}) if delete_ids else None
+        result = None
+        if delete_ids and not dry_run:
+            # Marking precedes feedback insertion in record_analyst_feedback.
+            # Backfill existing references before deletion, then make the
+            # marker part of the atomic delete predicate to close the
+            # cross-collection feedback race without requiring a replica-set
+            # transaction.
+            for snapshot_id in protected:
+                collection.update_one(
+                    {"snapshot_id": snapshot_id},
+                    {"$set": {"retention_protected": True}},
+                )
+            result = collection.delete_many(
+                {
+                    "_id": {"$in": delete_ids},
+                    "retention_protected": {"$ne": True},
+                }
+            )
         deleted = int(getattr(result, "deleted_count", 0) if result is not None else 0)
         total_after = int(collection.count_documents({}))
         return {
             "retention_days": retention_days,
             "cutoff": cutoff,
             "keep_latest_per_session": bool(keep_latest_per_session),
+            "dry_run": bool(dry_run),
+            "candidates_older_than_cutoff": len(old_rows),
+            "protected_by_feedback": feedback_protected,
+            "protected_by_retention_marker": len(marker_protected),
+            "protected_as_latest": latest_protected,
+            "eligible": len(delete_ids),
             "deleted": deleted,
             "before": total_before,
             "after": total_after,
@@ -3799,6 +3847,12 @@ class MongoStorage:
             "payload": payload,
             "created_at": payload["created_at"],
         }
+        snapshot_id = str(document.get("snapshot_id") or "")
+        if snapshot_id:
+            self._collection("prediction_snapshots").update_one(
+                {"snapshot_id": snapshot_id},
+                {"$set": {"retention_protected": True}},
+            )
         self._replace("analyst_feedback", document)
         return feedback_id
 

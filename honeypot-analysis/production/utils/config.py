@@ -758,6 +758,14 @@ class ProductionConfig:
             or self.threat_hunt_max_attempts < 1
         ):
             raise ValueError("threat_hunt_max_attempts must be an integer of at least 1")
+        if (
+            isinstance(self.prediction_snapshot_retention_days, bool)
+            or not isinstance(self.prediction_snapshot_retention_days, Integral)
+            or not 0 <= self.prediction_snapshot_retention_days <= 36_500
+        ):
+            raise ValueError(
+                "prediction_snapshot_retention_days must be between 0 and 36500"
+            )
 
     def database_settings(self) -> DatabaseSettings:
         """Validate and return the selected storage backend settings."""

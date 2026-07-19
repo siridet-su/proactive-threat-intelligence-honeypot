@@ -5742,6 +5742,7 @@ def test_storage_prunes_old_intermediate_prediction_snapshots() -> None:
             retention_days=90,
             keep_latest_per_session=True,
             now="2026-05-21T00:00:00+00:00",
+            dry_run=False,
         )
         remaining = {row["snapshot_id"] for row in storage.list_rows("prediction_snapshots", limit=20)}
         assert result["deleted"] == 1
