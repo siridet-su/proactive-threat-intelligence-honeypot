@@ -512,10 +512,12 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
         feeds = load_threat_feeds(
             cisa_cache_path=config.cisa_cache_path or None,
             sigma_cache_path=config.sigma_cache_path or None,
+            allow_network_refresh=False,
         )
         mitre_attack = load_mitre_attack_db(
             cache_path=config.mitre_attack_path or None,
             silent=True,
+            allow_network_refresh=False,
         )
         feed_status = collect_feed_status(config)
         feed_status["status"] = "loaded"

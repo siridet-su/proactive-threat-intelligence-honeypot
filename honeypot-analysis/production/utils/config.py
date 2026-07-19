@@ -230,6 +230,11 @@ class ProductionConfig:
     enrichment_retry_seconds: float = 300.0
     enrichment_ttl_seconds: int = 86400
     enrichment_allow_stale: bool = True
+    enrichment_provider_timeout_seconds: float = 20.0
+    enrichment_provider_workers: int = 4
+    enrichment_provider_http_retries: int = 1
+    enrichment_provider_retry_delay_seconds: float = 0.25
+    enrichment_provider_max_response_bytes: int = 1024 * 1024
     otx_api_key: str = ""
     abuseipdb_api_key: str = ""
     shodan_api_key: str = ""
@@ -571,6 +576,7 @@ class ProductionConfig:
             "job_retry_max_seconds": self.job_retry_max_seconds,
             "vertex_request_timeout_seconds": self.vertex_request_timeout_seconds,
             "vertex_outer_timeout_seconds": self.vertex_outer_timeout_seconds,
+            "enrichment_provider_timeout_seconds": self.enrichment_provider_timeout_seconds,
         }
         for name, value in positive_durations.items():
             if (
@@ -603,6 +609,39 @@ class ProductionConfig:
             or not 1 <= self.webhook_max_attempts <= 100
         ):
             raise ValueError("webhook_max_attempts must be an integer between 1 and 100")
+        if (
+            isinstance(self.enrichment_provider_workers, bool)
+            or not isinstance(self.enrichment_provider_workers, Integral)
+            or not 1 <= self.enrichment_provider_workers <= 16
+        ):
+            raise ValueError(
+                "enrichment_provider_workers must be an integer between 1 and 16"
+            )
+        if (
+            isinstance(self.enrichment_provider_http_retries, bool)
+            or not isinstance(self.enrichment_provider_http_retries, Integral)
+            or not 0 <= self.enrichment_provider_http_retries <= 5
+        ):
+            raise ValueError(
+                "enrichment_provider_http_retries must be an integer between 0 and 5"
+            )
+        if (
+            isinstance(self.enrichment_provider_max_response_bytes, bool)
+            or not isinstance(self.enrichment_provider_max_response_bytes, Integral)
+            or not 1024 <= self.enrichment_provider_max_response_bytes <= 16 * 1024 * 1024
+        ):
+            raise ValueError(
+                "enrichment_provider_max_response_bytes must be between 1024 and 16777216"
+            )
+        if (
+            isinstance(self.enrichment_provider_retry_delay_seconds, bool)
+            or not isinstance(self.enrichment_provider_retry_delay_seconds, Real)
+            or not math.isfinite(float(self.enrichment_provider_retry_delay_seconds))
+            or self.enrichment_provider_retry_delay_seconds < 0
+        ):
+            raise ValueError(
+                "enrichment_provider_retry_delay_seconds must be non-negative and finite"
+            )
         if (
             isinstance(self.webhook_max_response_bytes, bool)
             or not isinstance(self.webhook_max_response_bytes, Integral)
@@ -964,6 +1003,25 @@ class ProductionConfig:
         cfg.enrichment_retry_seconds = _env_float("ENRICHMENT_RETRY_SECONDS", cfg.enrichment_retry_seconds)
         cfg.enrichment_ttl_seconds = _env_int("ENRICHMENT_TTL_SECONDS", cfg.enrichment_ttl_seconds)
         cfg.enrichment_allow_stale = _env_bool("ENRICHMENT_ALLOW_STALE", cfg.enrichment_allow_stale)
+        cfg.enrichment_provider_timeout_seconds = _env_float(
+            "ENRICHMENT_PROVIDER_TIMEOUT_SECONDS",
+            cfg.enrichment_provider_timeout_seconds,
+        )
+        cfg.enrichment_provider_workers = _env_int(
+            "ENRICHMENT_PROVIDER_WORKERS", cfg.enrichment_provider_workers
+        )
+        cfg.enrichment_provider_http_retries = _env_int(
+            "ENRICHMENT_PROVIDER_HTTP_RETRIES",
+            cfg.enrichment_provider_http_retries,
+        )
+        cfg.enrichment_provider_retry_delay_seconds = _env_float(
+            "ENRICHMENT_PROVIDER_RETRY_DELAY_SECONDS",
+            cfg.enrichment_provider_retry_delay_seconds,
+        )
+        cfg.enrichment_provider_max_response_bytes = _env_int(
+            "ENRICHMENT_PROVIDER_MAX_RESPONSE_BYTES",
+            cfg.enrichment_provider_max_response_bytes,
+        )
         cfg.otx_api_key = os.getenv("OTX_API_KEY", cfg.otx_api_key)
         cfg.abuseipdb_api_key = os.getenv("ABUSEIPDB_API_KEY", cfg.abuseipdb_api_key)
         cfg.shodan_api_key = os.getenv("SHODAN_API_KEY", cfg.shodan_api_key)

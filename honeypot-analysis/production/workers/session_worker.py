@@ -195,10 +195,12 @@ class SessionWorker:
             self.feeds = load_threat_feeds(
                 cisa_cache_path=config.cisa_cache_path or None,
                 sigma_cache_path=config.sigma_cache_path or None,
+                allow_network_refresh=False,
             )
             self.mitre_db = load_mitre_attack_db(
                 cache_path=config.mitre_attack_path or None,
                 silent=True,
+                allow_network_refresh=False,
             )
         self._refresh_enrichment_cache()
         self.classifier = NotebookParityClassifier(

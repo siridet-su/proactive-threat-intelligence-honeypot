@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 from production.utils.config import ProductionConfig
 from production.utils.sensitive_data import redact_exception_for_log
+from production.enrichment.cache_io import CHECKSUM_FIELD, checksum_valid
 
 
 def _age_days(raw_fetched: str) -> float | None:
@@ -23,7 +24,12 @@ def _age_days(raw_fetched: str) -> float | None:
         return None
 
 
-def _cache_status(path: str, count_field: str, max_age_days: int) -> Dict[str, Any]:
+def _cache_status(
+    path: str,
+    count_field: str,
+    max_age_days: int,
+    expected_schema: str | None = None,
+) -> Dict[str, Any]:
     if not path:
         return {"status": "not_configured", "path": ""}
     cache_path = Path(path)
@@ -31,6 +37,12 @@ def _cache_status(path: str, count_field: str, max_age_days: int) -> Dict[str, A
         return {"status": "missing", "path": str(cache_path)}
     try:
         raw = json.loads(cache_path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("feed cache must contain a JSON object")
+        if expected_schema is not None and raw.get("_schema") != expected_schema:
+            raise ValueError("unsupported feed cache schema")
+        if not checksum_valid(raw):
+            raise ValueError("feed cache checksum mismatch")
         count = len(raw.get(count_field, {}))
         age = _age_days(raw.get("_fetched", ""))
         stale = age is None or age > max_age_days
@@ -39,6 +51,8 @@ def _cache_status(path: str, count_field: str, max_age_days: int) -> Dict[str, A
             "path": str(cache_path),
             "age_days": age,
             "records": count,
+            "last_success_at": raw.get("_fetched", ""),
+            "checksum_verified": CHECKSUM_FIELD in raw,
         }
     except Exception as exc:
         return {
@@ -49,9 +63,9 @@ def _cache_status(path: str, count_field: str, max_age_days: int) -> Dict[str, A
 
 
 def collect_feed_status(config: ProductionConfig) -> Dict[str, Any]:
-    cisa = _cache_status(config.cisa_cache_path, "entries", 1)
-    sigma = _cache_status(config.sigma_cache_path, "rules", 7)
-    mitre = _cache_status(config.mitre_attack_path, "techniques", 30)
+    cisa = _cache_status(config.cisa_cache_path, "entries", 1, "1")
+    sigma = _cache_status(config.sigma_cache_path, "rules", 7, "1")
+    mitre = _cache_status(config.mitre_attack_path, "techniques", 30, "2")
     stale = [
         name for name, item in {"cisa": cisa, "sigma": sigma, "mitre": mitre}.items()
         if item["status"] in {"missing", "stale", "corrupt", "not_configured"}

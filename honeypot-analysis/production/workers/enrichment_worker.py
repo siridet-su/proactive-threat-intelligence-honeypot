@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -36,10 +37,11 @@ class EnrichmentWorker:
         self.worker_owner = new_job_owner("enrichment")
 
     def _run_providers(self, observable_type: str, observable_value: str) -> List[ProviderResult]:
-        results: List[ProviderResult] = []
-        for provider in self.providers:
-            if not provider.supports(observable_type):
-                continue
+        selected = [
+            provider for provider in self.providers if provider.supports(observable_type)
+        ]
+
+        def run_provider(provider: EnrichmentProvider) -> ProviderResult:
             started_at = time.monotonic()
             try:
                 result = provider.enrich(observable_type, observable_value)
@@ -47,20 +49,34 @@ class EnrichmentWorker:
                     max(time.monotonic() - started_at, 0.0) * 1000,
                     3,
                 )
-                results.append(result)
+                return result
             except Exception as exc:
-                results.append(
-                    ProviderResult(
-                        provider=provider.name,
-                        status="error",
-                        error=redact_exception_for_log(exc),
-                        ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
-                        latency_ms=round(
-                            max(time.monotonic() - started_at, 0.0) * 1000,
-                            3,
-                        ),
-                    )
+                return ProviderResult(
+                    provider=provider.name,
+                    # Compatibility alias for providers outside the built-in
+                    # adapters, whose exception type cannot be classified here.
+                    status="error",
+                    error=redact_exception_for_log(exc),
+                    ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
+                    latency_ms=round(
+                        max(time.monotonic() - started_at, 0.0) * 1000,
+                        3,
+                    ),
                 )
+
+        results: List[ProviderResult] = []
+        if selected:
+            max_workers = min(
+                len(selected),
+                max(int(getattr(self.config, "enrichment_provider_workers", 4)), 1),
+            )
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="enrichment-provider",
+            ) as executor:
+                # executor.map preserves configured provider order even though
+                # requests execute concurrently.
+                results = list(executor.map(run_provider, selected))
         if not results:
             results.append(
                 ProviderResult(
@@ -135,7 +151,10 @@ class EnrichmentWorker:
                         provider_status,
                         expires_at=expires_at,
                     )
-                    if any(result.status == "error" for result in results):
+                    if any(
+                        result.status in {"error", "temporary_error", "rate_limited"}
+                        for result in results
+                    ):
                         # Preserve per-provider status in the cache, but keep the
                         # durable job retryable instead of declaring a partial
                         # provider outage to be complete enrichment success.
