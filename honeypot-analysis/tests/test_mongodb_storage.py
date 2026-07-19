@@ -17,6 +17,7 @@ import pytest
 from production.storage.backend import SQLiteStorage, StorageError
 from production.storage.contract import StorageBackend
 from production.storage.mongodb import (
+    ASCENDING,
     INDEX_DEFINITIONS,
     MONGODB_DRIVER_AVAILABLE,
     MONGODB_SCHEMA_VERSION,
@@ -2032,6 +2033,110 @@ def test_priority_claim_sighting_deduplication_and_webhook_idempotency() -> None
     delivery = storage.get_webhook_delivery(delivery_id)
     assert delivery["attempts"] == 2
     assert database["alerts"].find_one({"alert_id": alert_id})["delivered"] is True
+
+
+def test_webhook_per_target_lease_recovery_and_stale_completion_parity() -> None:
+    storage, _ = make_storage()
+    alert_id = storage.store_alert(
+        {
+            "alert_id": "mongo-webhook-alert",
+            "session_id": "mongo-webhook-session",
+            "severity": "HIGH",
+        }
+    )
+    target_a = "a" * 64
+    target_b = "b" * 64
+    payload = {
+        "type": "alert",
+        "idempotency_key": "delivery-mongo-webhook",
+    }
+    assert [
+        row["alert_id"]
+        for row in storage.pending_webhooks(
+            target_url_hash=target_a,
+            max_attempts=3,
+            now="2026-07-19T00:00:00+00:00",
+        )
+    ] == [alert_id]
+
+    first = storage.claim_webhook_delivery(
+        payload,
+        target_a,
+        "worker-a",
+        60,
+        3,
+        alert_id=alert_id,
+        now="2026-07-19T00:00:00+00:00",
+    )
+    assert first is not None
+    assert first["attempts"] == 1
+    assert storage.claim_webhook_delivery(
+        payload,
+        target_a,
+        "worker-b",
+        60,
+        3,
+        alert_id=alert_id,
+        now="2026-07-19T00:00:30+00:00",
+    ) is None
+    assert storage.pending_webhooks(
+        target_url_hash=target_a,
+        max_attempts=3,
+        now="2026-07-19T00:00:30+00:00",
+    ) == []
+    assert storage.pending_webhooks(
+        target_url_hash=target_b,
+        max_attempts=3,
+        now="2026-07-19T00:00:30+00:00",
+    )
+
+    recovered = storage.claim_webhook_delivery(
+        payload,
+        target_a,
+        "worker-b",
+        60,
+        3,
+        alert_id=alert_id,
+        now="2026-07-19T00:01:01+00:00",
+    )
+    assert recovered is not None
+    assert recovered["delivery_id"] == first["delivery_id"]
+    assert recovered["attempts"] == 2
+    assert storage.complete_webhook_delivery(
+        first["delivery_id"],
+        "worker-a",
+        first["claim_token"],
+        "delivered",
+        now="2026-07-19T00:01:01+00:00",
+    ) is False
+    assert storage.complete_webhook_delivery(
+        recovered["delivery_id"],
+        "worker-b",
+        recovered["claim_token"],
+        "delivered",
+        response_status=204,
+        now="2026-07-19T00:01:01+00:00",
+    ) is True
+    assert storage.pending_webhooks(
+        target_url_hash=target_a,
+        max_attempts=3,
+        now="2026-07-19T00:01:01+00:00",
+    ) == []
+
+
+def test_webhook_mongodb_indexes_include_target_claim_state() -> None:
+    _storage, database = make_storage()
+    definitions = {
+        index["name"]: index["keys"]
+        for index in database["webhook_deliveries"].indexes
+    }
+    assert definitions["idx_webhook_target_claimable"] == (
+        ("target_url_hash", ASCENDING),
+        ("status", ASCENDING),
+        ("next_retry_at", ASCENDING),
+        ("claim_expires_at", ASCENDING),
+        ("updated_at", ASCENDING),
+    )
 
 
 def test_critical_entity_parity_across_reports_predictions_campaigns_and_feedback() -> None:

@@ -31,6 +31,7 @@ from production.storage.contract import (
     validate_event_effect_summary,
     validate_event_failure_fields,
     validate_job_failure_fields,
+    validate_webhook_completion_fields,
 )
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
@@ -38,7 +39,7 @@ from production.storage.session_provenance import (
     normalize_session_source,
 )
 from production.utils.feedback import normalize_feedback_payload
-from production.utils.sensitive_data import redact_exception_for_log
+from production.utils.sensitive_data import redact_error_for_log, redact_exception_for_log
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
 
@@ -485,6 +486,16 @@ INDEX_DEFINITIONS: Dict[str, Sequence[IndexDefinition]] = {
         IndexDefinition((("delivery_id", ASCENDING),), "uq_webhook_deliveries_id", True),
         IndexDefinition((("alert_id", ASCENDING),), "idx_webhook_alert"),
         IndexDefinition((("report_id", ASCENDING),), "idx_webhook_report"),
+        IndexDefinition(
+            (
+                ("target_url_hash", ASCENDING),
+                ("status", ASCENDING),
+                ("next_retry_at", ASCENDING),
+                ("claim_expires_at", ASCENDING),
+                ("updated_at", ASCENDING),
+            ),
+            "idx_webhook_target_claimable",
+        ),
     ),
     "prediction_snapshots": (
         IndexDefinition((("snapshot_id", ASCENDING),), "uq_prediction_snapshots_id", True),
@@ -3858,21 +3869,276 @@ class MongoStorage:
             query["ended"] = True
         return int(self._collection("sessions").count_documents(query))
 
-    def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]:
-        cursor = self._collection("alerts").find({"delivered": False}).sort(
-            [("created_at", ASCENDING)]
-        ).limit(max(int(limit), 0))
-        return [
-            {
-                "alert_id": item["alert_id"],
-                "payload": dict(from_bson_safe(item).get("payload") or {}),
-            }
-            for item in cursor
-        ]
+    def pending_webhooks(
+        self,
+        limit: int = 100,
+        *,
+        target_url_hash: str = "",
+        max_attempts: int = 5,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        row_limit = max(int(limit), 0)
+        if row_limit == 0:
+            return []
+        if not target_url_hash:
+            cursor = self._collection("alerts").find({"delivered": False}).sort(
+                [("created_at", ASCENDING)]
+            ).limit(row_limit)
+            return [
+                {
+                    "alert_id": item["alert_id"],
+                    "payload": dict(from_bson_safe(item).get("payload") or {}),
+                }
+                for item in cursor
+            ]
+
+        target = _required_identity(target_url_hash, "target_url_hash")
+        attempt_limit = _positive_attempt_limit(max_attempts)
+        current_time = _utc_timestamp(now)
+        alerts = self._collection("alerts").find({}).sort(
+            [("created_at", ASCENDING), ("alert_id", ASCENDING)]
+        )
+        deliveries = self._collection("webhook_deliveries")
+        output: List[Dict[str, Any]] = []
+        for alert in alerts:
+            alert_id = str(alert.get("alert_id") or "")
+            delivery = deliveries.find_one(
+                {"alert_id": alert_id, "target_url_hash": target}
+            )
+            eligible = delivery is None
+            if delivery is not None:
+                status = str(delivery.get("status") or "")
+                attempts = int(delivery.get("attempts") or 0)
+                retry_at = delivery.get("next_retry_at")
+                lease_expires = delivery.get("claim_expires_at")
+                due = not retry_at or str(retry_at) <= current_time
+                unleased = not lease_expires or str(lease_expires) <= current_time
+                eligible = (
+                    status in {"pending", "retryable", "failed", "in_progress"}
+                    and unleased
+                    and (
+                        (attempts < attempt_limit and due)
+                        or (status == "in_progress" and attempts >= attempt_limit)
+                    )
+                )
+            if not eligible:
+                continue
+            item = from_bson_safe(alert)
+            output.append(
+                {
+                    "alert_id": alert_id,
+                    "payload": dict(item.get("payload") or {}),
+                }
+            )
+            if len(output) >= row_limit:
+                break
+        return output
 
     def get_webhook_delivery(self, delivery_id: str) -> Optional[Dict[str, Any]]:
         document = self._find("webhook_deliveries", {"delivery_id": delivery_id})
         return row_from_document("webhook_deliveries", document) if document else None
+
+    def claim_webhook_delivery(
+        self,
+        payload: Dict[str, Any],
+        target_url_hash: str,
+        owner: str,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        alert_id: Optional[str] = None,
+        report_id: Optional[str] = None,
+        now: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        target = _required_identity(target_url_hash, "target_url_hash")
+        claim_owner = _required_identity(owner, "owner")
+        if not alert_id and not report_id:
+            raise ValueError("alert_id or report_id is required")
+        attempt_limit = _positive_attempt_limit(max_attempts)
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time, lease_seconds, field="lease_seconds"
+        )
+        delivery_id = stable_id(
+            "delivery",
+            {"alert_id": alert_id, "report_id": report_id, "target": target},
+        )
+        collection = self._collection("webhook_deliveries")
+        collection.update_one(
+            {"delivery_id": delivery_id},
+            {
+                "$setOnInsert": to_bson_safe(
+                    {
+                        "_id": delivery_id,
+                        "delivery_id": delivery_id,
+                        "alert_id": alert_id,
+                        "report_id": report_id,
+                        "target_url_hash": target,
+                        "status": "pending",
+                        "attempts": 0,
+                        "payload": payload,
+                        "created_at": current_time,
+                        "updated_at": current_time,
+                        "schema_version": MONGODB_SCHEMA_VERSION,
+                    }
+                )
+            },
+            upsert=True,
+        )
+        collection.update_one(
+            {
+                "delivery_id": delivery_id,
+                "status": "in_progress",
+                "attempts": {"$gte": attempt_limit},
+                "$or": [
+                    {"claim_expires_at": None},
+                    {"claim_expires_at": {"$exists": False}},
+                    {"claim_expires_at": {"$lte": current_time}},
+                ],
+            },
+            {
+                "$set": {
+                    "status": "permanent_failure",
+                    "error_code": "webhook_lease_attempts_exhausted",
+                    "last_error": "delivery attempt budget exhausted after lease expiry",
+                    "completed_at": current_time,
+                    "updated_at": current_time,
+                    "schema_version": MONGODB_SCHEMA_VERSION,
+                },
+                "$unset": {
+                    "next_retry_at": "",
+                    "claim_owner": "",
+                    "claim_token": "",
+                    "claim_expires_at": "",
+                },
+            },
+        )
+        token = str(uuid4())
+        claimed = collection.find_one_and_update(
+            {
+                "delivery_id": delivery_id,
+                "status": {"$in": ["pending", "retryable", "failed", "in_progress"]},
+                "attempts": {"$lt": attempt_limit},
+                "$and": [
+                    {
+                        "$or": [
+                            {"next_retry_at": None},
+                            {"next_retry_at": {"$exists": False}},
+                            {"next_retry_at": {"$lte": current_time}},
+                        ]
+                    },
+                    {
+                        "$or": [
+                            {"claim_token": None},
+                            {"claim_token": {"$exists": False}},
+                            {"claim_expires_at": None},
+                            {"claim_expires_at": {"$exists": False}},
+                            {"claim_expires_at": {"$lte": current_time}},
+                        ]
+                    },
+                ],
+            },
+            {
+                "$set": to_bson_safe(
+                    {
+                        "status": "in_progress",
+                        "payload": payload,
+                        "claim_owner": claim_owner,
+                        "claim_token": token,
+                        "claim_expires_at": expires_at,
+                        "updated_at": current_time,
+                        "schema_version": MONGODB_SCHEMA_VERSION,
+                    }
+                ),
+                "$inc": {"attempts": 1},
+                "$unset": {
+                    "next_retry_at": "",
+                    "error_code": "",
+                    "last_error": "",
+                    "completed_at": "",
+                },
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if claimed is None:
+            return None
+        result = row_from_document("webhook_deliveries", claimed)
+        result["payload"] = dict(from_bson_safe(claimed).get("payload") or {})
+        return result
+
+    def complete_webhook_delivery(
+        self,
+        delivery_id: str,
+        owner: str,
+        token: str,
+        status: str,
+        *,
+        error_code: str = "",
+        error: str = "",
+        response_status: Optional[int] = None,
+        response_body_sha256: str = "",
+        response_body_bytes: int = 0,
+        response_body_truncated: bool = False,
+        next_retry_at: Any = None,
+        now: Any = None,
+    ) -> bool:
+        delivery = _required_identity(delivery_id, "delivery_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        (
+            outcome,
+            safe_error_code,
+            safe_error,
+            response_status,
+            digest,
+            body_bytes,
+            response_body_truncated,
+        ) = validate_webhook_completion_fields(
+            status,
+            error_code,
+            error,
+            response_status,
+            response_body_sha256,
+            response_body_bytes,
+            response_body_truncated,
+        )
+        current_time = _utc_timestamp(now)
+        retry_at = _utc_timestamp(next_retry_at) if next_retry_at else None
+        if outcome == "retryable" and not retry_at:
+            raise ValueError("retryable webhook completion requires next_retry_at")
+        if outcome != "retryable" and retry_at:
+            raise ValueError("next_retry_at is only valid for retryable completion")
+        update: Dict[str, Any] = {
+            "$set": {
+                "status": outcome,
+                "error_code": safe_error_code or None,
+                "last_error": safe_error or None,
+                "response_status": response_status,
+                "response_body_sha256": digest or None,
+                "response_body_bytes": body_bytes,
+                "response_body_truncated": bool(response_body_truncated),
+                "next_retry_at": retry_at,
+                "completed_at": None if outcome == "retryable" else current_time,
+                "updated_at": current_time,
+                "schema_version": MONGODB_SCHEMA_VERSION,
+            },
+            "$unset": {
+                "claim_owner": "",
+                "claim_token": "",
+                "claim_expires_at": "",
+            },
+        }
+        result = self._collection("webhook_deliveries").update_one(
+            {
+                "delivery_id": delivery,
+                "status": "in_progress",
+                "claim_owner": claim_owner,
+                "claim_token": claim_token,
+                "claim_expires_at": {"$gt": current_time},
+            },
+            update,
+        )
+        return bool(result.modified_count)
 
     def record_webhook_delivery(
         self,
@@ -3892,6 +4158,7 @@ class MongoStorage:
             delivery_key["payload"] = payload
         delivery_id = stable_id("delivery", delivery_key)
         now = utc_now()
+        safe_error = redact_error_for_log(error) if error else ""
         self._collection("webhook_deliveries").update_one(
             {"delivery_id": delivery_id},
             {
@@ -3901,7 +4168,7 @@ class MongoStorage:
                         "report_id": report_id,
                         "target_url_hash": target_url_hash,
                         "status": status,
-                        "last_error": error,
+                        "last_error": safe_error,
                         "payload": payload,
                         "updated_at": now,
                     }

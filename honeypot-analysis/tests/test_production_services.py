@@ -153,6 +153,9 @@ def _config(tmp: str) -> ProductionConfig:
         encoding="utf-8",
     )
     os.chmod(keyring_path, 0o600)
+    webhook_key_path = Path(tmp) / "webhook-signing-key"
+    webhook_key_path.write_bytes(b"fake-webhook-signing-key-material" * 2)
+    os.chmod(webhook_key_path, 0o600)
     return ProductionConfig(
         database_url=f"sqlite:///{Path(tmp) / 'state.db'}",
         enable_feed_loading=False,
@@ -162,6 +165,7 @@ def _config(tmp: str) -> ProductionConfig:
         analysis_batch_size=10,
         analysis_max_attempts=1,
         webhook_url="",
+        webhook_signing_key_file=str(webhook_key_path),
         credential_hmac_keyring_file=str(keyring_path),
     )
 
@@ -7135,6 +7139,8 @@ def test_webhook_dispatcher_honors_max_attempts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _config(tmp)
         cfg.webhook_url = "http://127.0.0.1:9"
+        cfg.webhook_allowed_schemes = ["http"]
+        cfg.webhook_allow_private_networks = True
         cfg.webhook_max_attempts = 1
         storage = open_storage(cfg.database_url)
         alert = {
@@ -7158,6 +7164,8 @@ def test_webhook_dispatcher_sends_medium_threat_hunt_matches_only() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _config(tmp)
         cfg.webhook_url = "http://127.0.0.1:9"
+        cfg.webhook_allowed_schemes = ["http"]
+        cfg.webhook_allow_private_networks = True
         storage = open_storage(cfg.database_url)
         storage.store_alert(
             {
@@ -7179,8 +7187,10 @@ def test_webhook_dispatcher_sends_medium_threat_hunt_matches_only() -> None:
         )
         assert WebhookDispatcher(cfg).dispatch_once() == 1
         deliveries = storage.list_rows("webhook_deliveries", limit=10)
-        assert len(deliveries) == 1
-        assert deliveries[0]["alert_id"] == "alert-medium-threat-hunt"
+        assert len(deliveries) == 2
+        by_alert = {delivery["alert_id"]: delivery for delivery in deliveries}
+        assert by_alert["alert-medium-generic"]["status"] == "filtered"
+        assert by_alert["alert-medium-threat-hunt"]["status"] == "retryable"
 
 
 def test_feed_stale_cache_fallback_and_kev_rescan() -> None:

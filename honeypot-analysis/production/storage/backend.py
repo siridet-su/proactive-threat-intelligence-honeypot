@@ -22,10 +22,12 @@ from production.storage.contract import (
     validate_event_effect_summary,
     validate_event_failure_fields,
     validate_job_failure_fields,
+    validate_webhook_completion_fields,
 )
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.utils.feedback import normalize_feedback_payload
+from production.utils.sensitive_data import redact_error_for_log
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     SESSION_SOURCE_UNKNOWN_LEGACY,
@@ -402,6 +404,16 @@ class SQLiteStorage:
                     status TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT,
+                    error_code TEXT,
+                    next_retry_at TEXT,
+                    claim_owner TEXT,
+                    claim_token TEXT,
+                    claim_expires_at TEXT,
+                    response_status INTEGER,
+                    response_body_sha256 TEXT,
+                    response_body_bytes INTEGER NOT NULL DEFAULT 0,
+                    response_body_truncated INTEGER NOT NULL DEFAULT 0,
+                    completed_at TEXT,
                     payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -583,6 +595,7 @@ class SQLiteStorage:
             self._ensure_sqlite_job_processing_columns(conn)
             self._ensure_sqlite_session_source_column(conn)
             self._ensure_sqlite_enrichment_priority_columns(conn)
+            self._ensure_sqlite_webhook_delivery_columns(conn)
 
     def health_check(self) -> Dict[str, Any]:
         with self.connection() as conn:
@@ -704,6 +717,38 @@ class SQLiteStorage:
             """
             CREATE INDEX IF NOT EXISTS idx_enrichment_jobs_priority
                 ON enrichment_jobs(status, priority, next_retry_at, created_at)
+            """
+        )
+
+    def _ensure_sqlite_webhook_delivery_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(webhook_deliveries)").fetchall()
+        }
+        additions = {
+            "error_code": "TEXT",
+            "next_retry_at": "TEXT",
+            "claim_owner": "TEXT",
+            "claim_token": "TEXT",
+            "claim_expires_at": "TEXT",
+            "response_status": "INTEGER",
+            "response_body_sha256": "TEXT",
+            "response_body_bytes": "INTEGER NOT NULL DEFAULT 0",
+            "response_body_truncated": "INTEGER NOT NULL DEFAULT 0",
+            "completed_at": "TEXT",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                conn.execute(
+                    f"ALTER TABLE webhook_deliveries ADD COLUMN {name} {declaration}"
+                )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_webhook_target_claimable
+                ON webhook_deliveries(
+                    target_url_hash, status, next_retry_at,
+                    claim_expires_at, updated_at
+                )
             """
         )
 
@@ -3495,7 +3540,73 @@ class SQLiteStorage:
             ).fetchone()
         return int(row["session_count"] if row else 0)
 
-    def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def pending_webhooks(
+        self,
+        limit: int = 100,
+        *,
+        target_url_hash: str = "",
+        max_attempts: int = 5,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        if target_url_hash:
+            target = _required_identity(target_url_hash, "target_url_hash")
+            try:
+                attempt_limit = int(max_attempts)
+                row_limit = max(0, int(limit))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("limit and max_attempts must be integers") from exc
+            if attempt_limit < 1:
+                raise ValueError("max_attempts must be positive")
+            current_time = _utc_timestamp(now)
+            with self.connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT alerts.alert_id, alerts.payload_json
+                    FROM alerts
+                    LEFT JOIN webhook_deliveries AS delivery
+                      ON delivery.alert_id = alerts.alert_id
+                     AND delivery.target_url_hash = ?
+                    WHERE delivery.delivery_id IS NULL
+                       OR (
+                            delivery.status IN ('pending', 'retryable', 'failed', 'in_progress')
+                            AND (
+                                (
+                                    delivery.attempts < ?
+                                    AND (
+                                        delivery.next_retry_at IS NULL
+                                        OR delivery.next_retry_at <= ?
+                                    )
+                                )
+                                OR (
+                                    delivery.status = 'in_progress'
+                                    AND delivery.attempts >= ?
+                                )
+                            )
+                            AND (
+                                delivery.claim_token IS NULL
+                                OR delivery.claim_expires_at IS NULL
+                                OR delivery.claim_expires_at <= ?
+                            )
+                       )
+                    ORDER BY alerts.created_at, alerts.alert_id
+                    LIMIT ?
+                    """,
+                    (
+                        target,
+                        attempt_limit,
+                        current_time,
+                        attempt_limit,
+                        current_time,
+                        row_limit,
+                    ),
+                ).fetchall()
+            return [
+                {
+                    "alert_id": row["alert_id"],
+                    "payload": json.loads(row["payload_json"]),
+                }
+                for row in rows
+            ]
         with self.connection() as conn:
             rows = conn.execute(
                 """
@@ -3516,6 +3627,216 @@ class SQLiteStorage:
             ).fetchone()
         return dict(row) if row else None
 
+    def claim_webhook_delivery(
+        self,
+        payload: Dict[str, Any],
+        target_url_hash: str,
+        owner: str,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        alert_id: Optional[str] = None,
+        report_id: Optional[str] = None,
+        now: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        target = _required_identity(target_url_hash, "target_url_hash")
+        claim_owner = _required_identity(owner, "owner")
+        if not alert_id and not report_id:
+            raise ValueError("alert_id or report_id is required")
+        try:
+            attempt_limit = int(max_attempts)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("max_attempts must be an integer") from exc
+        if attempt_limit < 1:
+            raise ValueError("max_attempts must be positive")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time, lease_seconds, field="lease_seconds"
+        )
+        delivery_id = stable_id(
+            "delivery",
+            {"alert_id": alert_id, "report_id": report_id, "target": target},
+        )
+        token = str(uuid.uuid4())
+        payload_json = stable_json(payload)
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO webhook_deliveries
+                    (delivery_id, alert_id, report_id, target_url_hash, status,
+                     attempts, payload_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                """,
+                (
+                    delivery_id,
+                    alert_id,
+                    report_id,
+                    target,
+                    payload_json,
+                    current_time,
+                    current_time,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE webhook_deliveries
+                SET status = 'permanent_failure',
+                    error_code = 'webhook_lease_attempts_exhausted',
+                    last_error = 'delivery attempt budget exhausted after lease expiry',
+                    completed_at = ?,
+                    updated_at = ?,
+                    next_retry_at = NULL,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_expires_at = NULL
+                WHERE delivery_id = ?
+                  AND status = 'in_progress'
+                  AND attempts >= ?
+                  AND (claim_expires_at IS NULL OR claim_expires_at <= ?)
+                """,
+                (
+                    current_time,
+                    current_time,
+                    delivery_id,
+                    attempt_limit,
+                    current_time,
+                ),
+            )
+            cursor = conn.execute(
+                """
+                UPDATE webhook_deliveries
+                SET status = 'in_progress',
+                    attempts = attempts + 1,
+                    payload_json = ?,
+                    claim_owner = ?,
+                    claim_token = ?,
+                    claim_expires_at = ?,
+                    next_retry_at = NULL,
+                    error_code = NULL,
+                    last_error = NULL,
+                    completed_at = NULL,
+                    updated_at = ?
+                WHERE delivery_id = ?
+                  AND status IN ('pending', 'retryable', 'failed', 'in_progress')
+                  AND attempts < ?
+                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                  AND (
+                      claim_token IS NULL
+                      OR claim_expires_at IS NULL
+                      OR claim_expires_at <= ?
+                  )
+                """,
+                (
+                    payload_json,
+                    claim_owner,
+                    token,
+                    expires_at,
+                    current_time,
+                    delivery_id,
+                    attempt_limit,
+                    current_time,
+                    current_time,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = conn.execute(
+                "SELECT * FROM webhook_deliveries WHERE delivery_id = ?",
+                (delivery_id,),
+            ).fetchone()
+        if row is None:  # pragma: no cover - protected by the transaction
+            return None
+        result = dict(row)
+        result["payload"] = json.loads(result["payload_json"])
+        return result
+
+    def complete_webhook_delivery(
+        self,
+        delivery_id: str,
+        owner: str,
+        token: str,
+        status: str,
+        *,
+        error_code: str = "",
+        error: str = "",
+        response_status: Optional[int] = None,
+        response_body_sha256: str = "",
+        response_body_bytes: int = 0,
+        response_body_truncated: bool = False,
+        next_retry_at: Any = None,
+        now: Any = None,
+    ) -> bool:
+        delivery = _required_identity(delivery_id, "delivery_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        (
+            outcome,
+            safe_error_code,
+            safe_error,
+            response_status,
+            digest,
+            body_bytes,
+            response_body_truncated,
+        ) = validate_webhook_completion_fields(
+            status,
+            error_code,
+            error,
+            response_status,
+            response_body_sha256,
+            response_body_bytes,
+            response_body_truncated,
+        )
+        current_time = _utc_timestamp(now)
+        retry_at = _optional_utc_timestamp(next_retry_at)
+        if outcome == "retryable" and not retry_at:
+            raise ValueError("retryable webhook completion requires next_retry_at")
+        if outcome != "retryable" and retry_at:
+            raise ValueError("next_retry_at is only valid for retryable completion")
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                """
+                UPDATE webhook_deliveries
+                SET status = ?,
+                    error_code = ?,
+                    last_error = ?,
+                    response_status = ?,
+                    response_body_sha256 = ?,
+                    response_body_bytes = ?,
+                    response_body_truncated = ?,
+                    next_retry_at = ?,
+                    completed_at = CASE WHEN ? = 'retryable' THEN NULL ELSE ? END,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_expires_at = NULL,
+                    updated_at = ?
+                WHERE delivery_id = ?
+                  AND status = 'in_progress'
+                  AND claim_owner = ?
+                  AND claim_token = ?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    outcome,
+                    safe_error_code or None,
+                    safe_error or None,
+                    response_status,
+                    digest or None,
+                    body_bytes,
+                    int(response_body_truncated),
+                    retry_at,
+                    outcome,
+                    current_time,
+                    current_time,
+                    delivery,
+                    claim_owner,
+                    claim_token,
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
     def record_webhook_delivery(
         self,
         payload: Dict[str, Any],
@@ -3530,6 +3851,7 @@ class SQLiteStorage:
             delivery_key["payload"] = payload
         delivery_id = stable_id("delivery", delivery_key)
         now = utc_now()
+        safe_error = redact_error_for_log(error) if error else ""
         with self.connection() as conn:
             conn.execute(
                 """
@@ -3537,7 +3859,7 @@ class SQLiteStorage:
                 (delivery_id, alert_id, report_id, target_url_hash, status, attempts, last_error, payload_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, COALESCE((SELECT attempts FROM webhook_deliveries WHERE delivery_id=?), 0) + 1, ?, ?, ?, ?)
                 """,
-                (delivery_id, alert_id, report_id, target_url_hash, status, delivery_id, error, stable_json(payload), now, now),
+                (delivery_id, alert_id, report_id, target_url_hash, status, delivery_id, safe_error, stable_json(payload), now, now),
             )
             if alert_id and status in {"succeeded", "delivered"}:
                 conn.execute("UPDATE alerts SET delivered = 1 WHERE alert_id = ?", (alert_id,))
@@ -6062,7 +6384,72 @@ class PostgresStorage:
             row = cur.fetchone()
         return int(row["session_count"] if row else 0)
 
-    def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def pending_webhooks(
+        self,
+        limit: int = 100,
+        *,
+        target_url_hash: str = "",
+        max_attempts: int = 5,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        if target_url_hash:
+            target = _required_identity(target_url_hash, "target_url_hash")
+            attempt_limit = int(max_attempts)
+            row_limit = max(0, int(limit))
+            if attempt_limit < 1:
+                raise ValueError("max_attempts must be positive")
+            current_time = _utc_timestamp(now)
+            with self.connection() as conn:
+                cur = self._execute(
+                    conn,
+                    """
+                    SELECT alerts.alert_id, alerts.payload_json
+                    FROM alerts
+                    LEFT JOIN webhook_deliveries AS delivery
+                      ON delivery.alert_id = alerts.alert_id
+                     AND delivery.target_url_hash = %s
+                    WHERE delivery.delivery_id IS NULL
+                       OR (
+                            delivery.status IN ('pending', 'retryable', 'failed', 'in_progress')
+                            AND (
+                                (
+                                    delivery.attempts < %s
+                                    AND (
+                                        delivery.next_retry_at IS NULL
+                                        OR delivery.next_retry_at <= %s
+                                    )
+                                )
+                                OR (
+                                    delivery.status = 'in_progress'
+                                    AND delivery.attempts >= %s
+                                )
+                            )
+                            AND (
+                                delivery.claim_token IS NULL
+                                OR delivery.claim_expires_at IS NULL
+                                OR delivery.claim_expires_at <= %s
+                            )
+                       )
+                    ORDER BY alerts.created_at, alerts.alert_id
+                    LIMIT %s
+                    """,
+                    (
+                        target,
+                        attempt_limit,
+                        current_time,
+                        attempt_limit,
+                        current_time,
+                        row_limit,
+                    ),
+                )
+                rows = cur.fetchall()
+            return [
+                {
+                    "alert_id": row["alert_id"],
+                    "payload": _decode_json(row["payload_json"]),
+                }
+                for row in rows
+            ]
         with self.connection() as conn:
             cur = self._execute(
                 conn,
@@ -6087,6 +6474,212 @@ class PostgresStorage:
             row = cur.fetchone()
         return dict(row) if row else None
 
+    def claim_webhook_delivery(
+        self,
+        payload: Dict[str, Any],
+        target_url_hash: str,
+        owner: str,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        alert_id: Optional[str] = None,
+        report_id: Optional[str] = None,
+        now: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        target = _required_identity(target_url_hash, "target_url_hash")
+        claim_owner = _required_identity(owner, "owner")
+        if not alert_id and not report_id:
+            raise ValueError("alert_id or report_id is required")
+        attempt_limit = int(max_attempts)
+        if attempt_limit < 1:
+            raise ValueError("max_attempts must be positive")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time, lease_seconds, field="lease_seconds"
+        )
+        delivery_id = stable_id(
+            "delivery",
+            {"alert_id": alert_id, "report_id": report_id, "target": target},
+        )
+        token = str(uuid.uuid4())
+        with self.connection() as conn:
+            self._execute(
+                conn,
+                """
+                INSERT INTO webhook_deliveries
+                    (delivery_id, alert_id, report_id, target_url_hash, status,
+                     attempts, payload_json, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, 'pending', 0, %s::jsonb, %s, %s)
+                ON CONFLICT(delivery_id) DO NOTHING
+                """,
+                (
+                    delivery_id,
+                    alert_id,
+                    report_id,
+                    target,
+                    stable_json(payload),
+                    current_time,
+                    current_time,
+                ),
+            )
+            self._execute(
+                conn,
+                """
+                UPDATE webhook_deliveries
+                SET status = 'permanent_failure',
+                    error_code = 'webhook_lease_attempts_exhausted',
+                    last_error = 'delivery attempt budget exhausted after lease expiry',
+                    completed_at = %s,
+                    updated_at = %s,
+                    next_retry_at = NULL,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_expires_at = NULL
+                WHERE delivery_id = %s
+                  AND status = 'in_progress'
+                  AND attempts >= %s
+                  AND (claim_expires_at IS NULL OR claim_expires_at <= %s)
+                """,
+                (
+                    current_time,
+                    current_time,
+                    delivery_id,
+                    attempt_limit,
+                    current_time,
+                ),
+            )
+            cur = self._execute(
+                conn,
+                """
+                UPDATE webhook_deliveries
+                SET status = 'in_progress',
+                    attempts = attempts + 1,
+                    payload_json = %s::jsonb,
+                    claim_owner = %s,
+                    claim_token = %s,
+                    claim_expires_at = %s,
+                    next_retry_at = NULL,
+                    error_code = NULL,
+                    last_error = NULL,
+                    completed_at = NULL,
+                    updated_at = %s
+                WHERE delivery_id = %s
+                  AND status IN ('pending', 'retryable', 'failed', 'in_progress')
+                  AND attempts < %s
+                  AND (next_retry_at IS NULL OR next_retry_at <= %s)
+                  AND (
+                      claim_token IS NULL
+                      OR claim_expires_at IS NULL
+                      OR claim_expires_at <= %s
+                  )
+                RETURNING *
+                """,
+                (
+                    stable_json(payload),
+                    claim_owner,
+                    token,
+                    expires_at,
+                    current_time,
+                    delivery_id,
+                    attempt_limit,
+                    current_time,
+                    current_time,
+                ),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["payload"] = _decode_json(result["payload_json"])
+        return result
+
+    def complete_webhook_delivery(
+        self,
+        delivery_id: str,
+        owner: str,
+        token: str,
+        status: str,
+        *,
+        error_code: str = "",
+        error: str = "",
+        response_status: Optional[int] = None,
+        response_body_sha256: str = "",
+        response_body_bytes: int = 0,
+        response_body_truncated: bool = False,
+        next_retry_at: Any = None,
+        now: Any = None,
+    ) -> bool:
+        delivery = _required_identity(delivery_id, "delivery_id")
+        claim_owner = _required_identity(owner, "owner")
+        claim_token = _uuid_token(token, "token")
+        (
+            outcome,
+            safe_error_code,
+            safe_error,
+            response_status,
+            digest,
+            body_bytes,
+            response_body_truncated,
+        ) = validate_webhook_completion_fields(
+            status,
+            error_code,
+            error,
+            response_status,
+            response_body_sha256,
+            response_body_bytes,
+            response_body_truncated,
+        )
+        current_time = _utc_timestamp(now)
+        retry_at = _optional_utc_timestamp(next_retry_at)
+        if outcome == "retryable" and not retry_at:
+            raise ValueError("retryable webhook completion requires next_retry_at")
+        if outcome != "retryable" and retry_at:
+            raise ValueError("next_retry_at is only valid for retryable completion")
+        with self.connection() as conn:
+            cur = self._execute(
+                conn,
+                """
+                UPDATE webhook_deliveries
+                SET status = %s,
+                    error_code = %s,
+                    last_error = %s,
+                    response_status = %s,
+                    response_body_sha256 = %s,
+                    response_body_bytes = %s,
+                    response_body_truncated = %s,
+                    next_retry_at = %s,
+                    completed_at = CASE WHEN %s = 'retryable' THEN NULL ELSE %s END,
+                    claim_owner = NULL,
+                    claim_token = NULL,
+                    claim_expires_at = NULL,
+                    updated_at = %s
+                WHERE delivery_id = %s
+                  AND status = 'in_progress'
+                  AND claim_owner = %s
+                  AND claim_token = %s
+                  AND claim_expires_at > %s
+                RETURNING delivery_id
+                """,
+                (
+                    outcome,
+                    safe_error_code or None,
+                    safe_error or None,
+                    response_status,
+                    digest or None,
+                    body_bytes,
+                    bool(response_body_truncated),
+                    retry_at,
+                    outcome,
+                    current_time,
+                    current_time,
+                    delivery,
+                    claim_owner,
+                    claim_token,
+                    current_time,
+                ),
+            )
+            return cur.fetchone() is not None
+
     def record_webhook_delivery(
         self,
         payload: Dict[str, Any],
@@ -6101,6 +6694,7 @@ class PostgresStorage:
             delivery_key["payload"] = payload
         delivery_id = stable_id("delivery", delivery_key)
         now = utc_now()
+        safe_error = redact_error_for_log(error) if error else ""
         with self.connection() as conn:
             self._execute(
                 conn,
@@ -6115,7 +6709,7 @@ class PostgresStorage:
                     payload_json=excluded.payload_json,
                     updated_at=excluded.updated_at
                 """,
-                (delivery_id, alert_id, report_id, target_url_hash, status, delivery_id, error, stable_json(payload), now, now),
+                (delivery_id, alert_id, report_id, target_url_hash, status, delivery_id, safe_error, stable_json(payload), now, now),
             )
             if alert_id and status in {"succeeded", "delivered"}:
                 self._execute(conn, "UPDATE alerts SET delivered = true WHERE alert_id = %s", (alert_id,))

@@ -47,6 +47,16 @@ def _env_json(name: str, default: Dict[str, Any]) -> Dict[str, Any]:
     return parsed
 
 
+def _env_json_list(name: str, default: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    raw = os.getenv(name)
+    if not raw:
+        return [dict(item) for item in default]
+    parsed = json.loads(raw)
+    if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
+        raise ValueError(f"{name} must be a JSON list of objects")
+    return [dict(item) for item in parsed]
+
+
 def _token_mapping(value: Dict[str, Any], name: str) -> Dict[str, str]:
     normalized: Dict[str, str] = {}
     for raw_identity, raw_token in value.items():
@@ -194,9 +204,16 @@ class ProductionConfig:
     analysis_suppress_stdout: bool = True
 
     webhook_url: str = ""
+    webhook_targets: List[Dict[str, Any]] = field(default_factory=list)
+    webhook_signing_key_file: str = ""
     webhook_timeout_seconds: int = 15
+    webhook_dns_timeout_seconds: float = 5.0
     webhook_max_attempts: int = 5
     webhook_retry_seconds: float = 30.0
+    webhook_lease_seconds: float = 60.0
+    webhook_max_response_bytes: int = 4096
+    webhook_allowed_schemes: List[str] = field(default_factory=lambda: ["https"])
+    webhook_allow_private_networks: bool = False
     webhook_policy: Dict[str, Any] = field(default_factory=lambda: {
         "min_severity": "high",
         "alert_type_min_severity": {
@@ -536,6 +553,10 @@ class ProductionConfig:
         positive_durations = {
             "forwarder_poll_seconds": self.forwarder_poll_seconds,
             "forwarder_timeout_seconds": self.forwarder_timeout_seconds,
+            "webhook_timeout_seconds": self.webhook_timeout_seconds,
+            "webhook_dns_timeout_seconds": self.webhook_dns_timeout_seconds,
+            "webhook_retry_seconds": self.webhook_retry_seconds,
+            "webhook_lease_seconds": self.webhook_lease_seconds,
             "event_lease_seconds": self.event_lease_seconds,
             "event_lease_heartbeat_seconds": self.event_lease_heartbeat_seconds,
             "event_retry_base_seconds": self.event_retry_base_seconds,
@@ -574,6 +595,39 @@ class ProductionConfig:
             or self.forwarder_min_free_bytes < 0
         ):
             raise ValueError("forwarder_min_free_bytes must be a non-negative integer")
+        if (
+            isinstance(self.webhook_max_attempts, bool)
+            or not isinstance(self.webhook_max_attempts, Integral)
+            or not 1 <= self.webhook_max_attempts <= 100
+        ):
+            raise ValueError("webhook_max_attempts must be an integer between 1 and 100")
+        if (
+            isinstance(self.webhook_max_response_bytes, bool)
+            or not isinstance(self.webhook_max_response_bytes, Integral)
+            or not 0 <= self.webhook_max_response_bytes <= 65536
+        ):
+            raise ValueError(
+                "webhook_max_response_bytes must be an integer between 0 and 65536"
+            )
+        if not isinstance(self.webhook_targets, list) or not all(
+            isinstance(item, dict) for item in self.webhook_targets
+        ):
+            raise ValueError("webhook_targets must be a list of objects")
+        if (
+            not isinstance(self.webhook_allowed_schemes, list)
+            or not self.webhook_allowed_schemes
+            or any(
+                not isinstance(item, str) or item.strip().lower() not in {"http", "https"}
+                for item in self.webhook_allowed_schemes
+            )
+        ):
+            raise ValueError("webhook_allowed_schemes must contain only http or https")
+        if self.webhook_lease_seconds <= (
+            self.webhook_timeout_seconds + self.webhook_dns_timeout_seconds
+        ):
+            raise ValueError(
+                "webhook_lease_seconds must exceed the combined DNS and request timeouts"
+            )
 
         if (
             isinstance(self.event_max_attempts, bool)
@@ -852,9 +906,30 @@ class ProductionConfig:
         cfg.analysis_skip_empty_sessions = _env_bool("ANALYSIS_SKIP_EMPTY_SESSIONS", cfg.analysis_skip_empty_sessions)
         cfg.analysis_suppress_stdout = _env_bool("ANALYSIS_SUPPRESS_STDOUT", cfg.analysis_suppress_stdout)
         cfg.webhook_url = os.getenv("WEBHOOK_URL", cfg.webhook_url)
+        cfg.webhook_targets = _env_json_list(
+            "WEBHOOK_TARGETS_JSON", cfg.webhook_targets
+        )
+        cfg.webhook_signing_key_file = os.getenv(
+            "WEBHOOK_SIGNING_KEY_FILE", cfg.webhook_signing_key_file
+        )
         cfg.webhook_timeout_seconds = _env_int("WEBHOOK_TIMEOUT_SECONDS", cfg.webhook_timeout_seconds)
+        cfg.webhook_dns_timeout_seconds = _env_float(
+            "WEBHOOK_DNS_TIMEOUT_SECONDS", cfg.webhook_dns_timeout_seconds
+        )
         cfg.webhook_max_attempts = _env_int("WEBHOOK_MAX_ATTEMPTS", cfg.webhook_max_attempts)
         cfg.webhook_retry_seconds = _env_float("WEBHOOK_RETRY_SECONDS", cfg.webhook_retry_seconds)
+        cfg.webhook_lease_seconds = _env_float(
+            "WEBHOOK_LEASE_SECONDS", cfg.webhook_lease_seconds
+        )
+        cfg.webhook_max_response_bytes = _env_int(
+            "WEBHOOK_MAX_RESPONSE_BYTES", cfg.webhook_max_response_bytes
+        )
+        cfg.webhook_allowed_schemes = _env_list(
+            "WEBHOOK_ALLOWED_SCHEMES", cfg.webhook_allowed_schemes
+        )
+        cfg.webhook_allow_private_networks = _env_bool(
+            "WEBHOOK_ALLOW_PRIVATE_NETWORKS", cfg.webhook_allow_private_networks
+        )
         cfg.webhook_policy = _env_json("WEBHOOK_POLICY_JSON", cfg.webhook_policy)
         cfg.enrichment_db_path = os.getenv("ENRICHMENT_DB_PATH", cfg.enrichment_db_path)
         cfg.enable_enrichment_jobs = _env_bool("ENABLE_ENRICHMENT_JOBS", cfg.enable_enrichment_jobs)

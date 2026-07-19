@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
+from production.utils.sensitive_data import redact_error_for_log
 
 
 SQLITE_BACKEND = "sqlite"
@@ -79,6 +80,24 @@ JOB_FAILURE_CODES = frozenset(
     }
 )
 
+WEBHOOK_COMPLETION_STATUSES = frozenset(
+    {"delivered", "retryable", "permanent_failure"}
+)
+WEBHOOK_FAILURE_CODES = frozenset(
+    {
+        "webhook_attempts_exhausted",
+        "webhook_dns_no_addresses",
+        "webhook_dns_unavailable",
+        "webhook_endpoint_internal",
+        "webhook_endpoint_unsafe",
+        "webhook_lease_attempts_exhausted",
+        "webhook_request_invalid",
+        "webhook_transport_error",
+        *(f"webhook_http_{status}" for status in range(100, 600)),
+    }
+)
+MAX_WEBHOOK_RESPONSE_BYTES = 65_536
+
 SESSION_ANALYSIS_FIELDS = frozenset(
     {
         "analysis_status",
@@ -122,6 +141,68 @@ def validate_event_failure_fields(error_code: str, error_type: str) -> tuple[str
     if failure_type not in EVENT_FAILURE_TYPES:
         raise ValueError("error_type is not a registered event failure type")
     return code, failure_type
+
+
+def validate_webhook_completion_fields(
+    status: str,
+    error_code: str,
+    error: str,
+    response_status: Optional[int],
+    response_body_sha256: str,
+    response_body_bytes: int,
+    response_body_truncated: bool,
+) -> tuple[str, str, str, Optional[int], str, int, bool]:
+    """Validate the bounded, secret-free webhook completion schema."""
+
+    outcome = str(status or "").strip().lower()
+    if outcome not in WEBHOOK_COMPLETION_STATUSES:
+        raise ValueError("unsupported webhook completion status")
+    code = str(error_code or "").strip()
+    if outcome == "delivered":
+        if code or error:
+            raise ValueError("delivered webhook completion cannot contain an error")
+        safe_error = ""
+    else:
+        if code not in WEBHOOK_FAILURE_CODES:
+            raise ValueError("error_code is not a registered webhook failure code")
+        raw_error = str(error or "").strip()
+        expected_http_error = (
+            f"HTTP {response_status}" if response_status is not None else ""
+        )
+        safe_error = (
+            raw_error
+            if raw_error == expected_http_error and code == f"webhook_http_{response_status}"
+            else redact_error_for_log(raw_error)
+        )
+    normalized_status: Optional[int] = None
+    if response_status is not None:
+        normalized_status = int(response_status)
+        if not 100 <= normalized_status <= 599:
+            raise ValueError("response_status must be an HTTP status")
+        if outcome == "delivered" and not 200 <= normalized_status < 300:
+            raise ValueError("delivered webhook response_status must be successful")
+    body_bytes = int(response_body_bytes)
+    if not 0 <= body_bytes <= MAX_WEBHOOK_RESPONSE_BYTES:
+        raise ValueError("response_body_bytes exceeds the bounded capture limit")
+    digest = str(response_body_sha256 or "")
+    if digest and (
+        len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError("response_body_sha256 must be a lowercase SHA-256 digest")
+    if body_bytes and not digest:
+        raise ValueError("captured response bytes require a SHA-256 digest")
+    if not isinstance(response_body_truncated, bool):
+        raise ValueError("response_body_truncated must be boolean")
+    return (
+        outcome,
+        code,
+        safe_error,
+        normalized_status,
+        digest,
+        body_bytes,
+        response_body_truncated,
+    )
 
 
 def validate_event_effect_summary(
@@ -860,12 +941,49 @@ class StorageBackend(Protocol):
         ended_only: bool = False,
     ) -> int: ...
 
-    def pending_webhooks(self, limit: int = 100) -> List[Dict[str, Any]]: ...
+    def pending_webhooks(
+        self,
+        limit: int = 100,
+        *,
+        target_url_hash: str = "",
+        max_attempts: int = 5,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]: ...
 
     def get_webhook_delivery(
         self,
         delivery_id: str,
     ) -> Optional[Dict[str, Any]]: ...
+
+    def claim_webhook_delivery(
+        self,
+        payload: Dict[str, Any],
+        target_url_hash: str,
+        owner: str,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        alert_id: Optional[str] = None,
+        report_id: Optional[str] = None,
+        now: Any = None,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def complete_webhook_delivery(
+        self,
+        delivery_id: str,
+        owner: str,
+        token: str,
+        status: str,
+        *,
+        error_code: str = "",
+        error: str = "",
+        response_status: Optional[int] = None,
+        response_body_sha256: str = "",
+        response_body_bytes: int = 0,
+        response_body_truncated: bool = False,
+        next_retry_at: Any = None,
+        now: Any = None,
+    ) -> bool: ...
 
     def record_webhook_delivery(
         self,

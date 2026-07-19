@@ -327,10 +327,34 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
     status TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    error_code TEXT,
+    next_retry_at TIMESTAMPTZ,
+    claim_owner TEXT,
+    claim_token UUID,
+    claim_expires_at TIMESTAMPTZ,
+    response_status INTEGER,
+    response_body_sha256 TEXT,
+    response_body_bytes INTEGER NOT NULL DEFAULT 0,
+    response_body_truncated BOOLEAN NOT NULL DEFAULT false,
+    completed_at TIMESTAMPTZ,
     payload_json JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS error_code TEXT;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS claim_owner TEXT;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS claim_token UUID;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS response_status INTEGER;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS response_body_sha256 TEXT;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS response_body_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS response_body_truncated BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_webhook_target_claimable
+    ON webhook_deliveries(
+        target_url_hash, status, next_retry_at, claim_expires_at, updated_at
+    );
 
 CREATE TABLE IF NOT EXISTS prediction_snapshots (
     snapshot_id TEXT PRIMARY KEY,

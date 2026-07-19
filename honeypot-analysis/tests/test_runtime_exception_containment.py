@@ -36,12 +36,15 @@ def test_webhook_result_does_not_render_exception_arguments(monkeypatch) -> None
     def fail_request(*_args, **_kwargs):
         raise OSError(BARE_SENTINEL)
 
-    monkeypatch.setattr(webhook_dispatcher.urllib.request, "urlopen", fail_request)
+    monkeypatch.setattr(webhook_dispatcher, "_open_no_redirect", fail_request)
 
     ok, error = webhook_dispatcher.post_webhook(
         "https://example.invalid/webhook",
         {"alert": "test"},
         1.0,
+        signing_key=b"fake-webhook-signing-key-material" * 2,
+        timestamp="2026-07-19T00:00:00+00:00",
+        idempotency_key="delivery_test",
     )
 
     assert ok is False
@@ -59,6 +62,9 @@ def test_webhook_request_construction_does_not_render_url(monkeypatch) -> None:
         f"not-a-url?token={BARE_SENTINEL}",
         {"alert": "test"},
         1.0,
+        signing_key=b"fake-webhook-signing-key-material" * 2,
+        timestamp="2026-07-19T00:00:00+00:00",
+        idempotency_key="delivery_test",
     )
 
     assert ok is False

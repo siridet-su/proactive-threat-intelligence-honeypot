@@ -152,6 +152,31 @@ sessions from the production database and writes warning-level journal lines
 when the first completed session and the 30-session threshold are crossed. Its
 state file is `/var/lib/honeypot/session_count_monitor_state.json`.
 
+## Signed Webhook Delivery
+
+Webhooks are disabled when both `WEBHOOK_URL` and `WEBHOOK_TARGETS_JSON` are
+empty. Enabling a target also requires `WEBHOOK_SIGNING_KEY_FILE` (or a
+per-target `signing_key_file`) naming a regular, non-symlink key file with at
+least 32 bytes and no group/other permissions. Do not put the key value in the
+environment or JSON configuration. HTTPS is the only allowed scheme by
+default; private, loopback, link-local, or otherwise non-global destinations
+require the explicit `allow_private_networks` target setting or
+`WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+
+Each exact JSON body is signed as HMAC-SHA256 over the byte sequence
+`v1 + "\n" + timestamp + "\n" + idempotency_key + "\n" + body`. Receivers
+must verify `X-Honeypot-Signature` (`v1=<lowercase hex digest>`), reject stale
+`X-Honeypot-Timestamp` values, and deduplicate
+`X-Honeypot-Idempotency-Key`. The same logical alert/target key is retained
+across crash recovery. Redirects are not followed. Response bodies are never
+stored verbatim; only a configured bounded byte count, truncation flag, and
+SHA-256 digest are recorded.
+
+For multiple destinations, configure `WEBHOOK_TARGETS_JSON` as a list of
+objects containing `target_id`, `url`, optional `signing_key_file`, and optional
+`allow_private_networks`. Delivery completion, attempt count, retry time, and
+lease state are tracked independently for every alert/target pair.
+
 ## Raspberry Pi Sensor
 
 Install only the forwarder service on the Pi. Cowrie should keep writing
