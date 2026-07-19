@@ -1,11 +1,16 @@
-"""Raspberry Pi Cowrie log forwarder with a local disk spool."""
+"""Raspberry Pi Cowrie log forwarder with a durable local disk spool."""
 
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
+import os
+import shutil
+import stat as stat_module
+import tempfile
 import time
-import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +27,12 @@ else:
     from production.utils.serialization import utc_now
 
 
+DEFAULT_MAX_SPOOL_BYTES = 64 * 1024 * 1024
+DEFAULT_MIN_FREE_BYTES = 32 * 1024 * 1024
+DEFAULT_MAX_LINE_BYTES = 256 * 1024
+OFFSET_SCHEMA = "cowrie_forwarder_offset.v2"
+
+
 def _safe_exception_text(exc: BaseException) -> str:
     """Summarize failures without rendering attacker-controlled arguments."""
 
@@ -33,6 +44,60 @@ def _safe_exception_text(exc: BaseException) -> str:
     return "operation_failed"
 
 
+def _fsync_directory(path: Path) -> None:
+    """Persist a directory-entry change on Linux filesystems."""
+
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_replace_bytes(path: Path, payload: bytes) -> None:
+    """Atomically replace ``path`` with an fsynced private regular file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        descriptor = -1
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+@dataclass(frozen=True)
+class TailCheckpoint:
+    offset: int
+    device: Optional[int] = None
+    inode: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class TailRead:
+    events: List[Dict[str, Any]]
+    checkpoint: TailCheckpoint
+    previous_offset: int
+    parse_errors: int = 0
+    rotation_detected: bool = False
+    truncation_detected: bool = False
+    commit_required: bool = False
+
+
 @dataclass
 class ForwardResult:
     sent: int
@@ -40,105 +105,410 @@ class ForwardResult:
     duplicates: int = 0
     rejected: int = 0
     error: str = ""
+    spooled: int = 0
+    parse_errors: int = 0
+    spool_bytes: int = 0
+    source_offset: int = 0
+    spool_parse_errors: int = 0
+    rotation_detected: bool = False
+    truncation_detected: bool = False
+    disk_limited: bool = False
+    lock_contended: bool = False
+
+
+class ForwarderInstanceLock:
+    """Non-blocking process lock colocated with the spool state."""
+
+    def __init__(self, spool_path: str) -> None:
+        self.path = Path(f"{spool_path}.lock")
+        self._descriptor: Optional[int] = None
+
+    def __enter__(self) -> "ForwarderInstanceLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(descriptor)
+            raise
+        self._descriptor = descriptor
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        if self._descriptor is None:
+            return
+        try:
+            fcntl.flock(self._descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(self._descriptor)
+            self._descriptor = None
+
+
+class SpoolCapacityError(OSError):
+    """Raised before an append that would violate a disk safety bound."""
 
 
 class CowrieLogTailer:
-    """Tails Cowrie's NDJSON log using a persistent byte offset."""
+    """Read complete Cowrie NDJSON records without prematurely committing them."""
 
     def __init__(self, log_path: str, offset_path: str) -> None:
         self.log_path = Path(log_path)
         self.offset_path = Path(offset_path)
 
-    def _load_offset(self) -> int:
+    def _load_checkpoint(self) -> TailCheckpoint:
         try:
-            return int(self.offset_path.read_text(encoding="utf-8").strip() or "0")
-        except (OSError, ValueError):
-            return 0
+            raw = self.offset_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return TailCheckpoint(0)
+        if not raw:
+            return TailCheckpoint(0)
+        # v1 stored a bare integer. It is parsed for compatibility, then
+        # replayed once because it cannot identify a rotated source file.
+        try:
+            return TailCheckpoint(max(int(raw), 0))
+        except ValueError:
+            pass
+        try:
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict) or parsed.get("schema") != OFFSET_SCHEMA:
+                return TailCheckpoint(0)
+            offset = parsed.get("offset")
+            device = parsed.get("device")
+            inode = parsed.get("inode")
+            if (
+                isinstance(offset, bool)
+                or not isinstance(offset, int)
+                or offset < 0
+                or isinstance(device, bool)
+                or not isinstance(device, int)
+                or device < 0
+                or isinstance(inode, bool)
+                or not isinstance(inode, int)
+                or inode < 0
+            ):
+                return TailCheckpoint(0)
+            return TailCheckpoint(offset, device, inode)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return TailCheckpoint(0)
 
-    def _save_offset(self, offset: int) -> None:
-        self.offset_path.parent.mkdir(parents=True, exist_ok=True)
-        self.offset_path.write_text(str(offset), encoding="utf-8")
+    def commit(self, checkpoint: TailCheckpoint) -> None:
+        payload = json.dumps(
+            {
+                "device": checkpoint.device,
+                "inode": checkpoint.inode,
+                "offset": checkpoint.offset,
+                "schema": OFFSET_SCHEMA,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        _atomic_replace_bytes(self.offset_path, payload + b"\n")
 
-    def read_new_events(self) -> Tuple[List[Dict[str, Any]], int]:
+    @staticmethod
+    def _parse_error_event(
+        raw_line: bytes,
+        reason: str,
+        *,
+        raw_line_bytes: Optional[int] = None,
+        raw_line_sha256: Optional[str] = None,
+        source_offset: Optional[int] = None,
+        source_file_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "eventid": "forwarder.parse_error",
+            "error": reason,
+            "raw_line_bytes": raw_line_bytes if raw_line_bytes is not None else len(raw_line),
+            "raw_line_sha256": raw_line_sha256 or hashlib.sha256(raw_line).hexdigest(),
+            **({"source_offset": source_offset} if source_offset is not None else {}),
+            **({"source_file_id": source_file_id} if source_file_id else {}),
+        }
+
+    def _find_rotated_source(self, checkpoint: TailCheckpoint) -> Optional[Path]:
+        """Find a renamed regular file matching the last committed identity."""
+
+        if checkpoint.device is None or checkpoint.inode is None:
+            return None
+        try:
+            with os.scandir(self.log_path.parent) as entries:
+                for entry in entries:
+                    if entry.name == self.log_path.name:
+                        continue
+                    try:
+                        candidate_stat = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    if not stat_module.S_ISREG(candidate_stat.st_mode):
+                        continue
+                    if (candidate_stat.st_dev, candidate_stat.st_ino) == (
+                        checkpoint.device,
+                        checkpoint.inode,
+                    ):
+                        return Path(entry.path)
+        except OSError:
+            return None
+        return None
+
+    def prepare_new_events(self, *, limit: int, max_line_bytes: int) -> TailRead:
+        checkpoint = self._load_checkpoint()
         if not self.log_path.exists():
-            return [], self._load_offset()
-
-        offset = self._load_offset()
-        size = self.log_path.stat().st_size
-        if offset > size:
-            offset = 0
+            return TailRead([], checkpoint, checkpoint.offset)
 
         events: List[Dict[str, Any]] = []
-        with self.log_path.open("rb") as handle:
-            handle.seek(offset)
-            for raw_line in handle:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line:
+        parse_errors = 0
+        current_stat = self.log_path.stat()
+        current_identity_changed = (
+            checkpoint.device is not None
+            and checkpoint.inode is not None
+            and (checkpoint.device, checkpoint.inode)
+            != (current_stat.st_dev, current_stat.st_ino)
+        )
+        rotated_source = (
+            self._find_rotated_source(checkpoint) if current_identity_changed else None
+        )
+        source_path = rotated_source or self.log_path
+        recovering_rotation = rotated_source is not None
+
+        with source_path.open("rb") as handle:
+            stat = os.fstat(handle.fileno())
+            source_file_id = hashlib.sha256(
+                f"{stat.st_dev}:{stat.st_ino}".encode("ascii")
+            ).hexdigest()[:32]
+            identity_changed = (
+                not recovering_rotation
+                and checkpoint.device is not None
+                and checkpoint.inode is not None
+                and (checkpoint.device, checkpoint.inode) != (stat.st_dev, stat.st_ino)
+            )
+            truncated = not identity_changed and checkpoint.offset > stat.st_size
+            legacy_checkpoint = (
+                checkpoint.offset > 0
+                and checkpoint.device is None
+                and checkpoint.inode is None
+            )
+            # A v1 bare offset cannot prove that the current pathname still
+            # refers to the same file. Resetting once may replay duplicates,
+            # but cannot silently skip a rotated file.
+            start_offset = (
+                0 if identity_changed or truncated or legacy_checkpoint else checkpoint.offset
+            )
+            handle.seek(start_offset)
+
+            while len(events) < limit:
+                line_start = handle.tell()
+                raw_line = handle.readline(max_line_bytes + 1)
+                if not raw_line:
+                    break
+
+                if not raw_line.endswith(b"\n"):
+                    if len(raw_line) <= max_line_bytes:
+                        # Cowrie may still be writing this record. Re-read it
+                        # after the terminating newline reaches disk.
+                        if not recovering_rotation:
+                            handle.seek(line_start)
+                            break
+                        events.append(
+                            self._parse_error_event(
+                                raw_line,
+                                "invalid_ndjson",
+                                source_offset=line_start,
+                                source_file_id=source_file_id,
+                            )
+                        )
+                        parse_errors += 1
+                        continue
+                    digest = hashlib.sha256()
+                    digest.update(raw_line)
+                    raw_line_length = len(raw_line)
+                    complete = False
+                    while True:
+                        chunk = handle.readline(max_line_bytes + 1)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                        raw_line_length += len(chunk)
+                        if chunk.endswith(b"\n"):
+                            complete = True
+                            break
+                    if not complete:
+                        if not recovering_rotation:
+                            handle.seek(line_start)
+                            break
+                        complete = True
+                    events.append(
+                        self._parse_error_event(
+                            b"",
+                            "line_too_large",
+                            raw_line_bytes=raw_line_length,
+                            raw_line_sha256=digest.hexdigest(),
+                            source_offset=line_start,
+                            source_file_id=source_file_id,
+                        )
+                    )
+                    parse_errors += 1
+                    continue
+
+                stripped = raw_line.rstrip(b"\r\n")
+                if not stripped:
+                    continue
+                if len(stripped) > max_line_bytes:
+                    event = self._parse_error_event(
+                        stripped,
+                        "line_too_large",
+                        source_offset=line_start,
+                        source_file_id=source_file_id,
+                    )
+                    parse_errors += 1
+                    events.append(event)
                     continue
                 try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    event = {
-                        "eventid": "forwarder.parse_error",
-                        "timestamp": utc_now(),
-                        "raw_line": line,
-                    }
-                events.append(event)
-            new_offset = handle.tell()
+                    parsed = json.loads(stripped.decode("utf-8"))
+                    if not isinstance(parsed, dict):
+                        raise ValueError("event_not_object")
+                    events.append(parsed)
+                except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                    events.append(
+                        self._parse_error_event(
+                            stripped,
+                            "invalid_ndjson",
+                            source_offset=line_start,
+                            source_file_id=source_file_id,
+                        )
+                    )
+                    parse_errors += 1
 
-        if new_offset != offset:
-            self._save_offset(new_offset)
-        return events, new_offset
+            new_offset = handle.tell()
+            recovered_to_eof = recovering_rotation and new_offset >= stat.st_size
+            next_checkpoint = (
+                TailCheckpoint(0, current_stat.st_dev, current_stat.st_ino)
+                if recovered_to_eof
+                else TailCheckpoint(new_offset, stat.st_dev, stat.st_ino)
+            )
+
+        return TailRead(
+            events,
+            next_checkpoint,
+            checkpoint.offset,
+            parse_errors=parse_errors,
+            rotation_detected=current_identity_changed,
+            truncation_detected=truncated,
+            commit_required=(
+                identity_changed
+                or truncated
+                or legacy_checkpoint
+                or new_offset != checkpoint.offset
+                or checkpoint.device is None
+                or checkpoint.inode is None
+                or recovered_to_eof
+            ),
+        )
 
 
 class DiskSpool:
-    """Small durable NDJSON queue for outbound-only sensors."""
+    """Durable bounded NDJSON queue for outbound-only sensors."""
 
     def __init__(self, path: str) -> None:
         self.path = Path(path)
 
-    def append_many(self, events: Iterable[Dict[str, Any]]) -> int:
+    def size_bytes(self) -> int:
+        try:
+            return self.path.stat().st_size
+        except FileNotFoundError:
+            return 0
+
+    def _available_bytes(self) -> int:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        return shutil.disk_usage(self.path.parent).free
+
+    def append_many(
+        self,
+        events: Iterable[Dict[str, Any]],
+        *,
+        max_spool_bytes: int = DEFAULT_MAX_SPOOL_BYTES,
+        min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
+    ) -> int:
         materialized = list(events)
         if not materialized:
             return 0
+        payload = b"".join(
+            json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+            for event in materialized
+        )
+        current_size = self.size_bytes()
+        if current_size + len(payload) > max_spool_bytes:
+            raise SpoolCapacityError("forwarder spool size limit reached")
+        prospective_size = current_size + len(payload)
+        # A later acknowledgement rewrite temporarily needs a second file as
+        # large as the queue. Reserve that space before accepting more data.
+        if self._available_bytes() - len(payload) - prospective_size < min_free_bytes:
+            raise SpoolCapacityError("forwarder spool free-space reserve reached")
+
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            for event in materialized:
-                handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
+        existed = self.path.exists()
+        descriptor = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("short spool append")
+                view = view[written:]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        if not existed:
+            _fsync_directory(self.path.parent)
         return len(materialized)
+
+    @staticmethod
+    def _spool_parse_error(raw_line: str, line_index: int) -> Dict[str, Any]:
+        encoded = raw_line.encode("utf-8", errors="replace")
+        return {
+            "eventid": "forwarder.spool_parse_error",
+            "error": "invalid_spool_ndjson",
+            "raw_line_bytes": len(encoded),
+            "raw_line_sha256": hashlib.sha256(encoded).hexdigest(),
+            "spool_line_index": line_index,
+        }
 
     def load_batch(self, limit: int) -> Tuple[List[Dict[str, Any]], List[str]]:
         if not self.path.exists():
             return [], []
-        lines = self.path.read_text(encoding="utf-8").splitlines()
+        lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
         batch_lines = lines[:limit]
         remaining = lines[limit:]
         events: List[Dict[str, Any]] = []
-        for line in batch_lines:
+        for line_index, line in enumerate(batch_lines):
             if not line.strip():
                 continue
             try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                events.append(
-                    {
-                        "eventid": "forwarder.spool_parse_error",
-                        "timestamp": utc_now(),
-                        "raw_line": line,
-                    }
-                )
+                parsed = json.loads(line)
+                if not isinstance(parsed, dict):
+                    raise ValueError("event_not_object")
+                events.append(parsed)
+            except (json.JSONDecodeError, ValueError):
+                events.append(self._spool_parse_error(line, line_index))
         return events, remaining
 
     def replace_remaining(self, remaining_lines: List[str]) -> None:
-        if remaining_lines:
-            self.path.write_text("\n".join(remaining_lines) + "\n", encoding="utf-8")
-        elif self.path.exists():
+        payload = (
+            ("\n".join(remaining_lines) + "\n").encode("utf-8")
+            if remaining_lines
+            else b""
+        )
+        _atomic_replace_bytes(self.path, payload)
+        if not remaining_lines:
+            # The empty replacement is already durable. Removing it restores
+            # the historical "no backlog means no spool file" contract.
             self.path.unlink()
+            _fsync_directory(self.path.parent)
 
     def count(self) -> int:
         if not self.path.exists():
             return 0
-        return sum(1 for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip())
+        with self.path.open("r", encoding="utf-8", errors="replace") as handle:
+            return sum(1 for line in handle if line.strip())
 
 
 def post_events(config: ProductionConfig, events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -163,55 +533,155 @@ def post_events(config: ProductionConfig, events: List[Dict[str, Any]]) -> Dict[
         return parsed
 
 
-def forward_once(config: ProductionConfig) -> ForwardResult:
+def _result(
+    spool: DiskSpool,
+    tail_read: TailRead,
+    *,
+    sent: int = 0,
+    duplicates: int = 0,
+    rejected: int = 0,
+    error: str = "",
+    spooled: int = 0,
+    disk_limited: bool = False,
+    checkpoint_committed: bool = True,
+    spool_parse_errors: int = 0,
+) -> ForwardResult:
+    return ForwardResult(
+        sent=sent,
+        duplicates=duplicates,
+        rejected=rejected,
+        remaining=spool.count(),
+        error=error,
+        spooled=spooled,
+        parse_errors=tail_read.parse_errors,
+        spool_bytes=spool.size_bytes(),
+        source_offset=(
+            tail_read.checkpoint.offset
+            if checkpoint_committed
+            else tail_read.previous_offset
+        ),
+        spool_parse_errors=spool_parse_errors,
+        rotation_detected=tail_read.rotation_detected,
+        truncation_detected=tail_read.truncation_detected,
+        disk_limited=disk_limited,
+    )
+
+
+def _forward_once_unlocked(config: ProductionConfig) -> ForwardResult:
     tailer = CowrieLogTailer(config.cowrie_log_path, f"{config.spool_path}.offset")
     spool = DiskSpool(config.spool_path)
-    new_events, _ = tailer.read_new_events()
-    spool.append_many(new_events)
+    batch_size = max(int(config.forwarder_batch_size), 1)
+    max_line_bytes = int(getattr(config, "forwarder_max_line_bytes", DEFAULT_MAX_LINE_BYTES))
+    tail_read = tailer.prepare_new_events(limit=batch_size, max_line_bytes=max_line_bytes)
 
-    events, remaining_lines = spool.load_batch(config.forwarder_batch_size)
+    try:
+        spooled = spool.append_many(
+            tail_read.events,
+            max_spool_bytes=int(
+                getattr(config, "forwarder_max_spool_bytes", DEFAULT_MAX_SPOOL_BYTES)
+            ),
+            min_free_bytes=int(
+                getattr(config, "forwarder_min_free_bytes", DEFAULT_MIN_FREE_BYTES)
+            ),
+        )
+    except SpoolCapacityError as exc:
+        # The offset deliberately remains unchanged so Cowrie remains the
+        # authoritative source after operators restore capacity.
+        return _result(
+            spool,
+            tail_read,
+            error=_safe_exception_text(exc),
+            disk_limited=True,
+            checkpoint_committed=False,
+        )
+    except OSError as exc:
+        return _result(
+            spool,
+            tail_read,
+            error=_safe_exception_text(exc),
+            checkpoint_committed=False,
+        )
+
+    if tail_read.commit_required:
+        try:
+            # This commit is strictly after the spool data fsync.
+            tailer.commit(tail_read.checkpoint)
+        except OSError as exc:
+            return _result(
+                spool,
+                tail_read,
+                spooled=spooled,
+                error=_safe_exception_text(exc),
+                checkpoint_committed=False,
+            )
+
+    events, remaining_lines = spool.load_batch(batch_size)
+    spool_parse_errors = sum(
+        1 for event in events if event.get("eventid") == "forwarder.spool_parse_error"
+    )
     if not events:
-        return ForwardResult(sent=0, remaining=0)
+        return _result(
+            spool,
+            tail_read,
+            spooled=spooled,
+            spool_parse_errors=spool_parse_errors,
+        )
 
     try:
         response = post_events(config, events)
     except Exception as exc:
-        return ForwardResult(sent=0, remaining=spool.count(), error=_safe_exception_text(exc))
+        return _result(
+            spool,
+            tail_read,
+            spooled=spooled,
+            error=_safe_exception_text(exc),
+            spool_parse_errors=spool_parse_errors,
+        )
 
     if not isinstance(response, dict):
-        return ForwardResult(
-            sent=0,
-            remaining=spool.count(),
+        return _result(
+            spool,
+            tail_read,
+            spooled=spooled,
             error="ingest returned an invalid response object",
+            spool_parse_errors=spool_parse_errors,
         )
 
     try:
         accepted = max(int(response.get("accepted", len(events))), 0)
         duplicates = max(int(response.get("duplicates", 0)), 0)
     except (TypeError, ValueError):
-        return ForwardResult(
-            sent=0,
-            remaining=spool.count(),
+        return _result(
+            spool,
+            tail_read,
+            spooled=spooled,
             error="ingest returned invalid acknowledgement counts",
+            spool_parse_errors=spool_parse_errors,
         )
 
     rejected_items = response.get("rejected", [])
     if not isinstance(rejected_items, list):
-        return ForwardResult(
+        return _result(
+            spool,
+            tail_read,
             sent=accepted,
             duplicates=duplicates,
-            remaining=spool.count(),
+            spooled=spooled,
             error="ingest returned an invalid rejected-event list",
+            spool_parse_errors=spool_parse_errors,
         )
 
     rejected_count = len(rejected_items)
     accounted = accepted + duplicates + rejected_count
     if accounted != len(events):
-        return ForwardResult(
+        return _result(
+            spool,
+            tail_read,
             sent=accepted,
             duplicates=duplicates,
             rejected=rejected_count,
-            remaining=spool.count(),
+            spooled=spooled,
+            spool_parse_errors=spool_parse_errors,
             error=(
                 "ingest acknowledgement mismatch: "
                 f"batch={len(events)} accepted={accepted} duplicates={duplicates} "
@@ -219,62 +689,97 @@ def forward_once(config: ProductionConfig) -> ForwardResult:
             ),
         )
 
-    if not rejected_items:
-        spool.replace_remaining(remaining_lines)
-    else:
-        rejected_indexes: List[int] = []
-        for item in rejected_items:
-            if not isinstance(item, dict) or not isinstance(item.get("index"), int):
-                return ForwardResult(
-                    sent=accepted,
-                    duplicates=duplicates,
-                    rejected=rejected_count,
-                    remaining=spool.count(),
-                    error="ingest rejected events without usable batch indexes",
-                )
-            index = int(item["index"])
-            if index < 0 or index >= len(events) or index in rejected_indexes:
-                return ForwardResult(
-                    sent=accepted,
-                    duplicates=duplicates,
-                    rejected=rejected_count,
-                    remaining=spool.count(),
-                    error="ingest returned invalid or duplicate rejected-event indexes",
-                )
-            rejected_indexes.append(index)
+    rejected_indexes: List[int] = []
+    for item in rejected_items:
+        if not isinstance(item, dict) or not isinstance(item.get("index"), int):
+            return _result(
+                spool,
+                tail_read,
+                sent=accepted,
+                duplicates=duplicates,
+                rejected=rejected_count,
+                spooled=spooled,
+                error="ingest rejected events without usable batch indexes",
+                spool_parse_errors=spool_parse_errors,
+            )
+        index = int(item["index"])
+        if index < 0 or index >= len(events) or index in rejected_indexes:
+            return _result(
+                spool,
+                tail_read,
+                sent=accepted,
+                duplicates=duplicates,
+                rejected=rejected_count,
+                spooled=spooled,
+                error="ingest returned invalid or duplicate rejected-event indexes",
+                spool_parse_errors=spool_parse_errors,
+            )
+        rejected_indexes.append(index)
 
-        rejected_events = [events[index] for index in sorted(rejected_indexes)]
-        rewritten = [json.dumps(event, sort_keys=True, separators=(",", ":")) for event in rejected_events]
-        rewritten.extend(remaining_lines)
+    rejected_events = [events[index] for index in sorted(rejected_indexes)]
+    rewritten = [json.dumps(event, sort_keys=True, separators=(",", ":")) for event in rejected_events]
+    rewritten.extend(remaining_lines)
+    try:
+        # The durable spool is only shortened after a complete acknowledgement.
         spool.replace_remaining(rewritten)
-    return ForwardResult(
+    except OSError as exc:
+        return _result(
+            spool,
+            tail_read,
+            sent=accepted,
+            duplicates=duplicates,
+            rejected=rejected_count,
+            spooled=spooled,
+            error=_safe_exception_text(exc),
+            spool_parse_errors=spool_parse_errors,
+        )
+    return _result(
+        spool,
+        tail_read,
         sent=accepted,
         duplicates=duplicates,
         rejected=rejected_count,
-        remaining=spool.count(),
+        spooled=spooled,
+        spool_parse_errors=spool_parse_errors,
         error=(f"{rejected_count} event(s) rejected by ingest and retained" if rejected_count else ""),
     )
 
 
-def run_forever(config: ProductionConfig) -> None:
-    while True:
-        result = forward_once(config)
-        print(
-            json.dumps(
-                {
-                    "service": "sensor_forwarder",
-                    "sent": result.sent,
-                    "duplicates": result.duplicates,
-                    "rejected": result.rejected,
-                    "remaining": result.remaining,
-                    "error": result.error,
-                    "timestamp": utc_now(),
-                },
-                sort_keys=True,
-            ),
-            flush=True,
+def forward_once(config: ProductionConfig) -> ForwardResult:
+    spool = DiskSpool(config.spool_path)
+    try:
+        with ForwarderInstanceLock(config.spool_path):
+            return _forward_once_unlocked(config)
+    except BlockingIOError:
+        return ForwardResult(
+            sent=0,
+            remaining=spool.count(),
+            error="forwarder instance lock is held",
+            spool_bytes=spool.size_bytes(),
+            lock_contended=True,
         )
-        time.sleep(config.forwarder_poll_seconds)
+
+
+def _log_result(result: ForwardResult) -> None:
+    print(
+        json.dumps(
+            {"service": "sensor_forwarder", **result.__dict__, "timestamp": utc_now()},
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
+def run_forever(config: ProductionConfig) -> None:
+    # Hold the process lock across sleeps so a second service instance fails
+    # closed instead of alternating access to the same cursor and spool.
+    try:
+        with ForwarderInstanceLock(config.spool_path):
+            while True:
+                _log_result(_forward_once_unlocked(config))
+                time.sleep(config.forwarder_poll_seconds)
+    except BlockingIOError as exc:
+        raise SystemExit("sensor forwarder instance already running") from exc
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

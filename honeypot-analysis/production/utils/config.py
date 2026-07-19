@@ -165,6 +165,9 @@ class ProductionConfig:
     forwarder_batch_size: int = 50
     forwarder_poll_seconds: float = 2.0
     forwarder_timeout_seconds: int = 15
+    forwarder_max_spool_bytes: int = 64 * 1024 * 1024
+    forwarder_min_free_bytes: int = 32 * 1024 * 1024
+    forwarder_max_line_bytes: int = 256 * 1024
 
     worker_batch_size: int = 100
     worker_poll_seconds: float = 2.0
@@ -531,6 +534,8 @@ class ProductionConfig:
     def validate_event_processing(self) -> None:
         """Reject unsafe event-processing lease and retry configuration."""
         positive_durations = {
+            "forwarder_poll_seconds": self.forwarder_poll_seconds,
+            "forwarder_timeout_seconds": self.forwarder_timeout_seconds,
             "event_lease_seconds": self.event_lease_seconds,
             "event_lease_heartbeat_seconds": self.event_lease_heartbeat_seconds,
             "event_retry_base_seconds": self.event_retry_base_seconds,
@@ -552,6 +557,23 @@ class ProductionConfig:
                 or value <= 0
             ):
                 raise ValueError(f"{name} must be a positive finite number")
+
+        positive_forwarder_integers = {
+            "forwarder_batch_size": self.forwarder_batch_size,
+            "forwarder_max_spool_bytes": self.forwarder_max_spool_bytes,
+            "forwarder_max_line_bytes": self.forwarder_max_line_bytes,
+        }
+        for name, value in positive_forwarder_integers.items():
+            if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.forwarder_max_line_bytes > 1024 * 1024:
+            raise ValueError("forwarder_max_line_bytes must not exceed 1048576 bytes")
+        if (
+            isinstance(self.forwarder_min_free_bytes, bool)
+            or not isinstance(self.forwarder_min_free_bytes, Integral)
+            or self.forwarder_min_free_bytes < 0
+        ):
+            raise ValueError("forwarder_min_free_bytes must be a non-negative integer")
 
         if (
             isinstance(self.event_max_attempts, bool)
@@ -761,6 +783,15 @@ class ProductionConfig:
             _env_float("FORWARDER_POLL_INTERVAL_SECONDS", cfg.forwarder_poll_seconds),
         )
         cfg.forwarder_timeout_seconds = _env_int("FORWARDER_TIMEOUT_SECONDS", cfg.forwarder_timeout_seconds)
+        cfg.forwarder_max_spool_bytes = _env_int(
+            "FORWARDER_MAX_SPOOL_BYTES", cfg.forwarder_max_spool_bytes
+        )
+        cfg.forwarder_min_free_bytes = _env_int(
+            "FORWARDER_MIN_FREE_BYTES", cfg.forwarder_min_free_bytes
+        )
+        cfg.forwarder_max_line_bytes = _env_int(
+            "FORWARDER_MAX_LINE_BYTES", cfg.forwarder_max_line_bytes
+        )
         cfg.worker_batch_size = _env_int("WORKER_BATCH_SIZE", cfg.worker_batch_size)
         cfg.worker_poll_seconds = _env_float("WORKER_POLL_SECONDS", cfg.worker_poll_seconds)
         cfg.event_lease_seconds = _env_float(
