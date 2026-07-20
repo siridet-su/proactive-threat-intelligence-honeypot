@@ -125,3 +125,23 @@ def test_v3_abstains_without_inventing_alternatives() -> None:
     assert management["abstained"] is True
     assert management["hypothesis_sets"] == []
     assert management["abstention_reason"]
+
+
+def test_historical_v2_without_v3_is_not_silently_recomputed() -> None:
+    historical = {
+        "schema_version": "threat_hypothesis.v2",
+        "session_id": "historical-v2",
+        "observed_behavior": {"session_id": "historical-v2"},
+        "model_prediction": {"status": "unavailable"},
+    }
+    updated = attach_model_prediction(historical, {
+        "snapshot_id": "later-snapshot",
+        "final_ranking": [{
+            "tactic": "execution",
+            "confidence": "possible",
+            "score": 0.5,
+        }],
+    })
+
+    assert "session_assessment_v3" not in updated
+    assert updated["schema_version"] == "threat_hypothesis.v2"

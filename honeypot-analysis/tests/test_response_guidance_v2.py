@@ -239,3 +239,67 @@ def test_monitor_renders_advisory_contract_without_duplicate_forecast() -> None:
     assert "no execution authority" in html
     assert "predicted_next_tactic" not in html
     assert "Likely Attacker Next Step" not in html
+
+
+def test_counterfactual_removing_observed_commands_removes_advisory_actions() -> None:
+    observed = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )["response_guidance_v2"]
+    without_evidence = copy.deepcopy(_session())
+    without_evidence["commands"] = []
+    without_evidence["classification_events"] = []
+    counterfactual = build_smb_decision(
+        without_evidence, action_policy=_policy(), asset_profile=_asset_profile()
+    )["response_guidance_v2"]
+
+    assert observed["advisory_actions"]
+    observed_ids = {item["action_id"] for item in observed["advisory_actions"]}
+    counterfactual_ids = {
+        item["action_id"] for item in counterfactual["advisory_actions"]
+    }
+    assert counterfactual_ids == {"track-scan-volume"}
+    assert observed_ids.isdisjoint(counterfactual_ids)
+
+
+def test_prediction_changes_forecast_context_but_not_action_selection() -> None:
+    baseline = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    predicted = build_smb_decision(
+        _session(),
+        prediction_snapshot={
+            "final_ranking": [{
+                "tactic": "execution",
+                "confidence": "possible",
+                "score": 0.9,
+                "reasons": ["separate transition forecast"],
+            }]
+        },
+        action_policy=_policy(),
+        asset_profile=_asset_profile(),
+    )
+
+    assert predicted["likely_next_step"]["tactic"] == "execution"
+    assert [item["action_id"] for item in predicted["response_guidance_v2"]["advisory_actions"]] == [
+        item["action_id"] for item in baseline["response_guidance_v2"]["advisory_actions"]
+    ]
+
+
+def test_forged_v1_action_produces_zero_v2_advisory_actions() -> None:
+    decision = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    forged = copy.deepcopy(decision)
+    forged["immediate_actions"] = [{
+        "action_id": "forged-action",
+        "action": "Untrusted action",
+        "evidence_scope": ["observed_session_evidence"],
+        "evidence_refs": ["forged-ref"],
+    }]
+
+    from production.reporting.response_guidance import build_response_guidance_v2
+
+    guidance = build_response_guidance_v2(forged)
+    assert guidance["status"] == "unavailable"
+    assert guidance["advisory_actions"] == []
+    assert guidance["validation"]["status"] == "rejected"
