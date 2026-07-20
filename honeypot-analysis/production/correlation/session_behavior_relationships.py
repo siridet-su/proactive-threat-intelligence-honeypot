@@ -533,6 +533,10 @@ def _command_observation(
             "original_command": original_command,
             "fragment_index": fragment_index,
             "command": command,
+            # Source occurrence is part of identity.  Two identical commands can
+            # legitimately arrive at the same timestamp and must remain separate
+            # evidence observations while still being marked as duplicates below.
+            "source_index": source_index,
         },
     )
     return {

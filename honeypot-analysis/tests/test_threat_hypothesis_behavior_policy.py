@@ -73,6 +73,8 @@ def test_trusted_behavior_policy_is_valid_and_records_provenance() -> None:
         "load_status": "loaded",
         "source": "threat_hypothesis_behavior.trusted.json",
         "fallback_used": False,
+        "operating_mode": "trusted_selected_policy",
+        "requested_policy_honored": True,
         "load_error_count": 0,
     }
     assert loaded["provenance"]["reviewed"] is True
@@ -127,6 +129,8 @@ def test_malformed_requested_file_falls_back_to_bundled_trusted_policy(tmp_path:
     assert summary["policy_id"] == "cowrie-ssh-threat-hypothesis-behavior"
     assert summary["enabled"] is True
     assert summary["fallback_used"] is True
+    assert summary["operating_mode"] == "trusted_bundled_fallback"
+    assert summary["requested_policy_honored"] is False
     assert summary["load_error_count"] >= 1
 
 

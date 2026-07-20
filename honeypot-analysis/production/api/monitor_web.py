@@ -1575,7 +1575,11 @@ def _report_recommendations(
             for item in follow_on.get("external_validation_suggestions") or []
             if isinstance(item, dict) and _text(item.get("text"))
         ],
+        # Compatibility only.  This heuristic is no longer rendered because it
+        # competed with both the canonical post-session hypothesis and the
+        # separately evaluated statistical forecast.
         "rule_based_likely_next_steps": _likely_next_steps(session_payload),
+        "rule_based_likely_next_steps_deprecated": True,
     }
 
 
@@ -3738,15 +3742,6 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     falsification = recommendations.get("falsification_conditions") or []
     evidence_gaps = recommendations.get("evidence_gaps") or []
     external_suggestions = recommendations.get("external_validation_suggestions") or []
-    likely_steps = recommendations.get("rule_based_likely_next_steps") or _likely_next_steps(payload)
-    if realtime_ranking and source == "rule_based_fallback":
-        source = "realtime_prediction"
-        likely_steps = [
-            f"{item.get('tactic', 'unknown')} ({item.get('confidence', 'low')}, score={item.get('score', 0)}): "
-            + "; ".join((item.get("reasons") or [])[:2])
-            for item in realtime_ranking
-        ]
-
     parts = []
     if smb_decision:
         parts.extend(["<h3>SMB Proactive CTI Decision</h3>", _render_smb_decision(smb_decision)])
@@ -3763,9 +3758,17 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
             or _render_list_items(operator_actions)
             or '<div class="empty">No policy-approved operator actions are available for this report.</div>'
         ),
-        "<h3>Likely Attacker Next Step</h3>",
-        _render_list_items(likely_steps),
     ])
+    if realtime_ranking and not smb_decision:
+        parts.extend([
+            "<h3>Statistical Next-Tactic Forecast</h3>",
+            '<p class="muted">Advisory model output; not observed evidence or factual confidence.</p>',
+            _render_list_items([
+                f"{item.get('tactic', 'unknown')} ({item.get('confidence', 'low')}): "
+                + "; ".join((item.get("reasons") or [])[:2])
+                for item in realtime_ranking
+            ]),
+        ])
     if strategic:
         parts.extend(["<h3>Strategic Recommendations</h3>", _render_list_items(strategic)])
     if falsification:

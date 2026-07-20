@@ -257,6 +257,48 @@ def _matching_chain(chain: List[Dict[str, Any]], pattern: re.Pattern[str]) -> Li
     return [item for item in chain if pattern.search(_clean(item.get("command")))]
 
 
+def _persistence_chain(
+    observed: Dict[str, Any],
+    chain: List[Dict[str, Any]],
+    pattern: re.Pattern[str],
+    policy_document: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Return persistence mappings only when write-sensitive evidence agrees.
+
+    The trusted policy also recognizes persistence families such as account
+    creation, cron, services, and startup files.  Only ``authorized_keys`` is
+    special here: mentioning or reading that path is not modification evidence.
+    The literal command extractor remains authoritative for that distinction.
+    """
+
+    matches = _matching_chain(chain, pattern)
+    account = ((policy_body(policy_document).get("extraction") or {}).get("account") or {})
+    marker = _clean(account.get("authorized_keys_marker")).lower()
+    if not marker:
+        return matches
+    observations = [
+        item
+        for item in observed.get("ordered_command_observations") or []
+        if isinstance(item, dict)
+    ]
+    output: List[Dict[str, Any]] = []
+    for item in matches:
+        command = _clean(item.get("command"))
+        if marker not in command.lower():
+            output.append(item)
+            continue
+        timestamp = _clean(item.get("timestamp"))
+        mutating = any(
+            _clean(observation.get("command")) == command
+            and (not timestamp or _clean(observation.get("timestamp")) == timestamp)
+            and "account_modification_attempt" in set(observation.get("action_types") or [])
+            for observation in observations
+        )
+        if mutating:
+            output.append(item)
+    return output
+
+
 def _event_refs(observed: Dict[str, Any], eventid: str) -> List[str]:
     return [
         _clean(item.get("evidence_id"))
@@ -401,9 +443,11 @@ def build_supported_assessment(
         )
         if not observed.get("ordered_command_observations") else []
     )
-    persistence = _matching_chain(
+    persistence = _persistence_chain(
+        observed,
         chain,
         compile_pattern(document, persistence_definition.get("trusted_command_pattern")),
+        document,
     )
     cleanup = _matching_chain(
         chain,
@@ -642,9 +686,11 @@ def build_follow_on_hypothesis(
                 "machine_evaluable": True,
             },
         ])
-        if not _matching_chain(
+        if not _persistence_chain(
+            observed,
             chain,
             compile_pattern(document, persistence_definition.get("trusted_command_pattern")),
+            document,
         ):
             gaps.append({
                 "text": "No persistence-related command was observed in this session.",

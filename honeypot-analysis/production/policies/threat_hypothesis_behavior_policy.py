@@ -365,18 +365,29 @@ def resolve_behavior_policy(
 def policy_summary(document: Dict[str, Any]) -> Dict[str, Any]:
     status = document.get("load_status") or {}
     provenance = document.get("provenance") or {}
+    load_status = str(status.get("status") or "unknown")
+    fallback_used = bool(status.get("fallback_used"))
+    enabled = bool(policy_body(document).get("enabled"))
+    if not enabled:
+        operating_mode = "fail_closed"
+    elif fallback_used:
+        operating_mode = "trusted_bundled_fallback"
+    else:
+        operating_mode = "trusted_selected_policy"
     return {
         "schema_version": str(document.get("schema_version") or ""),
         "policy_id": str(document.get("policy_id") or ""),
         "version": str(document.get("version") or ""),
-        "enabled": bool(policy_body(document).get("enabled")),
+        "enabled": enabled,
         "reviewed": bool(provenance.get("reviewed")),
         "review_status": str(provenance.get("review_status") or ""),
         "last_reviewed": str(provenance.get("last_reviewed") or ""),
         "method": str(provenance.get("method") or ""),
-        "load_status": str(status.get("status") or "unknown"),
+        "load_status": load_status,
         "source": str(status.get("source") or ""),
-        "fallback_used": bool(status.get("fallback_used")),
+        "fallback_used": fallback_used,
+        "operating_mode": operating_mode,
+        "requested_policy_honored": not fallback_used,
         "load_error_count": len(_as_list(status.get("errors"))),
     }
 
