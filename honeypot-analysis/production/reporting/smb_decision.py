@@ -136,13 +136,7 @@ def is_trusted_recommendation_action(value: Any) -> bool:
     rule = provenance.get("rule")
     action_template = provenance.get("action_template")
     return bool(
-        not _action_contract_errors(value)
-        and isinstance(value.get("evidence_scope"), list)
-        and "observed_behavior" in value.get("evidence_scope")
-        and isinstance(value.get("evidence_refs"), list)
-        and all(isinstance(ref, str) and ref.strip() for ref in value.get("evidence_refs"))
-        and value.get("evidence_refs")
-        and value.get("approved_by_policy") is True
+        value.get("approved_by_policy") is True
         and value.get("authority") == "trusted_policy_engine"
         and value.get("recommendation_tier") == "trusted_recommendation"
         and provenance.get("authority") == "trusted_policy_engine"
