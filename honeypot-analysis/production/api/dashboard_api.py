@@ -173,16 +173,34 @@ def _session_payload_for_id(storage: Any, session_id: str) -> Dict[str, Any]:
     return {"session_id": session_id}
 
 
-def _current_decision_payload(config: ProductionConfig, storage: Any, session_id: str, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def _current_decision_payload(
+    config: ProductionConfig,
+    storage: Any,
+    session_id: str,
+    snapshot: Dict[str, Any],
+    *,
+    report_recommendations: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     if not config.enable_smb_decisions:
         return {"enabled": False, "reason": "SMB decision layer disabled"}
-    return build_smb_decision_from_paths(
+    decision = build_smb_decision_from_paths(
         session_payload=_session_payload_for_id(storage, session_id),
         prediction_snapshot=snapshot,
+        report_recommendations=report_recommendations,
         asset_profile_path=config.smb_asset_profile_path,
         action_policy_path=config.smb_action_policy_path,
         mitre_attack_path=config.mitre_attack_path,
     )
+    decision["presentation_semantics"] = {
+        "mode": "current_policy_reevaluation",
+        "historical_record": False,
+        "replaces_stored_historical_guidance": False,
+        "description": (
+            "Recomputed from current policy and context; this is not the stored "
+            "point-in-time report decision."
+        ),
+    }
+    return decision
 
 
 def _external_seed_health_payload(config: ProductionConfig) -> Dict[str, Any]:

@@ -20,7 +20,7 @@ from production.reporting.reporting_pipeline import _build_trusted_recommendatio
 from production.reporting.threat_hypothesis import build_v2_report
 from production.reporting.threat_hypothesis import build_observed_behavior
 from production.api.dashboard_api import _current_decision_payload
-from production.api.monitor_web import _render_next_steps
+from production.api.monitor_web import _historical_decision_payload, _render_next_steps
 from production.utils.config import ProductionConfig
 
 
@@ -341,6 +341,66 @@ def test_report_worker_api_and_direct_builder_share_one_guidance_semantics() -> 
         ] == [
             item["action_id"] for item in direct["response_guidance_v2"]["advisory_actions"]
         ]
+    assert api_path["presentation_semantics"] == {
+        "mode": "current_policy_reevaluation",
+        "historical_record": False,
+        "replaces_stored_historical_guidance": False,
+        "description": (
+            "Recomputed from current policy and context; this is not the stored "
+            "point-in-time report decision."
+        ),
+    }
+
+
+def test_stored_historical_decision_is_copied_without_recomputation() -> None:
+    decision = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    report = {
+        "trusted_recommendation_decision": decision,
+        "response_guidance_v2": decision["response_guidance_v2"],
+    }
+    original = copy.deepcopy(report)
+
+    historical = _historical_decision_payload(report)
+
+    assert report == original
+    assert historical["decision_id"] == decision["decision_id"]
+    assert historical["response_guidance_v2"] == report["response_guidance_v2"]
+    assert historical["presentation_semantics"]["mode"] == (
+        "point_in_time_stored_decision"
+    )
+
+
+def test_policy_version_drift_is_rendered_as_separate_reevaluation() -> None:
+    historical = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    reevaluated = copy.deepcopy(historical)
+    historical["response_guidance_v2"]["provenance"]["policy"]["policy_id"] = (
+        "stored-policy"
+    )
+    reevaluated["response_guidance_v2"]["provenance"]["policy"]["policy_id"] = (
+        "current-policy"
+    )
+
+    html = _render_next_steps(
+        {"payload": _session()},
+        {
+            "smb_decision": historical,
+            "historical_smb_decision": historical,
+            "current_policy_reevaluation": reevaluated,
+            "report_recommendations": {},
+        },
+    )
+
+    assert "Point-in-Time Stored Advisory Response Guidance" in html
+    assert "Historical report decision; it is not recomputed" in html
+    assert "Current Policy Reevaluation" in html
+    assert "does not replace the stored historical guidance" in html
+    assert "stored-policy" in html
+    assert "current-policy" in html
+    assert html.index("stored-policy") < html.index("current-policy")
 
 
 def test_monitor_renders_advisory_contract_without_duplicate_forecast() -> None:

@@ -50,7 +50,6 @@ from production.utils.http_security import (
 from production.utils.serialization import html_script_json, stable_id, utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
 from production.reporting.smb_decision import (
-    build_smb_decision_from_paths,
     is_trusted_recommendation_action,
     is_trusted_recommendation_decision,
     is_trusted_recommendation_provenance,
@@ -1583,6 +1582,30 @@ def _report_recommendations(
     }
 
 
+def _historical_decision_payload(report_payload: Any) -> Dict[str, Any]:
+    """Return a view copy of the decision stored with a historical report."""
+
+    if not isinstance(report_payload, dict):
+        return {}
+    stored = report_payload.get("trusted_recommendation_decision")
+    if not isinstance(stored, dict):
+        return {}
+    decision = copy.deepcopy(stored)
+    top_level_guidance = report_payload.get("response_guidance_v2")
+    if isinstance(top_level_guidance, dict):
+        decision["response_guidance_v2"] = copy.deepcopy(top_level_guidance)
+    decision["presentation_semantics"] = {
+        "mode": "point_in_time_stored_decision",
+        "historical_record": True,
+        "replaces_stored_historical_guidance": False,
+        "description": (
+            "Stored with the historical report and displayed without current-policy "
+            "recomputation."
+        ),
+    }
+    return decision
+
+
 def _likely_next_steps(session_payload: Dict[str, Any]) -> List[str]:
     commands = session_payload.get("commands") or []
     tactics = {str(t).lower() for t in session_payload.get("tactics") or [] if t}
@@ -1838,16 +1861,19 @@ def load_session_detail(
     artifact_payload = _load_report_json_from_artifact(artifact_paths, config.reports_dir)
     latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
     report_recommendations = _report_recommendations(report_payload, artifact_payload, payload)
-    smb_decision: Dict[str, Any] = {}
+    current_policy_reevaluation: Dict[str, Any] = {}
     if config.enable_smb_decisions:
-        smb_decision = build_smb_decision_from_paths(
-            session_payload=payload,
-            prediction_snapshot=latest_prediction,
+        current_policy_reevaluation = _current_decision_payload(
+            config,
+            storage,
+            session_id,
+            latest_prediction,
             report_recommendations=report_recommendations,
-            asset_profile_path=config.smb_asset_profile_path,
-            action_policy_path=config.smb_action_policy_path,
-            mitre_attack_path=config.mitre_attack_path,
         )
+    historical_smb_decision = _historical_decision_payload(
+        _merged_report_payload(report_payload, artifact_payload)
+    )
+    primary_smb_decision = historical_smb_decision or current_policy_reevaluation
     detail = {
         "ok": True,
         "timestamp": utc_now(),
@@ -1885,7 +1911,20 @@ def load_session_detail(
         "reports": [_row_with_payload(row) for row in report_rows],
         "report_summary": _report_summary(report_payload, artifact_payload),
         "report_recommendations": report_recommendations,
-        "smb_decision": smb_decision,
+        # Backward-compatible primary field: a stored report decision wins.
+        "smb_decision": primary_smb_decision,
+        "historical_smb_decision": historical_smb_decision,
+        "current_policy_reevaluation": current_policy_reevaluation,
+        "smb_decision_semantics": {
+            "primary": (
+                "point_in_time_stored_decision"
+                if historical_smb_decision
+                else "current_policy_reevaluation"
+            ),
+            "historical_available": bool(historical_smb_decision),
+            "current_reevaluation_available": bool(current_policy_reevaluation),
+            "current_reevaluation_replaces_historical": False,
+        },
         "report_artifacts": artifact_paths,
         "errors": {
             "jobs": jobs_error,
@@ -3770,6 +3809,8 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         return '<div class="empty">No selected session.</div>'
     payload = selected["payload"] if selected else (detail or {}).get("session_payload", {})
     smb_decision = (detail or {}).get("smb_decision") or {}
+    historical_decision = (detail or {}).get("historical_smb_decision") or {}
+    reevaluated_decision = (detail or {}).get("current_policy_reevaluation") or {}
     recommendations = (detail or {}).get("report_recommendations") or {}
     latest_prediction = (detail or {}).get("latest_prediction_snapshot") or {}
     prediction_payload = latest_prediction.get("payload") or {}
@@ -3787,7 +3828,27 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     evidence_gaps = recommendations.get("evidence_gaps") or []
     external_suggestions = recommendations.get("external_validation_suggestions") or []
     parts = []
-    if smb_decision:
+    if historical_decision:
+        parts.extend([
+            "<h3>Point-in-Time Stored Advisory Response Guidance</h3>",
+            '<p class="muted">Historical report decision; it is not recomputed under the current policy.</p>',
+            _render_smb_decision(historical_decision),
+        ])
+        if reevaluated_decision:
+            parts.extend([
+                "<h3>Current Policy Reevaluation</h3>",
+                '<p class="muted">Recomputed from current policy and context; it does not replace the stored historical guidance.</p>',
+                _render_smb_decision(reevaluated_decision),
+            ])
+        parts.append("<h3>Technical Prediction / Report Detail</h3>")
+    elif reevaluated_decision:
+        parts.extend([
+            "<h3>Current Policy Reevaluation</h3>",
+            '<p class="muted">No stored report decision is available. This guidance was recomputed from current policy and context.</p>',
+            _render_smb_decision(reevaluated_decision),
+            "<h3>Technical Prediction / Report Detail</h3>",
+        ])
+    elif smb_decision:
         parts.extend(["<h3>Advisory Response Guidance</h3>", _render_smb_decision(smb_decision)])
         parts.append("<h3>Technical Prediction / Report Detail</h3>")
     parts.extend([
