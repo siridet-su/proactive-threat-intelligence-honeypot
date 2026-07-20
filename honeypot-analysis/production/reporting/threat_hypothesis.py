@@ -23,6 +23,10 @@ from production.reporting.smb_decision import (
     is_trusted_recommendation_decision,
     is_trusted_recommendation_provenance,
 )
+from production.reporting.session_assessment import (
+    attach_forecast_to_session_assessment,
+    build_session_assessment_v3,
+)
 from production.utils.serialization import stable_id
 
 
@@ -996,7 +1000,9 @@ def build_v2_report(
         },
         "claim_evidence_summary": evidence_summary,
     })
-    return apply_legacy_aliases(report)
+    report = apply_legacy_aliases(report)
+    report["session_assessment_v3"] = build_session_assessment_v3(report)
+    return report
 
 
 def attach_model_prediction(
@@ -1036,6 +1042,12 @@ def attach_model_prediction(
         "trust_status": prediction_snapshot.get("trust_status") or {},
         "separation_semantics": "statistical_prediction_not_observed_evidence",
     }
+    assessment = report.get("session_assessment_v3")
+    if isinstance(assessment, dict):
+        report["session_assessment_v3"] = attach_forecast_to_session_assessment(
+            assessment,
+            report["model_prediction"],
+        )
     return report
 
 
