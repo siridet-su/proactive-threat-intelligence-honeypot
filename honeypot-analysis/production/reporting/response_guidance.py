@@ -9,7 +9,7 @@ executes a response.
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from production.utils.serialization import stable_id, utc_now
 
@@ -18,6 +18,7 @@ SCHEMA_VERSION = "response_guidance.v2"
 ANALYST_RECORD_SCHEMA_VERSION = "analyst_guidance_decision.v1"
 ANALYST_DECISION_STATES = ("unreviewed", "approved", "rejected", "deferred")
 OUTCOME_STATES = ("not_recorded", "completed", "partially_completed", "not_applicable", "failed")
+CANONICAL_BEHAVIORAL_EVIDENCE_SCOPES = frozenset({"observed_behavior"})
 
 
 def _clean(value: Any) -> str:
@@ -31,6 +32,47 @@ def _texts(values: Iterable[Any]) -> List[str]:
         if text and text not in output:
             output.append(text)
     return output
+
+
+def _strict_text_list(value: Any) -> Optional[List[str]]:
+    """Return normalized JSON string-list content, or ``None`` when malformed."""
+
+    if not isinstance(value, list):
+        return None
+    output: List[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            return None
+        text = item.strip()
+        if text not in output:
+            output.append(text)
+    return output
+
+
+def canonical_behavioral_evidence_refs(observed_behavior: Any) -> Set[str]:
+    """Return IDs emitted by the deterministic observed-behavior reconstruction."""
+
+    if not isinstance(observed_behavior, dict):
+        return set()
+    refs: Set[str] = set()
+    for key in (
+        "ordered_behavior_chain",
+        "ordered_command_observations",
+        "cowrie_event_evidence",
+        "transfer_event_observations",
+        "trusted_attck_candidates",
+    ):
+        for item in observed_behavior.get(key) or []:
+            if isinstance(item, dict) and _clean(item.get("evidence_id")):
+                refs.add(_clean(item.get("evidence_id")))
+    for key in ("connected_behavior_chains", "behavior_relationships"):
+        for item in observed_behavior.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            item_refs = _strict_text_list(item.get("evidence_refs") or [])
+            if item_refs is not None:
+                refs.update(item_refs)
+    return refs
 
 
 def new_analyst_decision_record(guidance_id: str) -> Dict[str, Any]:
@@ -70,24 +112,35 @@ def validate_analyst_decision_record(record: Any) -> List[str]:
     return errors
 
 
-def _action_applicability(action: Dict[str, Any]) -> Dict[str, Any]:
-    scopes = _texts(action.get("evidence_scope") or [])
-    canonical = bool(set(scopes).intersection({
-        "observed_session_evidence",
-        "canonical_observed_evidence",
-        "session_context",
-    })) or bool(action.get("evidence_refs"))
+def _action_applicability(
+    action: Dict[str, Any],
+    canonical_evidence_refs: Optional[Set[str]],
+) -> Dict[str, Any]:
+    scopes = _strict_text_list(action.get("evidence_scope")) or []
+    source_refs = _strict_text_list(action.get("evidence_refs")) or []
+    matched_refs = (
+        source_refs
+        if canonical_evidence_refs is None
+        else [ref for ref in source_refs if ref in canonical_evidence_refs]
+    )
+    canonical = bool(
+        set(scopes).intersection(CANONICAL_BEHAVIORAL_EVIDENCE_SCOPES)
+        and matched_refs
+    )
     status = "applicable_under_policy" if canonical else "context_dependent"
     return {
         "status": status,
         "basis": "trusted_policy_match",
         "evidence_scope": scopes,
-        "evidence_refs": _texts(action.get("evidence_refs") or []),
+        "evidence_refs": matched_refs,
     }
 
 
-def _advisory_action(action: Dict[str, Any]) -> Dict[str, Any]:
-    applicability = _action_applicability(action)
+def _advisory_action(
+    action: Dict[str, Any],
+    canonical_evidence_refs: Set[str],
+) -> Dict[str, Any]:
+    applicability = _action_applicability(action, canonical_evidence_refs)
     return {
         "action_id": _clean(action.get("action_id")),
         "description": _clean(action.get("action")),
@@ -121,7 +174,36 @@ def _advisory_action(action: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def validate_response_guidance(value: Any) -> List[str]:
+def _canonical_grounding_errors(
+    action: Any,
+    *,
+    canonical_evidence_refs: Optional[Set[str]] = None,
+) -> List[str]:
+    if not isinstance(action, dict):
+        return ["source action must be an object"]
+    errors: List[str] = []
+    scopes = _strict_text_list(action.get("evidence_scope"))
+    refs = _strict_text_list(action.get("evidence_refs"))
+    if scopes is None:
+        errors.append("malformed evidence_scope")
+    elif not set(scopes).intersection(CANONICAL_BEHAVIORAL_EVIDENCE_SCOPES):
+        errors.append("missing canonical behavioral evidence scope")
+    if refs is None:
+        errors.append("malformed evidence_refs")
+    elif not refs:
+        errors.append("missing canonical behavioral evidence reference")
+    elif canonical_evidence_refs is not None and not set(refs).intersection(canonical_evidence_refs):
+        errors.append("evidence_refs do not identify canonical observed behavior")
+    return errors
+
+
+def validate_response_guidance(
+    value: Any,
+    *,
+    canonical_actions: Optional[List[Dict[str, Any]]] = None,
+    canonical_evidence_refs: Optional[Set[str]] = None,
+    source_decision: Optional[Dict[str, Any]] = None,
+) -> List[str]:
     errors: List[str] = []
     if not isinstance(value, dict):
         return ["response guidance must be an object"]
@@ -131,24 +213,101 @@ def validate_response_guidance(value: Any) -> List[str]:
         errors.append("unsupported response guidance authority")
     from production.reporting.smb_decision import is_trusted_recommendation_action
 
-    for index, action in enumerate(value.get("advisory_actions") or []):
+    actions = value.get("advisory_actions")
+    if not isinstance(actions, list):
+        errors.append("advisory_actions must be an array")
+        actions = []
+    expected_actions = {
+        _clean(action.get("action_id")): action
+        for action in (canonical_actions or [])
+        if isinstance(action, dict) and _clean(action.get("action_id"))
+    }
+    seen_action_ids: Set[str] = set()
+    for index, action in enumerate(actions):
         if not isinstance(action, dict):
             errors.append(f"advisory_actions[{index}] must be an object")
             continue
         source_action = action.get("source_action")
         if not is_trusted_recommendation_action(source_action):
             errors.append(f"advisory_actions[{index}] lacks a trusted source action")
-        scopes = set((action.get("applicability") or {}).get("evidence_scope") or [])
-        if scopes and scopes.issubset({"model_prediction"}):
-            errors.append(f"advisory_actions[{index}] relies only on statistical prediction")
-        if (action.get("manual_approval") or {}).get("required") is not True:
+        grounding_errors = _canonical_grounding_errors(
+            source_action,
+            canonical_evidence_refs=canonical_evidence_refs,
+        )
+        errors.extend(
+            f"advisory_actions[{index}] {error}" for error in grounding_errors
+        )
+        applicability = action.get("applicability")
+        applicability_errors = _canonical_grounding_errors(
+            applicability,
+            canonical_evidence_refs=canonical_evidence_refs,
+        )
+        errors.extend(
+            f"advisory_actions[{index}] applicability {error}"
+            for error in applicability_errors
+        )
+        action_id = _clean(action.get("action_id"))
+        if not action_id:
+            errors.append(f"advisory_actions[{index}] missing action_id")
+        elif action_id in seen_action_ids:
+            errors.append(f"advisory_actions[{index}] duplicates action_id")
+        else:
+            seen_action_ids.add(action_id)
+        if canonical_actions is not None:
+            expected = expected_actions.get(action_id)
+            if expected is None or source_action != expected:
+                errors.append(f"advisory_actions[{index}] is inconsistent with canonical action")
+        expected_applicability = _action_applicability(
+            source_action if isinstance(source_action, dict) else {},
+            canonical_evidence_refs,
+        )
+        if action.get("applicability") != expected_applicability:
+            errors.append(f"advisory_actions[{index}] has inconsistent applicability")
+        for field, source_field in (
+            ("description", "action"),
+            ("rationale", "why"),
+            ("policy_order", "priority"),
+            ("provenance", "provenance"),
+        ):
+            expected_value = (
+                deepcopy(source_action.get(source_field))
+                if isinstance(source_action, dict) else None
+            )
+            if action.get(field) != expected_value:
+                errors.append(f"advisory_actions[{index}] has inconsistent {field}")
+        if action.get("manual_approval") != {
+            "required": True,
+            "state": "pending",
+            "execution_authority": False,
+        }:
             errors.append(f"advisory_actions[{index}] must require manual approval")
         for field in ("preconditions", "verification_steps"):
             if not action.get(field):
                 errors.append(f"advisory_actions[{index}] missing {field}")
         if not _clean(action.get("rollback_guidance")):
             errors.append(f"advisory_actions[{index}] missing rollback guidance")
-    errors.extend(validate_analyst_decision_record(value.get("analyst_decision")))
+    source = value.get("source_decision") or {}
+    if source_decision is not None and source != {
+        "schema_version": _clean(source_decision.get("schema_version")),
+        "decision_id": _clean(source_decision.get("decision_id")),
+    }:
+        errors.append("source_decision is inconsistent with canonical decision")
+    if source_decision is not None:
+        expected_policy = deepcopy((source_decision.get("trust") or {}).get("policy") or {})
+        provenance = value.get("provenance") or {}
+        if not isinstance(provenance, dict) or provenance.get("policy") != expected_policy:
+            errors.append("guidance policy provenance is inconsistent with canonical decision")
+        if provenance.get("selection_authority") != "deterministic_trusted_policy":
+            errors.append("guidance selection authority is inconsistent")
+        if provenance.get("prediction_authority") != "advisory_forecast_only_no_action_selection":
+            errors.append("guidance prediction authority is inconsistent")
+    analyst_record = value.get("analyst_decision")
+    if (
+        isinstance(analyst_record, dict)
+        and analyst_record.get("guidance_id") != value.get("guidance_id")
+    ):
+        errors.append("analyst decision guidance_id is inconsistent")
+    errors.extend(validate_analyst_decision_record(analyst_record))
     return errors
 
 
@@ -159,8 +318,11 @@ def build_response_guidance_v2(
 ) -> Dict[str, Any]:
     """Adapt a trusted v1 decision; never generate an independent action."""
 
+    from production.reporting.smb_decision import is_trusted_recommendation_action
+
     decision = v1_decision if isinstance(v1_decision, dict) else {}
     observed = observed_behavior if isinstance(observed_behavior, dict) else {}
+    canonical_refs = canonical_behavioral_evidence_refs(observed)
     trust = decision.get("trust") or {}
     policy = deepcopy(trust.get("policy") or {})
     canonical_status = _clean(
@@ -176,14 +338,20 @@ def build_response_guidance_v2(
         for source_action in decision.get("immediate_actions") or []:
             if not isinstance(source_action, dict):
                 continue
-            candidate = _advisory_action(source_action)
-            scopes = set((candidate.get("applicability") or {}).get("evidence_scope") or [])
-            if scopes and scopes.issubset({"model_prediction"}):
+            grounding_errors = _canonical_grounding_errors(
+                source_action,
+                canonical_evidence_refs=canonical_refs,
+            )
+            if not is_trusted_recommendation_action(source_action):
+                grounding_errors.append("source action failed trusted policy contract")
+            if grounding_errors:
                 rejected.append({
-                    "action_id": candidate.get("action_id"),
-                    "reason": "statistical_prediction_cannot_be_the_sole_action_basis",
+                    "action_id": _clean(source_action.get("action_id")),
+                    "reason": "canonical_behavioral_evidence_required",
+                    "errors": grounding_errors,
                 })
                 continue
+            candidate = _advisory_action(source_action, canonical_refs)
             advisory_actions.append(candidate)
 
     guidance_id = stable_id("response_guidance", {
@@ -198,7 +366,13 @@ def build_response_guidance_v2(
         "schema_version": SCHEMA_VERSION,
         "guidance_id": guidance_id,
         "generated_at": _clean(decision.get("generated_at")) or utc_now(),
-        "status": "available" if policy_available and canonical_available else "unavailable",
+        "status": (
+            "available"
+            if policy_available
+            and canonical_available
+            and (advisory_actions or not decision.get("immediate_actions"))
+            else "unavailable"
+        ),
         "authority": authority if policy_available else "policy_unavailable",
         "session_id": _clean(decision.get("session_id")) or "unknown",
         "source_decision": {
@@ -244,7 +418,17 @@ def build_response_guidance_v2(
             "historical_decisions_recomputed": False,
         },
     }
-    validation_errors = validate_response_guidance(guidance)
+    validation_errors = validate_response_guidance(
+        guidance,
+        canonical_actions=[
+            action for action in decision.get("immediate_actions") or []
+            if isinstance(action, dict)
+        ],
+        canonical_evidence_refs=canonical_refs,
+        source_decision=decision,
+    )
+    if rejected and not advisory_actions:
+        validation_errors.append("no immediate action has canonical behavioral grounding")
     if validation_errors:
         guidance["status"] = "unavailable"
         guidance["authority"] = "policy_unavailable"

@@ -901,25 +901,15 @@ def _canonical_operator_actions(
         seen.add(action_id)
         item = dict(action)
         refs = {_clean(ref) for ref in item.get("evidence_refs") or [] if _clean(ref)}
-        scopes = {_clean(scope) for scope in item.get("evidence_scope") or [] if _clean(scope)}
         matched_refs = sorted(refs.intersection(canonical_refs))
         if matched_refs:
             item["grounding_status"] = "canonical_observed_evidence"
             item["canonical_evidence_refs"] = matched_refs
-        elif scopes.intersection({"contextual_intelligence", "model_prediction"}):
-            item["grounding_status"] = "context_or_prediction_only"
-            item["canonical_evidence_refs"] = []
-        elif scopes.intersection({"configured_asset_context", "session_context", "policy_default"}):
-            item["grounding_status"] = "session_or_policy_context"
-            item["canonical_evidence_refs"] = []
         else:
-            item["grounding_status"] = "legacy_evidence_unverified"
-            item["canonical_evidence_refs"] = []
-            limitations = list(item.get("visibility_limitations") or [])
-            limitation = "Legacy action lacks canonical v2 evidence references; verify its basis manually."
-            if limitation not in limitations:
-                limitations.append(limitation)
-            item["visibility_limitations"] = limitations
+            # Context, enrichment, prediction, policy defaults, and copied
+            # provenance cannot turn an unverified reference into an operator
+            # action at the report boundary.
+            continue
         output.append(item)
     return output
 
@@ -1003,15 +993,16 @@ def build_v2_report(
     })
     report = apply_legacy_aliases(report)
     report["session_assessment_v3"] = build_session_assessment_v3(report)
-    response_guidance = (
-        trusted_decision.get("response_guidance_v2")
-        if isinstance(trusted_decision, dict) else None
+    # The report boundary never promotes a nested adapter payload. Rebuilding
+    # from the filtered v1 decision prevents stale or forged v2 guidance from
+    # disagreeing with the canonical action and evidence lists above.
+    response_guidance = build_response_guidance_v2(
+        trusted_decision if isinstance(trusted_decision, dict) else {},
+        observed_behavior=observed,
     )
-    if not isinstance(response_guidance, dict):
-        response_guidance = build_response_guidance_v2(
-            trusted_decision if isinstance(trusted_decision, dict) else {},
-            observed_behavior=observed,
-        )
+    if isinstance(trusted_decision, dict):
+        trusted_decision["response_guidance_v2"] = response_guidance
+        report["trusted_recommendation_decision"] = trusted_decision
     report["response_guidance_v2"] = response_guidance
     report["session_assessment_v3"]["response_guidance_ref"] = {
         "schema_version": "response_guidance.v2",

@@ -5,9 +5,12 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from production.reporting.response_guidance import (
     ANALYST_DECISION_STATES,
     OUTCOME_STATES,
+    canonical_behavioral_evidence_refs,
     validate_analyst_decision_record,
     validate_response_guidance,
 )
@@ -15,6 +18,7 @@ from production.reporting.smb_decision import build_smb_decision
 from production.reporting.smb_decision import build_smb_decision_from_paths
 from production.reporting.reporting_pipeline import _build_trusted_recommendation_decision
 from production.reporting.threat_hypothesis import build_v2_report
+from production.reporting.threat_hypothesis import build_observed_behavior
 from production.api.dashboard_api import _current_decision_payload
 from production.api.monitor_web import _render_next_steps
 from production.utils.config import ProductionConfig
@@ -106,7 +110,7 @@ def test_prediction_cannot_be_the_sole_advisory_action_basis() -> None:
     forged_action["applicability"]["evidence_refs"] = []
 
     assert any(
-        "relies only on statistical prediction" in error
+        "missing canonical behavioral evidence scope" in error
         for error in validate_response_guidance(forged)
     )
     assert guidance_prediction_authority(decision) == "advisory_forecast_only_no_action_selection"
@@ -114,6 +118,93 @@ def test_prediction_cannot_be_the_sole_advisory_action_basis() -> None:
 
 def guidance_prediction_authority(decision: dict) -> str:
     return decision["response_guidance_v2"]["provenance"]["prediction_authority"]
+
+
+def test_prediction_plus_asset_context_is_not_canonical_behavioral_grounding() -> None:
+    decision = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    observed = build_observed_behavior([_session()])
+    forged = copy.deepcopy(decision["response_guidance_v2"])
+    action = forged["advisory_actions"][0]
+    for payload in (action, action["source_action"]):
+        target = payload["applicability"] if "applicability" in payload else payload
+        target["evidence_scope"] = ["model_prediction", "configured_asset_context"]
+        target["evidence_refs"] = ["prediction-snapshot-forged"]
+
+    errors = validate_response_guidance(
+        forged,
+        canonical_actions=decision["immediate_actions"],
+        canonical_evidence_refs=canonical_behavioral_evidence_refs(observed),
+        source_decision=decision,
+    )
+
+    assert any("missing canonical behavioral evidence scope" in error for error in errors)
+    assert any("inconsistent with canonical action" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("field", "malformed"),
+    [
+        ("evidence_scope", []),
+        ("evidence_scope", "observed_behavior"),
+        ("evidence_scope", ["observed_behavior", 7]),
+        ("evidence_refs", []),
+        ("evidence_refs", "canonical-ref"),
+        ("evidence_refs", ["canonical-ref", None]),
+    ],
+)
+def test_empty_or_malformed_evidence_contract_is_rejected(
+    field: str,
+    malformed: object,
+) -> None:
+    decision = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    observed = build_observed_behavior([_session()])
+    forged = copy.deepcopy(decision["response_guidance_v2"])
+    action = forged["advisory_actions"][0]
+    action["applicability"][field] = malformed
+    action["source_action"][field] = malformed
+
+    errors = validate_response_guidance(
+        forged,
+        canonical_actions=decision["immediate_actions"],
+        canonical_evidence_refs=canonical_behavioral_evidence_refs(observed),
+        source_decision=decision,
+    )
+
+    assert errors
+    expected_terms = (
+        ("scope",)
+        if field == "evidence_scope"
+        else ("evidence_refs", "reference")
+    )
+    assert any(term in error for error in errors for term in expected_terms)
+
+
+def test_copied_valid_provenance_cannot_bless_mutated_evidence_reference() -> None:
+    decision = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    forged = copy.deepcopy(decision)
+    for action in forged["immediate_actions"]:
+        action["evidence_refs"] = ["forged-but-well-formed-ref"]
+
+    from production.reporting.response_guidance import build_response_guidance_v2
+
+    guidance = build_response_guidance_v2(
+        forged,
+        observed_behavior=build_observed_behavior([_session()]),
+    )
+
+    assert guidance["status"] == "unavailable"
+    assert guidance["advisory_actions"] == []
+    assert guidance["validation"]["status"] == "rejected"
+    assert all(
+        "evidence_refs do not identify canonical observed behavior" in item["errors"]
+        for item in guidance["rejected_candidates"]
+    )
 
 
 def test_canonical_degraded_mode_suppresses_v2_actions_but_preserves_v1() -> None:
@@ -150,6 +241,49 @@ def test_report_exposes_both_additive_contracts_without_rewriting_v1_v2() -> Non
         "guidance_id": report["response_guidance_v2"]["guidance_id"],
         "status": report["response_guidance_v2"]["status"],
     }
+
+
+def test_report_rebuilds_forged_nested_guidance_from_filtered_v1_actions() -> None:
+    decision = build_smb_decision(
+        _session(), action_policy=_policy(), asset_profile=_asset_profile()
+    )
+    forged = copy.deepcopy(decision)
+    forged["response_guidance_v2"] = {
+        "schema_version": "response_guidance.v2",
+        "guidance_id": "forged-guidance",
+        "status": "available",
+        "authority": "trusted_policy_engine",
+        "advisory_actions": [{
+            "action_id": "forged-action",
+            "description": "Perform an unreviewed action",
+            "manual_approval": {"required": False, "execution_authority": True},
+        }],
+    }
+    forged["immediate_actions"].append({
+        "action_id": "forged-action",
+        "action": "Perform an unreviewed action",
+        "evidence_scope": ["observed_behavior"],
+        "evidence_refs": ["guidance-discovery"],
+    })
+
+    report = build_v2_report(
+        {"trusted_recommendation_decision": forged},
+        [_session()],
+    )
+
+    canonical_ids = {
+        item["action_id"]
+        for item in report["trusted_recommendation_decision"]["immediate_actions"]
+    }
+    guidance = report["response_guidance_v2"]
+    assert guidance["guidance_id"] != "forged-guidance"
+    assert {item["action_id"] for item in guidance["advisory_actions"]} == canonical_ids
+    assert all(
+        item["manual_approval"]["required"] is True
+        for item in guidance["advisory_actions"]
+    )
+    assert report["trusted_recommendation_decision"]["response_guidance_v2"] == guidance
+    assert guidance["validation"] == {"status": "valid", "errors": []}
 
 
 def test_report_worker_api_and_direct_builder_share_one_guidance_semantics() -> None:
@@ -257,7 +391,9 @@ def test_counterfactual_removing_observed_commands_removes_advisory_actions() ->
     counterfactual_ids = {
         item["action_id"] for item in counterfactual["advisory_actions"]
     }
-    assert counterfactual_ids == {"track-scan-volume"}
+    assert counterfactual_ids == set()
+    assert counterfactual["status"] == "unavailable"
+    assert counterfactual["validation"]["status"] == "rejected"
     assert observed_ids.isdisjoint(counterfactual_ids)
 
 
