@@ -1501,6 +1501,14 @@ def build_smb_decision(
         },
         "report_recommendations": report_recommendations or {},
     }
+    # Local import avoids a module cycle while making every v1 construction
+    # path (worker, API, monitor, and report) expose the same additive adapter.
+    from production.reporting.response_guidance import build_response_guidance_v2
+
+    decision["response_guidance_v2"] = build_response_guidance_v2(
+        decision,
+        observed_behavior=(features.get("canonical_evidence") or {}).get("observed_behavior") or {},
+    )
     return decision
 
 

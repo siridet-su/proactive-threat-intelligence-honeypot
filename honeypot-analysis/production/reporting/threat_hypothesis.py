@@ -27,6 +27,7 @@ from production.reporting.session_assessment import (
     attach_forecast_to_session_assessment,
     build_session_assessment_v3,
 )
+from production.reporting.response_guidance import build_response_guidance_v2
 from production.utils.serialization import stable_id
 
 
@@ -1002,6 +1003,21 @@ def build_v2_report(
     })
     report = apply_legacy_aliases(report)
     report["session_assessment_v3"] = build_session_assessment_v3(report)
+    response_guidance = (
+        trusted_decision.get("response_guidance_v2")
+        if isinstance(trusted_decision, dict) else None
+    )
+    if not isinstance(response_guidance, dict):
+        response_guidance = build_response_guidance_v2(
+            trusted_decision if isinstance(trusted_decision, dict) else {},
+            observed_behavior=observed,
+        )
+    report["response_guidance_v2"] = response_guidance
+    report["session_assessment_v3"]["response_guidance_ref"] = {
+        "schema_version": "response_guidance.v2",
+        "guidance_id": _clean(response_guidance.get("guidance_id")),
+        "status": _clean(response_guidance.get("status")),
+    }
     return report
 
 

@@ -3616,6 +3616,50 @@ def _render_reference_links(references: Iterable[Any], limit: int = 6) -> str:
 def _render_smb_decision(decision: Dict[str, Any]) -> str:
     if not decision:
         return ""
+    guidance = decision.get("response_guidance_v2") or {}
+    if isinstance(guidance, dict) and guidance.get("schema_version") == "response_guidance.v2":
+        finding = guidance.get("finding") or {}
+        triage = guidance.get("triage") or {}
+        actions = [
+            item for item in guidance.get("advisory_actions") or []
+            if isinstance(item, dict)
+        ]
+        rendered_actions = []
+        for action in actions[:8]:
+            approval = action.get("manual_approval") or {}
+            applicability = action.get("applicability") or {}
+            rendered_actions.append(
+                "<li>"
+                f"<strong>{_html(action.get('description') or '-')}</strong>"
+                f"<br><span class=\"muted\">{_html(action.get('rationale') or '')}</span>"
+                f"<div class=\"muted\">applicability: {_html(applicability.get('status') or '-')} | "
+                f"owner: {_html(action.get('owner_role') or '-')} | manual approval: "
+                f"{_html(approval.get('state') or '-')}</div>"
+                f"<details><summary>Preconditions</summary>{_render_list_items(action.get('preconditions') or [])}</details>"
+                f"<details><summary>Verification</summary>{_render_list_items(action.get('verification_steps') or [])}</details>"
+                f"<details><summary>Rollback guidance</summary><p>{_html(action.get('rollback_guidance') or '')}</p></details>"
+                "</li>"
+            )
+        action_html = (
+            "<ol>" + "\n".join(rendered_actions) + "</ol>"
+            if rendered_actions
+            else '<div class="empty">No policy-approved advisory action matched this session.</div>'
+        )
+        policy = (guidance.get("provenance") or {}).get("policy") or {}
+        return (
+            '<div class="decision-panel">'
+            '<div class="overview-grid">'
+            f'<div class="kv"><span>finding</span><strong>{_html(finding.get("policy_severity") or "-")}</strong></div>'
+            f'<div class="kv"><span>review urgency</span><strong>{_html(triage.get("urgency") or "-")}</strong></div>'
+            f'<div class="kv"><span>guidance status</span><strong>{_html(guidance.get("status") or "-")}</strong></div>'
+            f'<div class="kv"><span>policy</span><strong>{_html(policy.get("policy_id") or "-")}</strong></div>'
+            "</div>"
+            f'<p>{_html(finding.get("statement") or "")}</p>'
+            "<h3>Advisory Actions</h3>"
+            + action_html
+            + '<p class="muted">This guidance has no execution authority; a human must approve and verify any action.</p>'
+            + "</div>"
+        )
     risk = decision.get("risk") or {}
     goal = decision.get("likely_goal") or {}
     next_step = decision.get("likely_next_step") or {}
@@ -3744,7 +3788,7 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     external_suggestions = recommendations.get("external_validation_suggestions") or []
     parts = []
     if smb_decision:
-        parts.extend(["<h3>SMB Proactive CTI Decision</h3>", _render_smb_decision(smb_decision)])
+        parts.extend(["<h3>Advisory Response Guidance</h3>", _render_smb_decision(smb_decision)])
         parts.append("<h3>Technical Prediction / Report Detail</h3>")
     parts.extend([
         '<div class="overview-grid">',

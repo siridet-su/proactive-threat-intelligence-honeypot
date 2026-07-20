@@ -1735,7 +1735,9 @@ def _build_trusted_recommendation_decision(
     ttp_command_map: Dict[str, List[str]],
     mitre_db: Any = None,
     asset_profile_path: str = "",
-    action_policy_path: str = "") -> Dict[str, Any]:
+    action_policy_path: str = "",
+    prediction_snapshot: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Build report actions from the same trusted policy engine used by production.
 
@@ -1766,7 +1768,7 @@ def _build_trusted_recommendation_decision(
     try:
         decision = build_smb_decision(
             session_payload=session_payload,
-            prediction_snapshot=None,
+            prediction_snapshot=prediction_snapshot,
             report_recommendations={},
             asset_profile=load_asset_profile(asset_path),
             action_policy=load_action_policy(policy_path),
@@ -3701,6 +3703,7 @@ class ImprovedAsyncSwarmCoordinator:
                 mitre_db=self.mitre_db,
                 asset_profile_path=self.recommendation_asset_profile_path,
                 action_policy_path=self.recommendation_action_policy_path,
+                prediction_snapshot=self.prediction_context,
             )
             actions = [
                 item for item in decision.get("immediate_actions") or []
@@ -4799,6 +4802,7 @@ class ImprovedAsyncSwarmCoordinator:
             mitre_db=self.mitre_db,
             asset_profile_path=self.recommendation_asset_profile_path,
             action_policy_path=self.recommendation_action_policy_path,
+            prediction_snapshot=self.prediction_context,
         )
         structured_recommendations = [
             action for action in trusted_recommendation_decision.get("immediate_actions", [])
