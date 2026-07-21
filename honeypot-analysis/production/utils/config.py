@@ -378,13 +378,13 @@ class ProductionConfig:
     })
     prediction_policy: Dict[str, Any] = field(default_factory=lambda: {
         "enabled": True,
-        "prediction_mode": "primary_transition_with_fallback",
-        "compute_weighted_ensemble_baseline": True,
-        "weight_influence_scope": "diagnostic_only",
+        "prediction_mode": "external_hard_backoff_vomm",
+        "compute_weighted_ensemble_baseline": False,
+        "weight_influence_scope": "not_applicable_external_authority",
         "primary_transition": {
-            "primary_model": "transition_frequency",
-            "source_order": ["local_transition", "external_seed_transition"],
-            "fallback_scorer": "fallback_progression",
+            "primary_model": "external_hard_backoff_vomm",
+            "source_order": ["external_seed_transition"],
+            "fallback_scorer": "",
             "min_transition_score": 0.01,
         },
         "max_hypotheses": 5,

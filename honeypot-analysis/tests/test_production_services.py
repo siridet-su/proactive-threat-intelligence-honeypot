@@ -2041,10 +2041,14 @@ def test_threat_hypothesis_semantic_matrix_distinguishes_attempt_transfer_execut
     assert policy["policy"]["confidence_semantics"].endswith("not_probability")
 
 
-def test_threat_hypothesis_fixes_preserve_primary_prediction_architecture() -> None:
+def test_external_only_prediction_policy_requires_manifest_verified_authority() -> None:
     policy = json.loads(Path("configs/prediction_policy.trusted.json").read_text())
-    assert policy["policy"]["prediction_mode"] == "primary_transition_with_fallback"
-    assert policy["policy"]["compute_weighted_ensemble_baseline"] is True
+    assert policy["policy"]["prediction_mode"] == "external_hard_backoff_vomm"
+    assert policy["policy"]["compute_weighted_ensemble_baseline"] is False
+    assert policy["policy"]["primary_transition"]["source_order"] == [
+        "external_seed_transition"
+    ]
+    assert policy["policy"]["primary_transition"]["fallback_scorer"] == ""
 
     snapshot = RealtimePredictionEngine(policy=policy["policy"]).predict(
         {
@@ -2060,9 +2064,11 @@ def test_threat_hypothesis_fixes_preserve_primary_prediction_architecture() -> N
         },
         event_id="discovery-regression",
     )
-    assert snapshot["prediction_mode"] == "primary_transition_with_fallback"
-    assert snapshot["weighted_ensemble_baseline"]["computed"] is True
-    assert snapshot["weighted_ensemble_baseline"]["prediction_mode"] == "weighted_ensemble_baseline"
+    assert snapshot["prediction_mode"] == "external_hard_backoff_vomm"
+    assert snapshot["prediction_status"] == "model_unavailable"
+    assert snapshot["final_ranking"] == []
+    assert snapshot["ranking_influence"]["local_transition"] == "shadow_offline_only"
+    assert snapshot["ranking_influence"]["weighted_ensemble"] == "not_computed"
 
 
 def test_threat_hypothesis_factuality_matrix_covers_forty_five_scoped_scenarios() -> None:
@@ -5104,6 +5110,20 @@ def test_monitor_renders_campaign_panel() -> None:
 def test_session_close_creates_exactly_one_analysis_job_and_redacts_credentials() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _config(tmp)
+        # This workflow characterization exercises the retained legacy
+        # fallback path, not the manifest-bound production policy.
+        cfg.prediction_policy = {
+            **cfg.prediction_policy,
+            "prediction_mode": "primary_transition_with_fallback",
+            "compute_weighted_ensemble_baseline": False,
+            "weight_influence_scope": "diagnostic_only",
+            "primary_transition": {
+                "primary_model": "transition_frequency",
+                "source_order": ["local_transition", "external_seed_transition"],
+                "fallback_scorer": "fallback_progression",
+                "min_transition_score": 0.01,
+            },
+        }
         storage = open_storage(cfg.database_url)
         for event in _demo_events():
             storage.store_event(cfg.sensor_id, event)
@@ -5563,6 +5583,15 @@ def test_session_worker_stores_predictive_next_step_alert() -> None:
         cfg.enable_smb_decision_alerts = False
         cfg.prediction_policy = {
             **cfg.prediction_policy,
+            "prediction_mode": "primary_transition_with_fallback",
+            "compute_weighted_ensemble_baseline": False,
+            "weight_influence_scope": "diagnostic_only",
+            "primary_transition": {
+                "primary_model": "transition_frequency",
+                "source_order": ["local_transition", "external_seed_transition"],
+                "fallback_scorer": "fallback_progression",
+                "min_transition_score": 0.01,
+            },
             "min_sessions_for_local": 1,
             "min_transition_count": 1,
             "min_prefix_transition_count": 1,

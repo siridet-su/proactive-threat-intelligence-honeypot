@@ -94,18 +94,26 @@ corresponding Cowrie transfer event.
 
 ### Next-Tactic Prediction
 
-The active `primary_transition_with_fallback` design is a source-selecting
-transition model, not a weighted vote across all contextual scorers:
+The active `external_hard_backoff_vomm` design uses one immutable,
+manifest-bound external Cowrie VOMM as the sole authoritative ranker:
 
-1. Use trusted local tactic transitions when the observed prefix has support.
-2. Otherwise use the selected external Cowrie transition model as a cold-start
-   prior when it supports that prefix.
-3. Otherwise emit a conservative, policy-defined fallback hypothesis.
+1. Verify the artifact byte hash, model ID, manifest ID, split membership, and
+   provenance before it is eligible at runtime.
+2. Use its longest empirically supported prefix, then technique, then tactic
+   context in hard-backoff order.
+3. Explicitly abstain when no supported external context exists, or report
+   `model_unavailable` when verification fails. It never falls back to a local
+   model or heuristic ranking.
 
 The input is the trusted, adjacent-deduplicated tactic sequence, not raw command
 text. SecureBERT classifies already-observed commands; it is not the next-tactic
-predictor. The historical weighted ensemble remains comparison-only and does
-not produce the active final ranking.
+predictor. The local VOMM remains a separately stored shadow/offline comparison.
+The human-curated progression list is exposed only as `generic_progression_prior`:
+non-empirical planning context with no prediction confidence and no authority
+for alerts, hypotheses, guidance, or actions. The historical local-first cascade
+and weighted ensemble remain offline comparison baselines and do not produce the
+active final ranking. Historical snapshots are not rewritten or reinterpreted
+after policy changes.
 
 The checked-in external model contains aggregate counts and provenance rather
 than raw sessions. Its labels are automatically generated weak labels, not

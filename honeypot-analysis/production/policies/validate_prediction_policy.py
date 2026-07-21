@@ -77,8 +77,8 @@ def _validate_weights(policy: Dict[str, Any], errors: List[str]) -> None:
 
 def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None:
     mode = str(policy.get("prediction_mode") or "primary_transition_with_fallback").strip()
-    if mode not in {"primary_transition_with_fallback", "weighted_ensemble_baseline"}:
-        errors.append("policy.prediction_mode must be primary_transition_with_fallback or weighted_ensemble_baseline")
+    if mode not in {"primary_transition_with_fallback", "weighted_ensemble_baseline", "external_hard_backoff_vomm"}:
+        errors.append("policy.prediction_mode must be primary_transition_with_fallback, weighted_ensemble_baseline, or external_hard_backoff_vomm")
     if "compute_weighted_ensemble_baseline" in policy and not isinstance(
         policy.get("compute_weighted_ensemble_baseline"),
         bool,
@@ -89,11 +89,13 @@ def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None
         expected_scope = (
             "production_ranking"
             if mode == "weighted_ensemble_baseline"
+            else "not_applicable_external_authority"
+            if mode == "external_hard_backoff_vomm"
             else "diagnostic_only"
         )
-        if influence_scope not in {"diagnostic_only", "production_ranking"}:
+        if influence_scope not in {"diagnostic_only", "production_ranking", "not_applicable_external_authority"}:
             errors.append(
-                "policy.weight_influence_scope must be diagnostic_only or production_ranking"
+                "policy.weight_influence_scope must be diagnostic_only, production_ranking, or not_applicable_external_authority"
             )
         elif influence_scope != expected_scope:
             errors.append(
@@ -116,10 +118,26 @@ def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None
             for index, item in enumerate(source_order):
                 if not str(item or "").strip():
                     errors.append(f"policy.primary_transition.source_order[{index}] must be non-empty")
-    if "fallback_scorer" in primary_transition and not str(primary_transition.get("fallback_scorer") or "").strip():
+    if mode != "external_hard_backoff_vomm" and "fallback_scorer" in primary_transition and not str(primary_transition.get("fallback_scorer") or "").strip():
         errors.append("policy.primary_transition.fallback_scorer must be non-empty")
     if "min_transition_score" in primary_transition and not _finite_nonnegative(primary_transition.get("min_transition_score")):
         errors.append("policy.primary_transition.min_transition_score must be a finite non-negative number")
+    if mode == "external_hard_backoff_vomm":
+        if primary_transition.get("source_order") != ["external_seed_transition"]:
+            errors.append("external_hard_backoff_vomm requires primary_transition.source_order to be [external_seed_transition]")
+        if str(primary_transition.get("fallback_scorer") or "").strip():
+            errors.append("external_hard_backoff_vomm must not configure a primary fallback scorer")
+        if policy.get("compute_weighted_ensemble_baseline") is not False:
+            errors.append("external_hard_backoff_vomm requires compute_weighted_ensemble_baseline=false")
+        for field in (
+            "external_transition_model_path",
+            "external_transition_manifest_path",
+            "external_transition_expected_artifact_sha256",
+            "external_transition_expected_model_id",
+            "external_transition_expected_manifest_id",
+        ):
+            if not str(policy.get(field) or "").strip():
+                errors.append(f"external_hard_backoff_vomm requires policy.{field}")
 
 
 def _validate_external_seed_decay(policy: Dict[str, Any], errors: List[str]) -> None:
@@ -414,7 +432,10 @@ def validate_policy_document(document: Dict[str, Any]) -> List[str]:
     if not policy:
         errors.append("policy object is required")
         return errors
-    _validate_weights(policy, errors)
+    # External hard-backoff authority deliberately has no ensemble weights.
+    # Legacy policies keep the existing positive-weight validation.
+    if str(policy.get("prediction_mode") or "").strip() != "external_hard_backoff_vomm":
+        _validate_weights(policy, errors)
     _validate_prediction_mode(policy, errors)
     _validate_external_seed_decay(policy, errors)
     _validate_actor_fingerprint_prior(policy, errors)

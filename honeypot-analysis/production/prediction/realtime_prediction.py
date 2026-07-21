@@ -2773,11 +2773,21 @@ class RealtimePredictionEngine:
         transition_model: Dict[str, Any] | None = None,
         external_transition_model: Dict[str, Any] | None = None,
         actor_fingerprint_transition_model: Dict[str, Any] | None = None,
+        external_artifact_validation: Dict[str, Any] | None = None,
     ) -> None:
         merged = _merge_policy(DEFAULT_PREDICTION_POLICY, policy)
         self.policy = merged
         self.transition_model = transition_model or build_transition_model([])
         self.external_transition_model = external_transition_model or build_transition_model([])
+        # An external-only authority mode is intentionally stricter than the
+        # legacy seed model: the worker must have verified the immutable
+        # artifact and manifest before its outputs are eligible.  Direct
+        # callers that omit this block therefore fail closed in that mode.
+        self.external_artifact_validation = dict(external_artifact_validation or {
+            "status": "unavailable",
+            "valid": False,
+            "reasons": ["external_artifact_validation_not_supplied"],
+        })
         self.actor_fingerprint_transition_model = (
             actor_fingerprint_transition_model
             or build_actor_fingerprint_transition_model([], merged)
@@ -2885,6 +2895,8 @@ class RealtimePredictionEngine:
         mode = str(self.policy.get("prediction_mode") or "primary_transition_with_fallback").strip()
         if mode in {"weighted_ensemble", "weighted"}:
             return "weighted_ensemble_baseline"
+        if mode in {"external_hard_backoff_vomm", "external_only_hard_backoff_vomm"}:
+            return "external_hard_backoff_vomm"
         if mode not in {"primary_transition_with_fallback", "weighted_ensemble_baseline"}:
             return "primary_transition_with_fallback"
         return mode
@@ -3154,6 +3166,319 @@ class RealtimePredictionEngine:
             },
         }
 
+    def _external_artifact_snapshot_metadata(self) -> Dict[str, Any]:
+        """Return a redaction-safe identity block for a new v2 snapshot."""
+
+        validation = dict(self.external_artifact_validation or {})
+        provenance = self.external_transition_model.get("provenance") or {}
+        manifest = validation.get("manifest") if isinstance(validation.get("manifest"), dict) else {}
+        artifact = manifest.get("artifact") if isinstance(manifest.get("artifact"), dict) else {}
+        return {
+            "status": str(validation.get("status") or "unavailable"),
+            "valid": bool(validation.get("valid")),
+            "reasons": [str(reason) for reason in validation.get("reasons") or []],
+            "model_id": str(
+                validation.get("model_id")
+                or self.external_transition_model.get("model_id")
+                or ""
+            ),
+            "manifest_id": str(
+                validation.get("manifest_id")
+                or provenance.get("manifest_id")
+                or ""
+            ),
+            "artifact_version": str(
+                validation.get("artifact_version")
+                or self.external_transition_model.get("artifact_version")
+                or ""
+            ),
+            "artifact_sha256": str(
+                validation.get("actual_artifact_sha256")
+                or validation.get("actual_sha256")
+                or artifact.get("sha256")
+                or ""
+            ),
+            "manifest_sha256": str(validation.get("manifest_sha256") or ""),
+            "schema_version": str(self.external_transition_model.get("schema_version") or ""),
+            "source": "external_hard_backoff_vomm",
+        }
+
+    def _generic_progression_prior(
+        self,
+        raw_by_scorer: Dict[str, List[Hypothesis]],
+    ) -> Dict[str, Any]:
+        """Expose human-curated progression as planning context, never a prediction."""
+
+        outputs = raw_by_scorer.get("fallback_progression", [])
+        entries = []
+        for position, hypothesis in enumerate(outputs, start=1):
+            tactic = str(hypothesis.tactic or "").strip()
+            if not tactic:
+                continue
+            entries.append({
+                "tactic": tactic,
+                "ordinal": position,
+                "reason": "; ".join(str(value) for value in hypothesis.reasons if str(value)),
+            })
+        return {
+            "schema_version": "generic_progression_prior.v1",
+            "source": "fallback_progression",
+            "not_empirical_prediction": True,
+            "not_authoritative": True,
+            "not_for_alerts": True,
+            "not_for_hypotheses": True,
+            "not_for_response_guidance": True,
+            "not_for_action_eligibility": True,
+            "tactics": entries,
+            "reason": (
+                "Human-curated generic progression prior for offline planning only; "
+                "it is not an empirical forecast and has no confidence score."
+            ),
+        }
+
+    def _external_only_snapshot(
+        self,
+        *,
+        features: Dict[str, Any],
+        event_id: str,
+        raw_by_scorer: Dict[str, List[Hypothesis]],
+        scorer_outputs: Dict[str, List[Dict[str, Any]]],
+        risk_by_annotator: Dict[str, List[Hypothesis]],
+        local_model_maturity: Dict[str, Any],
+        damping_factor: float,
+    ) -> Dict[str, Any]:
+        """Build one authoritative external-only prediction snapshot.
+
+        This branch is deliberately separate from weighted and primary cascade
+        modes.  Local, heuristic, enrichment, and correlation outputs may be
+        retained as diagnostics but cannot reach ``final_ranking`` or affect
+        confidence, alerts, hypotheses, guidance, or action eligibility.
+        """
+
+        scorer_by_name = {scorer.name: scorer for scorer in self.scorers}
+        artifact = self._external_artifact_snapshot_metadata()
+        external_outputs = raw_by_scorer.get("external_seed_transition", [])
+        min_transition_score = _safe_float(
+            ((self.policy.get("primary_transition") or {}).get("min_transition_score")),
+            _safe_float(self.policy.get("min_score"), 0.01),
+        )
+        external_diagnostic = self._source_diagnostic(
+            "external_seed_transition",
+            external_outputs,
+            scorer_by_name,
+            min_transition_score,
+        )
+        usable_external = [
+            hypothesis
+            for hypothesis in external_outputs
+            if hypothesis.tactic and float(hypothesis.score) >= min_transition_score
+        ]
+        authority_maturity = {
+            "maturity": "external_immutable",
+            "confidence_cap": "",
+            "warning": "",
+            "prior_dominated": False,
+            "model_id": artifact["model_id"],
+        }
+        calibration_policy = {"enabled": False, "method": "not_probability_calibrated"}
+        if not artifact["valid"]:
+            prediction_status = "model_unavailable"
+            status_reason = "; ".join(artifact["reasons"]) or "external artifact is unavailable"
+            ranking: List[Dict[str, Any]] = []
+        elif not usable_external:
+            prediction_status = "abstained"
+            status_reason = "no empirically supported external hard-backoff context"
+            ranking = []
+        else:
+            prediction_status = "predicted"
+            status_reason = "external hard-backoff context is empirically supported"
+            ranking = self._ranking_from_hypotheses(
+                "external_seed_transition",
+                usable_external,
+                scorer_by_name,
+                damping_factor,
+                calibration_policy,
+                authority_maturity,
+                max_hypotheses=max(int(self.policy.get("max_hypotheses", 5)), 1),
+                min_score=_safe_float(self.policy.get("min_score"), 0.01),
+            )
+
+        active_scorers = ["external_seed_transition"] if ranking else []
+        agreement = _detect_agreement(
+            {"external_seed_transition": usable_external} if ranking else {},
+            ranking,
+        )
+        classification_quality = _classification_quality(features)
+        confidence_controls = _apply_confidence_controls(
+            ranking,
+            active_scorers,
+            agreement,
+            classification_quality,
+            self.policy,
+        )
+        if agreement.get("warning") and ranking:
+            ranking[0].setdefault("reasons", []).append(str(agreement["warning"]))
+        external_seed_model = _external_seed_model_summary(self.external_transition_model)
+        external_seed_model = {
+            **external_seed_model,
+            "authority": "authoritative_external_hard_backoff_vomm",
+            "warning": (
+                "Immutable external hard-backoff VOMM is authoritative for this snapshot; "
+                "scores remain uncalibrated empirical rankings."
+                if artifact["valid"] else "Immutable external hard-backoff VOMM artifact is unavailable."
+            ),
+        }
+        trust_status = _trust_status(
+            ranking,
+            active_scorers,
+            authority_maturity,
+            external_seed_model,
+            classification_quality,
+            _calibration_status(calibration_policy),
+            agreement,
+        )
+        trust_status["evidence_posture"] = (
+            "external_immutable_authoritative" if ranking else "external_immutable_unavailable_or_abstained"
+        )
+        trust_status["warnings"] = list(trust_status.get("warnings") or [])
+        calibration_warning = "External hard-backoff scores are not probability-calibrated."
+        if calibration_warning not in trust_status["warnings"]:
+            trust_status["warnings"].append(calibration_warning)
+        trust_status["status"] = "review_required"
+
+        local_shadow = self._ranking_from_hypotheses(
+            "local_transition",
+            raw_by_scorer.get("local_transition", []),
+            scorer_by_name,
+            damping_factor,
+            calibration_policy,
+            local_model_maturity,
+            max_hypotheses=max(int(self.policy.get("max_hypotheses", 5)), 1),
+            min_score=_safe_float(self.policy.get("min_score"), 0.01),
+        )
+        local_shadow_payload = {
+            "schema_version": "local_transition_shadow.v1",
+            "authority": "shadow_offline_only",
+            "not_authoritative": True,
+            "not_for_alerts": True,
+            "not_for_hypotheses": True,
+            "not_for_response_guidance": True,
+            "not_for_action_eligibility": True,
+            "status": "available" if local_shadow else "abstained",
+            "ranking": local_shadow,
+            "model": _local_transition_model_summary(self.transition_model, local_model_maturity),
+            "reason": "Local VOMM is retained for shadow/offline comparison only.",
+        }
+        generic_prior = self._generic_progression_prior(raw_by_scorer)
+
+        transition_evidence_type = ""
+        transition_context = ""
+        transition_count = 0.0
+        evidence_count = 0.0
+        if ranking:
+            metadata = ((ranking[0].get("sources") or [{}])[0].get("metadata") or {})
+            transition_evidence_type = str(metadata.get("transition_type") or "")
+            transition_context = str(metadata.get("transition_context") or "")
+            transition_count = _safe_float(metadata.get("transition_total"), 0.0)
+            evidence_count = _safe_float(metadata.get("transition_support"), 0.0)
+        coverage = {
+            "active_scorer_count": len(active_scorers),
+            "min_active_scorers": 1,
+            "below_minimum": not bool(ranking),
+            "reason": "" if ranking else status_reason,
+        }
+        risk_annotation = _risk_annotation_from_outputs(risk_by_annotator)
+        snapshot = {
+            "schema_version": "prediction_snapshot.v2",
+            "engine": {"name": self.name, "version": self.version},
+            "prediction_mode": "external_hard_backoff_vomm",
+            "prediction_status": prediction_status,
+            "prediction_status_reason": status_reason,
+            "primary_model": "external_hard_backoff_vomm",
+            "source": "external_seed_transition",
+            "fallback_used": False,
+            "fallback_reason": "",
+            "transition_evidence_type": transition_evidence_type,
+            "transition_context": transition_context,
+            "transition_count": round(transition_count, 4),
+            "evidence_count": round(evidence_count, 4),
+            "session_id": features.get("session_id", "unknown"),
+            "src_ip": features.get("src_ip", "unknown"),
+            "session_status": features.get("status", "active"),
+            "event_id": event_id,
+            "features_hash": features.get("features_hash") or stable_id("features", features),
+            "generated_at": utc_now(),
+            "external_artifact": artifact,
+            "coverage": coverage,
+            "active_scorers": active_scorers,
+            "active_weights": {"external_seed_transition": 1.0} if ranking else {},
+            "weights": {},
+            "effective_weights": {},
+            "weight_influence_scope": "not_applicable_external_authority",
+            "ranking_influence": {
+                "production_mode": "external_hard_backoff_vomm",
+                "production_effective_scorers": list(active_scorers),
+                "local_transition": "shadow_offline_only",
+                "fallback_progression": "generic_planning_prior_only",
+                "heuristic_prior": "not_authoritative",
+                "enrichment_context": "not_authoritative",
+                "weighted_ensemble": "not_computed",
+            },
+            "model_maturity": {
+                "authority": authority_maturity,
+                "local_shadow": local_model_maturity,
+            },
+            "local_transition_model": _local_transition_model_summary(self.transition_model, local_model_maturity),
+            "external_seed_model": external_seed_model,
+            "classification_quality": classification_quality,
+            "calibration_status": _calibration_status(calibration_policy),
+            "trust_status": trust_status,
+            "agreement": agreement,
+            "confidence_controls": confidence_controls,
+            "primary_transition": {
+                "primary_model": "external_hard_backoff_vomm",
+                "selected_source": "external_seed_transition" if ranking else "",
+                "source_order": ["external_seed_transition"],
+                "fallback_scorer": "",
+                "fallback_used": False,
+                "fallback_reason": "",
+                "transition_evidence_type": transition_evidence_type,
+                "transition_context": transition_context,
+                "transition_count": round(transition_count, 4),
+                "evidence_count": round(evidence_count, 4),
+                "checked_transition_sources": [external_diagnostic],
+            },
+            "local_shadow_prediction": local_shadow_payload,
+            "generic_progression_prior": generic_prior,
+            "risk_annotation": risk_annotation,
+            # ``scorer_outputs`` is consumed by legacy diagnostic renderers.
+            # In the external-authority contract it must not carry local or
+            # heuristic scored alternatives, because those scores could be
+            # misconstrued as a production forecast. The local candidate is
+            # available only in ``local_shadow_prediction`` and the progression
+            # list only in the score-free prior block above.
+            "scorer_outputs": {
+                "external_seed_transition": list(
+                    scorer_outputs.get("external_seed_transition") or []
+                )
+            },
+            "final_ranking": ranking,
+            "prediction": [item["tactic"] for item in ranking],
+        }
+        snapshot["snapshot_id"] = stable_id(
+            "predsnap",
+            {
+                "schema_version": snapshot["schema_version"],
+                "session_id": snapshot["session_id"],
+                "event_id": event_id,
+                "features_hash": snapshot["features_hash"],
+                "prediction_status": prediction_status,
+                "artifact_sha256": artifact["artifact_sha256"],
+                "ranking": snapshot["final_ranking"],
+            },
+        )
+        return snapshot
+
     def predict(
         self,
         features: Dict[str, Any],
@@ -3177,6 +3502,16 @@ class RealtimePredictionEngine:
             scorer_outputs[annotator.name] = [hypothesis.to_dict() for hypothesis in raw_outputs]
 
         model_maturity = _model_maturity(self.transition_model, self.policy)
+        if self._prediction_mode() == "external_hard_backoff_vomm":
+            return self._external_only_snapshot(
+                features=features,
+                event_id=event_id,
+                raw_by_scorer=raw_by_scorer,
+                scorer_outputs=scorer_outputs,
+                risk_by_annotator=risk_by_annotator,
+                local_model_maturity=model_maturity,
+                damping_factor=self._classification_damping_factor(features),
+            )
         risk_annotator_names = {annotator.name for annotator in self.risk_annotators}
         ranking_configured_weights = {
             name: value

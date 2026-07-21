@@ -2044,6 +2044,10 @@
         const feedbackSummary = cp.feedback_summary || {};
         const calibrationStatus = cp.calibration_status || {};
         const weightCalibration = cp.weight_calibration || {};
+        const predictionStatus = cp.prediction_status || (cp.final_ranking?.length ? 'predicted' : 'abstained');
+        const predictionStatusReason = cp.prediction_status_reason || '';
+        const externalArtifact = cp.external_artifact || {};
+        const genericProgressionPrior = cp.generic_progression_prior || {};
 
         const finalRanking = cp.final_ranking?.length ? cp.final_ranking : ranking;
 
@@ -2224,7 +2228,7 @@
                     <!-- Predicted tactics -->
                     <div class="card p-5">
                         <div class="flex items-center justify-between mb-4">
-                            <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Predicted Tactics</h3>
+                            <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Authoritative Next-Tactic Forecast</h3>
                             ${finalRanking.length?`<span class="chip">${finalRanking.length}</span>`:''}
                         </div>
                         ${finalRanking.length?`<div class="space-y-3">${finalRanking.map((t,i)=>{
@@ -2243,8 +2247,15 @@
                                 </div>
                                 <div class="score-bar-track"><div class="score-bar-fill" style="width:${p2}%;background:${bc}"></div></div>
                             </div>`;
-                        }).join('')}</div>`:`<p class="text-xs text-zinc-600 italic">No prediction data.</p>`}
+                        }).join('')}</div>`:`<p class="text-xs text-zinc-600 italic">${predictionStatus==='model_unavailable'?'External model unavailable':predictionStatus==='abstained'?'External model explicitly abstained':'No prediction data.'}${predictionStatusReason?`: ${predictionStatusReason}`:''}</p>`}
+                        ${externalArtifact.model_id?`<div class="mt-4 pt-3 border-t text-[10px] text-zinc-600 font-mono" style="border-color:#1f1f23">external artifact ${externalArtifact.model_id} · manifest ${externalArtifact.manifest_id||'—'} · ${externalArtifact.status||'unknown'}</div>`:''}
                     </div>
+
+                    ${genericProgressionPrior.not_empirical_prediction?`<div class="card p-5">
+                        <div class="flex items-center justify-between mb-3"><h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Generic Progression Prior</h3><span class="chip">non-empirical</span></div>
+                        <p class="text-xs text-zinc-500 mb-3">Offline planning context only. It does not create a forecast, alert, guidance, or action.</p>
+                        <div class="flex flex-wrap gap-1.5">${(genericProgressionPrior.tactics||[]).map(t=>`<span class="chip">${t.ordinal||'—'}. ${t.tactic||'unknown'}</span>`).join('')||'<span class="text-xs text-zinc-600">No applicable progression.</span>'}</div>
+                    </div>`:''}
 
                     <!-- Trust indicator (trust_status + confidence_damping [2]) -->
                     ${trustIndicator(trustStatus, confidenceDamping)}

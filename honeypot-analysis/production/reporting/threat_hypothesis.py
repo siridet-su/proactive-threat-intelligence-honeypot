@@ -1027,8 +1027,11 @@ def attach_model_prediction(
         prediction_snapshot = prediction_snapshot["payload"]
     ranking = list(prediction_snapshot.get("final_ranking") or [])
     coverage = prediction_snapshot.get("coverage") or {}
+    prediction_status = _clean(prediction_snapshot.get("prediction_status"))
+    if prediction_status not in {"predicted", "abstained", "model_unavailable"}:
+        prediction_status = "available" if ranking else "abstained"
     report["model_prediction"] = {
-        "status": "available" if ranking else "abstained",
+        "status": prediction_status,
         "snapshot_id": _clean(prediction_snapshot.get("snapshot_id")),
         "generated_at": _clean(prediction_snapshot.get("generated_at")),
         "engine": prediction_snapshot.get("engine") or {},
@@ -1041,11 +1044,16 @@ def attach_model_prediction(
             "transition_context": prediction_snapshot.get("transition_context") or "",
         },
         "coverage": coverage,
-        "abstained": not bool(ranking),
+        "abstained": prediction_status == "abstained",
         "abstention_reason": (
-            _clean(coverage.get("reason")) or _clean(prediction_snapshot.get("fallback_reason"))
-            if not ranking else ""
+            _clean(prediction_snapshot.get("prediction_status_reason"))
+            or _clean(coverage.get("reason"))
+            or _clean(prediction_snapshot.get("fallback_reason"))
+            if prediction_status in {"abstained", "model_unavailable"} else ""
         ),
+        "external_artifact": prediction_snapshot.get("external_artifact") or {},
+        "local_shadow_prediction": prediction_snapshot.get("local_shadow_prediction") or {},
+        "generic_progression_prior": prediction_snapshot.get("generic_progression_prior") or {},
         "trust_status": prediction_snapshot.get("trust_status") or {},
         "separation_semantics": "statistical_prediction_not_observed_evidence",
     }

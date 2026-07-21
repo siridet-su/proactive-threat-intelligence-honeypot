@@ -352,7 +352,15 @@ def evaluate(
     split = chronological_split(payloads)
     train, calibration, test = split["train"], split["calibration"], split["test"]
     variants = {
-        "current_primary_transition_with_fallback": _policy_variant(policy),
+        # This tool evaluates the historical local-first cascade as a fixed
+        # offline baseline.  It must not silently inherit the active
+        # external-only production mode when comparing that legacy design.
+        "current_primary_transition_with_fallback": _policy_variant(
+            policy,
+            mode="primary_transition_with_fallback",
+            source_order=["local_transition", "external_seed_transition"],
+            fallback_scorer="fallback_progression",
+        ),
         "local_transition_only": _policy_variant(
             policy, source_order=["local_transition"], fallback_scorer="__no_fallback__"
         ),

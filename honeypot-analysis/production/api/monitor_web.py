@@ -3277,6 +3277,8 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         return f'<div class="empty">No prediction snapshot recorded for this session yet.{suffix}</div>'
 
     ranking = payload.get("final_ranking") or []
+    prediction_status = str(payload.get("prediction_status") or ("predicted" if ranking else "abstained"))
+    prediction_status_reason = str(payload.get("prediction_status_reason") or "")
     features = payload.get("features") or {}
     engine = payload.get("engine") or {}
     weights = payload.get("weights") or {}
@@ -3287,6 +3289,8 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     coverage = payload.get("coverage") or {}
     damping = payload.get("confidence_damping") or {}
     maturity = payload.get("model_maturity") or {}
+    local_maturity = maturity.get("local_shadow") if isinstance(maturity.get("local_shadow"), dict) else maturity
+    authority_maturity = maturity.get("authority") if isinstance(maturity.get("authority"), dict) else {}
     local_model = payload.get("local_transition_model") or {}
     external_seed = payload.get("external_seed_model") or {}
     classification_quality = payload.get("classification_quality") or {}
@@ -3296,10 +3300,15 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     agreement = payload.get("agreement") or {}
     trigger = payload.get("prediction_trigger") or {}
     predictive_alert = payload.get("predictive_alert") or {}
+    external_artifact = payload.get("external_artifact") or {}
+    generic_prior = payload.get("generic_progression_prior") or {}
+    local_shadow = payload.get("local_shadow_prediction") or {}
     rows = [
         ("snapshot_role", "current prediction"),
         ("snapshot_id", payload.get("snapshot_id") or latest.get("snapshot_id") or "-"),
         ("generated_at", payload.get("generated_at") or latest.get("created_at") or "-"),
+        ("prediction_status", prediction_status),
+        ("prediction_status_reason", prediction_status_reason or "-"),
         ("engine", f"{engine.get('name', 'unknown')} {engine.get('version', '')}".strip()),
         ("session_status", payload.get("session_status") or "-"),
         ("event_id", payload.get("event_id") or "-"),
@@ -3316,9 +3325,10 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         ("trust_status", trust_status.get("status") or "-"),
         ("evidence_posture", trust_status.get("evidence_posture") or "-"),
         ("dominant_source", trust_status.get("dominant_source") or "-"),
-        ("local_model_maturity", maturity.get("maturity") or "-"),
-        ("local_transition_sessions", maturity.get("local_transition_sessions")),
-        ("local_transition_transitions", maturity.get("local_transition_transitions")),
+        ("authority_model_maturity", authority_maturity.get("maturity") or "-"),
+        ("local_shadow_maturity", local_maturity.get("maturity") or "-"),
+        ("local_transition_sessions", local_maturity.get("local_transition_sessions")),
+        ("local_transition_transitions", local_maturity.get("local_transition_transitions")),
         ("local_model_id", local_model.get("model_id") or "-"),
         (
             "local_model_source",
@@ -3328,12 +3338,20 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
             ),
         ),
         ("local_recency_decay_half_life", local_model.get("recency_decay_half_life_sessions")),
-        ("prior_dominated", maturity.get("prior_dominated")),
+        ("local_prior_dominated", local_maturity.get("prior_dominated")),
         ("external_seed_enabled", external_seed.get("enabled")),
         ("external_seed_sessions", external_seed.get("usable_sessions")),
         ("external_seed_transitions", external_seed.get("transition_count")),
         ("external_seed_source", external_seed.get("dataset_handle") or external_seed.get("source_type") or "-"),
         ("external_seed_model_id", external_seed.get("model_id") or "-"),
+        ("external_artifact_status", external_artifact.get("status") or "-"),
+        ("external_artifact_model_id", external_artifact.get("model_id") or "-"),
+        ("external_artifact_manifest_id", external_artifact.get("manifest_id") or "-"),
+        ("external_artifact_sha256", external_artifact.get("artifact_sha256") or "-"),
+        ("external_artifact_context", payload.get("transition_context") or "-"),
+        ("external_artifact_support", payload.get("evidence_count")),
+        ("local_shadow_status", local_shadow.get("status") or "-"),
+        ("generic_progression_prior", "offline planning only" if generic_prior else "-"),
         ("external_seed_decay", f"{external_weight_policy.get('maturity', '-')} x{external_weight_policy.get('multiplier', '-')}"),
         ("external_seed_effective_weight", external_weight_policy.get("effective_weight")),
         ("classification_validation", classification_quality.get("validation_status") or "-"),
@@ -3357,8 +3375,8 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         for label, value in rows
     ) + "</div>"
     warning_parts = []
-    if maturity.get("warning"):
-        warning_parts.append(f'<div class="warning"><strong>Model maturity:</strong> {_html(maturity.get("warning"))}</div>')
+    if local_maturity.get("warning"):
+        warning_parts.append(f'<div class="warning"><strong>Local shadow model:</strong> {_html(local_maturity.get("warning"))}</div>')
     if external_seed.get("warning"):
         warning_parts.append(f'<div class="warning"><strong>External seed:</strong> {_html(external_seed.get("warning"))}</div>')
     if agreement.get("warning"):
@@ -3398,7 +3416,8 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
             + "</tbody></table>"
         )
     else:
-        ranking_html = '<div class="empty">Prediction engine returned no ranked hypotheses for this state.</div>'
+        label = "model unavailable" if prediction_status == "model_unavailable" else "explicitly abstained"
+        ranking_html = f'<div class="empty">External hard-backoff VOMM {label}: {_html(prediction_status_reason or "no empirically supported context")}</div>'
 
     scorer_outputs = payload.get("scorer_outputs") or {}
     scorer_sections = []
@@ -3440,6 +3459,15 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         f'<span class="chip">{_html(name)}={_html(weight)}</span>'
         for name, weight in sorted(effective_weights.items())
     ) + "</div>"
+    prior_items = generic_prior.get("tactics") if isinstance(generic_prior, dict) else []
+    prior_html = (
+        '<div class="empty">No generic progression prior applies.</div>'
+        if not prior_items else
+        '<div class="weights">' + " ".join(
+            f'<span class="chip">{_html(item.get("ordinal"))}. {_html(item.get("tactic"))}</span>'
+            for item in prior_items if isinstance(item, dict)
+        ) + '</div>'
+    )
 
     commands = features.get("commands") or []
     command_rows = "\n".join(
@@ -3487,11 +3515,15 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         + warnings_html
         + "<h3>Ranked Next-Step Hypotheses</h3>"
         + ranking_html
+        + "<h3>Generic Progression Prior (Non-empirical, Offline Planning Only)</h3>"
+        + prior_html
         + why_html
         + (
             "<h3>Configured Weights (Diagnostic Baseline Only)</h3>"
             if weight_influence_scope == "diagnostic_only"
             else "<h3>Configured Production Weights</h3>"
+            if weight_influence_scope == "production_ranking"
+            else "<h3>Weights (Not Applicable to External-Only Authority)</h3>"
         )
         + weights_html
         + (

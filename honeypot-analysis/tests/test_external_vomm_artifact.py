@@ -112,6 +112,39 @@ def test_manifest_bound_artifact_loads_only_when_hashes_and_membership_match(tmp
     assert "manifest_artifact_sha256_mismatch" in blocked["reasons"]
 
 
+def test_manifest_loader_fails_closed_for_missing_malformed_or_outdated_identity(tmp_path: Path) -> None:
+    result = _build(tmp_path)
+    artifact_path = tmp_path / "model.json"
+    manifest_path = tmp_path / "model.manifest.json"
+
+    missing_model, missing = load_external_vomm_artifact(
+        tmp_path / "missing.json", manifest_path
+    )
+    assert missing_model == {}
+    assert missing["status"] == "unavailable"
+    assert "artifact_path_missing" in missing["reasons"]
+
+    malformed_manifest = tmp_path / "malformed.manifest.json"
+    malformed_manifest.write_text("{not-json", encoding="utf-8")
+    malformed_model, malformed = load_external_vomm_artifact(
+        artifact_path, malformed_manifest
+    )
+    assert malformed_model == {}
+    assert malformed["status"] == "unavailable"
+    assert "artifact_or_manifest_json_malformed" in malformed["reasons"]
+
+    outdated_model, outdated = load_external_vomm_artifact(
+        artifact_path,
+        manifest_path,
+        expected_artifact_sha256=result["artifact_sha256"],
+        expected_model_id="old-model-id",
+        expected_manifest_id=result["manifest"]["manifest_id"],
+    )
+    assert outdated_model == {}
+    assert outdated["status"] == "unavailable"
+    assert "expected_model_id_mismatch" in outdated["reasons"]
+
+
 def test_builder_rejects_cross_partition_session_membership(tmp_path: Path) -> None:
     payload_path = tmp_path / "overlap.jsonl"
     payload_path.write_text(

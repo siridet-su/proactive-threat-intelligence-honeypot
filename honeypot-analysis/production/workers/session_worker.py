@@ -45,6 +45,7 @@ from production.prediction.realtime_prediction import (
     build_actor_fingerprint_transition_model,
     build_transition_model,
 )
+from production.prediction.external_vomm_artifact import load_external_vomm_artifact
 from production.prediction.predictive_alerts import evaluate_predictive_alert
 from production.utils.runtime_context import attach_runtime_context
 from production.utils.serialization import session_to_payload, stable_id, utc_now
@@ -183,6 +184,11 @@ class SessionWorker:
         self.weight_calibration_status: Dict[str, Any] = {
             "enabled": bool((config.calibration_policy or {}).get("enabled", True)),
             "status": "not_checked",
+        }
+        self.external_artifact_validation: Dict[str, Any] = {
+            "status": "unavailable",
+            "valid": False,
+            "reasons": ["external_artifact_not_loaded"],
         }
         self._session_latest_snapshots: Dict[str, Dict[str, Any]] = {}
         self._session_prediction_snapshots: Dict[str, List[Dict[str, Any]]] = {}
@@ -582,10 +588,60 @@ class SessionWorker:
     def _load_external_transition_model(self) -> Dict[str, Any]:
         policy = self.config.prediction_policy or {}
         path_text = str(policy.get("external_transition_model_path") or "").strip()
+        manifest_path_text = str(policy.get("external_transition_manifest_path") or "").strip()
+        external_only = str(policy.get("prediction_mode") or "").strip() in {
+            "external_hard_backoff_vomm",
+            "external_only_hard_backoff_vomm",
+        }
         if not path_text:
+            self.external_artifact_validation = {
+                "status": "unavailable",
+                "valid": False,
+                "reasons": ["external_transition_model_path_not_configured"],
+            }
+            return build_transition_model([])
+        if manifest_path_text:
+            model, validation = load_external_vomm_artifact(
+                path_text,
+                manifest_path_text,
+                expected_artifact_sha256=str(policy.get("external_transition_expected_artifact_sha256") or ""),
+                expected_model_id=str(policy.get("external_transition_expected_model_id") or ""),
+                expected_manifest_id=str(policy.get("external_transition_expected_manifest_id") or ""),
+            )
+            self.external_artifact_validation = validation
+            if validation.get("valid"):
+                return model
+            print(
+                json.dumps(
+                    {
+                        "service": "session_worker",
+                        "warning": "external_vomm_artifact_unavailable",
+                        "path": path_text,
+                        "manifest_path": manifest_path_text,
+                        "reasons": list(validation.get("reasons") or []),
+                        "timestamp": utc_now(),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            return build_transition_model([])
+        if external_only:
+            self.external_artifact_validation = {
+                "status": "unavailable",
+                "valid": False,
+                "reasons": ["external_only_mode_requires_manifest_path"],
+                "artifact_path": path_text,
+            }
             return build_transition_model([])
         path = Path(path_text)
         if not path.exists():
+            self.external_artifact_validation = {
+                "status": "unavailable",
+                "valid": False,
+                "reasons": ["artifact_path_missing"],
+                "artifact_path": path_text,
+            }
             print(
                 json.dumps(
                     {
@@ -603,6 +659,12 @@ class SessionWorker:
             with path.open("r", encoding="utf-8") as f:
                 loaded = json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
+            self.external_artifact_validation = {
+                "status": "unavailable",
+                "valid": False,
+                "reasons": ["artifact_json_malformed"],
+                "artifact_path": path_text,
+            }
             print(
                 json.dumps(
                     {
@@ -618,9 +680,27 @@ class SessionWorker:
             )
             return build_transition_model([])
         if isinstance(loaded, dict) and isinstance(loaded.get("model"), dict):
+            self.external_artifact_validation = {
+                "status": "legacy_unverified",
+                "valid": False,
+                "reasons": ["legacy_external_transition_model_has_no_manifest"],
+                "artifact_path": path_text,
+            }
             return loaded["model"]
         if isinstance(loaded, dict):
+            self.external_artifact_validation = {
+                "status": "legacy_unverified",
+                "valid": False,
+                "reasons": ["legacy_external_transition_model_has_no_manifest"],
+                "artifact_path": path_text,
+            }
             return loaded
+        self.external_artifact_validation = {
+            "status": "unavailable",
+            "valid": False,
+            "reasons": ["external_transition_model_not_object"],
+            "artifact_path": path_text,
+        }
         return build_transition_model([])
 
     def _load_actor_fingerprint_transition_model(self) -> Dict[str, Any]:
@@ -705,11 +785,13 @@ class SessionWorker:
         )
 
     def _new_prediction_engine(self) -> RealtimePredictionEngine:
+        external_model = self._load_external_transition_model()
         return RealtimePredictionEngine(
             self.config.prediction_policy,
             transition_model=self._load_transition_model(),
-            external_transition_model=self._load_external_transition_model(),
+            external_transition_model=external_model,
             actor_fingerprint_transition_model=self._load_actor_fingerprint_transition_model(),
+            external_artifact_validation=self.external_artifact_validation,
         )
 
     def _merge_prediction_policy_overlay(self, overlay: Dict[str, Any]) -> Dict[str, Any]:
