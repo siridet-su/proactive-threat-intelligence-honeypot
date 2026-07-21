@@ -8,9 +8,25 @@ efficiency results, and the validation-only Transformer selection record.
 
 The selected Transformer checkpoint is retained locally at
 `data/models/transformer_shadow_20260721.pt`; its SHA-256 and frozen metadata
-are recorded here. Restore it only from trusted local artifact storage, then
-verify `sha256sum -c selected_transformer_checkpoint.sha256` before enabling
-shadow scoring.
+are recorded here. The legacy `shadow` filename does not imply that any shadow
+runtime is active. Restore it only from trusted local artifact storage, then
+verify from the repository root with:
+
+```text
+sha256sum -c evaluation/next_tactic_benchmark_evidence/selected_transformer_checkpoint.sha256
+```
+
+`single_checkpoint_evaluation.json` is the authoritative final promotion-gate
+record for that exact checkpoint. It was generated once with the committed,
+offline-only evaluator:
+
+```text
+PYTHONPATH=. python -m production.tools.evaluate_frozen_transformer_candidate
+```
+
+The record retains the external hard-backoff VOMM as the PoC authority because
+the frozen Transformer failed the predeclared tactic-safety criterion. It does
+not replace or alter the earlier five-seed aggregate evidence.
 
 Bulk run directories `evaluation/next_tactic_offline_benchmark_*/` are ignored:
 they contain raw case predictions, seed duplicates, logs, stage dumps, caches,
