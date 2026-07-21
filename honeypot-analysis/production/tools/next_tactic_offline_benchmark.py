@@ -315,11 +315,18 @@ def interpolated_vomm_model(
 
 
 def external_hard_backoff_model(
-    policy: Mapping[str, Any], external_artifact: Mapping[str, Any], vocabulary: Sequence[str]
+    policy: Mapping[str, Any], external_artifact: Mapping[str, Any], vocabulary: Sequence[str],
+    *, artifact_validation: Mapping[str, Any] | None = None,
 ) -> ModelRun:
     """Use the exact loaded immutable artifact, never a rebuilt count model."""
 
-    engine = RealtimePredictionEngine(dict(policy), transition_model={}, external_transition_model=dict(external_artifact))
+    # The production engine deliberately fails closed unless the manifest-bound
+    # loader's validation result accompanies the immutable artifact.  Passing
+    # only the JSON model made this offline adapter abstain on every case.
+    engine = RealtimePredictionEngine(
+        dict(policy), transition_model={}, external_transition_model=dict(external_artifact),
+        external_artifact_validation=dict(artifact_validation or {}),
+    )
 
     def predict(case: BenchmarkCase) -> Prediction:
         snapshot = engine.predict(dict(case.features), event_id=f"offline-benchmark:{case.case_id}")
@@ -1165,7 +1172,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     first_order = first_order_model(fit_sessions, vocabulary)
     interpolated_selection = select_interpolated_vomm(split["train"], selection_cases, vocabulary, experiment_log=experiment_log)
     interpolated = interpolated_vomm_model(fit_sessions, vocabulary, interpolated_selection["settings"])
-    production = external_hard_backoff_model(policy, artifact, vocabulary)
+    production = external_hard_backoff_model(policy, artifact, vocabulary, artifact_validation=artifact_validation)
     # Finish and persist every deterministic model before neural training.
     results = {}
     for model in (majority, first_order, production, interpolated):
