@@ -1,0 +1,435 @@
+{
+  "aggregate_neural_runtime_excluded": true,
+  "artifacts": [
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/01_all_model_predictive_overview.png",
+      "sha256": "c01de8956c8ec49acd4320a90b18cd5043e303c3814ec25d44e652581bca7efd",
+      "size_bytes": 142624
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/01_all_model_predictive_overview.pdf",
+      "sha256": "ee1dbfd4e124643190ee43cf71e35d443227a4660c6f6ad09ecfd4ac0450531c",
+      "size_bytes": 31821
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/02_all_model_metric_heatmap.png",
+      "sha256": "46d825a1bf65bc0be425b07960209ca3a624ba743c7e32d63b1615ebee488367",
+      "size_bytes": 230728
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/02_all_model_metric_heatmap.pdf",
+      "sha256": "0cce7be0b86f009721a19917362db1364f2ba8ddc8701dd501ed611da544bc7c",
+      "size_bytes": 28288
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/03_all_model_ranking.png",
+      "sha256": "961752946a5e515b7104f461087f6868f846ddfc65a85926e0a49e5beec42fd1",
+      "size_bytes": 196444
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/03_all_model_ranking.pdf",
+      "sha256": "35471420d880c6871cd4c9f9ef6f9df46368a0bfe843aa71f9b02b7dfbfcca7d",
+      "size_bytes": 32409
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/04_predictive_radar.png",
+      "sha256": "188c606e5504488f468e056635e698c3386f7c940f23bcee772c53dcb9d11351",
+      "size_bytes": 330769
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/04_predictive_radar.pdf",
+      "sha256": "373047a9cb1ec7780f1e0269c059436ad3ad9aefef160bf812ef2b53f918a505",
+      "size_bytes": 23617
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/05_sequence_length.png",
+      "sha256": "b4b83e096de2c2105cfb85d0bf7d61c068af691465f97ef1da322c6521a8d479",
+      "size_bytes": 233169
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/05_sequence_length.pdf",
+      "sha256": "1947e7b386129cd2cb0ea7e8c3caa2cdaa8f5064306266f544ace9e67100cfaf",
+      "size_bytes": 24216
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/06_latency.png",
+      "sha256": "881aba4789fb9f3b41b3ce280eb2b9fa2082f8e4c09b59ae659bea5fb65dd279",
+      "size_bytes": 172660
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/06_latency.pdf",
+      "sha256": "14ec24d7d0f8fea4796ffb3714a76744b529f83681108a6959e58ede1303dc84",
+      "size_bytes": 22716
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/07_throughput.png",
+      "sha256": "f488d0323975710679460027cf268e6e29393f4820228ea859f3051005c81d86",
+      "size_bytes": 155021
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/07_throughput.pdf",
+      "sha256": "5c2dd517da062e2d92aa10a7c4dbaef357667a6f9e8562bb689998bda3320fc6",
+      "size_bytes": 24337
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/08_memory_storage_complexity.png",
+      "sha256": "634c3721bbf3e2f2209d2deb82990ce67889e9c41ebea1eb215777552f94e091",
+      "size_bytes": 256061
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/08_memory_storage_complexity.pdf",
+      "sha256": "7d0b08c6831cba7461c055b6774170d309e82cbc9502ba00c3644f0c9e4ab9b5",
+      "size_bytes": 30779
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/09_accuracy_latency_tradeoff.png",
+      "sha256": "36b606cb6b3c656521da0bc0ee4d46301f35ee40caef5176734c83e80f90bcef",
+      "size_bytes": 137686
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/09_accuracy_latency_tradeoff.pdf",
+      "sha256": "a969f9f9c4f210e13c1cb6d5454fde96250e92c320655f61e05ad01c2929e180",
+      "size_bytes": 24430
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/10_macro_f1_memory_tradeoff.png",
+      "sha256": "bec390540d5524bdcfa4060931d802c8e7cce3bcbb93e625643d5bdb2cc04684",
+      "size_bytes": 141863
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/10_macro_f1_memory_tradeoff.pdf",
+      "sha256": "00f6d90f354e38020eef7bad480eab7db8baf61fec7086b61e12bd90049960ee",
+      "size_bytes": 23131
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/11_performance_efficiency_summary.png",
+      "sha256": "47e06d4b0818792fbab94417b7167bdec14a83ee425fbf7e1090e0d1f7487d6d",
+      "size_bytes": 151245
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/11_performance_efficiency_summary.pdf",
+      "sha256": "28ca4491a69b93676655dd56ed26c58d74c73a06049dfef30c1d64f51f690cf3",
+      "size_bytes": 23550
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/12_focused_overall.png",
+      "sha256": "eb7a318626dea50f5947ed66088eb9439c31c5e955bc16cd0f2f665502e6bf33",
+      "size_bytes": 145912
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/12_focused_overall.pdf",
+      "sha256": "882cbc80efbed2fa3dca2095672741d0071d4f658b45abafc2f331a7c7a9ee18",
+      "size_bytes": 21811
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/13_paired_outcomes.png",
+      "sha256": "39972f10327f940ad2c8b8f620628a2e2b510f36ae979869890b4f935a7f364a",
+      "size_bytes": 78579
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/13_paired_outcomes.pdf",
+      "sha256": "8b24ff886e4b26197d09e96b036b975e467ec328f52a93067457a0c5c639aa93",
+      "size_bytes": 20215
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/14_paired_confidence_intervals.png",
+      "sha256": "8a0c36217e397a7bad7ba5d4dbd112ba1f0abeb8bcf73081f7fa4b112edbbd7c",
+      "size_bytes": 78463
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/14_paired_confidence_intervals.pdf",
+      "sha256": "4b442ff716433ebe6ff2ff8bd7ff07e0b94452ea4b420ed8ac15d44ab5113056",
+      "size_bytes": 21056
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/15_tactic_precision.png",
+      "sha256": "a6405dcc3f3cd752711c497cc3ec6a8ad740b528af1c0d015fd71f87f71d4e30",
+      "size_bytes": 182745
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/15_tactic_precision.pdf",
+      "sha256": "a5141943a09c5fd962cef4683b4e540f79f832fd9f1061cec3e648a9c3ce9dd4",
+      "size_bytes": 25550
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/16_tactic_recall.png",
+      "sha256": "8abe4372740bf82848d27628134e8eae79bc1ee074031ddee1a798afdcbbef0d",
+      "size_bytes": 180727
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/16_tactic_recall.pdf",
+      "sha256": "8780a5b58f8f8a9b5a35c9e795b34fe79a1f5a1ce745314b6ec22a7c2c05dd80",
+      "size_bytes": 25448
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/17_tactic_f1.png",
+      "sha256": "d5b63bc12e8e6f9edba5897ad3a99ed14d676fe15caa32c63548c2b6ce702674",
+      "size_bytes": 182373
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/17_tactic_f1.pdf",
+      "sha256": "3a78979a7ad86bfbc858eaf52f25bfddfbd40f5ab88381f4bbda3f1bdf79ce5b",
+      "size_bytes": 25643
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/18_persistence_execution_tradeoff.png",
+      "sha256": "467034fbf708ae41a4700c65aca1e98d70449a85e732eeaec965c37a1c230f79",
+      "size_bytes": 123205
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/18_persistence_execution_tradeoff.pdf",
+      "sha256": "baacd135e0a2c3d337d1bbf586c29a23b22c02b163128f87c9ca83d575eb34df",
+      "size_bytes": 20464
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/19_opposing_confusions.png",
+      "sha256": "136f0c1be99123bd95ee114098d5c2855a3b6e0c0de7156ce16e29e35e39b17e",
+      "size_bytes": 91817
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/19_opposing_confusions.pdf",
+      "sha256": "e49b56c8971eaf9435fef8eab85c007e296087b1e324f40a6a604b3be2f5054e",
+      "size_bytes": 25482
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/20_transformer_win_sources.png",
+      "sha256": "be032cfe55adea8594fdc35f14884c587f1d7efe9e7cf37b236399596566a5b5",
+      "size_bytes": 125423
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/20_transformer_win_sources.pdf",
+      "sha256": "640b805b0e887eefa2914406320562dfcbffb89e72e624e3e9b543d8f37a4aa7",
+      "size_bytes": 20417
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/21_chronological_stability.png",
+      "sha256": "ccbca9f6cf38de599ea1c7cd98bcec353518195cc52579188dd02816d6556792",
+      "size_bytes": 151916
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/21_chronological_stability.pdf",
+      "sha256": "c907fe22b119a1d4f8fb4e90228d7f1196dbd31777c2c435ba3ca137b3d3339e",
+      "size_bytes": 22165
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/22_repeated_pattern_caveat.png",
+      "sha256": "b317ad6d259eaff36e91970320c8be03553e6a56a8674148f3ba3cb4888fc564",
+      "size_bytes": 134455
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/22_repeated_pattern_caveat.pdf",
+      "sha256": "575feb8e3b9bbe4a846ca0e22031324917b1b0f49feac4838d48e21c7f1acd2c",
+      "size_bytes": 22683
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/23_reliability_failure_handling.png",
+      "sha256": "b26f77aee999468e3974530bed5d7508b75ffa4bd12027821a35d286e968717f",
+      "size_bytes": 198996
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/23_reliability_failure_handling.pdf",
+      "sha256": "d700a4daf9470836b6f93648cb110df9cac77815f94678aea08fcdd4859e6dde",
+      "size_bytes": 27271
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/24_weighted_decision_matrix.png",
+      "sha256": "d8abd70bf8be9487665105764e43ea9406be280e9319d48df22ffa1a6cab5e84",
+      "size_bytes": 366437
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/24_weighted_decision_matrix.pdf",
+      "sha256": "b606188d48ccbb3e7b4c9e3d1f4509ac618c7ce38b4ed293db5bf85679b3a502",
+      "size_bytes": 27863
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/25_model_roles.png",
+      "sha256": "81dee88d6695fa1958c2c2a8a9daab6230d1b17f7bc7f879aab3554bcabe76e4",
+      "size_bytes": 129910
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/25_model_roles.pdf",
+      "sha256": "e6125cb2b082143e6b530d3dbe8438a346b72be424626c607b6bfa4cf8114c47",
+      "size_bytes": 25711
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/26_why_transformer_selected.png",
+      "sha256": "7fd394ffe77f8199b04daef492527267c38c0c392b1b54b9b43eda554d7bfb15",
+      "size_bytes": 163170
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/26_why_transformer_selected.pdf",
+      "sha256": "d30cfbbe9071f1993ced0f10975c77f9ed21eb3d81cfb4b79176f398c7c0b099",
+      "size_bytes": 31967
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/27_why_vomm_retained.png",
+      "sha256": "d03ee6314c7f91c749915885e7e6602c92f114d1041d3828cfea08e401df13b4",
+      "size_bytes": 145926
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/27_why_vomm_retained.pdf",
+      "sha256": "a61565107d6c4f02166d949c319962bbd9306cb2dd1bf9dca3e2ee00c30989e6",
+      "size_bytes": 26425
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/28_final_decision_dashboard.png",
+      "sha256": "681ea46d0d0fcbd9eb70d41f4ac3d38dc77eb976853bce735461bbe4073e8c2d",
+      "size_bytes": 179616
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/28_final_decision_dashboard.pdf",
+      "sha256": "7b611bc1c924e47167a8522d5c1dde255f8742874c64d99a9201669076bef7af",
+      "size_bytes": 31232
+    },
+    {
+      "format": "png",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/29_executive_summary.png",
+      "sha256": "3cc08fd802ddf0e18a0cf10d1ee8e2091ff272e6eb1b0c3cb1af70fc642f8b1f",
+      "size_bytes": 196576
+    },
+    {
+      "format": "pdf",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/29_executive_summary.pdf",
+      "sha256": "68951b4b84d623aa73a822b27043711239fac040d86e1cb4ccebfae53cbbb972",
+      "size_bytes": 32814
+    },
+    {
+      "format": "markdown",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/FIGURE_SUMMARY.md",
+      "sha256": "30007819bf25f637ef3cbef87db2ff38c0bf1c3bf5f1456e99ec83e93e3618be",
+      "size_bytes": 15302
+    },
+    {
+      "format": "json",
+      "path": "evaluation/next_tactic_benchmark_evidence/final_model_selection_figures/decision_matrix.json",
+      "sha256": "d02fc27e6b9378dd78b52041fce97015a930ee2bcb9753c2a29749ecff8d98e4",
+      "size_bytes": 2234
+    }
+  ],
+  "benchmark_values_modified": false,
+  "decision_matrix_provenance": "latest accepted multi-factor decision analysis in the preceding repository review",
+  "displayed_key_values": {
+    "case_count": 12235,
+    "decision_total_dual_reporting": 4.395,
+    "persistence_wins": 1718,
+    "transformer_execution_to_persistence": 819,
+    "transformer_top1": 0.886554965263588,
+    "transformer_wins": 1887,
+    "vomm_persistence_to_execution": 1718,
+    "vomm_top1": 0.8008173273395995
+  },
+  "generated_at": "2026-07-21T18:50:34.217473+00:00",
+  "generator": {
+    "path": "production/tools/generate_final_model_selection_figures.py",
+    "sha256": "59f50603cec223f114462fa60255e9b7826d41a2f638a968f4a8d4e6f2315710"
+  },
+  "input_evidence": [
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "3e2b5a55ed7f8f52dbbaf6c6a2834f38173fd3f425a9c8f3a00c5173751c2c4d"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/overall_metrics.json",
+      "sha256": "9bb84670de9fe94aae25afa97d45d2041d3fdc92f2dba39e0b5cc4dfbcf87cb5"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/per_tactic_metrics.json",
+      "sha256": "bc676de1f251b011882d1957870d463744a09b97454b1a031e268f9b58b7b5fa"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/paired_comparisons.json",
+      "sha256": "dd794a0294080b83613174c474a5bcfa9b247f3af783964b7d84907708a0cff7"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/confidence_intervals.json",
+      "sha256": "5be1c47608a089fb08ffe3a2baf80aa421bc09f63e690e215c056c86326b1da0"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/confusion_matrices.json",
+      "sha256": "7a696d631ff157e887c60837b11ba7d1dcb1b1681fa7d15ede056a1bdd62cef2"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/efficiency.json",
+      "sha256": "b207b50a0ebf7db1ff195dfe4ee8f0527ee0c25efbfa0a177a8baf55bdff6183"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/model_configurations.json",
+      "sha256": "b672abe37eeea1f39052592f7a31b89d8eb8e663ef5b9da771c614b7090387c0"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/dataset_split_manifest.json",
+      "sha256": "1abce0a95540d8c8d4d92e0e358f4df7282ea336b4af8698d109808009d6af75"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/selected_transformer_metadata.json",
+      "sha256": "5a3d1a2ce63646153a55c395681f1057912e72d93e25c2ff4b45568d3c6c2d48"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/calibration.json",
+      "sha256": "f583a6b8ac29ddfcd21a04ef05683dd37553d42778e5cc85c3a74f6ddb96e9d8"
+    }
+  ],
+  "matplotlib_version": "3.11.1",
+  "production_authority_modified": false,
+  "python_version": "3.14.6",
+  "repository_commit": "b2cf7a7c60f99119ed7409f8a60e465a94dd3773",
+  "schema_version": "final_next_tactic_model_selection_figures.v1",
+  "selected_transformer_checkpoint_sha256": "d9b316d76e63b15b175668aa0bf69cfe4172bbd812d6b19743a628cd0ec8073d",
+  "unsupported_runtime_values_fabricated": false
+}
