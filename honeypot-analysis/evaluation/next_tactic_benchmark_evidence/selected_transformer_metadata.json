@@ -1,0 +1,83 @@
+{
+  "case_count": 12235,
+  "checkpoint_sha256": "d9b316d76e63b15b175668aa0bf69cfe4172bbd812d6b19743a628cd0ec8073d",
+  "ordered_case_ids_sha256": "aab9e4a5cde42b8a0ce3fdfa66ef09281c34fdc7d3ae033001d788958d1d9024",
+  "predictions_sha256": "a35310bfe004efa832e18d8033a984285d81f3c275f6598a8647333e84643af6",
+  "reload_verified": true,
+  "replay": {
+    "max_absolute_difference": 7.450580596923828e-09,
+    "mean_absolute_difference": 1.04046193882823e-09,
+    "model_eval": true,
+    "original_top3": [
+      "discovery",
+      "privilege-escalation",
+      "impact"
+    ],
+    "reloaded_eval": true,
+    "reloaded_top3": [
+      "discovery",
+      "privilege-escalation",
+      "impact"
+    ]
+  },
+  "seed": 20260723,
+  "training": {
+    "early_stopping": false,
+    "epochs_completed": 6,
+    "epochs_requested": 6,
+    "history": [
+      {
+        "epoch": 1,
+        "training_loss": 0.6922263499253836,
+        "validation_metrics": null
+      },
+      {
+        "epoch": 2,
+        "training_loss": 0.2090633024389927,
+        "validation_metrics": null
+      },
+      {
+        "epoch": 3,
+        "training_loss": 0.17695338068864283,
+        "validation_metrics": null
+      },
+      {
+        "epoch": 4,
+        "training_loss": 0.16442785450281241,
+        "validation_metrics": null
+      },
+      {
+        "epoch": 5,
+        "training_loss": 0.1591062320348544,
+        "validation_metrics": null
+      },
+      {
+        "epoch": 6,
+        "training_loss": 0.1543433175255091,
+        "validation_metrics": null
+      }
+    ],
+    "model_id": "transformer",
+    "parameter_count": 2632,
+    "seed": 20260723,
+    "selected_epoch": 6,
+    "settings": {
+      "attention_heads": 4,
+      "batch_size": 2048,
+      "dropout": 0.1,
+      "embedding_dimension": 16,
+      "hidden_dimension": 32,
+      "layers": 1,
+      "learning_rate": 0.003,
+      "max_sequence_length": 8,
+      "patience": 2,
+      "weight_decay": 0.0
+    },
+    "stage": "final_seed_fit",
+    "stopping_criterion": "minimum validation raw multiclass log loss with patience",
+    "training_current_bytes": 6374489,
+    "training_peak_bytes": 12701917,
+    "training_seconds": 18.66195449099905,
+    "validation_loss": Infinity
+  }
+}

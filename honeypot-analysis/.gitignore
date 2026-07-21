@@ -78,6 +78,14 @@ models/
 *.bin
 *.safetensors
 
+# Offline next-tactic benchmark runs are local, resumable bulk artifacts.
+evaluation/next_tactic_offline_benchmark_*/
+evaluation/next_tactic_benchmark_evidence/*.json
+!evaluation/next_tactic_benchmark_evidence/
+!evaluation/next_tactic_benchmark_evidence/*.json
+!evaluation/next_tactic_benchmark_evidence/*.sha256
+data/models/transformer_shadow_*.pt
+
 # Generated deployment bundles and local artifacts
 deployment/artifacts/
 archives/deployments/*.tgz

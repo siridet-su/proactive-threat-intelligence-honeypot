@@ -1,0 +1,207 @@
+{
+  "first_order_markov": {
+    "by_tactic": {
+      "command-and-control": {
+        "both_wrong_or_abstained": 42,
+        "production_vomm_win": 4
+      },
+      "credential-access": {
+        "both_wrong_or_abstained": 2
+      },
+      "defense-evasion": {
+        "both_wrong_or_abstained": 69,
+        "candidate_win": 1,
+        "tie_both_correct": 165
+      },
+      "discovery": {
+        "candidate_win": 8,
+        "production_vomm_win": 2,
+        "tie_both_correct": 6844
+      },
+      "execution": {
+        "both_wrong_or_abstained": 143,
+        "production_vomm_win": 2702
+      },
+      "persistence": {
+        "candidate_win": 1718,
+        "production_vomm_win": 63,
+        "tie_both_correct": 9
+      },
+      "privilege-escalation": {
+        "both_wrong_or_abstained": 454,
+        "production_vomm_win": 9
+      }
+    },
+    "case_count": 12235,
+    "outcomes": {
+      "both_wrong_or_abstained": 710,
+      "candidate_win": 1727,
+      "production_vomm_win": 2780,
+      "tie_both_correct": 7018
+    }
+  },
+  "gru_aggregate": {
+    "by_tactic": {
+      "command-and-control": {
+        "both_wrong_or_abstained": 42,
+        "production_vomm_win": 4
+      },
+      "credential-access": {
+        "both_wrong_or_abstained": 2
+      },
+      "defense-evasion": {
+        "both_wrong_or_abstained": 60,
+        "candidate_win": 10,
+        "tie_both_correct": 165
+      },
+      "discovery": {
+        "both_wrong_or_abstained": 8,
+        "production_vomm_win": 6,
+        "tie_both_correct": 6840
+      },
+      "execution": {
+        "both_wrong_or_abstained": 2,
+        "candidate_win": 141,
+        "production_vomm_win": 822,
+        "tie_both_correct": 1880
+      },
+      "persistence": {
+        "candidate_win": 1718,
+        "tie_both_correct": 72
+      },
+      "privilege-escalation": {
+        "both_wrong_or_abstained": 454,
+        "production_vomm_win": 9
+      }
+    },
+    "case_count": 12235,
+    "outcomes": {
+      "both_wrong_or_abstained": 568,
+      "candidate_win": 1869,
+      "production_vomm_win": 841,
+      "tie_both_correct": 8957
+    }
+  },
+  "interpolated_vomm": {
+    "by_tactic": {
+      "command-and-control": {
+        "both_wrong_or_abstained": 42,
+        "tie_both_correct": 4
+      },
+      "credential-access": {
+        "both_wrong_or_abstained": 2
+      },
+      "defense-evasion": {
+        "both_wrong_or_abstained": 61,
+        "candidate_win": 9,
+        "tie_both_correct": 165
+      },
+      "discovery": {
+        "both_wrong_or_abstained": 8,
+        "tie_both_correct": 6846
+      },
+      "execution": {
+        "both_wrong_or_abstained": 143,
+        "tie_both_correct": 2702
+      },
+      "persistence": {
+        "both_wrong_or_abstained": 1718,
+        "production_vomm_win": 38,
+        "tie_both_correct": 34
+      },
+      "privilege-escalation": {
+        "both_wrong_or_abstained": 454,
+        "tie_both_correct": 9
+      }
+    },
+    "case_count": 12235,
+    "outcomes": {
+      "both_wrong_or_abstained": 2428,
+      "candidate_win": 9,
+      "production_vomm_win": 38,
+      "tie_both_correct": 9760
+    }
+  },
+  "majority_class": {
+    "by_tactic": {
+      "command-and-control": {
+        "both_wrong_or_abstained": 42,
+        "production_vomm_win": 4
+      },
+      "credential-access": {
+        "both_wrong_or_abstained": 2
+      },
+      "defense-evasion": {
+        "both_wrong_or_abstained": 70,
+        "production_vomm_win": 165
+      },
+      "discovery": {
+        "candidate_win": 8,
+        "tie_both_correct": 6846
+      },
+      "execution": {
+        "both_wrong_or_abstained": 143,
+        "production_vomm_win": 2702
+      },
+      "persistence": {
+        "both_wrong_or_abstained": 1718,
+        "production_vomm_win": 72
+      },
+      "privilege-escalation": {
+        "both_wrong_or_abstained": 454,
+        "production_vomm_win": 9
+      }
+    },
+    "case_count": 12235,
+    "outcomes": {
+      "both_wrong_or_abstained": 2429,
+      "candidate_win": 8,
+      "production_vomm_win": 2952,
+      "tie_both_correct": 6846
+    }
+  },
+  "transformer_aggregate": {
+    "by_tactic": {
+      "command-and-control": {
+        "both_wrong_or_abstained": 42,
+        "production_vomm_win": 4
+      },
+      "credential-access": {
+        "both_wrong_or_abstained": 2
+      },
+      "defense-evasion": {
+        "both_wrong_or_abstained": 42,
+        "candidate_win": 28,
+        "production_vomm_win": 4,
+        "tie_both_correct": 161
+      },
+      "discovery": {
+        "both_wrong_or_abstained": 8,
+        "production_vomm_win": 6,
+        "tie_both_correct": 6840
+      },
+      "execution": {
+        "both_wrong_or_abstained": 2,
+        "candidate_win": 141,
+        "production_vomm_win": 810,
+        "tie_both_correct": 1892
+      },
+      "persistence": {
+        "candidate_win": 1718,
+        "tie_both_correct": 72
+      },
+      "privilege-escalation": {
+        "both_wrong_or_abstained": 454,
+        "production_vomm_win": 5,
+        "tie_both_correct": 4
+      }
+    },
+    "case_count": 12235,
+    "outcomes": {
+      "both_wrong_or_abstained": 550,
+      "candidate_win": 1887,
+      "production_vomm_win": 829,
+      "tie_both_correct": 8969
+    }
+  }
+}
