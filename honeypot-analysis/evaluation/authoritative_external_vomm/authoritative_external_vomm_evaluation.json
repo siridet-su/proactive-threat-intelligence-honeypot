@@ -1,0 +1,3951 @@
+{
+  "abstention_vs_heuristic": {
+    "alert_effect": {
+      "external_abstain_triggered": 0,
+      "external_then_heuristic_triggered": 0
+    },
+    "error_cost_sensitivity": {
+      "abstention_cost_0": {
+        "external_abstain": 0.200736,
+        "external_then_heuristic": 0.20188
+      },
+      "abstention_cost_0.25": {
+        "external_abstain": 0.201696,
+        "external_then_heuristic": 0.20188
+      },
+      "abstention_cost_0.5": {
+        "external_abstain": 0.202656,
+        "external_then_heuristic": 0.20188
+      },
+      "abstention_cost_1": {
+        "external_abstain": 0.204577,
+        "external_then_heuristic": 0.20188
+      }
+    },
+    "external_abstention_metrics": {
+      "abstention_rate": 0.003841,
+      "all_case_accuracy": 0.795423,
+      "balanced_accuracy": 0.38799,
+      "coverage": 0.996159,
+      "selective_top1_accuracy": 0.79849
+    },
+    "external_then_heuristic_metrics": {
+      "abstention_rate": 0.0,
+      "all_case_accuracy": 0.79812,
+      "balanced_accuracy": 0.408051,
+      "coverage": 1.0,
+      "selective_top1_accuracy": 0.79812
+    },
+    "guidance_effect": {
+      "contract": "response_guidance.v2 requires canonical trusted actions and evidence; forecast is advisory context only",
+      "expected_actions_created_from_prediction_only": 0,
+      "forecast_is_not_an_action_authority": true
+    },
+    "heuristic_on_unsupported_external_contexts": {
+      "cases": 47,
+      "top1_accuracy": 0.702128
+    },
+    "same_case_count": 12235,
+    "unsupported_external_context_cases": 47,
+    "unsupported_external_context_rate": 0.003841
+  },
+  "artifact": {
+    "actual_sha256": "f6f4650f9b6c8bdda39998eed039afc0aa3f948ddb3b0e5582f5145bc5530b51",
+    "artifact_size_bytes": 7077,
+    "built_at": "2026-05-22T08:49:25.065836+00:00",
+    "classification_rule_policy_sha256": "",
+    "classifier": "NotebookParityClassifier rules plus SecureBERT",
+    "counts": {
+      "completed_sessions": 517812,
+      "prefix_contexts": 18,
+      "prefix_transition_count": 1255.0,
+      "tactic_contexts": 6,
+      "technique_contexts": 10,
+      "technique_transition_count": 2334.0,
+      "transition_count": 1840.0,
+      "usable_sessions": 52018
+    },
+    "dataset_handle": "nlaha11/global-ssh-and-telnet-honeypot-logs-cowrie",
+    "expected_model_id": "externaltransition_1ec330113086868b5d6ab05eef9602f5",
+    "expected_sha256": "f6f4650f9b6c8bdda39998eed039afc0aa3f948ddb3b0e5582f5145bc5530b51",
+    "model_id": "externaltransition_1ec330113086868b5d6ab05eef9602f5",
+    "path": "data/models/external_cowrie_seed_transition_model.compound_securebert.json",
+    "reasons": [],
+    "schema_version": "external_transition_model.v1",
+    "securebert_checkpoint_sha256": "",
+    "source_type": "external_cowrie_seed",
+    "status": "valid",
+    "training_data_manifest_sha256": "",
+    "training_input_root": "<SOURCE_DATA_NOT_DISTRIBUTED>",
+    "valid": true
+  },
+  "dataset": {
+    "path": "evaluation/next_tactic_zenodo_7day_session_payload.jsonl",
+    "sessions": 219336,
+    "sha256": "c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb",
+    "source_scope": "external_classifier_derived_weak_labels",
+    "split_method": "preassigned_whole_session_split",
+    "split_sessions": {
+      "calibration": 32900,
+      "test": 32901,
+      "train": 153535
+    },
+    "transition_cases": {
+      "calibration": 14865,
+      "test": 12235,
+      "train": 151822
+    }
+  },
+  "experiment_parameters": {
+    "bootstrap_iterations": 100,
+    "memory_profile_case_limit": 250,
+    "min_per_tactic_support": 30,
+    "seed": 20260721,
+    "window_count": 3
+  },
+  "local_authority": {
+    "conclusion": "not_established_without_clean_production_live_external_source_holdout",
+    "local_override_summary": {
+      "by_actual_tactic": {
+        "command-and-control": {
+          "both_incorrect_or_abstained": 45
+        },
+        "credential-access": {
+          "both_incorrect_or_abstained": 2
+        },
+        "defense-evasion": {
+          "both_correct": 119,
+          "both_incorrect_or_abstained": 22,
+          "local_override_loss": 33
+        },
+        "discovery": {
+          "both_correct": 6846,
+          "both_incorrect_or_abstained": 5,
+          "local_override_win": 1
+        },
+        "execution": {
+          "both_correct": 2706,
+          "both_incorrect_or_abstained": 1,
+          "local_override_win": 125
+        },
+        "persistence": {
+          "both_incorrect_or_abstained": 1776,
+          "local_override_win": 14
+        },
+        "privilege-escalation": {
+          "both_incorrect_or_abstained": 463
+        }
+      },
+      "outcomes": {
+        "both_correct": 9671,
+        "both_incorrect_or_abstained": 2314,
+        "local_override_loss": 33,
+        "local_override_win": 140
+      },
+      "override_count": 12158,
+      "override_rate": 0.993707,
+      "transition_total": {
+        "max": 82.3937,
+        "median": 44.7066,
+        "min": 2.1546
+      }
+    },
+    "paired_current_vs_external": {
+      "by_actual_tactic": {
+        "command-and-control": {
+          "both_incorrect_or_abstained": 46
+        },
+        "credential-access": {
+          "both_incorrect_or_abstained": 2
+        },
+        "defense-evasion": {
+          "both_correct": 147,
+          "both_incorrect_or_abstained": 22,
+          "current_local_first_win": 33,
+          "external_authoritative_win": 33
+        },
+        "discovery": {
+          "both_correct": 6846,
+          "both_incorrect_or_abstained": 7,
+          "current_local_first_win": 1
+        },
+        "execution": {
+          "both_correct": 2706,
+          "both_incorrect_or_abstained": 14,
+          "current_local_first_win": 125
+        },
+        "persistence": {
+          "both_incorrect_or_abstained": 1776,
+          "current_local_first_win": 14
+        },
+        "privilege-escalation": {
+          "both_incorrect_or_abstained": 463
+        }
+      },
+      "case_count": 12235,
+      "outcomes": {
+        "both_correct": 9699,
+        "both_incorrect_or_abstained": 2330,
+        "current_local_first_win": 173,
+        "external_authoritative_win": 33
+      }
+    },
+    "scope": "external_corpus_proxy_not_production_local"
+  },
+  "model_summaries": [
+    {
+      "abstention_rate": 0.0,
+      "all_case_accuracy": 0.806866,
+      "balanced_accuracy": 0.395405,
+      "cases": 12235,
+      "coverage": 1.0,
+      "latency_p50_ms": 0.36922,
+      "latency_p95_ms": 1.653601,
+      "mean_reciprocal_rank": 0.897058,
+      "model_id": "current_local_first_cascade",
+      "normalized_multiclass_brier_score": 0.107237,
+      "peak_memory_bytes": 8069337,
+      "selective_top1_accuracy": 0.806866
+    },
+    {
+      "abstention_rate": 0.003841,
+      "all_case_accuracy": 0.795423,
+      "balanced_accuracy": 0.38799,
+      "cases": 12235,
+      "coverage": 0.996159,
+      "latency_p50_ms": 0.346273,
+      "latency_p95_ms": 1.901954,
+      "mean_reciprocal_rank": 0.872749,
+      "model_id": "external_authoritative_abstain",
+      "normalized_multiclass_brier_score": 0.10852,
+      "peak_memory_bytes": 7914056,
+      "selective_top1_accuracy": 0.79849
+    },
+    {
+      "abstention_rate": 0.0,
+      "all_case_accuracy": 0.79812,
+      "balanced_accuracy": 0.408051,
+      "cases": 12235,
+      "coverage": 1.0,
+      "latency_p50_ms": 0.346418,
+      "latency_p95_ms": 1.893354,
+      "mean_reciprocal_rank": 0.875446,
+      "model_id": "external_then_heuristic",
+      "normalized_multiclass_brier_score": 0.107834,
+      "peak_memory_bytes": 7906794,
+      "selective_top1_accuracy": 0.79812
+    },
+    {
+      "abstention_rate": 0.0,
+      "all_case_accuracy": 0.208092,
+      "balanced_accuracy": 0.215254,
+      "cases": 12235,
+      "coverage": 1.0,
+      "latency_p50_ms": 0.41037,
+      "latency_p95_ms": 2.423903,
+      "mean_reciprocal_rank": 0.208378,
+      "model_id": "heuristic_only",
+      "normalized_multiclass_brier_score": 0.593575,
+      "peak_memory_bytes": 9288603,
+      "selective_top1_accuracy": 0.208092
+    },
+    {
+      "abstention_rate": 0.006293,
+      "all_case_accuracy": 0.80188,
+      "balanced_accuracy": 0.358323,
+      "cases": 12235,
+      "coverage": 0.993707,
+      "latency_p50_ms": 0.368148,
+      "latency_p95_ms": 1.647266,
+      "mean_reciprocal_rank": 0.892072,
+      "model_id": "local_shadow_only",
+      "normalized_multiclass_brier_score": 0.108945,
+      "peak_memory_bytes": 8066515,
+      "selective_top1_accuracy": 0.806958
+    }
+  ],
+  "models": {
+    "current_local_first_cascade": {
+      "calibration_diagnostic": [
+        {
+          "cases": 0,
+          "lower": 0.0,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.25
+        },
+        {
+          "cases": 0,
+          "lower": 0.25,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.5
+        },
+        {
+          "cases": 2659,
+          "lower": 0.5,
+          "mean_score": 0.601173,
+          "top1_accuracy": 0.32343,
+          "upper": 0.75
+        },
+        {
+          "cases": 9576,
+          "lower": 0.75,
+          "mean_score": 0.963383,
+          "top1_accuracy": 0.941103,
+          "upper": 1.0
+        }
+      ],
+      "confusion_matrix": {
+        "command-and-control": {
+          "defense-evasion": 2,
+          "discovery": 9,
+          "execution": 35
+        },
+        "credential-access": {
+          "execution": 2
+        },
+        "defense-evasion": {
+          "defense-evasion": 180,
+          "discovery": 50,
+          "execution": 4,
+          "persistence": 1
+        },
+        "discovery": {
+          "command-and-control": 2,
+          "discovery": 6847,
+          "execution": 5
+        },
+        "execution": {
+          "defense-evasion": 13,
+          "discovery": 1,
+          "execution": 2831
+        },
+        "persistence": {
+          "defense-evasion": 22,
+          "discovery": 27,
+          "execution": 1727,
+          "persistence": 14
+        },
+        "privilege-escalation": {
+          "discovery": 455,
+          "execution": 8
+        }
+      },
+      "context_length": {
+        "0": 47,
+        "1": 3551,
+        "2": 2702,
+        "3": 5935
+      },
+      "metrics": {
+        "abstention_rate": 0.0,
+        "all_case_accuracy": 0.806866,
+        "balanced_accuracy": 0.395405,
+        "bootstrap_95ci_by_session": {
+          "brier_score": [
+            0.208866,
+            0.221535
+          ],
+          "coverage": [
+            1.0,
+            1.0
+          ],
+          "macro_top1_accuracy": [
+            0.388207,
+            0.46195
+          ],
+          "mean_reciprocal_rank": [
+            0.893905,
+            0.899255
+          ],
+          "normalized_multiclass_brier_score": [
+            0.104433,
+            0.110768
+          ],
+          "selective_top1_accuracy": [
+            0.802464,
+            0.810537
+          ],
+          "top1_accuracy": [
+            0.802464,
+            0.810537
+          ]
+        },
+        "brier_score": 0.214474,
+        "coverage": 1.0,
+        "covered_examples": 12235,
+        "evaluated_examples": 12235,
+        "macro_recall": 0.395405,
+        "macro_top1_accuracy": 0.395405,
+        "macro_top1_accuracy_sufficient_support": 0.461306,
+        "mean_reciprocal_rank": 0.897058,
+        "metric_tactic_vocabulary": [
+          "command-and-control",
+          "credential-access",
+          "defense-evasion",
+          "discovery",
+          "execution",
+          "persistence",
+          "privilege-escalation"
+        ],
+        "normalized_multiclass_brier_score": 0.107237,
+        "per_tactic": {
+          "command-and-control": {
+            "brier_score": 1.684822,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.0,
+            "normalized_multiclass_brier_score": 0.842411,
+            "reportable": true,
+            "support": 46,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "credential-access": {
+            "brier_score": null,
+            "descriptive_only": {
+              "brier_score": 1.523752,
+              "mean_reciprocal_rank": 0.0,
+              "normalized_multiclass_brier_score": 0.761876,
+              "top1_accuracy": 0.0
+            },
+            "enough_support": false,
+            "mean_reciprocal_rank": null,
+            "normalized_multiclass_brier_score": null,
+            "reportable": false,
+            "support": 2,
+            "support_status": "low_support_descriptive_only",
+            "top1_accuracy": null
+          },
+          "defense-evasion": {
+            "brier_score": 0.518726,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.789362,
+            "normalized_multiclass_brier_score": 0.259363,
+            "reportable": true,
+            "support": 235,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.765957
+          },
+          "discovery": {
+            "brier_score": 0.011609,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.998979,
+            "normalized_multiclass_brier_score": 0.005805,
+            "reportable": true,
+            "support": 6854,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.998979
+          },
+          "execution": {
+            "brier_score": 0.097703,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.995079,
+            "normalized_multiclass_brier_score": 0.048852,
+            "reportable": true,
+            "support": 2845,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.995079
+          },
+          "persistence": {
+            "brier_score": 0.740914,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.496369,
+            "normalized_multiclass_brier_score": 0.370457,
+            "reportable": true,
+            "support": 1790,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.007821
+          },
+          "privilege-escalation": {
+            "brier_score": 1.593668,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.482721,
+            "normalized_multiclass_brier_score": 0.796834,
+            "reportable": true,
+            "support": 463,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          }
+        },
+        "selective_top1_accuracy": 0.806866,
+        "tactic_support_summary": {
+          "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+          "low_support_tactics": [
+            "credential-access"
+          ],
+          "minimum_support_for_reportable_per_tactic_metrics": 30,
+          "observed_target_tactic_count": 7,
+          "sufficient_support_tactics": [
+            "command-and-control",
+            "defense-evasion",
+            "discovery",
+            "execution",
+            "persistence",
+            "privilege-escalation"
+          ],
+          "zero_support_tactics": []
+        },
+        "top1_accuracy": 0.806866,
+        "top3_accuracy_secondary": 0.98725
+      },
+      "model_id": "current_local_first_cascade",
+      "resource_profile": {
+        "prediction_latency_ms": {
+          "count": 12235,
+          "max": 498.027571,
+          "mean": 0.529677,
+          "p50": 0.36922,
+          "p95": 1.653601
+        },
+        "tracemalloc_bytes": {
+          "measurement": "maximum window sample; each sample is bounded to 250 prediction cases",
+          "peak_delta": 8069337,
+          "sample_case_limit": 250
+        }
+      }
+    },
+    "external_authoritative_abstain": {
+      "calibration_diagnostic": [
+        {
+          "cases": 0,
+          "lower": 0.0,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.25
+        },
+        {
+          "cases": 45,
+          "lower": 0.25,
+          "mean_score": 0.3389,
+          "top1_accuracy": 0.0,
+          "upper": 0.5
+        },
+        {
+          "cases": 2871,
+          "lower": 0.5,
+          "mean_score": 0.552767,
+          "top1_accuracy": 0.344479,
+          "upper": 0.75
+        },
+        {
+          "cases": 9272,
+          "lower": 0.75,
+          "mean_score": 0.997372,
+          "top1_accuracy": 0.942947,
+          "upper": 1.0
+        }
+      ],
+      "confusion_matrix": {
+        "command-and-control": {
+          "<abstained>": 1,
+          "credential-access": 28,
+          "defense-evasion": 3,
+          "execution": 7,
+          "persistence": 7
+        },
+        "credential-access": {
+          "execution": 2
+        },
+        "defense-evasion": {
+          "<abstained>": 33,
+          "credential-access": 4,
+          "defense-evasion": 180,
+          "persistence": 18
+        },
+        "discovery": {
+          "command-and-control": 2,
+          "discovery": 6846,
+          "execution": 5,
+          "persistence": 1
+        },
+        "execution": {
+          "<abstained>": 13,
+          "command-and-control": 122,
+          "credential-access": 3,
+          "discovery": 1,
+          "execution": 2706
+        },
+        "persistence": {
+          "credential-access": 9,
+          "defense-evasion": 63,
+          "execution": 1718
+        },
+        "privilege-escalation": {
+          "command-and-control": 1,
+          "credential-access": 1,
+          "discovery": 447,
+          "execution": 6,
+          "persistence": 8
+        }
+      },
+      "context_length": {
+        "0": 47,
+        "1": 3358,
+        "2": 2853,
+        "3": 5977
+      },
+      "metrics": {
+        "abstention_rate": 0.003841,
+        "all_case_accuracy": 0.795423,
+        "balanced_accuracy": 0.38799,
+        "bootstrap_95ci_by_session": {
+          "brier_score": [
+            0.208531,
+            0.225331
+          ],
+          "coverage": [
+            0.994824,
+            0.997398
+          ],
+          "macro_top1_accuracy": [
+            0.380739,
+            0.455191
+          ],
+          "mean_reciprocal_rank": [
+            0.86819,
+            0.877666
+          ],
+          "normalized_multiclass_brier_score": [
+            0.104266,
+            0.112666
+          ],
+          "selective_top1_accuracy": [
+            0.794376,
+            0.803253
+          ],
+          "top1_accuracy": [
+            0.790542,
+            0.800534
+          ]
+        },
+        "brier_score": 0.21704,
+        "coverage": 0.996159,
+        "covered_examples": 12188,
+        "evaluated_examples": 12235,
+        "macro_recall": 0.38799,
+        "macro_top1_accuracy": 0.38799,
+        "macro_top1_accuracy_sufficient_support": 0.452655,
+        "mean_reciprocal_rank": 0.872749,
+        "metric_tactic_vocabulary": [
+          "command-and-control",
+          "credential-access",
+          "defense-evasion",
+          "discovery",
+          "execution",
+          "persistence",
+          "privilege-escalation"
+        ],
+        "normalized_multiclass_brier_score": 0.10852,
+        "per_tactic": {
+          "command-and-control": {
+            "brier_score": 1.052562,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.387681,
+            "normalized_multiclass_brier_score": 0.526281,
+            "reportable": true,
+            "support": 46,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "credential-access": {
+            "brier_score": null,
+            "descriptive_only": {
+              "brier_score": 1.504122,
+              "mean_reciprocal_rank": 0.0,
+              "normalized_multiclass_brier_score": 0.752061,
+              "top1_accuracy": 0.0
+            },
+            "enough_support": false,
+            "mean_reciprocal_rank": null,
+            "normalized_multiclass_brier_score": null,
+            "reportable": false,
+            "support": 2,
+            "support_status": "low_support_descriptive_only",
+            "top1_accuracy": null
+          },
+          "defense-evasion": {
+            "brier_score": 0.315972,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.785106,
+            "normalized_multiclass_brier_score": 0.157986,
+            "reportable": true,
+            "support": 235,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.765957
+          },
+          "discovery": {
+            "brier_score": 0.001913,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.998906,
+            "normalized_multiclass_brier_score": 0.000957,
+            "reportable": true,
+            "support": 6854,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.998833
+          },
+          "execution": {
+            "brier_score": 0.158481,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.972935,
+            "normalized_multiclass_brier_score": 0.079241,
+            "reportable": true,
+            "support": 2845,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.951142
+          },
+          "persistence": {
+            "brier_score": 0.640727,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.481145,
+            "normalized_multiclass_brier_score": 0.320364,
+            "reportable": true,
+            "support": 1790,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "privilege-escalation": {
+            "brier_score": 1.984693,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.0,
+            "normalized_multiclass_brier_score": 0.992347,
+            "reportable": true,
+            "support": 463,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          }
+        },
+        "selective_top1_accuracy": 0.79849,
+        "tactic_support_summary": {
+          "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+          "low_support_tactics": [
+            "credential-access"
+          ],
+          "minimum_support_for_reportable_per_tactic_metrics": 30,
+          "observed_target_tactic_count": 7,
+          "sufficient_support_tactics": [
+            "command-and-control",
+            "defense-evasion",
+            "discovery",
+            "execution",
+            "persistence",
+            "privilege-escalation"
+          ],
+          "zero_support_tactics": []
+        },
+        "top1_accuracy": 0.795423,
+        "top3_accuracy_secondary": 0.949244
+      },
+      "model_id": "external_authoritative_abstain",
+      "resource_profile": {
+        "prediction_latency_ms": {
+          "count": 12235,
+          "max": 183.944903,
+          "mean": 0.525335,
+          "p50": 0.346273,
+          "p95": 1.901954
+        },
+        "tracemalloc_bytes": {
+          "measurement": "maximum window sample; each sample is bounded to 250 prediction cases",
+          "peak_delta": 7914056,
+          "sample_case_limit": 250
+        }
+      }
+    },
+    "external_then_heuristic": {
+      "calibration_diagnostic": [
+        {
+          "cases": 0,
+          "lower": 0.0,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.25
+        },
+        {
+          "cases": 45,
+          "lower": 0.25,
+          "mean_score": 0.3389,
+          "top1_accuracy": 0.0,
+          "upper": 0.5
+        },
+        {
+          "cases": 2918,
+          "lower": 0.5,
+          "mean_score": 0.552723,
+          "top1_accuracy": 0.35024,
+          "upper": 0.75
+        },
+        {
+          "cases": 9272,
+          "lower": 0.75,
+          "mean_score": 0.997372,
+          "top1_accuracy": 0.942947,
+          "upper": 1.0
+        }
+      ],
+      "confusion_matrix": {
+        "command-and-control": {
+          "credential-access": 28,
+          "defense-evasion": 4,
+          "execution": 7,
+          "persistence": 7
+        },
+        "credential-access": {
+          "execution": 2
+        },
+        "defense-evasion": {
+          "credential-access": 4,
+          "defense-evasion": 213,
+          "persistence": 18
+        },
+        "discovery": {
+          "command-and-control": 2,
+          "discovery": 6846,
+          "execution": 5,
+          "persistence": 1
+        },
+        "execution": {
+          "command-and-control": 122,
+          "credential-access": 3,
+          "defense-evasion": 13,
+          "discovery": 1,
+          "execution": 2706
+        },
+        "persistence": {
+          "credential-access": 9,
+          "defense-evasion": 63,
+          "execution": 1718
+        },
+        "privilege-escalation": {
+          "command-and-control": 1,
+          "credential-access": 1,
+          "discovery": 447,
+          "execution": 6,
+          "persistence": 8
+        }
+      },
+      "context_length": {
+        "0": 47,
+        "1": 3358,
+        "2": 2853,
+        "3": 5977
+      },
+      "metrics": {
+        "abstention_rate": 0.0,
+        "all_case_accuracy": 0.79812,
+        "balanced_accuracy": 0.408051,
+        "bootstrap_95ci_by_session": {
+          "brier_score": [
+            0.206848,
+            0.222978
+          ],
+          "coverage": [
+            1.0,
+            1.0
+          ],
+          "macro_top1_accuracy": [
+            0.402168,
+            0.478044
+          ],
+          "mean_reciprocal_rank": [
+            0.871479,
+            0.879795
+          ],
+          "normalized_multiclass_brier_score": [
+            0.103424,
+            0.111489
+          ],
+          "selective_top1_accuracy": [
+            0.793228,
+            0.801943
+          ],
+          "top1_accuracy": [
+            0.793228,
+            0.801943
+          ]
+        },
+        "brier_score": 0.215667,
+        "coverage": 1.0,
+        "covered_examples": 12235,
+        "evaluated_examples": 12235,
+        "macro_recall": 0.408051,
+        "macro_top1_accuracy": 0.408051,
+        "macro_top1_accuracy_sufficient_support": 0.47606,
+        "mean_reciprocal_rank": 0.875446,
+        "metric_tactic_vocabulary": [
+          "command-and-control",
+          "credential-access",
+          "defense-evasion",
+          "discovery",
+          "execution",
+          "persistence",
+          "privilege-escalation"
+        ],
+        "normalized_multiclass_brier_score": 0.107834,
+        "per_tactic": {
+          "command-and-control": {
+            "brier_score": 1.061583,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.387681,
+            "normalized_multiclass_brier_score": 0.530792,
+            "reportable": true,
+            "support": 46,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "credential-access": {
+            "brier_score": null,
+            "descriptive_only": {
+              "brier_score": 1.504122,
+              "mean_reciprocal_rank": 0.0,
+              "normalized_multiclass_brier_score": 0.752061,
+              "top1_accuracy": 0.0
+            },
+            "enough_support": false,
+            "mean_reciprocal_rank": null,
+            "normalized_multiclass_brier_score": null,
+            "reportable": false,
+            "support": 2,
+            "support_status": "low_support_descriptive_only",
+            "top1_accuracy": null
+          },
+          "defense-evasion": {
+            "brier_score": 0.219781,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.925532,
+            "normalized_multiclass_brier_score": 0.10989,
+            "reportable": true,
+            "support": 235,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.906383
+          },
+          "discovery": {
+            "brier_score": 0.001913,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.998906,
+            "normalized_multiclass_brier_score": 0.000957,
+            "reportable": true,
+            "support": 6854,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.998833
+          },
+          "execution": {
+            "brier_score": 0.160378,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.972935,
+            "normalized_multiclass_brier_score": 0.080189,
+            "reportable": true,
+            "support": 2845,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.951142
+          },
+          "persistence": {
+            "brier_score": 0.640727,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.481145,
+            "normalized_multiclass_brier_score": 0.320364,
+            "reportable": true,
+            "support": 1790,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "privilege-escalation": {
+            "brier_score": 1.984693,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.0,
+            "normalized_multiclass_brier_score": 0.992347,
+            "reportable": true,
+            "support": 463,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          }
+        },
+        "selective_top1_accuracy": 0.79812,
+        "tactic_support_summary": {
+          "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+          "low_support_tactics": [
+            "credential-access"
+          ],
+          "minimum_support_for_reportable_per_tactic_metrics": 30,
+          "observed_target_tactic_count": 7,
+          "sufficient_support_tactics": [
+            "command-and-control",
+            "defense-evasion",
+            "discovery",
+            "execution",
+            "persistence",
+            "privilege-escalation"
+          ],
+          "zero_support_tactics": []
+        },
+        "top1_accuracy": 0.79812,
+        "top3_accuracy_secondary": 0.951941
+      },
+      "model_id": "external_then_heuristic",
+      "resource_profile": {
+        "prediction_latency_ms": {
+          "count": 12235,
+          "max": 9.099828,
+          "mean": 0.498533,
+          "p50": 0.346418,
+          "p95": 1.893354
+        },
+        "tracemalloc_bytes": {
+          "measurement": "maximum window sample; each sample is bounded to 250 prediction cases",
+          "peak_delta": 7906794,
+          "sample_case_limit": 250
+        }
+      }
+    },
+    "heuristic_only": {
+      "calibration_diagnostic": [
+        {
+          "cases": 0,
+          "lower": 0.0,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.25
+        },
+        {
+          "cases": 0,
+          "lower": 0.25,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.5
+        },
+        {
+          "cases": 12235,
+          "lower": 0.5,
+          "mean_score": 0.55,
+          "top1_accuracy": 0.208092,
+          "upper": 0.75
+        },
+        {
+          "cases": 0,
+          "lower": 0.75,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 1.0
+        }
+      ],
+      "confusion_matrix": {
+        "command-and-control": {
+          "collection": 7,
+          "credential-access": 28,
+          "defense-evasion": 1,
+          "discovery": 10
+        },
+        "credential-access": {
+          "credential-access": 2
+        },
+        "defense-evasion": {
+          "credential-access": 4,
+          "defense-evasion": 33,
+          "discovery": 65,
+          "exfiltration": 133
+        },
+        "discovery": {
+          "collection": 5,
+          "defense-evasion": 4336,
+          "discovery": 2511,
+          "persistence": 2
+        },
+        "execution": {
+          "collection": 313,
+          "credential-access": 2518,
+          "defense-evasion": 14
+        },
+        "persistence": {
+          "credential-access": 1727,
+          "discovery": 63
+        },
+        "privilege-escalation": {
+          "collection": 7,
+          "credential-access": 1,
+          "defense-evasion": 447,
+          "discovery": 8
+        }
+      },
+      "context_length": {
+        "0": 12235
+      },
+      "metrics": {
+        "abstention_rate": 0.0,
+        "all_case_accuracy": 0.208092,
+        "balanced_accuracy": 0.215254,
+        "bootstrap_95ci_by_session": {
+          "brier_score": [
+            1.184409,
+            1.190046
+          ],
+          "coverage": [
+            1.0,
+            1.0
+          ],
+          "macro_top1_accuracy": [
+            0.081981,
+            0.221329
+          ],
+          "mean_reciprocal_rank": [
+            0.205734,
+            0.210775
+          ],
+          "normalized_multiclass_brier_score": [
+            0.592205,
+            0.595023
+          ],
+          "selective_top1_accuracy": [
+            0.205455,
+            0.210462
+          ],
+          "top1_accuracy": [
+            0.205455,
+            0.210462
+          ]
+        },
+        "brier_score": 1.18715,
+        "coverage": 1.0,
+        "covered_examples": 12235,
+        "evaluated_examples": 12235,
+        "macro_recall": 0.215254,
+        "macro_top1_accuracy": 0.215254,
+        "macro_top1_accuracy_sufficient_support": 0.084463,
+        "mean_reciprocal_rank": 0.208378,
+        "metric_tactic_vocabulary": [
+          "command-and-control",
+          "credential-access",
+          "defense-evasion",
+          "discovery",
+          "execution",
+          "persistence",
+          "privilege-escalation"
+        ],
+        "normalized_multiclass_brier_score": 0.593575,
+        "per_tactic": {
+          "command-and-control": {
+            "brier_score": 1.323696,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.076087,
+            "normalized_multiclass_brier_score": 0.661848,
+            "reportable": true,
+            "support": 46,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "credential-access": {
+            "brier_score": null,
+            "descriptive_only": {
+              "brier_score": 0.315,
+              "mean_reciprocal_rank": 1.0,
+              "normalized_multiclass_brier_score": 0.1575,
+              "top1_accuracy": 1.0
+            },
+            "enough_support": false,
+            "mean_reciprocal_rank": null,
+            "normalized_multiclass_brier_score": null,
+            "reportable": false,
+            "support": 2,
+            "support_status": "low_support_descriptive_only",
+            "top1_accuracy": null
+          },
+          "defense-evasion": {
+            "brier_score": 1.333117,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.140426,
+            "normalized_multiclass_brier_score": 0.666559,
+            "reportable": true,
+            "support": 235,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.140426
+          },
+          "discovery": {
+            "brier_score": 1.012009,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.366355,
+            "normalized_multiclass_brier_score": 0.506005,
+            "reportable": true,
+            "support": 6854,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.366355
+          },
+          "execution": {
+            "brier_score": 1.415,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.0,
+            "normalized_multiclass_brier_score": 0.7075,
+            "reportable": true,
+            "support": 2845,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "persistence": {
+            "brier_score": 1.415,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.0,
+            "normalized_multiclass_brier_score": 0.7075,
+            "reportable": true,
+            "support": 1790,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "privilege-escalation": {
+            "brier_score": 1.415,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.0,
+            "normalized_multiclass_brier_score": 0.7075,
+            "reportable": true,
+            "support": 463,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          }
+        },
+        "selective_top1_accuracy": 0.208092,
+        "tactic_support_summary": {
+          "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+          "low_support_tactics": [
+            "credential-access"
+          ],
+          "minimum_support_for_reportable_per_tactic_metrics": 30,
+          "observed_target_tactic_count": 7,
+          "sufficient_support_tactics": [
+            "command-and-control",
+            "defense-evasion",
+            "discovery",
+            "execution",
+            "persistence",
+            "privilege-escalation"
+          ],
+          "zero_support_tactics": []
+        },
+        "top1_accuracy": 0.208092,
+        "top3_accuracy_secondary": 0.208664
+      },
+      "model_id": "heuristic_only",
+      "resource_profile": {
+        "prediction_latency_ms": {
+          "count": 12235,
+          "max": 1545.75125,
+          "mean": 0.780049,
+          "p50": 0.41037,
+          "p95": 2.423903
+        },
+        "tracemalloc_bytes": {
+          "measurement": "maximum window sample; each sample is bounded to 250 prediction cases",
+          "peak_delta": 9288603,
+          "sample_case_limit": 250
+        }
+      }
+    },
+    "local_shadow_only": {
+      "calibration_diagnostic": [
+        {
+          "cases": 0,
+          "lower": 0.0,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.25
+        },
+        {
+          "cases": 0,
+          "lower": 0.25,
+          "mean_score": null,
+          "top1_accuracy": null,
+          "upper": 0.5
+        },
+        {
+          "cases": 2612,
+          "lower": 0.5,
+          "mean_score": 0.602094,
+          "top1_accuracy": 0.316616,
+          "upper": 0.75
+        },
+        {
+          "cases": 9546,
+          "lower": 0.75,
+          "mean_score": 0.963651,
+          "top1_accuracy": 0.941127,
+          "upper": 1.0
+        }
+      ],
+      "confusion_matrix": {
+        "command-and-control": {
+          "<abstained>": 1,
+          "defense-evasion": 1,
+          "discovery": 9,
+          "execution": 35
+        },
+        "credential-access": {
+          "execution": 2
+        },
+        "defense-evasion": {
+          "<abstained>": 61,
+          "defense-evasion": 119,
+          "discovery": 50,
+          "execution": 4,
+          "persistence": 1
+        },
+        "discovery": {
+          "<abstained>": 2,
+          "discovery": 6847,
+          "execution": 5
+        },
+        "execution": {
+          "<abstained>": 13,
+          "discovery": 1,
+          "execution": 2831
+        },
+        "persistence": {
+          "defense-evasion": 22,
+          "discovery": 27,
+          "execution": 1727,
+          "persistence": 14
+        },
+        "privilege-escalation": {
+          "discovery": 455,
+          "execution": 8
+        }
+      },
+      "context_length": {
+        "0": 77,
+        "1": 3524,
+        "2": 2699,
+        "3": 5935
+      },
+      "metrics": {
+        "abstention_rate": 0.006293,
+        "all_case_accuracy": 0.80188,
+        "balanced_accuracy": 0.358323,
+        "bootstrap_95ci_by_session": {
+          "brier_score": [
+            0.210909,
+            0.225878
+          ],
+          "coverage": [
+            0.992125,
+            0.995289
+          ],
+          "macro_top1_accuracy": [
+            0.350039,
+            0.425245
+          ],
+          "mean_reciprocal_rank": [
+            0.887507,
+            0.895556
+          ],
+          "normalized_multiclass_brier_score": [
+            0.105455,
+            0.112939
+          ],
+          "selective_top1_accuracy": [
+            0.802216,
+            0.810271
+          ],
+          "top1_accuracy": [
+            0.796637,
+            0.806061
+          ]
+        },
+        "brier_score": 0.217891,
+        "coverage": 0.993707,
+        "covered_examples": 12158,
+        "evaluated_examples": 12235,
+        "macro_recall": 0.358323,
+        "macro_top1_accuracy": 0.358323,
+        "macro_top1_accuracy_sufficient_support": 0.418044,
+        "mean_reciprocal_rank": 0.892072,
+        "metric_tactic_vocabulary": [
+          "command-and-control",
+          "credential-access",
+          "defense-evasion",
+          "discovery",
+          "execution",
+          "persistence",
+          "privilege-escalation"
+        ],
+        "normalized_multiclass_brier_score": 0.108945,
+        "per_tactic": {
+          "command-and-control": {
+            "brier_score": 1.6758,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.0,
+            "normalized_multiclass_brier_score": 0.8379,
+            "reportable": true,
+            "support": 46,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          },
+          "credential-access": {
+            "brier_score": null,
+            "descriptive_only": {
+              "brier_score": 1.523752,
+              "mean_reciprocal_rank": 0.0,
+              "normalized_multiclass_brier_score": 0.761876,
+              "top1_accuracy": 0.0
+            },
+            "enough_support": false,
+            "mean_reciprocal_rank": null,
+            "normalized_multiclass_brier_score": null,
+            "reportable": false,
+            "support": 2,
+            "support_status": "low_support_descriptive_only",
+            "top1_accuracy": null
+          },
+          "defense-evasion": {
+            "brier_score": 0.729848,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.529787,
+            "normalized_multiclass_brier_score": 0.364924,
+            "reportable": true,
+            "support": 235,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.506383
+          },
+          "discovery": {
+            "brier_score": 0.011318,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.998979,
+            "normalized_multiclass_brier_score": 0.005659,
+            "reportable": true,
+            "support": 6854,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.998979
+          },
+          "execution": {
+            "brier_score": 0.095807,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.995079,
+            "normalized_multiclass_brier_score": 0.047904,
+            "reportable": true,
+            "support": 2845,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.995079
+          },
+          "persistence": {
+            "brier_score": 0.740914,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.496369,
+            "normalized_multiclass_brier_score": 0.370457,
+            "reportable": true,
+            "support": 1790,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.007821
+          },
+          "privilege-escalation": {
+            "brier_score": 1.593668,
+            "descriptive_only": null,
+            "enough_support": true,
+            "mean_reciprocal_rank": 0.482721,
+            "normalized_multiclass_brier_score": 0.796834,
+            "reportable": true,
+            "support": 463,
+            "support_status": "sufficient_support",
+            "top1_accuracy": 0.0
+          }
+        },
+        "selective_top1_accuracy": 0.806958,
+        "tactic_support_summary": {
+          "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+          "low_support_tactics": [
+            "credential-access"
+          ],
+          "minimum_support_for_reportable_per_tactic_metrics": 30,
+          "observed_target_tactic_count": 7,
+          "sufficient_support_tactics": [
+            "command-and-control",
+            "defense-evasion",
+            "discovery",
+            "execution",
+            "persistence",
+            "privilege-escalation"
+          ],
+          "zero_support_tactics": []
+        },
+        "top1_accuracy": 0.80188,
+        "top3_accuracy_secondary": 0.982264
+      },
+      "model_id": "local_shadow_only",
+      "resource_profile": {
+        "prediction_latency_ms": {
+          "count": 12235,
+          "max": 1338.483296,
+          "mean": 0.665071,
+          "p50": 0.368148,
+          "p95": 1.647266
+        },
+        "tracemalloc_bytes": {
+          "measurement": "maximum window sample; each sample is bounded to 250 prediction cases",
+          "peak_delta": 8066515,
+          "sample_case_limit": 250
+        }
+      }
+    }
+  },
+  "promotion_gate": {
+    "predeclared_rule": "Do not change production authority without a valid pinned artifact, leakage-safe chronological evaluation, and clean production_live external-source evidence for whether local authority provides repeatable benefit.",
+    "reasons": [
+      "external_artifact_training_data_manifest_missing_no_overlap_proof",
+      "no_clean_local_production_chronological_evidence"
+    ],
+    "status": "not_supported_for_production_change"
+  },
+  "reproducibility": {
+    "artifact_path": "data/models/external_cowrie_seed_transition_model.compound_securebert.json",
+    "artifact_sha256": "f6f4650f9b6c8bdda39998eed039afc0aa3f948ddb3b0e5582f5145bc5530b51",
+    "classifier": {
+      "name": "NotebookParityClassifier rules plus SecureBERT",
+      "provenance_status": "not_recorded_in_external_artifact",
+      "rule_policy_sha256": "",
+      "securebert_checkpoint_sha256": ""
+    },
+    "code_sha256": {
+      "evaluator": "9f3a1835ab6bfe504c7606e8a16621a11e307a1f06098f94bf81832978d47b75",
+      "realtime_prediction": "10bc19fc907e09ae7c728c2e4a19be47b1f967460ccba3cb781391f1dea01db2",
+      "session_features": "ccc77acc5cf64584782d0f1cdcbdc4ae3622e3e0440bad4aa20788f2472926cb"
+    },
+    "external_training_data": {
+      "input_root": "<SOURCE_DATA_NOT_DISTRIBUTED>",
+      "manifest_sha256": "",
+      "overlap_proof": "not_available",
+      "source_type": "external_cowrie_seed"
+    },
+    "leakage_controls": [
+      "whole sessions remain in one recorded chronological split",
+      "the external artifact is fixed and never rebuilt from evaluation sessions",
+      "each local shadow window uses only complete sessions before that window",
+      "all compared models receive identical case identities per window"
+    ],
+    "policy_path": "configs/prediction_policy.trusted.json",
+    "policy_sha256": "85d5d881f8f1cf80951b937a6ca6ad40d461299c4003dece135b82c1941691ec"
+  },
+  "schema_version": "authoritative_external_vomm_evaluation.v1",
+  "status": "evaluated_external_proxy_only",
+  "windows": [
+    {
+      "history_sessions": 186435,
+      "local_shadow_model": {
+        "completed_sessions": 1000,
+        "model_id": "transitionmodel_b2007b75fafb72ae48e683a1a56b4deb",
+        "prefix_transition_count": 254.56593294513243,
+        "technique_transition_count": 0,
+        "transition_count": 206.29567200871324,
+        "usable_sessions": 1000
+      },
+      "models": {
+        "current_local_first_cascade": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.803732,
+            "balanced_accuracy": 0.452909,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.213708,
+            "coverage": 1.0,
+            "covered_examples": 4341,
+            "evaluated_examples": 4341,
+            "macro_recall": 0.452909,
+            "macro_top1_accuracy": 0.452909,
+            "macro_top1_accuracy_sufficient_support": 0.543491,
+            "mean_reciprocal_rank": 0.897028,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.106854,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.519722,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.759861,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 14,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": null,
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 0,
+                "support_status": "no_heldout_support",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.723115,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.822917,
+                "normalized_multiclass_brier_score": 0.361557,
+                "reportable": true,
+                "support": 48,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.708333
+              },
+              "discovery": {
+                "brier_score": 0.011736,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.997975,
+                "normalized_multiclass_brier_score": 0.005868,
+                "reportable": true,
+                "support": 2469,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.997975
+              },
+              "execution": {
+                "brier_score": 0.105534,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.989868,
+                "normalized_multiclass_brier_score": 0.052767,
+                "reportable": true,
+                "support": 987,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.989868
+              },
+              "persistence": {
+                "brier_score": 0.711957,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.510638,
+                "normalized_multiclass_brier_score": 0.355979,
+                "reportable": true,
+                "support": 658,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.021277
+              },
+              "privilege-escalation": {
+                "brier_score": 1.637062,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.469697,
+                "normalized_multiclass_brier_score": 0.818531,
+                "reportable": true,
+                "support": 165,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.803732,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 6,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": [
+                "credential-access"
+              ]
+            },
+            "top1_accuracy": 0.803732,
+            "top3_accuracy_secondary": 0.990325
+          },
+          "model_id": "current_local_first_cascade",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4341,
+              "max": 498.027571,
+              "mean": 0.659896,
+              "p50": 0.368128,
+              "p95": 1.63822
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7945566,
+              "peak_delta": 7956962,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "external_authoritative_abstain": {
+          "metrics": {
+            "abstention_rate": 0.00622,
+            "all_case_accuracy": 0.79613,
+            "balanced_accuracy": 0.390099,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.221945,
+            "coverage": 0.99378,
+            "covered_examples": 4314,
+            "evaluated_examples": 4341,
+            "macro_recall": 0.390099,
+            "macro_top1_accuracy": 0.390099,
+            "macro_top1_accuracy_sufficient_support": 0.468118,
+            "mean_reciprocal_rank": 0.870076,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.110972,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 0.733043,
+                  "mean_reciprocal_rank": 0.5,
+                  "normalized_multiclass_brier_score": 0.366521,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 14,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": null,
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 0,
+                "support_status": "no_heldout_support",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.802056,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.40625,
+                "normalized_multiclass_brier_score": 0.401028,
+                "reportable": true,
+                "support": 48,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.354167
+              },
+              "discovery": {
+                "brier_score": 0.003691,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.997772,
+                "normalized_multiclass_brier_score": 0.001845,
+                "reportable": true,
+                "support": 2469,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.99757
+              },
+              "execution": {
+                "brier_score": 0.147338,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.989362,
+                "normalized_multiclass_brier_score": 0.073669,
+                "reportable": true,
+                "support": 987,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.988855
+              },
+              "persistence": {
+                "brier_score": 0.660069,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.471884,
+                "normalized_multiclass_brier_score": 0.330034,
+                "reportable": true,
+                "support": 658,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.974795,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.987398,
+                "reportable": true,
+                "support": 165,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.801113,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 6,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": [
+                "credential-access"
+              ]
+            },
+            "top1_accuracy": 0.79613,
+            "top3_accuracy_secondary": 0.94264
+          },
+          "model_id": "external_authoritative_abstain",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4341,
+              "max": 183.944903,
+              "mean": 0.565555,
+              "p50": 0.342456,
+              "p95": 1.89513
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7787596,
+              "peak_delta": 7802981,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "external_then_heuristic": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.800276,
+            "balanced_accuracy": 0.452599,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.219965,
+            "coverage": 1.0,
+            "covered_examples": 4341,
+            "evaluated_examples": 4341,
+            "macro_recall": 0.452599,
+            "macro_top1_accuracy": 0.452599,
+            "macro_top1_accuracy_sufficient_support": 0.543118,
+            "mean_reciprocal_rank": 0.874223,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.109982,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 0.733043,
+                  "mean_reciprocal_rank": 0.5,
+                  "normalized_multiclass_brier_score": 0.366521,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 14,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": null,
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 0,
+                "support_status": "no_heldout_support",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.545181,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.78125,
+                "normalized_multiclass_brier_score": 0.272591,
+                "reportable": true,
+                "support": 48,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.729167
+              },
+              "discovery": {
+                "brier_score": 0.003691,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.997772,
+                "normalized_multiclass_brier_score": 0.001845,
+                "reportable": true,
+                "support": 2469,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.99757
+              },
+              "execution": {
+                "brier_score": 0.151122,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.989362,
+                "normalized_multiclass_brier_score": 0.075561,
+                "reportable": true,
+                "support": 987,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.988855
+              },
+              "persistence": {
+                "brier_score": 0.660069,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.471884,
+                "normalized_multiclass_brier_score": 0.330034,
+                "reportable": true,
+                "support": 658,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.974795,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.987398,
+                "reportable": true,
+                "support": 165,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.800276,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 6,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": [
+                "credential-access"
+              ]
+            },
+            "top1_accuracy": 0.800276,
+            "top3_accuracy_secondary": 0.946786
+          },
+          "model_id": "external_then_heuristic",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4341,
+              "max": 9.099828,
+              "mean": 0.488806,
+              "p50": 0.343522,
+              "p95": 1.883093
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7794091,
+              "peak_delta": 7809467,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "heuristic_only": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.210781,
+            "balanced_accuracy": 0.123051,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 1.1832,
+            "coverage": 1.0,
+            "covered_examples": 4341,
+            "evaluated_examples": 4341,
+            "macro_recall": 0.123051,
+            "macro_top1_accuracy": 0.123051,
+            "macro_top1_accuracy_sufficient_support": 0.147661,
+            "mean_reciprocal_rank": 0.210781,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.5916,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.415,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.7075,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 14,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": null,
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 0,
+                "support_status": "no_heldout_support",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 1.007844,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.375,
+                "normalized_multiclass_brier_score": 0.503922,
+                "reportable": true,
+                "support": 48,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.375
+              },
+              "discovery": {
+                "brier_score": 1.015365,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.363305,
+                "normalized_multiclass_brier_score": 0.507682,
+                "reportable": true,
+                "support": 2469,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.363305
+              },
+              "execution": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 987,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "persistence": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 658,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 165,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.210781,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 6,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": [
+                "credential-access"
+              ]
+            },
+            "top1_accuracy": 0.210781,
+            "top3_accuracy_secondary": 0.210781
+          },
+          "model_id": "heuristic_only",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4341,
+              "max": 8.037044,
+              "mean": 0.553858,
+              "p50": 0.408064,
+              "p95": 2.532522
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 9151291,
+              "peak_delta": 9168387,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "local_shadow_only": {
+          "metrics": {
+            "abstention_rate": 0.00668,
+            "all_case_accuracy": 0.799125,
+            "balanced_accuracy": 0.383464,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.21614,
+            "coverage": 0.99332,
+            "covered_examples": 4312,
+            "evaluated_examples": 4341,
+            "macro_recall": 0.383464,
+            "macro_top1_accuracy": 0.383464,
+            "macro_top1_accuracy_sufficient_support": 0.460157,
+            "mean_reciprocal_rank": 0.892421,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.10807,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.519722,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.759861,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 14,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": null,
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 0,
+                "support_status": "no_heldout_support",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 1.020891,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.40625,
+                "normalized_multiclass_brier_score": 0.510446,
+                "reportable": true,
+                "support": 48,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.291667
+              },
+              "discovery": {
+                "brier_score": 0.011736,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.997975,
+                "normalized_multiclass_brier_score": 0.005868,
+                "reportable": true,
+                "support": 2469,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.997975
+              },
+              "execution": {
+                "brier_score": 0.10175,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.989868,
+                "normalized_multiclass_brier_score": 0.050875,
+                "reportable": true,
+                "support": 987,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.989868
+              },
+              "persistence": {
+                "brier_score": 0.711957,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.510638,
+                "normalized_multiclass_brier_score": 0.355979,
+                "reportable": true,
+                "support": 658,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.021277
+              },
+              "privilege-escalation": {
+                "brier_score": 1.637062,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.469697,
+                "normalized_multiclass_brier_score": 0.818531,
+                "reportable": true,
+                "support": 165,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.804499,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 6,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": [
+                "credential-access"
+              ]
+            },
+            "top1_accuracy": 0.799125,
+            "top3_accuracy_secondary": 0.985718
+          },
+          "model_id": "local_shadow_only",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4341,
+              "max": 287.476984,
+              "mean": 0.509383,
+              "p50": 0.367479,
+              "p95": 1.632967
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7927417,
+              "peak_delta": 7938800,
+              "sample_case_limit": 250
+            }
+          }
+        }
+      },
+      "test_cases": 4341,
+      "test_sessions": 10967,
+      "window_index": 1
+    },
+    {
+      "history_sessions": 197402,
+      "local_shadow_model": {
+        "completed_sessions": 1000,
+        "model_id": "transitionmodel_a3e321b7b2b2c591e622ef0a92ce978d",
+        "prefix_transition_count": 240.98758075732275,
+        "technique_transition_count": 0,
+        "transition_count": 202.78371665537114,
+        "usable_sessions": 1000
+      },
+      "models": {
+        "current_local_first_cascade": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.807473,
+            "balanced_accuracy": 0.374591,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.220053,
+            "coverage": 1.0,
+            "covered_examples": 3506,
+            "evaluated_examples": 3506,
+            "macro_recall": 0.374591,
+            "macro_top1_accuracy": 0.374591,
+            "macro_top1_accuracy_sufficient_support": 0.524428,
+            "mean_reciprocal_rank": 0.898032,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.110026,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.534637,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.767319,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 6,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.536073,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.768036,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.814335,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.622642,
+                "normalized_multiclass_brier_score": 0.407167,
+                "reportable": true,
+                "support": 53,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.622642
+              },
+              "discovery": {
+                "brier_score": 0.015492,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999496,
+                "normalized_multiclass_brier_score": 0.007746,
+                "reportable": true,
+                "support": 1985,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999496
+              },
+              "execution": {
+                "brier_score": 0.0769,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 1.0,
+                "normalized_multiclass_brier_score": 0.03845,
+                "reportable": true,
+                "support": 814,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 1.0
+              },
+              "persistence": {
+                "brier_score": 0.832418,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.488372,
+                "normalized_multiclass_brier_score": 0.416209,
+                "reportable": true,
+                "support": 516,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.486457,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.5,
+                "normalized_multiclass_brier_score": 0.743229,
+                "reportable": true,
+                "support": 131,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.807473,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.807473,
+            "top3_accuracy_secondary": 0.988591
+          },
+          "model_id": "current_local_first_cascade",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 3506,
+              "max": 6.310295,
+              "mean": 0.473492,
+              "p50": 0.376394,
+              "p95": 1.675653
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 8050063,
+              "peak_delta": 8069337,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "external_authoritative_abstain": {
+          "metrics": {
+            "abstention_rate": 0.001997,
+            "all_case_accuracy": 0.802054,
+            "balanced_accuracy": 0.393936,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.208822,
+            "coverage": 0.998003,
+            "covered_examples": 3499,
+            "evaluated_examples": 3506,
+            "macro_recall": 0.393936,
+            "macro_top1_accuracy": 0.393936,
+            "macro_top1_accuracy_sufficient_support": 0.55151,
+            "mean_reciprocal_rank": 0.878684,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.104411,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 0.704294,
+                  "mean_reciprocal_rank": 0.5,
+                  "normalized_multiclass_brier_score": 0.352147,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 6,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.504122,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.752061,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.291674,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.811321,
+                "normalized_multiclass_brier_score": 0.145837,
+                "reportable": true,
+                "support": 53,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.792453
+              },
+              "discovery": {
+                "brier_score": 0.001008,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999496,
+                "normalized_multiclass_brier_score": 0.000504,
+                "reportable": true,
+                "support": 1985,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999496
+              },
+              "execution": {
+                "brier_score": 0.149593,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.982391,
+                "normalized_multiclass_brier_score": 0.074796,
+                "reportable": true,
+                "support": 814,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.965602
+              },
+              "persistence": {
+                "brier_score": 0.63018,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.486434,
+                "normalized_multiclass_brier_score": 0.31509,
+                "reportable": true,
+                "support": 516,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 2.0,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 1.0,
+                "reportable": true,
+                "support": 131,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.803658,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.802054,
+            "top3_accuracy_secondary": 0.954364
+          },
+          "model_id": "external_authoritative_abstain",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 3506,
+              "max": 6.528,
+              "mean": 0.518082,
+              "p50": 0.35235,
+              "p95": 1.93679
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7895208,
+              "peak_delta": 7914056,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "external_then_heuristic": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.80405,
+            "balanced_accuracy": 0.412804,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.207454,
+            "coverage": 1.0,
+            "covered_examples": 3506,
+            "evaluated_examples": 3506,
+            "macro_recall": 0.412804,
+            "macro_top1_accuracy": 0.412804,
+            "macro_top1_accuracy_sufficient_support": 0.577925,
+            "mean_reciprocal_rank": 0.880681,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.103727,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 0.704294,
+                  "mean_reciprocal_rank": 0.5,
+                  "normalized_multiclass_brier_score": 0.352147,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 6,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.504122,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.752061,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.201202,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.943396,
+                "normalized_multiclass_brier_score": 0.100601,
+                "reportable": true,
+                "support": 53,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.924528
+              },
+              "discovery": {
+                "brier_score": 0.001008,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999496,
+                "normalized_multiclass_brier_score": 0.000504,
+                "reportable": true,
+                "support": 1985,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999496
+              },
+              "execution": {
+                "brier_score": 0.149593,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.982391,
+                "normalized_multiclass_brier_score": 0.074796,
+                "reportable": true,
+                "support": 814,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.965602
+              },
+              "persistence": {
+                "brier_score": 0.63018,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.486434,
+                "normalized_multiclass_brier_score": 0.31509,
+                "reportable": true,
+                "support": 516,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 2.0,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 1.0,
+                "reportable": true,
+                "support": 131,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.80405,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.80405,
+            "top3_accuracy_secondary": 0.956361
+          },
+          "model_id": "external_then_heuristic",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 3506,
+              "max": 6.895888,
+              "mean": 0.518015,
+              "p50": 0.353661,
+              "p95": 1.917583
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7888012,
+              "peak_delta": 7906794,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "heuristic_only": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.209926,
+            "balanced_accuracy": 0.214118,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 1.185033,
+            "coverage": 1.0,
+            "covered_examples": 3506,
+            "evaluated_examples": 3506,
+            "macro_recall": 0.214118,
+            "macro_top1_accuracy": 0.214118,
+            "macro_top1_accuracy_sufficient_support": 0.099765,
+            "mean_reciprocal_rank": 0.209926,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.592516,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.415,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.7075,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 6,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 0.315,
+                  "mean_reciprocal_rank": 1.0,
+                  "normalized_multiclass_brier_score": 0.1575,
+                  "top1_accuracy": 1.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 1.332633,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.132075,
+                "normalized_multiclass_brier_score": 0.666317,
+                "reportable": true,
+                "support": 53,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.132075
+              },
+              "discovery": {
+                "brier_score": 1.011574,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.366751,
+                "normalized_multiclass_brier_score": 0.505787,
+                "reportable": true,
+                "support": 1985,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.366751
+              },
+              "execution": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 814,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "persistence": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 516,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 131,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.209926,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.209926,
+            "top3_accuracy_secondary": 0.209926
+          },
+          "model_id": "heuristic_only",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 3506,
+              "max": 1175.041759,
+              "mean": 0.913241,
+              "p50": 0.414099,
+              "p95": 2.421911
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 9267553,
+              "peak_delta": 9288603,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "local_shadow_only": {
+          "metrics": {
+            "abstention_rate": 0.009698,
+            "all_case_accuracy": 0.79806,
+            "balanced_accuracy": 0.285642,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.228279,
+            "coverage": 0.990302,
+            "covered_examples": 3472,
+            "evaluated_examples": 3506,
+            "macro_recall": 0.285642,
+            "macro_top1_accuracy": 0.285642,
+            "macro_top1_accuracy_sufficient_support": 0.399899,
+            "mean_reciprocal_rank": 0.88862,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.114139,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.534637,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.767319,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 6,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.536073,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.768036,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 1.377358,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.688679,
+                "reportable": true,
+                "support": 53,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "discovery": {
+                "brier_score": 0.014988,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999496,
+                "normalized_multiclass_brier_score": 0.007494,
+                "reportable": true,
+                "support": 1985,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999496
+              },
+              "execution": {
+                "brier_score": 0.0769,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 1.0,
+                "normalized_multiclass_brier_score": 0.03845,
+                "reportable": true,
+                "support": 814,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 1.0
+              },
+              "persistence": {
+                "brier_score": 0.832418,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.488372,
+                "normalized_multiclass_brier_score": 0.416209,
+                "reportable": true,
+                "support": 516,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.486457,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.5,
+                "normalized_multiclass_brier_score": 0.743229,
+                "reportable": true,
+                "support": 131,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.805876,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.79806,
+            "top3_accuracy_secondary": 0.979179
+          },
+          "model_id": "local_shadow_only",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 3506,
+              "max": 992.148896,
+              "mean": 0.753301,
+              "p50": 0.374744,
+              "p95": 1.679575
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 8047283,
+              "peak_delta": 8066515,
+              "sample_case_limit": 250
+            }
+          }
+        }
+      },
+      "test_cases": 3506,
+      "test_sessions": 10967,
+      "window_index": 2
+    },
+    {
+      "history_sessions": 208369,
+      "local_shadow_model": {
+        "completed_sessions": 1000,
+        "model_id": "transitionmodel_3ce18e1683c7c0bb9c2bcdfc0e331b26",
+        "prefix_transition_count": 184.6552252419262,
+        "technique_transition_count": 0,
+        "transition_count": 157.65952243999118,
+        "usable_sessions": 1000
+      },
+      "models": {
+        "current_local_first_cascade": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.80948,
+            "balanced_accuracy": 0.405576,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.210775,
+            "coverage": 1.0,
+            "covered_examples": 4388,
+            "evaluated_examples": 4388,
+            "macro_recall": 0.405576,
+            "macro_top1_accuracy": 0.405576,
+            "macro_top1_accuracy_sufficient_support": 0.567807,
+            "mean_reciprocal_rank": 0.896308,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.105388,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.80838,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.90419,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 26,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.511431,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.755715,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.328593,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.843284,
+                "normalized_multiclass_brier_score": 0.164296,
+                "reportable": true,
+                "support": 134,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.843284
+              },
+              "discovery": {
+                "brier_score": 0.008268,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999583,
+                "normalized_multiclass_brier_score": 0.004134,
+                "reportable": true,
+                "support": 2400,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999583
+              },
+              "execution": {
+                "brier_score": 0.106521,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.996169,
+                "normalized_multiclass_brier_score": 0.05326,
+                "reportable": true,
+                "support": 1044,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.996169
+              },
+              "persistence": {
+                "brier_score": 0.695197,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.487825,
+                "normalized_multiclass_brier_score": 0.347598,
+                "reportable": true,
+                "support": 616,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.634895,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.482036,
+                "normalized_multiclass_brier_score": 0.817447,
+                "reportable": true,
+                "support": 167,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.80948,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.80948,
+            "top3_accuracy_secondary": 0.983136
+          },
+          "model_id": "current_local_first_cascade",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4388,
+              "max": 7.718219,
+              "mean": 0.445744,
+              "p50": 0.366135,
+              "p95": 1.643541
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7961175,
+              "peak_delta": 7972579,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "external_authoritative_abstain": {
+          "metrics": {
+            "abstention_rate": 0.002963,
+            "all_case_accuracy": 0.789426,
+            "balanced_accuracy": 0.400969,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.218754,
+            "coverage": 0.997037,
+            "covered_examples": 4375,
+            "evaluated_examples": 4388,
+            "macro_recall": 0.400969,
+            "macro_top1_accuracy": 0.400969,
+            "macro_top1_accuracy_sufficient_support": 0.561357,
+            "mean_reciprocal_rank": 0.870651,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.109377,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.30498,
+                  "mean_reciprocal_rank": 0.301282,
+                  "normalized_multiclass_brier_score": 0.65249,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 26,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.504122,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.752061,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.151463,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.910448,
+                "normalized_multiclass_brier_score": 0.075732,
+                "reportable": true,
+                "support": 134,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.902985
+              },
+              "discovery": {
+                "brier_score": 0.000833,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999583,
+                "normalized_multiclass_brier_score": 0.000417,
+                "reportable": true,
+                "support": 2400,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999583
+              },
+              "execution": {
+                "brier_score": 0.175947,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.950032,
+                "normalized_multiclass_brier_score": 0.087974,
+                "reportable": true,
+                "support": 1044,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.904215
+              },
+              "persistence": {
+                "brier_score": 0.628903,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.486607,
+                "normalized_multiclass_brier_score": 0.314451,
+                "reportable": true,
+                "support": 616,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.982465,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.991233,
+                "reportable": true,
+                "support": 167,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.791771,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.789426,
+            "top3_accuracy_secondary": 0.951686
+          },
+          "model_id": "external_authoritative_abstain",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4388,
+              "max": 5.833623,
+              "mean": 0.491342,
+              "p50": 0.346029,
+              "p95": 1.882384
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7844069,
+              "peak_delta": 7859459,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "external_then_heuristic": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.791249,
+            "balanced_accuracy": 0.409498,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.217978,
+            "coverage": 1.0,
+            "covered_examples": 4388,
+            "evaluated_examples": 4388,
+            "macro_recall": 0.409498,
+            "macro_top1_accuracy": 0.409498,
+            "macro_top1_accuracy_sufficient_support": 0.573297,
+            "mean_reciprocal_rank": 0.872474,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.108989,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.320941,
+                  "mean_reciprocal_rank": 0.301282,
+                  "normalized_multiclass_brier_score": 0.660471,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 26,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.504122,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.752061,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.110568,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.970149,
+                "normalized_multiclass_brier_score": 0.055284,
+                "reportable": true,
+                "support": 134,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.962687
+              },
+              "discovery": {
+                "brier_score": 0.000833,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999583,
+                "normalized_multiclass_brier_score": 0.000417,
+                "reportable": true,
+                "support": 2400,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999583
+              },
+              "execution": {
+                "brier_score": 0.177537,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.950032,
+                "normalized_multiclass_brier_score": 0.088769,
+                "reportable": true,
+                "support": 1044,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.904215
+              },
+              "persistence": {
+                "brier_score": 0.628903,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.486607,
+                "normalized_multiclass_brier_score": 0.314451,
+                "reportable": true,
+                "support": 616,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.982465,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.991233,
+                "reportable": true,
+                "support": 167,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.791249,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.791249,
+            "top3_accuracy_secondary": 0.95351
+          },
+          "model_id": "external_then_heuristic",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4388,
+              "max": 7.680455,
+              "mean": 0.492589,
+              "p50": 0.345346,
+              "p95": 1.879179
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7839337,
+              "peak_delta": 7854718,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "heuristic_only": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "all_case_accuracy": 0.203965,
+            "balanced_accuracy": 0.204124,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 1.19275,
+            "coverage": 1.0,
+            "covered_examples": 4388,
+            "evaluated_examples": 4388,
+            "macro_recall": 0.204124,
+            "macro_top1_accuracy": 0.204124,
+            "macro_top1_accuracy_sufficient_support": 0.085774,
+            "mean_reciprocal_rank": 0.204763,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.596375,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.253462,
+                  "mean_reciprocal_rank": 0.134615,
+                  "normalized_multiclass_brier_score": 0.626731,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 26,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 0.315,
+                  "mean_reciprocal_rank": 1.0,
+                  "normalized_multiclass_brier_score": 0.1575,
+                  "top1_accuracy": 1.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 1.449825,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.059701,
+                "normalized_multiclass_brier_score": 0.724912,
+                "reportable": true,
+                "support": 134,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.059701
+              },
+              "discovery": {
+                "brier_score": 1.008917,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.369167,
+                "normalized_multiclass_brier_score": 0.504458,
+                "reportable": true,
+                "support": 2400,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.369167
+              },
+              "execution": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 1044,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "persistence": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 616,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.415,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.0,
+                "normalized_multiclass_brier_score": 0.7075,
+                "reportable": true,
+                "support": 167,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.203965,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.203965,
+            "top3_accuracy_secondary": 0.205561
+          },
+          "model_id": "heuristic_only",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4388,
+              "max": 1545.75125,
+              "mean": 0.897399,
+              "p50": 0.409916,
+              "p95": 2.389424
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 9156025,
+              "peak_delta": 9173131,
+              "sample_case_limit": 250
+            }
+          }
+        },
+        "local_shadow_only": {
+          "metrics": {
+            "abstention_rate": 0.003191,
+            "all_case_accuracy": 0.807657,
+            "balanced_accuracy": 0.397048,
+            "bootstrap_95ci_by_session": {
+              "brier_score": null,
+              "coverage": null,
+              "macro_top1_accuracy": null,
+              "mean_reciprocal_rank": null,
+              "normalized_multiclass_brier_score": null,
+              "selective_top1_accuracy": null,
+              "top1_accuracy": null
+            },
+            "brier_score": 0.211323,
+            "coverage": 0.996809,
+            "covered_examples": 4374,
+            "evaluated_examples": 4388,
+            "macro_recall": 0.397048,
+            "macro_top1_accuracy": 0.397048,
+            "macro_top1_accuracy_sufficient_support": 0.555867,
+            "mean_reciprocal_rank": 0.894485,
+            "metric_tactic_vocabulary": [
+              "command-and-control",
+              "credential-access",
+              "defense-evasion",
+              "discovery",
+              "execution",
+              "persistence",
+              "privilege-escalation"
+            ],
+            "normalized_multiclass_brier_score": 0.105662,
+            "per_tactic": {
+              "command-and-control": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.792418,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.896209,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 26,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "credential-access": {
+                "brier_score": null,
+                "descriptive_only": {
+                  "brier_score": 1.511431,
+                  "mean_reciprocal_rank": 0.0,
+                  "normalized_multiclass_brier_score": 0.755715,
+                  "top1_accuracy": 0.0
+                },
+                "enough_support": false,
+                "mean_reciprocal_rank": null,
+                "normalized_multiclass_brier_score": null,
+                "reportable": false,
+                "support": 1,
+                "support_status": "low_support_descriptive_only",
+                "top1_accuracy": null
+              },
+              "defense-evasion": {
+                "brier_score": 0.369488,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.783582,
+                "normalized_multiclass_brier_score": 0.184744,
+                "reportable": true,
+                "support": 134,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.783582
+              },
+              "discovery": {
+                "brier_score": 0.007852,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.999583,
+                "normalized_multiclass_brier_score": 0.003926,
+                "reportable": true,
+                "support": 2400,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.999583
+              },
+              "execution": {
+                "brier_score": 0.104931,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.996169,
+                "normalized_multiclass_brier_score": 0.052465,
+                "reportable": true,
+                "support": 1044,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.996169
+              },
+              "persistence": {
+                "brier_score": 0.695197,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.487825,
+                "normalized_multiclass_brier_score": 0.347598,
+                "reportable": true,
+                "support": 616,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              },
+              "privilege-escalation": {
+                "brier_score": 1.634895,
+                "descriptive_only": null,
+                "enough_support": true,
+                "mean_reciprocal_rank": 0.482036,
+                "normalized_multiclass_brier_score": 0.817447,
+                "reportable": true,
+                "support": 167,
+                "support_status": "sufficient_support",
+                "top1_accuracy": 0.0
+              }
+            },
+            "selective_top1_accuracy": 0.810242,
+            "tactic_support_summary": {
+              "balanced_accuracy_definition": "unweighted mean Top-1 recall across target tactics observed in the held-out set",
+              "low_support_tactics": [
+                "command-and-control",
+                "credential-access"
+              ],
+              "minimum_support_for_reportable_per_tactic_metrics": 30,
+              "observed_target_tactic_count": 7,
+              "sufficient_support_tactics": [
+                "defense-evasion",
+                "discovery",
+                "execution",
+                "persistence",
+                "privilege-escalation"
+              ],
+              "zero_support_tactics": []
+            },
+            "top1_accuracy": 0.807657,
+            "top3_accuracy_secondary": 0.981313
+          },
+          "model_id": "local_shadow_only",
+          "resource_profile": {
+            "prediction_latency_ms": {
+              "count": 4388,
+              "max": 1338.483296,
+              "mean": 0.748596,
+              "p50": 0.364361,
+              "p95": 1.640412
+            },
+            "tracemalloc_bytes": {
+              "current_delta": 7958845,
+              "peak_delta": 7970237,
+              "sample_case_limit": 250
+            }
+          }
+        }
+      },
+      "test_cases": 4388,
+      "test_sessions": 10967,
+      "window_index": 3
+    }
+  ]
+}

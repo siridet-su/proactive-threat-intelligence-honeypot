@@ -1,0 +1,6 @@
+model_id,cases,coverage,abstention_rate,all_case_accuracy,selective_top1_accuracy,balanced_accuracy,mean_reciprocal_rank,normalized_multiclass_brier_score,latency_p50_ms,latency_p95_ms,peak_memory_bytes
+current_local_first_cascade,12235,1.0,0.0,0.806866,0.806866,0.395405,0.897058,0.107237,0.36922,1.653601,8069337
+external_authoritative_abstain,12235,0.996159,0.003841,0.795423,0.79849,0.38799,0.872749,0.10852,0.346273,1.901954,7914056
+external_then_heuristic,12235,1.0,0.0,0.79812,0.79812,0.408051,0.875446,0.107834,0.346418,1.893354,7906794
+heuristic_only,12235,1.0,0.0,0.208092,0.208092,0.215254,0.208378,0.593575,0.41037,2.423903,9288603
+local_shadow_only,12235,0.993707,0.006293,0.80188,0.806958,0.358323,0.892072,0.108945,0.368148,1.647266,8066515

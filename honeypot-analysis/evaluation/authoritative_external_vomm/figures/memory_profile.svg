@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560">
+<rect width="100%" height="100%" fill="white"/>
+<text x="90" y="42" font-family="Arial" font-size="24" font-weight="bold">Prediction peak memory sample (MiB)</text>
+<text x="22" y="280.0" font-family="Arial" font-size="14" transform="rotate(-90 22 280.0)">MiB; bounded 250-case window sample</text>
+<line x1="90" y1="470" x2="870" y2="470" stroke="#334155"/>
+<line x1="90" y1="90" x2="90" y2="470" stroke="#334155"/>
+<rect x="114.96" y="139.88" width="106.08" height="330.12" fill="#2563eb"/>
+<text x="168.00" y="131.88" text-anchor="middle" font-family="Arial" font-size="12">7.696</text>
+<text x="168.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">current_local_first_cascade</text>
+<rect x="270.96" y="146.23" width="106.08" height="323.77" fill="#2563eb"/>
+<text x="324.00" y="138.23" text-anchor="middle" font-family="Arial" font-size="12">7.547</text>
+<text x="324.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">external_authoritative_abstain</text>
+<rect x="426.96" y="146.53" width="106.08" height="323.47" fill="#2563eb"/>
+<text x="480.00" y="138.53" text-anchor="middle" font-family="Arial" font-size="12">7.541</text>
+<text x="480.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">external_then_heuristic</text>
+<rect x="582.96" y="90.00" width="106.08" height="380.00" fill="#2563eb"/>
+<text x="636.00" y="82.00" text-anchor="middle" font-family="Arial" font-size="12">8.858</text>
+<text x="636.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">heuristic_only</text>
+<rect x="738.96" y="140.00" width="106.08" height="330.00" fill="#2563eb"/>
+<text x="792.00" y="132.00" text-anchor="middle" font-family="Arial" font-size="12">7.693</text>
+<text x="792.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">local_shadow_only</text>
+</svg>
