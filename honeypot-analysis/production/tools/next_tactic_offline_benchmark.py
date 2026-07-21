@@ -1150,7 +1150,13 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     test_cases = make_cases(split["test"])
     if not all((train_cases, selection_cases, calibration_cases, test_cases)):
         raise ValueError("each benchmark role must contain at least one next-tactic case")
+    checkpoint_dir = Path(getattr(args, "checkpoint_dir", "") or args.output_dir) / "stages"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    def checkpoint(name: str, value: Any) -> None:
+        _write_json(checkpoint_dir / f"{name}.json", value)
+        print(f"[offline-benchmark] checkpoint={name}", flush=True)
     experiment_log: list[dict[str, Any]] = []
+    checkpoint("01_validation", {"dataset_sha256": file_sha256(args.payload), "artifact": artifact_validation, "membership": membership})
     # Candidate count models never observe test cases. Keep calibration held out
     # from their raw fit, so it remains valid for secondary neural calibration.
     fit_sessions = [*split["train"], *selection_sessions]
@@ -1160,17 +1166,28 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     interpolated_selection = select_interpolated_vomm(split["train"], selection_cases, vocabulary, experiment_log=experiment_log)
     interpolated = interpolated_vomm_model(fit_sessions, vocabulary, interpolated_selection["settings"])
     production = external_hard_backoff_model(policy, artifact, vocabulary)
+    # Finish and persist every deterministic model before neural training.
+    results = {}
+    for model in (majority, first_order, production, interpolated):
+        print(f"[offline-benchmark] evaluating={model.model_id}", flush=True)
+        results[model.model_id] = evaluate_model(model, test_cases, vocabulary, bootstrap_iterations=args.bootstrap_iterations, seed=int(args.seeds[0]))
+        checkpoint(f"02_model_{model.model_id}", results[model.model_id])
     neural_settings: dict[str, Any] = {}
     neural_runs: list[ModelRun] = []
     neural_seed_records: dict[str, list[dict[str, Any]]] = {}
     neural_values: dict[str, dict[str, list[dict[str, float]]]] = {}
     for kind in ("gru", "transformer"):
+        print(f"[offline-benchmark] selecting={kind}", flush=True)
         selected = select_neural_settings(kind, train_cases, selection_cases, vocabulary, seed=int(args.seeds[0]), experiment_log=experiment_log)
         neural_settings[kind] = selected
         run, logs, values = train_neural_aggregate(kind, fit_cases, calibration_cases, test_cases, vocabulary, settings=selected["settings"], epochs=int(selected["selected_epoch"]), seeds=args.seeds, experiment_log=experiment_log)
         neural_runs.append(run); neural_seed_records[kind] = logs; neural_values[kind] = values
+        checkpoint(f"03_neural_{kind}_seeds", {"selection": selected, "seed_logs": logs, "test_prediction_counts": {seed: len(rows) for seed, rows in values["test_by_seed"].items()}})
     models = [majority, first_order, production, interpolated, *neural_runs]
-    results = {model.model_id: evaluate_model(model, test_cases, vocabulary, bootstrap_iterations=args.bootstrap_iterations, seed=int(args.seeds[0])) for model in models}
+    for model in neural_runs:
+        print(f"[offline-benchmark] evaluating={model.model_id}", flush=True)
+        results[model.model_id] = evaluate_model(model, test_cases, vocabulary, bootstrap_iterations=args.bootstrap_iterations, seed=int(args.seeds[0]))
+        checkpoint(f"04_model_{model.model_id}", results[model.model_id])
     # The neural aggregate is precomputed over test cases, so its ModelRun is a
     # read-only lookup. Its per-seed metric distribution remains independently
     # recorded below.
@@ -1221,6 +1238,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "limitations": ["All targets are trusted classifier-derived weak labels, not independent analyst labels.", "The immutable incumbent artifact was trained on manifest train plus validation; candidate models retain a calibration half, so equal-data superiority is not claimed.", "This is offline external-corpus evaluation only and does not establish deployment-local accuracy.", "No raw score is a calibrated probability unless reported separately in the secondary calibration analysis."],
     }
     result["selected_examples"] = _select_examples(results, vocabulary)
+    checkpoint("05_aggregate_complete", {"model_ids": list(results), "test_case_count": len(test_cases)})
     return result
 
 
@@ -1255,6 +1273,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-model-id", default="externalvomm_8dabca1f770b06e73fb051766539435a")
     parser.add_argument("--expected-manifest-id", default="externalvommmanifest_f97d2d3770c6ac44f9eb7e7905c7736b")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--checkpoint-dir", default="")
     parser.add_argument("--seeds", type=int, nargs="+", default=list(DEFAULT_SEEDS))
     parser.add_argument("--bootstrap-iterations", type=int, default=DEFAULT_BOOTSTRAP)
     parser.add_argument("--no-figures", action="store_true")
