@@ -832,6 +832,7 @@ def train_neural_aggregate(
     epochs: int,
     seeds: Sequence[int],
     experiment_log: list[dict[str, Any]],
+    persistence_dir: Path | None = None,
 ) -> tuple[ModelRun, list[dict[str, Any]], dict[str, list[dict[str, float]]]]:
     """Fit five declared seeds; aggregation is a reporting ensemble, not tuning."""
 
@@ -852,6 +853,20 @@ def train_neural_aggregate(
         experiment_log.append(log)
         test_by_seed[str(seed)] = _neural_probabilities(model, test_cases, vocabulary, settings, torch)
         calibration_by_seed[str(seed)] = _neural_probabilities(model, calibration_cases, vocabulary, settings, torch)
+        if persistence_dir is not None:
+            persistence_dir.mkdir(parents=True, exist_ok=True)
+            stem = persistence_dir / f"{kind}_seed_{seed}"
+            checkpoint = stem.with_suffix(".pt")
+            predictions = stem.with_suffix(".predictions.json")
+            torch.save(model.state_dict(), checkpoint)
+            _write_json(predictions, [{"case_id": case.case_id, "probabilities": row, "top3": _ranking(row)[:3]} for case, row in zip(test_cases, test_by_seed[str(seed)])])
+            restored = _make_neural_model(kind, vocabulary_size=len(vocabulary), settings=settings, torch=torch)
+            restored.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True)); restored.eval()
+            replay = _neural_probabilities(restored, test_cases[:1], vocabulary, settings, torch)[0]
+            if any(abs(replay[label] - test_by_seed[str(seed)][0][label]) > 1e-10 for label in vocabulary): raise RuntimeError("persisted neural checkpoint prediction mismatch")
+            meta = {"seed": seed, "training": log, "case_count": len(test_cases), "ordered_case_ids_sha256": sha256_json([case.case_id for case in test_cases]), "checkpoint_sha256": file_sha256(checkpoint), "predictions_sha256": file_sha256(predictions), "reload_verified": True}
+            _write_json(stem.with_suffix(".metadata.json"), meta)
+            stem.with_suffix(".complete").write_text(file_sha256(stem.with_suffix(".metadata.json")) + "\n", encoding="utf-8")
         total_training += float(log["training_seconds"])
         total_peak = max(total_peak, int(log["training_peak_bytes"]))
         total_parameters += int(log["parameter_count"])
@@ -1187,7 +1202,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         print(f"[offline-benchmark] selecting={kind}", flush=True)
         selected = select_neural_settings(kind, train_cases, selection_cases, vocabulary, seed=int(args.seeds[0]), experiment_log=experiment_log)
         neural_settings[kind] = selected
-        run, logs, values = train_neural_aggregate(kind, fit_cases, calibration_cases, test_cases, vocabulary, settings=selected["settings"], epochs=int(selected["selected_epoch"]), seeds=args.seeds, experiment_log=experiment_log)
+        run, logs, values = train_neural_aggregate(kind, fit_cases, calibration_cases, test_cases, vocabulary, settings=selected["settings"], epochs=int(selected["selected_epoch"]), seeds=args.seeds, experiment_log=experiment_log, persistence_dir=Path(args.output_dir) / "seed_runs")
         neural_runs.append(run); neural_seed_records[kind] = logs; neural_values[kind] = values
         checkpoint(f"03_neural_{kind}_seeds", {"selection": selected, "seed_logs": logs, "test_prediction_counts": {seed: len(rows) for seed, rows in values["test_by_seed"].items()}})
     models = [majority, first_order, production, interpolated, *neural_runs]
