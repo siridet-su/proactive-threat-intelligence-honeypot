@@ -858,13 +858,20 @@ def train_neural_aggregate(
             stem = persistence_dir / f"{kind}_seed_{seed}"
             checkpoint = stem.with_suffix(".pt")
             predictions = stem.with_suffix(".predictions.json")
+            model.eval()
             torch.save(model.state_dict(), checkpoint)
             _write_json(predictions, [{"case_id": case.case_id, "probabilities": row, "top3": _ranking(row)[:3]} for case, row in zip(test_cases, test_by_seed[str(seed)])])
             restored = _make_neural_model(kind, vocabulary_size=len(vocabulary), settings=settings, torch=torch)
             restored.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True)); restored.eval()
             replay = _neural_probabilities(restored, test_cases[:1], vocabulary, settings, torch)[0]
-            if any(abs(replay[label] - test_by_seed[str(seed)][0][label]) > 1e-10 for label in vocabulary): raise RuntimeError("persisted neural checkpoint prediction mismatch")
-            meta = {"seed": seed, "training": log, "case_count": len(test_cases), "ordered_case_ids_sha256": sha256_json([case.case_id for case in test_cases]), "checkpoint_sha256": file_sha256(checkpoint), "predictions_sha256": file_sha256(predictions), "reload_verified": True}
+            original = test_by_seed[str(seed)][0]
+            delta = {label: abs(replay[label] - original[label]) for label in vocabulary}
+            original_top3, replay_top3 = _ranking(original)[:3], _ranking(replay)[:3]
+            # CPU float32 kernels may differ at the final ulps after state
+            # serialization.  Labels/rankings must remain identical and the
+            # maximum vector delta is bounded well below a material score.
+            if max(delta.values(), default=0.0) > 1e-6 or original_top3 != replay_top3: raise RuntimeError("persisted neural checkpoint prediction mismatch")
+            meta = {"seed": seed, "training": log, "case_count": len(test_cases), "ordered_case_ids_sha256": sha256_json([case.case_id for case in test_cases]), "checkpoint_sha256": file_sha256(checkpoint), "predictions_sha256": file_sha256(predictions), "reload_verified": True, "replay": {"max_absolute_difference": max(delta.values(), default=0.0), "mean_absolute_difference": statistics.fmean(delta.values()), "original_top3": original_top3, "reloaded_top3": replay_top3, "model_eval": not model.training, "reloaded_eval": not restored.training}}
             _write_json(stem.with_suffix(".metadata.json"), meta)
             stem.with_suffix(".complete").write_text(file_sha256(stem.with_suffix(".metadata.json")) + "\n", encoding="utf-8")
         total_training += float(log["training_seconds"])
