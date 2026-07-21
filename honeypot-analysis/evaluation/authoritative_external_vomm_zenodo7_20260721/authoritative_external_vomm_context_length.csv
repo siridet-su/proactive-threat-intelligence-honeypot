@@ -1,0 +1,15 @@
+model_id,context_length,cases
+current_local_first_cascade,1,3553
+current_local_first_cascade,2,2729
+current_local_first_cascade,3,5953
+external_authoritative_abstain,1,3342
+external_authoritative_abstain,2,2777
+external_authoritative_abstain,3,6116
+external_then_heuristic,1,3342
+external_then_heuristic,2,2777
+external_then_heuristic,3,6116
+heuristic_only,0,12235
+local_shadow_only,0,77
+local_shadow_only,1,3524
+local_shadow_only,2,2699
+local_shadow_only,3,5935

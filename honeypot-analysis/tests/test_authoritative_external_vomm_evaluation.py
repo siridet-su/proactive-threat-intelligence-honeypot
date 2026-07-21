@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 
 from production.prediction.realtime_prediction import build_transition_model
+from production.prediction.external_vomm_artifact import (
+    build_external_vomm_artifact,
+    sha256_file,
+)
 from production.tools.evaluate_authoritative_external_vomm import (
     evaluate_authoritative_external_vomm,
     file_sha256,
@@ -101,6 +105,37 @@ def _write_fixture_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     return policy_path, artifact_path, payload_path
 
 
+def _write_manifest_bound_fixture_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict]:
+    policy_path, _legacy_artifact_path, payload_path = _write_fixture_inputs(tmp_path)
+    payloads = [json.loads(line) for line in payload_path.read_text(encoding="utf-8").splitlines()]
+    for payload in payloads:
+        payload["dataset_source"] = "unit-test:manifest-bound-external-corpus"
+    payload_path.write_text(
+        "".join(json.dumps(payload, sort_keys=True) + "\n" for payload in payloads),
+        encoding="utf-8",
+    )
+    artifact_path = tmp_path / "external-vomm.json"
+    manifest_path = tmp_path / "external-vomm.manifest.json"
+    built = build_external_vomm_artifact(
+        payload_path=payload_path,
+        artifact_path=artifact_path,
+        manifest_path=manifest_path,
+        artifact_version="unit-test-v1",
+        source_start="2026-01-01",
+        source_end="2026-01-08",
+        preprocessing={"prefix_max_length": 3, "transition_smoothing": 0.0, "min_transition_count": 1},
+        classification={
+            "sha256": "classification-fixture-sha",
+            "classifier": "deterministic fixture",
+            "securebert_checkpoint_id": "fixture-checkpoint",
+            "securebert_checkpoint_sha256": "checkpoint-fixture-sha",
+        },
+        trust_policy={"sha256": "trust-policy-fixture-sha"},
+        model_builder_commit="unit-test",
+    )
+    return policy_path, artifact_path, manifest_path, payload_path, built
+
+
 def test_artifact_validation_is_fail_closed_for_bad_identity_or_malformed_data(tmp_path: Path) -> None:
     artifact = _artifact()
     valid = validate_external_transition_artifact(
@@ -164,6 +199,9 @@ def test_exact_artifact_experiment_uses_identical_cases_and_writes_review_output
         "min_per_tactic_support": 1,
         "seed": 20260721,
         "memory_profile_case_limit": 250,
+        "external_only_authority": False,
+        "min_external_coverage": 0.8,
+        "max_all_case_regression": 0.15,
     }
     assert result["promotion_gate"]["status"] == "not_supported_for_production_change"
     assert "no_clean_local_production_chronological_evidence" in result["promotion_gate"]["reasons"]
@@ -212,3 +250,51 @@ def test_hash_mismatch_blocks_experiment_without_ranking(tmp_path: Path) -> None
     assert result["status"] == "blocked_invalid_external_artifact"
     assert "models" not in result
     assert "artifact_sha256_mismatch" in result["artifact"]["reasons"]
+
+
+def test_manifest_bound_external_only_experiment_requires_exact_dataset_membership(tmp_path: Path) -> None:
+    policy_path, artifact_path, manifest_path, payload_path, built = _write_manifest_bound_fixture_inputs(tmp_path)
+
+    result = evaluate_authoritative_external_vomm(
+        payload_path=str(payload_path),
+        policy_path=str(policy_path),
+        artifact_path=str(artifact_path),
+        manifest_path=str(manifest_path),
+        expected_artifact_sha256=sha256_file(artifact_path),
+        expected_model_id=built["artifact"]["model_id"],
+        expected_manifest_id=built["manifest"]["manifest_id"],
+        external_only_authority=True,
+        min_external_coverage=0.0,
+        max_all_case_regression=1.0,
+        window_count=2,
+        bootstrap_iterations=0,
+        min_per_tactic_support=1,
+    )
+
+    assert result["status"] == "evaluated_external_proxy_only"
+    assert result["artifact"]["manifest_bound"] is True
+    assert result["artifact"]["manifest_sha256"] == sha256_file(manifest_path)
+    assert result["exact_split_proof"]["valid"] is True
+    assert result["promotion_gate"]["architecture"] == "external_only_authority"
+    assert "no_clean_local_production_chronological_evidence" not in result["promotion_gate"]["reasons"]
+
+    changed = [json.loads(line) for line in payload_path.read_text(encoding="utf-8").splitlines()]
+    changed[-1]["session_id"] = "different-test-session"
+    payload_path.write_text(
+        "".join(json.dumps(payload, sort_keys=True) + "\n" for payload in changed),
+        encoding="utf-8",
+    )
+    blocked = evaluate_authoritative_external_vomm(
+        payload_path=str(payload_path),
+        policy_path=str(policy_path),
+        artifact_path=str(artifact_path),
+        manifest_path=str(manifest_path),
+        expected_artifact_sha256=sha256_file(artifact_path),
+        expected_model_id=built["artifact"]["model_id"],
+        expected_manifest_id=built["manifest"]["manifest_id"],
+        external_only_authority=True,
+        window_count=1,
+        bootstrap_iterations=0,
+    )
+    assert blocked["status"] == "blocked_manifest_evaluation_membership_mismatch"
+    assert "evaluation_test_membership_mismatch" in blocked["exact_split_proof"]["reasons"]

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from production.prediction.predictive_alerts import evaluate_predictive_alert
+from production.prediction.external_vomm_artifact import load_external_vomm_artifact
 from production.prediction.realtime_prediction import (
     RealtimePredictionEngine,
     build_transition_model,
@@ -192,8 +193,69 @@ def load_exact_external_artifact(
     *,
     expected_sha256: str = "",
     expected_model_id: str = "",
+    manifest_path: str | Path = "",
+    expected_manifest_id: str = "",
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
-    """Load one artifact and return an unavailable result instead of guessing."""
+    """Load one artifact and return an unavailable result instead of guessing.
+
+    Legacy comparisons can load an old stand-alone artifact.  An
+    external-only authority comparison supplies a companion manifest and uses
+    the production loader, which also proves that the model is bound to
+    non-overlapping whole-session partitions.
+    """
+
+    if manifest_path:
+        artifact, bound = load_external_vomm_artifact(
+            path,
+            manifest_path,
+            expected_artifact_sha256=expected_sha256,
+            expected_model_id=expected_model_id,
+            expected_manifest_id=expected_manifest_id,
+        )
+        candidate = Path(path)
+        manifest_candidate = Path(manifest_path)
+        legacy = validate_external_transition_artifact(
+            artifact,
+            actual_sha256=str(bound.get("actual_artifact_sha256") or ""),
+            expected_sha256=expected_sha256,
+            expected_model_id=expected_model_id,
+        )
+        reasons = list(dict.fromkeys([
+            *(bound.get("reasons") or []),
+            *(legacy.get("reasons") or []),
+        ]))
+        manifest = bound.get("manifest") if isinstance(bound.get("manifest"), dict) else {}
+        source_dataset = manifest.get("source_dataset") if isinstance(manifest.get("source_dataset"), dict) else {}
+        classification = manifest.get("classification") if isinstance(manifest.get("classification"), dict) else {}
+        validation = {
+            **legacy,
+            "status": "valid" if not reasons else "unavailable",
+            "valid": not reasons,
+            "reasons": reasons,
+            "path": str(candidate),
+            "manifest_path": str(manifest_candidate),
+            "artifact_size_bytes": candidate.stat().st_size if candidate.is_file() else 0,
+            "manifest_size_bytes": manifest_candidate.stat().st_size if manifest_candidate.is_file() else 0,
+            "actual_sha256": str(bound.get("actual_artifact_sha256") or ""),
+            "manifest_sha256": str(bound.get("manifest_sha256") or ""),
+            "manifest_id": str(bound.get("manifest_id") or ""),
+            "expected_manifest_id": expected_manifest_id,
+            "artifact_version": str(bound.get("artifact_version") or ""),
+            "manifest": manifest,
+            "manifest_bound": True,
+            # The immutable manifest is the training-member manifest in this
+            # contract: it contains all split membership digests and binds the
+            # model byte hash.  It is more specific than a path-based input
+            # listing and remains valid after deployment relocation.
+            "training_data_manifest_sha256": str(bound.get("manifest_sha256") or ""),
+            "dataset_handle": str(source_dataset.get("name") or ""),
+            "classifier": str(classification.get("classifier") or "manifest-recorded-classification"),
+            "classification_rule_policy_sha256": str(classification.get("sha256") or ""),
+            "securebert_checkpoint_sha256": str(classification.get("securebert_checkpoint_sha256") or ""),
+            "training_input_root": "manifest-bound-privacy-minimized-payload",
+            "source_type": str(artifact.get("source_type") or "external_cowrie_seed"),
+        }
+        return (artifact if validation["valid"] else {}), validation
 
     candidate = Path(path)
     if not candidate.exists():
@@ -226,7 +288,42 @@ def load_exact_external_artifact(
     )
     validation["path"] = str(candidate)
     validation["artifact_size_bytes"] = candidate.stat().st_size
+    validation["manifest_bound"] = False
     return (document if validation["valid"] else {}), validation
+
+
+def _membership_sha256(payloads: Sequence[Mapping[str, Any]]) -> str:
+    identifiers = sorted(str(item.get("session_id") or "").strip() for item in payloads)
+    return hashlib.sha256("\n".join(identifiers).encode("utf-8")).hexdigest()
+
+
+def _verify_manifest_evaluation_membership(
+    payloads: Sequence[Mapping[str, Any]],
+    split: Mapping[str, Sequence[Mapping[str, Any]]],
+    manifest: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Prove that the evaluator is using the exact split bound to the model."""
+
+    reasons: List[str] = []
+    partitions = manifest.get("partitions") if isinstance(manifest.get("partitions"), dict) else {}
+    details: Dict[str, Any] = {}
+    split_aliases = {"train": "train", "calibration": "validation", "test": "test"}
+    for split_name, manifest_name in split_aliases.items():
+        rows = list(split.get(split_name) or [])
+        expected = partitions.get(manifest_name) if isinstance(partitions.get(manifest_name), dict) else {}
+        actual_hash = _membership_sha256(rows)
+        actual_count = len(rows)
+        details[manifest_name] = {
+            "actual_session_count": actual_count,
+            "actual_membership_sha256": actual_hash,
+            "manifest_session_count": int(expected.get("session_count") or 0),
+            "manifest_membership_sha256": str(expected.get("membership_sha256") or ""),
+        }
+        if actual_count != int(expected.get("session_count") or 0):
+            reasons.append(f"evaluation_{manifest_name}_session_count_mismatch")
+        if actual_hash != str(expected.get("membership_sha256") or ""):
+            reasons.append(f"evaluation_{manifest_name}_membership_mismatch")
+    return {"valid": not reasons, "reasons": reasons, "partitions": details}
 
 
 def _policy_variant(
@@ -256,6 +353,13 @@ def _case_keys(cases: Sequence[EvaluationCase]) -> List[CaseKey]:
 
 
 def _ranking_probabilities(snapshot: Mapping[str, Any]) -> Dict[str, float]:
+    stored = snapshot.get("probabilities")
+    if isinstance(stored, dict):
+        return {
+            str(tactic): max(_number(score), 0.0)
+            for tactic, score in stored.items()
+            if str(tactic).strip() and _number(score) > 0.0
+        }
     raw: Dict[str, float] = {}
     for item in snapshot.get("final_ranking") or []:
         if not isinstance(item, dict):
@@ -272,6 +376,8 @@ def _snapshot_record(
     key: CaseKey,
     snapshot: Mapping[str, Any],
     latency_ms: float,
+    *,
+    alert_triggered: bool,
 ) -> Dict[str, Any]:
     ranking = [item for item in snapshot.get("final_ranking") or [] if isinstance(item, dict)]
     primary = snapshot.get("primary_transition") or {}
@@ -286,6 +392,9 @@ def _snapshot_record(
         context_length = 1
     else:
         context_length = 0
+    # Keep only normalized scores and scalar diagnostics.  The evaluator can
+    # otherwise retain hundreds of thousands of repeated provenance blocks,
+    # causing a memory failure before it can report a valid experiment.
     return {
         "case_id": key.text,
         "session_id": key.session_id,
@@ -306,7 +415,8 @@ def _snapshot_record(
         "transition_total": round(_number(source_metadata.get("transition_total", snapshot.get("transition_count"))), 6),
         "transition_support": round(_number(source_metadata.get("transition_support", snapshot.get("evidence_count"))), 6),
         "latency_ms": round(latency_ms, 6),
-        "snapshot": dict(snapshot),
+        "probabilities": _ranking_probabilities(snapshot),
+        "alert_triggered": bool(alert_triggered),
     }
 
 
@@ -362,9 +472,14 @@ def _run_model(
         start = time.perf_counter_ns()
         snapshot = engine.predict(case.features, event_id=f"architecture-eval:{model_id}:{key.text}")
         elapsed = (time.perf_counter_ns() - start) / 1_000_000
-        record = _snapshot_record(key, snapshot, elapsed)
+        record = _snapshot_record(
+            key,
+            snapshot,
+            elapsed,
+            alert_triggered=_alert_triggered(snapshot, {}),
+        )
         records.append(record)
-        probabilities[key.text] = _ranking_probabilities(snapshot)
+        probabilities[key.text] = dict(record["probabilities"])
         if index == memory_sample_limit:
             memory_after_current, memory_after_peak = tracemalloc.get_traced_memory()
             tracemalloc.stop()
@@ -578,10 +693,10 @@ def _abstention_comparison(
         },
         "alert_effect": {
             "external_abstain_triggered": sum(
-                _alert_triggered(item["snapshot"], {}) for item in abstaining
+                bool(item.get("alert_triggered")) for item in abstaining
             ),
             "external_then_heuristic_triggered": sum(
-                _alert_triggered(item["snapshot"], {}) for item in heuristic
+                bool(item.get("alert_triggered")) for item in heuristic
             ),
         },
         "guidance_effect": {
@@ -609,9 +724,12 @@ def _model_summary(row: Mapping[str, Any]) -> Dict[str, Any]:
         "abstention_rate": metrics.get("abstention_rate"),
         "all_case_accuracy": metrics.get("all_case_accuracy"),
         "selective_top1_accuracy": metrics.get("selective_top1_accuracy"),
+        "top3_accuracy": metrics.get("top3_accuracy"),
         "balanced_accuracy": metrics.get("balanced_accuracy"),
+        "macro_f1": metrics.get("macro_f1"),
         "mean_reciprocal_rank": metrics.get("mean_reciprocal_rank"),
         "normalized_multiclass_brier_score": metrics.get("normalized_multiclass_brier_score"),
+        "log_loss": metrics.get("log_loss"),
         "latency_p50_ms": latency.get("p50"),
         "latency_p95_ms": latency.get("p95"),
         "peak_memory_bytes": memory.get("peak_delta"),
@@ -624,17 +742,42 @@ def _promotion_gate(
     provenance_scope: str,
     windows: Sequence[Mapping[str, Any]],
     abstention: Mapping[str, Any],
+    external_only_authority: bool = False,
+    exact_split_proof: Mapping[str, Any] | None = None,
+    external_metrics: Mapping[str, Any] | None = None,
+    incumbent_metrics: Mapping[str, Any] | None = None,
+    min_external_coverage: float = 0.80,
+    max_all_case_regression: float = 0.15,
 ) -> Dict[str, Any]:
-    # The gate intentionally refuses to treat external-corpus proxy adaptation
-    # as local-deployment evidence.  No numeric performance threshold is chosen
-    # after viewing results; a future production promotion needs an independent
-    # pre-registered local dataset and decision threshold.
+    """Apply the pre-registered architecture gate.
+
+    Legacy use of the evaluator still refuses a local-authority promotion
+    without production-local evidence.  The external-only migration has a
+    different question: can a pinned, leakage-safe external artifact replace
+    the local authority?  It must not be blocked merely because the local
+    shadow has no production holdout; that limitation is recorded separately.
+    """
+
     reasons: List[str] = []
     if not artifact_validation.get("valid"):
         reasons.append("exact_external_artifact_is_not_valid")
     if not artifact_validation.get("training_data_manifest_sha256"):
         reasons.append("external_artifact_training_data_manifest_missing_no_overlap_proof")
-    if provenance_scope != "production_live_external_source":
+    if external_only_authority:
+        if not artifact_validation.get("manifest_bound"):
+            reasons.append("external_only_authority_requires_manifest_bound_artifact")
+        if not (exact_split_proof or {}).get("valid"):
+            reasons.append("evaluation_split_does_not_match_manifest_membership")
+        coverage = _number((external_metrics or {}).get("coverage"), -1.0)
+        if coverage < float(min_external_coverage):
+            reasons.append("external_abstention_coverage_below_predeclared_minimum")
+        external_accuracy = _number((external_metrics or {}).get("all_case_accuracy"), -1.0)
+        incumbent_accuracy = _number((incumbent_metrics or {}).get("all_case_accuracy"), -1.0)
+        if external_accuracy < 0.0 or incumbent_accuracy < 0.0:
+            reasons.append("missing_external_or_incumbent_all_case_accuracy")
+        elif incumbent_accuracy - external_accuracy > float(max_all_case_regression):
+            reasons.append("external_all_case_accuracy_materially_regresses_incumbent")
+    elif provenance_scope != "production_live_external_source":
         reasons.append("no_clean_local_production_chronological_evidence")
     if not windows:
         reasons.append("no_heldout_chronological_windows")
@@ -644,9 +787,20 @@ def _promotion_gate(
         "status": "supported_for_production_change" if not reasons else "not_supported_for_production_change",
         "reasons": reasons,
         "predeclared_rule": (
-            "Do not change production authority without a valid pinned artifact, leakage-safe "
-            "chronological evaluation, and clean production_live external-source evidence for "
-            "whether local authority provides repeatable benefit."
+            "For an external-only authority change: require a valid manifest-bound artifact, "
+            "exact non-overlapping held-out membership proof, chronological windows, at least "
+            f"{float(min_external_coverage):.2f} coverage, and no more than "
+            f"{float(max_all_case_regression):.2f} all-case Top-1 regression against the incumbent. "
+            "For a local-authority change: additionally require clean production_live external-source evidence."
+        ),
+        "architecture": "external_only_authority" if external_only_authority else "legacy_local_authority_comparison",
+        "thresholds": {
+            "min_external_coverage": float(min_external_coverage),
+            "max_all_case_regression": float(max_all_case_regression),
+        },
+        "local_holdout_limitation": (
+            "No production-local holdout is available; local scoring remains shadow/offline only."
+            if external_only_authority else ""
         ),
     }
 
@@ -809,8 +963,9 @@ def _write_csv(result: Mapping[str, Any], destination: Path) -> None:
     rows = list(result.get("model_summaries") or [])
     columns = [
         "model_id", "cases", "coverage", "abstention_rate", "all_case_accuracy",
-        "selective_top1_accuracy", "balanced_accuracy", "mean_reciprocal_rank",
-        "normalized_multiclass_brier_score", "latency_p50_ms", "latency_p95_ms", "peak_memory_bytes",
+        "selective_top1_accuracy", "top3_accuracy", "balanced_accuracy", "macro_f1",
+        "mean_reciprocal_rank", "normalized_multiclass_brier_score", "log_loss",
+        "latency_p50_ms", "latency_p95_ms", "peak_memory_bytes",
     ]
     with destination.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
@@ -836,6 +991,9 @@ def _write_detail_tables(result: Mapping[str, Any], destination: Path) -> List[s
                 "support": values.get("support"),
                 "reportable": values.get("reportable"),
                 "top1_accuracy": values.get("top1_accuracy"),
+                "precision": values.get("precision"),
+                "recall": values.get("recall"),
+                "f1": values.get("f1"),
                 "normalized_multiclass_brier_score": values.get("normalized_multiclass_brier_score"),
                 "mean_reciprocal_rank": values.get("mean_reciprocal_rank"),
             })
@@ -880,6 +1038,7 @@ def _write_markdown(result: Mapping[str, Any], destination: Path) -> None:
         f"- Evaluation schema: `{result.get('schema_version')}`",
         f"- Exact artifact: `{artifact.get('model_id')}`",
         f"- Artifact SHA-256: `{artifact.get('actual_sha256')}`",
+        f"- Manifest ID / SHA-256: `{artifact.get('manifest_id')}` / `{artifact.get('manifest_sha256')}`",
         f"- Dataset SHA-256: `{(result.get('dataset') or {}).get('sha256')}`",
         f"- Dataset sessions / held-out transition cases: `{dataset.get('sessions')}` / `{(dataset.get('transition_cases') or {}).get('test')}`",
         f"- Split: `{dataset.get('split_method')}`",
@@ -888,18 +1047,20 @@ def _write_markdown(result: Mapping[str, Any], destination: Path) -> None:
         f"- External training overlap proof: `{training_data.get('overlap_proof')}`",
         f"- Promotion gate: **{gate.get('status')}**",
         "",
-        "| Model | Coverage | All-case Top-1 | Selective Top-1 | Balanced Top-1 | Normalized Brier |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Model | Coverage | All-case Top-1 | Top-3 | Macro-F1 | Balanced Top-1 | Brier | Log loss |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in result.get("model_summaries") or []:
         lines.append(
-            "| {model_id} | {coverage:.4f} | {all_case_accuracy:.4f} | {selective_top1_accuracy:.4f} | {balanced_accuracy:.4f} | {normalized_multiclass_brier_score:.4f} |".format(
+            "| {model_id} | {coverage:.4f} | {all_case_accuracy:.4f} | {top3_accuracy:.4f} | {macro_f1:.4f} | {balanced_accuracy:.4f} | {normalized_multiclass_brier_score:.4f} | {log_loss:.4f} |".format(
                 model_id=item.get("model_id") or "",
                 coverage=float(item.get("coverage") or 0.0),
                 all_case_accuracy=float(item.get("all_case_accuracy") or 0.0),
-                selective_top1_accuracy=float(item.get("selective_top1_accuracy") or 0.0),
+                top3_accuracy=float(item.get("top3_accuracy") or 0.0),
+                macro_f1=float(item.get("macro_f1") or 0.0),
                 balanced_accuracy=float(item.get("balanced_accuracy") or 0.0),
                 normalized_multiclass_brier_score=float(item.get("normalized_multiclass_brier_score") or 0.0),
+                log_loss=float(item.get("log_loss") or 0.0),
             )
         )
     lines.extend(["", "## Gate reasons", ""])
@@ -911,7 +1072,7 @@ def _write_markdown(result: Mapping[str, Any], destination: Path) -> None:
         "",
         "- This is an offline external-corpus comparison. It does not change the production policy, artifact, service, alerting, or response-guidance authority.",
         "- The local scorer is a chronology-limited proxy trained on this external corpus; it is not evidence about the deployment-local model.",
-        "- An absent training-member manifest prevents proof that the frozen artifact and the held-out corpus do not overlap. The recorded result therefore cannot authorize a production architecture change.",
+        "- A manifest-bound run cryptographically verifies the exact evaluation memberships and artifact byte hash. A legacy stand-alone run cannot authorize an external-only production change.",
     ])
     destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -923,6 +1084,11 @@ def evaluate_authoritative_external_vomm(
     artifact_path: str,
     expected_artifact_sha256: str = "",
     expected_model_id: str = "",
+    manifest_path: str = "",
+    expected_manifest_id: str = "",
+    external_only_authority: bool = False,
+    min_external_coverage: float = 0.80,
+    max_all_case_regression: float = 0.15,
     window_count: int = DEFAULT_WINDOW_COUNT,
     bootstrap_iterations: int = DEFAULT_BOOTSTRAP_ITERATIONS,
     min_per_tactic_support: int = DEFAULT_MIN_PER_TACTIC_SUPPORT,
@@ -934,21 +1100,71 @@ def evaluate_authoritative_external_vomm(
         artifact_path,
         expected_sha256=expected_artifact_sha256,
         expected_model_id=expected_model_id,
+        manifest_path=manifest_path,
+        expected_manifest_id=expected_manifest_id,
     )
     policy = load_policy(policy_path)
     payloads = load_session_payloads(payload_path)
     split, split_method = split_session_payloads(payloads)
+    dataset_sha256 = file_sha256(payload_path)
+    exact_split_proof: Dict[str, Any] = {"valid": not external_only_authority, "reasons": []}
+    if external_only_authority:
+        manifest = validation.get("manifest") if isinstance(validation.get("manifest"), dict) else {}
+        exact_split_proof = _verify_manifest_evaluation_membership(payloads, split, manifest)
+        expected_dataset_sha256 = str(
+            ((manifest.get("source_dataset") or {}) if isinstance(manifest.get("source_dataset"), dict) else {}).get("sha256")
+            or ""
+        )
+        if dataset_sha256 != expected_dataset_sha256:
+            exact_split_proof = {
+                **exact_split_proof,
+                "valid": False,
+                "reasons": [
+                    *(exact_split_proof.get("reasons") or []),
+                    "evaluation_dataset_sha256_does_not_match_manifest",
+                ],
+                "actual_dataset_sha256": dataset_sha256,
+                "manifest_dataset_sha256": expected_dataset_sha256,
+            }
+        else:
+            exact_split_proof = {
+                **exact_split_proof,
+                "actual_dataset_sha256": dataset_sha256,
+                "manifest_dataset_sha256": expected_dataset_sha256,
+            }
     if not validation["valid"]:
         return {
             "schema_version": SCHEMA_VERSION,
             "status": "blocked_invalid_external_artifact",
             "artifact": validation,
-            "dataset": {"path": payload_path, "sha256": file_sha256(payload_path), "sessions": len(payloads)},
+            "dataset": {"path": payload_path, "sha256": dataset_sha256, "sessions": len(payloads)},
             "promotion_gate": _promotion_gate(
                 artifact_validation=validation,
                 provenance_scope="not_evaluated",
                 windows=[],
                 abstention={},
+                external_only_authority=external_only_authority,
+                exact_split_proof=exact_split_proof,
+                min_external_coverage=min_external_coverage,
+                max_all_case_regression=max_all_case_regression,
+            ),
+        }
+    if external_only_authority and not exact_split_proof.get("valid"):
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "status": "blocked_manifest_evaluation_membership_mismatch",
+            "artifact": validation,
+            "dataset": {"path": payload_path, "sha256": dataset_sha256, "sessions": len(payloads)},
+            "exact_split_proof": exact_split_proof,
+            "promotion_gate": _promotion_gate(
+                artifact_validation=validation,
+                provenance_scope="not_evaluated",
+                windows=[],
+                abstention={},
+                external_only_authority=True,
+                exact_split_proof=exact_split_proof,
+                min_external_coverage=min_external_coverage,
+                max_all_case_regression=max_all_case_regression,
             ),
         }
 
@@ -1005,7 +1221,7 @@ def evaluate_authoritative_external_vomm(
     # Aggregate metrics from stored rankings without recomputing a model.
     for offset, (model_id, records) in enumerate(sorted(aggregate.items())):
         probabilities = {
-            record["case_id"]: _ranking_probabilities(record["snapshot"])
+            record["case_id"]: _ranking_probabilities(record)
             for record in records
         }
         aggregate_cases = [
@@ -1057,7 +1273,7 @@ def evaluate_authoritative_external_vomm(
         "artifact": validation,
         "dataset": {
             "path": payload_path,
-            "sha256": file_sha256(payload_path),
+            "sha256": dataset_sha256,
             "sessions": len(payloads),
             "split_method": split_method,
             "split_sessions": {name: len(items) for name, items in split.items()},
@@ -1070,12 +1286,18 @@ def evaluate_authoritative_external_vomm(
             "min_per_tactic_support": min_per_tactic_support,
             "seed": seed,
             "memory_profile_case_limit": MEMORY_PROFILE_CASE_LIMIT,
+            "external_only_authority": bool(external_only_authority),
+            "min_external_coverage": float(min_external_coverage),
+            "max_all_case_regression": float(max_all_case_regression),
         },
         "reproducibility": {
             "policy_path": policy_path,
             "policy_sha256": file_sha256(policy_path),
             "artifact_path": artifact_path,
+            "manifest_path": manifest_path,
             "artifact_sha256": validation.get("actual_sha256"),
+            "manifest_sha256": validation.get("manifest_sha256"),
+            "manifest_id": validation.get("manifest_id"),
             "code_sha256": {
                 "realtime_prediction": file_sha256("production/prediction/realtime_prediction.py"),
                 "session_features": file_sha256("production/prediction/session_features.py"),
@@ -1108,6 +1330,7 @@ def evaluate_authoritative_external_vomm(
                 "all compared models receive identical case identities per window",
             ],
         },
+        "exact_split_proof": exact_split_proof,
         "windows": window_results,
         "models": aggregate_models,
         "model_summaries": [_model_summary(aggregate_models[key]) for key in sorted(aggregate_models)],
@@ -1132,6 +1355,12 @@ def evaluate_authoritative_external_vomm(
         provenance_scope="external_corpus_proxy_not_production_local",
         windows=window_results,
         abstention=result["abstention_vs_heuristic"],
+        external_only_authority=external_only_authority,
+        exact_split_proof=exact_split_proof,
+        external_metrics=aggregate_models["external_authoritative_abstain"]["metrics"],
+        incumbent_metrics=aggregate_models["current_local_first_cascade"]["metrics"],
+        min_external_coverage=min_external_coverage,
+        max_all_case_regression=max_all_case_regression,
     )
     return result
 
@@ -1163,6 +1392,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact", default=DEFAULT_MODEL_PATH)
     parser.add_argument("--expected-artifact-sha256", default="")
     parser.add_argument("--expected-model-id", default="")
+    parser.add_argument("--manifest", default="")
+    parser.add_argument("--expected-manifest-id", default="")
+    parser.add_argument(
+        "--external-only-authority",
+        action="store_true",
+        help="apply the manifest-bound external-only production gate rather than the legacy local-authority gate",
+    )
+    parser.add_argument("--min-external-coverage", type=float, default=0.80)
+    parser.add_argument("--max-all-case-regression", type=float, default=0.15)
     parser.add_argument("--windows", type=int, default=DEFAULT_WINDOW_COUNT)
     parser.add_argument("--bootstrap-iterations", type=int, default=DEFAULT_BOOTSTRAP_ITERATIONS)
     parser.add_argument("--min-per-tactic-support", type=int, default=DEFAULT_MIN_PER_TACTIC_SUPPORT)
@@ -1179,6 +1417,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         artifact_path=args.artifact,
         expected_artifact_sha256=args.expected_artifact_sha256,
         expected_model_id=args.expected_model_id,
+        manifest_path=args.manifest,
+        expected_manifest_id=args.expected_manifest_id,
+        external_only_authority=bool(args.external_only_authority),
+        min_external_coverage=max(min(float(args.min_external_coverage), 1.0), 0.0),
+        max_all_case_regression=max(float(args.max_all_case_regression), 0.0),
         window_count=max(int(args.windows), 1),
         bootstrap_iterations=max(int(args.bootstrap_iterations), 0),
         min_per_tactic_support=max(int(args.min_per_tactic_support), 1),

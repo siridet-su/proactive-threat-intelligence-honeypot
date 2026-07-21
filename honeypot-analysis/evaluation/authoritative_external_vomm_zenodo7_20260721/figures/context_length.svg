@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560">
+<rect width="100%" height="100%" fill="white"/>
+<text x="90" y="42" font-family="Arial" font-size="24" font-weight="bold">External VOMM context-length use</text>
+<text x="22" y="280.0" font-family="Arial" font-size="14" transform="rotate(-90 22 280.0)">cases</text>
+<line x1="90" y1="470" x2="870" y2="470" stroke="#334155"/>
+<line x1="90" y1="90" x2="90" y2="470" stroke="#334155"/>
+<rect x="131.60" y="262.35" width="176.80" height="207.65" fill="#2563eb"/>
+<text x="220.00" y="254.35" text-anchor="middle" font-family="Arial" font-size="12">3342.000</text>
+<text x="220.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">1</text>
+<rect x="391.60" y="297.46" width="176.80" height="172.54" fill="#2563eb"/>
+<text x="480.00" y="289.46" text-anchor="middle" font-family="Arial" font-size="12">2777.000</text>
+<text x="480.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">2</text>
+<rect x="651.60" y="90.00" width="176.80" height="380.00" fill="#2563eb"/>
+<text x="740.00" y="82.00" text-anchor="middle" font-family="Arial" font-size="12">6116.000</text>
+<text x="740.00" y="492" text-anchor="middle" font-family="Arial" font-size="11">3</text>
+</svg>

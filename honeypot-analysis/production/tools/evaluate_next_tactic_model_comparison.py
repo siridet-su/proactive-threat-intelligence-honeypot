@@ -13,6 +13,7 @@ import argparse
 import csv
 import importlib.util
 import json
+import math
 import random
 from collections import Counter, defaultdict
 from copy import deepcopy
@@ -722,6 +723,14 @@ def _case_result(
     predicted = [str(item["tactic"]) for item in ranking]
     rank = predicted.index(case.actual) + 1 if case.actual in predicted else 0
     brier_score = _brier_score(ranking, case.actual, vocabulary)
+    actual_probability = next(
+        (
+            max(float(item.get("score") or 0.0), 0.0)
+            for item in ranking
+            if str(item.get("tactic") or "") == case.actual
+        ),
+        0.0,
+    )
     return {
         "session_id": case.session_id,
         "actual": case.actual,
@@ -730,6 +739,7 @@ def _case_result(
         "covered": bool(predicted),
         "brier_score": brier_score,
         "normalized_multiclass_brier_score": brier_score / 2.0,
+        "log_loss": -math.log(max(actual_probability, 1e-15)),
     }
 
 
@@ -790,6 +800,18 @@ def _metric_core(
             if support
             else None
         )
+        true_positive = sum(int(item.get("rank") or 0) == 1 for item in items)
+        predicted_positive = sum(
+            bool(item.get("predicted")) and str(item["predicted"][0]) == tactic
+            for item in results
+        )
+        precision = true_positive / predicted_positive if predicted_positive else None
+        recall = true_positive / support if support else None
+        f1 = (
+            2.0 * precision * recall / (precision + recall)
+            if precision is not None and recall is not None and precision + recall > 0.0
+            else 0.0 if precision is not None and recall is not None else None
+        )
         if descriptive_top1 is not None:
             observed_top1.append(descriptive_top1)
         if enough_support and descriptive_top1 is not None:
@@ -811,6 +833,9 @@ def _metric_core(
                 if enough_support and descriptive_top1 is not None
                 else None
             ),
+            "precision": round(precision, 6) if enough_support and precision is not None else None,
+            "recall": round(recall, 6) if enough_support and recall is not None else None,
+            "f1": round(f1, 6) if enough_support and f1 is not None else None,
             "mean_reciprocal_rank": (
                 round(descriptive_mrr, 6)
                 if enough_support and descriptive_mrr is not None
@@ -835,6 +860,9 @@ def _metric_core(
                         descriptive_normalized_brier,
                         6,
                     ),
+                    "precision": round(precision, 6) if precision is not None else None,
+                    "recall": round(recall, 6) if recall is not None else None,
+                    "f1": round(f1, 6) if f1 is not None else None,
                 }
                 if support and not enough_support
                 else None
@@ -847,14 +875,34 @@ def _metric_core(
     supported_macro_top1 = (
         sum(sufficient_top1) / len(sufficient_top1) if sufficient_top1 else None
     )
+    observed_f1 = [
+        float(
+            values.get("f1")
+            if values.get("f1") is not None
+            else (values.get("descriptive_only") or {}).get("f1")
+        )
+        for values in per_tactic.values()
+        if values.get("f1") is not None
+        or (values.get("descriptive_only") or {}).get("f1") is not None
+    ]
+    sufficient_f1 = [
+        float(values.get("f1"))
+        for values in per_tactic.values()
+        if values.get("f1") is not None
+    ]
     return {
         "evaluated_examples": total,
         "covered_examples": len(covered),
         "metric_tactic_vocabulary": tactics,
         "top1_accuracy": round(top1_hits / total, 6) if total else None,
         "all_case_accuracy": round(top1_hits / total, 6) if total else None,
+        # `top3_accuracy_secondary` was the original public field.  Retain it
+        # for readers of prior evaluations while exposing the canonical metric
+        # name used by the external-only evaluation contract.
+        "top3_accuracy": round(top3_hits / total, 6) if total else None,
         "top3_accuracy_secondary": round(top3_hits / total, 6) if total else None,
         "mean_reciprocal_rank": round(reciprocal / total, 6) if total else None,
+        "log_loss": round(sum(float(item["log_loss"]) for item in results) / total, 6) if total else None,
         "brier_score": round(sum(float(item["brier_score"]) for item in results) / total, 6) if total else None,
         "normalized_multiclass_brier_score": (
             round(
@@ -880,6 +928,12 @@ def _metric_core(
         ),
         "macro_recall": (
             round(macro_top1, 6) if macro_top1 is not None else None
+        ),
+        "macro_f1": round(sum(observed_f1) / len(observed_f1), 6) if observed_f1 else None,
+        "macro_f1_sufficient_support": (
+            round(sum(sufficient_f1) / len(sufficient_f1), 6)
+            if sufficient_f1
+            else None
         ),
         "macro_top1_accuracy_sufficient_support": (
             round(supported_macro_top1, 6)
@@ -922,10 +976,14 @@ def _bootstrap_by_session(
     session_ids = sorted(grouped)
     fields = (
         "top1_accuracy",
+        "top3_accuracy",
+        "top3_accuracy_secondary",
         "mean_reciprocal_rank",
+        "log_loss",
         "brier_score",
         "normalized_multiclass_brier_score",
         "macro_top1_accuracy",
+        "macro_f1",
         "coverage",
         "selective_top1_accuracy",
     )

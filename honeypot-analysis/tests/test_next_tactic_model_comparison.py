@@ -264,8 +264,10 @@ def test_abstention_counts_as_all_case_failure_but_not_selective_failure() -> No
     assert metrics["top1_accuracy"] == 0.5
     assert metrics["all_case_accuracy"] == 0.5
     assert metrics["selective_top1_accuracy"] == 1.0
+    assert metrics["top3_accuracy"] == 0.5
     assert metrics["brier_score"] == 0.5
     assert metrics["normalized_multiclass_brier_score"] == 0.25
+    assert metrics["log_loss"] > 0.0
 
 
 def test_macro_and_per_tactic_metrics_flag_low_and_zero_support() -> None:
@@ -307,8 +309,12 @@ def test_macro_and_per_tactic_metrics_flag_low_and_zero_support() -> None:
     assert metrics["macro_top1_accuracy"] == 0.5
     assert metrics["balanced_accuracy"] == 0.5
     assert metrics["macro_recall"] == 0.5
+    assert metrics["macro_f1"] is not None
     assert metrics["macro_top1_accuracy_sufficient_support"] == 0.5
     assert metrics["per_tactic"]["execution"]["top1_accuracy"] == 0.5
+    assert metrics["per_tactic"]["execution"]["precision"] == 0.5
+    assert metrics["per_tactic"]["execution"]["recall"] == 0.5
+    assert metrics["per_tactic"]["execution"]["f1"] == 0.5
     assert metrics["per_tactic"]["execution"]["mean_reciprocal_rank"] == 0.5
     assert metrics["per_tactic"]["persistence"]["top1_accuracy"] is None
     assert metrics["per_tactic"]["persistence"]["descriptive_only"][
