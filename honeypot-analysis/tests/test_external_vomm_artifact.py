@@ -64,8 +64,8 @@ def test_manifest_bound_artifact_is_deterministic_and_excludes_test_partition(tm
     second = _build(tmp_path, "second")
 
     assert first["artifact_sha256"] == second["artifact_sha256"]
-    assert first["manifest"]["manifest_id"] == second["manifest"]["manifest_id"]
-    assert first["manifest"]["artifact"]["sha256"] == second["manifest"]["artifact"]["sha256"]
+    assert first["manifest_sha256"] == second["manifest_sha256"]
+    assert first["manifest"] == second["manifest"]
     assert first["manifest"]["partition_intersections"] == {
         "all_empty": True,
         "counts": {

@@ -337,7 +337,6 @@ def build_external_vomm_artifact(
         **manifest_base,
         "manifest_id": manifest_id,
         "artifact": {
-            "path": str(artifact_file),
             "sha256": artifact_sha256,
             "model_id": artifact["model_id"],
             "schema_version": artifact["schema_version"],
