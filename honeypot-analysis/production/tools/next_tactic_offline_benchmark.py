@@ -1179,7 +1179,10 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     test_cases = make_cases(split["test"])
     if not all((train_cases, selection_cases, calibration_cases, test_cases)):
         raise ValueError("each benchmark role must contain at least one next-tactic case")
-    checkpoint_dir = Path(getattr(args, "checkpoint_dir", "") or args.output_dir) / "stages"
+    # The CLI always provides ``output_dir``.  Keep the programmatic helper
+    # backward compatible with callers that predate staged-output support.
+    output_dir = Path(getattr(args, "output_dir", "") or Path(args.payload).with_name("benchmark_output"))
+    checkpoint_dir = Path(getattr(args, "checkpoint_dir", "") or output_dir) / "stages"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     def checkpoint(name: str, value: Any) -> None:
         _write_json(checkpoint_dir / f"{name}.json", value)
@@ -1209,7 +1212,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         print(f"[offline-benchmark] selecting={kind}", flush=True)
         selected = select_neural_settings(kind, train_cases, selection_cases, vocabulary, seed=int(args.seeds[0]), experiment_log=experiment_log)
         neural_settings[kind] = selected
-        run, logs, values = train_neural_aggregate(kind, fit_cases, calibration_cases, test_cases, vocabulary, settings=selected["settings"], epochs=int(selected["selected_epoch"]), seeds=args.seeds, experiment_log=experiment_log, persistence_dir=Path(args.output_dir) / "seed_runs")
+        run, logs, values = train_neural_aggregate(kind, fit_cases, calibration_cases, test_cases, vocabulary, settings=selected["settings"], epochs=int(selected["selected_epoch"]), seeds=args.seeds, experiment_log=experiment_log, persistence_dir=output_dir / "seed_runs")
         neural_runs.append(run); neural_seed_records[kind] = logs; neural_values[kind] = values
         checkpoint(f"03_neural_{kind}_seeds", {"selection": selected, "seed_logs": logs, "test_prediction_counts": {seed: len(rows) for seed, rows in values["test_by_seed"].items()}})
     models = [majority, first_order, production, interpolated, *neural_runs]
