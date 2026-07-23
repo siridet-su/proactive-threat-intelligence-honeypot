@@ -10,7 +10,7 @@
     "consecutive_equal_tactic_sets": "collapse_with_run_length",
     "maximum_sequence_length": 8,
     "truncation": "retain_most_recent_phases",
-    "padding": "left_padding_reserved_for_tensor_adapter"
+    "padding": "left_zero_padding_with_attention_mask"
   },
   "terminal_outcome": "session_end_no_further_trusted_behavior",
   "features": {
