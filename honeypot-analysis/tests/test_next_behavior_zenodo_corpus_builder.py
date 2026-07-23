@@ -326,7 +326,7 @@ def _frozen_classifier_manifest() -> dict:
             "rule_policy_sha256": "a" * 64,
             "trust_policy_sha256": "b" * 64,
             "mitre_cache_path": "mitre.json",
-            "mitre_cache_sha256": "d" * 64,
+            "mitre_cache_sha256": hashlib.sha256(b"mitre\n").hexdigest(),
             "drop_rule_securebert_disagreements": True,
         },
     }
@@ -368,6 +368,7 @@ def _ingest_complete_fixture(
     )
     label_adapter.parent.mkdir(parents=True)
     label_adapter.write_text("# fixture\n", encoding="utf-8")
+    (tmp_path / "mitre.json").write_bytes(b"mitre\n")
     return (
         raw_directory,
         manifest_path,
@@ -440,6 +441,15 @@ def test_classification_and_safe_build_preserve_causal_context_and_privacy(
     ) = _ingest_complete_fixture(tmp_path)
     database_path = tmp_path / "private/sessions.sqlite"
     _patch_classifier_dependencies(monkeypatch)
+    database = open_private_database(database_path)
+    database.execute(
+        """
+        INSERT INTO command_labels(command, labels_json, unrepresented_json)
+        VALUES ('interrupted partial row', '[]', '{}')
+        """
+    )
+    database.commit()
+    database.close()
 
     classification = classify_private_commands(
         source_manifest_path=source_manifest_path,

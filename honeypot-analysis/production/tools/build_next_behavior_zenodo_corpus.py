@@ -696,9 +696,11 @@ def classify_private_commands(
         if int(
             database.execute("SELECT COUNT(*) FROM command_labels").fetchone()[0]
         ):
-            raise NextBehaviorCorpusBuildError(
-                "unreceipted command classifications already exist"
-            )
+            # A stage receipt is written only after every command is present.
+            # Rows without that receipt are necessarily an interrupted build
+            # and cannot be resumed because fragment predictions are in-memory.
+            database.execute("DELETE FROM command_labels")
+            database.commit()
 
         commands = [
             str(row[0])
@@ -750,10 +752,20 @@ def classify_private_commands(
             model_predictions.setdefault(fragment, (None, 0.0))
 
         policy = classifier_manifest["classification_policy"]
+        mitre_cache_path = repository_root / policy["mitre_cache_path"]
+        if _sha256_file(mitre_cache_path) != policy["mitre_cache_sha256"]:
+            raise NextBehaviorCorpusBuildError(
+                "MITRE cache changed before classifier normalization"
+            )
         mitre_database = load_mitre_attack_db(
-            cache_path=str(repository_root / policy["mitre_cache_path"]),
+            cache_path=str(mitre_cache_path),
             silent=True,
+            allow_network_refresh=False,
         )
+        if _sha256_file(mitre_cache_path) != policy["mitre_cache_sha256"]:
+            raise NextBehaviorCorpusBuildError(
+                "MITRE cache changed during classifier normalization"
+            )
         classifier = NotebookParityClassifier(
             bert_fn=lambda command: model_predictions.get(command, (None, 0.0)),
             mitre_db=mitre_database,
