@@ -52,7 +52,7 @@
     "partition_role": "selection",
     "minimum_targets": 30,
     "minimum_independent_target_sessions": 30,
-    "primary_metric": "session_clustered_macro_f1_reportable_tactics_plus_terminal",
+    "primary_metric": "macro_f1_reportable_tactics_plus_terminal_with_whole_session_cluster_bootstrap",
     "tie_breakers": [
       "session_clustered_balanced_accuracy",
       "lower_worst_reportable_class_recall_regression_vs_hard_backoff_vomm",

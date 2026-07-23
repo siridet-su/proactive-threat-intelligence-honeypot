@@ -32,6 +32,9 @@ def test_repository_policy_freezes_all_pre_test_choices() -> None:
         "raw_model_scores_not_probabilities"
     )
     assert policy["selection"]["test_metrics_used"] is False
+    assert policy["selection"]["primary_metric"].endswith(
+        "with_whole_session_cluster_bootstrap"
+    )
     assert policy["calibration"]["class_specific_mapping_allowed"] is False
     assert policy["abstention"]["fallback_model"] is None
     assert policy["authority"]["production_change_allowed"] is False

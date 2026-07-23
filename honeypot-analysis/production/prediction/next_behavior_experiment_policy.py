@@ -198,7 +198,10 @@ def require_valid_experiment_policy(value: Any) -> Dict[str, Any]:
         or selection["minimum_targets"] != 30
         or selection["minimum_independent_target_sessions"] != 30
         or selection["primary_metric"]
-        != "session_clustered_macro_f1_reportable_tactics_plus_terminal"
+        != (
+            "macro_f1_reportable_tactics_plus_terminal_with_"
+            "whole_session_cluster_bootstrap"
+        )
         or not _exact_list(
             selection["tie_breakers"],
             DECLARED_TIE_BREAKERS,
