@@ -1,0 +1,110 @@
+{
+  "schema_version": "next_behavior_experiment_policy.v1",
+  "policy_id": "corrected_target_small_causal_transformer_20260723.v1",
+  "target_contract_id": "next_distinct_command_behavior_phase_or_session_end.v1",
+  "model_family": "small_causal_transformer",
+  "architecture": {
+    "causal_layers": 1,
+    "d_model": 16,
+    "feedforward_dimension": 32,
+    "attention_heads": 4,
+    "dropout": 0.1,
+    "maximum_sequence_length": 8,
+    "activation": "gelu",
+    "batch_first": true,
+    "norm_first": false,
+    "phase_readout": "last_unmasked_phase",
+    "tactic_objective": "independent_multilabel_logits",
+    "terminal_objective": "independent_binary_logit",
+    "device": "cpu"
+  },
+  "training": {
+    "seeds": [
+      20260721,
+      20260722,
+      20260723,
+      20260724,
+      20260725
+    ],
+    "epochs": 6,
+    "batch_size": 2048,
+    "optimizer": "adam",
+    "learning_rate": 0.003,
+    "weight_decay": 0.0,
+    "shuffle_each_epoch": true,
+    "deterministic_algorithms": true,
+    "device": "cpu",
+    "tactic_loss": "binary_cross_entropy_with_logits_mean",
+    "terminal_loss": "binary_cross_entropy_with_logits_mean",
+    "combined_loss": "tactic_loss_plus_terminal_loss",
+    "early_stopping": false,
+    "feature_ablation_search": false
+  },
+  "prediction_decision": {
+    "score_semantics": "raw_model_scores_not_probabilities",
+    "terminal_rule": "terminal_logit_greater_than_or_equal_to_zero",
+    "tactic_rule": "each_tactic_logit_greater_than_or_equal_to_zero",
+    "empty_nonterminal_rule": "select_highest_ranked_tactic",
+    "ranking_rule": "descending_raw_logit_then_lexical_tactic",
+    "prediction_set_threshold_source": "fixed_before_model_fitting"
+  },
+  "selection": {
+    "partition_role": "selection",
+    "minimum_targets": 30,
+    "minimum_independent_target_sessions": 30,
+    "primary_metric": "session_clustered_macro_f1_reportable_tactics_plus_terminal",
+    "tie_breakers": [
+      "session_clustered_balanced_accuracy",
+      "lower_worst_reportable_class_recall_regression_vs_hard_backoff_vomm",
+      "terminal_f1",
+      "lower_p95_cpu_single_case_latency",
+      "lower_seed"
+    ],
+    "high_consequence_tactics": [
+      "execution"
+    ],
+    "maximum_high_consequence_recall_regression": 0.1,
+    "reject_reportable_class_zero_recall_collapse": true,
+    "test_metrics_used": false
+  },
+  "calibration": {
+    "partition_role": "calibration",
+    "method": "global_scalar_temperature_sigmoid.v1",
+    "tactic_mapping": "one_positive_global_temperature",
+    "terminal_mapping": "one_positive_global_temperature",
+    "class_specific_mapping_allowed": false,
+    "changes_ranking": false,
+    "changes_prediction_set": false
+  },
+  "abstention": {
+    "model_unavailable": true,
+    "schema_or_hash_mismatch": true,
+    "missing_required_features": true,
+    "uncertainty_threshold": null,
+    "fallback_model": null
+  },
+  "baselines": {
+    "families": [
+      "majority_terminal_prevalence",
+      "first_order_phase_state_markov",
+      "hard_backoff_vomm",
+      "interpolated_vomm"
+    ],
+    "maximum_order": 8,
+    "include_zero_order": false,
+    "interpolation_decay": 0.5,
+    "same_training_membership_required": true
+  },
+  "runtime_budgets": {
+    "device": "cpu",
+    "maximum_checkpoint_bytes": 10485760,
+    "maximum_checkpoint_load_seconds": 5.0,
+    "maximum_p95_single_case_latency_ms": 50.0,
+    "maximum_process_rss_delta_bytes": 268435456
+  },
+  "authority": {
+    "offline_experiment_only": true,
+    "production_change_allowed": false,
+    "prediction_can_authorize_alerts_guidance_recommendations_or_actions": false
+  }
+}
