@@ -29,7 +29,10 @@ PREPROCESSING_PATH = ROOT / "configs" / "next_behavior_preprocessing.v1.json"
 def _members() -> list[dict]:
     return [
         {
-            "member_id": f"member-{index}",
+            "member_id": (
+                "nbmember_"
+                + hashlib.sha256(f"member-{index}".encode()).hexdigest()
+            ),
             "sha256": hashlib.sha256(f"member-{index}".encode()).hexdigest(),
             "chronological_order": index,
             "collection_start": f"2026-01-{index:02d}T00:00:00Z",
@@ -43,9 +46,19 @@ def _session(member: dict, index: int) -> dict:
     policy_sha = hashlib.sha256(b"policy").hexdigest()
 
     def group(group_index: int, tactic: str) -> dict:
-        evidence_ref = f"evidence-{index}-{group_index}"
+        evidence_ref = (
+            "nbevidence_"
+            + hashlib.sha256(
+                f"evidence-{index}-{group_index}".encode()
+            ).hexdigest()
+        )
         return {
-            "group_id": f"group-{index}-{group_index}",
+            "group_id": (
+                "nbgroup_"
+                + hashlib.sha256(
+                    f"group-{index}-{group_index}".encode()
+                ).hexdigest()
+            ),
             "event_order": group_index,
             "relative_time_ms": (group_index - 1) * 1000,
             "tactics": [tactic],
@@ -58,6 +71,7 @@ def _session(member: dict, index: int) -> dict:
                     "source": "reviewed_rule",
                     "trust_tier": "trusted_observation",
                     "policy_sha256": policy_sha,
+                    "trust_policy_sha256": policy_sha,
                     "checkpoint_sha256": "",
                     "confidence": 1.0,
                     "confidence_bucket": "high",
@@ -75,7 +89,10 @@ def _session(member: dict, index: int) -> dict:
 
     return {
         "schema_version": SESSION_SCHEMA_VERSION,
-        "session_id": f"session-{index}",
+        "session_id": (
+            "nbsession_"
+            + hashlib.sha256(f"session-{index}".encode()).hexdigest()
+        ),
         "source_member_id": member["member_id"],
         "source_member_sha256": member["sha256"],
         "protocol": "ssh",
@@ -89,6 +106,10 @@ def _session(member: dict, index: int) -> dict:
 
 def _records(members: list[dict]) -> list[dict]:
     return [_session(member, index) for index, member in enumerate(members, 1)]
+
+
+def _session_id(index: int) -> str:
+    return "nbsession_" + hashlib.sha256(f"session-{index}".encode()).hexdigest()
 
 
 def _manifest(records: list[dict], members: list[dict], **kwargs) -> dict:
@@ -124,7 +145,7 @@ def test_seven_member_roles_are_chronological_and_frozen() -> None:
 
     roles = assign_seven_member_roles(members)
 
-    assert [roles[f"member-{index}"] for index in range(1, 8)] == [
+    assert [roles[_members()[index - 1]["member_id"]] for index in range(1, 8)] == [
         "train",
         "train",
         "train",
@@ -186,7 +207,7 @@ def test_historical_membership_guard_rejects_any_overlap() -> None:
         _manifest(
             records,
             members,
-            forbidden_historical_session_ids={"session-7", "historical-only"},
+            forbidden_historical_session_ids={_session_id(7), "historical-only"},
         )
 
     manifest = _manifest(
@@ -202,10 +223,10 @@ def test_historical_membership_guard_rejects_any_overlap() -> None:
 @pytest.mark.parametrize(
     ("purpose", "expected_session"),
     [
-        ("fit_model", "session-1"),
-        ("select_model", "session-5"),
-        ("fit_calibration", "session-6"),
-        ("final_evaluation", "session-7"),
+        ("fit_model", _session_id(1)),
+        ("select_model", _session_id(5)),
+        ("fit_calibration", _session_id(6)),
+        ("final_evaluation", _session_id(7)),
     ],
 )
 def test_purpose_scoped_loader_exposes_only_its_role(
@@ -231,8 +252,8 @@ def test_training_and_selection_cannot_load_final_test() -> None:
     train = records_for_purpose(records, members, purpose="fit_model")
     selection = records_for_purpose(records, members, purpose="select_model")
 
-    assert "session-7" not in {record["session_id"] for record in train}
-    assert "session-7" not in {record["session_id"] for record in selection}
+    assert _session_id(7) not in {record["session_id"] for record in train}
+    assert _session_id(7) not in {record["session_id"] for record in selection}
     with pytest.raises(NextBehaviorPartitionError, match="unknown"):
         records_for_purpose(records, members, purpose="train_and_test")
 

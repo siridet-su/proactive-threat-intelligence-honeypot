@@ -73,11 +73,15 @@ def assign_seven_member_roles(
                 f"source_members[{index}] must be an object"
             )
         unknown = set(member) - {
+            "schema_version",
             "member_id",
             "sha256",
+            "byte_size",
             "chronological_order",
             "collection_start",
             "collection_end",
+            "pseudonymization_scheme",
+            "pseudonymization_key_id",
         }
         if unknown:
             raise NextBehaviorPartitionError(

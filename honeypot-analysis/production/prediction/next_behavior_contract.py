@@ -8,6 +8,7 @@ authority.
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from math import isfinite
 from typing import Any, Dict, Iterable, List, Mapping
@@ -28,7 +29,38 @@ TRUSTED_LABEL_SOURCES = frozenset(
 )
 TRUSTED_TIER = "trusted_observation"
 AUDIT_ONLY_TIERS = frozenset({"audit_only_candidate", "excluded"})
-CONFIDENCE_BUCKETS = frozenset({"high", "medium", "not_applicable"})
+CONFIDENCE_BUCKETS = frozenset({"high", "medium", "low", "not_applicable"})
+AGREEMENT_STATUSES = frozenset(
+    {"rule_only", "model_only", "agreed", "disagreed", "unreviewed", "emergency"}
+)
+AUDIT_REASON_CODES = frozenset(
+    {
+        "below_trusted_threshold",
+        "unresolved_conflict",
+        "emergency_rule",
+        "unreviewed_rule",
+        "malformed_label",
+        "missing_provenance",
+    }
+)
+TACTIC_VOCABULARY = frozenset(
+    {
+        "reconnaissance",
+        "resource-development",
+        "initial-access",
+        "execution",
+        "persistence",
+        "privilege-escalation",
+        "defense-evasion",
+        "credential-access",
+        "discovery",
+        "lateral-movement",
+        "collection",
+        "command-and-control",
+        "exfiltration",
+        "impact",
+    }
+)
 LOGIN_OUTCOMES = frozenset({"success", "failed", "unknown"})
 COMMAND_COUNT_BUCKETS = frozenset({"0", "1", "2-5", "6-20", "21+"})
 SESSION_AGE_BUCKETS = frozenset(
@@ -64,6 +96,8 @@ _SESSION_FIELDS = frozenset(
         "status",
         "configuration_id",
         "template_family_id",
+        "pseudonymization_key_id",
+        "audit_summary",
         "observation_groups",
     }
 )
@@ -95,6 +129,7 @@ _PROVENANCE_FIELDS = frozenset(
         "source",
         "trust_tier",
         "policy_sha256",
+        "trust_policy_sha256",
         "checkpoint_sha256",
         "confidence",
         "confidence_bucket",
@@ -103,12 +138,18 @@ _PROVENANCE_FIELDS = frozenset(
     }
 )
 _AUDIT_PROVENANCE_FIELDS = _PROVENANCE_FIELDS | frozenset({"exclusion_reason"})
+_AUDIT_SUMMARY_FIELDS = frozenset({"total", "by_reason"})
 
 LEGACY_LABEL_SOURCE_MAP = {
     "rule": "reviewed_rule",
     "both": "rule_model_agreement",
     "model": "securebert",
 }
+_TECHNIQUE_ID = re.compile(r"^T[0-9]{4}(?:\.[0-9]{3})?$")
+_PSEUDONYMOUS_ID = re.compile(
+    r"^nb(?P<kind>member|session|group|evidence|configuration|template_family)_"
+    r"[0-9a-f]{64}$"
+)
 
 
 class NextBehaviorContractError(ValueError):
@@ -126,6 +167,11 @@ def _unique_sorted(values: Iterable[Any]) -> List[str]:
 def _is_sha256(value: Any) -> bool:
     text = _clean(value).lower()
     return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
+
+
+def _is_pseudonymous_id(value: Any, kind: str) -> bool:
+    match = _PSEUDONYMOUS_ID.fullmatch(_clean(value))
+    return bool(match and match.group("kind") == kind)
 
 
 def _strict_string_list(value: Any) -> List[str] | None:
@@ -211,6 +257,8 @@ def _validate_provenance(
             errors.append(f"{path}.trust_tier must be {TRUSTED_TIER}")
     if not _is_sha256(value.get("policy_sha256")):
         errors.append(f"{path}.policy_sha256 must be a SHA-256 digest")
+    if not _is_sha256(value.get("trust_policy_sha256")):
+        errors.append(f"{path}.trust_policy_sha256 must be a SHA-256 digest")
     if source in {"securebert", "rule_model_agreement"} and not _is_sha256(
         value.get("checkpoint_sha256")
     ):
@@ -218,6 +266,8 @@ def _validate_provenance(
     bucket = _clean(value.get("confidence_bucket"))
     if bucket not in CONFIDENCE_BUCKETS:
         errors.append(f"{path}.confidence_bucket is invalid")
+    if not audit_only and bucket == "low":
+        errors.append(f"{path}.low confidence cannot be trusted target evidence")
     confidence = value.get("confidence")
     if confidence is None:
         if bucket != "not_applicable":
@@ -231,12 +281,16 @@ def _validate_provenance(
                 errors.append(f"{path}.confidence must be in [0, 1]")
     if not _clean(value.get("tactic")):
         errors.append(f"{path}.tactic is required")
-    if not _clean(value.get("technique")):
-        errors.append(f"{path}.technique is required")
-    if not _clean(value.get("agreement_status")):
-        errors.append(f"{path}.agreement_status is required")
-    if not _clean(value.get("evidence_ref")):
-        errors.append(f"{path}.evidence_ref is required")
+    elif _clean(value.get("tactic")).lower() not in TACTIC_VOCABULARY:
+        errors.append(f"{path}.tactic is outside the frozen vocabulary")
+    if not _TECHNIQUE_ID.fullmatch(_clean(value.get("technique")).upper()):
+        errors.append(f"{path}.technique is not an ATT&CK technique identifier")
+    if _clean(value.get("agreement_status")) not in AGREEMENT_STATUSES:
+        errors.append(f"{path}.agreement_status is invalid")
+    if not _is_pseudonymous_id(value.get("evidence_ref"), "evidence"):
+        errors.append(f"{path}.evidence_ref must be a pseudonymous evidence ID")
+    if audit_only and _clean(value.get("exclusion_reason")) not in AUDIT_REASON_CODES:
+        errors.append(f"{path}.exclusion_reason is not a registered reason code")
     return errors
 
 
@@ -251,6 +305,32 @@ def normalize_label_source(source: Any) -> str:
     return LEGACY_LABEL_SOURCE_MAP.get(text, text)
 
 
+def _validate_audit_summary(value: Any, path: str) -> List[str]:
+    if not isinstance(value, dict):
+        return [f"{path} must be an object"]
+    errors = _unexpected_fields(value, _AUDIT_SUMMARY_FIELDS, path)
+    total = value.get("total")
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        errors.append(f"{path}.total must be a non-negative integer")
+    by_reason = value.get("by_reason")
+    if not isinstance(by_reason, dict):
+        errors.append(f"{path}.by_reason must be an object")
+        return errors
+    calculated = 0
+    for reason, count in by_reason.items():
+        if reason not in AUDIT_REASON_CODES:
+            errors.append(f"{path}.by_reason.{reason} is not a registered reason")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            errors.append(
+                f"{path}.by_reason.{reason} must be a non-negative integer"
+            )
+        else:
+            calculated += count
+    if isinstance(total, int) and not isinstance(total, bool) and calculated != total:
+        errors.append(f"{path}.total does not equal by_reason counts")
+    return errors
+
+
 def validate_next_behavior_session(value: Any) -> List[str]:
     """Return stable validation errors for a privacy-safe session record."""
 
@@ -260,16 +340,30 @@ def validate_next_behavior_session(value: Any) -> List[str]:
     errors.extend(_forbidden_paths(value))
     if value.get("schema_version") != SESSION_SCHEMA_VERSION:
         errors.append(f"schema_version must be {SESSION_SCHEMA_VERSION}")
-    if not _clean(value.get("session_id")):
-        errors.append("session_id is required")
+    if not _is_pseudonymous_id(value.get("session_id"), "session"):
+        errors.append("session_id must be a pseudonymous session ID")
     if _clean(value.get("status")) not in {"active", "closed"}:
         errors.append("status must be active or closed")
     if _clean(value.get("protocol")) != "ssh":
         errors.append("protocol must be ssh")
-    if not _clean(value.get("source_member_id")):
-        errors.append("source_member_id is required")
+    if not _is_pseudonymous_id(value.get("source_member_id"), "member"):
+        errors.append("source_member_id must be a pseudonymous member ID")
     if not _is_sha256(value.get("source_member_sha256")):
         errors.append("source_member_sha256 must be a SHA-256 digest")
+    for optional_id, kind in (
+        ("configuration_id", "configuration"),
+        ("template_family_id", "template_family"),
+    ):
+        if optional_id in value and not _is_pseudonymous_id(
+            value.get(optional_id), kind
+        ):
+            errors.append(f"{optional_id} must be a pseudonymous {kind} ID")
+    if "pseudonymization_key_id" in value and not _clean(
+        value.get("pseudonymization_key_id")
+    ):
+        errors.append("pseudonymization_key_id must be non-empty when present")
+    if "audit_summary" in value:
+        errors.extend(_validate_audit_summary(value["audit_summary"], "audit_summary"))
 
     groups = value.get("observation_groups")
     if not isinstance(groups, list) or not groups:
@@ -286,8 +380,8 @@ def validate_next_behavior_session(value: Any) -> List[str]:
             continue
         errors.extend(_unexpected_fields(group, _GROUP_FIELDS, path))
         group_id = _clean(group.get("group_id"))
-        if not group_id:
-            errors.append(f"{path}.group_id is required")
+        if not _is_pseudonymous_id(group_id, "group"):
+            errors.append(f"{path}.group_id must be a pseudonymous group ID")
         elif group_id in seen_group_ids:
             errors.append(f"{path}.group_id is duplicated")
         else:
@@ -318,13 +412,24 @@ def validate_next_behavior_session(value: Any) -> List[str]:
         tactics = _strict_string_list(group.get("tactics"))
         if tactics is None or not tactics:
             errors.append(f"{path}.tactics must be a non-empty string array")
+        elif any(tactic.lower() not in TACTIC_VOCABULARY for tactic in tactics):
+            errors.append(f"{path}.tactics contains an unknown tactic")
         techniques = _strict_string_list(group.get("techniques"))
         if techniques is None:
             errors.append(f"{path}.techniques must be a string array")
+        elif any(
+            not _TECHNIQUE_ID.fullmatch(technique.upper())
+            for technique in techniques
+        ):
+            errors.append(f"{path}.techniques contains an invalid technique ID")
         refs = _strict_string_list(group.get("evidence_refs"))
         if refs is None or not refs:
             errors.append(f"{path}.evidence_refs must be a non-empty string array")
             refs = []
+        elif any(not _is_pseudonymous_id(ref, "evidence") for ref in refs):
+            errors.append(
+                f"{path}.evidence_refs contains a non-pseudonymous evidence ID"
+            )
         provenance = group.get("label_provenance")
         if not isinstance(provenance, list) or not provenance:
             errors.append(f"{path}.label_provenance must be a non-empty array")
@@ -352,6 +457,32 @@ def validate_next_behavior_session(value: Any) -> List[str]:
                             f"{path}.label_provenance[{provenance_index}].technique "
                             "is absent from techniques"
                         )
+            if isinstance(provenance, list):
+                provenance_tactics = {
+                    _clean(item.get("tactic"))
+                    for item in provenance
+                    if isinstance(item, dict)
+                }
+                provenance_techniques = {
+                    _clean(item.get("technique"))
+                    for item in provenance
+                    if isinstance(item, dict)
+                }
+                provenance_refs = {
+                    _clean(item.get("evidence_ref"))
+                    for item in provenance
+                    if isinstance(item, dict)
+                }
+                if set(tactics or []) != provenance_tactics:
+                    errors.append(f"{path}.tactics does not match trusted provenance")
+                if set(techniques or []) != provenance_techniques:
+                    errors.append(
+                        f"{path}.techniques does not match trusted provenance"
+                    )
+                if set(refs) != provenance_refs:
+                    errors.append(
+                        f"{path}.evidence_refs does not match trusted provenance"
+                    )
         audit_labels = group.get("audit_only_labels", [])
         if not isinstance(audit_labels, list):
             errors.append(f"{path}.audit_only_labels must be an array")
@@ -365,6 +496,21 @@ def validate_next_behavior_session(value: Any) -> List[str]:
                     )
                 )
         errors.extend(_validate_context(group.get("session_context"), f"{path}.session_context"))
+    if isinstance(value.get("audit_summary"), dict):
+        attached_audit_count = sum(
+            len(group.get("audit_only_labels") or [])
+            for group in groups
+            if isinstance(group, dict)
+        )
+        summary_total = value["audit_summary"].get("total")
+        if (
+            isinstance(summary_total, int)
+            and not isinstance(summary_total, bool)
+            and summary_total < attached_audit_count
+        ):
+            errors.append(
+                "audit_summary.total cannot be less than attached audit-only labels"
+            )
     return errors
 
 

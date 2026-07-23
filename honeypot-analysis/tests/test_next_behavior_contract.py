@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 
 import pytest
 
@@ -22,6 +23,10 @@ from production.prediction.next_behavior_preprocessing import (
 
 HASH_A = "a" * 64
 HASH_B = "b" * 64
+
+
+def _opaque(kind: str, value: str) -> str:
+    return f"nb{kind}_{hashlib.sha256(value.encode()).hexdigest()}"
 
 
 def _context(command_count: str = "1", age: str = "under_10s") -> dict:
@@ -52,12 +57,15 @@ def _provenance(
     tactic: str = "discovery",
     technique: str = "T1082",
 ) -> dict:
+    if not evidence_ref.startswith("nbevidence_"):
+        evidence_ref = _opaque("evidence", evidence_ref)
     return {
         "tactic": tactic,
         "technique": technique,
         "source": source,
         "trust_tier": "trusted_observation",
         "policy_sha256": HASH_A,
+        "trust_policy_sha256": HASH_A,
         "checkpoint_sha256": HASH_B if source != "reviewed_rule" else "",
         "confidence": 1.0,
         "confidence_bucket": "high",
@@ -76,7 +84,10 @@ def _group(
     command_count: str = "1",
     provenance: list[dict] | None = None,
 ) -> dict:
-    refs = [f"evidence-{group_id}-{index}" for index in range(len(tactics))]
+    safe_group_id = _opaque("group", group_id)
+    refs = [
+        _opaque("evidence", f"{group_id}-{index}") for index in range(len(tactics))
+    ]
     resolved_techniques = techniques or ["T1082"]
     label_provenance = provenance or [
         _provenance(
@@ -87,7 +98,7 @@ def _group(
         for index, (ref, tactic) in enumerate(zip(refs, tactics))
     ]
     return {
-        "group_id": group_id,
+        "group_id": safe_group_id,
         "event_order": order,
         "relative_time_ms": time_ms,
         "tactics": tactics,
@@ -103,8 +114,8 @@ def _group(
 def _session(groups: list[dict], *, status: str = "closed") -> dict:
     return {
         "schema_version": SESSION_SCHEMA_VERSION,
-        "session_id": "safe-session",
-        "source_member_id": "member-week-1",
+        "session_id": _opaque("session", "safe-session"),
+        "source_member_id": _opaque("member", "member-week-1"),
         "source_member_sha256": HASH_A,
         "protocol": "ssh",
         "status": status,
@@ -176,7 +187,7 @@ def test_closed_session_emits_next_phase_and_terminal_examples() -> None:
         "tactics": ["execution"],
         "techniques": ["T1082"],
         "terminal_outcome": "",
-        "target_evidence_refs": ["evidence-two-0"],
+        "target_evidence_refs": [_opaque("evidence", "two-0")],
     }
     assert examples[1]["target"] == {
         "outcome_type": "session_end",
@@ -337,6 +348,17 @@ def test_nonfinite_confidence_and_unknown_fields_are_rejected() -> None:
 
     assert any("confidence must be in [0, 1]" in error for error in errors)
     assert any("geo is not defined by the contract" in error for error in errors)
+
+
+def test_raw_identifiers_and_unregistered_tactics_are_rejected() -> None:
+    record = _session([_group("one", 1, 0, ["discovery"])])
+    record["session_id"] = "private-session-id"
+    record["observation_groups"][0]["tactics"] = ["secret-shaped-tactic"]
+
+    errors = validate_next_behavior_session(record)
+
+    assert any("pseudonymous session ID" in error for error in errors)
+    assert any("unknown tactic" in error for error in errors)
 
 
 def test_audit_only_labels_are_retained_but_never_become_targets() -> None:
