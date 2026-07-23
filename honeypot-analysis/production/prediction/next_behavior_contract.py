@@ -39,6 +39,7 @@ AUDIT_REASON_CODES = frozenset(
         "unresolved_conflict",
         "emergency_rule",
         "unreviewed_rule",
+        "opaque_model_probe",
         "malformed_label",
         "missing_provenance",
     }
