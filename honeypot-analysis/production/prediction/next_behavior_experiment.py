@@ -25,13 +25,39 @@ from production.prediction.next_behavior_corpus import (
     require_valid_source_member_receipt,
 )
 from production.prediction.next_behavior_partitions import MEMBER_ROLES
+from production.prediction.next_behavior_partitions import (
+    PARTITION_SCHEMA_VERSION_V2,
+)
+from production.prediction.next_behavior_experiment_policy import (
+    NextBehaviorExperimentPolicyError,
+    experiment_policy_sha256,
+    require_valid_experiment_policy,
+)
+from production.prediction.next_behavior_source_selection import (
+    NextBehaviorSourceSelectionError,
+    require_completed_source_selection,
+)
 from production.prediction.next_behavior_tensor import (
     NextBehaviorTensorError,
     require_valid_vocabulary,
+    vocabulary_sha256,
 )
-from production.utils.serialization import stable_id
+from production.prediction.next_behavior_model import (
+    NextBehaviorModelError,
+    require_valid_model_spec,
+)
+from production.prediction.next_behavior_baseline import (
+    NextBehaviorBaselineError,
+    require_valid_baseline,
+)
+from production.prediction.next_behavior_calibration import (
+    NextBehaviorCalibrationError,
+    require_valid_calibration_mapping,
+)
+from production.utils.serialization import stable_id, stable_json
 
 EXPERIMENT_MANIFEST_SCHEMA_VERSION = "next_behavior_experiment_manifest.v1"
+EXPERIMENT_MANIFEST_SCHEMA_VERSION_V2 = "next_behavior_experiment_manifest.v2"
 EXPERIMENT_MANIFEST_STATUSES = frozenset({"frozen_pre_test"})
 REQUIRED_ARTIFACT_ROLES = frozenset(
     {
@@ -142,6 +168,137 @@ _FREEZE_FIELDS = frozenset(
     }
 )
 
+# The v2 manifest is additive.  V1 remains the historical seven-member
+# contract above; these roles bind the corrected 13-member experiment without
+# changing how an accepted v1 bundle is read.
+_V2_ROLE_MEMBER_COUNTS = {
+    "train": 4,
+    "selection": 1,
+    "calibration": 1,
+    "test": 7,
+}
+_V2_BASELINE_FAMILIES = (
+    "majority_terminal_prevalence",
+    "first_order_phase_state_markov",
+    "hard_backoff_vomm",
+    "interpolated_vomm",
+)
+REQUIRED_ARTIFACT_ROLES_V2 = frozenset(
+    {
+        "source_selection_receipt",
+        "source_member_receipts",
+        "experiment_policy",
+        "preprocessing",
+        "vocabulary",
+        "partition_manifest",
+        "environment_lock",
+        "label_policy",
+        "trust_policy",
+        "classification_checkpoint",
+        "checkpoint",
+        "model_spec",
+        "calibration",
+        "baseline_manifest",
+        *{
+            f"baseline_{family}"
+            for family in _V2_BASELINE_FAMILIES
+        },
+        *{
+            f"{role}_{suffix}"
+            for role in MEMBER_ROLES
+            for suffix in ("role_inventory", "corpus_receipt", "safe_payload")
+        },
+    }
+)
+_V2_TOP_FIELDS = frozenset(
+    {
+        "schema_version",
+        "manifest_id",
+        "status",
+        "target_contract_id",
+        "input_schema_version",
+        "code_commit",
+        "source_selection",
+        "corpora",
+        "partitions",
+        "policies",
+        "model",
+        "baselines",
+        "calibration",
+        "decision_freeze",
+        "artifact_hashes",
+    }
+)
+_V2_SOURCE_FIELDS = frozenset(
+    {
+        "selection_id",
+        "completed_receipt_sha256",
+        "source_member_count",
+        "source_member_receipts_sha256",
+    }
+)
+_V2_CORPUS_FIELDS = frozenset(MEMBER_ROLES)
+_V2_ROLE_CORPUS_FIELDS = frozenset(
+    {
+        "receipt_id",
+        "receipt_sha256",
+        "safe_payload_sha256",
+        "role_inventory_sha256",
+        "source_member_count",
+        "safe_session_count",
+    }
+)
+_V2_POLICY_FIELDS = frozenset(
+    {
+        "experiment_policy_artifact_sha256",
+        "experiment_policy_sha256",
+        "preprocessing_sha256",
+        "vocabulary_artifact_sha256",
+        "vocabulary_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "environment_lock_sha256",
+        "classification_checkpoint_sha256",
+    }
+)
+_V2_MODEL_FIELDS = frozenset(
+    {
+        "family",
+        "model_id",
+        "architecture_sha256",
+        "parameter_count",
+        "checkpoint_sha256",
+        "model_spec_artifact_sha256",
+        "model_spec_sha256",
+        "state_dictionary_sha256",
+        "training_seed",
+        "training_membership_sha256",
+        "selection_membership_sha256",
+        "selected_on_partition",
+        "deterministic_replay_verified",
+    }
+)
+_V2_BASELINES_FIELDS = frozenset(
+    {"manifest_sha256", "training_membership_sha256", "families"}
+)
+_V2_BASELINE_ENTRY_FIELDS = frozenset(
+    {
+        "model_id",
+        "artifact_sha256",
+        "training_membership_sha256",
+        "selection_membership_sha256",
+    }
+)
+_V2_CALIBRATION_FIELDS = frozenset(
+    {
+        "artifact_sha256",
+        "status",
+        "method",
+        "mapping_sha256",
+        "fit_partition_membership_sha256",
+    }
+)
+
 
 class NextBehaviorExperimentError(ValueError):
     """Raised when a corrected-target experiment bundle is unsafe."""
@@ -193,11 +350,315 @@ def _require_hash_fields(
             errors.append(f"{path}.{field} must be a SHA-256 digest")
 
 
+def _validate_experiment_manifest_v2(value: Mapping[str, Any]) -> List[str]:
+    """Validate the additive 13-member pre-test freeze contract."""
+
+    errors = _unexpected(value, _V2_TOP_FIELDS, "$")
+    if value.get("target_contract_id") != TARGET_CONTRACT_ID:
+        errors.append(
+            "target_contract_id must name the corrected phase-or-end target"
+        )
+    if value.get("input_schema_version") != MODEL_INPUT_SCHEMA_VERSION:
+        errors.append(
+            f"input_schema_version must be {MODEL_INPUT_SCHEMA_VERSION}"
+        )
+    if value.get("status") != "frozen_pre_test":
+        errors.append("status must be frozen_pre_test")
+    if not _SAFE_ID.fullmatch(_clean(value.get("code_commit"))):
+        errors.append("code_commit is invalid")
+
+    source = _require_object(
+        value, "source_selection", _V2_SOURCE_FIELDS, errors
+    )
+    if not _SAFE_ID.fullmatch(_clean(source.get("selection_id"))):
+        errors.append("source_selection.selection_id is invalid")
+    _require_hash_fields(
+        source,
+        ("completed_receipt_sha256", "source_member_receipts_sha256"),
+        "source_selection",
+        errors,
+    )
+    if source.get("source_member_count") != 13:
+        errors.append("source_selection.source_member_count must be 13")
+
+    corpora = _require_object(value, "corpora", _V2_CORPUS_FIELDS, errors)
+    for role in MEMBER_ROLES:
+        role_corpus = corpora.get(role)
+        path = f"corpora.{role}"
+        if not isinstance(role_corpus, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        errors.extend(_unexpected(role_corpus, _V2_ROLE_CORPUS_FIELDS, path))
+        if not _SAFE_ID.fullmatch(_clean(role_corpus.get("receipt_id"))):
+            errors.append(f"{path}.receipt_id is invalid")
+        _require_hash_fields(
+            role_corpus,
+            ("receipt_sha256", "safe_payload_sha256", "role_inventory_sha256"),
+            path,
+            errors,
+        )
+        if role_corpus.get("source_member_count") != _V2_ROLE_MEMBER_COUNTS[role]:
+            errors.append(
+                f"{path}.source_member_count must be "
+                f"{_V2_ROLE_MEMBER_COUNTS[role]}"
+            )
+        safe_count = role_corpus.get("safe_session_count")
+        if (
+            isinstance(safe_count, bool)
+            or not isinstance(safe_count, int)
+            or safe_count < 1
+        ):
+            errors.append(f"{path}.safe_session_count must be positive")
+
+    partitions = _require_object(
+        value, "partitions", _PARTITIONS_FIELDS, errors
+    )
+    if not _SAFE_ID.fullmatch(_clean(partitions.get("manifest_id"))):
+        errors.append("partitions.manifest_id is invalid")
+    _require_hash_fields(
+        partitions, ("manifest_sha256",), "partitions", errors
+    )
+    if partitions.get("test_opened") is not False:
+        errors.append("frozen_pre_test manifest requires test_opened=false")
+    memberships = partitions.get("membership_sha256")
+    if not isinstance(memberships, dict) or set(memberships) != set(MEMBER_ROLES):
+        errors.append(
+            "partitions.membership_sha256 must define every experimental role"
+        )
+        memberships = {}
+    else:
+        for role in MEMBER_ROLES:
+            if not _is_sha(memberships.get(role)):
+                errors.append(
+                    f"partitions.membership_sha256.{role} "
+                    "must be a SHA-256 digest"
+                )
+        if len(set(memberships.values())) != len(MEMBER_ROLES):
+            errors.append("partition role membership hashes must be distinct")
+
+    policies = _require_object(value, "policies", _V2_POLICY_FIELDS, errors)
+    _require_hash_fields(
+        policies,
+        tuple(sorted(_V2_POLICY_FIELDS)),
+        "policies",
+        errors,
+    )
+
+    model = _require_object(value, "model", _V2_MODEL_FIELDS, errors)
+    if model.get("family") != "small_causal_transformer":
+        errors.append("model.family must be small_causal_transformer")
+    if not _SAFE_ID.fullmatch(_clean(model.get("model_id"))):
+        errors.append("model.model_id is invalid")
+    _require_hash_fields(
+        model,
+        (
+            "architecture_sha256",
+            "checkpoint_sha256",
+            "model_spec_artifact_sha256",
+            "model_spec_sha256",
+            "state_dictionary_sha256",
+            "training_membership_sha256",
+            "selection_membership_sha256",
+        ),
+        "model",
+        errors,
+    )
+    parameter_count = model.get("parameter_count")
+    if (
+        isinstance(parameter_count, bool)
+        or not isinstance(parameter_count, int)
+        or parameter_count < 1
+    ):
+        errors.append("model.parameter_count must be positive")
+    training_seed = model.get("training_seed")
+    if (
+        isinstance(training_seed, bool)
+        or not isinstance(training_seed, int)
+        or training_seed < 0
+    ):
+        errors.append("model.training_seed must be a non-negative integer")
+    if model.get("selected_on_partition") != "selection":
+        errors.append("model.selected_on_partition must be selection")
+    if model.get("deterministic_replay_verified") is not True:
+        errors.append("model.deterministic_replay_verified must be true")
+    if memberships:
+        if model.get("training_membership_sha256") != memberships["train"]:
+            errors.append("model training membership does not match train role")
+        if model.get("selection_membership_sha256") != memberships["selection"]:
+            errors.append(
+                "model selection membership does not match selection role"
+            )
+
+    baselines = _require_object(
+        value, "baselines", _V2_BASELINES_FIELDS, errors
+    )
+    if not _is_sha(baselines.get("manifest_sha256")):
+        errors.append("baselines.manifest_sha256 must be a SHA-256 digest")
+    if memberships and baselines.get(
+        "training_membership_sha256"
+    ) != memberships.get("train"):
+        errors.append("baseline training membership does not match train role")
+    baseline_entries = baselines.get("families")
+    if (
+        not isinstance(baseline_entries, dict)
+        or set(baseline_entries) != set(_V2_BASELINE_FAMILIES)
+    ):
+        errors.append("baselines.families must define all four frozen baselines")
+        baseline_entries = {}
+    else:
+        for family in _V2_BASELINE_FAMILIES:
+            entry = baseline_entries[family]
+            path = f"baselines.families.{family}"
+            if not isinstance(entry, dict):
+                errors.append(f"{path} must be an object")
+                continue
+            errors.extend(
+                _unexpected(entry, _V2_BASELINE_ENTRY_FIELDS, path)
+            )
+            if not _SAFE_ID.fullmatch(_clean(entry.get("model_id"))):
+                errors.append(f"{path}.model_id is invalid")
+            _require_hash_fields(
+                entry,
+                (
+                    "artifact_sha256",
+                    "training_membership_sha256",
+                    "selection_membership_sha256",
+                ),
+                path,
+                errors,
+            )
+            if memberships and entry.get(
+                "training_membership_sha256"
+            ) != memberships.get("train"):
+                errors.append(f"{path} training membership mismatch")
+            if memberships and entry.get(
+                "selection_membership_sha256"
+            ) != memberships.get("selection"):
+                errors.append(f"{path} selection membership mismatch")
+
+    calibration = _require_object(
+        value, "calibration", _V2_CALIBRATION_FIELDS, errors
+    )
+    if not _is_sha(calibration.get("artifact_sha256")):
+        errors.append("calibration.artifact_sha256 must be a SHA-256 digest")
+    calibration_status = _clean(calibration.get("status"))
+    if calibration_status not in {"not_implemented", "valid"}:
+        errors.append("calibration.status must be not_implemented or valid")
+    if memberships and calibration.get(
+        "fit_partition_membership_sha256"
+    ) != memberships.get("calibration"):
+        errors.append("calibration membership does not match calibration role")
+    if calibration_status == "valid":
+        if not _clean(calibration.get("method")):
+            errors.append("calibration.method is required")
+        if not _is_sha(calibration.get("mapping_sha256")):
+            errors.append("calibration.mapping_sha256 must be a SHA-256 digest")
+    elif _clean(calibration.get("method")) or _clean(
+        calibration.get("mapping_sha256")
+    ):
+        errors.append("not_implemented calibration cannot contain a mapping")
+
+    freeze = _require_object(
+        value, "decision_freeze", _FREEZE_FIELDS, errors
+    )
+    _require_hash_fields(
+        freeze,
+        (
+            "selection_rule_sha256",
+            "promotion_rule_sha256",
+            "feature_rule_sha256",
+            "seed_rule_sha256",
+            "calibration_rule_sha256",
+        ),
+        "decision_freeze",
+        errors,
+    )
+    if freeze.get("frozen_before_test") is not True:
+        errors.append("decision rules must be frozen before test access")
+
+    artifact_hashes = value.get("artifact_hashes")
+    if not isinstance(artifact_hashes, dict) or set(artifact_hashes) != set(
+        REQUIRED_ARTIFACT_ROLES_V2
+    ):
+        errors.append(
+            "artifact_hashes must define every required v2 artifact role"
+        )
+        artifact_hashes = {}
+    else:
+        for role in sorted(REQUIRED_ARTIFACT_ROLES_V2):
+            if not _is_sha(artifact_hashes.get(role)):
+                errors.append(
+                    f"artifact_hashes.{role} must be a SHA-256 digest"
+                )
+
+    expected_bindings = {
+        "source_selection_receipt": source.get("completed_receipt_sha256"),
+        "source_member_receipts": source.get(
+            "source_member_receipts_sha256"
+        ),
+        "experiment_policy": policies.get(
+            "experiment_policy_artifact_sha256"
+        ),
+        "preprocessing": policies.get("preprocessing_sha256"),
+        "vocabulary": policies.get("vocabulary_artifact_sha256"),
+        "partition_manifest": partitions.get("manifest_sha256"),
+        "environment_lock": policies.get("environment_lock_sha256"),
+        "label_policy": policies.get("label_policy_sha256"),
+        "trust_policy": policies.get("trust_policy_sha256"),
+        "classification_checkpoint": policies.get(
+            "classification_checkpoint_sha256"
+        ),
+        "checkpoint": model.get("checkpoint_sha256"),
+        "model_spec": model.get("model_spec_artifact_sha256"),
+        "calibration": calibration.get("artifact_sha256"),
+        "baseline_manifest": baselines.get("manifest_sha256"),
+    }
+    for role in MEMBER_ROLES:
+        role_corpus = corpora.get(role) if isinstance(corpora, dict) else None
+        if isinstance(role_corpus, dict):
+            expected_bindings.update(
+                {
+                    f"{role}_role_inventory": role_corpus.get(
+                        "role_inventory_sha256"
+                    ),
+                    f"{role}_corpus_receipt": role_corpus.get(
+                        "receipt_sha256"
+                    ),
+                    f"{role}_safe_payload": role_corpus.get(
+                        "safe_payload_sha256"
+                    ),
+                }
+            )
+    for family in _V2_BASELINE_FAMILIES:
+        entry = baseline_entries.get(family)
+        if isinstance(entry, dict):
+            expected_bindings[f"baseline_{family}"] = entry.get(
+                "artifact_sha256"
+            )
+    for role, expected in expected_bindings.items():
+        if artifact_hashes and artifact_hashes.get(role) != expected:
+            errors.append(
+                f"artifact_hashes.{role} contradicts its manifest field"
+            )
+
+    manifest_id = _clean(value.get("manifest_id"))
+    if not _MANIFEST_ID.fullmatch(manifest_id):
+        errors.append("manifest_id is invalid")
+    else:
+        identity_payload = deepcopy(value)
+        identity_payload.pop("manifest_id", None)
+        if stable_id("nextbehaviorexperiment", identity_payload) != manifest_id:
+            errors.append("manifest_id does not match manifest content")
+    return errors
+
+
 def validate_experiment_manifest(value: Any) -> List[str]:
     """Return stable errors for a complete corrected-target freeze manifest."""
 
     if not isinstance(value, dict):
         return ["experiment manifest must be an object"]
+    if value.get("schema_version") == EXPERIMENT_MANIFEST_SCHEMA_VERSION_V2:
+        return _validate_experiment_manifest_v2(value)
     errors = _unexpected(value, _TOP_FIELDS, "$")
     if value.get("schema_version") != EXPERIMENT_MANIFEST_SCHEMA_VERSION:
         errors.append(
@@ -485,6 +946,360 @@ def _load_json_artifact(
         ) from exc
 
 
+def _verify_v2_artifacts(
+    validated: Mapping[str, Any],
+    artifact_paths: Mapping[str, str | Path],
+) -> Dict[str, Any]:
+    """Verify a v2 bundle without treating copied hashes as provenance.
+
+    Every file is byte-verified before JSON is parsed.  In particular, the
+    final-role payload is never parsed by this pre-test gate; its bytes are
+    sealed here and can only be opened by the purpose-scoped final evaluator.
+    """
+
+    if set(artifact_paths) != set(REQUIRED_ARTIFACT_ROLES_V2):
+        raise NextBehaviorExperimentError(
+            "artifact paths must define every required v2 artifact role"
+        )
+    expected = validated["artifact_hashes"]
+    verified: Dict[str, Dict[str, Any]] = {}
+    for role in sorted(REQUIRED_ARTIFACT_ROLES_V2):
+        path = Path(artifact_paths[role])
+        if not path.is_file():
+            raise NextBehaviorExperimentError(f"{role} artifact is missing")
+        actual_sha256 = _sha256_file(path)
+        if actual_sha256 != expected[role]:
+            raise NextBehaviorExperimentError(f"{role} artifact hash mismatch")
+        verified[role] = {
+            "path": str(path),
+            "sha256": actual_sha256,
+            "size_bytes": path.stat().st_size,
+        }
+
+    source_selection = _load_json_artifact(
+        verified, "source_selection_receipt"
+    )
+    try:
+        source_selection = require_completed_source_selection(source_selection)
+    except (NextBehaviorSourceSelectionError, ValueError) as exc:
+        raise NextBehaviorExperimentError(
+            "source selection receipt is incomplete or invalid"
+        ) from exc
+    if (
+        source_selection["selection_id"]
+        != validated["source_selection"]["selection_id"]
+        or len(source_selection["members"]) != 13
+    ):
+        raise NextBehaviorExperimentError(
+            "source selection semantic binding mismatch"
+        )
+    selection_receipts = {
+        item["filename"]: item
+        for item in source_selection["verification"]["member_receipts"]
+    }
+
+    source_receipts = _load_json_artifact(verified, "source_member_receipts")
+    if not isinstance(source_receipts, list) or len(source_receipts) != 13:
+        raise NextBehaviorExperimentError(
+            "source member receipts must contain exactly 13 entries"
+        )
+    chronological: Dict[int, Dict[str, Any]] = {}
+    member_ids: set[str] = set()
+    for item in source_receipts:
+        try:
+            receipt = require_valid_source_member_receipt(item)
+        except NextBehaviorCorpusError as exc:
+            raise NextBehaviorExperimentError(
+                "source member receipt is invalid"
+            ) from exc
+        order = receipt["chronological_order"]
+        if order in chronological or receipt["member_id"] in member_ids:
+            raise NextBehaviorExperimentError(
+                "source member receipts are duplicated"
+            )
+        chronological[order] = receipt
+        member_ids.add(receipt["member_id"])
+    if set(chronological) != set(range(1, 14)):
+        raise NextBehaviorExperimentError(
+            "source member chronology must contain positions one through 13"
+        )
+    for selected in source_selection["members"]:
+        order = selected["chronological_order"]
+        archive_receipt = selection_receipts[selected["filename"]]
+        if chronological[order]["sha256"] != archive_receipt["sha256"]:
+            raise NextBehaviorExperimentError(
+                "source member receipt does not match completed selection"
+            )
+
+    policy = _load_json_artifact(verified, "experiment_policy")
+    try:
+        policy = require_valid_experiment_policy(policy)
+    except NextBehaviorExperimentPolicyError as exc:
+        raise NextBehaviorExperimentError(
+            "experiment policy is semantically invalid"
+        ) from exc
+    if (
+        experiment_policy_sha256(policy)
+        != validated["policies"]["experiment_policy_sha256"]
+    ):
+        raise NextBehaviorExperimentError(
+            "experiment policy semantic hash mismatch"
+        )
+
+    partition = _load_json_artifact(verified, "partition_manifest")
+    roles = partition.get("roles") if isinstance(partition, dict) else None
+    if (
+        not isinstance(partition, dict)
+        or partition.get("schema_version") != PARTITION_SCHEMA_VERSION_V2
+        or partition.get("status") != "membership_frozen"
+        or partition.get("manifest_id")
+        != validated["partitions"]["manifest_id"]
+        or partition.get("target_contract_id") != TARGET_CONTRACT_ID
+        or not isinstance(roles, dict)
+        or set(roles) != set(MEMBER_ROLES)
+    ):
+        raise NextBehaviorExperimentError(
+            "partition manifest semantic binding mismatch"
+        )
+    role_member_ids: set[str] = set()
+    for role in MEMBER_ROLES:
+        role_value = roles[role]
+        member_values = (
+            role_value.get("source_member_ids")
+            if isinstance(role_value, dict)
+            else None
+        )
+        if (
+            not isinstance(member_values, list)
+            or len(member_values) != _V2_ROLE_MEMBER_COUNTS[role]
+            or len(set(member_values)) != len(member_values)
+            or role_value.get("source_member_count")
+            != _V2_ROLE_MEMBER_COUNTS[role]
+            or role_value.get("example_membership_sha256")
+            != validated["partitions"]["membership_sha256"][role]
+            or role_value.get("cohort")
+            != ("final" if role == "test" else "development")
+        ):
+            raise NextBehaviorExperimentError(
+                f"partition manifest {role} semantic binding mismatch"
+            )
+        if role_member_ids.intersection(member_values):
+            raise NextBehaviorExperimentError(
+                "partition source-member roles intersect"
+            )
+        role_member_ids.update(member_values)
+    if role_member_ids != member_ids:
+        raise NextBehaviorExperimentError(
+            "partition source membership does not match source receipts"
+        )
+    proofs = partition.get("intersection_proofs")
+    if not isinstance(proofs, dict):
+        raise NextBehaviorExperimentError(
+            "partition intersection proofs are missing"
+        )
+    for proof_group in ("roles", "cohorts"):
+        group = proofs.get(proof_group)
+        if (
+            not isinstance(group, dict)
+            or not group
+            or any(
+                not isinstance(item, dict) or item.get("all_empty") is not True
+                for item in group.values()
+            )
+        ):
+            raise NextBehaviorExperimentError(
+                f"partition {proof_group} intersections are not empty"
+            )
+
+    preprocessing = _load_json_artifact(verified, "preprocessing")
+    if (
+        not isinstance(preprocessing, dict)
+        or preprocessing.get("target_contract_id") != TARGET_CONTRACT_ID
+        or preprocessing.get("input_schema_version")
+        != MODEL_INPUT_SCHEMA_VERSION
+    ):
+        raise NextBehaviorExperimentError(
+            "preprocessing semantic binding mismatch"
+        )
+    vocabulary = _load_json_artifact(verified, "vocabulary")
+    try:
+        vocabulary = require_valid_vocabulary(vocabulary)
+    except NextBehaviorTensorError as exc:
+        raise NextBehaviorExperimentError(
+            "vocabulary semantic binding mismatch"
+        ) from exc
+    if (
+        vocabulary["preprocessing_sha256"]
+        != validated["policies"]["preprocessing_sha256"]
+        or vocabulary_sha256(vocabulary)
+        != validated["policies"]["vocabulary_sha256"]
+        or vocabulary["training_membership_sha256"]
+        != validated["partitions"]["membership_sha256"]["train"]
+    ):
+        raise NextBehaviorExperimentError(
+            "vocabulary semantic binding mismatch"
+        )
+
+    model_spec = _load_json_artifact(verified, "model_spec")
+    try:
+        model_spec = require_valid_model_spec(model_spec)
+    except NextBehaviorModelError as exc:
+        raise NextBehaviorExperimentError(
+            "model spec semantic binding mismatch"
+        ) from exc
+    if (
+        model_spec.get("spec_id") != validated["model"]["model_id"]
+        or model_spec.get("spec_sha256")
+        != validated["model"]["model_spec_sha256"]
+        or model_spec.get("architecture_sha256")
+        != validated["model"]["architecture_sha256"]
+    ):
+        raise NextBehaviorExperimentError(
+            "model spec semantic binding mismatch"
+        )
+
+    calibration = _load_json_artifact(verified, "calibration")
+    try:
+        calibration = require_valid_calibration_mapping(calibration)
+    except NextBehaviorCalibrationError as exc:
+        raise NextBehaviorExperimentError(
+            "calibration semantic binding mismatch"
+        ) from exc
+    if (
+        calibration.get("status") != validated["calibration"]["status"]
+        or calibration.get("method") != validated["calibration"]["method"]
+        or calibration.get("mapping_sha256")
+        != validated["calibration"]["mapping_sha256"]
+        or calibration.get("fit_partition_membership_sha256")
+        != validated["partitions"]["membership_sha256"]["calibration"]
+        or calibration.get("checkpoint_sha256")
+        != validated["model"]["checkpoint_sha256"]
+        or calibration.get("vocabulary_sha256")
+        != validated["policies"]["vocabulary_sha256"]
+        or calibration.get("preprocessing_sha256")
+        != validated["policies"]["preprocessing_sha256"]
+    ):
+        raise NextBehaviorExperimentError(
+            "calibration semantic binding mismatch"
+        )
+
+    baseline_manifest = _load_json_artifact(verified, "baseline_manifest")
+    baseline_entries = (
+        baseline_manifest.get("artifacts")
+        if isinstance(baseline_manifest, dict)
+        else None
+    )
+    if (
+        not isinstance(baseline_manifest, dict)
+        or baseline_manifest.get("target_contract_id") != TARGET_CONTRACT_ID
+        or baseline_manifest.get("experiment_policy_sha256")
+        != validated["policies"]["experiment_policy_sha256"]
+        or baseline_manifest.get("training_membership_sha256")
+        != validated["partitions"]["membership_sha256"]["train"]
+        or baseline_manifest.get("selection_membership_sha256")
+        != validated["partitions"]["membership_sha256"]["selection"]
+        or not isinstance(baseline_entries, dict)
+        or set(baseline_entries) != set(_V2_BASELINE_FAMILIES)
+    ):
+        raise NextBehaviorExperimentError(
+            "baseline manifest semantic binding mismatch"
+        )
+    for family in _V2_BASELINE_FAMILIES:
+        artifact = _load_json_artifact(verified, f"baseline_{family}")
+        try:
+            artifact = require_valid_baseline(artifact)
+        except NextBehaviorBaselineError as exc:
+            raise NextBehaviorExperimentError(
+                f"baseline {family} artifact is invalid"
+            ) from exc
+        declared = validated["baselines"]["families"][family]
+        manifest_entry = baseline_entries[family]
+        if (
+            artifact.get("family") != family
+            or artifact.get("model_id") != declared["model_id"]
+            or manifest_entry.get("model_id") != declared["model_id"]
+            or manifest_entry.get("artifact_sha256")
+            != declared["artifact_sha256"]
+        ):
+            raise NextBehaviorExperimentError(
+                f"baseline {family} semantic binding mismatch"
+            )
+
+    for role in MEMBER_ROLES:
+        inventory = _load_json_artifact(
+            verified, f"{role}_role_inventory"
+        )
+        role_corpus = validated["corpora"][role]
+        if (
+            not isinstance(inventory, dict)
+            or inventory.get("schema_version")
+            != "next_behavior_role_inventory.v1"
+            or inventory.get("status") != "role_membership_frozen"
+            or inventory.get("target_contract_id") != TARGET_CONTRACT_ID
+            or inventory.get("role") != role
+            or inventory.get("source_member_count")
+            != _V2_ROLE_MEMBER_COUNTS[role]
+            or inventory.get("eligible_complete_session_count")
+            != role_corpus["safe_session_count"]
+            or inventory.get("partial_sessions_can_emit_terminal_target")
+            is not False
+        ):
+            raise NextBehaviorExperimentError(
+                f"{role} role inventory semantic binding mismatch"
+            )
+        corpus_receipt = _load_json_artifact(
+            verified, f"{role}_corpus_receipt"
+        )
+        try:
+            corpus_receipt = require_valid_corpus_receipt(corpus_receipt)
+        except NextBehaviorCorpusError as exc:
+            raise NextBehaviorExperimentError(
+                f"{role} corpus receipt is invalid"
+            ) from exc
+        if (
+            corpus_receipt.get("receipt_id") != role_corpus["receipt_id"]
+            or corpus_receipt.get("safe_payload_sha256")
+            != role_corpus["safe_payload_sha256"]
+            or corpus_receipt.get("source_member_count")
+            != role_corpus["source_member_count"]
+            or corpus_receipt.get("safe_session_count")
+            != role_corpus["safe_session_count"]
+            or corpus_receipt.get("preprocessing_sha256")
+            != validated["policies"]["preprocessing_sha256"]
+            or corpus_receipt.get("label_policy_sha256")
+            != validated["policies"]["label_policy_sha256"]
+            or corpus_receipt.get("trust_policy_sha256")
+            != validated["policies"]["trust_policy_sha256"]
+            or corpus_receipt.get("classification_checkpoint_sha256")
+            != validated["policies"]["classification_checkpoint_sha256"]
+        ):
+            raise NextBehaviorExperimentError(
+                f"{role} corpus receipt semantic binding mismatch"
+            )
+
+    return {
+        "status": "verified_pre_test",
+        "manifest_id": validated["manifest_id"],
+        "target_contract_id": validated["target_contract_id"],
+        "test_opened": False,
+        "artifacts": verified,
+    }
+
+
+def verify_experiment_artifacts_v2_pretest(
+    manifest: Mapping[str, Any],
+    artifact_paths: Mapping[str, str | Path],
+) -> Dict[str, Any]:
+    """Public purpose boundary for the v2 freeze before final-test access."""
+
+    validated = require_valid_experiment_manifest(manifest)
+    if validated.get("schema_version") != EXPERIMENT_MANIFEST_SCHEMA_VERSION_V2:
+        raise NextBehaviorExperimentError(
+            "pre-test v2 verification requires a v2 experiment manifest"
+        )
+    return _verify_v2_artifacts(validated, artifact_paths)
+
+
 def verify_experiment_artifacts(
     manifest: Mapping[str, Any],
     artifact_paths: Mapping[str, str | Path],
@@ -492,6 +1307,11 @@ def verify_experiment_artifacts(
     """Verify all exact bytes before any corrected-target inference."""
 
     validated = require_valid_experiment_manifest(manifest)
+    if (
+        validated.get("schema_version")
+        == EXPERIMENT_MANIFEST_SCHEMA_VERSION_V2
+    ):
+        return _verify_v2_artifacts(validated, artifact_paths)
     if set(artifact_paths) != set(REQUIRED_ARTIFACT_ROLES):
         raise NextBehaviorExperimentError(
             "artifact paths must define every required artifact role"
