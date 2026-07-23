@@ -2,10 +2,54 @@
 
 Status date: 2026-07-23
 
-Implementation HEAD before this status record:
+Initial implementation HEAD before source recovery:
 `69a6cf82a056ededbdc36f730c25037722afeab1`
 
+Latest verified preprocessing-inventory commit:
+`556677821b37f7c7d220e337957623e0781b3d22`
+
 Production deployment status: not deployed; the deployed prediction policy and model were not changed.
+
+## Source-recovery update
+
+The earlier statement that the source corpus, event mapping, classifier
+checkpoint, and environment lock were unavailable is no longer true.
+
+- Zenodo record: `21260400`, DOI `10.5281/zenodo.21260400`.
+- Seven exact selected members were recovered from the official
+  `data_all.zip` archive into a local non-repository cache and verified by
+  filename, expanded byte size, ZIP compressed size, CRC-32, SHA-256, and
+  `gzip -t`.
+- The SecureBERT `checkpoint-6765` weights were recovered locally and match
+  SHA-256
+  `dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b`.
+  Configuration, tokenizer, label mapping, architecture, 149,755,588
+  parameters, 196 labels, and deterministic CPU replay were verified.
+- A Python 3.12.13 environment was pinned in
+  `requirements-next-behavior-corpus.lock.txt` with lock SHA-256
+  `468db1f2f4dad879b6cd4cc60402117f8ec77bce6d0b64266760e5ce0e4d5ace`.
+- The seven source members yielded 30,083,833 raw events, 5,405,789
+  sessions, 1,015,068 command-input events (349 empty), 1,014,719 non-empty
+  command events, and 5,595,627 causal context events. There were zero
+  cross-member sessions and zero non-UTC session timestamps after explicit
+  UTC normalization.
+- Strict offline classification covered 59,002 classifiable fragments and
+  57,955 unique commands. The MITRE cache remained byte-identical to its
+  pinned SHA-256.
+- The safe corpus contains 219,336 sessions and 351,197 causal examples.
+  Its JSONL file SHA-256 is
+  `81736363154cf485b0fec98fe8ba41e03f1440860564aa843a1de2739aacf375`.
+  A second complete build was byte-identical for the payload and all receipts.
+- All 219,336 safe sessions and seven source receipts passed strict schema
+  validation; the secret-shaped-field scan was clean.
+
+The recovery exposed a different, decisive blocker: all 219,336 emitted safe
+sessions overlap the accepted historical corpus (153,535 historical train,
+32,900 historical calibration, and 32,901 historical test). A changed HMAC
+key does not create independent membership. Commit `99b78ec` makes the split
+builder reject this condition before reading or writing partition artifacts.
+No training vocabulary was frozen, no model was fitted, and no redesigned
+final test was opened.
 
 This record classifies the implementation against `implementation_plan.md` and
 `acceptance_criteria.md`. A validator or synthetic fixture is not treated as
@@ -39,16 +83,27 @@ evidence for the old target and are not relabeled as evidence for
 | `26d7cc9` | Shared tensor adapter | Added byte-stable offline/live tensor construction, training-only technique vocabulary, unknown handling, masks, multilabel targets, and a separate terminal target. |
 | `3781f42` | Vocabulary binding | Bound the experiment manifest semantically to the exact tensor vocabulary rather than trusting a copied hash. |
 | `69a6cf8` | Prediction-only side-effect prohibition | Removed active prediction-only alert persistence and enrichment escalation while preserving the legacy evaluator for historical diagnostics and reproducibility. |
+| `e3de17c` | Verified Zenodo source manifest | Pinned the official record, archive, seven selected source members, byte sizes, CRCs, and recovered SHA-256 values. |
+| `aae0fd3` | Classifier environment freeze | Pinned and verified the recovered SecureBERT assets and complete Python environment lock. |
+| `70a1d3a` | Label-provenance normalization | Aligned real classifier output with trusted/audit-only central policy and a strict model-only threshold. |
+| `2cc39a6` | Private event mapping | Added resumable source ingestion with event order/time/context preservation and cross-member rejection. |
+| `5cd8be7` | Streaming corpus receipts | Added bounded-memory safe-corpus receipt construction equivalent to the in-memory contract. |
+| `b54ab62` | Provenance-safe corpus build | Added HMAC-safe export, causal context construction, count reconciliation, and historical membership mapping. |
+| `c38fba6` | Offline cache integrity | Made classification fail closed on MITRE cache drift and prevented stale-cache network refresh. |
+| `3ce5f24` | Clean-HEAD artifact binding | Bound generated corpus artifacts to the exact clean Git HEAD. |
+| `cdb871b` | Recovered corpus evidence | Preserved compact source, classification, reconciliation, and safe-corpus receipts without raw content. |
+| `99b78ec` | Historical-overlap preflight | Rejects accepted historical session reuse despite changed safe identifiers. |
+| `5566778` | Real-corpus preprocessing inventory | Validates and inventories every real causal example without opening model partitions. |
 
 ## Phase status
 
 | Phase | Status | Evidence and exact boundary |
 |---|---|---|
 | 0 — Design freeze | **COMPLETE** | The target, inputs, output semantics, partitions, selection rule, promotion blockers, raw-score policy, authority limits, and historical compatibility are frozen and content hashed. |
-| 1 — Private-to-safe data contract | **PARTIAL; ARTIFACT BUILD BLOCKED** | The strict contract, adapter, receipts, reconciliation, redaction constraints, and tests are complete. A real byte-reproducible safe phase corpus cannot be built because the seven raw source members, their hashes/byte sizes, private event grouping/order/time, classification checkpoint, and full environment lock are unavailable in this checkout. |
-| 2 — Example builder and parity | **PARTIAL; REAL-CORPUS VERIFICATION BLOCKED** | One pure implementation constructs phases, terminal examples, and tensors for offline/live use; permutation, causal-counterfactual, truncation, mask, missing-value, and parity tests pass. Ordered real example-membership and vocabulary artifacts require the Phase 1 corpus. |
-| 3 — Fresh partition and evidence generation | **PARTIAL; REAL MANIFEST BLOCKED** | The exact 4/1/1/1 source-member role policy, purpose-specific access, no-overwrite builder, independent-role proof, and historical exclusion receipt are enforced. Real membership hashes, distributions, minimum-support decision, and blinded human sample cannot be produced without the corrected corpus and authorized source members. |
-| 4 — Baselines and Transformer retraining | **BLOCKED** | Correct training would require the frozen Phase 3 examples, distributions, training vocabulary, support decision, environment lock, and same-target labels. The existing Transformer checkpoint and VOMM answer a different target and the gate rejects them. No checkpoint was retrained, selected, or fabricated. |
+| 1 — Private-to-safe data contract | **COMPLETE AND VERIFIED LOCALLY** | Exact source/checkpoint/environment receipts, private event mapping, per-label provenance, count reconciliation, HMAC-safe output, two byte-identical builds, full strict validation, and a clean secret-field scan now exist. Raw/private artifacts remain outside Git. |
+| 2 — Example builder and parity | **PARTIAL; REAL PREPROCESSING VERIFIED** | The recovered safe corpus produces 351,197 validated causal examples with ordered example/input hashes and real member/role/target distributions. Shared offline/live parity remains green. A training-only vocabulary is intentionally not frozen because no independent partition may be authorized. |
+| 3 — Fresh partition and evidence generation | **BLOCKED BY PROVEN HISTORICAL OVERLAP** | All 219,336 safe sessions belong to the accepted historical corpus. The real receipt-bound preflight rejects the corpus before any partition output. New, independently selected source members and a predeclared amended split are required; re-HMACing these sessions is not sufficient. |
+| 4 — Baselines and Transformer retraining | **BLOCKED** | Correct training requires an independent Phase 3 partition and training-only vocabulary. No checkpoint was retrained, selected, or fabricated from the overlapping corpus. |
 | 5 — Calibration and abstention | **BLOCKED** | Depends on the validation-selected Phase 4 checkpoint and independent calibration membership. The v3 contract safely supports `not_implemented`, but no calibration decision is claimed for a nonexistent model. |
 | 6 — One-time frozen evaluation | **BLOCKED** | No test evaluation was run because Phases 3–5 have not produced frozen artifacts. The accepted historical benchmark was not opened or reused as the redesigned final test. |
 | 7 — Shadow-only integration | **BLOCKED AND NOT IMPLEMENTED** | The plan requires a successful Phase 6 checkpoint, operational package, and explicit deployment authorization. No v3 model loader, storage writer, API field, UI panel, service, timer, or runtime feature flag was introduced. |
@@ -66,19 +121,19 @@ evidence for the old target and are not relabeled as evidence for
 | A3 | Compression retains repetition/time | **PASS — LOCAL** | Phase builder and strict phase schema tests. |
 | A4 | Every eligible prefix has phase or terminal target | **PASS — LOCAL** | Builder emits transition and terminal examples; tests cover both. |
 | A5 | Shared live/offline preprocessing and golden tensor parity | **PASS — LOCAL** | One tensor adapter and byte-stable parity tests. |
-| A6 | Every real trusted target retains complete provenance | **BLOCKED — REAL ARTIFACT** | Enforced by schema, but the available public-safe payload lacks the required event-level provenance. |
+| A6 | Every real trusted target retains complete provenance | **PASS — REAL ARTIFACT** | All 219,336 safe sessions were rebuilt from the verified private mapping with per-label rule/model/checkpoint/policy/confidence/agreement/evidence provenance and passed strict validation. |
 | A7 | Untrusted categories are audit-only | **PASS — LOCAL POLICY** | Corpus validator separates trusted and audit-only labels and reasons. |
-| A8 | Real source receipts and safe identities | **BLOCKED — REAL ARTIFACT** | Receipt/HMAC validators pass on fixtures; actual seven source receipts/private mapping are absent. |
-| A9 | Real whole-session role intersections are empty | **BLOCKED — REAL ARTIFACT** | Enforced by code; actual corrected membership does not exist. |
+| A8 | Real source receipts and safe identities | **PASS — REAL ARTIFACT** | Seven verified SHA-256 source receipts, private mapping, HMAC-safe identities, reconciliation, deterministic rebuild, and redaction scan exist. |
+| A9 | Real whole-session role intersections are empty | **BLOCKED — HISTORICAL REUSE** | Candidate member roles are internally disjoint, but every candidate session overlaps the accepted historical corpus; the partition preflight correctly refuses a manifest. |
 | A10 | Selection and calibration uses are independently enforced | **PASS — LOCAL CONTROL** | Purpose-specific manifest loading denies role reuse. |
-| A11 | Accepted historical test excluded from tuning | **PASS — LOCAL CONTROL** | Historical exclusion receipt is mandatory and the old-target artifact is rejected; no redesigned training occurred. |
-| A12 | All model decisions fixed before final test | **PARTIAL** | The protocol and experiment manifest require the decisions, but no real frozen experiment manifest can yet be issued. |
+| A11 | Accepted historical test excluded from tuning | **BLOCKED — RECOVERED SOURCE IS HISTORICAL** | No redesigned training occurred, but the recovered seven-member corpus cannot satisfy independent historical exclusion. |
+| A12 | All model decisions fixed before final test | **BLOCKED** | No independent experiment manifest can be issued; no final test was opened. |
 | A13 | Validation-only checkpoint selection/replay | **BLOCKED — PHASE 4** | No corrected-target checkpoint exists. |
 | A14 | Same-target VOMM and baselines | **BLOCKED — PHASE 4** | No corrected-target training corpus exists. |
 | A15 | Clustered final intervals and sensitivity | **BLOCKED — PHASE 6** | No corrected-target frozen evaluation exists. |
-| A16 | Unsupported tactic reporting | **PARTIAL** | The vocabulary/schema and minimum-support policy are frozen; actual support is unknown. |
+| A16 | Unsupported tactic reporting | **PARTIAL — DESCRIPTIVE SUPPORT KNOWN** | Candidate support is now inventoried, but reportable support cannot be frozen for an invalid overlapping partition. |
 | A17 | Raw scores are not probabilities | **PASS — LOCAL CONTRACT** | Forecast validation rejects probability semantics without a valid independent calibration mapping. |
-| A18 | All real artifact hashes verify | **BLOCKED — REAL ARTIFACT** | The gate is implemented and adversarially tested; required real artifacts do not exist. |
+| A18 | All real artifact hashes verify | **PARTIAL** | Source, environment, checkpoint, policies, cache, safe payload, receipts, memberships, and real example/input hashes verify. Model/vocabulary/partition/checkpoint hashes remain unavailable because Phase 3 is blocked. |
 | A19 | Focused and feasible repository tests pass | **PASS** | See exact test record below. |
 | A20 | Historical records/evidence remain unchanged and readable | **PASS — LOCAL** | Additive v3 schemas only; compatibility regressions pass; accepted evidence was not rewritten. |
 | A21 | Final thesis/model card states narrow claim and adverse findings | **BLOCKED — PHASE 6/9** | No corrected-target result exists from which to make a final claim. |
@@ -139,6 +194,20 @@ Focused tests were run after each implementation unit. Material checkpoints:
   → `15 passed`.
 - Final feasible full suite with localhost socket permission:
   `pytest -q tests` → **`951 passed, 7 skipped in 77.09s`**.
+- Source-recovery/corpus focused suite:
+  `pytest -q tests/test_next_behavior_zenodo_corpus_builder.py
+  tests/test_next_behavior_label_policy.py tests/test_next_behavior_corpus.py
+  tests/test_next_behavior_contract.py tests/test_next_behavior_zenodo_source.py
+  tests/test_next_behavior_classifier_assets.py` → **`69 passed`**.
+- Historical preflight and affected contracts/experiment/tensor suite:
+  **`68 passed`**.
+- Real-corpus inventory and affected preprocessing/partition/tensor suite:
+  **`59 passed`**.
+- Current sandboxed full run:
+  `pytest -q tests` → **`990 passed, 8 failed, 7 skipped`**; all eight failures
+  were localhost-socket `PermissionError` failures in ingest/E2E setup.
+- Current socket-enabled full confirmation:
+  `pytest -q tests` → **`998 passed, 7 skipped in 24.75s`**.
 
 The seven skips are environment/dependency gates: four neural tests require
 PyTorch, two figure tests require Matplotlib, and one MongoDB integration test
@@ -147,24 +216,24 @@ plan and was not attempted.
 
 ## Exact blockers and first safe continuation
 
-The checkout has no raw `.json.gz` source members, SecureBERT weight artifact,
-or complete environment lock. The available 219,336-row public-safe payload
-(SHA-256
-`c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb`)
-does not retain event timestamps/order, source-member membership, event groups,
-per-label confidence/conflict/provenance, or terminal evidence. The old
-Transformer checkpoint
-`data/models/transformer_shadow_20260721.pt` (SHA-256
-`d9b316d76e63b15b175668aa0bf69cfe4172bbd812d6b19743a628cd0ec8073d`)
-therefore cannot be relabeled or reused for the new target.
+The seven expected source members, private event/time mapping, label
+provenance, classification checkpoint, and complete environment lock are no
+longer missing. Their compact evidence is in `corrected_target_corpus/`; the
+bulk safe payload remains ignored and reproducible locally.
 
-The first safe continuation is to obtain authorized, hash-receipted access to
-the seven raw source members plus the exact classification checkpoint,
-classification/trust policies, environment lock, and private session/event
-mapping. Build the Phase 1 corpus to a new path, run secret scanning and count
-reconciliation, then freeze the real Phase 2/3 vocabularies, memberships,
-distributions, support decision, and human-audit sample. Do not train or open a
-final test until those gates pass.
+The remaining blocker is independent membership. The recovered safe corpus is
+not a fresh experiment: all 219,336 emitted sessions are already present in
+the accepted historical payload. Candidate 4/1/1/1 role distributions are
+descriptive only. No training-only vocabulary, checkpoint, calibration, or
+final evaluation may be produced from them under the frozen protocol.
+
+The first safe continuation is a documented design amendment, made before
+classification or model access, selecting additional Zenodo source members
+that are provably absent from all accepted historical membership. Those exact
+members must be content-receipted and rebuilt through the same private-to-safe
+pipeline. The historical-overlap preflight must return zero before Phase 3 may
+freeze membership or Phase 4 may fit any model. The old Transformer checkpoint
+still answers a different target and remains ineligible for relabeling.
 
 ## Preserved untracked audit evidence
 

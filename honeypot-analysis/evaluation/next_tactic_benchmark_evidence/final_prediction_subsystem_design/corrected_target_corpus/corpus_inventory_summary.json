@@ -1,0 +1,245 @@
+{
+  "candidate_roles": {
+    "calibration": {
+      "example_count": 54756,
+      "input_sequence_length_counts": {
+        "1": 38507,
+        "2": 3780,
+        "3": 3676,
+        "4": 3663,
+        "5": 2566,
+        "6": 2554,
+        "7": 5,
+        "8": 5
+      },
+      "next_behavior_example_count": 16249,
+      "phase_count": 54756,
+      "session_count": 38507,
+      "target_sessions_by_tactic": {
+        "command-and-control": 3,
+        "credential-access": 12,
+        "defense-evasion": 33,
+        "discovery": 3746,
+        "execution": 3654,
+        "persistence": 2569,
+        "privilege-escalation": 8
+      },
+      "target_set_counts": {
+        "SESSION_END": 38507,
+        "command-and-control": 3,
+        "credential-access": 12,
+        "defense-evasion": 33,
+        "discovery": 9947,
+        "execution": 3664,
+        "persistence": 2569,
+        "privilege-escalation": 21
+      },
+      "target_tactic_occurrences": {
+        "command-and-control": 3,
+        "credential-access": 12,
+        "defense-evasion": 33,
+        "discovery": 9947,
+        "execution": 3664,
+        "persistence": 2569,
+        "privilege-escalation": 21
+      },
+      "terminal_example_count": 38507
+    },
+    "selection": {
+      "example_count": 58721,
+      "input_sequence_length_counts": {
+        "1": 35442,
+        "2": 6229,
+        "3": 4908,
+        "4": 4900,
+        "5": 3617,
+        "6": 3607,
+        "7": 9,
+        "8": 9
+      },
+      "next_behavior_example_count": 23279,
+      "phase_count": 58721,
+      "session_count": 35442,
+      "target_sessions_by_tactic": {
+        "command-and-control": 6,
+        "credential-access": 8,
+        "defense-evasion": 44,
+        "discovery": 6183,
+        "execution": 4879,
+        "persistence": 3625,
+        "privilege-escalation": 15
+      },
+      "target_set_counts": {
+        "SESSION_END": 35442,
+        "command-and-control": 6,
+        "command-and-control+defense-evasion+execution": 1,
+        "credential-access": 8,
+        "defense-evasion": 43,
+        "discovery": 14661,
+        "execution": 4897,
+        "persistence": 3625,
+        "privilege-escalation": 38
+      },
+      "target_tactic_occurrences": {
+        "command-and-control": 7,
+        "credential-access": 8,
+        "defense-evasion": 44,
+        "discovery": 14661,
+        "execution": 4898,
+        "persistence": 3625,
+        "privilege-escalation": 38
+      },
+      "terminal_example_count": 35442
+    },
+    "test": {
+      "example_count": 48752,
+      "input_sequence_length_counts": {
+        "1": 36319,
+        "2": 2920,
+        "3": 2845,
+        "4": 2833,
+        "5": 1921,
+        "6": 1906,
+        "7": 4,
+        "8": 4
+      },
+      "next_behavior_example_count": 12433,
+      "phase_count": 48752,
+      "session_count": 36319,
+      "target_sessions_by_tactic": {
+        "command-and-control": 8,
+        "credential-access": 2,
+        "defense-evasion": 41,
+        "discovery": 2872,
+        "execution": 2822,
+        "persistence": 1939,
+        "privilege-escalation": 5
+      },
+      "target_set_counts": {
+        "SESSION_END": 36319,
+        "command-and-control": 8,
+        "credential-access": 2,
+        "defense-evasion": 41,
+        "discovery": 7599,
+        "execution": 2830,
+        "persistence": 1939,
+        "privilege-escalation": 14
+      },
+      "target_tactic_occurrences": {
+        "command-and-control": 8,
+        "credential-access": 2,
+        "defense-evasion": 41,
+        "discovery": 7599,
+        "execution": 2830,
+        "persistence": 1939,
+        "privilege-escalation": 14
+      },
+      "terminal_example_count": 36319
+    },
+    "train": {
+      "example_count": 188968,
+      "input_sequence_length_counts": {
+        "1": 109068,
+        "2": 31798,
+        "3": 14201,
+        "4": 14143,
+        "5": 9735,
+        "6": 9711,
+        "7": 20,
+        "8": 292
+      },
+      "next_behavior_example_count": 79900,
+      "phase_count": 188968,
+      "session_count": 109068,
+      "target_sessions_by_tactic": {
+        "command-and-control": 30,
+        "credential-access": 37,
+        "defense-evasion": 117,
+        "discovery": 31713,
+        "execution": 14087,
+        "persistence": 9806,
+        "privilege-escalation": 39
+      },
+      "target_set_counts": {
+        "SESSION_END": 109068,
+        "command-and-control": 12,
+        "command-and-control+defense-evasion+discovery+persistence+privilege-escalation": 18,
+        "command-and-control+defense-evasion+execution": 5,
+        "credential-access": 37,
+        "defense-evasion": 222,
+        "defense-evasion+execution+privilege-escalation": 80,
+        "discovery": 55566,
+        "execution": 14110,
+        "execution+persistence+privilege-escalation": 16,
+        "execution+privilege-escalation": 32,
+        "persistence": 9788,
+        "privilege-escalation": 14
+      },
+      "target_tactic_occurrences": {
+        "command-and-control": 35,
+        "credential-access": 37,
+        "defense-evasion": 325,
+        "discovery": 55584,
+        "execution": 14243,
+        "persistence": 9822,
+        "privilege-escalation": 160
+      },
+      "terminal_example_count": 109068
+    }
+  },
+  "corpus_build_code_commit": "3ce5f249a21a57a9f041b4770e13d592f2495a21",
+  "example_count": 351197,
+  "final_test_opened": false,
+  "full_local_inventory": {
+    "path": "evaluation/generated/next_behavior_corrected_20260723/corpus_inventory.json",
+    "sha256": "1c236ea246a2cfc8ba2696d113d4b68bbf1ed205265351beab8fb2ad6421cfb4",
+    "size_bytes": 16925
+  },
+  "historical_membership": {
+    "overlap_by_historical_split": {
+      "calibration": 32900,
+      "not_present": 168239,
+      "test": 32901,
+      "train": 153535
+    },
+    "overlap_count": 219336,
+    "partition_freeze_status": "blocked_historical_overlap"
+  },
+  "inventory_code_commit": "556677821b37f7c7d220e337957623e0781b3d22",
+  "inventory_id": "nextbehaviorinventory_006770ce51234406a66e62f7d7a3dc2c",
+  "model_fitting_authorized": false,
+  "observed_techniques": [
+    "T1003",
+    "T1016",
+    "T1033",
+    "T1049",
+    "T1053",
+    "T1057",
+    "T1059",
+    "T1070",
+    "T1078",
+    "T1082",
+    "T1083",
+    "T1098",
+    "T1105",
+    "T1110",
+    "T1136",
+    "T1140",
+    "T1222",
+    "T1529",
+    "T1543",
+    "T1546",
+    "T1548",
+    "T1562"
+  ],
+  "ordered_example_id_sha256": "b6649014627ef8bb59671193a4fdcbe4b27205d45698a47eb72a2755b6e69b95",
+  "ordered_model_input_sha256": "88988f8aeb07cf0146cea81144b5c788db4c8339abbfa10e4624c21f4ea85d1f",
+  "preprocessing_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
+  "safe_payload_file_sha256": "81736363154cf485b0fec98fe8ba41e03f1440860564aa843a1de2739aacf375",
+  "safe_payload_semantic_sha256": "6a23c2f861b1d0fb56180e9157b149e26410a15d333a693235695b3f1e9e7428",
+  "safe_session_membership_sha256": "9b4550b1a5ddae65844d1ad87388f15bd2305fa75228954628bb7f63d308fb0d",
+  "schema_version": "next_behavior_corpus_inventory_summary.v1",
+  "session_count": 219336,
+  "source_member_count": 7,
+  "training_vocabulary_frozen": false
+}
