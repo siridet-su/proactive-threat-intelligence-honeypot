@@ -427,6 +427,11 @@ def _patch_classifier_dependencies(monkeypatch) -> None:
         "load_mitre_attack_db",
         lambda **_kwargs: _FakeMitre(),
     )
+    monkeypatch.setattr(
+        builder,
+        "_require_repository_commit",
+        lambda _root, commit: commit,
+    )
 
 
 def test_classification_and_safe_build_preserve_causal_context_and_privacy(
@@ -506,6 +511,7 @@ def test_classification_and_safe_build_preserve_causal_context_and_privacy(
         source_receipts_path=source_receipts_path,
         corpus_receipt_path=corpus_receipt_path,
         build_receipt_path=build_receipt_path,
+        repository_root=tmp_path,
         code_commit="e" * 40,
         create_key=True,
     )
@@ -558,6 +564,7 @@ def test_classification_and_safe_build_preserve_causal_context_and_privacy(
             source_receipts_path=source_receipts_path,
             corpus_receipt_path=corpus_receipt_path,
             build_receipt_path=build_receipt_path,
+            repository_root=tmp_path,
             code_commit="e" * 40,
         )
 
@@ -576,3 +583,43 @@ def test_key_loading_rejects_broad_permissions_or_wrong_size(
     short.chmod(0o600)
     with pytest.raises(NextBehaviorCorpusBuildError, match="exactly 32"):
         load_or_create_pseudonymization_key(short, create=False)
+
+
+def test_artifact_generation_requires_exact_clean_repository_head(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class _Result:
+        def __init__(self, output: str) -> None:
+            self.stdout = output
+
+    outputs = iter([_Result("a" * 40 + "\n"), _Result("")])
+    monkeypatch.setattr(
+        builder.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(outputs),
+    )
+    assert builder._require_repository_commit(tmp_path, "a" * 40) == "a" * 40
+
+    outputs = iter([_Result("a" * 40 + "\n"), _Result("")])
+    monkeypatch.setattr(
+        builder.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(outputs),
+    )
+    with pytest.raises(NextBehaviorCorpusBuildError, match="does not match"):
+        builder._require_repository_commit(tmp_path, "b" * 40)
+
+    outputs = iter(
+        [
+            _Result("a" * 40 + "\n"),
+            _Result(" M production/example.py\n"),
+        ]
+    )
+    monkeypatch.setattr(
+        builder.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(outputs),
+    )
+    with pytest.raises(NextBehaviorCorpusBuildError, match="must be clean"):
+        builder._require_repository_commit(tmp_path, "a" * 40)

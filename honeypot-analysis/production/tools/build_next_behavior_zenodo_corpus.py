@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import sqlite3
+import subprocess
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -102,6 +103,50 @@ def _stable_json(value: Any) -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
+
+
+def _require_repository_commit(
+    repository_root: Path,
+    expected_commit: str,
+) -> str:
+    commit = _clean(expected_commit).lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise NextBehaviorCorpusBuildError(
+            "code_commit must be a full Git hash"
+        )
+    try:
+        actual = subprocess.run(
+            ["git", "-C", str(repository_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip().lower()
+        tracked_status = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository_root),
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise NextBehaviorCorpusBuildError(
+            "cannot verify repository commit"
+        ) from exc
+    if actual != commit:
+        raise NextBehaviorCorpusBuildError(
+            "code_commit does not match repository HEAD"
+        )
+    if tracked_status:
+        raise NextBehaviorCorpusBuildError(
+            "tracked repository state must be clean before artifact generation"
+        )
+    return commit
 
 
 def _normalize_source_timestamp(value: Any) -> str:
@@ -653,8 +698,7 @@ def classify_private_commands(
 
     if batch_size < 1:
         raise NextBehaviorCorpusBuildError("classification batch size must be positive")
-    if not code_commit or not re.fullmatch(r"[0-9a-f]{40}", code_commit.lower()):
-        raise NextBehaviorCorpusBuildError("code_commit must be a full Git hash")
+    verified_commit = _require_repository_commit(repository_root, code_commit)
     source_manifest = load_source_manifest(source_manifest_path)
     classifier_manifest = load_classifier_manifest(classifier_manifest_path)
     asset_receipt = verify_classifier_assets(
@@ -686,7 +730,7 @@ def classify_private_commands(
                 != _sha256_file(classifier_manifest_path)
                 or receipt.get("source_manifest_sha256")
                 != _sha256_file(source_manifest_path)
-                or receipt.get("code_commit") != code_commit.lower()
+                or receipt.get("code_commit") != verified_commit
                 or stored_count != command_count
             ):
                 raise NextBehaviorCorpusBuildError(
@@ -837,7 +881,7 @@ def classify_private_commands(
         receipt = {
             "schema_version": CLASSIFICATION_STAGE_ID,
             "status": "classified",
-            "code_commit": code_commit.lower(),
+            "code_commit": verified_commit,
             "source_manifest_sha256": _sha256_file(source_manifest_path),
             "classifier_manifest_sha256": _sha256_file(
                 classifier_manifest_path
@@ -1287,15 +1331,16 @@ def build_safe_corpus(
     source_receipts_path: Path,
     corpus_receipt_path: Path,
     build_receipt_path: Path,
+    repository_root: Path,
     code_commit: str,
     create_key: bool = False,
 ) -> Dict[str, Any]:
     """Build and export the deterministic privacy-safe corrected corpus."""
 
-    if not code_commit or not all(
-        character in "0123456789abcdef" for character in code_commit.lower()
-    ) or len(code_commit) != 40:
-        raise NextBehaviorCorpusBuildError("code_commit must be a full Git hash")
+    verified_commit = _require_repository_commit(
+        repository_root,
+        code_commit,
+    )
     output_paths = (
         safe_payload_path,
         source_receipts_path,
@@ -1331,7 +1376,7 @@ def build_safe_corpus(
         if (
             classification_receipt.get("classifier_manifest_sha256")
             != _sha256_file(classifier_manifest_path)
-            or classification_receipt.get("code_commit") != code_commit.lower()
+            or classification_receipt.get("code_commit") != verified_commit
         ):
             raise NextBehaviorCorpusBuildError(
                 "classification receipt uses another code or classifier manifest"
@@ -1449,7 +1494,7 @@ def build_safe_corpus(
         corpus_receipt = build_streaming_corpus_receipt(
             build_result_stream(),
             source_receipts,
-            code_commit=code_commit,
+            code_commit=verified_commit,
             preprocessing_sha256=_sha256_file(
                 preprocessing_manifest_path
             ),
@@ -1516,7 +1561,7 @@ def build_safe_corpus(
         build_receipt = {
             "schema_version": "next_behavior_zenodo_build_receipt.v1",
             "status": "safe_corpus_built",
-            "code_commit": code_commit.lower(),
+            "code_commit": verified_commit,
             "source_manifest_sha256": _sha256_file(source_manifest_path),
             "classifier_manifest_sha256": _sha256_file(
                 classifier_manifest_path
@@ -1670,6 +1715,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_receipts_path=args.source_receipts,
             corpus_receipt_path=args.corpus_receipt,
             build_receipt_path=args.build_receipt,
+            repository_root=args.repository_root,
             code_commit=args.code_commit,
             create_key=args.create_key,
         )
