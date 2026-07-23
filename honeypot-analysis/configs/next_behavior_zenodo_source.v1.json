@@ -1,0 +1,99 @@
+{
+  "schema_version": "next_behavior_zenodo_source.v1",
+  "source": {
+    "zenodo_record_id": 21260400,
+    "doi": "10.5281/zenodo.21260400",
+    "title": "Deployment of 160 Cowrie SSH honeypot instances across four distinct configurations",
+    "license": "CC-BY-4.0",
+    "record_url": "https://zenodo.org/records/21260400"
+  },
+  "archive": {
+    "filename": "data_all.zip",
+    "size_bytes": 19372965772,
+    "checksum": "md5:5b6d6e77e5f7247ac400d2318cef7adb",
+    "download_url": "https://zenodo.org/api/records/21260400/files/data_all.zip/content"
+  },
+  "selection": {
+    "selection_id": "seven_systematic_weekly_members.v1",
+    "method": "fixed weekly cadence selected before command classification",
+    "member_count": 7,
+    "excluded_previously_used_members": [
+      "2025-06-27.json.gz",
+      "2025-06-29.json.gz",
+      "2025-08-17.json.gz"
+    ],
+    "transferred_file_archive_used": false
+  },
+  "members": [
+    {
+      "filename": "2025-07-03.json.gz",
+      "archive_path": "../logs_by_day/2025-07-03.json.gz",
+      "collection_date": "2025-07-03",
+      "chronological_order": 1,
+      "size_bytes": 261678477,
+      "archive_compressed_bytes": 255813041,
+      "archive_crc32": "3a78e796",
+      "sha256": "6112dcd46930fe18ed3d001284c1501620242ea0b17cc3d498ecd5a6cc19e4c8"
+    },
+    {
+      "filename": "2025-07-10.json.gz",
+      "archive_path": "../logs_by_day/2025-07-10.json.gz",
+      "collection_date": "2025-07-10",
+      "chronological_order": 2,
+      "size_bytes": 500081541,
+      "archive_compressed_bytes": 492883075,
+      "archive_crc32": "9446163d",
+      "sha256": "49a3f0a975dde63d24a89c565c14b1ae26e8b74ab6275de2c109cb5353199c3f"
+    },
+    {
+      "filename": "2025-07-17.json.gz",
+      "archive_path": "../logs_by_day/2025-07-17.json.gz",
+      "collection_date": "2025-07-17",
+      "chronological_order": 3,
+      "size_bytes": 332075166,
+      "archive_compressed_bytes": 327119238,
+      "archive_crc32": "1c1bddfc",
+      "sha256": "cf244e88366c87feaddc0b0ac7209ffeed2fcbb5774fb00c71ad744866d86c69"
+    },
+    {
+      "filename": "2025-07-24.json.gz",
+      "archive_path": "../logs_by_day/2025-07-24.json.gz",
+      "collection_date": "2025-07-24",
+      "chronological_order": 4,
+      "size_bytes": 468400203,
+      "archive_compressed_bytes": 461218117,
+      "archive_crc32": "7c45fe5c",
+      "sha256": "00a7b4d7710b14a0233518406b5fee8de8412f848ed64c553e98b94764469dd6"
+    },
+    {
+      "filename": "2025-07-31.json.gz",
+      "archive_path": "../logs_by_day/2025-07-31.json.gz",
+      "collection_date": "2025-07-31",
+      "chronological_order": 5,
+      "size_bytes": 463626236,
+      "archive_compressed_bytes": 456695641,
+      "archive_crc32": "da3e6896",
+      "sha256": "b34712cd2e720d84bda914d380374061cb22afd7bd1d2059cc850037cff8b5a7"
+    },
+    {
+      "filename": "2025-08-07.json.gz",
+      "archive_path": "../logs_by_day/2025-08-07.json.gz",
+      "collection_date": "2025-08-07",
+      "chronological_order": 6,
+      "size_bytes": 414524496,
+      "archive_compressed_bytes": 407980179,
+      "archive_crc32": "0026669d",
+      "sha256": "0c524da22ba13ce15cf3d47d0d008bdea16ec55bae9a93b1ef194e1aa545e2f1"
+    },
+    {
+      "filename": "2025-08-14.json.gz",
+      "archive_path": "../logs_by_day/2025-08-14.json.gz",
+      "collection_date": "2025-08-14",
+      "chronological_order": 7,
+      "size_bytes": 395803739,
+      "archive_compressed_bytes": 389440642,
+      "archive_crc32": "e808d4cd",
+      "sha256": "bc2fd3ff9d0dcd9bc7ea4b8090bc60741b863893e1ed629f13739924ee88aa88"
+    }
+  ]
+}
