@@ -1,0 +1,148 @@
+{
+  "schema_version": "next_behavior_forecast.v3.design",
+  "status": "design_proposal_not_implemented",
+  "target_contract": {
+    "target_id": "next_distinct_command_behavior_phase_or_session_end.v1",
+    "prediction_point": "after at least one trusted command-derived behavior observation",
+    "horizon": "until the next distinct trusted behavior phase or session termination",
+    "tactic_target_semantics": "unordered set of trusted ATT&CK tactics attached to the next distinct command-derived behavior phase",
+    "terminal_outcome": "session_end_no_further_trusted_behavior",
+    "not_predicted": [
+      "exact next command",
+      "attacker intent",
+      "real asset compromise",
+      "response necessity",
+      "chronological ATT&CK doctrine"
+    ]
+  },
+  "required_fields": {
+    "forecast_id": "stable identifier derived from model, input, and prediction timestamp",
+    "session_id": "pseudonymous application session identifier",
+    "observation_timestamp": "time at which the input evidence was frozen",
+    "generated_at": "forecast generation time",
+    "status": "predicted|abstained|insufficient_history|model_unavailable",
+    "status_reason": "stable non-sensitive reason code and human-readable text",
+    "model": {
+      "role": "experimental_primary|interpretable_baseline",
+      "model_id": "immutable model identity",
+      "model_family": "small_causal_transformer|hard_backoff_vomm",
+      "checkpoint_sha256": "required for neural model",
+      "artifact_sha256": "required for count model",
+      "manifest_id": "immutable training/evaluation manifest identity",
+      "code_commit": "source commit used to build the artifact",
+      "device": "cpu",
+      "dtype": "float32"
+    },
+    "input": {
+      "schema_version": "next_behavior_input.v1",
+      "preprocessing_sha256": "hash of the complete preprocessing contract",
+      "vocabulary_sha256": "hash of ordered tactic, technique, and terminal vocabularies",
+      "phase_sequence": [
+        {
+          "tactics": [
+            "example-tactic"
+          ],
+          "techniques": [
+            "T0000"
+          ],
+          "repetition_bucket": "1|2|3-5|6+",
+          "elapsed_time_bucket": "unknown|under_1s|1_to_10s|10_to_60s|over_60s",
+          "label_provenance": [
+            "reviewed_rule"
+          ],
+          "label_confidence_bucket": "high|medium|not_applicable",
+          "evidence_refs": [
+            "canonical-redacted-evidence-reference"
+          ]
+        }
+      ],
+      "session_context": {
+        "login_outcome": "success|failed|unknown",
+        "command_count_bucket": "0|1|2-5|6-20|21+",
+        "session_age_bucket": "under_10s|10_to_60s|1_to_5m|over_5m|unknown",
+        "confirmed_transfer_observed": false
+      },
+      "input_hash": "hash of the redacted canonical input",
+      "input_evidence_refs": [
+        "canonical-redacted-evidence-reference"
+      ]
+    },
+    "output": {
+      "ranked_tactics": [
+        {
+          "tactic": "example-tactic",
+          "raw_score": 0.0,
+          "rank": 1,
+          "calibrated_probability": null
+        }
+      ],
+      "terminal_outcome": {
+        "label": "session_end_no_further_trusted_behavior",
+        "raw_score": 0.0,
+        "calibrated_probability": null
+      },
+      "prediction_set": [],
+      "score_semantics": "raw_model_scores_not_probabilities",
+      "calibration": {
+        "status": "not_implemented|valid|invalid",
+        "method": "",
+        "mapping_sha256": "",
+        "fit_partition_membership_sha256": ""
+      },
+      "abstention": {
+        "abstained": false,
+        "reason_code": "",
+        "coverage_policy_id": ""
+      }
+    },
+    "baseline": {
+      "status": "available|abstained|model_unavailable",
+      "model_id": "hard-backoff VOMM rebuilt for the same target contract",
+      "artifact_sha256": "",
+      "ranked_tactics": [],
+      "terminal_outcome": {},
+      "authority": "interpretable_disagreement_reference_only"
+    },
+    "disagreement": {
+      "status": "agree|disagree|not_comparable|baseline_unavailable",
+      "top_tactic_differs": false,
+      "terminal_decision_differs": false,
+      "semantics": "diagnostic_only_no_score_blending_no_routing"
+    },
+    "authority": {
+      "observed_evidence": false,
+      "establishes_attacker_intent": false,
+      "may_create_alert_alone": false,
+      "may_support_hypothesis_claim": false,
+      "may_select_guidance": false,
+      "may_select_recommendation": false,
+      "may_authorize_action": false,
+      "automatic_execution": false,
+      "display_semantics": "experimental_statistical_forecast_only"
+    },
+    "audit": {
+      "historical_snapshot": false,
+      "recomputed": false,
+      "supersedes_forecast_id": "",
+      "retention_policy_id": "",
+      "redaction_policy_version": "",
+      "failure_details": []
+    }
+  },
+  "compatibility": {
+    "storage": "store v3 as a new immutable payload schema in prediction_snapshots or a dedicated forecast table; never rewrite v1/v2 rows",
+    "api": "dual-read v1/v2/v3; expose explicit schema and target semantics; retain existing historical fields unchanged",
+    "reports": "attach only under model_prediction/next_tactic_forecast with statistical_prediction_not_observed_evidence semantics",
+    "dashboard": "label raw scores, terminal outcome, abstention, baseline, and disagreement; do not show raw score as confidence percentage",
+    "historical_records": "point-in-time stored snapshot remains authoritative for historical presentation",
+    "reevaluation": "must create a new linked record explicitly labeled current-policy/model reevaluation"
+  },
+  "fail_closed_conditions": [
+    "checkpoint or artifact missing",
+    "checkpoint, artifact, manifest, preprocessing, or vocabulary hash mismatch",
+    "state dictionary incompatible",
+    "required input schema field unavailable",
+    "non-deterministic replay check failure",
+    "unsupported or out-of-distribution input under the frozen coverage policy"
+  ]
+}
