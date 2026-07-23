@@ -20,6 +20,10 @@ from production.prediction.next_behavior_experiment import (
     verify_experiment_artifacts,
     with_experiment_manifest_id,
 )
+from production.prediction.next_behavior_preprocessing import (
+    build_live_model_input,
+)
+from production.prediction.next_behavior_tensor import build_vocabulary
 from production.utils.serialization import stable_id, stable_json
 
 
@@ -230,20 +234,16 @@ def _write_bundle(tmp_path: Path) -> tuple[dict[str, Path], dict[str, str]]:
         + "\n",
         encoding="utf-8",
     )
+    safe_payload_value = json.loads(paths["safe_payload"].read_text())
+    vocabulary = build_vocabulary(
+        [build_live_model_input(safe_payload_value[0])],
+        preprocessing_sha256=hashlib.sha256(
+            paths["preprocessing"].read_bytes()
+        ).hexdigest(),
+        training_membership_sha256=_memberships()["train"],
+    )
     paths["vocabulary"].write_text(
-        json.dumps(
-            {
-                "schema_version": "next_behavior_vocabulary.v1",
-                "target_contract_id": TARGET_CONTRACT_ID,
-                "tactics": ["discovery", "execution"],
-                "techniques": ["T1082"],
-                "terminal_outcome": (
-                    "session_end_no_further_trusted_behavior"
-                ),
-            },
-            sort_keys=True,
-        )
-        + "\n",
+        stable_json(vocabulary),
         encoding="utf-8",
     )
     hashes = {

@@ -25,6 +25,10 @@ from production.prediction.next_behavior_corpus import (
     require_valid_source_member_receipt,
 )
 from production.prediction.next_behavior_partitions import MEMBER_ROLES
+from production.prediction.next_behavior_tensor import (
+    NextBehaviorTensorError,
+    require_valid_vocabulary,
+)
 from production.utils.serialization import stable_id
 
 EXPERIMENT_MANIFEST_SCHEMA_VERSION = "next_behavior_experiment_manifest.v1"
@@ -645,14 +649,17 @@ def verify_experiment_artifacts(
         )
 
     vocabulary = _load_json_artifact(verified, "vocabulary")
+    try:
+        vocabulary = require_valid_vocabulary(vocabulary)
+    except NextBehaviorTensorError as exc:
+        raise NextBehaviorExperimentError(
+            "vocabulary semantic binding mismatch"
+        ) from exc
     if (
-        not isinstance(vocabulary, dict)
-        or vocabulary.get("schema_version") != "next_behavior_vocabulary.v1"
-        or vocabulary.get("target_contract_id") != TARGET_CONTRACT_ID
-        or vocabulary.get("terminal_outcome")
-        != "session_end_no_further_trusted_behavior"
-        or not isinstance(vocabulary.get("tactics"), list)
-        or not isinstance(vocabulary.get("techniques"), list)
+        vocabulary["preprocessing_sha256"]
+        != validated["policies"]["preprocessing_sha256"]
+        or vocabulary["training_membership_sha256"]
+        != validated["partitions"]["membership_sha256"]["train"]
     ):
         raise NextBehaviorExperimentError("vocabulary semantic binding mismatch")
 
