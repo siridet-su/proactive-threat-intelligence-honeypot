@@ -30,10 +30,172 @@ SOURCE_MEMBER_RECEIPT_SCHEMA_VERSION = "next_behavior_source_member_receipt.v1"
 CORPUS_RECEIPT_SCHEMA_VERSION = "next_behavior_corpus_receipt.v1"
 PSEUDONYMIZATION_SCHEME = "hmac-sha256-v1"
 _SAFE_KEY_ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_CORPUS_RECEIPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "code_commit",
+        "preprocessing_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "classification_checkpoint_sha256",
+        "source_member_count",
+        "source_member_receipts_sha256",
+        "source_member_receipts_artifact_sha256",
+        "private_session_count",
+        "safe_session_count",
+        "dropped_session_count",
+        "safe_session_membership_sha256",
+        "safe_payload_sha256",
+        "counts",
+        "receipt_id",
+    }
+)
+_SOURCE_MEMBER_RECEIPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "member_id",
+        "sha256",
+        "byte_size",
+        "chronological_order",
+        "collection_start",
+        "collection_end",
+        "pseudonymization_scheme",
+        "pseudonymization_key_id",
+    }
+)
+_RECONCILIATION_FIELDS = frozenset(
+    {
+        "private_group_count",
+        "safe_trusted_group_count",
+        "audit_only_group_count",
+        "private_label_count",
+        "trusted_label_count",
+        "audit_only_label_count",
+    }
+)
 
 
 class NextBehaviorCorpusError(ValueError):
     """Raised when a private-to-safe build cannot be audited safely."""
+
+
+def validate_source_member_receipt(value: Any) -> List[str]:
+    if not isinstance(value, dict):
+        return ["source member receipt must be an object"]
+    errors = [
+        f"$.{field} is not defined by the source receipt contract"
+        for field in sorted(set(value) - _SOURCE_MEMBER_RECEIPT_FIELDS)
+    ]
+    if value.get("schema_version") != SOURCE_MEMBER_RECEIPT_SCHEMA_VERSION:
+        errors.append(
+            f"schema_version must be {SOURCE_MEMBER_RECEIPT_SCHEMA_VERSION}"
+        )
+    if not re.fullmatch(r"nbmember_[0-9a-f]{64}", _clean(value.get("member_id"))):
+        errors.append("member_id must be a pseudonymous member ID")
+    if not _is_sha256(value.get("sha256")):
+        errors.append("sha256 must be a SHA-256 digest")
+    for field in ("byte_size", "chronological_order"):
+        count = value.get(field)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            errors.append(f"{field} must be a positive integer")
+    try:
+        start = _parse_timestamp(value.get("collection_start"))
+        end = _parse_timestamp(value.get("collection_end"))
+    except NextBehaviorCorpusError as exc:
+        errors.append(str(exc))
+    else:
+        if end < start:
+            errors.append("source member collection range is reversed")
+    if value.get("pseudonymization_scheme") != PSEUDONYMIZATION_SCHEME:
+        errors.append(f"pseudonymization_scheme must be {PSEUDONYMIZATION_SCHEME}")
+    if not _SAFE_KEY_ID.fullmatch(_clean(value.get("pseudonymization_key_id"))):
+        errors.append("pseudonymization_key_id is invalid")
+    return errors
+
+
+def require_valid_source_member_receipt(value: Any) -> Dict[str, Any]:
+    errors = validate_source_member_receipt(value)
+    if errors:
+        raise NextBehaviorCorpusError("; ".join(errors))
+    return dict(value)
+
+
+def validate_corpus_receipt(value: Any) -> List[str]:
+    """Return strict errors for the public-safe aggregate receipt."""
+
+    if not isinstance(value, dict):
+        return ["corpus receipt must be an object"]
+    errors = [
+        f"$.{field} is not defined by the receipt contract"
+        for field in sorted(set(value) - _CORPUS_RECEIPT_FIELDS)
+    ]
+    if value.get("schema_version") != CORPUS_RECEIPT_SCHEMA_VERSION:
+        errors.append(f"schema_version must be {CORPUS_RECEIPT_SCHEMA_VERSION}")
+    if value.get("status") != "safe_payload_reconciled":
+        errors.append("status must be safe_payload_reconciled")
+    if not _clean(value.get("code_commit")):
+        errors.append("code_commit is required")
+    for field in (
+        "preprocessing_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "classification_checkpoint_sha256",
+        "source_member_receipts_sha256",
+        "source_member_receipts_artifact_sha256",
+        "safe_session_membership_sha256",
+        "safe_payload_sha256",
+    ):
+        if not _is_sha256(value.get(field)):
+            errors.append(f"{field} must be a SHA-256 digest")
+    for field in (
+        "source_member_count",
+        "private_session_count",
+        "safe_session_count",
+        "dropped_session_count",
+    ):
+        count = value.get(field)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            errors.append(f"{field} must be a non-negative integer")
+    private_count = value.get("private_session_count")
+    safe_count = value.get("safe_session_count")
+    dropped_count = value.get("dropped_session_count")
+    if all(
+        isinstance(item, int) and not isinstance(item, bool)
+        for item in (private_count, safe_count, dropped_count)
+    ) and private_count != safe_count + dropped_count:
+        errors.append("session counts do not reconcile")
+    counts = value.get("counts")
+    if not isinstance(counts, dict) or set(counts) != _RECONCILIATION_FIELDS:
+        errors.append("counts must define every reconciliation field")
+    else:
+        for field in _RECONCILIATION_FIELDS:
+            count = counts.get(field)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                errors.append(f"counts.{field} must be a non-negative integer")
+        if counts.get("private_group_count") != (
+            counts.get("safe_trusted_group_count", 0)
+            + counts.get("audit_only_group_count", 0)
+        ):
+            errors.append("group counts do not reconcile")
+        if counts.get("private_label_count") != (
+            counts.get("trusted_label_count", 0)
+            + counts.get("audit_only_label_count", 0)
+        ):
+            errors.append("label counts do not reconcile")
+    receipt_id = _clean(value.get("receipt_id"))
+    identity_payload = dict(value)
+    identity_payload.pop("receipt_id", None)
+    if stable_id("nextbehaviorcorpus", identity_payload) != receipt_id:
+        errors.append("receipt_id does not match receipt content")
+    return errors
+
+
+def require_valid_corpus_receipt(value: Any) -> Dict[str, Any]:
+    errors = validate_corpus_receipt(value)
+    if errors:
+        raise NextBehaviorCorpusError("; ".join(errors))
+    return dict(value)
 
 
 def _clean(value: Any) -> str:
@@ -201,10 +363,9 @@ def build_privacy_safe_session(
         pseudonymization_key,
         pseudonymization_key_id,
     )
-    if source_member_receipt.get("schema_version") != (
-        SOURCE_MEMBER_RECEIPT_SCHEMA_VERSION
-    ):
-        raise NextBehaviorCorpusError("source member receipt schema is invalid")
+    source_member_receipt = require_valid_source_member_receipt(
+        source_member_receipt
+    )
     if source_member_receipt.get("pseudonymization_key_id") != key_id:
         raise NextBehaviorCorpusError(
             "source member and session pseudonymization key IDs differ"
@@ -361,6 +522,7 @@ def build_corpus_receipt(
     preprocessing_sha256: str,
     label_policy_sha256: str,
     trust_policy_sha256: str,
+    classification_checkpoint_sha256: str,
 ) -> Dict[str, Any]:
     """Reconcile a safe corpus without exposing raw member or event values."""
 
@@ -368,6 +530,7 @@ def build_corpus_receipt(
         ("preprocessing_sha256", preprocessing_sha256),
         ("label_policy_sha256", label_policy_sha256),
         ("trust_policy_sha256", trust_policy_sha256),
+        ("classification_checkpoint_sha256", classification_checkpoint_sha256),
     ):
         if not _is_sha256(digest):
             raise NextBehaviorCorpusError(f"{name} is invalid")
@@ -381,14 +544,7 @@ def build_corpus_receipt(
     reconciliations = [
         result.get("reconciliation") or {} for result in build_results
     ]
-    count_fields = (
-        "private_group_count",
-        "safe_trusted_group_count",
-        "audit_only_group_count",
-        "private_label_count",
-        "trusted_label_count",
-        "audit_only_label_count",
-    )
+    count_fields = tuple(sorted(_RECONCILIATION_FIELDS))
     for index, item in enumerate(reconciliations):
         if set(item) != set(count_fields):
             raise NextBehaviorCorpusError(
@@ -414,32 +570,22 @@ def build_corpus_receipt(
     member_receipt_hashes = []
     seen_member_ids: set[str] = set()
     for receipt in source_member_receipts:
-        expected_fields = {
-            "schema_version",
-            "member_id",
-            "sha256",
-            "byte_size",
-            "chronological_order",
-            "collection_start",
-            "collection_end",
-            "pseudonymization_scheme",
-            "pseudonymization_key_id",
-        }
-        if set(receipt) != expected_fields:
-            raise NextBehaviorCorpusError("source member receipt fields are invalid")
-        if receipt.get("schema_version") != SOURCE_MEMBER_RECEIPT_SCHEMA_VERSION:
-            raise NextBehaviorCorpusError("source member receipt schema is invalid")
-        member_id = _clean(receipt.get("member_id"))
-        if not member_id.startswith("nbmember_") or member_id in seen_member_ids:
+        validated_receipt = require_valid_source_member_receipt(receipt)
+        member_id = _clean(validated_receipt.get("member_id"))
+        if member_id in seen_member_ids:
             raise NextBehaviorCorpusError(
                 "source member receipt identity is invalid or duplicated"
             )
-        if not _is_sha256(receipt.get("sha256")):
-            raise NextBehaviorCorpusError("source member receipt hash is invalid")
         seen_member_ids.add(member_id)
         member_receipt_hashes.append(
-            hashlib.sha256(stable_json(receipt).encode("utf-8")).hexdigest()
+            hashlib.sha256(
+                stable_json(validated_receipt).encode("utf-8")
+            ).hexdigest()
         )
+    ordered_source_receipts = sorted(
+        (dict(receipt) for receipt in source_member_receipts),
+        key=lambda receipt: _clean(receipt.get("member_id")),
+    )
     safe_sessions: List[Dict[str, Any]] = []
     for raw_session in raw_safe_sessions:
         try:
@@ -459,9 +605,15 @@ def build_corpus_receipt(
         "preprocessing_sha256": _clean(preprocessing_sha256).lower(),
         "label_policy_sha256": _clean(label_policy_sha256).lower(),
         "trust_policy_sha256": _clean(trust_policy_sha256).lower(),
+        "classification_checkpoint_sha256": _clean(
+            classification_checkpoint_sha256
+        ).lower(),
         "source_member_count": len(source_member_receipts),
         "source_member_receipts_sha256": hashlib.sha256(
             stable_json(sorted(member_receipt_hashes)).encode("utf-8")
+        ).hexdigest(),
+        "source_member_receipts_artifact_sha256": hashlib.sha256(
+            stable_json(ordered_source_receipts).encode("utf-8")
         ).hexdigest(),
         "private_session_count": len(build_results),
         "safe_session_count": len(safe_sessions),
@@ -477,4 +629,4 @@ def build_corpus_receipt(
         "counts": totals,
     }
     receipt["receipt_id"] = stable_id("nextbehaviorcorpus", receipt)
-    return receipt
+    return require_valid_corpus_receipt(receipt)

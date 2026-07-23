@@ -11,6 +11,7 @@ from production.prediction.next_behavior_corpus import (
     build_corpus_receipt,
     build_privacy_safe_session,
     build_source_member_receipt,
+    require_valid_corpus_receipt,
 )
 from production.prediction.next_behavior_preprocessing import (
     build_next_behavior_examples,
@@ -234,6 +235,7 @@ def test_corpus_receipt_reconciles_counts_and_hashes_safe_payload() -> None:
         preprocessing_sha256=POLICY_SHA,
         label_policy_sha256=POLICY_SHA,
         trust_policy_sha256=TRUST_SHA,
+        classification_checkpoint_sha256=CHECKPOINT_SHA,
     )
 
     assert receipt["status"] == "safe_payload_reconciled"
@@ -256,8 +258,26 @@ def test_corpus_receipt_rejects_forged_counts_or_unknown_members() -> None:
             preprocessing_sha256=POLICY_SHA,
             label_policy_sha256=POLICY_SHA,
             trust_policy_sha256=TRUST_SHA,
+            classification_checkpoint_sha256=CHECKPOINT_SHA,
         )
 
+
+def test_corpus_receipt_rejects_undeclared_metadata() -> None:
+    receipt = build_corpus_receipt(
+        [_build()],
+        [_member()],
+        code_commit="test-commit",
+        preprocessing_sha256=POLICY_SHA,
+        label_policy_sha256=POLICY_SHA,
+        trust_policy_sha256=TRUST_SHA,
+        classification_checkpoint_sha256=CHECKPOINT_SHA,
+    )
+    receipt["raw_commands"] = ["must never be retained"]
+
+    with pytest.raises(NextBehaviorCorpusError, match="not defined"):
+        require_valid_corpus_receipt(receipt)
+
+    result = _build()
     unknown_member = copy.deepcopy(result)
     unknown_member["safe_session"]["source_member_id"] = (
         "nbmember_" + "f" * 64
@@ -270,6 +290,7 @@ def test_corpus_receipt_rejects_forged_counts_or_unknown_members() -> None:
             preprocessing_sha256=POLICY_SHA,
             label_policy_sha256=POLICY_SHA,
             trust_policy_sha256=TRUST_SHA,
+            classification_checkpoint_sha256=CHECKPOINT_SHA,
         )
 
 
