@@ -9,9 +9,13 @@ from pathlib import Path
 
 import pytest
 
+from production.tools import build_next_behavior_zenodo_corpus as builder
 from production.tools.build_next_behavior_zenodo_corpus import (
     NextBehaviorCorpusBuildError,
+    build_safe_corpus,
+    classify_private_commands,
     ingest_members,
+    load_or_create_pseudonymization_key,
     open_private_database,
 )
 
@@ -174,6 +178,9 @@ def test_ingest_builds_private_causal_mapping_and_is_resumable(
         )
         assert stats["malformed_records"] == 1
         assert stats["non_object_records"] == 1
+        assert stats["timestamp_normalization"].startswith(
+            "source naive timestamps"
+        )
     finally:
         database.close()
 
@@ -267,3 +274,295 @@ def test_private_database_rejects_foreign_schema(tmp_path: Path) -> None:
 
     with pytest.raises(NextBehaviorCorpusBuildError, match="another schema"):
         open_private_database(path)
+
+
+def test_naive_zenodo_timestamp_is_explicitly_normalized_to_utc(
+    tmp_path: Path,
+) -> None:
+    raw_directory = tmp_path / "raw"
+    raw_directory.mkdir()
+    event = _event(
+        "cowrie.session.connect",
+        timestamp="2025-07-01 12:34:56.123456",
+    )
+    manifest = _manifest(raw_directory, [[event]])
+    manifest_path = tmp_path / "source.json"
+    _write_manifest(manifest_path, manifest)
+    database_path = tmp_path / "private.sqlite"
+
+    ingest_members(
+        source_manifest_path=manifest_path,
+        raw_directory=raw_directory,
+        private_database_path=database_path,
+        selected_members=[manifest["members"][0]["filename"]],
+    )
+
+    database = sqlite3.connect(database_path)
+    try:
+        first_seen, collection_start = database.execute(
+            """
+            SELECT sessions.first_seen, processed_members.collection_start
+            FROM sessions JOIN processed_members
+              ON sessions.source_member = processed_members.source_member
+            """
+        ).fetchone()
+    finally:
+        database.close()
+    assert first_seen == "2025-07-01T12:34:56.123456Z"
+    assert collection_start == "2025-07-01T12:34:56.123456Z"
+
+
+def _frozen_classifier_manifest() -> dict:
+    return {
+        "classifier": {
+            "device": "cpu",
+            "max_length": 128,
+            "checkpoint_sha256": "c" * 64,
+        },
+        "classification_policy": {
+            "securebert_candidate_threshold": 0.55,
+            "trusted_model_only_threshold": 0.90,
+            "rule_policy_path": "rules.json",
+            "rule_policy_sha256": "a" * 64,
+            "trust_policy_sha256": "b" * 64,
+            "mitre_cache_path": "mitre.json",
+            "mitre_cache_sha256": "d" * 64,
+            "drop_rule_securebert_disagreements": True,
+        },
+    }
+
+
+def _ingest_complete_fixture(
+    tmp_path: Path,
+) -> tuple[Path, Path, Path, dict]:
+    raw_directory = tmp_path / "raw"
+    raw_directory.mkdir()
+    events = [
+        _event("cowrie.session.connect"),
+        _event("cowrie.login.failed", timestamp="2025-07-01T00:00:01Z"),
+        _event("cowrie.login.success", timestamp="2025-07-01T00:00:02Z"),
+        _event(
+            "cowrie.command.input",
+            timestamp="2025-07-01T00:00:03Z",
+            command="synthetic fixture command",
+        ),
+        _event(
+            "cowrie.session.file_download",
+            timestamp="2025-07-01T00:00:04Z",
+        ),
+        _event("cowrie.session.closed", timestamp="2025-07-01T00:00:05Z"),
+    ]
+    manifest = _manifest(raw_directory, [events])
+    manifest_path = tmp_path / "source.json"
+    _write_manifest(manifest_path, manifest)
+    database_path = tmp_path / "private/sessions.sqlite"
+    ingest_members(
+        source_manifest_path=manifest_path,
+        raw_directory=raw_directory,
+        private_database_path=database_path,
+    )
+    classifier_manifest_path = tmp_path / "classifier.json"
+    classifier_manifest_path.write_text("{}\n", encoding="utf-8")
+    label_adapter = (
+        tmp_path / "production/prediction/next_behavior_label_policy.py"
+    )
+    label_adapter.parent.mkdir(parents=True)
+    label_adapter.write_text("# fixture\n", encoding="utf-8")
+    return (
+        raw_directory,
+        manifest_path,
+        classifier_manifest_path,
+        manifest,
+    )
+
+
+class _FakeSecureBert:
+    def __init__(self, **_kwargs) -> None:
+        pass
+
+    def classify_batch(self, commands: list[str]):
+        return [("T1059", 0.95) for _command in commands]
+
+
+class _FakeMitre:
+    def get_tactics(self, technique: str):
+        return ["execution"] if technique == "T1059" else ["discovery"]
+
+
+class _FakeHybridClassifier:
+    def __init__(self, **_kwargs) -> None:
+        pass
+
+    def classify(self, command: str):
+        return [
+            {
+                "command": command,
+                "ttp": "T1059",
+                "tactic": "execution",
+                "source": "securebert",
+                "confidence": 0.95,
+                "high_confidence": True,
+                "agreement_status": "model_only",
+            }
+        ]
+
+
+def _patch_classifier_dependencies(monkeypatch) -> None:
+    manifest = _frozen_classifier_manifest()
+    monkeypatch.setattr(
+        builder,
+        "load_classifier_manifest",
+        lambda _path: manifest,
+    )
+    monkeypatch.setattr(
+        builder,
+        "verify_classifier_assets",
+        lambda *_args, **_kwargs: {"status": "assets_verified"},
+    )
+    monkeypatch.setattr(builder, "SecureBertCommandClassifier", _FakeSecureBert)
+    monkeypatch.setattr(builder, "NotebookParityClassifier", _FakeHybridClassifier)
+    monkeypatch.setattr(
+        builder,
+        "load_mitre_attack_db",
+        lambda **_kwargs: _FakeMitre(),
+    )
+
+
+def test_classification_and_safe_build_preserve_causal_context_and_privacy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        _raw_directory,
+        source_manifest_path,
+        classifier_manifest_path,
+        _manifest_value,
+    ) = _ingest_complete_fixture(tmp_path)
+    database_path = tmp_path / "private/sessions.sqlite"
+    _patch_classifier_dependencies(monkeypatch)
+
+    classification = classify_private_commands(
+        source_manifest_path=source_manifest_path,
+        classifier_manifest_path=classifier_manifest_path,
+        repository_root=tmp_path,
+        model_root=tmp_path / "model",
+        private_database_path=database_path,
+        code_commit="e" * 40,
+        batch_size=4,
+    )
+    repeated = classify_private_commands(
+        source_manifest_path=source_manifest_path,
+        classifier_manifest_path=classifier_manifest_path,
+        repository_root=tmp_path,
+        model_root=tmp_path / "model",
+        private_database_path=database_path,
+        code_commit="e" * 40,
+        batch_size=4,
+    )
+
+    assert classification["unique_command_count"] == 1
+    assert classification["label_counts"] == {
+        "trusted_observation:securebert": 1
+    }
+    assert repeated["status"] == "already_classified"
+
+    historical_path = tmp_path / "historical.jsonl"
+    historical_path.write_text(
+        json.dumps(
+            {
+                "session_id": builder._legacy_historical_id("session-a"),
+                "split": "test",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    preprocessing_path = tmp_path / "preprocessing.json"
+    preprocessing_path.write_text('{"fixture":true}\n', encoding="utf-8")
+    key_path = tmp_path / "private/pseudonymization.key"
+    safe_path = tmp_path / "safe/corpus.jsonl"
+    source_receipts_path = tmp_path / "safe/source_receipts.json"
+    corpus_receipt_path = tmp_path / "safe/corpus_receipt.json"
+    build_receipt_path = tmp_path / "safe/build_receipt.json"
+
+    receipt = build_safe_corpus(
+        source_manifest_path=source_manifest_path,
+        classifier_manifest_path=classifier_manifest_path,
+        preprocessing_manifest_path=preprocessing_path,
+        historical_payload_path=historical_path,
+        private_database_path=database_path,
+        pseudonymization_key_path=key_path,
+        safe_payload_path=safe_path,
+        source_receipts_path=source_receipts_path,
+        corpus_receipt_path=corpus_receipt_path,
+        build_receipt_path=build_receipt_path,
+        code_commit="e" * 40,
+        create_key=True,
+    )
+
+    safe_record = json.loads(safe_path.read_text(encoding="utf-8"))
+    context = safe_record["observation_groups"][0]["session_context"]
+    assert context == {
+        "login_outcome": "success",
+        "command_count_bucket": "1",
+        "session_age_bucket": "under_10s",
+        "confirmed_transfer_observed": False,
+    }
+    serialized = (
+        safe_path.read_text(encoding="utf-8")
+        + source_receipts_path.read_text(encoding="utf-8")
+        + corpus_receipt_path.read_text(encoding="utf-8")
+        + build_receipt_path.read_text(encoding="utf-8")
+    )
+    assert "synthetic fixture command" not in serialized
+    assert "session-a" not in serialized
+    assert "2025-07-01.json.gz" not in serialized
+    assert receipt["historical_membership"]["overlap_by_historical_split"] == {
+        "test": 1
+    }
+    assert receipt["safe_payload"]["line_count"] == 1
+    assert receipt["pipeline_reconciliation"] == {
+        "raw_event_records": 12,
+        "raw_command_input_events": 1,
+        "empty_command_input_events": 0,
+        "nonempty_command_events": 1,
+        "private_store_command_events": 1,
+        "unique_classified_commands": 1,
+        "groups_with_trusted_label": 1,
+        "unrepresented_output_occurrences_by_reason": {},
+        "private_sessions_entering_safe_adapter": 1,
+        "privacy_safe_sessions_emitted": 1,
+        "sessions_dropped_without_trusted_behavior": 0,
+    }
+    assert key_path.stat().st_mode & 0o777 == 0o600
+
+    with pytest.raises(NextBehaviorCorpusBuildError, match="refusing to overwrite"):
+        build_safe_corpus(
+            source_manifest_path=source_manifest_path,
+            classifier_manifest_path=classifier_manifest_path,
+            preprocessing_manifest_path=preprocessing_path,
+            historical_payload_path=historical_path,
+            private_database_path=database_path,
+            pseudonymization_key_path=key_path,
+            safe_payload_path=safe_path,
+            source_receipts_path=source_receipts_path,
+            corpus_receipt_path=corpus_receipt_path,
+            build_receipt_path=build_receipt_path,
+            code_commit="e" * 40,
+        )
+
+
+def test_key_loading_rejects_broad_permissions_or_wrong_size(
+    tmp_path: Path,
+) -> None:
+    broad = tmp_path / "broad.key"
+    broad.write_bytes(b"x" * 32)
+    broad.chmod(0o644)
+    with pytest.raises(NextBehaviorCorpusBuildError, match="too broad"):
+        load_or_create_pseudonymization_key(broad, create=False)
+
+    short = tmp_path / "short.key"
+    short.write_bytes(b"x")
+    short.chmod(0o600)
+    with pytest.raises(NextBehaviorCorpusBuildError, match="exactly 32"):
+        load_or_create_pseudonymization_key(short, create=False)
