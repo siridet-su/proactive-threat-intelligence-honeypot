@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""Verify the frozen classifier environment and private model assets.
+
+The versioned manifest contains hashes and configuration but never a local
+model path. Operators supply the private model root explicitly. Verification
+is read-only; the optional smoke test uses a fixed synthetic command and emits
+no raw-corpus content.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+from math import isfinite
+from pathlib import Path
+from typing import Any, Dict, Mapping, Sequence
+
+
+SCHEMA_VERSION = "next_behavior_classifier_environment.v1"
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_TOP_LEVEL_FIELDS = frozenset(
+    {
+        "schema_version",
+        "python",
+        "dependency_lock",
+        "classifier",
+        "classification_policy",
+        "freeze",
+    }
+)
+_PYTHON_FIELDS = frozenset({"implementation", "version"})
+_LOCK_FIELDS = frozenset({"path", "sha256"})
+_CLASSIFIER_FIELDS = frozenset(
+    {
+        "adapter",
+        "adapter_sha256",
+        "pipeline_sha256",
+        "checkpoint_id",
+        "checkpoint_sha256",
+        "parameter_count",
+        "label_count",
+        "device",
+        "max_length",
+        "files",
+    }
+)
+_POLICY_FIELDS = frozenset(
+    {
+        "rule_policy_path",
+        "rule_policy_sha256",
+        "mitre_cache_path",
+        "mitre_cache_sha256",
+        "trust_policy_path",
+        "trust_policy_sha256",
+        "securebert_candidate_threshold",
+        "trusted_model_only_threshold",
+        "drop_rule_securebert_disagreements",
+        "compound_command_splitter",
+    }
+)
+_FREEZE_FIELDS = frozenset(
+    {
+        "basis_commit",
+        "historical_runtime_threshold_distinction_preserved",
+        "raw_scores_are_probabilities",
+    }
+)
+_MODEL_FILE_PATHS = frozenset(
+    {
+        "config.json",
+        "label_mapping.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "checkpoint-6765/config.json",
+        "checkpoint-6765/model.safetensors",
+        "checkpoint-6765/tokenizer.json",
+        "checkpoint-6765/tokenizer_config.json",
+    }
+)
+_CLASSIFIER_ADAPTER = (
+    "production.classification.securebert_classifier."
+    "SecureBertCommandClassifier"
+)
+_COMPOUND_SPLITTER = (
+    "production.classification.classification_pipeline.split_compound_command"
+)
+
+
+class ClassifierAssetError(ValueError):
+    """Raised when a frozen classifier receipt cannot be verified."""
+
+
+def _clean(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _is_sha256(value: Any) -> bool:
+    return bool(_SHA256.fullmatch(_clean(value).lower()))
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def validate_classifier_manifest(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return ["classifier environment manifest must be an object"]
+    errors: list[str] = []
+    if set(value) != _TOP_LEVEL_FIELDS:
+        errors.append("classifier environment fields are invalid")
+    if value.get("schema_version") != SCHEMA_VERSION:
+        errors.append(f"schema_version must be {SCHEMA_VERSION}")
+
+    python = value.get("python")
+    if not isinstance(python, dict) or set(python) != _PYTHON_FIELDS:
+        errors.append("python fields are invalid")
+    elif python.get("implementation") != "CPython" or not re.fullmatch(
+        r"3\.12\.[0-9]+", _clean(python.get("version"))
+    ):
+        errors.append("python runtime is not the frozen CPython 3.12 runtime")
+
+    lock = value.get("dependency_lock")
+    if not isinstance(lock, dict) or set(lock) != _LOCK_FIELDS:
+        errors.append("dependency_lock fields are invalid")
+    else:
+        if Path(_clean(lock.get("path"))).is_absolute():
+            errors.append("dependency lock path must be repository-relative")
+        if not _is_sha256(lock.get("sha256")):
+            errors.append("dependency lock SHA-256 is invalid")
+
+    classifier = value.get("classifier")
+    if not isinstance(classifier, dict) or set(classifier) != _CLASSIFIER_FIELDS:
+        errors.append("classifier fields are invalid")
+    else:
+        if classifier.get("adapter") != _CLASSIFIER_ADAPTER:
+            errors.append("classifier.adapter is not the frozen adapter")
+        if classifier.get("checkpoint_id") != (
+            "securebert_ttp_model_v2/checkpoint-6765"
+        ):
+            errors.append("classifier.checkpoint_id is not frozen")
+        for field in (
+            "adapter_sha256",
+            "pipeline_sha256",
+            "checkpoint_sha256",
+        ):
+            if not _is_sha256(classifier.get(field)):
+                errors.append(f"classifier.{field} is invalid")
+        for field in ("parameter_count", "label_count", "max_length"):
+            number = classifier.get(field)
+            if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+                errors.append(f"classifier.{field} must be positive")
+        if classifier.get("device") != "cpu":
+            errors.append("classifier.device must be cpu")
+        files = classifier.get("files")
+        if not isinstance(files, dict) or set(files) != _MODEL_FILE_PATHS:
+            errors.append("classifier.files must contain the exact frozen asset set")
+        else:
+            for filename, digest in files.items():
+                path = Path(_clean(filename))
+                if (
+                    not _clean(filename)
+                    or path.is_absolute()
+                    or ".." in path.parts
+                    or not _is_sha256(digest)
+                ):
+                    errors.append("classifier.files contains an unsafe receipt")
+
+    policy = value.get("classification_policy")
+    if not isinstance(policy, dict) or set(policy) != _POLICY_FIELDS:
+        errors.append("classification_policy fields are invalid")
+    else:
+        for path_field in (
+            "rule_policy_path",
+            "mitre_cache_path",
+            "trust_policy_path",
+        ):
+            path = Path(_clean(policy.get(path_field)))
+            if path.is_absolute() or ".." in path.parts:
+                errors.append(f"classification_policy.{path_field} is unsafe")
+        for hash_field in (
+            "rule_policy_sha256",
+            "mitre_cache_sha256",
+            "trust_policy_sha256",
+        ):
+            if not _is_sha256(policy.get(hash_field)):
+                errors.append(f"classification_policy.{hash_field} is invalid")
+        candidate = policy.get("securebert_candidate_threshold")
+        trusted = policy.get("trusted_model_only_threshold")
+        if not isinstance(candidate, (int, float)) or isinstance(candidate, bool):
+            errors.append("SecureBERT candidate threshold is invalid")
+        if not isinstance(trusted, (int, float)) or isinstance(trusted, bool):
+            errors.append("trusted model-only threshold is invalid")
+        if (
+            isinstance(candidate, (int, float))
+            and not isinstance(candidate, bool)
+            and isinstance(trusted, (int, float))
+            and not isinstance(trusted, bool)
+            and (
+                not isfinite(float(candidate))
+                or not isfinite(float(trusted))
+                or not (0.0 <= float(candidate) <= float(trusted) <= 1.0)
+            )
+        ):
+            errors.append("classification thresholds are inconsistent")
+        if policy.get("drop_rule_securebert_disagreements") is not True:
+            errors.append("classifier disagreements must remain audit-only")
+        if policy.get("compound_command_splitter") != _COMPOUND_SPLITTER:
+            errors.append("compound command splitter is not frozen")
+
+    freeze = value.get("freeze")
+    if not isinstance(freeze, dict) or set(freeze) != _FREEZE_FIELDS:
+        errors.append("freeze fields are invalid")
+    else:
+        if not re.fullmatch(r"[0-9a-f]{40}", _clean(freeze.get("basis_commit"))):
+            errors.append("freeze.basis_commit is invalid")
+        if freeze.get("historical_runtime_threshold_distinction_preserved") is not True:
+            errors.append("historical/runtime threshold distinction is not preserved")
+        if freeze.get("raw_scores_are_probabilities") is not False:
+            errors.append("raw classifier scores must not be called probabilities")
+    return errors
+
+
+def load_classifier_manifest(path: Path) -> Dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ClassifierAssetError(f"cannot read classifier manifest: {exc}") from exc
+    errors = validate_classifier_manifest(value)
+    if errors:
+        raise ClassifierAssetError("; ".join(errors))
+    return dict(value)
+
+
+def _verify_file(path: Path, expected_sha256: str, label: str) -> Dict[str, Any]:
+    if not path.is_file():
+        raise ClassifierAssetError(f"missing {label}")
+    actual = file_sha256(path)
+    if actual != expected_sha256:
+        raise ClassifierAssetError(f"{label} SHA-256 mismatch")
+    return {"sha256": actual, "size_bytes": path.stat().st_size}
+
+
+def verify_classifier_assets(
+    manifest: Mapping[str, Any],
+    *,
+    repository_root: Path,
+    model_root: Path,
+) -> Dict[str, Any]:
+    errors = validate_classifier_manifest(manifest)
+    if errors:
+        raise ClassifierAssetError("; ".join(errors))
+    classifier = manifest["classifier"]
+    policy = manifest["classification_policy"]
+    verified: Dict[str, Any] = {}
+    verified["dependency_lock"] = _verify_file(
+        repository_root / manifest["dependency_lock"]["path"],
+        manifest["dependency_lock"]["sha256"],
+        "dependency lock",
+    )
+    verified["classifier_adapter"] = _verify_file(
+        repository_root / "production/classification/securebert_classifier.py",
+        classifier["adapter_sha256"],
+        "SecureBERT adapter",
+    )
+    verified["classification_pipeline"] = _verify_file(
+        repository_root / "production/classification/classification_pipeline.py",
+        classifier["pipeline_sha256"],
+        "classification pipeline",
+    )
+    for path_field, hash_field in (
+        ("rule_policy_path", "rule_policy_sha256"),
+        ("mitre_cache_path", "mitre_cache_sha256"),
+        ("trust_policy_path", "trust_policy_sha256"),
+    ):
+        verified[path_field] = _verify_file(
+            repository_root / policy[path_field],
+            policy[hash_field],
+            path_field,
+        )
+    verified_model_files: Dict[str, Any] = {}
+    for relative_path, expected_hash in classifier["files"].items():
+        verified_model_files[relative_path] = _verify_file(
+            model_root / relative_path,
+            expected_hash,
+            f"classifier asset {relative_path}",
+        )
+    verified["model_files"] = verified_model_files
+    checkpoint_receipt = verified_model_files["checkpoint-6765/model.safetensors"]
+    if checkpoint_receipt["sha256"] != classifier["checkpoint_sha256"]:
+        raise ClassifierAssetError("checkpoint receipt is inconsistent")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": "assets_verified",
+        "classifier": {
+            "checkpoint_id": classifier["checkpoint_id"],
+            "checkpoint_sha256": checkpoint_receipt["sha256"],
+            "parameter_count": classifier["parameter_count"],
+            "label_count": classifier["label_count"],
+            "max_length": classifier["max_length"],
+            "device": classifier["device"],
+        },
+        "verified": verified,
+    }
+
+
+def run_smoke_test(
+    manifest: Mapping[str, Any],
+    *,
+    model_root: Path,
+) -> Dict[str, Any]:
+    from production.classification.securebert_classifier import (
+        SecureBertCommandClassifier,
+    )
+
+    classifier_config = manifest["classifier"]
+    classifier = SecureBertCommandClassifier(
+        model_path=str(model_root),
+        checkpoint_path=str(model_root / "checkpoint-6765"),
+        device=classifier_config["device"],
+        max_length=classifier_config["max_length"],
+    )
+    first = classifier.classify("uname -a")
+    second = classifier.classify("uname -a")
+    parameter_count = sum(
+        parameter.numel() for parameter in classifier.model.parameters()
+    )
+    label_count = len(classifier.model.config.id2label)
+    if parameter_count != classifier_config["parameter_count"]:
+        raise ClassifierAssetError("loaded classifier parameter count mismatch")
+    if label_count != classifier_config["label_count"]:
+        raise ClassifierAssetError("loaded classifier label count mismatch")
+    if first != second:
+        raise ClassifierAssetError("loaded classifier inference is not deterministic")
+    return {
+        "status": "loaded_and_deterministic",
+        "parameter_count": parameter_count,
+        "label_count": label_count,
+        "synthetic_replay_equal": True,
+    }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("configs/next_behavior_classifier_environment.v1.json"),
+    )
+    parser.add_argument("--repository-root", type=Path, default=Path("."))
+    parser.add_argument("--model-root", type=Path, required=True)
+    parser.add_argument("--smoke-test", action="store_true")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    manifest = load_classifier_manifest(args.manifest)
+    receipt = verify_classifier_assets(
+        manifest,
+        repository_root=args.repository_root,
+        model_root=args.model_root,
+    )
+    if args.smoke_test:
+        receipt["smoke_test"] = run_smoke_test(
+            manifest,
+            model_root=args.model_root,
+        )
+    print(json.dumps(receipt, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

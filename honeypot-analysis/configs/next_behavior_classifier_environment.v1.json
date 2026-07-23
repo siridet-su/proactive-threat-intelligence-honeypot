@@ -1,0 +1,49 @@
+{
+  "schema_version": "next_behavior_classifier_environment.v1",
+  "python": {
+    "implementation": "CPython",
+    "version": "3.12.13"
+  },
+  "dependency_lock": {
+    "path": "requirements-next-behavior-corpus.lock.txt",
+    "sha256": "468db1f2f4dad879b6cd4cc60402117f8ec77bce6d0b64266760e5ce0e4d5ace"
+  },
+  "classifier": {
+    "adapter": "production.classification.securebert_classifier.SecureBertCommandClassifier",
+    "adapter_sha256": "72c7cb7a4c2a9f85f141d8eb39a12b24414e0cd861f463ac6cb9e4811cc622be",
+    "pipeline_sha256": "72b848e262c32c726c73db9031a5bec663ca2550ccb512b0d48d2c00851b66b7",
+    "checkpoint_id": "securebert_ttp_model_v2/checkpoint-6765",
+    "checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+    "parameter_count": 149755588,
+    "label_count": 196,
+    "device": "cpu",
+    "max_length": 128,
+    "files": {
+      "config.json": "5e8ceaf5a403d630e78d8c49982f97b519b227977f4880166d3168f38988b90b",
+      "label_mapping.json": "53a6fca070ce44d15731cf654475e1e66a17d0c1f924021ab597d192ba22f16b",
+      "tokenizer.json": "e0a696f1fbf0f2c7d212e8b9e133250d19bd1c7e5bc34fc91c59d008894dc7b1",
+      "tokenizer_config.json": "cbea6a0ec8bf4a66475f458a359223ec17f1ac36b2f5797036a76140daa065de",
+      "checkpoint-6765/config.json": "5e8ceaf5a403d630e78d8c49982f97b519b227977f4880166d3168f38988b90b",
+      "checkpoint-6765/model.safetensors": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+      "checkpoint-6765/tokenizer.json": "e0a696f1fbf0f2c7d212e8b9e133250d19bd1c7e5bc34fc91c59d008894dc7b1",
+      "checkpoint-6765/tokenizer_config.json": "cbea6a0ec8bf4a66475f458a359223ec17f1ac36b2f5797036a76140daa065de"
+    }
+  },
+  "classification_policy": {
+    "rule_policy_path": "configs/classification_rules.trusted.json",
+    "rule_policy_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
+    "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
+    "trust_policy_path": "production/classification/trust.py",
+    "trust_policy_sha256": "1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd",
+    "securebert_candidate_threshold": 0.55,
+    "trusted_model_only_threshold": 0.9,
+    "drop_rule_securebert_disagreements": true,
+    "compound_command_splitter": "production.classification.classification_pipeline.split_compound_command"
+  },
+  "freeze": {
+    "basis_commit": "e3de17c727d8dd8b16f57654da4566e8a5700c03",
+    "historical_runtime_threshold_distinction_preserved": true,
+    "raw_scores_are_probabilities": false
+  }
+}
