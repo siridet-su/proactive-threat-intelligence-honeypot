@@ -16,6 +16,10 @@ from production.prediction.next_behavior_contract import (
     NextBehaviorContractError,
     require_valid_next_behavior_session,
 )
+from production.prediction.next_behavior_corpus import (
+    NextBehaviorCorpusError,
+    require_valid_corpus_receipt,
+)
 from production.prediction.next_behavior_preprocessing import (
     build_next_behavior_examples,
 )
@@ -34,6 +38,7 @@ _SHA_FIELDS = (
     "label_policy_sha256",
     "trust_policy_sha256",
 )
+_HISTORICAL_SPLITS = ("train", "calibration", "test")
 
 
 class NextBehaviorPartitionError(ValueError):
@@ -54,6 +59,133 @@ def membership_sha256(values: Iterable[Any]) -> str:
 
     normalized = sorted({_clean(value) for value in values if _clean(value)})
     return hashlib.sha256(stable_json(normalized).encode("utf-8")).hexdigest()
+
+
+def require_historical_membership_independence(
+    build_receipt: Mapping[str, Any],
+    corpus_receipt: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Fail closed when a rebuilt corpus reuses accepted historical sessions.
+
+    A new HMAC key changes public session identifiers, so comparing only the
+    safe identifiers can falsely imply independence. The private corpus
+    builder records the accepted historical split for each original session.
+    This boundary validates those aggregate counts against the safe-corpus
+    receipt before any partition artifact may be frozen.
+    """
+
+    if not isinstance(build_receipt, Mapping):
+        raise NextBehaviorPartitionError("build receipt must be an object")
+    if build_receipt.get("schema_version") != (
+        "next_behavior_zenodo_build_receipt.v1"
+    ):
+        raise NextBehaviorPartitionError(
+            "build receipt has an unsupported schema"
+        )
+    if build_receipt.get("status") != "safe_corpus_built":
+        raise NextBehaviorPartitionError("safe corpus build is incomplete")
+    try:
+        corpus = require_valid_corpus_receipt(dict(corpus_receipt))
+    except NextBehaviorCorpusError as exc:
+        raise NextBehaviorPartitionError(
+            "corpus receipt is invalid"
+        ) from exc
+    if build_receipt.get("code_commit") != corpus["code_commit"]:
+        raise NextBehaviorPartitionError(
+            "build and corpus receipts use different code commits"
+        )
+    if build_receipt.get("corpus_receipt_id") != corpus["receipt_id"]:
+        raise NextBehaviorPartitionError(
+            "build and corpus receipt identities do not match"
+        )
+    safe_payload = build_receipt.get("safe_payload")
+    if (
+        not isinstance(safe_payload, Mapping)
+        or safe_payload.get("line_count") != corpus["safe_session_count"]
+    ):
+        raise NextBehaviorPartitionError(
+            "build and corpus safe-session counts do not match"
+        )
+    reconciliation = build_receipt.get("pipeline_reconciliation")
+    if not isinstance(reconciliation, Mapping):
+        raise NextBehaviorPartitionError(
+            "build receipt has no pipeline reconciliation"
+        )
+    private_count = reconciliation.get(
+        "private_sessions_entering_safe_adapter"
+    )
+    if (
+        isinstance(private_count, bool)
+        or not isinstance(private_count, int)
+        or private_count < 0
+        or private_count != corpus["private_session_count"]
+    ):
+        raise NextBehaviorPartitionError(
+            "build and corpus private-session counts do not match"
+        )
+    historical = build_receipt.get("historical_membership")
+    if not isinstance(historical, Mapping):
+        raise NextBehaviorPartitionError(
+            "build receipt has no historical membership evidence"
+        )
+    accepted_count = historical.get("accepted_payload_session_count")
+    if (
+        isinstance(accepted_count, bool)
+        or not isinstance(accepted_count, int)
+        or accepted_count < 1
+    ):
+        raise NextBehaviorPartitionError(
+            "accepted historical membership count is invalid"
+        )
+    overlap_by_split = historical.get("overlap_by_historical_split")
+    if (
+        not isinstance(overlap_by_split, Mapping)
+        or set(overlap_by_split) != {*_HISTORICAL_SPLITS, "not_present"}
+    ):
+        raise NextBehaviorPartitionError(
+            "historical overlap must define train, calibration, test, "
+            "and not_present"
+        )
+    for split, count in overlap_by_split.items():
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise NextBehaviorPartitionError(
+                f"historical overlap count for {split} is invalid"
+            )
+    if sum(overlap_by_split.values()) != private_count:
+        raise NextBehaviorPartitionError(
+            "historical overlap counts do not reconcile to private sessions"
+        )
+    overlap_count = sum(
+        overlap_by_split[split] for split in _HISTORICAL_SPLITS
+    )
+    if overlap_count > accepted_count:
+        raise NextBehaviorPartitionError(
+            "historical overlap exceeds accepted membership"
+        )
+    historical_payload_sha256 = _clean(
+        build_receipt.get("historical_payload_sha256")
+    ).lower()
+    if not _is_sha256(historical_payload_sha256):
+        raise NextBehaviorPartitionError(
+            "historical payload SHA-256 is invalid"
+        )
+    if overlap_count:
+        split_summary = ", ".join(
+            f"{split}={overlap_by_split[split]}"
+            for split in _HISTORICAL_SPLITS
+            if overlap_by_split[split]
+        )
+        raise NextBehaviorPartitionError(
+            "redesigned membership overlaps the accepted historical corpus "
+            f"({overlap_count} sessions; {split_summary})"
+        )
+    return {
+        "status": "historical_membership_independent",
+        "accepted_historical_session_count": accepted_count,
+        "candidate_private_session_count": private_count,
+        "overlap_count": 0,
+        "historical_payload_sha256": historical_payload_sha256,
+    }
 
 
 def assign_seven_member_roles(

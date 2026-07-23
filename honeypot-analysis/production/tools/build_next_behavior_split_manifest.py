@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Sequence
 
 from production.prediction.next_behavior_partitions import (
     build_partition_manifest,
+    require_historical_membership_independence,
 )
 
 
@@ -39,6 +40,13 @@ def _load_string_array(path: Path, *, label: str) -> List[str]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{label} must be a JSON array of strings")
+    return value
+
+
+def _load_object(path: Path, *, label: str) -> Dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
     return value
 
 
@@ -71,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sessions", type=Path, required=True)
     parser.add_argument("--source-members", type=Path, required=True)
     parser.add_argument("--historical-session-ids", type=Path, required=True)
+    parser.add_argument("--corpus-receipt", type=Path)
+    parser.add_argument("--build-receipt", type=Path)
     parser.add_argument("--preprocessing-config", type=Path, required=True)
     parser.add_argument("--label-policy", type=Path, required=True)
     parser.add_argument("--trust-policy", type=Path, required=True)
@@ -81,6 +91,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if bool(args.corpus_receipt) != bool(args.build_receipt):
+        raise ValueError(
+            "--corpus-receipt and --build-receipt must be supplied together"
+        )
+    if args.corpus_receipt and args.build_receipt:
+        require_historical_membership_independence(
+            _load_object(args.build_receipt, label="build receipt"),
+            _load_object(args.corpus_receipt, label="corpus receipt"),
+        )
     manifest = build_partition_manifest(
         _load_object_array(args.sessions, label="sessions"),
         _load_object_array(args.source_members, label="source members"),

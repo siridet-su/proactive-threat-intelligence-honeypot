@@ -16,6 +16,12 @@ from production.prediction.next_behavior_partitions import (
     membership_sha256,
     load_partition_for_purpose,
     records_for_purpose,
+    require_historical_membership_independence,
+)
+from production.prediction.next_behavior_corpus import (
+    build_corpus_receipt,
+    build_privacy_safe_session,
+    build_source_member_receipt,
 )
 from production.tools.build_next_behavior_split_manifest import main as build_manifest
 
@@ -110,6 +116,80 @@ def _records(members: list[dict]) -> list[dict]:
 
 def _session_id(index: int) -> str:
     return "nbsession_" + hashlib.sha256(f"session-{index}".encode()).hexdigest()
+
+
+def _corpus_and_build_receipts(
+    *,
+    overlap: dict[str, int],
+) -> tuple[dict, dict]:
+    members = _members()
+    records = _records(members)
+    key = b"k" * 32
+
+    source_receipts = [
+        build_source_member_receipt(
+            private_member_identifier=str(index),
+            source_sha256=member["sha256"],
+            byte_size=100 + index,
+            chronological_order=index,
+            collection_start=member["collection_start"],
+            collection_end=member["collection_end"],
+            pseudonymization_key=key,
+            pseudonymization_key_id="fixture-key",
+        )
+        for index, member in enumerate(members, 1)
+    ]
+    build_results = []
+    for index, record in enumerate(records, 1):
+        source_receipt = source_receipts[index - 1]
+        build_results.append(
+            build_privacy_safe_session(
+                {
+                    "session_id": record["session_id"],
+                    "source_member_id": str(index),
+                    "protocol": "ssh",
+                    "status": "closed",
+                    "observation_groups": [
+                        {
+                            **record["observation_groups"][0],
+                            "labels": record["observation_groups"][0][
+                                "label_provenance"
+                            ],
+                        }
+                    ],
+                },
+                source_receipt,
+                pseudonymization_key=key,
+                pseudonymization_key_id="fixture-key",
+            )
+        )
+    corpus = build_corpus_receipt(
+        build_results,
+        source_receipts,
+        code_commit="fixture-commit",
+        preprocessing_sha256=HASH_A,
+        label_policy_sha256=HASH_A,
+        trust_policy_sha256=HASH_B,
+        classification_checkpoint_sha256=HASH_B,
+    )
+    build = {
+        "schema_version": "next_behavior_zenodo_build_receipt.v1",
+        "status": "safe_corpus_built",
+        "code_commit": corpus["code_commit"],
+        "corpus_receipt_id": corpus["receipt_id"],
+        "historical_payload_sha256": HASH_A,
+        "safe_payload": {"line_count": corpus["safe_session_count"]},
+        "pipeline_reconciliation": {
+            "private_sessions_entering_safe_adapter": corpus[
+                "private_session_count"
+            ],
+        },
+        "historical_membership": {
+            "accepted_payload_session_count": 50,
+            "overlap_by_historical_split": overlap,
+        },
+    }
+    return corpus, build
 
 
 def _manifest(records: list[dict], members: list[dict], **kwargs) -> dict:
@@ -220,6 +300,55 @@ def test_historical_membership_guard_rejects_any_overlap() -> None:
     assert exclusion["intersection_count"] == 0
 
 
+def test_private_historical_receipt_rejects_overlap_despite_new_safe_ids() -> None:
+    corpus, build = _corpus_and_build_receipts(
+        overlap={"train": 3, "calibration": 1, "test": 2, "not_present": 1},
+    )
+
+    with pytest.raises(
+        NextBehaviorPartitionError,
+        match=r"6 sessions; train=3, calibration=1, test=2",
+    ):
+        require_historical_membership_independence(build, corpus)
+
+
+def test_private_historical_receipt_accepts_reconciled_zero_overlap() -> None:
+    corpus, build = _corpus_and_build_receipts(
+        overlap={"train": 0, "calibration": 0, "test": 0, "not_present": 7},
+    )
+
+    result = require_historical_membership_independence(build, corpus)
+
+    assert result["status"] == "historical_membership_independent"
+    assert result["overlap_count"] == 0
+    assert result["candidate_private_session_count"] == 7
+
+
+def test_private_historical_receipt_rejects_forged_or_incomplete_counts() -> None:
+    corpus, build = _corpus_and_build_receipts(
+        overlap={"train": 0, "calibration": 0, "test": 0, "not_present": 7},
+    )
+    build["historical_membership"]["overlap_by_historical_split"][
+        "not_present"
+    ] = 6
+    with pytest.raises(NextBehaviorPartitionError, match="do not reconcile"):
+        require_historical_membership_independence(build, corpus)
+
+    corpus, build = _corpus_and_build_receipts(
+        overlap={"train": 0, "calibration": 0, "test": 0, "not_present": 7},
+    )
+    build["corpus_receipt_id"] = "copied-but-wrong"
+    with pytest.raises(NextBehaviorPartitionError, match="identities"):
+        require_historical_membership_independence(build, corpus)
+
+    corpus, build = _corpus_and_build_receipts(
+        overlap={"train": 0, "calibration": 0, "test": 0, "not_present": 7},
+    )
+    build["historical_payload_sha256"] = "not-a-digest"
+    with pytest.raises(NextBehaviorPartitionError, match="SHA-256"):
+        require_historical_membership_independence(build, corpus)
+
+
 @pytest.mark.parametrize(
     ("purpose", "expected_session"),
     [
@@ -327,3 +456,44 @@ def test_manifest_cli_writes_once_and_refuses_overwrite(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         build_manifest(arguments)
+
+
+def test_manifest_cli_runs_private_historical_preflight_before_writing(
+    tmp_path: Path,
+) -> None:
+    corpus, build = _corpus_and_build_receipts(
+        overlap={"train": 3, "calibration": 1, "test": 2, "not_present": 1},
+    )
+    corpus_path = tmp_path / "corpus-receipt.json"
+    build_path = tmp_path / "build-receipt.json"
+    output_path = tmp_path / "must-not-exist.json"
+    corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
+    build_path.write_text(json.dumps(build), encoding="utf-8")
+
+    with pytest.raises(NextBehaviorPartitionError, match="6 sessions"):
+        build_manifest(
+            [
+                "--sessions",
+                str(tmp_path / "sessions-do-not-need-to-exist.json"),
+                "--source-members",
+                str(tmp_path / "members-do-not-need-to-exist.json"),
+                "--historical-session-ids",
+                str(tmp_path / "ids-do-not-need-to-exist.json"),
+                "--corpus-receipt",
+                str(corpus_path),
+                "--build-receipt",
+                str(build_path),
+                "--preprocessing-config",
+                str(PREPROCESSING_PATH),
+                "--label-policy",
+                str(tmp_path / "label-policy-does-not-need-to-exist.json"),
+                "--trust-policy",
+                str(tmp_path / "trust-policy-does-not-need-to-exist.py"),
+                "--code-commit",
+                "fixture-commit",
+                "--output",
+                str(output_path),
+            ]
+        )
+
+    assert not output_path.exists()
