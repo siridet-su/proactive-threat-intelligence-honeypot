@@ -10,12 +10,22 @@ import pytest
 from production.prediction.next_behavior_contract import SESSION_SCHEMA_VERSION
 from production.prediction.next_behavior_partitions import (
     MEMBER_ROLES,
+    PARTITION_SCHEMA_VERSION,
+    PARTITION_SCHEMA_VERSION_V2,
+    V2_DEVELOPMENT_CUTOFF,
+    V2_EMBARGO_DATE,
+    V2_FINAL_WINDOW_START,
     NextBehaviorPartitionError,
     assign_seven_member_roles,
+    assign_thirteen_member_cohorts,
+    assign_thirteen_member_roles,
     build_partition_manifest,
+    build_partition_manifest_v2,
+    load_partition_for_purpose_v2,
     membership_sha256,
     load_partition_for_purpose,
     records_for_purpose,
+    records_for_purpose_v2,
     require_historical_membership_independence,
 )
 from production.prediction.next_behavior_corpus import (
@@ -46,6 +56,27 @@ def _members() -> list[dict]:
         }
         for index in range(1, 8)
     ]
+
+
+def _members_v2() -> list[dict]:
+    members = []
+    for index in range(1, 14):
+        day = index if index <= 6 else index + 2
+        members.append(
+            {
+                "member_id": (
+                    "nbmember_"
+                    + hashlib.sha256(f"v2-member-{index}".encode()).hexdigest()
+                ),
+                "sha256": hashlib.sha256(
+                    f"v2-member-{index}".encode()
+                ).hexdigest(),
+                "chronological_order": index,
+                "collection_start": f"2025-08-{day:02d}T00:00:00Z",
+                "collection_end": f"2025-08-{day:02d}T23:59:59Z",
+            }
+        )
+    return members
 
 
 def _session(member: dict, index: int) -> dict:
@@ -209,6 +240,42 @@ def _manifest(records: list[dict], members: list[dict], **kwargs) -> dict:
     )
 
 
+def _historical_evidence_v2(records: list[dict]) -> dict[str, str]:
+    split_by_session = {
+        _session_id(index): (
+            "train"
+            if index <= 4
+            else "calibration"
+            if index <= 6
+            else "not_present"
+        )
+        for index in range(1, 14)
+    }
+    return {
+        record["session_id"]: split_by_session[record["session_id"]]
+        for record in records
+    }
+
+
+def _manifest_v2(records: list[dict], members: list[dict], **kwargs) -> dict:
+    preprocessing_sha = hashlib.sha256(PREPROCESSING_PATH.read_bytes()).hexdigest()
+    kwargs.setdefault(
+        "historical_split_by_session",
+        _historical_evidence_v2(records),
+    )
+    kwargs.setdefault("development_cutoff", V2_DEVELOPMENT_CUTOFF)
+    kwargs.setdefault("final_window_start", V2_FINAL_WINDOW_START)
+    return build_partition_manifest_v2(
+        records,
+        members,
+        preprocessing_sha256=preprocessing_sha,
+        label_policy_sha256=HASH_A,
+        trust_policy_sha256=HASH_B,
+        code_commit="test-v2-commit",
+        **kwargs,
+    )
+
+
 def test_frozen_preprocessing_configuration_matches_contract() -> None:
     payload = json.loads(PREPROCESSING_PATH.read_text(encoding="utf-8"))
 
@@ -234,6 +301,137 @@ def test_seven_member_roles_are_chronological_and_frozen() -> None:
         "calibration",
         "test",
     ]
+
+
+def test_thirteen_member_roles_and_cohorts_are_additive_and_frozen() -> None:
+    members = _members_v2()
+
+    roles = assign_thirteen_member_roles(members)
+    cohorts = assign_thirteen_member_cohorts(members)
+
+    assert [roles[member["member_id"]] for member in members] == [
+        "train",
+        "train",
+        "train",
+        "train",
+        "selection",
+        "calibration",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+    ]
+    assert [cohorts[member["member_id"]] for member in members] == [
+        *(["development"] * 6),
+        *(["final"] * 7),
+    ]
+
+
+def test_v2_manifest_is_deterministic_with_exact_disjoint_membership() -> None:
+    members = _members_v2()
+    records = _records(members)
+
+    first = _manifest_v2(records, members)
+    second = _manifest_v2(list(reversed(records)), members)
+
+    assert first == second
+    assert first["schema_version"] == PARTITION_SCHEMA_VERSION_V2
+    assert first["protocol"] == (
+        "thirteen_member_chronological_4_1_1_7_with_embargo.v1"
+    )
+    assert first["temporal_policy"]["development_cutoff"] == "2025-08-07"
+    assert first["temporal_policy"]["embargo_date"] == V2_EMBARGO_DATE
+    assert first["temporal_policy"]["final_window_start"] == "2025-08-09"
+    assert first["roles"]["train"]["source_member_count"] == 4
+    assert first["roles"]["test"]["source_member_count"] == 7
+    assert first["roles"]["test"]["session_count"] == 7
+    assert first["roles"]["test"]["example_count"] == 14
+    assert first["cohorts"]["development"]["session_count"] == 6
+    assert first["cohorts"]["final"]["session_count"] == 7
+    for scope in ("roles", "cohorts"):
+        for membership in ("source_members", "sessions", "examples"):
+            assert (
+                first["intersection_proofs"][scope][membership]["all_empty"]
+                is True
+            )
+    assert all(
+        len(digest) == 64 for digest in first["input_hashes"].values()
+    )
+
+
+def test_v2_historical_policy_rejects_test_in_development_and_any_final_overlap(
+) -> None:
+    members = _members_v2()
+    records = _records(members)
+    evidence = _historical_evidence_v2(records)
+    evidence[records[4]["session_id"]] = "test"
+
+    with pytest.raises(
+        NextBehaviorPartitionError,
+        match="development cohort.*historical test",
+    ):
+        _manifest_v2(
+            records,
+            members,
+            historical_split_by_session=evidence,
+        )
+
+    evidence = _historical_evidence_v2(records)
+    evidence[records[6]["session_id"]] = "calibration"
+    with pytest.raises(
+        NextBehaviorPartitionError,
+        match=r"final cohort.*historical split \(calibration\)",
+    ):
+        _manifest_v2(
+            records,
+            members,
+            historical_split_by_session=evidence,
+        )
+
+
+def test_v2_discloses_permitted_development_historical_reuse() -> None:
+    members = _members_v2()
+    records = _records(members)
+
+    manifest = _manifest_v2(records, members)
+
+    disclosure = manifest["historical_membership_policy"]["development"][
+        "disclosure"
+    ]
+    assert disclosure["train"]["session_count"] == 4
+    assert disclosure["calibration"]["session_count"] == 2
+    assert disclosure["test"]["session_count"] == 0
+    assert (
+        manifest["historical_membership_policy"]["final"]["disclosure"][
+            "not_present"
+        ]["session_count"]
+        == 7
+    )
+
+
+def test_v2_requires_exact_temporal_cutoff_and_embargo() -> None:
+    members = _members_v2()
+    records = _records(members)
+
+    with pytest.raises(NextBehaviorPartitionError, match="development_cutoff"):
+        _manifest_v2(records, members, development_cutoff="2025-08-06")
+
+    members[6]["collection_start"] = "2025-08-08T23:59:59Z"
+    with pytest.raises(NextBehaviorPartitionError, match="final window boundary"):
+        _manifest_v2(records, members)
+
+
+def test_v1_manifest_and_role_assignment_remain_compatible() -> None:
+    members = _members()
+    manifest = _manifest(_records(members), members)
+
+    assert manifest["schema_version"] == PARTITION_SCHEMA_VERSION
+    assert manifest["protocol"] == "seven_member_chronological_4_1_1_1.v1"
+    assert assign_seven_member_roles(members)[members[-1]["member_id"]] == "test"
+    assert "cohorts" not in manifest
 
 
 def test_manifest_has_disjoint_membership_and_deterministic_hashes() -> None:
@@ -411,6 +609,70 @@ def test_purpose_loader_never_opens_another_role_artifact() -> None:
     assert "private/test.jsonl" not in opened
 
 
+@pytest.mark.parametrize(
+    ("purpose", "expected_count"),
+    [
+        ("fit_model", 4),
+        ("select_model", 1),
+        ("fit_calibration", 1),
+        ("final_evaluation", 7),
+    ],
+)
+def test_v2_record_access_is_role_and_purpose_scoped(
+    purpose: str,
+    expected_count: int,
+) -> None:
+    members = _members_v2()
+
+    selected = records_for_purpose_v2(
+        _records(members),
+        members,
+        purpose=purpose,
+    )
+
+    assert len(selected) == expected_count
+    if purpose != "final_evaluation":
+        final_member_ids = {
+            member["member_id"] for member in members[6:]
+        }
+        assert not final_member_ids.intersection(
+            record["source_member_id"] for record in selected
+        )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "role"),
+    [
+        ("fit_model", "train"),
+        ("select_model", "selection"),
+        ("fit_calibration", "calibration"),
+    ],
+)
+def test_v2_nonfinal_loader_rejects_any_test_path(
+    purpose: str,
+    role: str,
+) -> None:
+    opened: list[str] = []
+
+    with pytest.raises(NextBehaviorPartitionError, match=f"only {role}"):
+        load_partition_for_purpose_v2(
+            {
+                role: f"private/{role}.jsonl",
+                "test": "private/test.jsonl",
+            },
+            purpose=purpose,
+            reader=opened.append,
+        )
+
+    assert opened == []
+    selected = load_partition_for_purpose_v2(
+        {role: f"private/{role}.jsonl"},
+        purpose=purpose,
+        reader=lambda path: path,
+    )
+    assert selected == f"private/{role}.jsonl"
+
+
 def test_membership_hash_is_order_invariant_and_duplicate_free() -> None:
     assert membership_sha256(["b", "a", "a"]) == membership_sha256(["a", "b"])
 
@@ -456,6 +718,58 @@ def test_manifest_cli_writes_once_and_refuses_overwrite(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         build_manifest(arguments)
+
+
+def test_manifest_cli_builds_explicit_v2_protocol(tmp_path: Path) -> None:
+    members = _members_v2()
+    records = _records(members)
+    sessions_path = tmp_path / "sessions.json"
+    members_path = tmp_path / "members.json"
+    evidence_path = tmp_path / "historical-split-evidence.json"
+    label_policy_path = tmp_path / "label-policy.json"
+    trust_policy_path = tmp_path / "trust-policy.json"
+    output_path = tmp_path / "manifest-v2.json"
+    sessions_path.write_text(json.dumps(records), encoding="utf-8")
+    members_path.write_text(json.dumps(members), encoding="utf-8")
+    evidence_path.write_text(
+        json.dumps(_historical_evidence_v2(records)),
+        encoding="utf-8",
+    )
+    label_policy_path.write_text('{"version": 2}\n', encoding="utf-8")
+    trust_policy_path.write_text('{"version": 2}\n', encoding="utf-8")
+
+    assert (
+        build_manifest(
+            [
+                "--protocol-version",
+                "v2",
+                "--sessions",
+                str(sessions_path),
+                "--source-members",
+                str(members_path),
+                "--historical-split-evidence",
+                str(evidence_path),
+                "--development-cutoff",
+                V2_DEVELOPMENT_CUTOFF,
+                "--final-window-start",
+                V2_FINAL_WINDOW_START,
+                "--preprocessing-config",
+                str(PREPROCESSING_PATH),
+                "--label-policy",
+                str(label_policy_path),
+                "--trust-policy",
+                str(trust_policy_path),
+                "--code-commit",
+                "test-v2-commit",
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == PARTITION_SCHEMA_VERSION_V2
+    assert manifest["roles"]["test"]["source_member_count"] == 7
 
 
 def test_manifest_cli_runs_private_historical_preflight_before_writing(
