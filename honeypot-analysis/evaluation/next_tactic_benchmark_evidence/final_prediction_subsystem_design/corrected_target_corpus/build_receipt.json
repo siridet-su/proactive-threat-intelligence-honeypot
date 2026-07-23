@@ -1,0 +1,85 @@
+{
+  "classification": {
+    "asset_verification_status": "assets_verified",
+    "checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+    "classifiable_fragment_count": 59002,
+    "classifier_manifest_sha256": "26a54d4700735bb634a425700b71c27e4d15447d64120ee3988afa9a02afee20",
+    "code_commit": "3ce5f249a21a57a9f041b4770e13d592f2495a21",
+    "corpus_builder_sha256": "cc0560f4cb42ed2a9fd16053aa0597ca11acca19bc39c24fa14dca985edc4635",
+    "drop_rule_securebert_disagreements": true,
+    "label_adapter_sha256": "07772cdbb419cd8373d26a9a05f14224fbccb0548b70f829917d224699c91331",
+    "label_counts": {
+      "audit_only_candidate:reviewed_rule": 15245,
+      "audit_only_candidate:securebert": 259834,
+      "trusted_observation:reviewed_rule": 118277,
+      "trusted_observation:rule_model_agreement": 18805,
+      "trusted_observation:securebert": 546
+    },
+    "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
+    "raw_content_emitted": false,
+    "rule_policy_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "schema_version": "next_behavior_zenodo_classification.v1",
+    "source_manifest_sha256": "a82f2c71251a241eac7294ced9dc41d6ca22e72e1358babc902c4eabcdc59e6f",
+    "status": "classified",
+    "trust_policy_sha256": "1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd",
+    "trusted_model_only_threshold": 0.9,
+    "unique_command_count": 57955,
+    "unique_fragment_count": 59011,
+    "unrepresented_counts": {
+      "malformed_label": 37275,
+      "shell_noise": 5
+    }
+  },
+  "classifier_manifest_sha256": "26a54d4700735bb634a425700b71c27e4d15447d64120ee3988afa9a02afee20",
+  "code_commit": "3ce5f249a21a57a9f041b4770e13d592f2495a21",
+  "corpus_receipt_id": "nextbehaviorcorpus_edccc3cc1349e941adf676703733f442",
+  "historical_membership": {
+    "accepted_payload_session_count": 219336,
+    "overlap_by_historical_split": {
+      "calibration": 32900,
+      "not_present": 168239,
+      "test": 32901,
+      "train": 153535
+    }
+  },
+  "historical_payload_sha256": "c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb",
+  "pipeline_reconciliation": {
+    "empty_command_input_events": 349,
+    "groups_with_audit_only_labels": 358396,
+    "groups_with_trusted_label": 656267,
+    "groups_without_representable_labels": 56,
+    "nonempty_command_events": 1014719,
+    "privacy_safe_sessions_emitted": 219336,
+    "private_sessions_entering_safe_adapter": 387575,
+    "private_store_command_events": 1014719,
+    "raw_command_input_events": 1015068,
+    "raw_event_records": 30083833,
+    "sessions_dropped_without_trusted_behavior": 168239,
+    "unique_classified_commands": 57955,
+    "unrepresented_output_occurrences_by_reason": {
+      "malformed_label": 43161,
+      "shell_noise": 75
+    }
+  },
+  "preprocessing_manifest_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
+  "pseudonymization_key_id": "next-behavior-hmac-d664dad99120377f",
+  "raw_content_emitted": false,
+  "safe_payload": {
+    "line_count": 219336,
+    "sha256": "81736363154cf485b0fec98fe8ba41e03f1440860564aa843a1de2739aacf375",
+    "size_bytes": 1231491290
+  },
+  "schema_version": "next_behavior_zenodo_build_receipt.v1",
+  "source_manifest_sha256": "a82f2c71251a241eac7294ced9dc41d6ca22e72e1358babc902c4eabcdc59e6f",
+  "source_session_counts": {
+    "nbmember_423e2a27aad0a1151473319ef53cd2ce27e6742255f21d1b6beaf33b3ec078cf": 41407,
+    "nbmember_4caccc11665bd56432dd177af6a57da56c6b4c6bbf9fecfac794f4c710042e82": 39879,
+    "nbmember_5fea19155ccafd3341b64048a08feda7637613fd9cbe854c3964c19064981795": 56396,
+    "nbmember_6d6573491a2e31ef3585af4998e824b69085c1ac9135335c24b499f686de6065": 87322,
+    "nbmember_a5f2ff39184631ffd93a4aea7de8c6be3cda2319f47ab19449518a292b1f0b33": 61084,
+    "nbmember_a648bcd4727d972dcd96cd27f955af811497a672f1c2d38cea47d8cb6c3daf72": 22426,
+    "nbmember_fd827a782ca074dd15ee604e2b47db83ce476fb5c3de79f8dbb1af571bcbe6b3": 79061
+  },
+  "status": "safe_corpus_built",
+  "timestamp_normalization": "source naive timestamps interpreted as UTC and emitted as timezone-aware ISO-8601 Z"
+}
