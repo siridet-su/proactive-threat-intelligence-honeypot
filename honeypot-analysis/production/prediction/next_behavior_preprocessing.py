@@ -166,6 +166,7 @@ def _model_phase(phase: Mapping[str, Any]) -> Dict[str, Any]:
             phase.get("label_agreement_statuses") or []
         ),
         "audit_only_label_count": int(phase.get("audit_only_label_count") or 0),
+        "evidence_refs": _unique_sorted(phase.get("evidence_refs") or []),
     }
 
 
@@ -189,6 +190,11 @@ def build_model_input(
         "truncated": len(phase_sequence) > max_sequence_length,
         "phase_sequence": [_model_phase(phase) for phase in selected],
         "session_context": context,
+        "input_evidence_refs": _unique_sorted(
+            evidence_ref
+            for phase in selected
+            for evidence_ref in phase.get("evidence_refs") or []
+        ),
     }
     model_input["input_hash"] = stable_id("nextbehaviorinput", model_input)
     return model_input

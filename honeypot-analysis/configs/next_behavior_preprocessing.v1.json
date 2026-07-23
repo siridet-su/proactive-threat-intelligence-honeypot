@@ -1,7 +1,7 @@
 {
   "schema_version": "next_behavior_preprocessing.v1",
   "target_contract_id": "next_distinct_command_behavior_phase_or_session_end.v1",
-  "input_schema_version": "next_behavior_model_input.v1",
+  "input_schema_version": "next_behavior_input.v1",
   "session_schema_version": "next_behavior_session.v1",
   "phase_schema_version": "next_behavior_phase.v1",
   "example_schema_version": "next_behavior_example.v1",
@@ -22,7 +22,8 @@
       "label_provenance_sources",
       "label_confidence_buckets",
       "label_agreement_statuses",
-      "audit_only_label_count"
+      "audit_only_label_count",
+      "evidence_refs"
     ],
     "session_context": [
       "login_outcome",

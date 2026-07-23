@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Mapping
 SESSION_SCHEMA_VERSION = "next_behavior_session.v1"
 PHASE_SCHEMA_VERSION = "next_behavior_phase.v1"
 EXAMPLE_SCHEMA_VERSION = "next_behavior_example.v1"
-MODEL_INPUT_SCHEMA_VERSION = "next_behavior_model_input.v1"
+MODEL_INPUT_SCHEMA_VERSION = "next_behavior_input.v1"
 TARGET_CONTRACT_ID = "next_distinct_command_behavior_phase_or_session_end.v1"
 TERMINAL_OUTCOME = "session_end_no_further_trusted_behavior"
 
