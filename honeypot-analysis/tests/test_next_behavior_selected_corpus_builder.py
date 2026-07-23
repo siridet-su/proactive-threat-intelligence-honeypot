@@ -7,9 +7,11 @@ import json
 import sqlite3
 import zlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import production.tools.build_next_behavior_selected_corpus as selected_corpus
 from production.prediction.next_behavior_source_selection import (
     COMPLETE_STATUS,
 )
@@ -401,8 +403,9 @@ def test_same_role_cross_member_session_is_quarantined(
     assert reason == "cross_member"
 
 
-def test_final_access_is_explicitly_sealed_until_one_time_gate(
+def test_final_access_is_explicitly_sealed_until_verified_training_gate(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     completed, raw_directory, _payloads = _fixture(tmp_path)
     database = tmp_path / "private.sqlite"
@@ -415,17 +418,126 @@ def test_final_access_is_explicitly_sealed_until_one_time_gate(
         )
     assert not database.exists()
 
+    with pytest.raises(SelectedCorpusBuildError, match="training receipt"):
+        ingest_selected_members(
+            completed_selection_path=completed,
+            raw_directory=raw_directory,
+            private_database_path=database,
+            cohort="final",
+            open_final_test=True,
+        )
+    assert not database.exists()
+
+    commit = "a" * 40
+    training_bundle = tmp_path / "training_bundle.json"
+    training_bundle.write_text(
+        stable_json(
+            {
+                "schema_version": "next_behavior_training_bundle.v1",
+                "status": "frozen_pre_test",
+                "test_opened": False,
+                "final_test_path_accepted_by_command": False,
+                "code_commit": commit,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    gate_receipt = tmp_path / "training_bundle_verification.json"
+    gate_receipt.write_text(
+        stable_json(
+            {
+                "status": "frozen_pre_test",
+                "test_opened": False,
+                "code_commit": commit,
+                "training_bundle_sha256": hashlib.sha256(
+                    training_bundle.read_bytes()
+                ).hexdigest(),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            stdout=(commit + "\n" if "rev-parse" in command else "")
+        )
+
+    monkeypatch.setattr(selected_corpus.subprocess, "run", fake_run)
     receipt = ingest_selected_members(
         completed_selection_path=completed,
         raw_directory=raw_directory,
         private_database_path=database,
         cohort="final",
         open_final_test=True,
+        final_pretest_receipt_path=gate_receipt,
+        training_bundle_path=training_bundle,
+        repository_root=tmp_path,
     )
     assert receipt["final_test_opened"] is True
+    assert receipt["final_pretest_gate"]["training_bundle_sha256"] == (
+        hashlib.sha256(training_bundle.read_bytes()).hexdigest()
+    )
     assert receipt["counts"]["by_role"]["test"][
         "eligible_complete_sessions"
     ] == 7
+
+
+def test_final_gate_rejects_mutated_bundle_before_database_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed, raw_directory, _payloads = _fixture(tmp_path)
+    database = tmp_path / "private.sqlite"
+    commit = "b" * 40
+    training_bundle = tmp_path / "training_bundle.json"
+    training_bundle.write_text(
+        stable_json(
+            {
+                "schema_version": "next_behavior_training_bundle.v1",
+                "status": "frozen_pre_test",
+                "test_opened": False,
+                "final_test_path_accepted_by_command": False,
+                "code_commit": commit,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    receipt = tmp_path / "verification.json"
+    receipt.write_text(
+        stable_json(
+            {
+                "status": "frozen_pre_test",
+                "test_opened": False,
+                "code_commit": commit,
+                "training_bundle_sha256": hashlib.sha256(
+                    training_bundle.read_bytes()
+                ).hexdigest(),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    training_bundle.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        selected_corpus.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout=commit + "\n"),
+    )
+    with pytest.raises(SelectedCorpusBuildError, match="does not match"):
+        ingest_selected_members(
+            completed_selection_path=completed,
+            raw_directory=raw_directory,
+            private_database_path=database,
+            cohort="final",
+            open_final_test=True,
+            final_pretest_receipt_path=receipt,
+            training_bundle_path=training_bundle,
+            repository_root=tmp_path,
+        )
+    assert not database.exists()
 
 
 def test_role_inventory_is_pseudonymous_purpose_scoped_and_no_overwrite(

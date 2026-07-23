@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import tempfile
 import zlib
 from collections import Counter
@@ -86,6 +87,15 @@ _CONTEXT_EVENTS = frozenset(
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _KEY_ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _BLOCK_SIZE = 8 * 1024 * 1024
+_FINAL_PRETEST_FIELDS = frozenset(
+    {
+        "status",
+        "test_opened",
+        "code_commit",
+        "training_bundle_sha256",
+    }
+)
+_TRAINING_BUNDLE_SCHEMA_VERSION = "next_behavior_training_bundle.v1"
 
 
 class SelectedCorpusBuildError(ValueError):
@@ -114,6 +124,78 @@ def _file_identity(path: Path) -> tuple[int, str, str]:
             crc32 = zlib.crc32(block, crc32)
             digest.update(block)
     return size, f"{crc32 & 0xFFFFFFFF:08x}", digest.hexdigest()
+
+
+def _require_final_pretest_gate(
+    *,
+    receipt_path: Path,
+    training_bundle_path: Path,
+    repository_root: Path,
+) -> Dict[str, Any]:
+    """Verify the immutable pre-test training receipt before final ingestion."""
+
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        bundle = json.loads(training_bundle_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SelectedCorpusBuildError(
+            "final pre-test gate artifacts cannot be verified"
+        ) from exc
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != _FINAL_PRETEST_FIELDS
+        or receipt.get("status") != "frozen_pre_test"
+        or receipt.get("test_opened") is not False
+        or not _SHA256.fullmatch(_clean(receipt.get("training_bundle_sha256")))
+        or not re.fullmatch(r"[0-9a-f]{40}", _clean(receipt.get("code_commit")))
+    ):
+        raise SelectedCorpusBuildError(
+            "final pre-test verification receipt is invalid"
+        )
+    if _sha256_file(training_bundle_path) != receipt["training_bundle_sha256"]:
+        raise SelectedCorpusBuildError(
+            "frozen training bundle does not match the final pre-test receipt"
+        )
+    if (
+        not isinstance(bundle, dict)
+        or bundle.get("schema_version") != _TRAINING_BUNDLE_SCHEMA_VERSION
+        or bundle.get("status") != "frozen_pre_test"
+        or bundle.get("test_opened") is not False
+        or bundle.get("final_test_path_accepted_by_command") is not False
+        or bundle.get("code_commit") != receipt["code_commit"]
+    ):
+        raise SelectedCorpusBuildError(
+            "training bundle is not a sealed pre-test bundle"
+        )
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(repository_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip().lower()
+        tracked_status = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository_root),
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SelectedCorpusBuildError(
+            "repository state cannot be verified for final-test opening"
+        ) from exc
+    if head != receipt["code_commit"] or tracked_status:
+        raise SelectedCorpusBuildError(
+            "final-test opening requires the exact clean training commit"
+        )
+    return receipt
 
 
 def _load_completed_selection(path: Path) -> tuple[Dict[str, Any], str]:
@@ -1123,15 +1205,18 @@ def ingest_selected_members(
     private_database_path: Path,
     cohort: str,
     open_final_test: bool = False,
+    final_pretest_receipt_path: Path | None = None,
+    training_bundle_path: Path | None = None,
+    repository_root: Path | None = None,
     selected_members: Iterable[str] = (),
     flush_size: int = 20_000,
     receipt_output_path: Path | None = None,
 ) -> Dict[str, Any]:
     """Verify then ingest one frozen cohort without leaking raw content.
 
-    ``final`` access requires the explicit ``open_final_test`` gate.  Merely
-    downloading or verifying final member bytes does not open this builder's
-    final-test path.
+    ``final`` access requires both the explicit flag and the exact verified
+    frozen training-bundle receipt. Merely downloading or verifying final
+    member bytes does not open this builder's final-test path.
     """
 
     if cohort not in {"development", "final"}:
@@ -1139,6 +1224,21 @@ def ingest_selected_members(
     if cohort == "final" and not open_final_test:
         raise SelectedCorpusBuildError(
             "final cohort remains sealed; --open-final-test is required"
+        )
+    final_gate: Dict[str, Any] | None = None
+    if cohort == "final":
+        if final_pretest_receipt_path is None or training_bundle_path is None:
+            raise SelectedCorpusBuildError(
+                "final cohort requires a frozen pre-test training receipt"
+            )
+        final_gate = _require_final_pretest_gate(
+            receipt_path=final_pretest_receipt_path,
+            training_bundle_path=training_bundle_path,
+            repository_root=(
+                repository_root
+                if repository_root is not None
+                else Path(__file__).resolve().parents[2]
+            ),
         )
     if flush_size < 1:
         raise SelectedCorpusBuildError("flush_size must be positive")
@@ -1212,6 +1312,7 @@ def ingest_selected_members(
         "source_selection_sha256": selection_sha256,
         "cohort": cohort,
         "final_test_opened": cohort == "final",
+        "final_pretest_gate": final_gate,
         "requested_member_count": len(members),
         "member_receipts": receipts,
         "counts": counts,
@@ -1485,6 +1586,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--cohort", choices=("development", "final"), required=True
     )
     ingest.add_argument("--open-final-test", action="store_true")
+    ingest.add_argument("--final-pretest-receipt", type=Path)
+    ingest.add_argument("--training-bundle", type=Path)
+    ingest.add_argument("--repository-root", type=Path)
     ingest.add_argument("--member", action="append", default=[])
     ingest.add_argument("--flush-size", type=int, default=20_000)
     ingest.add_argument("--receipt-output", type=Path, required=True)
@@ -1507,6 +1611,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             private_database_path=args.private_database,
             cohort=args.cohort,
             open_final_test=args.open_final_test,
+            final_pretest_receipt_path=args.final_pretest_receipt,
+            training_bundle_path=args.training_bundle,
+            repository_root=args.repository_root,
             selected_members=args.member,
             flush_size=args.flush_size,
             receipt_output_path=args.receipt_output,
