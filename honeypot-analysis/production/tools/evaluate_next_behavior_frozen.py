@@ -4,7 +4,9 @@ The evaluator deliberately separates pre-test verification from final-partition
 access.  Every non-test artifact, including the deserialized neural checkpoint,
 is verified before the sealed final-role safe-session payload is opened.
 Results are written to a new directory through an atomic rename; an existing
-or partial result is never overwritten.
+or partial result is never overwritten.  A durable ledger beside the sealed
+payload records the sole permitted post-preflight access attempt, so a failed
+run cannot be retried under a different output directory.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import math
 import os
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
@@ -63,6 +66,10 @@ from production.utils.serialization import stable_json
 
 FROZEN_EVALUATION_RESULT_SCHEMA_VERSION = "next_behavior_frozen_result.v1"
 COMPLETION_SCHEMA_VERSION = "next_behavior_frozen_completion.v1"
+EVALUATION_ACCESS_LEDGER_SCHEMA_VERSION = (
+    "next_behavior_frozen_evaluation_access_ledger.v1"
+)
+_ACCESS_LEDGER_DIRECTORY = ".next_behavior_frozen_evaluation_access"
 BASELINE_ROLES = {
     family: f"baseline_{family}" for family in sorted(BASELINE_FAMILIES)
 }
@@ -83,6 +90,22 @@ def sha256_file(path: str | Path) -> str:
 
 def _json_sha256(value: Any) -> str:
     return hashlib.sha256(stable_json(value).encode("utf-8")).hexdigest()
+
+
+def _utc_now() -> str:
+    """Return an audit timestamp without consulting test-payload content."""
+
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _require_sha256(value: Any, *, label: str) -> str:
+    if not isinstance(value, str) or len(value) != 64:
+        raise FrozenEvaluationError(f"{label} is not a SHA-256 digest")
+    try:
+        int(value, 16)
+    except ValueError as exc:
+        raise FrozenEvaluationError(f"{label} is not a SHA-256 digest") from exc
+    return value.lower()
 
 
 def _read_json(path: Path, *, role: str) -> Any:
@@ -234,6 +257,229 @@ def verify_pre_test_artifacts(
         "checkpoint_metadata": checkpoint_metadata,
         "test_member_order": test_member_order,
     }
+
+
+def _evaluation_access_identity(
+    preflight: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Return the sealed identity used to enforce one final-test opening.
+
+    The ledger is intentionally located next to the private test payload, not
+    below an evaluator output directory.  Changing ``--output`` therefore
+    cannot create a second opportunity to evaluate the same sealed payload.
+    The payload digest is the filename key; the manifest digest is also bound
+    in the immutable record and must match on every inspection.
+    """
+
+    manifest_sha256 = _require_sha256(
+        preflight.get("manifest_sha256"), label="preflight manifest_sha256"
+    )
+    artifacts = preflight.get("verified_artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise FrozenEvaluationError("preflight verified artifacts are invalid")
+    payload = artifacts.get("test_safe_payload")
+    if not isinstance(payload, Mapping):
+        raise FrozenEvaluationError("preflight test payload receipt is invalid")
+    path_value = payload.get("path")
+    if not isinstance(path_value, str) or not path_value:
+        raise FrozenEvaluationError("preflight test payload path is invalid")
+    payload_sha256 = _require_sha256(
+        payload.get("sha256"), label="preflight test payload SHA-256"
+    )
+    payload_path = Path(path_value)
+    if not payload_path.is_file():
+        raise FrozenEvaluationError("preflight test payload is missing")
+    identity = {
+        "experiment_manifest_sha256": manifest_sha256,
+        "test_payload_sha256": payload_sha256,
+    }
+    return {
+        **identity,
+        "identity_sha256": _json_sha256(identity),
+        "test_payload_path": payload_path,
+    }
+
+
+def evaluation_access_ledger_path(preflight: Mapping[str, Any]) -> Path:
+    """Return the durable one-time ledger path without reading test content."""
+
+    identity = _evaluation_access_identity(preflight)
+    return (
+        identity["test_payload_path"].parent
+        / _ACCESS_LEDGER_DIRECTORY
+        / f"{identity['test_payload_sha256']}.json"
+    )
+
+
+def _read_access_ledger(path: Path) -> Dict[str, Any]:
+    value = _read_json(path, role="final evaluation access ledger")
+    if not isinstance(value, dict):
+        raise FrozenEvaluationError("final evaluation access ledger is invalid")
+    return value
+
+
+def _write_access_ledger_atomically(path: Path, value: Mapping[str, Any]) -> None:
+    """Replace a claim owned by this process with a durable state transition."""
+
+    payload = (stable_json(dict(value)) + "\n").encode("utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _claim_final_evaluation_access(
+    preflight: Mapping[str, Any],
+    *,
+    output_directory: Path,
+) -> Dict[str, Any]:
+    """Atomically record the single permitted transition to final-test access.
+
+    This function must only be called after :func:`verify_pre_test_artifacts`.
+    Its ``O_EXCL`` create is the concurrency boundary.  A pre-existing record,
+    including one left ``opened`` by process termination, permanently blocks
+    automatic retry.  There is deliberately no retry or reset operation:
+    recovery requires an external audit of the immutable record and any
+    published output, rather than silently reopening the held-out payload.
+    """
+
+    identity = _evaluation_access_identity(preflight)
+    ledger_path = evaluation_access_ledger_path(preflight)
+    try:
+        ledger_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise FrozenEvaluationError(
+            "final evaluation access ledger directory cannot be created"
+        ) from exc
+    if not ledger_path.parent.is_dir() or ledger_path.parent.is_symlink():
+        raise FrozenEvaluationError("final evaluation access ledger path is unsafe")
+
+    record = {
+        "schema_version": EVALUATION_ACCESS_LEDGER_SCHEMA_VERSION,
+        "state": "opened",
+        "identity_sha256": identity["identity_sha256"],
+        "experiment_manifest_sha256": identity["experiment_manifest_sha256"],
+        "test_payload_sha256": identity["test_payload_sha256"],
+        "test_payload_path": str(identity["test_payload_path"].resolve()),
+        "output_directory": str(output_directory.resolve()),
+        "opened_at": _utc_now(),
+        "automatic_retry_permitted": False,
+    }
+    payload = (stable_json(record) + "\n").encode("utf-8")
+    try:
+        descriptor = os.open(
+            ledger_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError as exc:
+        try:
+            existing = _read_access_ledger(ledger_path)
+            state = existing.get("state")
+            recorded_manifest = existing.get("experiment_manifest_sha256")
+            recorded_payload = existing.get("test_payload_sha256")
+        except FrozenEvaluationError:
+            raise FrozenEvaluationError(
+                "final test access was already claimed by an invalid ledger"
+            ) from exc
+        if (
+            recorded_payload != identity["test_payload_sha256"]
+            or recorded_manifest != identity["experiment_manifest_sha256"]
+        ):
+            raise FrozenEvaluationError(
+                "final test payload was already claimed under a different "
+                "frozen manifest"
+            ) from exc
+        raise FrozenEvaluationError(
+            f"final test access was already claimed (state={state!r})"
+        ) from exc
+    except OSError as exc:
+        raise FrozenEvaluationError("final evaluation access ledger cannot be claimed") from exc
+
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        directory_descriptor = os.open(ledger_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except BaseException:
+        # Do not remove a partially created claim: fail closed if durability
+        # cannot be established, rather than permitting a second opener.
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
+    return {**record, "ledger_path": ledger_path}
+
+
+def _finalize_final_evaluation_access(
+    claim: Mapping[str, Any],
+    *,
+    state: str,
+    output_directory: Path | None = None,
+    error: BaseException | None = None,
+) -> None:
+    """Durably preserve a completed or failed post-open evaluation outcome."""
+
+    if state not in {"completed", "failed"}:
+        raise FrozenEvaluationError("final evaluation ledger state is invalid")
+    ledger_path_value = claim.get("ledger_path")
+    if not isinstance(ledger_path_value, Path):
+        raise FrozenEvaluationError("final evaluation ledger claim is invalid")
+    current = _read_access_ledger(ledger_path_value)
+    expected_fields = {
+        "identity_sha256": claim.get("identity_sha256"),
+        "experiment_manifest_sha256": claim.get("experiment_manifest_sha256"),
+        "test_payload_sha256": claim.get("test_payload_sha256"),
+        "state": "opened",
+    }
+    if any(current.get(field) != value for field, value in expected_fields.items()):
+        raise FrozenEvaluationError(
+            "final evaluation access ledger changed during the claimed run"
+        )
+    updated = dict(current)
+    updated["state"] = state
+    updated["finalized_at"] = _utc_now()
+    if state == "completed":
+        if output_directory is None:
+            raise FrozenEvaluationError("completed evaluation has no output path")
+        updated["completed_output_directory"] = str(output_directory.resolve())
+    else:
+        # Do not serialize exception text or a digest of it: either can retain
+        # an accidental path or a representation of future sensitive test
+        # data.  The stage and exception type preserve the audit fact needed
+        # to block retries without exporting held-out content.
+        updated["failure_stage"] = "post_open_evaluation"
+        updated["failure_type"] = type(error).__name__ if error else "UnknownError"
+    _write_access_ledger_atomically(ledger_path_value, updated)
+
+
+def _verify_claimed_test_payload_bytes(preflight: Mapping[str, Any]) -> None:
+    """Reject a TOCTOU payload mutation after the preflight hash seal."""
+
+    identity = _evaluation_access_identity(preflight)
+    if sha256_file(identity["test_payload_path"]) != identity["test_payload_sha256"]:
+        raise FrozenEvaluationError(
+            "test safe payload changed after complete pre-test verification"
+        )
 
 
 def _read_json_or_jsonl(path: Path, *, role: str) -> list[Any]:
@@ -655,32 +901,16 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(stable_json(value) + "\n", encoding="utf-8")
 
 
-def evaluate_frozen_experiment(
-    manifest: Mapping[str, Any],
-    artifact_paths: Mapping[str, str | Path],
-    output_directory: str | Path,
+def _evaluate_after_access_claim(
+    preflight: Mapping[str, Any],
+    destination: Path,
     *,
-    purpose: str,
-    bootstrap_samples: int = 1000,
-    bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
+    bootstrap_samples: int,
+    bootstrap_seed: int,
 ) -> Dict[str, Any]:
-    """Run one immutable final evaluation and publish it atomically."""
+    """Evaluate only after the durable final-test access claim exists."""
 
-    destination = Path(output_directory)
-    if destination.exists():
-        raise FrozenEvaluationError("output directory already exists")
-    # This call loads and validates the checkpoint before the test path is used.
-    if (
-        isinstance(bootstrap_samples, bool)
-        or not isinstance(bootstrap_samples, int)
-        or bootstrap_samples < 1
-    ):
-        raise FrozenEvaluationError("bootstrap_samples must be positive")
-    if isinstance(bootstrap_seed, bool) or not isinstance(bootstrap_seed, int):
-        raise FrozenEvaluationError("bootstrap_seed must be an integer")
-    preflight = verify_pre_test_artifacts(
-        manifest, artifact_paths, purpose=purpose
-    )
+    _verify_claimed_test_payload_bytes(preflight)
     examples = _load_final_examples(preflight)
     transformer_predictions = [
         _transformer_prediction(
@@ -816,6 +1046,68 @@ def evaluate_frozen_experiment(
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
+    return result
+
+
+def evaluate_frozen_experiment(
+    manifest: Mapping[str, Any],
+    artifact_paths: Mapping[str, str | Path],
+    output_directory: str | Path,
+    *,
+    purpose: str,
+    bootstrap_samples: int = 1000,
+    bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
+) -> Dict[str, Any]:
+    """Run the one permitted immutable final evaluation.
+
+    Complete non-test preflight precedes the exclusive ledger claim.  Once the
+    claim is durable, every outcome is retained as ``completed`` or ``failed``
+    in the ledger; an interrupted ``opened`` claim also blocks automatic
+    retry.  This makes changing an output directory incapable of reopening a
+    held-out payload.
+    """
+
+    destination = Path(output_directory)
+    if destination.exists():
+        raise FrozenEvaluationError("output directory already exists")
+    if (
+        isinstance(bootstrap_samples, bool)
+        or not isinstance(bootstrap_samples, int)
+        or bootstrap_samples < 1
+    ):
+        raise FrozenEvaluationError("bootstrap_samples must be positive")
+    if isinstance(bootstrap_seed, bool) or not isinstance(bootstrap_seed, int):
+        raise FrozenEvaluationError("bootstrap_seed must be an integer")
+
+    # This call loads and validates every non-test artifact, including the
+    # checkpoint, before the final payload can be semantically read.
+    preflight = verify_pre_test_artifacts(
+        manifest, artifact_paths, purpose=purpose
+    )
+    claim = _claim_final_evaluation_access(
+        preflight, output_directory=destination
+    )
+    try:
+        result = _evaluate_after_access_claim(
+            preflight,
+            destination,
+            bootstrap_samples=bootstrap_samples,
+            bootstrap_seed=bootstrap_seed,
+        )
+    except BaseException as exc:
+        try:
+            _finalize_final_evaluation_access(
+                claim, state="failed", error=exc
+            )
+        except BaseException:
+            # The durable ``opened`` claim is safer than masking the original
+            # evaluation error or allowing a retry when ledger finalization
+            # itself fails.
+            pass
+        raise
+    _finalize_final_evaluation_access(
+        claim, state="completed", output_directory=destination
+    )
     return result
 
 

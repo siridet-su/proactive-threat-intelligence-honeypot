@@ -296,6 +296,27 @@ def _bundle(
     return manifest, paths, examples, preflight
 
 
+def _ledger_preflight(
+    tmp_path: Path,
+    *,
+    manifest_sha256: str = "1" * 64,
+    payload_bytes: bytes = b"sealed test fixture\n",
+) -> dict:
+    """Construct a byte-sealed payload receipt without parsing its content."""
+
+    payload = tmp_path / "sealed-test-payload.jsonl"
+    payload.write_bytes(payload_bytes)
+    return {
+        "manifest_sha256": manifest_sha256,
+        "verified_artifacts": {
+            "test_safe_payload": {
+                "path": str(payload),
+                "sha256": frozen.sha256_file(payload),
+            }
+        },
+    }
+
+
 def test_manifest_requires_v2_and_pre_test_freeze(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -499,6 +520,143 @@ def test_calibration_diagnostics_use_probability_not_raw_logit_semantics() -> No
     assert sum(item["count"] for item in result["reliability_bins"]) == 2
     with pytest.raises(frozen.FrozenEvaluationError, match="probability"):
         frozen._binary_calibration_diagnostics([1.2], [True])
+
+
+def test_final_access_ledger_is_exclusive_and_binds_manifest_and_payload(
+    tmp_path: Path,
+) -> None:
+    preflight = _ledger_preflight(tmp_path)
+    claim = frozen._claim_final_evaluation_access(
+        preflight, output_directory=tmp_path / "first-output"
+    )
+    ledger_path = frozen.evaluation_access_ledger_path(preflight)
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+
+    assert claim["ledger_path"] == ledger_path
+    assert ledger["schema_version"] == (
+        frozen.EVALUATION_ACCESS_LEDGER_SCHEMA_VERSION
+    )
+    assert ledger["state"] == "opened"
+    assert ledger["experiment_manifest_sha256"] == "1" * 64
+    assert ledger["test_payload_sha256"] == frozen.sha256_file(
+        tmp_path / "sealed-test-payload.jsonl"
+    )
+    assert ledger["automatic_retry_permitted"] is False
+
+    with pytest.raises(frozen.FrozenEvaluationError, match="already claimed"):
+        frozen._claim_final_evaluation_access(
+            preflight, output_directory=tmp_path / "different-output"
+        )
+    conflicting_manifest = _ledger_preflight(
+        tmp_path,
+        manifest_sha256="2" * 64,
+        payload_bytes=(tmp_path / "sealed-test-payload.jsonl").read_bytes(),
+    )
+    # Reuse the exact same payload path/receipt while changing only the
+    # manifest binding.  A different frozen manifest cannot reopen it.
+    conflicting_manifest["verified_artifacts"]["test_safe_payload"] = (
+        preflight["verified_artifacts"]["test_safe_payload"]
+    )
+    with pytest.raises(
+        frozen.FrozenEvaluationError, match="different frozen manifest"
+    ):
+        frozen._claim_final_evaluation_access(
+            conflicting_manifest,
+            output_directory=tmp_path / "conflicting-output",
+        )
+
+
+def test_evaluator_claims_before_final_load_and_records_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preflight = _ledger_preflight(tmp_path)
+    destination = tmp_path / "accepted"
+    monkeypatch.setattr(
+        frozen, "verify_pre_test_artifacts", lambda *_args, **_kwargs: preflight
+    )
+
+    def after_claim(
+        observed_preflight: dict,
+        observed_destination: Path,
+        **_kwargs: object,
+    ) -> dict:
+        assert observed_preflight is preflight
+        assert observed_destination == destination
+        ledger = json.loads(
+            frozen.evaluation_access_ledger_path(preflight).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert ledger["state"] == "opened"
+        return {"status": "complete"}
+
+    monkeypatch.setattr(frozen, "_evaluate_after_access_claim", after_claim)
+    assert frozen.evaluate_frozen_experiment(
+        {}, {}, destination, purpose="final_evaluation", bootstrap_samples=1
+    ) == {"status": "complete"}
+    ledger = json.loads(
+        frozen.evaluation_access_ledger_path(preflight).read_text(encoding="utf-8")
+    )
+    assert ledger["state"] == "completed"
+    assert ledger["completed_output_directory"] == str(destination.resolve())
+    with pytest.raises(frozen.FrozenEvaluationError, match="already claimed"):
+        frozen.evaluate_frozen_experiment(
+            {}, {}, tmp_path / "retry", purpose="final_evaluation", bootstrap_samples=1
+        )
+
+
+def test_post_open_failure_is_durable_and_blocks_different_output_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preflight = _ledger_preflight(tmp_path)
+    monkeypatch.setattr(
+        frozen, "verify_pre_test_artifacts", lambda *_args, **_kwargs: preflight
+    )
+    monkeypatch.setattr(
+        frozen,
+        "_evaluate_after_access_claim",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        frozen.evaluate_frozen_experiment(
+            {}, {}, tmp_path / "failed-output", purpose="final_evaluation", bootstrap_samples=1
+        )
+    ledger = json.loads(
+        frozen.evaluation_access_ledger_path(preflight).read_text(encoding="utf-8")
+    )
+    assert ledger["state"] == "failed"
+    assert ledger["failure_type"] == "RuntimeError"
+    assert "boom" not in stable_json(ledger)
+    with pytest.raises(frozen.FrozenEvaluationError, match="already claimed"):
+        frozen.evaluate_frozen_experiment(
+            {}, {}, tmp_path / "hidden-retry", purpose="final_evaluation", bootstrap_samples=1
+        )
+
+
+def test_post_preflight_payload_mutation_fails_closed_after_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preflight = _ledger_preflight(tmp_path)
+    payload = Path(preflight["verified_artifacts"]["test_safe_payload"]["path"])
+
+    def preflight_then_mutate(*_args: object, **_kwargs: object) -> dict:
+        payload.write_bytes(b"mutated after preflight\n")
+        return preflight
+
+    monkeypatch.setattr(
+        frozen, "verify_pre_test_artifacts", preflight_then_mutate
+    )
+    with pytest.raises(frozen.FrozenEvaluationError, match="changed after"):
+        frozen.evaluate_frozen_experiment(
+            {}, {}, tmp_path / "mutated", purpose="final_evaluation", bootstrap_samples=1
+        )
+    ledger = json.loads(
+        frozen.evaluation_access_ledger_path(preflight).read_text(encoding="utf-8")
+    )
+    assert ledger["state"] == "failed"
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch unavailable")
