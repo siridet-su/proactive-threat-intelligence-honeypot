@@ -11,6 +11,7 @@ from production.prediction.next_behavior_corpus import (
     build_corpus_receipt,
     build_privacy_safe_session,
     build_source_member_receipt,
+    build_streaming_corpus_receipt,
     require_valid_corpus_receipt,
 )
 from production.prediction.next_behavior_preprocessing import (
@@ -244,6 +245,64 @@ def test_corpus_receipt_reconciles_counts_and_hashes_safe_payload() -> None:
     assert receipt["safe_session_count"] == 1
     assert receipt["counts"]["private_label_count"] == 3
     assert receipt["receipt_id"].startswith("nextbehaviorcorpus_")
+
+
+def test_streaming_receipt_matches_in_memory_receipt() -> None:
+    first = _build()
+    second_private = _private_session()
+    second_private["session_id"] = "second-private-session-id"
+    second = _build(second_private)
+    ordered = sorted(
+        (first, second),
+        key=lambda item: item["safe_session"]["session_id"],
+    )
+    arguments = {
+        "code_commit": "test-commit",
+        "preprocessing_sha256": POLICY_SHA,
+        "label_policy_sha256": POLICY_SHA,
+        "trust_policy_sha256": TRUST_SHA,
+        "classification_checkpoint_sha256": CHECKPOINT_SHA,
+    }
+
+    in_memory = build_corpus_receipt(ordered, [_member()], **arguments)
+    streaming = build_streaming_corpus_receipt(
+        (item for item in ordered),
+        [_member()],
+        **arguments,
+    )
+
+    assert streaming == in_memory
+
+
+def test_streaming_receipt_rejects_unsorted_or_duplicate_safe_sessions() -> None:
+    first = _build()
+    second_private = _private_session()
+    second_private["session_id"] = "second-private-session-id"
+    second = _build(second_private)
+    ordered = sorted(
+        (first, second),
+        key=lambda item: item["safe_session"]["session_id"],
+    )
+    arguments = {
+        "code_commit": "test-commit",
+        "preprocessing_sha256": POLICY_SHA,
+        "label_policy_sha256": POLICY_SHA,
+        "trust_policy_sha256": TRUST_SHA,
+        "classification_checkpoint_sha256": CHECKPOINT_SHA,
+    }
+
+    with pytest.raises(NextBehaviorCorpusError, match="strict session_id order"):
+        build_streaming_corpus_receipt(
+            list(reversed(ordered)),
+            [_member()],
+            **arguments,
+        )
+    with pytest.raises(NextBehaviorCorpusError, match="strict session_id order"):
+        build_streaming_corpus_receipt(
+            [ordered[0], ordered[0]],
+            [_member()],
+            **arguments,
+        )
 
 
 def test_corpus_receipt_rejects_forged_counts_or_unknown_members() -> None:

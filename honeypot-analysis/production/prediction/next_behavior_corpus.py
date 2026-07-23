@@ -630,3 +630,153 @@ def build_corpus_receipt(
     }
     receipt["receipt_id"] = stable_id("nextbehaviorcorpus", receipt)
     return require_valid_corpus_receipt(receipt)
+
+
+def build_streaming_corpus_receipt(
+    build_results: Iterable[Mapping[str, Any]],
+    source_member_receipts: Sequence[Mapping[str, Any]],
+    *,
+    code_commit: str,
+    preprocessing_sha256: str,
+    label_policy_sha256: str,
+    trust_policy_sha256: str,
+    classification_checkpoint_sha256: str,
+) -> Dict[str, Any]:
+    """Reconcile a session-ID-ordered build stream with bounded memory.
+
+    Safe sessions must arrive in strictly increasing ``session_id`` order.
+    Dropped audit-only sessions may occur anywhere in the stream. The produced
+    membership and payload hashes are byte-identical to
+    :func:`build_corpus_receipt` for the same records.
+    """
+
+    for name, digest in (
+        ("preprocessing_sha256", preprocessing_sha256),
+        ("label_policy_sha256", label_policy_sha256),
+        ("trust_policy_sha256", trust_policy_sha256),
+        ("classification_checkpoint_sha256", classification_checkpoint_sha256),
+    ):
+        if not _is_sha256(digest):
+            raise NextBehaviorCorpusError(f"{name} is invalid")
+    if not _clean(code_commit):
+        raise NextBehaviorCorpusError("code_commit is required")
+
+    member_receipt_hashes: List[str] = []
+    seen_member_ids: set[str] = set()
+    ordered_source_receipts: List[Dict[str, Any]] = []
+    for receipt in source_member_receipts:
+        validated = require_valid_source_member_receipt(receipt)
+        member_id = _clean(validated.get("member_id"))
+        if member_id in seen_member_ids:
+            raise NextBehaviorCorpusError(
+                "source member receipt identity is invalid or duplicated"
+            )
+        seen_member_ids.add(member_id)
+        ordered_source_receipts.append(validated)
+        member_receipt_hashes.append(
+            hashlib.sha256(stable_json(validated).encode("utf-8")).hexdigest()
+        )
+    ordered_source_receipts.sort(
+        key=lambda receipt: _clean(receipt.get("member_id"))
+    )
+
+    payload_digest = hashlib.sha256()
+    membership_digest = hashlib.sha256()
+    payload_digest.update(b"[")
+    membership_digest.update(b"[")
+    payload_first = True
+    membership_first = True
+    previous_session_id = ""
+    private_session_count = 0
+    safe_session_count = 0
+    totals = {field: 0 for field in _RECONCILIATION_FIELDS}
+    count_fields = set(_RECONCILIATION_FIELDS)
+
+    for index, result in enumerate(build_results):
+        if not isinstance(result, Mapping):
+            raise NextBehaviorCorpusError(f"build_results[{index}] is invalid")
+        private_session_count += 1
+        reconciliation = result.get("reconciliation")
+        if not isinstance(reconciliation, Mapping) or set(reconciliation) != count_fields:
+            raise NextBehaviorCorpusError(
+                f"reconciliation[{index}] fields are invalid"
+            )
+        for field in count_fields:
+            value = reconciliation.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise NextBehaviorCorpusError(
+                    f"reconciliation[{index}].{field} must be non-negative"
+                )
+            totals[field] += value
+
+        raw_session = result.get("safe_session")
+        if raw_session is None:
+            continue
+        if not isinstance(raw_session, dict):
+            raise NextBehaviorCorpusError(
+                f"build_results[{index}].safe_session is invalid"
+            )
+        try:
+            session = require_valid_next_behavior_session(raw_session)
+        except NextBehaviorContractError as exc:
+            raise NextBehaviorCorpusError(str(exc)) from exc
+        member_id = _clean(session.get("source_member_id"))
+        if member_id not in seen_member_ids:
+            raise NextBehaviorCorpusError(
+                "safe session references a source member absent from receipts"
+            )
+        session_id = _clean(session.get("session_id"))
+        if previous_session_id and session_id <= previous_session_id:
+            raise NextBehaviorCorpusError(
+                "safe sessions are not in strict session_id order"
+            )
+        previous_session_id = session_id
+        serialized_session = stable_json(session).encode("utf-8")
+        serialized_id = stable_json(session_id).encode("utf-8")
+        if not payload_first:
+            payload_digest.update(b",")
+        if not membership_first:
+            membership_digest.update(b",")
+        payload_digest.update(serialized_session)
+        membership_digest.update(serialized_id)
+        payload_first = False
+        membership_first = False
+        safe_session_count += 1
+
+    payload_digest.update(b"]")
+    membership_digest.update(b"]")
+    if totals["private_group_count"] != (
+        totals["safe_trusted_group_count"] + totals["audit_only_group_count"]
+    ):
+        raise NextBehaviorCorpusError("group reconciliation does not balance")
+    if totals["private_label_count"] != (
+        totals["trusted_label_count"] + totals["audit_only_label_count"]
+    ):
+        raise NextBehaviorCorpusError("label reconciliation does not balance")
+
+    receipt: Dict[str, Any] = {
+        "schema_version": CORPUS_RECEIPT_SCHEMA_VERSION,
+        "status": "safe_payload_reconciled",
+        "code_commit": _clean(code_commit),
+        "preprocessing_sha256": _clean(preprocessing_sha256).lower(),
+        "label_policy_sha256": _clean(label_policy_sha256).lower(),
+        "trust_policy_sha256": _clean(trust_policy_sha256).lower(),
+        "classification_checkpoint_sha256": _clean(
+            classification_checkpoint_sha256
+        ).lower(),
+        "source_member_count": len(source_member_receipts),
+        "source_member_receipts_sha256": hashlib.sha256(
+            stable_json(sorted(member_receipt_hashes)).encode("utf-8")
+        ).hexdigest(),
+        "source_member_receipts_artifact_sha256": hashlib.sha256(
+            stable_json(ordered_source_receipts).encode("utf-8")
+        ).hexdigest(),
+        "private_session_count": private_session_count,
+        "safe_session_count": safe_session_count,
+        "dropped_session_count": private_session_count - safe_session_count,
+        "safe_session_membership_sha256": membership_digest.hexdigest(),
+        "safe_payload_sha256": payload_digest.hexdigest(),
+        "counts": totals,
+    }
+    receipt["receipt_id"] = stable_id("nextbehaviorcorpus", receipt)
+    return require_valid_corpus_receipt(receipt)
