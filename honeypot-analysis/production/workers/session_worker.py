@@ -1062,63 +1062,42 @@ class SessionWorker:
         self._record_event_effect("alerts_created", 1)
 
     def _maybe_store_predictive_alert(self, snapshot: Dict[str, Any]) -> None:
-        alert, evaluation = evaluate_predictive_alert(snapshot, self.config.prediction_policy or {})
-        snapshot["predictive_alert"] = evaluation
-        if not alert:
-            return
-        self.storage.store_alert(alert)
-        self._record_event_effect("alerts_created", 1)
-        escalation = {
-            "status": "not_attempted",
-            "observable_type": "ip",
-            "observable_value": snapshot.get("src_ip") or "",
-            "priority": "urgent",
-            "reason": "predictive alert created",
+        # The evaluator remains available to reproduce accepted historical
+        # "would alert" analysis. Runtime treats its alert payload as a
+        # non-authoritative diagnostic and never stores or acts on it.
+        alert, evaluation = evaluate_predictive_alert(
+            snapshot,
+            self.config.prediction_policy or {},
+        )
+        evaluation = dict(evaluation or {})
+        evaluation["authority"] = {
+            "prediction_only": True,
+            "may_create_alert": False,
+            "may_escalate_enrichment": False,
+            "semantics": "diagnostic_threshold_evaluation_only",
         }
-        src_ip = str(snapshot.get("src_ip") or "").strip()
-        if src_ip and src_ip.lower() != "unknown" and self.config.enable_enrichment_jobs:
+        evaluation["legacy_candidate_thresholds_crossed"] = bool(alert)
+        if alert:
             reason = (
-                f"predictive_alert:{alert.get('alert_id')} "
-                f"tactic={alert.get('predicted_tactic')} severity={alert.get('severity')}"
+                "prediction-only alert creation is prohibited; the legacy "
+                "threshold candidate is diagnostic only"
             )
-            job_id, queued = self.storage.enqueue_enrichment_job(
-                "ip",
-                src_ip,
-                session_id=str(snapshot.get("session_id") or ""),
-                payload={
-                    "source": "predictive_alert",
-                    "snapshot_id": snapshot.get("snapshot_id") or "",
-                    "alert_id": alert.get("alert_id") or "",
-                    "predicted_tactic": alert.get("predicted_tactic") or "",
-                    "predicted_confidence": alert.get("predicted_confidence") or "",
-                    "predicted_score": alert.get("predicted_score"),
-                },
-                priority="urgent",
-                priority_reason=reason,
-            )
-            updated = self.storage.reprioritize_enrichment_jobs(
-                src_ip,
-                observable_type="ip",
-                priority="urgent",
-                reason=reason,
-                session_id=str(snapshot.get("session_id") or ""),
-            )
-            escalation.update(
-                {
-                    "status": "queued_or_reprioritized" if queued or updated else "fresh_cache_or_no_queued_job",
-                    "job_id": job_id,
-                    "queued": queued,
-                    "reprioritized_jobs": updated,
-                    "reason": reason,
-                }
-            )
-        elif not self.config.enable_enrichment_jobs:
-            escalation["status"] = "disabled"
-            escalation["reason"] = "enrichment jobs disabled"
-        else:
-            escalation["status"] = "skipped"
-            escalation["reason"] = "snapshot has no usable source IP"
-        snapshot["predictive_alert"]["enrichment_escalation"] = escalation
+            evaluation["status"] = "suppressed"
+            evaluation["reason"] = reason
+            evaluation.pop("alert_id", None)
+            suppressed = [
+                str(item)
+                for item in evaluation.get("suppressed_reasons") or []
+                if str(item)
+            ]
+            if reason not in suppressed:
+                suppressed.append(reason)
+            evaluation["suppressed_reasons"] = suppressed
+        evaluation["enrichment_escalation"] = {
+            "status": "prohibited",
+            "reason": "prediction alone cannot escalate enrichment",
+        }
+        snapshot["predictive_alert"] = evaluation
 
     def _apply_campaign_clustering(self, payload: Dict[str, Any], status: str) -> Dict[str, Any]:
         try:

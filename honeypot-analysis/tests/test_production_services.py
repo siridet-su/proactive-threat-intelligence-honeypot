@@ -9,6 +9,7 @@ import sys
 import tempfile
 import urllib.error
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -5576,7 +5577,7 @@ def test_predictive_alert_policy_suppresses_high_divergence() -> None:
     assert "divergence ratio" in evaluation["reason"]
 
 
-def test_session_worker_stores_predictive_next_step_alert() -> None:
+def test_session_worker_suppresses_prediction_only_alert_and_enrichment() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _config(tmp)
         cfg.enable_smb_decisions = False
@@ -5659,19 +5660,73 @@ def test_session_worker_stores_predictive_next_step_alert() -> None:
         assert worker.process_unprocessed() == 1
 
         snapshot = json.loads(storage.list_rows("prediction_snapshots")[0]["payload_json"])
-        assert snapshot["predictive_alert"]["status"] == "alert_created"
+        assert snapshot["predictive_alert"]["status"] == "suppressed"
         assert snapshot["predictive_alert"]["candidate"]["predicted_tactic"] == "command-and-control"
+        assert snapshot["predictive_alert"]["legacy_candidate_thresholds_crossed"] is True
+        assert snapshot["predictive_alert"]["authority"] == {
+            "prediction_only": True,
+            "may_create_alert": False,
+            "may_escalate_enrichment": False,
+            "semantics": "diagnostic_threshold_evaluation_only",
+        }
         alert_payloads = [json.loads(row["payload_json"]) for row in storage.list_rows("alerts")]
         predictive_alerts = [payload for payload in alert_payloads if payload.get("alert_type") == "predictive_next_step"]
-        assert len(predictive_alerts) == 1
-        assert predictive_alerts[0]["predicted_tactic"] == "command-and-control"
-        assert predictive_alerts[0]["severity"] == "HIGH"
-        assert snapshot["predictive_alert"]["enrichment_escalation"]["status"] == "queued_or_reprioritized"
+        assert predictive_alerts == []
+        assert snapshot["predictive_alert"]["enrichment_escalation"] == {
+            "status": "prohibited",
+            "reason": "prediction alone cannot escalate enrichment",
+        }
         enrichment_jobs = storage.list_rows("enrichment_jobs")
         ip_jobs = [job for job in enrichment_jobs if job["observable_value"] == "203.0.113.21"]
-        assert ip_jobs
-        assert ip_jobs[0]["priority"] == "urgent"
-        assert "predictive_alert" in (ip_jobs[0]["priority_reason"] or "")
+        assert all(
+            "predictive_alert" not in (job["priority_reason"] or "")
+            for job in ip_jobs
+        )
+
+
+def test_session_worker_discards_forged_prediction_alert_payload() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _config(tmp)
+        storage = open_storage(cfg.database_url)
+        storage.initialize()
+        worker = SessionWorker(cfg)
+        forged_alert = {
+            "alert_id": "forged-predictive-alert",
+            "alert_type": "predictive_next_step",
+            "session_id": "forged-session",
+            "severity": "CRITICAL",
+            "predicted_tactic": "impact",
+        }
+        forged_evaluation = {
+            "schema_version": "predictive_alert_evaluation.v1",
+            "status": "alert_created",
+            "reason": "forged permissive overlay",
+            "alert_id": "forged-predictive-alert",
+            "candidate": {"predicted_tactic": "impact"},
+            "suppressed_reasons": [],
+        }
+        snapshot = {
+            "snapshot_id": "forged-snapshot",
+            "session_id": "forged-session",
+            "src_ip": "203.0.113.99",
+        }
+
+        with patch(
+            "production.workers.session_worker.evaluate_predictive_alert",
+            return_value=(forged_alert, forged_evaluation),
+        ):
+            worker._maybe_store_predictive_alert(snapshot)
+
+        assert storage.list_rows("alerts") == []
+        assert storage.list_rows("enrichment_jobs") == []
+        assert snapshot["predictive_alert"]["status"] == "suppressed"
+        assert "alert_id" not in snapshot["predictive_alert"]
+        assert snapshot["predictive_alert"]["authority"][
+            "may_create_alert"
+        ] is False
+        assert snapshot["predictive_alert"]["authority"][
+            "may_escalate_enrichment"
+        ] is False
 
 
 def test_storage_returns_latest_prediction_snapshot_for_session() -> None:
@@ -8635,7 +8690,8 @@ if __name__ == "__main__":
     test_predictive_alert_policy_suppresses_closed_session_prediction()
     test_predictive_alert_policy_suppresses_weakly_supported_high_risk_prediction()
     test_predictive_alert_policy_suppresses_high_divergence()
-    test_session_worker_stores_predictive_next_step_alert()
+    test_session_worker_suppresses_prediction_only_alert_and_enrichment()
+    test_session_worker_discards_forged_prediction_alert_payload()
     test_storage_returns_latest_prediction_snapshot_for_session()
     test_dashboard_current_prediction_payload_includes_trust_summary()
     test_storage_records_backtest_runs_and_analyst_feedback()
