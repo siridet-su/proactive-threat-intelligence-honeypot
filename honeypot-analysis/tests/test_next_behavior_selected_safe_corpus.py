@@ -10,6 +10,8 @@ from production.prediction.next_behavior_label_policy import (
     normalize_classifier_outputs,
 )
 from production.tools.build_next_behavior_selected_corpus import (
+    FINAL_PREPARATION_SCHEMA_VERSION,
+    final_member_receipts_sha256,
     open_selected_database,
 )
 from production.tools.build_next_behavior_selected_safe_corpus import (
@@ -21,7 +23,7 @@ from production.tools.build_next_behavior_selected_safe_corpus import (
     classify_missing_selected_commands,
     verify_selected_role_artifacts,
 )
-from production.utils.serialization import stable_json
+from production.utils.serialization import stable_id, stable_json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -416,11 +418,6 @@ def _safe_store(
                 """,
                 (command, _canonical_label(tactic, technique)),
             )
-    if role == "test":
-        database.execute(
-            "INSERT INTO metadata(key, value) VALUES "
-            "('final_test_opened_at', '2025-08-17T00:00:00Z')"
-        )
     database.commit()
     database.close()
 
@@ -453,13 +450,85 @@ def _safe_outputs(tmp_path: Path) -> dict:
     }
 
 
-def _pretest_receipt() -> dict:
-    return {
-        "status": "frozen_pre_test",
-        "test_opened": False,
+def _preparation_receipt(path: Path) -> dict:
+    manifest = json.loads(CLASSIFIER_MANIFEST.read_text())
+    database = open_selected_database(path)
+    members = [
+        {
+            "filename": str(row[0]),
+            "source_sha256": str(row[1]),
+            "source_size_bytes": int(row[2]),
+            "archive_crc32": str(row[3]),
+            "chronological_order": int(row[4]),
+            "source_cohort": str(row[5]),
+            "experiment_role": str(row[6]),
+        }
+        for row in database.execute(
+            """
+            SELECT filename, source_sha256, source_size_bytes, archive_crc32,
+                   chronological_order, source_cohort, experiment_role
+            FROM source_members WHERE experiment_role = 'test'
+            ORDER BY chronological_order
+            """
+        )
+    ]
+    receipt = {
+        "schema_version": FINAL_PREPARATION_SCHEMA_VERSION,
+        "status": "frozen_for_blinded_preparation",
+        "purpose": "prepare_final_corpus",
+        "evaluation_opened": False,
         "code_commit": CODE_COMMIT,
-        "training_bundle_sha256": "c" * 64,
+        "source_selection_id": "fixture-selection",
+        "source_selection_sha256": SELECTION_SHA,
+        "final_source_member_count": 7,
+        "final_source_member_receipts_sha256": (
+            final_member_receipts_sha256(members)
+        ),
+        "classifier_manifest_sha256": hashlib.sha256(
+            CLASSIFIER_MANIFEST.read_bytes()
+        ).hexdigest(),
+        "classifier_adapter_sha256": manifest["classifier"][
+            "adapter_sha256"
+        ],
+        "classification_pipeline_sha256": manifest["classifier"][
+            "pipeline_sha256"
+        ],
+        "preprocessing_sha256": hashlib.sha256(
+            PREPROCESSING_MANIFEST.read_bytes()
+        ).hexdigest(),
+        "environment_lock_sha256": manifest["dependency_lock"]["sha256"],
+        "label_policy_sha256": manifest["classification_policy"][
+            "rule_policy_sha256"
+        ],
+        "trust_policy_sha256": manifest["classification_policy"][
+            "trust_policy_sha256"
+        ],
+        "mitre_cache_sha256": manifest["classification_policy"][
+            "mitre_cache_sha256"
+        ],
+        "classification_checkpoint_sha256": manifest["classifier"][
+            "checkpoint_sha256"
+        ],
+        "pseudonymization_key_id": "fixture-key",
     }
+    receipt["receipt_id"] = stable_id(
+        "nextbehaviorfinalpreparation", receipt
+    )
+    database.execute(
+        "INSERT INTO metadata(key, value) VALUES "
+        "('final_corpus_prepared_at', '2025-08-17T00:00:00Z')"
+    )
+    database.execute(
+        "INSERT INTO metadata(key, value) VALUES (?, ?)",
+        ("final_corpus_preparation_receipt_id", receipt["receipt_id"]),
+    )
+    database.execute(
+        "INSERT INTO metadata(key, value) VALUES (?, ?)",
+        ("final_corpus_preparation_receipt_json", stable_json(receipt)),
+    )
+    database.commit()
+    database.close()
+    return receipt
 
 
 def test_development_safe_export_is_causal_private_and_discloses_reuse(
@@ -634,6 +703,7 @@ def test_role_artifact_verifier_reconstructs_and_binds_exact_payloads(
 
 def test_training_role_verifier_rejects_final_bundle(tmp_path: Path) -> None:
     path, historical = _safe_store(tmp_path, role="test")
+    preparation = _preparation_receipt(path)
     outputs = _safe_outputs(tmp_path)
     receipt = build_selected_safe_corpus(
         purpose="final_evaluation",
@@ -644,10 +714,10 @@ def test_training_role_verifier_rejects_final_bundle(tmp_path: Path) -> None:
         pseudonymization_key=b"k" * 32,
         pseudonymization_key_id="fixture-key",
         code_commit=CODE_COMMIT,
-        final_access_gate=lambda _purpose: _pretest_receipt(),
+        final_preparation_receipt=preparation,
         **outputs,
     )
-    assert receipt["final_pretest_gate"]["training_bundle_sha256"] == "c" * 64
+    assert receipt["final_preparation_gate"]["evaluation_opened"] is False
     with pytest.raises(
         SelectedSafeCorpusError, match="cannot accept final-test"
     ):
@@ -663,7 +733,7 @@ def test_training_role_verifier_rejects_final_bundle(tmp_path: Path) -> None:
 
 def test_final_gate_is_checked_before_private_store_access(tmp_path: Path) -> None:
     with pytest.raises(
-        SelectedSafeCorpusError, match="pre-test receipt fields"
+        SelectedSafeCorpusError, match="preparation receipt fields"
     ):
         build_selected_safe_corpus(
             purpose="final_evaluation",
@@ -674,7 +744,7 @@ def test_final_gate_is_checked_before_private_store_access(tmp_path: Path) -> No
             pseudonymization_key=b"k" * 32,
             pseudonymization_key_id="fixture-key",
             code_commit=CODE_COMMIT,
-            final_access_gate=lambda _purpose: True,
+            final_preparation_receipt={"forged": True},
             **_safe_outputs(tmp_path),
         )
     assert not (tmp_path / "does-not-exist.sqlite").exists()
@@ -684,28 +754,18 @@ def test_final_gate_is_checked_before_private_store_access(tmp_path: Path) -> No
     "receipt",
     [
         {
-            "status": "frozen_pre_test",
-            "test_opened": False,
+            "status": "frozen_for_blinded_preparation",
+            "evaluation_opened": False,
             "code_commit": CODE_COMMIT,
-        },
-        {
-            **_pretest_receipt(),
-            "test_opened": True,
-        },
-        {
-            **_pretest_receipt(),
-            "code_commit": "d" * 40,
-        },
-        {
-            **_pretest_receipt(),
-            "unexpected": "copied-but-mutated",
         },
     ],
 )
 def test_final_gate_rejects_incomplete_or_inconsistent_receipts(
     tmp_path: Path, receipt: dict
 ) -> None:
-    with pytest.raises(SelectedSafeCorpusError, match="final pre-test"):
+    with pytest.raises(
+        SelectedSafeCorpusError, match="final corpus preparation"
+    ):
         build_selected_safe_corpus(
             purpose="final_evaluation",
             private_database_path=tmp_path / "does-not-exist.sqlite",
@@ -715,16 +775,139 @@ def test_final_gate_rejects_incomplete_or_inconsistent_receipts(
             pseudonymization_key=b"k" * 32,
             pseudonymization_key_id="fixture-key",
             code_commit=CODE_COMMIT,
-            final_access_gate=lambda _purpose: receipt,
+            final_preparation_receipt=receipt,
             **_safe_outputs(tmp_path),
         )
     assert not (tmp_path / "does-not-exist.sqlite").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "error"),
+    [
+        ("evaluation_opened", True, "cannot follow evaluation access"),
+        (
+            "pseudonymization_key_id",
+            "copied-other-key",
+            "pseudonymization_key_id is inconsistent",
+        ),
+        (
+            "final_source_member_receipts_sha256",
+            "f" * 64,
+            "source receipts differ",
+        ),
+    ],
+)
+def test_final_preparation_rejects_mutated_valid_shaped_receipt(
+    tmp_path: Path,
+    field: str,
+    replacement: object,
+    error: str,
+) -> None:
+    path, historical = _safe_store(tmp_path, role="test")
+    receipt = _preparation_receipt(path)
+    receipt[field] = replacement
+    identity = dict(receipt)
+    identity.pop("receipt_id")
+    receipt["receipt_id"] = stable_id(
+        "nextbehaviorfinalpreparation", identity
+    )
+    database = open_selected_database(path)
+    database.execute(
+        "UPDATE metadata SET value = ? "
+        "WHERE key = 'final_corpus_preparation_receipt_id'",
+        (receipt["receipt_id"],),
+    )
+    database.execute(
+        "UPDATE metadata SET value = ? "
+        "WHERE key = 'final_corpus_preparation_receipt_json'",
+        (stable_json(receipt),),
+    )
+    database.commit()
+    database.close()
+    with pytest.raises(SelectedSafeCorpusError, match=error):
+        build_selected_safe_corpus(
+            purpose="final_evaluation",
+            private_database_path=path,
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+            historical_payload_path=historical,
+            pseudonymization_key=b"k" * 32,
+            pseudonymization_key_id="fixture-key",
+            code_commit=CODE_COMMIT,
+            final_preparation_receipt=receipt,
+            **_safe_outputs(tmp_path),
+        )
+
+
+def test_legacy_final_open_marker_does_not_authorize_safe_export(
+    tmp_path: Path,
+) -> None:
+    path, historical = _safe_store(tmp_path, role="test")
+    receipt = _preparation_receipt(path)
+    database = open_selected_database(path)
+    database.execute(
+        "DELETE FROM metadata WHERE key IN "
+        "('final_corpus_prepared_at', "
+        "'final_corpus_preparation_receipt_id', "
+        "'final_corpus_preparation_receipt_json')"
+    )
+    database.execute(
+        "INSERT INTO metadata(key, value) VALUES "
+        "('final_test_opened_at', 'legacy')"
+    )
+    database.commit()
+    database.close()
+    with pytest.raises(
+        SelectedSafeCorpusError, match="preparation marker"
+    ):
+        build_selected_safe_corpus(
+            purpose="final_evaluation",
+            private_database_path=path,
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+            historical_payload_path=historical,
+            pseudonymization_key=b"k" * 32,
+            pseudonymization_key_id="fixture-key",
+            code_commit=CODE_COMMIT,
+            final_preparation_receipt=receipt,
+            **_safe_outputs(tmp_path),
+        )
+
+
+def test_final_classification_requires_completed_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _historical = _safe_store(tmp_path, role="test")
+    _asset_verification(monkeypatch)
+    with pytest.raises(
+        SelectedSafeCorpusError, match="completed blinded preparation"
+    ):
+        classify_missing_selected_commands(
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            repository_root=ROOT,
+            model_root=tmp_path / "model",
+            private_database_path=path,
+            code_commit=CODE_COMMIT,
+        )
+
+    _preparation_receipt(path)
+    result = classify_missing_selected_commands(
+        classifier_manifest_path=CLASSIFIER_MANIFEST,
+        repository_root=ROOT,
+        model_root=tmp_path / "model",
+        private_database_path=path,
+        code_commit=CODE_COMMIT,
+    )
+    assert result["status"] == "classification_complete"
+    assert result["missing_command_count_before_run"] == 0
 
 
 def test_final_export_rejects_any_historical_overlap(tmp_path: Path) -> None:
     path, historical = _safe_store(
         tmp_path, role="test", historical_split="calibration"
     )
+    preparation = _preparation_receipt(path)
     with pytest.raises(SelectedSafeCorpusError, match="final role overlaps"):
         build_selected_safe_corpus(
             purpose="final_evaluation",
@@ -735,7 +918,7 @@ def test_final_export_rejects_any_historical_overlap(tmp_path: Path) -> None:
             pseudonymization_key=b"k" * 32,
             pseudonymization_key_id="fixture-key",
             code_commit=CODE_COMMIT,
-            final_access_gate=lambda _purpose: _pretest_receipt(),
+            final_preparation_receipt=preparation,
             **_safe_outputs(tmp_path),
         )
 

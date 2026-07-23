@@ -53,10 +53,13 @@ from production.prediction.next_behavior_preprocessing import (
     build_next_behavior_examples,
 )
 from production.tools.build_next_behavior_selected_corpus import (
+    FINAL_PREPARATION_SCHEMA_VERSION,
+    FINAL_PREPARATION_FIELDS,
     PURPOSE_TO_ROLE,
     ROLE_TO_COHORT,
     SelectedCorpusBuildError,
     _require_canonical_cached_row,
+    final_member_receipts_sha256,
     open_selected_database,
 )
 from production.tools.build_next_behavior_zenodo_corpus import (
@@ -72,7 +75,7 @@ from production.utils.serialization import stable_id, stable_json
 CLASSIFICATION_RECEIPT_SCHEMA_VERSION = (
     "next_behavior_selected_classification.v1"
 )
-SAFE_BUILD_RECEIPT_SCHEMA_VERSION = "next_behavior_selected_safe_build.v1"
+SAFE_BUILD_RECEIPT_SCHEMA_VERSION = "next_behavior_selected_safe_build.v2"
 SOURCE_RECEIPTS_SCHEMA_VERSION = (
     "next_behavior_selected_source_member_receipts.v1"
 )
@@ -127,7 +130,7 @@ _BUILD_RECEIPT_FIELDS = frozenset(
         "membership",
         "historical_membership",
         "pipeline_reconciliation",
-        "final_pretest_gate",
+        "final_preparation_gate",
         "corpus_receipt_id",
         "raw_content_emitted",
         "build_receipt_id",
@@ -375,6 +378,60 @@ def classify_missing_selected_commands(
         selection_sha256 = _require_sha256(
             selection[0], "source_selection_sha256"
         )
+        final_member_count = int(
+            database.execute(
+                "SELECT COUNT(*) FROM source_members "
+                "WHERE experiment_role = 'test'"
+            ).fetchone()[0]
+        )
+        if final_member_count:
+            metadata = dict(
+                database.execute(
+                    "SELECT key, value FROM metadata WHERE key IN "
+                    "('final_corpus_prepared_at', "
+                    "'final_corpus_preparation_receipt_id', "
+                    "'final_corpus_preparation_receipt_id_pending', "
+                    "'final_corpus_preparation_receipt_json')"
+                )
+            )
+            if (
+                final_member_count != 7
+                or "final_corpus_prepared_at" not in metadata
+                or "final_corpus_preparation_receipt_id_pending" in metadata
+                or "final_corpus_preparation_receipt_id" not in metadata
+                or "final_corpus_preparation_receipt_json" not in metadata
+            ):
+                raise SelectedSafeCorpusError(
+                    "final classification requires completed blinded "
+                    "preparation"
+                )
+            try:
+                preparation = json.loads(
+                    metadata["final_corpus_preparation_receipt_json"]
+                )
+            except json.JSONDecodeError as exc:
+                raise SelectedSafeCorpusError(
+                    "stored final preparation receipt is invalid"
+                ) from exc
+            if (
+                not isinstance(preparation, Mapping)
+                or set(preparation) != FINAL_PREPARATION_FIELDS
+                or preparation.get("receipt_id")
+                != metadata["final_corpus_preparation_receipt_id"]
+                or preparation.get("status")
+                != "frozen_for_blinded_preparation"
+                or preparation.get("evaluation_opened") is not False
+                or preparation.get("code_commit") != commit
+                or preparation.get("source_selection_sha256")
+                != selection_sha256
+                or preparation.get("classifier_manifest_sha256")
+                != manifest_sha256
+                or preparation.get("classification_checkpoint_sha256")
+                != manifest["classifier"]["checkpoint_sha256"]
+            ):
+                raise SelectedSafeCorpusError(
+                    "stored final preparation provenance is inconsistent"
+                )
         cached_before = _validate_all_cached_rows(database, manifest)
         commands = [
             str(row[0])
@@ -987,6 +1044,33 @@ def _require_role_build_receipt_shape(
         raise SelectedSafeCorpusError(
             "selected role build receipt cohort is inconsistent"
         )
+    preparation_gate = receipt.get("final_preparation_gate")
+    if role == "test":
+        if (
+            not isinstance(preparation_gate, Mapping)
+            or set(preparation_gate) != FINAL_PREPARATION_FIELDS
+            or preparation_gate.get("schema_version")
+            != FINAL_PREPARATION_SCHEMA_VERSION
+            or preparation_gate.get("status")
+            != "frozen_for_blinded_preparation"
+            or preparation_gate.get("purpose") != "prepare_final_corpus"
+            or preparation_gate.get("evaluation_opened") is not False
+        ):
+            raise SelectedSafeCorpusError(
+                "final role preparation evidence is invalid"
+            )
+        gate_identity = dict(preparation_gate)
+        gate_receipt_id = gate_identity.pop("receipt_id", None)
+        if gate_receipt_id != stable_id(
+            "nextbehaviorfinalpreparation", gate_identity
+        ):
+            raise SelectedSafeCorpusError(
+                "final role preparation identity is invalid"
+            )
+    elif preparation_gate != {"status": "not_applicable"}:
+        raise SelectedSafeCorpusError(
+            "development role cannot contain a final preparation gate"
+        )
     for field in (
         "code_commit",
         "source_selection_sha256",
@@ -1269,45 +1353,91 @@ def verify_selected_role_artifacts(
     }
 
 
-def _require_final_pretest_receipt(
+def _require_final_preparation_receipt(
     value: Any,
     *,
     code_commit: str,
+    classifier_manifest: Mapping[str, Any],
+    classifier_manifest_sha256: str,
+    preprocessing_sha256: str,
+    pseudonymization_key_id: str,
 ) -> Dict[str, Any]:
-    """Bind final access to a frozen, still-unopened training bundle."""
+    """Verify the blinded-preparation receipt before private-store access."""
 
-    required_fields = {
-        "status",
-        "test_opened",
-        "code_commit",
-        "training_bundle_sha256",
+    if not isinstance(value, Mapping) or set(value) != (
+        FINAL_PREPARATION_FIELDS
+    ):
+        raise SelectedSafeCorpusError(
+            "final corpus preparation receipt fields are invalid"
+        )
+    receipt = dict(value)
+    if (
+        receipt.get("schema_version") != FINAL_PREPARATION_SCHEMA_VERSION
+        or receipt.get("status") != "frozen_for_blinded_preparation"
+        or receipt.get("purpose") != "prepare_final_corpus"
+    ):
+        raise SelectedSafeCorpusError(
+            "final corpus preparation receipt is not frozen"
+        )
+    if receipt.get("evaluation_opened") is not False:
+        raise SelectedSafeCorpusError(
+            "final preparation cannot follow evaluation access"
+        )
+    if _clean(receipt.get("code_commit")).lower() != code_commit:
+        raise SelectedSafeCorpusError(
+            "final preparation receipt code commit is inconsistent"
+        )
+    policy = classifier_manifest["classification_policy"]
+    bindings = {
+        "classifier_manifest_sha256": classifier_manifest_sha256,
+        "classifier_adapter_sha256": classifier_manifest["classifier"][
+            "adapter_sha256"
+        ],
+        "classification_pipeline_sha256": classifier_manifest["classifier"][
+            "pipeline_sha256"
+        ],
+        "preprocessing_sha256": preprocessing_sha256,
+        "environment_lock_sha256": classifier_manifest["dependency_lock"][
+            "sha256"
+        ],
+        "label_policy_sha256": policy["rule_policy_sha256"],
+        "trust_policy_sha256": policy["trust_policy_sha256"],
+        "mitre_cache_sha256": policy["mitre_cache_sha256"],
+        "classification_checkpoint_sha256": classifier_manifest["classifier"][
+            "checkpoint_sha256"
+        ],
+        "pseudonymization_key_id": pseudonymization_key_id,
     }
-    if not isinstance(value, Mapping) or set(value) != required_fields:
+    for field, expected in bindings.items():
+        if receipt.get(field) != expected:
+            raise SelectedSafeCorpusError(
+                f"final preparation receipt {field} is inconsistent"
+            )
+    for field in (
+        "source_selection_sha256",
+        "final_source_member_receipts_sha256",
+        "classifier_manifest_sha256",
+        "classifier_adapter_sha256",
+        "classification_pipeline_sha256",
+        "preprocessing_sha256",
+        "environment_lock_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "mitre_cache_sha256",
+        "classification_checkpoint_sha256",
+    ):
+        _require_sha256(receipt.get(field), field)
+    if receipt.get("final_source_member_count") != 7:
         raise SelectedSafeCorpusError(
-            "final pre-test receipt fields are invalid"
+            "final preparation receipt must bind seven members"
         )
-    if value.get("status") != "frozen_pre_test":
+    identity = dict(receipt)
+    receipt_id = identity.pop("receipt_id", None)
+    if receipt_id != stable_id("nextbehaviorfinalpreparation", identity):
         raise SelectedSafeCorpusError(
-            "final pre-test receipt is not frozen"
+            "final preparation receipt identity is invalid"
         )
-    if value.get("test_opened") is not False:
-        raise SelectedSafeCorpusError(
-            "final pre-test receipt must prove the test was unopened"
-        )
-    if _clean(value.get("code_commit")).lower() != code_commit:
-        raise SelectedSafeCorpusError(
-            "final pre-test receipt code commit is inconsistent"
-        )
-    training_bundle_sha256 = _require_sha256(
-        value.get("training_bundle_sha256"),
-        "training_bundle_sha256",
-    )
-    return {
-        "status": "frozen_pre_test",
-        "test_opened": False,
-        "code_commit": code_commit,
-        "training_bundle_sha256": training_bundle_sha256,
-    }
+    return receipt
 
 
 def _write_temp(path: Path, payload: bytes) -> Path:
@@ -1363,14 +1493,15 @@ def build_selected_safe_corpus(
     build_receipt_path: Path,
     code_commit: str,
     max_sequence_length: int = 8,
-    final_access_gate: Callable[[str], Mapping[str, Any]] | None = None,
+    final_preparation_receipt: Mapping[str, Any] | None = None,
     repository_root: Path | None = None,
 ) -> Dict[str, Any]:
     """Export one role without exposing any other role's private records.
 
-    The final role is checked before the private database is opened.  Its
-    caller must supply a positive one-time gate *and* the ingestion store must
-    already contain the final-open marker.
+    The final role is checked before the private database is opened. Its
+    caller must supply the exact blinded-preparation receipt and the ingestion
+    store must already contain the corresponding preparation marker. This
+    export does not grant model-evaluation access.
     """
 
     role = PURPOSE_TO_ROLE.get(_clean(purpose))
@@ -1382,16 +1513,6 @@ def build_selected_safe_corpus(
         else Path(__file__).resolve().parents[2]
     )
     commit = _require_repository_commit(root, code_commit)
-    final_pretest_receipt: Dict[str, Any] | None = None
-    if role == "test":
-        if final_access_gate is None:
-            raise SelectedSafeCorpusError(
-                "final-test safe export remains sealed"
-            )
-        final_pretest_receipt = _require_final_pretest_receipt(
-            final_access_gate(purpose),
-            code_commit=commit,
-        )
     if max_sequence_length < 1:
         raise SelectedSafeCorpusError("max_sequence_length must be positive")
     if (
@@ -1420,12 +1541,26 @@ def build_selected_safe_corpus(
         )
     except ValueError as exc:
         raise SelectedSafeCorpusError(str(exc)) from exc
-    historical, historical_sha256 = _load_historical_membership(
-        historical_payload_path
-    )
     preprocessing_sha256 = _sha256_file(preprocessing_manifest_path)
     classifier_sha256 = _sha256_file(classifier_manifest_path)
     policy = classifier_manifest["classification_policy"]
+    final_preparation_gate: Dict[str, Any] | None = None
+    if role == "test":
+        if final_preparation_receipt is None:
+            raise SelectedSafeCorpusError(
+                "final-test safe export remains sealed for preparation"
+            )
+        final_preparation_gate = _require_final_preparation_receipt(
+            final_preparation_receipt,
+            code_commit=commit,
+            classifier_manifest=classifier_manifest,
+            classifier_manifest_sha256=classifier_sha256,
+            preprocessing_sha256=preprocessing_sha256,
+            pseudonymization_key_id=pseudonymization_key_id,
+        )
+    historical, historical_sha256 = _load_historical_membership(
+        historical_payload_path
+    )
 
     database = open_selected_database(private_database_path)
     spool_path: Path | None = None
@@ -1442,12 +1577,69 @@ def build_selected_safe_corpus(
         source_selection_sha256 = _require_sha256(
             selection_row[0], "source_selection_sha256"
         )
-        if role == "test" and database.execute(
-            "SELECT 1 FROM metadata WHERE key = 'final_test_opened_at'"
-        ).fetchone() is None:
+        if (
+            role == "test"
+            and source_selection_sha256
+            != final_preparation_gate["source_selection_sha256"]
+        ):
             raise SelectedSafeCorpusError(
-                "final-test source cohort has not been opened"
+                "final private store source selection differs from "
+                "preparation freeze"
             )
+        if role == "test":
+            prepared = database.execute(
+                "SELECT value FROM metadata "
+                "WHERE key = 'final_corpus_prepared_at'"
+            ).fetchone()
+            preparation_id = database.execute(
+                "SELECT value FROM metadata "
+                "WHERE key = 'final_corpus_preparation_receipt_id'"
+            ).fetchone()
+            preparation_json = database.execute(
+                "SELECT value FROM metadata "
+                "WHERE key = 'final_corpus_preparation_receipt_json'"
+            ).fetchone()
+            if (
+                prepared is None
+                or preparation_id is None
+                or preparation_json is None
+                or str(preparation_id[0])
+                != final_preparation_gate["receipt_id"]
+                or str(preparation_json[0])
+                != stable_json(final_preparation_gate)
+            ):
+                raise SelectedSafeCorpusError(
+                    "final corpus preparation marker is missing or inconsistent"
+                )
+            final_member_rows = [
+                {
+                    "filename": str(row[0]),
+                    "source_sha256": str(row[1]),
+                    "source_size_bytes": int(row[2]),
+                    "archive_crc32": str(row[3]),
+                    "chronological_order": int(row[4]),
+                    "source_cohort": str(row[5]),
+                    "experiment_role": str(row[6]),
+                }
+                for row in database.execute(
+                    """
+                    SELECT filename, source_sha256, source_size_bytes,
+                           archive_crc32, chronological_order, source_cohort,
+                           experiment_role
+                    FROM source_members
+                    WHERE experiment_role = 'test'
+                    ORDER BY chronological_order
+                    """
+                )
+            ]
+            if final_member_receipts_sha256(final_member_rows) != (
+                final_preparation_gate[
+                    "final_source_member_receipts_sha256"
+                ]
+            ):
+                raise SelectedSafeCorpusError(
+                    "final source receipts differ from preparation freeze"
+                )
         unique_commands = int(
             database.execute(
                 "SELECT COUNT(DISTINCT command) FROM command_events"
@@ -1734,9 +1926,9 @@ def build_selected_safe_corpus(
                 ),
             },
             "pipeline_reconciliation": pipeline_reconciliation,
-            "final_pretest_gate": (
-                final_pretest_receipt
-                if final_pretest_receipt is not None
+            "final_preparation_gate": (
+                final_preparation_gate
+                if final_preparation_gate is not None
                 else {"status": "not_applicable"}
             ),
             "corpus_receipt_id": corpus_receipt["receipt_id"],
@@ -1792,18 +1984,39 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("fit_model", "select_model", "fit_calibration"),
         required=True,
     )
-    safe.add_argument("--private-database", type=Path, required=True)
-    safe.add_argument("--classifier-manifest", type=Path, required=True)
-    safe.add_argument("--preprocessing-manifest", type=Path, required=True)
-    safe.add_argument("--historical-payload", type=Path, required=True)
-    safe.add_argument("--pseudonymization-key", type=Path, required=True)
-    safe.add_argument("--safe-sessions", type=Path, required=True)
-    safe.add_argument("--examples", type=Path, required=True)
-    safe.add_argument("--source-receipts", type=Path, required=True)
-    safe.add_argument("--corpus-receipt", type=Path, required=True)
-    safe.add_argument("--build-receipt", type=Path, required=True)
-    safe.add_argument("--code-commit", required=True)
-    safe.add_argument("--max-sequence-length", type=int, default=8)
+    final = subparsers.add_parser("safe-final-role")
+    final.add_argument("--preparation-receipt", type=Path, required=True)
+    for role_parser in (safe, final):
+        role_parser.add_argument(
+            "--private-database", type=Path, required=True
+        )
+        role_parser.add_argument(
+            "--classifier-manifest", type=Path, required=True
+        )
+        role_parser.add_argument(
+            "--preprocessing-manifest", type=Path, required=True
+        )
+        role_parser.add_argument(
+            "--historical-payload", type=Path, required=True
+        )
+        role_parser.add_argument(
+            "--pseudonymization-key", type=Path, required=True
+        )
+        role_parser.add_argument("--safe-sessions", type=Path, required=True)
+        role_parser.add_argument("--examples", type=Path, required=True)
+        role_parser.add_argument(
+            "--source-receipts", type=Path, required=True
+        )
+        role_parser.add_argument(
+            "--corpus-receipt", type=Path, required=True
+        )
+        role_parser.add_argument(
+            "--build-receipt", type=Path, required=True
+        )
+        role_parser.add_argument("--code-commit", required=True)
+        role_parser.add_argument(
+            "--max-sequence-length", type=int, default=8
+        )
     return parser
 
 
@@ -1826,8 +2039,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except ValueError as exc:
             raise SelectedSafeCorpusError(str(exc)) from exc
+        final_preparation_receipt = (
+            _load_json_object(
+                args.preparation_receipt,
+                "final corpus preparation receipt",
+            )
+            if args.stage == "safe-final-role"
+            else None
+        )
         result = build_selected_safe_corpus(
-            purpose=args.purpose,
+            purpose=(
+                "final_evaluation"
+                if args.stage == "safe-final-role"
+                else args.purpose
+            ),
             private_database_path=args.private_database,
             classifier_manifest_path=args.classifier_manifest,
             preprocessing_manifest_path=args.preprocessing_manifest,
@@ -1841,6 +2066,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             build_receipt_path=args.build_receipt,
             code_commit=args.code_commit,
             max_sequence_length=args.max_sequence_length,
+            final_preparation_receipt=final_preparation_receipt,
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

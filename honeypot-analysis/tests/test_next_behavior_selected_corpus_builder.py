@@ -17,6 +17,7 @@ from production.prediction.next_behavior_source_selection import (
 )
 from production.tools.build_next_behavior_selected_corpus import (
     SelectedCorpusBuildError,
+    build_final_corpus_preparation_receipt,
     build_role_inventory,
     import_verified_classification_cache,
     ingest_selected_members,
@@ -34,6 +35,7 @@ DECLARATION = (
 CLASSIFIER_MANIFEST = (
     ROOT / "configs" / "next_behavior_classifier_environment.v1.json"
 )
+PREPROCESSING_MANIFEST = ROOT / "configs/next_behavior_preprocessing.v1.json"
 
 
 def _event(
@@ -403,7 +405,39 @@ def test_same_role_cross_member_session_is_quarantined(
     assert reason == "cross_member"
 
 
-def test_final_access_is_explicitly_sealed_until_verified_training_gate(
+def _final_preparation(
+    completed: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    commit: str = "a" * 40,
+    key_id: str = "fixture-key",
+) -> Path:
+    calls = iter(
+        (
+            SimpleNamespace(stdout=commit + "\n"),
+            SimpleNamespace(stdout=""),
+        )
+    )
+    monkeypatch.setattr(
+        selected_corpus.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(calls),
+    )
+    output = tmp_path / "final-preparation.json"
+    build_final_corpus_preparation_receipt(
+        completed_selection_path=completed,
+        classifier_manifest_path=CLASSIFIER_MANIFEST,
+        preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+        repository_root=ROOT,
+        code_commit=commit,
+        pseudonymization_key_id=key_id,
+        output_path=output,
+    )
+    return output
+
+
+def test_final_ingest_is_sealed_until_blinded_preparation_freezes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -418,51 +452,28 @@ def test_final_access_is_explicitly_sealed_until_verified_training_gate(
         )
     assert not database.exists()
 
-    with pytest.raises(SelectedCorpusBuildError, match="training receipt"):
+    with pytest.raises(SelectedCorpusBuildError, match="blinded-preparation"):
         ingest_selected_members(
             completed_selection_path=completed,
             raw_directory=raw_directory,
             private_database_path=database,
             cohort="final",
-            open_final_test=True,
+            prepare_final_corpus=True,
         )
     assert not database.exists()
 
     commit = "a" * 40
-    training_bundle = tmp_path / "training_bundle.json"
-    training_bundle.write_text(
-        stable_json(
-            {
-                "schema_version": "next_behavior_training_bundle.v1",
-                "status": "frozen_pre_test",
-                "test_opened": False,
-                "final_test_path_accepted_by_command": False,
-                "code_commit": commit,
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+    preparation = _final_preparation(
+        completed, tmp_path, monkeypatch, commit=commit
     )
-    gate_receipt = tmp_path / "training_bundle_verification.json"
-    gate_receipt.write_text(
-        stable_json(
-            {
-                "status": "frozen_pre_test",
-                "test_opened": False,
-                "code_commit": commit,
-                "training_bundle_sha256": hashlib.sha256(
-                    training_bundle.read_bytes()
-                ).hexdigest(),
-            }
+    calls = iter(
+        (
+            SimpleNamespace(stdout=commit + "\n"),
+            SimpleNamespace(stdout=""),
         )
-        + "\n",
-        encoding="utf-8",
     )
-
     def fake_run(command: list[str], **_kwargs: object) -> SimpleNamespace:
-        return SimpleNamespace(
-            stdout=(commit + "\n" if "rev-parse" in command else "")
-        )
+        return next(calls)
 
     monkeypatch.setattr(selected_corpus.subprocess, "run", fake_run)
     receipt = ingest_selected_members(
@@ -470,61 +481,54 @@ def test_final_access_is_explicitly_sealed_until_verified_training_gate(
         raw_directory=raw_directory,
         private_database_path=database,
         cohort="final",
-        open_final_test=True,
-        final_pretest_receipt_path=gate_receipt,
-        training_bundle_path=training_bundle,
-        repository_root=tmp_path,
+        prepare_final_corpus=True,
+        final_preparation_receipt_path=preparation,
+        classifier_manifest_path=CLASSIFIER_MANIFEST,
+        preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+        pseudonymization_key_id="fixture-key",
+        repository_root=ROOT,
+        code_commit=commit,
     )
-    assert receipt["final_test_opened"] is True
-    assert receipt["final_pretest_gate"]["training_bundle_sha256"] == (
-        hashlib.sha256(training_bundle.read_bytes()).hexdigest()
+    assert receipt["final_corpus_prepared"] is True
+    assert receipt["evaluation_opened"] is False
+    assert receipt["final_preparation_gate"]["status"] == (
+        "frozen_for_blinded_preparation"
     )
     assert receipt["counts"]["by_role"]["test"][
         "eligible_complete_sessions"
     ] == 7
+    connection = sqlite3.connect(database)
+    try:
+        metadata = dict(connection.execute("SELECT key, value FROM metadata"))
+    finally:
+        connection.close()
+    assert "final_corpus_prepared_at" in metadata
+    assert "final_test_opened_at" not in metadata
 
 
-def test_final_gate_rejects_mutated_bundle_before_database_creation(
+def test_final_preparation_rejects_mutated_provenance_before_database_creation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     completed, raw_directory, _payloads = _fixture(tmp_path)
     database = tmp_path / "private.sqlite"
     commit = "b" * 40
-    training_bundle = tmp_path / "training_bundle.json"
-    training_bundle.write_text(
-        stable_json(
-            {
-                "schema_version": "next_behavior_training_bundle.v1",
-                "status": "frozen_pre_test",
-                "test_opened": False,
-                "final_test_path_accepted_by_command": False,
-                "code_commit": commit,
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+    receipt = _final_preparation(
+        completed, tmp_path, monkeypatch, commit=commit
     )
-    receipt = tmp_path / "verification.json"
-    receipt.write_text(
-        stable_json(
-            {
-                "status": "frozen_pre_test",
-                "test_opened": False,
-                "code_commit": commit,
-                "training_bundle_sha256": hashlib.sha256(
-                    training_bundle.read_bytes()
-                ).hexdigest(),
-            }
+    value = json.loads(receipt.read_text())
+    value["evaluation_opened"] = True
+    receipt.write_text(stable_json(value) + "\n", encoding="utf-8")
+    calls = iter(
+        (
+            SimpleNamespace(stdout=commit + "\n"),
+            SimpleNamespace(stdout=""),
         )
-        + "\n",
-        encoding="utf-8",
     )
-    training_bundle.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(
         selected_corpus.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout=commit + "\n"),
+        lambda *_args, **_kwargs: next(calls),
     )
     with pytest.raises(SelectedCorpusBuildError, match="does not match"):
         ingest_selected_members(
@@ -532,12 +536,181 @@ def test_final_gate_rejects_mutated_bundle_before_database_creation(
             raw_directory=raw_directory,
             private_database_path=database,
             cohort="final",
-            open_final_test=True,
-            final_pretest_receipt_path=receipt,
-            training_bundle_path=training_bundle,
-            repository_root=tmp_path,
+            prepare_final_corpus=True,
+            final_preparation_receipt_path=receipt,
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+            pseudonymization_key_id="fixture-key",
+            repository_root=ROOT,
+            code_commit=commit,
         )
     assert not database.exists()
+
+
+def test_final_preparation_receipt_is_deterministic_complete_and_secret_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed, _raw_directory, _payloads = _fixture(tmp_path)
+    receipt_path = _final_preparation(completed, tmp_path, monkeypatch)
+    receipt = json.loads(receipt_path.read_text())
+
+    assert receipt["status"] == "frozen_for_blinded_preparation"
+    assert receipt["purpose"] == "prepare_final_corpus"
+    assert receipt["evaluation_opened"] is False
+    assert receipt["final_source_member_count"] == 7
+    assert receipt["pseudonymization_key_id"] == "fixture-key"
+    assert all(
+        len(receipt[field]) == 64
+        for field in (
+            "source_selection_sha256",
+            "final_source_member_receipts_sha256",
+            "classifier_manifest_sha256",
+            "classifier_adapter_sha256",
+            "classification_pipeline_sha256",
+            "preprocessing_sha256",
+            "environment_lock_sha256",
+            "label_policy_sha256",
+            "trust_policy_sha256",
+            "mitre_cache_sha256",
+            "classification_checkpoint_sha256",
+        )
+    )
+    serialized = stable_json(receipt)
+    assert "training_bundle" not in serialized
+    assert "test_opened" not in serialized
+    assert "private fixture" not in serialized
+
+
+def test_final_preparation_requires_exact_clean_code_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed, _raw_directory, _payloads = _fixture(tmp_path)
+    commit = "e" * 40
+    calls = iter(
+        (
+            SimpleNamespace(stdout="f" * 40 + "\n"),
+            SimpleNamespace(stdout=""),
+        )
+    )
+    monkeypatch.setattr(
+        selected_corpus.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(calls),
+    )
+    with pytest.raises(SelectedCorpusBuildError, match="does not match"):
+        build_final_corpus_preparation_receipt(
+            completed_selection_path=completed,
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+            repository_root=ROOT,
+            code_commit=commit,
+            pseudonymization_key_id="fixture-key",
+        )
+
+    calls = iter(
+        (
+            SimpleNamespace(stdout=commit + "\n"),
+            SimpleNamespace(stdout=" M tracked.py\n"),
+        )
+    )
+    monkeypatch.setattr(
+        selected_corpus.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(calls),
+    )
+    with pytest.raises(SelectedCorpusBuildError, match="must be clean"):
+        build_final_corpus_preparation_receipt(
+            completed_selection_path=completed,
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+            repository_root=ROOT,
+            code_commit=commit,
+            pseudonymization_key_id="fixture-key",
+        )
+
+
+def test_final_ingest_rejects_wrong_hmac_identity_before_database_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed, raw_directory, _payloads = _fixture(tmp_path)
+    commit = "c" * 40
+    preparation = _final_preparation(
+        completed, tmp_path, monkeypatch, commit=commit
+    )
+    calls = iter(
+        (
+            SimpleNamespace(stdout=commit + "\n"),
+            SimpleNamespace(stdout=""),
+        )
+    )
+    monkeypatch.setattr(
+        selected_corpus.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(calls),
+    )
+    database = tmp_path / "must-not-exist.sqlite"
+    with pytest.raises(SelectedCorpusBuildError, match="does not match"):
+        ingest_selected_members(
+            completed_selection_path=completed,
+            raw_directory=raw_directory,
+            private_database_path=database,
+            cohort="final",
+            prepare_final_corpus=True,
+            final_preparation_receipt_path=preparation,
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+            pseudonymization_key_id="another-key",
+            repository_root=ROOT,
+            code_commit=commit,
+        )
+    assert not database.exists()
+
+
+def test_legacy_open_state_cannot_be_reclassified_as_blinded_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed, raw_directory, _payloads = _fixture(tmp_path)
+    commit = "d" * 40
+    preparation = _final_preparation(
+        completed, tmp_path, monkeypatch, commit=commit
+    )
+    database = tmp_path / "private.sqlite"
+    connection = selected_corpus.open_selected_database(database)
+    connection.execute(
+        "INSERT INTO metadata(key, value) VALUES "
+        "('final_test_opened_at', 'legacy')"
+    )
+    connection.commit()
+    connection.close()
+    calls = iter(
+        (
+            SimpleNamespace(stdout=commit + "\n"),
+            SimpleNamespace(stdout=""),
+        )
+    )
+    monkeypatch.setattr(
+        selected_corpus.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(calls),
+    )
+    with pytest.raises(SelectedCorpusBuildError, match="legacy"):
+        ingest_selected_members(
+            completed_selection_path=completed,
+            raw_directory=raw_directory,
+            private_database_path=database,
+            cohort="final",
+            prepare_final_corpus=True,
+            final_preparation_receipt_path=preparation,
+            classifier_manifest_path=CLASSIFIER_MANIFEST,
+            preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+            pseudonymization_key_id="fixture-key",
+            repository_root=ROOT,
+            code_commit=commit,
+        )
 
 
 def test_role_inventory_is_pseudonymous_purpose_scoped_and_no_overwrite(
@@ -571,7 +744,7 @@ def test_role_inventory_is_pseudonymous_purpose_scoped_and_no_overwrite(
         )
 
 
-def test_role_inventory_requires_every_member_and_test_open_marker(
+def test_role_inventory_requires_every_member_and_preparation_marker(
     tmp_path: Path,
 ) -> None:
     completed, raw_directory, _payloads = _fixture(tmp_path)
@@ -590,7 +763,9 @@ def test_role_inventory_requires_every_member_and_test_open_marker(
             pseudonymization_key=b"k" * 32,
             pseudonymization_key_id="fixture-key",
         )
-    with pytest.raises(SelectedCorpusBuildError, match="remains sealed"):
+    with pytest.raises(
+        SelectedCorpusBuildError, match="blinded preparation"
+    ):
         build_role_inventory(
             private_database_path=database,
             purpose="final_evaluation",

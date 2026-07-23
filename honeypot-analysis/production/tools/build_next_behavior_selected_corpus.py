@@ -87,15 +87,33 @@ _CONTEXT_EVENTS = frozenset(
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _KEY_ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _BLOCK_SIZE = 8 * 1024 * 1024
-_FINAL_PRETEST_FIELDS = frozenset(
+FINAL_PREPARATION_SCHEMA_VERSION = (
+    "next_behavior_final_corpus_preparation.v1"
+)
+FINAL_PREPARATION_FIELDS = frozenset(
     {
+        "schema_version",
+        "receipt_id",
         "status",
-        "test_opened",
+        "purpose",
+        "evaluation_opened",
         "code_commit",
-        "training_bundle_sha256",
+        "source_selection_id",
+        "source_selection_sha256",
+        "final_source_member_count",
+        "final_source_member_receipts_sha256",
+        "classifier_manifest_sha256",
+        "classifier_adapter_sha256",
+        "classification_pipeline_sha256",
+        "preprocessing_sha256",
+        "environment_lock_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "mitre_cache_sha256",
+        "classification_checkpoint_sha256",
+        "pseudonymization_key_id",
     }
 )
-_TRAINING_BUNDLE_SCHEMA_VERSION = "next_behavior_training_bundle.v1"
 
 
 class SelectedCorpusBuildError(ValueError):
@@ -126,47 +144,16 @@ def _file_identity(path: Path) -> tuple[int, str, str]:
     return size, f"{crc32 & 0xFFFFFFFF:08x}", digest.hexdigest()
 
 
-def _require_final_pretest_gate(
+def _require_repository_commit(
     *,
-    receipt_path: Path,
-    training_bundle_path: Path,
     repository_root: Path,
-) -> Dict[str, Any]:
-    """Verify the immutable pre-test training receipt before final ingestion."""
+    expected_commit: str,
+) -> str:
+    """Bind generated private evidence to the exact clean tracked tree."""
 
-    try:
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        bundle = json.loads(training_bundle_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise SelectedCorpusBuildError(
-            "final pre-test gate artifacts cannot be verified"
-        ) from exc
-    if (
-        not isinstance(receipt, dict)
-        or set(receipt) != _FINAL_PRETEST_FIELDS
-        or receipt.get("status") != "frozen_pre_test"
-        or receipt.get("test_opened") is not False
-        or not _SHA256.fullmatch(_clean(receipt.get("training_bundle_sha256")))
-        or not re.fullmatch(r"[0-9a-f]{40}", _clean(receipt.get("code_commit")))
-    ):
-        raise SelectedCorpusBuildError(
-            "final pre-test verification receipt is invalid"
-        )
-    if _sha256_file(training_bundle_path) != receipt["training_bundle_sha256"]:
-        raise SelectedCorpusBuildError(
-            "frozen training bundle does not match the final pre-test receipt"
-        )
-    if (
-        not isinstance(bundle, dict)
-        or bundle.get("schema_version") != _TRAINING_BUNDLE_SCHEMA_VERSION
-        or bundle.get("status") != "frozen_pre_test"
-        or bundle.get("test_opened") is not False
-        or bundle.get("final_test_path_accepted_by_command") is not False
-        or bundle.get("code_commit") != receipt["code_commit"]
-    ):
-        raise SelectedCorpusBuildError(
-            "training bundle is not a sealed pre-test bundle"
-        )
+    commit = _clean(expected_commit).lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise SelectedCorpusBuildError("code_commit must be a full Git hash")
     try:
         head = subprocess.run(
             ["git", "-C", str(repository_root), "rev-parse", "HEAD"],
@@ -189,13 +176,261 @@ def _require_final_pretest_gate(
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as exc:
         raise SelectedCorpusBuildError(
-            "repository state cannot be verified for final-test opening"
+            "repository state cannot be verified for final preparation"
         ) from exc
-    if head != receipt["code_commit"] or tracked_status:
+    if head != commit:
         raise SelectedCorpusBuildError(
-            "final-test opening requires the exact clean training commit"
+            "code_commit does not match repository HEAD"
+        )
+    if tracked_status:
+        raise SelectedCorpusBuildError(
+            "tracked repository state must be clean before final preparation"
+        )
+    return commit
+
+
+def _final_member_receipt_basis(
+    members: Sequence[Mapping[str, Any]],
+) -> list[Dict[str, Any]]:
+    """Return the canonical public identity of the seven frozen final members."""
+
+    final = [
+        {
+            "filename": _clean(member.get("filename")),
+            "source_sha256": _clean(
+                member.get("source_sha256") or member.get("sha256")
+            ).lower(),
+            "source_size_bytes": member.get(
+                "source_size_bytes", member.get("size_bytes")
+            ),
+            "archive_crc32": _clean(member.get("archive_crc32")).lower(),
+            "chronological_order": member.get("chronological_order"),
+            "source_cohort": _clean(
+                member.get("source_cohort") or member.get("role")
+            ),
+            "experiment_role": _clean(
+                member.get("experiment_role") or "test"
+            ),
+        }
+        for member in members
+        if _clean(member.get("source_cohort") or member.get("role")) == "final"
+        or _clean(member.get("experiment_role")) == "test"
+    ]
+    final.sort(key=lambda item: int(item["chronological_order"] or 0))
+    if (
+        len(final) != 7
+        or [item["chronological_order"] for item in final]
+        != list(range(7, 14))
+        or any(
+            not item["filename"]
+            or not _SHA256.fullmatch(item["source_sha256"])
+            or isinstance(item["source_size_bytes"], bool)
+            or not isinstance(item["source_size_bytes"], int)
+            or item["source_size_bytes"] < 1
+            or not re.fullmatch(r"[0-9a-f]{8}", item["archive_crc32"])
+            or item["source_cohort"] != "final"
+            or item["experiment_role"] != "test"
+            for item in final
+        )
+    ):
+        raise SelectedCorpusBuildError(
+            "final source member receipts are incomplete or inconsistent"
+        )
+    return final
+
+
+def final_member_receipts_sha256(
+    members: Sequence[Mapping[str, Any]],
+) -> str:
+    """Hash exact final member identities without opening their content."""
+
+    return hashlib.sha256(
+        stable_json(_final_member_receipt_basis(members)).encode("utf-8")
+    ).hexdigest()
+
+
+def _preparation_receipt_basis(
+    *,
+    completed_selection_path: Path,
+    classifier_manifest_path: Path,
+    preprocessing_manifest_path: Path,
+    repository_root: Path,
+    code_commit: str,
+    pseudonymization_key_id: str,
+) -> Dict[str, Any]:
+    selection, source_selection_sha256 = _load_completed_selection(
+        completed_selection_path
+    )
+    members = normalized_selected_members(selection)
+    try:
+        classifier = load_classifier_manifest(classifier_manifest_path)
+    except ValueError as exc:
+        raise SelectedCorpusBuildError(str(exc)) from exc
+    key_id = _clean(pseudonymization_key_id)
+    if not _KEY_ID.fullmatch(key_id):
+        raise SelectedCorpusBuildError("pseudonymization key ID is invalid")
+    dependency_lock = classifier["dependency_lock"]
+    environment_lock_path = repository_root / dependency_lock["path"]
+    policy = classifier["classification_policy"]
+    for path, expected, label in (
+        (
+            environment_lock_path,
+            dependency_lock["sha256"],
+            "environment lock",
+        ),
+        (
+            repository_root
+            / "production/classification/securebert_classifier.py",
+            classifier["classifier"]["adapter_sha256"],
+            "classifier adapter",
+        ),
+        (
+            repository_root
+            / "production/classification/classification_pipeline.py",
+            classifier["classifier"]["pipeline_sha256"],
+            "classification pipeline",
+        ),
+        (
+            repository_root / policy["rule_policy_path"],
+            policy["rule_policy_sha256"],
+            "label policy",
+        ),
+        (
+            repository_root / policy["trust_policy_path"],
+            policy["trust_policy_sha256"],
+            "trust policy",
+        ),
+        (
+            repository_root / policy["mitre_cache_path"],
+            policy["mitre_cache_sha256"],
+            "MITRE cache",
+        ),
+    ):
+        if not path.is_file() or _sha256_file(path) != expected:
+            raise SelectedCorpusBuildError(f"{label} SHA-256 mismatch")
+    if not preprocessing_manifest_path.is_file():
+        raise SelectedCorpusBuildError("preprocessing manifest is missing")
+    return {
+        "schema_version": FINAL_PREPARATION_SCHEMA_VERSION,
+        "status": "frozen_for_blinded_preparation",
+        "purpose": "prepare_final_corpus",
+        "evaluation_opened": False,
+        "code_commit": code_commit,
+        "source_selection_id": selection["selection_id"],
+        "source_selection_sha256": source_selection_sha256,
+        "final_source_member_count": 7,
+        "final_source_member_receipts_sha256": final_member_receipts_sha256(
+            members
+        ),
+        "classifier_manifest_sha256": _sha256_file(
+            classifier_manifest_path
+        ),
+        "classifier_adapter_sha256": classifier["classifier"][
+            "adapter_sha256"
+        ],
+        "classification_pipeline_sha256": classifier["classifier"][
+            "pipeline_sha256"
+        ],
+        "preprocessing_sha256": _sha256_file(preprocessing_manifest_path),
+        "environment_lock_sha256": dependency_lock["sha256"],
+        "label_policy_sha256": policy["rule_policy_sha256"],
+        "trust_policy_sha256": policy["trust_policy_sha256"],
+        "mitre_cache_sha256": policy["mitre_cache_sha256"],
+        "classification_checkpoint_sha256": classifier["classifier"][
+            "checkpoint_sha256"
+        ],
+        "pseudonymization_key_id": key_id,
+    }
+
+
+def build_final_corpus_preparation_receipt(
+    *,
+    completed_selection_path: Path,
+    classifier_manifest_path: Path,
+    preprocessing_manifest_path: Path,
+    repository_root: Path,
+    code_commit: str,
+    pseudonymization_key_id: str,
+    output_path: Path | None = None,
+) -> Dict[str, Any]:
+    """Freeze the blinded data-preparation inputs before final ingestion."""
+
+    commit = _require_repository_commit(
+        repository_root=repository_root,
+        expected_commit=code_commit,
+    )
+    receipt = _preparation_receipt_basis(
+        completed_selection_path=completed_selection_path,
+        classifier_manifest_path=classifier_manifest_path,
+        preprocessing_manifest_path=preprocessing_manifest_path,
+        repository_root=repository_root,
+        code_commit=commit,
+        pseudonymization_key_id=pseudonymization_key_id,
+    )
+    receipt["receipt_id"] = stable_id(
+        "nextbehaviorfinalpreparation", receipt
+    )
+    if output_path is not None:
+        _atomic_write_new(
+            output_path,
+            (stable_json(receipt) + "\n").encode("utf-8"),
         )
     return receipt
+
+
+def require_final_corpus_preparation_receipt(
+    value: Any,
+    *,
+    completed_selection_path: Path,
+    classifier_manifest_path: Path,
+    preprocessing_manifest_path: Path,
+    repository_root: Path,
+    code_commit: str,
+    pseudonymization_key_id: str,
+) -> Dict[str, Any]:
+    """Validate a preparation receipt against authoritative current bytes."""
+
+    if not isinstance(value, Mapping) or set(value) != (
+        FINAL_PREPARATION_FIELDS
+    ):
+        raise SelectedCorpusBuildError(
+            "final corpus preparation receipt fields are invalid"
+        )
+    expected = _preparation_receipt_basis(
+        completed_selection_path=completed_selection_path,
+        classifier_manifest_path=classifier_manifest_path,
+        preprocessing_manifest_path=preprocessing_manifest_path,
+        repository_root=repository_root,
+        code_commit=code_commit,
+        pseudonymization_key_id=pseudonymization_key_id,
+    )
+    expected["receipt_id"] = stable_id(
+        "nextbehaviorfinalpreparation", expected
+    )
+    if dict(value) != expected:
+        raise SelectedCorpusBuildError(
+            "final corpus preparation receipt does not match frozen inputs"
+        )
+    return expected
+
+
+def _pseudonymization_key_id(path: Path) -> str:
+    """Derive the public key identity without exposing the private key."""
+
+    if not path.is_file() or path.is_symlink():
+        raise SelectedCorpusBuildError(
+            "pseudonymization key is missing or unsafe"
+        )
+    if path.stat().st_mode & 0o077:
+        raise SelectedCorpusBuildError(
+            "pseudonymization key permissions are too broad"
+        )
+    key = path.read_bytes()
+    if len(key) != 32:
+        raise SelectedCorpusBuildError(
+            "pseudonymization key must contain exactly 32 bytes"
+        )
+    return "next-behavior-hmac-" + hashlib.sha256(key).hexdigest()[:16]
 
 
 def _load_completed_selection(path: Path) -> tuple[Dict[str, Any], str]:
@@ -1204,41 +1439,68 @@ def ingest_selected_members(
     raw_directory: Path,
     private_database_path: Path,
     cohort: str,
-    open_final_test: bool = False,
-    final_pretest_receipt_path: Path | None = None,
-    training_bundle_path: Path | None = None,
+    prepare_final_corpus: bool = False,
+    final_preparation_receipt_path: Path | None = None,
+    classifier_manifest_path: Path | None = None,
+    preprocessing_manifest_path: Path | None = None,
+    pseudonymization_key_id: str | None = None,
     repository_root: Path | None = None,
+    code_commit: str | None = None,
     selected_members: Iterable[str] = (),
     flush_size: int = 20_000,
     receipt_output_path: Path | None = None,
 ) -> Dict[str, Any]:
     """Verify then ingest one frozen cohort without leaking raw content.
 
-    ``final`` access requires both the explicit flag and the exact verified
-    frozen training-bundle receipt. Merely downloading or verifying final
-    member bytes does not open this builder's final-test path.
+    ``final`` ingestion is blinded preparation, not evaluation access. It
+    requires an exact preparation receipt frozen before ingestion. Merely
+    downloading or verifying final member bytes does not prepare the corpus,
+    and this function never opens the final payload for model evaluation.
     """
 
     if cohort not in {"development", "final"}:
         raise SelectedCorpusBuildError("cohort must be development or final")
-    if cohort == "final" and not open_final_test:
+    if cohort == "final" and not prepare_final_corpus:
         raise SelectedCorpusBuildError(
-            "final cohort remains sealed; --open-final-test is required"
+            "final cohort remains sealed; --prepare-final-corpus is required"
         )
     final_gate: Dict[str, Any] | None = None
     if cohort == "final":
-        if final_pretest_receipt_path is None or training_bundle_path is None:
+        if (
+            final_preparation_receipt_path is None
+            or classifier_manifest_path is None
+            or preprocessing_manifest_path is None
+            or pseudonymization_key_id is None
+            or code_commit is None
+        ):
             raise SelectedCorpusBuildError(
-                "final cohort requires a frozen pre-test training receipt"
+                "final cohort requires a frozen blinded-preparation receipt"
             )
-        final_gate = _require_final_pretest_gate(
-            receipt_path=final_pretest_receipt_path,
-            training_bundle_path=training_bundle_path,
-            repository_root=(
-                repository_root
-                if repository_root is not None
-                else Path(__file__).resolve().parents[2]
-            ),
+        root = (
+            repository_root
+            if repository_root is not None
+            else Path(__file__).resolve().parents[2]
+        )
+        commit = _require_repository_commit(
+            repository_root=root,
+            expected_commit=code_commit,
+        )
+        try:
+            preparation_value = json.loads(
+                final_preparation_receipt_path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise SelectedCorpusBuildError(
+                "final corpus preparation receipt is unreadable"
+            ) from exc
+        final_gate = require_final_corpus_preparation_receipt(
+            preparation_value,
+            completed_selection_path=completed_selection_path,
+            classifier_manifest_path=classifier_manifest_path,
+            preprocessing_manifest_path=preprocessing_manifest_path,
+            repository_root=root,
+            code_commit=commit,
+            pseudonymization_key_id=pseudonymization_key_id,
         )
     if flush_size < 1:
         raise SelectedCorpusBuildError("flush_size must be positive")
@@ -1272,6 +1534,39 @@ def ingest_selected_members(
 
     database = open_selected_database(private_database_path)
     try:
+        if cohort == "final":
+            legacy_open = database.execute(
+                "SELECT 1 FROM metadata WHERE key = 'final_test_opened_at'"
+            ).fetchone()
+            if legacy_open is not None:
+                raise SelectedCorpusBuildError(
+                    "legacy final-test-open state cannot authorize blinded "
+                    "preparation"
+                )
+            existing_gate = database.execute(
+                "SELECT value FROM metadata WHERE key IN "
+                "('final_corpus_preparation_receipt_id', "
+                "'final_corpus_preparation_receipt_id_pending') "
+                "ORDER BY key"
+            ).fetchall()
+            if any(
+                str(row[0]) != final_gate["receipt_id"]
+                for row in existing_gate
+            ):
+                raise SelectedCorpusBuildError(
+                    "private store is bound to another final preparation"
+                )
+            existing_receipt = database.execute(
+                "SELECT value FROM metadata "
+                "WHERE key = 'final_corpus_preparation_receipt_json'"
+            ).fetchone()
+            if (
+                existing_receipt is not None
+                and str(existing_receipt[0]) != stable_json(final_gate)
+            ):
+                raise SelectedCorpusBuildError(
+                    "private store final preparation provenance changed"
+                )
         stored_hash = database.execute(
             "SELECT value FROM metadata "
             "WHERE key = 'source_selection_sha256'"
@@ -1288,8 +1583,8 @@ def ingest_selected_members(
             database.execute(
                 "INSERT OR IGNORE INTO metadata(key, value) VALUES (?, ?)",
                 (
-                    "final_test_opened_at",
-                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "final_corpus_preparation_receipt_id_pending",
+                    final_gate["receipt_id"],
                 ),
             )
         database.commit()
@@ -1303,6 +1598,33 @@ def ingest_selected_members(
             for member in members
         ]
         _refresh_quarantine(database)
+        if cohort == "final":
+            database.execute(
+                "INSERT OR IGNORE INTO metadata(key, value) VALUES (?, ?)",
+                (
+                    "final_corpus_prepared_at",
+                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                ),
+            )
+            database.execute(
+                "INSERT OR IGNORE INTO metadata(key, value) VALUES (?, ?)",
+                (
+                    "final_corpus_preparation_receipt_id",
+                    final_gate["receipt_id"],
+                ),
+            )
+            database.execute(
+                "INSERT OR IGNORE INTO metadata(key, value) VALUES (?, ?)",
+                (
+                    "final_corpus_preparation_receipt_json",
+                    stable_json(final_gate),
+                ),
+            )
+            database.execute(
+                "DELETE FROM metadata "
+                "WHERE key = 'final_corpus_preparation_receipt_id_pending'"
+            )
+            database.commit()
         counts = _database_counts(database)
     finally:
         database.close()
@@ -1311,8 +1633,9 @@ def ingest_selected_members(
         "status": "cohort_ingested",
         "source_selection_sha256": selection_sha256,
         "cohort": cohort,
-        "final_test_opened": cohort == "final",
-        "final_pretest_gate": final_gate,
+        "final_corpus_prepared": cohort == "final",
+        "evaluation_opened": False,
+        "final_preparation_gate": final_gate,
         "requested_member_count": len(members),
         "member_receipts": receipts,
         "counts": counts,
@@ -1406,9 +1729,11 @@ def build_role_inventory(
                 "private database is not bound to a completed selection"
             )
         if role == "test" and database.execute(
-            "SELECT 1 FROM metadata WHERE key = 'final_test_opened_at'"
+            "SELECT 1 FROM metadata WHERE key = 'final_corpus_prepared_at'"
         ).fetchone() is None:
-            raise SelectedCorpusBuildError("final-test role remains sealed")
+            raise SelectedCorpusBuildError(
+                "final corpus has not completed blinded preparation"
+            )
         expected_member_count = 4 if role == "train" else (7 if role == "test" else 1)
         member_rows = list(
             database.execute(
@@ -1513,8 +1838,9 @@ def iter_role_private_sessions(
 
     The iterator deliberately yields no labels.  Classification must use the
     frozen classifier/label adapter before calling the existing
-    ``build_privacy_safe_session`` contract.  Final sessions are inaccessible
-    until the one-time final-open marker exists.
+    ``build_privacy_safe_session`` contract. Final sessions are inaccessible
+    until the blinded-preparation marker exists; this iterator does not grant
+    model-evaluation access.
     """
 
     role = PURPOSE_TO_ROLE.get(purpose)
@@ -1523,9 +1849,11 @@ def iter_role_private_sessions(
     database = open_selected_database(private_database_path)
     try:
         if role == "test" and database.execute(
-            "SELECT 1 FROM metadata WHERE key = 'final_test_opened_at'"
+            "SELECT 1 FROM metadata WHERE key = 'final_corpus_prepared_at'"
         ).fetchone() is None:
-            raise SelectedCorpusBuildError("final-test role remains sealed")
+            raise SelectedCorpusBuildError(
+                "final corpus has not completed blinded preparation"
+            )
         rows = database.execute(
             """
             SELECT s.raw_session_id, s.source_member, s.first_seen,
@@ -1578,6 +1906,14 @@ def iter_role_private_sessions(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    prepare = subparsers.add_parser("freeze-final-preparation")
+    prepare.add_argument("--completed-selection", type=Path, required=True)
+    prepare.add_argument("--classifier-manifest", type=Path, required=True)
+    prepare.add_argument("--preprocessing-manifest", type=Path, required=True)
+    prepare.add_argument("--pseudonymization-key", type=Path, required=True)
+    prepare.add_argument("--repository-root", type=Path, required=True)
+    prepare.add_argument("--code-commit", required=True)
+    prepare.add_argument("--receipt-output", type=Path, required=True)
     ingest = subparsers.add_parser("ingest")
     ingest.add_argument("--completed-selection", type=Path, required=True)
     ingest.add_argument("--raw-directory", type=Path, required=True)
@@ -1585,10 +1921,13 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument(
         "--cohort", choices=("development", "final"), required=True
     )
-    ingest.add_argument("--open-final-test", action="store_true")
-    ingest.add_argument("--final-pretest-receipt", type=Path)
-    ingest.add_argument("--training-bundle", type=Path)
+    ingest.add_argument("--prepare-final-corpus", action="store_true")
+    ingest.add_argument("--final-preparation-receipt", type=Path)
+    ingest.add_argument("--classifier-manifest", type=Path)
+    ingest.add_argument("--preprocessing-manifest", type=Path)
+    ingest.add_argument("--pseudonymization-key", type=Path)
     ingest.add_argument("--repository-root", type=Path)
+    ingest.add_argument("--code-commit")
     ingest.add_argument("--member", action="append", default=[])
     ingest.add_argument("--flush-size", type=int, default=20_000)
     ingest.add_argument("--receipt-output", type=Path, required=True)
@@ -1604,16 +1943,38 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "freeze-final-preparation":
+        receipt = build_final_corpus_preparation_receipt(
+            completed_selection_path=args.completed_selection,
+            classifier_manifest_path=args.classifier_manifest,
+            preprocessing_manifest_path=args.preprocessing_manifest,
+            repository_root=args.repository_root,
+            code_commit=args.code_commit,
+            pseudonymization_key_id=_pseudonymization_key_id(
+                args.pseudonymization_key
+            ),
+            output_path=args.receipt_output,
+        )
+        print(stable_json(receipt))
+        return 0
     if args.command == "ingest":
+        key_id = (
+            _pseudonymization_key_id(args.pseudonymization_key)
+            if args.pseudonymization_key is not None
+            else None
+        )
         receipt = ingest_selected_members(
             completed_selection_path=args.completed_selection,
             raw_directory=args.raw_directory,
             private_database_path=args.private_database,
             cohort=args.cohort,
-            open_final_test=args.open_final_test,
-            final_pretest_receipt_path=args.final_pretest_receipt,
-            training_bundle_path=args.training_bundle,
+            prepare_final_corpus=args.prepare_final_corpus,
+            final_preparation_receipt_path=args.final_preparation_receipt,
+            classifier_manifest_path=args.classifier_manifest,
+            preprocessing_manifest_path=args.preprocessing_manifest,
+            pseudonymization_key_id=key_id,
             repository_root=args.repository_root,
+            code_commit=args.code_commit,
             selected_members=args.member,
             flush_size=args.flush_size,
             receipt_output_path=args.receipt_output,
