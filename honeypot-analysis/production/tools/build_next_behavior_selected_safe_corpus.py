@@ -75,9 +75,15 @@ from production.utils.serialization import stable_id, stable_json
 CLASSIFICATION_RECEIPT_SCHEMA_VERSION = (
     "next_behavior_selected_classification.v1"
 )
-SAFE_BUILD_RECEIPT_SCHEMA_VERSION = "next_behavior_selected_safe_build.v2"
+SAFE_BUILD_RECEIPT_SCHEMA_VERSION = "next_behavior_selected_safe_build.v3"
+LEGACY_SAFE_BUILD_RECEIPT_SCHEMA_VERSION = (
+    "next_behavior_selected_safe_build.v2"
+)
 SOURCE_RECEIPTS_SCHEMA_VERSION = (
     "next_behavior_selected_source_member_receipts.v1"
+)
+HISTORICAL_SPLIT_EVIDENCE_SCHEMA_VERSION = (
+    "next_behavior_historical_split_evidence.v1"
 )
 HISTORICAL_DATASET_SOURCE = (
     "zenodo:21260400:COW160x4:seven_systematic_weekly_members"
@@ -105,7 +111,7 @@ _FORBIDDEN_PUBLIC_FIELDS = frozenset(
         "raw_commands",
     }
 )
-_BUILD_RECEIPT_FIELDS = frozenset(
+_LEGACY_BUILD_RECEIPT_FIELDS = frozenset(
     {
         "schema_version",
         "status",
@@ -135,6 +141,18 @@ _BUILD_RECEIPT_FIELDS = frozenset(
         "raw_content_emitted",
         "build_receipt_id",
     }
+)
+_HISTORICAL_SPLIT_EVIDENCE_RECEIPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "artifact_sha256",
+        "record_count",
+        "session_membership_sha256",
+    }
+)
+_BUILD_RECEIPT_FIELDS = _LEGACY_BUILD_RECEIPT_FIELDS | frozenset(
+    {"historical_split_evidence"}
 )
 _PAYLOAD_RECEIPT_FIELDS = frozenset(
     {"line_count", "size_bytes", "sha256"}
@@ -1016,14 +1034,23 @@ def _require_role_build_receipt_shape(
     expected_purpose: str,
     allow_final: bool,
 ) -> Dict[str, Any]:
-    if not isinstance(value, Mapping) or set(value) != _BUILD_RECEIPT_FIELDS:
+    if not isinstance(value, Mapping):
         raise SelectedSafeCorpusError(
             "selected role build receipt fields are invalid"
         )
     receipt = dict(value)
-    if receipt.get("schema_version") != SAFE_BUILD_RECEIPT_SCHEMA_VERSION:
+    schema_version = receipt.get("schema_version")
+    if schema_version == SAFE_BUILD_RECEIPT_SCHEMA_VERSION:
+        expected_fields = _BUILD_RECEIPT_FIELDS
+    elif schema_version == LEGACY_SAFE_BUILD_RECEIPT_SCHEMA_VERSION:
+        expected_fields = _LEGACY_BUILD_RECEIPT_FIELDS
+    else:
         raise SelectedSafeCorpusError(
             "selected role build receipt schema is invalid"
+        )
+    if set(receipt) != expected_fields:
+        raise SelectedSafeCorpusError(
+            "selected role build receipt fields are invalid"
         )
     if receipt.get("status") != "role_safe_corpus_built":
         raise SelectedSafeCorpusError(
@@ -1132,6 +1159,36 @@ def _require_role_build_receipt_shape(
             _require_sha256(
                 membership.get(field), f"membership.{field}"
             )
+    if schema_version == SAFE_BUILD_RECEIPT_SCHEMA_VERSION:
+        evidence = receipt.get("historical_split_evidence")
+        if (
+            not isinstance(evidence, Mapping)
+            or set(evidence) != _HISTORICAL_SPLIT_EVIDENCE_RECEIPT_FIELDS
+            or evidence.get("schema_version")
+            != HISTORICAL_SPLIT_EVIDENCE_SCHEMA_VERSION
+            or evidence.get("status")
+            != "historical_split_evidence_complete"
+        ):
+            raise SelectedSafeCorpusError(
+                "selected role historical split evidence receipt is invalid"
+            )
+        record_count = evidence.get("record_count")
+        if (
+            isinstance(record_count, bool)
+            or not isinstance(record_count, int)
+            or record_count < 0
+        ):
+            raise SelectedSafeCorpusError(
+                "selected role historical split evidence count is invalid"
+            )
+        _require_sha256(
+            evidence.get("artifact_sha256"),
+            "historical_split_evidence.artifact_sha256",
+        )
+        _require_sha256(
+            evidence.get("session_membership_sha256"),
+            "historical_split_evidence.session_membership_sha256",
+        )
     identity = dict(receipt)
     identity.pop("build_receipt_id", None)
     if stable_id("nextbehaviorselectedsafebuild", identity) != receipt.get(
@@ -1151,6 +1208,7 @@ def verify_selected_role_artifacts(
     source_receipts_path: Path,
     corpus_receipt_path: Path,
     expected_purpose: str,
+    historical_split_evidence_path: Path | None = None,
     allow_final: bool = False,
 ) -> Dict[str, Any]:
     """Verify one exact role bundle before any training/evaluation load.
@@ -1165,6 +1223,20 @@ def verify_selected_role_artifacts(
         expected_purpose=expected_purpose,
         allow_final=allow_final,
     )
+    requires_historical_evidence = (
+        receipt["schema_version"] == SAFE_BUILD_RECEIPT_SCHEMA_VERSION
+    )
+    if requires_historical_evidence and historical_split_evidence_path is None:
+        raise SelectedSafeCorpusError(
+            "selected role historical split evidence is missing"
+        )
+    if (
+        historical_split_evidence_path is not None
+        and not requires_historical_evidence
+    ):
+        raise SelectedSafeCorpusError(
+            "legacy selected role receipt cannot bind historical split evidence"
+        )
     for path, field in (
         (safe_sessions_path, "safe_sessions"),
         (examples_path, "examples"),
@@ -1252,6 +1324,46 @@ def verify_selected_role_artifacts(
             "selected role corpus policy provenance is inconsistent"
         )
 
+    historical_evidence: Dict[str, Any] | None = None
+    if historical_split_evidence_path is not None:
+        if (
+            not historical_split_evidence_path.is_file()
+            or historical_split_evidence_path.is_symlink()
+            or _sha256_file(historical_split_evidence_path)
+            != receipt["historical_split_evidence"]["artifact_sha256"]
+        ):
+            raise SelectedSafeCorpusError(
+                "selected role historical split evidence identity mismatch"
+            )
+        historical_evidence = _load_json_object(
+            historical_split_evidence_path,
+            "historical split evidence",
+        )
+        if (
+            stable_json(historical_evidence) + "\n"
+            != historical_split_evidence_path.read_text(encoding="utf-8")
+            or set(historical_evidence)
+            != {
+                "schema_version",
+                "status",
+                "selected_safe_corpus_receipt_id",
+                "source_selection_sha256",
+                "records",
+            }
+            or historical_evidence.get("schema_version")
+            != HISTORICAL_SPLIT_EVIDENCE_SCHEMA_VERSION
+            or historical_evidence.get("status")
+            != "historical_split_evidence_complete"
+            or historical_evidence.get("selected_safe_corpus_receipt_id")
+            != corpus_receipt["receipt_id"]
+            or historical_evidence.get("source_selection_sha256")
+            != receipt["source_selection_sha256"]
+            or not isinstance(historical_evidence.get("records"), list)
+        ):
+            raise SelectedSafeCorpusError(
+                "selected role historical split evidence is inconsistent"
+            )
+
     session_ids: list[str] = []
     seen_member_ids: set[str] = set()
     example_ids: list[str] = []
@@ -1333,6 +1445,65 @@ def verify_selected_role_artifacts(
         raise SelectedSafeCorpusError(
             "selected role payload line counts are inconsistent"
         )
+    if historical_evidence is not None:
+        records = historical_evidence["records"]
+        # The safe payload is the authority for the public identifiers; keep
+        # only the split as sidecar-owned evidence and require every other
+        # field to bind exactly to that payload.
+        safe_by_session: Dict[str, Dict[str, Any]] = {}
+        try:
+            with safe_sessions_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    session = json.loads(line)
+                    safe_by_session[str(session["session_id"])] = session
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SelectedSafeCorpusError(
+                "selected role safe sessions cannot bind historical evidence"
+            ) from exc
+        expected_records = []
+        for record in records:
+            if (
+                not isinstance(record, Mapping)
+                or set(record)
+                != {
+                    "session_id",
+                    "source_member_id",
+                    "source_member_sha256",
+                    "historical_split",
+                }
+                or _clean(record.get("historical_split"))
+                not in {"train", "calibration", "test", "not_present"}
+            ):
+                raise SelectedSafeCorpusError(
+                    "selected role historical split evidence record is invalid"
+                )
+            session_id = _clean(record.get("session_id"))
+            session = safe_by_session.get(session_id)
+            if (
+                session is None
+                or _clean(record.get("source_member_id"))
+                != session["source_member_id"]
+                or _clean(record.get("source_member_sha256")).lower()
+                != session["source_member_sha256"]
+            ):
+                raise SelectedSafeCorpusError(
+                    "selected role historical split evidence binding is inconsistent"
+                )
+            expected_records.append(dict(record))
+        if (
+            len(expected_records) != len(safe_by_session)
+            or [record["session_id"] for record in expected_records]
+            != sorted(safe_by_session)
+            or len({record["session_id"] for record in expected_records})
+            != len(expected_records)
+            or _membership_sha256(record["session_id"] for record in expected_records)
+            != receipt["historical_split_evidence"]["session_membership_sha256"]
+            or len(expected_records)
+            != receipt["historical_split_evidence"]["record_count"]
+        ):
+            raise SelectedSafeCorpusError(
+                "selected role historical split evidence coverage is inconsistent"
+            )
     return {
         "status": "selected_role_artifacts_verified",
         "purpose": expected_purpose,
@@ -1493,6 +1664,7 @@ def build_selected_safe_corpus(
     build_receipt_path: Path,
     code_commit: str,
     max_sequence_length: int = 8,
+    historical_split_evidence_path: Path | None = None,
     final_preparation_receipt: Mapping[str, Any] | None = None,
     repository_root: Path | None = None,
 ) -> Dict[str, Any]:
@@ -1528,6 +1700,10 @@ def build_selected_safe_corpus(
         source_receipts_path,
         corpus_receipt_path,
         build_receipt_path,
+    ) + (
+        (historical_split_evidence_path,)
+        if historical_split_evidence_path is not None
+        else ()
     )
     if any(path.exists() for path in output_paths):
         raise SelectedSafeCorpusError(
@@ -1799,12 +1975,14 @@ def build_selected_safe_corpus(
         safe_member_ids: set[str] = set()
         example_ids: list[str] = []
         input_hashes: list[str] = []
+        historical_evidence_records: list[Dict[str, str]] = []
         with (
             os.fdopen(sessions_descriptor, "wb") as sessions_handle,
             os.fdopen(examples_descriptor, "wb") as examples_handle,
         ):
-            for (safe_json,) in spool.execute(
-                "SELECT safe_json FROM results WHERE safe_json IS NOT NULL "
+            for safe_json, historical_split in spool.execute(
+                "SELECT safe_json, historical_split FROM results "
+                "WHERE safe_json IS NOT NULL "
                 "ORDER BY sort_session_id"
             ):
                 safe = json.loads(str(safe_json))
@@ -1815,6 +1993,16 @@ def build_selected_safe_corpus(
                 sessions_handle.write(session_line)
                 session_digest.update(session_line)
                 session_size += len(session_line)
+                historical_evidence_records.append(
+                    {
+                        "session_id": str(safe["session_id"]),
+                        "source_member_id": str(safe["source_member_id"]),
+                        "source_member_sha256": str(
+                            safe["source_member_sha256"]
+                        ),
+                        "historical_split": str(historical_split),
+                    }
+                )
                 for example in build_next_behavior_examples(
                     safe, max_sequence_length=max_sequence_length
                 ):
@@ -1872,8 +2060,28 @@ def build_selected_safe_corpus(
             safe_session_count=safe_count,
             example_count=example_count,
         )
+        historical_split_evidence: Dict[str, Any] | None = None
+        historical_split_evidence_bytes: bytes | None = None
+        if historical_split_evidence_path is not None:
+            historical_split_evidence = {
+                "schema_version": HISTORICAL_SPLIT_EVIDENCE_SCHEMA_VERSION,
+                "status": "historical_split_evidence_complete",
+                "selected_safe_corpus_receipt_id": corpus_receipt[
+                    "receipt_id"
+                ],
+                "source_selection_sha256": source_selection_sha256,
+                "records": historical_evidence_records,
+            }
+            _scan_public_value(historical_split_evidence)
+            historical_split_evidence_bytes = (
+                stable_json(historical_split_evidence) + "\n"
+            ).encode()
         build_receipt: Dict[str, Any] = {
-            "schema_version": SAFE_BUILD_RECEIPT_SCHEMA_VERSION,
+            "schema_version": (
+                SAFE_BUILD_RECEIPT_SCHEMA_VERSION
+                if historical_split_evidence is not None
+                else LEGACY_SAFE_BUILD_RECEIPT_SCHEMA_VERSION
+            ),
             "status": "role_safe_corpus_built",
             "purpose": purpose,
             "role": role,
@@ -1934,6 +2142,19 @@ def build_selected_safe_corpus(
             "corpus_receipt_id": corpus_receipt["receipt_id"],
             "raw_content_emitted": False,
         }
+        if historical_split_evidence is not None:
+            build_receipt["historical_split_evidence"] = {
+                "schema_version": HISTORICAL_SPLIT_EVIDENCE_SCHEMA_VERSION,
+                "status": "historical_split_evidence_complete",
+                "artifact_sha256": hashlib.sha256(
+                    historical_split_evidence_bytes
+                ).hexdigest(),
+                "record_count": len(historical_evidence_records),
+                "session_membership_sha256": _membership_sha256(
+                    record["session_id"]
+                    for record in historical_evidence_records
+                ),
+            }
         build_receipt["build_receipt_id"] = stable_id(
             "nextbehaviorselectedsafebuild", build_receipt
         )
@@ -1947,6 +2168,10 @@ def build_selected_safe_corpus(
                 json.dumps(build_receipt, indent=2, sort_keys=True) + "\n"
             ).encode(),
         }
+        if historical_split_evidence_path is not None:
+            payloads[historical_split_evidence_path] = (
+                historical_split_evidence_bytes
+            )
         for destination, payload in payloads.items():
             temporary_outputs[destination] = _write_temp(
                 destination, payload
@@ -2013,6 +2238,9 @@ def build_parser() -> argparse.ArgumentParser:
         role_parser.add_argument(
             "--build-receipt", type=Path, required=True
         )
+        role_parser.add_argument(
+            "--historical-split-evidence", type=Path
+        )
         role_parser.add_argument("--code-commit", required=True)
         role_parser.add_argument(
             "--max-sequence-length", type=int, default=8
@@ -2064,6 +2292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_receipts_path=args.source_receipts,
             corpus_receipt_path=args.corpus_receipt,
             build_receipt_path=args.build_receipt,
+            historical_split_evidence_path=args.historical_split_evidence,
             code_commit=args.code_commit,
             max_sequence_length=args.max_sequence_length,
             final_preparation_receipt=final_preparation_receipt,

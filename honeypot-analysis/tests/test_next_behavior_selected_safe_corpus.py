@@ -447,6 +447,9 @@ def _safe_outputs(tmp_path: Path) -> dict:
         "source_receipts_path": tmp_path / "source_receipts.json",
         "corpus_receipt_path": tmp_path / "corpus_receipt.json",
         "build_receipt_path": tmp_path / "build_receipt.json",
+        "historical_split_evidence_path": (
+            tmp_path / "historical_split_evidence.json"
+        ),
     }
 
 
@@ -553,6 +556,20 @@ def test_development_safe_export_is_causal_private_and_discloses_reuse(
     assert receipt["safe_sessions"]["line_count"] == 4
     assert receipt["examples"]["line_count"] == 8
     assert receipt["historical_membership"]["overlap_by_split"] == {"train": 4}
+    evidence = json.loads(
+        outputs["historical_split_evidence_path"].read_text()
+    )
+    assert evidence["schema_version"] == (
+        "next_behavior_historical_split_evidence.v1"
+    )
+    assert evidence["selected_safe_corpus_receipt_id"] == receipt[
+        "corpus_receipt_id"
+    ]
+    assert [record["session_id"] for record in evidence["records"]] == sorted(
+        record["session_id"] for record in evidence["records"]
+    )
+    assert all(record["historical_split"] == "train" for record in evidence["records"])
+    assert receipt["historical_split_evidence"]["record_count"] == 4
     sessions_text = outputs["safe_sessions_path"].read_text()
     examples_text = outputs["examples_path"].read_text()
     assert "raw-private-session" not in sessions_text + examples_text
@@ -679,6 +696,9 @@ def test_role_artifact_verifier_reconstructs_and_binds_exact_payloads(
         examples_path=outputs["examples_path"],
         source_receipts_path=outputs["source_receipts_path"],
         corpus_receipt_path=outputs["corpus_receipt_path"],
+        historical_split_evidence_path=outputs[
+            "historical_split_evidence_path"
+        ],
         expected_purpose="fit_model",
     )
     assert verified["status"] == "selected_role_artifacts_verified"
@@ -697,8 +717,78 @@ def test_role_artifact_verifier_reconstructs_and_binds_exact_payloads(
             examples_path=outputs["examples_path"],
             source_receipts_path=outputs["source_receipts_path"],
             corpus_receipt_path=outputs["corpus_receipt_path"],
+            historical_split_evidence_path=outputs[
+                "historical_split_evidence_path"
+            ],
             expected_purpose="fit_model",
         )
+
+
+def test_historical_split_evidence_is_required_and_hash_bound(
+    tmp_path: Path,
+) -> None:
+    path, historical = _safe_store(tmp_path)
+    outputs = _safe_outputs(tmp_path)
+    build_selected_safe_corpus(
+        purpose="fit_model",
+        private_database_path=path,
+        classifier_manifest_path=CLASSIFIER_MANIFEST,
+        preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+        historical_payload_path=historical,
+        pseudonymization_key=b"k" * 32,
+        pseudonymization_key_id="fixture-key",
+        code_commit=CODE_COMMIT,
+        **outputs,
+    )
+    common = {
+        "build_receipt_path": outputs["build_receipt_path"],
+        "safe_sessions_path": outputs["safe_sessions_path"],
+        "examples_path": outputs["examples_path"],
+        "source_receipts_path": outputs["source_receipts_path"],
+        "corpus_receipt_path": outputs["corpus_receipt_path"],
+        "expected_purpose": "fit_model",
+    }
+    with pytest.raises(SelectedSafeCorpusError, match="evidence is missing"):
+        verify_selected_role_artifacts(**common)
+
+    evidence_path = outputs["historical_split_evidence_path"]
+    evidence = json.loads(evidence_path.read_text())
+    evidence["records"][0]["historical_split"] = "calibration"
+    evidence_path.write_text(stable_json(evidence) + "\n")
+    with pytest.raises(SelectedSafeCorpusError, match="evidence identity mismatch"):
+        verify_selected_role_artifacts(
+            **common,
+            historical_split_evidence_path=evidence_path,
+        )
+
+
+def test_legacy_v2_safe_build_remains_verifiable_without_sidecar(
+    tmp_path: Path,
+) -> None:
+    path, historical = _safe_store(tmp_path)
+    outputs = _safe_outputs(tmp_path)
+    evidence_path = outputs.pop("historical_split_evidence_path")
+    receipt = build_selected_safe_corpus(
+        purpose="fit_model",
+        private_database_path=path,
+        classifier_manifest_path=CLASSIFIER_MANIFEST,
+        preprocessing_manifest_path=PREPROCESSING_MANIFEST,
+        historical_payload_path=historical,
+        pseudonymization_key=b"k" * 32,
+        pseudonymization_key_id="fixture-key",
+        code_commit=CODE_COMMIT,
+        **outputs,
+    )
+    assert receipt["schema_version"] == "next_behavior_selected_safe_build.v2"
+    assert not evidence_path.exists()
+    assert verify_selected_role_artifacts(
+        build_receipt_path=outputs["build_receipt_path"],
+        safe_sessions_path=outputs["safe_sessions_path"],
+        examples_path=outputs["examples_path"],
+        source_receipts_path=outputs["source_receipts_path"],
+        corpus_receipt_path=outputs["corpus_receipt_path"],
+        expected_purpose="fit_model",
+    )["status"] == "selected_role_artifacts_verified"
 
 
 def test_training_role_verifier_rejects_final_bundle(tmp_path: Path) -> None:
