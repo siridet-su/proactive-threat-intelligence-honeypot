@@ -69,6 +69,12 @@ def _inputs(tmp_path: Path) -> dict:
     partition_dir.mkdir()
     partition_path = partition_dir / "partition_manifest.json"
     partition_path.write_bytes(paths["partition_manifest"].read_bytes())
+    payload_dir = partition_dir / "safe_payloads"
+    payload_dir.mkdir()
+    for role in MEMBER_ROLES:
+        (payload_dir / f"{role}.json").write_bytes(
+            paths[f"{role}_safe_payload"].read_bytes()
+        )
     partition = json.loads(partition_path.read_text())
     memberships = {
         role: partition["roles"][role]["example_membership_sha256"]
@@ -180,7 +186,6 @@ def _inputs(tmp_path: Path) -> dict:
         for source, name in (
             (paths[f"{role}_role_inventory"], "role_inventory.json"),
             (paths[f"{role}_corpus_receipt"], "corpus_receipt.json"),
-            (paths[f"{role}_safe_payload"], "safe_sessions.json"),
         ):
             (directory / name).write_bytes(source.read_bytes())
         role_dirs[role] = directory
@@ -206,7 +211,7 @@ def test_merger_derives_every_hash_and_preserves_the_test_payload_seal(tmp_path:
     assert require_valid_experiment_manifest(manifest) == manifest
     assert receipt["test_opened"] is False
     assert Path(paths["test_safe_payload"]).read_bytes() == (
-        inputs["role_dirs"]["test"] / "safe_sessions.json"
+        inputs["partition_dir"] / "safe_payloads" / "test.json"
     ).read_bytes()
     output = tmp_path / "merged"
     write_merged_manifest(output, **inputs)

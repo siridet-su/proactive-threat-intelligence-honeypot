@@ -41,7 +41,6 @@ ARTIFACT_PATHS_SCHEMA_VERSION = "next_behavior_experiment_artifact_paths.v1"
 ROLE_FILENAMES = {
     "role_inventory": "role_inventory.json",
     "corpus_receipt": "corpus_receipt.json",
-    "safe_payload": "safe_sessions.json",
 }
 
 
@@ -159,7 +158,11 @@ def _load_training_bindings(
     return bundle, bindings, artifact_paths
 
 
-def _role_artifacts(role_dirs: Mapping[str, Path]) -> tuple[Dict[str, Path], Dict[str, Any]]:
+def _role_artifacts(
+    role_dirs: Mapping[str, Path],
+    *,
+    canonical_payload_dir: Path,
+) -> tuple[Dict[str, Path], Dict[str, Any]]:
     if set(role_dirs) != set(MEMBER_ROLES):
         raise NextBehaviorManifestMergeError("exactly train, selection, calibration, and test role directories are required")
     paths: Dict[str, Path] = {}
@@ -170,6 +173,10 @@ def _role_artifacts(role_dirs: Mapping[str, Path]) -> tuple[Dict[str, Path], Dic
             suffix: _require_file(directory / filename, label=f"{role} {suffix}")
             for suffix, filename in ROLE_FILENAMES.items()
         }
+        role_paths["safe_payload"] = _require_file(
+            canonical_payload_dir / f"{role}.json",
+            label=f"{role} canonical safe payload",
+        )
         inventory = _read_json(role_paths["role_inventory"], label=f"{role} role inventory")
         receipt = _read_json(role_paths["corpus_receipt"], label=f"{role} corpus receipt")
         if not isinstance(inventory, dict) or not isinstance(receipt, dict):
@@ -240,7 +247,10 @@ def merge_experiment_manifest(
     }
     if memberships != bindings["partition_membership_sha256"]:
         raise NextBehaviorManifestMergeError("partition memberships disagree with training binding")
-    role_paths, corpora = _role_artifacts(role_dirs)
+    role_paths, corpora = _role_artifacts(
+        role_dirs,
+        canonical_payload_dir=partition_path.parent / "safe_payloads",
+    )
     source_selection = _read_json(source_selection_receipt_path, label="source selection receipt")
     if not isinstance(source_selection, dict):
         raise NextBehaviorManifestMergeError("source selection receipt is invalid")
