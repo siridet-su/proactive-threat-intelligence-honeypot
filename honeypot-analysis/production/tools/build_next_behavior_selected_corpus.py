@@ -114,6 +114,50 @@ FINAL_PREPARATION_FIELDS = frozenset(
         "pseudonymization_key_id",
     }
 )
+FINAL_PREPARATION_GENERATION_SCHEMA_VERSION = (
+    "next_behavior_final_corpus_preparation_generation.v1"
+)
+FINAL_PREPARATION_GENERATION_LEDGER_SCHEMA_VERSION = (
+    "next_behavior_final_corpus_preparation_generation_ledger.v1"
+)
+FINAL_PREPARATION_GENERATION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "generation_id",
+        "generation_number",
+        "status",
+        "purpose",
+        "target_safe_build_schema_version",
+        "code_commit",
+        "predecessor_generation_id",
+        "predecessor_build_receipt_id",
+        "predecessor_build_receipt_sha256",
+        "predecessor_build_schema_version",
+        "legacy_preparation_receipt_id",
+        "legacy_preparation_receipt_sha256",
+        "preparation_receipt_id",
+        "preparation_receipt_sha256",
+        "source_selection_sha256",
+        "final_source_member_receipts_sha256",
+        "classifier_manifest_sha256",
+        "preprocessing_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "classification_checkpoint_sha256",
+        "pseudonymization_key_id",
+        "max_sequence_length",
+        "membership",
+        "store_snapshot_hmac_sha256",
+        "authorized_output_paths",
+        "authorized_output_paths_sha256",
+    }
+)
+_FINAL_PREPARATION_GENERATION_HEAD_KEY = (
+    "final_corpus_preparation_generation_id"
+)
+_FINAL_PREPARATION_LEDGER_SCHEMA_KEY = (
+    "final_corpus_preparation_generation_ledger_schema_version"
+)
 
 
 class SelectedCorpusBuildError(ValueError):
@@ -649,6 +693,473 @@ def open_selected_database(path: Path) -> sqlite3.Connection:
     )
     database.commit()
     return database
+
+
+def _generation_receipt_sha256(receipt: Mapping[str, Any]) -> str:
+    return hashlib.sha256(stable_json(dict(receipt)).encode()).hexdigest()
+
+
+def require_final_preparation_generation_receipt(
+    value: Any,
+) -> Dict[str, Any]:
+    """Validate the immutable shape and identity of a migration generation."""
+
+    if not isinstance(value, Mapping) or set(value) != (
+        FINAL_PREPARATION_GENERATION_FIELDS
+    ):
+        raise SelectedCorpusBuildError(
+            "final preparation generation fields are invalid"
+        )
+    receipt = dict(value)
+    generation_number = receipt.get("generation_number")
+    if (
+        receipt.get("schema_version")
+        != FINAL_PREPARATION_GENERATION_SCHEMA_VERSION
+        or receipt.get("status") != "compatible_generation_recorded"
+        or receipt.get("purpose") != "authorize_selected_safe_build_v3"
+        or receipt.get("target_safe_build_schema_version")
+        != "next_behavior_selected_safe_build.v3"
+        or isinstance(generation_number, bool)
+        or not isinstance(generation_number, int)
+        or generation_number < 1
+    ):
+        raise SelectedCorpusBuildError(
+            "final preparation generation is invalid"
+        )
+    predecessor = receipt.get("predecessor_generation_id")
+    if generation_number == 1:
+        if predecessor is not None:
+            raise SelectedCorpusBuildError(
+                "first preparation generation cannot name a predecessor "
+                "generation"
+            )
+    elif not _clean(predecessor):
+        raise SelectedCorpusBuildError(
+            "preparation generation predecessor is missing"
+        )
+    for field in (
+        "predecessor_build_receipt_sha256",
+        "legacy_preparation_receipt_sha256",
+        "preparation_receipt_sha256",
+        "source_selection_sha256",
+        "final_source_member_receipts_sha256",
+        "classifier_manifest_sha256",
+        "preprocessing_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "classification_checkpoint_sha256",
+        "store_snapshot_hmac_sha256",
+        "authorized_output_paths_sha256",
+    ):
+        if not _SHA256.fullmatch(_clean(receipt.get(field)).lower()):
+            raise SelectedCorpusBuildError(
+                f"final preparation generation {field} is invalid"
+            )
+    if not re.fullmatch(r"[0-9a-f]{40}", _clean(receipt.get("code_commit"))):
+        raise SelectedCorpusBuildError(
+            "final preparation generation code commit is invalid"
+        )
+    if not _KEY_ID.fullmatch(_clean(receipt.get("pseudonymization_key_id"))):
+        raise SelectedCorpusBuildError(
+            "final preparation generation key ID is invalid"
+        )
+    if (
+        not _clean(receipt.get("predecessor_build_receipt_id"))
+        or not _clean(receipt.get("legacy_preparation_receipt_id"))
+        or not _clean(receipt.get("preparation_receipt_id"))
+        or isinstance(receipt.get("max_sequence_length"), bool)
+        or not isinstance(receipt.get("max_sequence_length"), int)
+        or receipt["max_sequence_length"] < 1
+    ):
+        raise SelectedCorpusBuildError(
+            "final preparation generation receipt binding is invalid"
+        )
+    membership = receipt.get("membership")
+    if (
+        not isinstance(membership, Mapping)
+        or set(membership)
+        != {
+            "source_member_count",
+            "source_member_membership_sha256",
+            "session_count",
+            "session_membership_sha256",
+            "example_count",
+            "example_membership_sha256",
+            "input_count",
+            "input_membership_sha256",
+        }
+        or any(
+            isinstance(membership.get(field), bool)
+            or not isinstance(membership.get(field), int)
+            or membership[field] < 0
+            for field in (
+                "source_member_count",
+                "session_count",
+                "example_count",
+                "input_count",
+            )
+        )
+        or any(
+            not _SHA256.fullmatch(_clean(membership.get(field)).lower())
+            for field in (
+                "source_member_membership_sha256",
+                "session_membership_sha256",
+                "example_membership_sha256",
+                "input_membership_sha256",
+            )
+        )
+    ):
+        raise SelectedCorpusBuildError(
+            "final preparation generation membership is invalid"
+        )
+    paths = receipt.get("authorized_output_paths")
+    if (
+        not isinstance(paths, Mapping)
+        or not paths
+        or any(not _clean(path) for path in paths.values())
+        or hashlib.sha256(stable_json(dict(paths)).encode()).hexdigest()
+        != receipt["authorized_output_paths_sha256"]
+    ):
+        raise SelectedCorpusBuildError(
+            "final preparation generation output authorization is invalid"
+        )
+    identity = dict(receipt)
+    generation_id = identity.pop("generation_id", None)
+    if generation_id != stable_id(
+        "nextbehaviorfinalpreparationgeneration", identity
+    ):
+        raise SelectedCorpusBuildError(
+            "final preparation generation identity is invalid"
+        )
+    return receipt
+
+
+def _preparation_generation_table_exists(database: sqlite3.Connection) -> bool:
+    return database.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+        "AND name = 'final_preparation_generations'"
+    ).fetchone() is not None
+
+
+def _require_preparation_generation_ledger_state(
+    database: sqlite3.Connection,
+    *,
+    allow_absent: bool,
+) -> bool:
+    """Validate ledger schema presence without changing an existing store."""
+
+    table_exists = _preparation_generation_table_exists(database)
+    schema = database.execute(
+        "SELECT value FROM metadata WHERE key = ?",
+        (_FINAL_PREPARATION_LEDGER_SCHEMA_KEY,),
+    ).fetchone()
+    head = database.execute(
+        "SELECT value FROM metadata WHERE key = ?",
+        (_FINAL_PREPARATION_GENERATION_HEAD_KEY,),
+    ).fetchone()
+    if not table_exists:
+        if schema is not None or head is not None:
+            raise SelectedCorpusBuildError(
+                "preparation-generation ledger is partially initialized"
+            )
+        if allow_absent:
+            return False
+        raise SelectedCorpusBuildError("preparation-generation ledger is missing")
+    if (
+        schema is None
+        or str(schema[0]) != FINAL_PREPARATION_GENERATION_LEDGER_SCHEMA_VERSION
+    ):
+        raise SelectedCorpusBuildError(
+            "private database preparation-generation ledger schema is invalid"
+        )
+    return True
+
+
+def _initialize_preparation_generation_ledger(
+    database: sqlite3.Connection,
+) -> None:
+    """Create the additive ledger only inside an explicit migration write."""
+
+    if _preparation_generation_table_exists(database):
+        _require_preparation_generation_ledger_state(
+            database, allow_absent=False
+        )
+        return
+    _require_preparation_generation_ledger_state(database, allow_absent=True)
+    database.execute(
+        """
+        CREATE TABLE final_preparation_generations (
+            generation_id TEXT PRIMARY KEY,
+            generation_number INTEGER NOT NULL UNIQUE,
+            predecessor_generation_id TEXT,
+            predecessor_build_receipt_id TEXT NOT NULL,
+            receipt_sha256 TEXT NOT NULL,
+            receipt_json TEXT NOT NULL
+        )
+        """
+    )
+    database.execute(
+        "INSERT INTO metadata(key, value) VALUES (?, ?)",
+        (
+            _FINAL_PREPARATION_LEDGER_SCHEMA_KEY,
+            FINAL_PREPARATION_GENERATION_LEDGER_SCHEMA_VERSION,
+        ),
+    )
+
+
+def _legacy_preparation_marker(
+    database: sqlite3.Connection,
+) -> Dict[str, Any]:
+    """Load the original marker without upgrading or rewriting it."""
+
+    metadata = dict(
+        database.execute(
+            "SELECT key, value FROM metadata WHERE key IN "
+            "('final_corpus_prepared_at', "
+            "'final_corpus_preparation_receipt_id', "
+            "'final_corpus_preparation_receipt_id_pending', "
+            "'final_corpus_preparation_receipt_json')"
+        )
+    )
+    if (
+        "final_corpus_prepared_at" not in metadata
+        or "final_corpus_preparation_receipt_id_pending" in metadata
+        or "final_corpus_preparation_receipt_id" not in metadata
+        or "final_corpus_preparation_receipt_json" not in metadata
+    ):
+        raise SelectedCorpusBuildError(
+            "completed legacy preparation predecessor is missing"
+        )
+    try:
+        receipt = json.loads(metadata["final_corpus_preparation_receipt_json"])
+    except json.JSONDecodeError as exc:
+        raise SelectedCorpusBuildError(
+            "legacy preparation marker receipt is invalid"
+        ) from exc
+    if (
+        not isinstance(receipt, Mapping)
+        or set(receipt) != FINAL_PREPARATION_FIELDS
+        or receipt.get("schema_version") != FINAL_PREPARATION_SCHEMA_VERSION
+        or receipt.get("receipt_id")
+        != metadata["final_corpus_preparation_receipt_id"]
+        or stable_json(receipt)
+        != metadata["final_corpus_preparation_receipt_json"]
+    ):
+        raise SelectedCorpusBuildError(
+            "legacy preparation marker history is invalid"
+        )
+    identity = dict(receipt)
+    receipt_id = identity.pop("receipt_id", None)
+    if receipt_id != stable_id("nextbehaviorfinalpreparation", identity):
+        raise SelectedCorpusBuildError(
+            "legacy preparation marker identity is invalid"
+        )
+    return dict(receipt)
+
+
+def _validated_generation_history(
+    database: sqlite3.Connection,
+) -> list[Dict[str, Any]]:
+    """Validate every append-only row and its predecessor link."""
+
+    if not _require_preparation_generation_ledger_state(
+        database, allow_absent=True
+    ):
+        return []
+    generations: list[Dict[str, Any]] = []
+    previous_id: str | None = None
+    rows = database.execute(
+        """
+        SELECT generation_id, generation_number, predecessor_generation_id,
+               predecessor_build_receipt_id, receipt_sha256, receipt_json
+        FROM final_preparation_generations
+        ORDER BY generation_number
+        """
+    )
+    for expected_number, row in enumerate(rows, start=1):
+        try:
+            value = json.loads(str(row[5]))
+        except json.JSONDecodeError as exc:
+            raise SelectedCorpusBuildError(
+                "preparation-generation ledger receipt is invalid"
+            ) from exc
+        receipt = require_final_preparation_generation_receipt(value)
+        if (
+            int(row[1]) != expected_number
+            or receipt["generation_number"] != expected_number
+            or str(row[0]) != receipt["generation_id"]
+            or (
+                None if row[2] is None else str(row[2])
+            )
+            != receipt["predecessor_generation_id"]
+            or receipt["predecessor_generation_id"] != previous_id
+            or str(row[3]) != receipt["predecessor_build_receipt_id"]
+            or str(row[4]) != _generation_receipt_sha256(receipt)
+            or str(row[5]) != stable_json(receipt)
+        ):
+            raise SelectedCorpusBuildError(
+                "preparation-generation ledger history is inconsistent"
+            )
+        generations.append(receipt)
+        previous_id = receipt["generation_id"]
+    return generations
+
+
+def require_final_preparation_generation_marker(
+    database: sqlite3.Connection,
+    value: Any,
+) -> Dict[str, Any]:
+    """Require an exact ledger row, head marker, and preserved legacy marker."""
+
+    receipt = require_final_preparation_generation_receipt(value)
+    _require_preparation_generation_ledger_state(database, allow_absent=False)
+    legacy = _legacy_preparation_marker(database)
+    if (
+        legacy["receipt_id"] != receipt["legacy_preparation_receipt_id"]
+        or hashlib.sha256(stable_json(legacy).encode()).hexdigest()
+        != receipt["legacy_preparation_receipt_sha256"]
+    ):
+        raise SelectedCorpusBuildError(
+            "preparation generation legacy predecessor is inconsistent"
+        )
+    history = _validated_generation_history(database)
+    head = database.execute(
+        "SELECT value FROM metadata WHERE key = ?",
+        (_FINAL_PREPARATION_GENERATION_HEAD_KEY,),
+    ).fetchone()
+    if (
+        not history
+        or head is None
+        or str(head[0]) != history[-1]["generation_id"]
+        or history[-1] != receipt
+    ):
+        raise SelectedCorpusBuildError(
+            "preparation generation marker or history is inconsistent"
+        )
+    return receipt
+
+
+def record_final_preparation_generation(
+    *,
+    private_database_path: Path,
+    generation_receipt: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Append one generation atomically, or recover its missing head marker."""
+
+    receipt = require_final_preparation_generation_receipt(
+        generation_receipt
+    )
+    database = open_selected_database(private_database_path)
+    try:
+        database.execute("BEGIN IMMEDIATE")
+        _initialize_preparation_generation_ledger(database)
+        legacy = _legacy_preparation_marker(database)
+        if (
+            legacy["receipt_id"] != receipt["legacy_preparation_receipt_id"]
+            or hashlib.sha256(stable_json(legacy).encode()).hexdigest()
+            != receipt["legacy_preparation_receipt_sha256"]
+        ):
+            raise SelectedCorpusBuildError(
+                "preparation generation legacy predecessor is inconsistent"
+            )
+        history = _validated_generation_history(database)
+        head = database.execute(
+            "SELECT value FROM metadata WHERE key = ?",
+            (_FINAL_PREPARATION_GENERATION_HEAD_KEY,),
+        ).fetchone()
+        existing = next(
+            (
+                item
+                for item in history
+                if item["generation_id"] == receipt["generation_id"]
+            ),
+            None,
+        )
+        if existing is not None:
+            if existing != receipt or history[-1] != receipt:
+                raise SelectedCorpusBuildError(
+                    "preparation generation cannot rebind ledger history"
+                )
+            if head is not None and str(head[0]) != receipt["generation_id"]:
+                raise SelectedCorpusBuildError(
+                    "preparation generation head cannot be rebound"
+                )
+            status = "generation_already_recorded"
+            if head is None:
+                database.execute(
+                    "INSERT INTO metadata(key, value) VALUES (?, ?)",
+                    (
+                        _FINAL_PREPARATION_GENERATION_HEAD_KEY,
+                        receipt["generation_id"],
+                    ),
+                )
+                status = "generation_head_recovered"
+            database.commit()
+            return {
+                "status": status,
+                "generation_id": receipt["generation_id"],
+                "generation_number": receipt["generation_number"],
+                "receipt_sha256": _generation_receipt_sha256(receipt),
+            }
+        if head is not None and (
+            not history or str(head[0]) != history[-1]["generation_id"]
+        ):
+            raise SelectedCorpusBuildError(
+                "preparation generation head cannot be rebound"
+            )
+        expected_number = len(history) + 1
+        expected_predecessor = (
+            history[-1]["generation_id"] if history else None
+        )
+        if (
+            receipt["generation_number"] != expected_number
+            or receipt["predecessor_generation_id"] != expected_predecessor
+        ):
+            raise SelectedCorpusBuildError(
+                "preparation generation predecessor linkage is invalid"
+            )
+        database.execute(
+            """
+            INSERT INTO final_preparation_generations(
+                generation_id, generation_number,
+                predecessor_generation_id, predecessor_build_receipt_id,
+                receipt_sha256, receipt_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                receipt["generation_id"],
+                receipt["generation_number"],
+                receipt["predecessor_generation_id"],
+                receipt["predecessor_build_receipt_id"],
+                _generation_receipt_sha256(receipt),
+                stable_json(receipt),
+            ),
+        )
+        if head is None:
+            database.execute(
+                "INSERT INTO metadata(key, value) VALUES (?, ?)",
+                (
+                    _FINAL_PREPARATION_GENERATION_HEAD_KEY,
+                    receipt["generation_id"],
+                ),
+            )
+        else:
+            database.execute(
+                "UPDATE metadata SET value = ? WHERE key = ?",
+                (receipt["generation_id"], _FINAL_PREPARATION_GENERATION_HEAD_KEY),
+            )
+        database.commit()
+        return {
+            "status": "generation_recorded",
+            "generation_id": receipt["generation_id"],
+            "generation_number": receipt["generation_number"],
+            "receipt_sha256": _generation_receipt_sha256(receipt),
+        }
+    except (sqlite3.Error, SelectedCorpusBuildError):
+        database.rollback()
+        raise
+    finally:
+        database.close()
 
 
 def _clear_partial_member(

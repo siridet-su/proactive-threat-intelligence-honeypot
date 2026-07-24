@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -55,12 +56,19 @@ from production.prediction.next_behavior_preprocessing import (
 from production.tools.build_next_behavior_selected_corpus import (
     FINAL_PREPARATION_SCHEMA_VERSION,
     FINAL_PREPARATION_FIELDS,
+    FINAL_PREPARATION_GENERATION_SCHEMA_VERSION,
+    FINAL_PREPARATION_GENERATION_FIELDS,
     PURPOSE_TO_ROLE,
     ROLE_TO_COHORT,
     SelectedCorpusBuildError,
+    _legacy_preparation_marker,
+    _validated_generation_history,
     _require_canonical_cached_row,
     final_member_receipts_sha256,
     open_selected_database,
+    record_final_preparation_generation,
+    require_final_preparation_generation_marker,
+    require_final_preparation_generation_receipt,
 )
 from production.tools.build_next_behavior_zenodo_corpus import (
     load_or_create_pseudonymization_key,
@@ -167,6 +175,16 @@ _MEMBERSHIP_FIELDS = frozenset(
         "example_membership_sha256",
         "input_count",
         "input_membership_sha256",
+    }
+)
+_GENERATION_OUTPUT_FIELDS = frozenset(
+    {
+        "safe_sessions",
+        "examples",
+        "source_receipts",
+        "corpus_receipt",
+        "build_receipt",
+        "historical_split_evidence",
     }
 )
 
@@ -1074,26 +1092,45 @@ def _require_role_build_receipt_shape(
     preparation_gate = receipt.get("final_preparation_gate")
     if role == "test":
         if (
-            not isinstance(preparation_gate, Mapping)
-            or set(preparation_gate) != FINAL_PREPARATION_FIELDS
-            or preparation_gate.get("schema_version")
-            != FINAL_PREPARATION_SCHEMA_VERSION
-            or preparation_gate.get("status")
-            != "frozen_for_blinded_preparation"
-            or preparation_gate.get("purpose") != "prepare_final_corpus"
-            or preparation_gate.get("evaluation_opened") is not False
+            schema_version == SAFE_BUILD_RECEIPT_SCHEMA_VERSION
+            and isinstance(preparation_gate, Mapping)
+            and preparation_gate.get("schema_version")
+            == FINAL_PREPARATION_GENERATION_SCHEMA_VERSION
         ):
-            raise SelectedSafeCorpusError(
-                "final role preparation evidence is invalid"
-            )
-        gate_identity = dict(preparation_gate)
-        gate_receipt_id = gate_identity.pop("receipt_id", None)
-        if gate_receipt_id != stable_id(
-            "nextbehaviorfinalpreparation", gate_identity
-        ):
-            raise SelectedSafeCorpusError(
-                "final role preparation identity is invalid"
-            )
+            try:
+                generation = require_final_preparation_generation_receipt(
+                    preparation_gate
+                )
+            except SelectedCorpusBuildError as exc:
+                raise SelectedSafeCorpusError(
+                    "final v3 role preparation generation is invalid"
+                ) from exc
+            if generation["code_commit"] != receipt["code_commit"]:
+                raise SelectedSafeCorpusError(
+                    "final v3 role preparation commit is inconsistent"
+                )
+        else:
+            if (
+                not isinstance(preparation_gate, Mapping)
+                or set(preparation_gate) != FINAL_PREPARATION_FIELDS
+                or preparation_gate.get("schema_version")
+                != FINAL_PREPARATION_SCHEMA_VERSION
+                or preparation_gate.get("status")
+                != "frozen_for_blinded_preparation"
+                or preparation_gate.get("purpose") != "prepare_final_corpus"
+                or preparation_gate.get("evaluation_opened") is not False
+            ):
+                raise SelectedSafeCorpusError(
+                    "final role preparation evidence is invalid"
+                )
+            gate_identity = dict(preparation_gate)
+            gate_receipt_id = gate_identity.pop("receipt_id", None)
+            if gate_receipt_id != stable_id(
+                "nextbehaviorfinalpreparation", gate_identity
+            ):
+                raise SelectedSafeCorpusError(
+                    "final role preparation identity is invalid"
+                )
     elif preparation_gate != {"status": "not_applicable"}:
         raise SelectedSafeCorpusError(
             "development role cannot contain a final preparation gate"
@@ -1524,6 +1561,655 @@ def verify_selected_role_artifacts(
     }
 
 
+def _canonical_generation_output_paths(
+    *,
+    safe_sessions_path: Path,
+    examples_path: Path,
+    source_receipts_path: Path,
+    corpus_receipt_path: Path,
+    build_receipt_path: Path,
+    historical_split_evidence_path: Path,
+) -> Dict[str, str]:
+    paths = {
+        "safe_sessions": safe_sessions_path,
+        "examples": examples_path,
+        "source_receipts": source_receipts_path,
+        "corpus_receipt": corpus_receipt_path,
+        "build_receipt": build_receipt_path,
+        "historical_split_evidence": historical_split_evidence_path,
+    }
+    canonical = {
+        label: str(path.resolve(strict=False))
+        for label, path in paths.items()
+    }
+    if (
+        set(canonical) != _GENERATION_OUTPUT_FIELDS
+        or len(set(canonical.values())) != len(canonical)
+    ):
+        raise SelectedSafeCorpusError(
+            "v3 output authorization paths are duplicated or incomplete"
+        )
+    return canonical
+
+
+def _store_snapshot_hmac_sha256(
+    database: sqlite3.Connection,
+    *,
+    pseudonymization_key: bytes,
+) -> str:
+    """Authenticate all final source, membership, event, and label state."""
+
+    digest = hmac.new(
+        pseudonymization_key,
+        b"next-behavior-final-store-snapshot.v1\0",
+        hashlib.sha256,
+    )
+    queries = (
+        (
+            "metadata",
+            """
+            SELECT key, value FROM metadata
+            WHERE key IN (
+                'store_schema_version',
+                'source_selection_sha256',
+                'final_corpus_prepared_at',
+                'final_corpus_preparation_receipt_id',
+                'final_corpus_preparation_receipt_json'
+            )
+            ORDER BY key
+            """,
+        ),
+        (
+            "source_members",
+            """
+            SELECT filename, source_sha256, source_size_bytes, archive_crc32,
+                   chronological_order, source_cohort, experiment_role,
+                   collection_start, collection_end, stats_json
+            FROM source_members WHERE experiment_role = 'test'
+            ORDER BY chronological_order
+            """,
+        ),
+        (
+            "sessions",
+            """
+            SELECT raw_session_id, source_member, source_cohort,
+                   experiment_role, first_seen, last_seen, protocol,
+                   configuration, connected, closed, cross_member, cross_role
+            FROM sessions WHERE experiment_role = 'test'
+            ORDER BY raw_session_id
+            """,
+        ),
+        (
+            "session_sources",
+            """
+            SELECT raw_session_id, source_member, source_cohort,
+                   experiment_role, chronological_order, first_seen,
+                   last_seen, protocol, configuration, connected, closed
+            FROM session_sources WHERE experiment_role = 'test'
+            ORDER BY raw_session_id, source_member
+            """,
+        ),
+        (
+            "command_events",
+            """
+            SELECT events.source_member, events.source_line,
+                   events.raw_session_id, events.event_time, events.command
+            FROM command_events AS events
+            JOIN source_members AS members
+              ON members.filename = events.source_member
+            WHERE members.experiment_role = 'test'
+            ORDER BY events.source_member, events.source_line
+            """,
+        ),
+        (
+            "context_events",
+            """
+            SELECT events.source_member, events.source_line,
+                   events.raw_session_id, events.event_time, events.event_type
+            FROM context_events AS events
+            JOIN source_members AS members
+              ON members.filename = events.source_member
+            WHERE members.experiment_role = 'test'
+            ORDER BY events.source_member, events.source_line
+            """,
+        ),
+        (
+            "quarantine",
+            """
+            SELECT q.raw_session_id, q.reason, q.source_members_json,
+                   q.experiment_roles_json
+            FROM quarantined_sessions AS q
+            WHERE EXISTS (
+                SELECT 1 FROM session_sources AS sources
+                WHERE sources.raw_session_id = q.raw_session_id
+                  AND sources.experiment_role = 'test'
+            )
+            ORDER BY q.raw_session_id
+            """,
+        ),
+        (
+            "command_labels",
+            """
+            SELECT labels.command, labels.labels_json,
+                   labels.unrepresented_json, labels.cache_receipt_id
+            FROM command_labels AS labels
+            WHERE EXISTS (
+                SELECT 1 FROM command_events AS events
+                JOIN source_members AS members
+                  ON members.filename = events.source_member
+                WHERE events.command = labels.command
+                  AND members.experiment_role = 'test'
+            )
+            ORDER BY labels.command
+            """,
+        ),
+    )
+    for table, query in queries:
+        digest.update(table.encode())
+        digest.update(b"\0")
+        count = 0
+        for row in database.execute(query):
+            digest.update(stable_json(list(row)).encode())
+            digest.update(b"\n")
+            count += 1
+        digest.update(str(count).encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _final_store_membership(
+    database: sqlite3.Connection,
+    *,
+    pseudonymization_key: bytes,
+    pseudonymization_key_id: str,
+    max_sequence_length: int,
+) -> Dict[str, Any]:
+    """Reconstruct only membership identities for compatibility checking."""
+
+    source_receipts, receipts_by_filename = _source_receipts_for_role(
+        database,
+        role="test",
+        key=pseudonymization_key,
+        key_id=pseudonymization_key_id,
+    )
+    source_member_ids = [
+        str(receipt["member_id"]) for receipt in source_receipts
+    ]
+    session_ids: list[str] = []
+    example_ids: list[str] = []
+    input_hashes: list[str] = []
+    safe_member_ids: set[str] = set()
+    rows = database.execute(
+        """
+        SELECT s.raw_session_id, s.source_member, s.first_seen,
+               s.last_seen, s.protocol, s.configuration
+        FROM sessions AS s
+        WHERE s.experiment_role = 'test'
+          AND s.source_cohort = 'final'
+          AND s.protocol = 'ssh'
+          AND s.connected = 1
+          AND s.closed = 1
+          AND NOT EXISTS (
+              SELECT 1 FROM quarantined_sessions AS q
+              WHERE q.raw_session_id = s.raw_session_id
+          )
+        ORDER BY s.first_seen, s.raw_session_id
+        """
+    )
+    for row in rows:
+        result = _private_session_result(
+            database,
+            row,
+            source_receipt=receipts_by_filename[str(row[1])],
+            key=pseudonymization_key,
+            key_id=pseudonymization_key_id,
+        )
+        safe = result["safe_session"]
+        if safe is None:
+            continue
+        session_ids.append(str(safe["session_id"]))
+        safe_member_ids.add(str(safe["source_member_id"]))
+        for example in build_next_behavior_examples(
+            safe, max_sequence_length=max_sequence_length
+        ):
+            example_ids.append(str(example["example_id"]))
+            input_hashes.append(str(example["model_input"]["input_hash"]))
+    if (
+        safe_member_ids != set(source_member_ids)
+        or len(session_ids) != len(set(session_ids))
+        or len(example_ids) != len(set(example_ids))
+    ):
+        raise SelectedSafeCorpusError(
+            "final store membership is incomplete or duplicated"
+        )
+    return {
+        "source_member_count": len(source_member_ids),
+        "source_member_membership_sha256": _membership_sha256(
+            source_member_ids
+        ),
+        "session_count": len(session_ids),
+        "session_membership_sha256": _membership_sha256(session_ids),
+        "example_count": len(example_ids),
+        "example_membership_sha256": _membership_sha256(example_ids),
+        "input_count": len(input_hashes),
+        "input_membership_sha256": _membership_sha256(input_hashes),
+    }
+
+
+def _generation_compatibility_fields(
+    receipt: Mapping[str, Any],
+) -> Dict[str, Any]:
+    ignored = {
+        "generation_id",
+        "generation_number",
+        "predecessor_generation_id",
+    }
+    return {
+        key: value for key, value in receipt.items() if key not in ignored
+    }
+
+
+def migrate_final_preparation_generation(
+    *,
+    private_database_path: Path,
+    preparation_receipt: Mapping[str, Any],
+    predecessor_build_receipt_path: Path,
+    predecessor_safe_sessions_path: Path,
+    predecessor_examples_path: Path,
+    predecessor_source_receipts_path: Path,
+    predecessor_corpus_receipt_path: Path,
+    classifier_manifest_path: Path,
+    preprocessing_manifest_path: Path,
+    pseudonymization_key: bytes,
+    pseudonymization_key_id: str,
+    safe_sessions_path: Path,
+    examples_path: Path,
+    source_receipts_path: Path,
+    corpus_receipt_path: Path,
+    build_receipt_path: Path,
+    historical_split_evidence_path: Path,
+    generation_receipt_path: Path,
+    code_commit: str,
+    repository_root: Path | None = None,
+) -> Dict[str, Any]:
+    """Authorize a fresh v3 generation from a verified immutable v2 bundle."""
+
+    root = (
+        Path(repository_root)
+        if repository_root is not None
+        else Path(__file__).resolve().parents[2]
+    )
+    commit = _require_repository_commit(root, code_commit)
+    if (
+        not isinstance(pseudonymization_key, bytes)
+        or len(pseudonymization_key) < 32
+    ):
+        raise SelectedSafeCorpusError(
+            "pseudonymization key must contain at least 32 bytes"
+        )
+    key_id = _clean(pseudonymization_key_id)
+    target_paths = _canonical_generation_output_paths(
+        safe_sessions_path=safe_sessions_path,
+        examples_path=examples_path,
+        source_receipts_path=source_receipts_path,
+        corpus_receipt_path=corpus_receipt_path,
+        build_receipt_path=build_receipt_path,
+        historical_split_evidence_path=historical_split_evidence_path,
+    )
+    predecessor_paths = (
+        predecessor_build_receipt_path,
+        predecessor_safe_sessions_path,
+        predecessor_examples_path,
+        predecessor_source_receipts_path,
+        predecessor_corpus_receipt_path,
+    )
+    if any(
+        not path.is_file() or path.is_symlink() for path in predecessor_paths
+    ):
+        raise SelectedSafeCorpusError(
+            "predecessor v2 artifact is missing or unsafe"
+        )
+    predecessor_canonical = {
+        str(path.resolve(strict=True)) for path in predecessor_paths
+    }
+    if predecessor_canonical & set(target_paths.values()):
+        raise SelectedSafeCorpusError(
+            "v3 output paths cannot overwrite predecessor v2 artifacts"
+        )
+    if any(Path(path).exists() for path in target_paths.values()):
+        raise SelectedSafeCorpusError(
+            "authorized v3 output must be fresh"
+        )
+    generation_path_canonical = str(
+        generation_receipt_path.resolve(strict=False)
+    )
+    if (
+        generation_path_canonical in predecessor_canonical
+        or generation_path_canonical in set(target_paths.values())
+    ):
+        raise SelectedSafeCorpusError(
+            "generation receipt path aliases an artifact path"
+        )
+    try:
+        manifest = load_classifier_manifest(classifier_manifest_path)
+    except ValueError as exc:
+        raise SelectedSafeCorpusError(str(exc)) from exc
+    manifest_sha256 = _sha256_file(classifier_manifest_path)
+    preprocessing_sha256 = _sha256_file(preprocessing_manifest_path)
+    policy = manifest["classification_policy"]
+    current_preparation = _require_final_preparation_receipt(
+        preparation_receipt,
+        code_commit=commit,
+        classifier_manifest=manifest,
+        classifier_manifest_sha256=manifest_sha256,
+        preprocessing_sha256=preprocessing_sha256,
+        pseudonymization_key_id=key_id,
+    )
+    predecessor_receipt = _require_role_build_receipt_shape(
+        _load_json_object(
+            predecessor_build_receipt_path,
+            "predecessor v2 build receipt",
+        ),
+        expected_purpose="final_evaluation",
+        allow_final=True,
+    )
+    if predecessor_receipt["schema_version"] != (
+        LEGACY_SAFE_BUILD_RECEIPT_SCHEMA_VERSION
+    ):
+        raise SelectedSafeCorpusError(
+            "predecessor must be an exact legacy v2 generation"
+        )
+    predecessor_verification = verify_selected_role_artifacts(
+        build_receipt_path=predecessor_build_receipt_path,
+        safe_sessions_path=predecessor_safe_sessions_path,
+        examples_path=predecessor_examples_path,
+        source_receipts_path=predecessor_source_receipts_path,
+        corpus_receipt_path=predecessor_corpus_receipt_path,
+        expected_purpose="final_evaluation",
+        allow_final=True,
+    )
+    expected_bindings = {
+        "classifier_manifest_sha256": manifest_sha256,
+        "preprocessing_sha256": preprocessing_sha256,
+        "label_policy_sha256": policy["rule_policy_sha256"],
+        "trust_policy_sha256": policy["trust_policy_sha256"],
+        "classification_checkpoint_sha256": manifest["classifier"][
+            "checkpoint_sha256"
+        ],
+        "pseudonymization_key_id": key_id,
+    }
+    for field, expected in expected_bindings.items():
+        if predecessor_receipt.get(field) != expected:
+            raise SelectedSafeCorpusError(
+                f"predecessor v2 {field} is incompatible"
+            )
+    predecessor_gate = predecessor_receipt["final_preparation_gate"]
+    immutable_gate_bindings = {
+        "classifier_manifest_sha256": manifest_sha256,
+        "classifier_adapter_sha256": manifest["classifier"][
+            "adapter_sha256"
+        ],
+        "classification_pipeline_sha256": manifest["classifier"][
+            "pipeline_sha256"
+        ],
+        "preprocessing_sha256": preprocessing_sha256,
+        "environment_lock_sha256": manifest["dependency_lock"]["sha256"],
+        "label_policy_sha256": policy["rule_policy_sha256"],
+        "trust_policy_sha256": policy["trust_policy_sha256"],
+        "mitre_cache_sha256": policy["mitre_cache_sha256"],
+        "classification_checkpoint_sha256": manifest["classifier"][
+            "checkpoint_sha256"
+        ],
+        "pseudonymization_key_id": key_id,
+    }
+    for field, expected in immutable_gate_bindings.items():
+        if predecessor_gate.get(field) != expected:
+            raise SelectedSafeCorpusError(
+                f"legacy preparation {field} is incompatible"
+            )
+    for field in (
+        "source_selection_id",
+        "source_selection_sha256",
+        "final_source_member_count",
+        "final_source_member_receipts_sha256",
+        "classifier_manifest_sha256",
+        "classifier_adapter_sha256",
+        "classification_pipeline_sha256",
+        "preprocessing_sha256",
+        "environment_lock_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "mitre_cache_sha256",
+        "classification_checkpoint_sha256",
+        "pseudonymization_key_id",
+    ):
+        if current_preparation.get(field) != predecessor_gate.get(field):
+            raise SelectedSafeCorpusError(
+                f"current preparation {field} is incompatible with predecessor"
+            )
+
+    database = open_selected_database(private_database_path)
+    try:
+        legacy_marker = _legacy_preparation_marker(database)
+        if legacy_marker != predecessor_gate:
+            raise SelectedSafeCorpusError(
+                "predecessor v2 does not match preserved store marker"
+            )
+        selection = database.execute(
+            "SELECT value FROM metadata WHERE key = 'source_selection_sha256'"
+        ).fetchone()
+        if (
+            selection is None
+            or str(selection[0]) != predecessor_receipt[
+                "source_selection_sha256"
+            ]
+            or str(selection[0]) != predecessor_gate[
+                "source_selection_sha256"
+            ]
+        ):
+            raise SelectedSafeCorpusError(
+                "predecessor source selection is incompatible with store"
+            )
+        final_members = [
+            {
+                "filename": str(row[0]),
+                "source_sha256": str(row[1]),
+                "source_size_bytes": int(row[2]),
+                "archive_crc32": str(row[3]),
+                "chronological_order": int(row[4]),
+                "source_cohort": str(row[5]),
+                "experiment_role": str(row[6]),
+            }
+            for row in database.execute(
+                """
+                SELECT filename, source_sha256, source_size_bytes,
+                       archive_crc32, chronological_order, source_cohort,
+                       experiment_role
+                FROM source_members WHERE experiment_role = 'test'
+                ORDER BY chronological_order
+                """
+            )
+        ]
+        member_receipts_sha256 = final_member_receipts_sha256(final_members)
+        if member_receipts_sha256 != predecessor_gate[
+            "final_source_member_receipts_sha256"
+        ]:
+            raise SelectedSafeCorpusError(
+                "predecessor source membership is incompatible with store"
+            )
+        classified = _validate_all_cached_rows(database, manifest)
+        unique_commands = int(
+            database.execute(
+                "SELECT COUNT(DISTINCT command) FROM command_events"
+            ).fetchone()[0]
+        )
+        if classified != unique_commands:
+            raise SelectedSafeCorpusError(
+                "predecessor classification state is incomplete"
+            )
+        membership = _final_store_membership(
+            database,
+            pseudonymization_key=pseudonymization_key,
+            pseudonymization_key_id=key_id,
+            max_sequence_length=predecessor_receipt[
+                "max_sequence_length"
+            ],
+        )
+        if membership != predecessor_verification["membership"]:
+            raise SelectedSafeCorpusError(
+                "predecessor membership is incompatible with store"
+            )
+        store_snapshot = _store_snapshot_hmac_sha256(
+            database,
+            pseudonymization_key=pseudonymization_key,
+        )
+        history = _validated_generation_history(database)
+    except (sqlite3.Error, SelectedCorpusBuildError) as exc:
+        if isinstance(exc, SelectedSafeCorpusError):
+            raise
+        raise SelectedSafeCorpusError(str(exc)) from exc
+    finally:
+        database.close()
+
+    base: Dict[str, Any] = {
+        "schema_version": FINAL_PREPARATION_GENERATION_SCHEMA_VERSION,
+        "status": "compatible_generation_recorded",
+        "purpose": "authorize_selected_safe_build_v3",
+        "target_safe_build_schema_version": SAFE_BUILD_RECEIPT_SCHEMA_VERSION,
+        "code_commit": commit,
+        "predecessor_build_receipt_id": predecessor_receipt[
+            "build_receipt_id"
+        ],
+        "predecessor_build_receipt_sha256": _sha256_file(
+            predecessor_build_receipt_path
+        ),
+        "predecessor_build_schema_version": (
+            LEGACY_SAFE_BUILD_RECEIPT_SCHEMA_VERSION
+        ),
+        "legacy_preparation_receipt_id": legacy_marker["receipt_id"],
+        "legacy_preparation_receipt_sha256": hashlib.sha256(
+            stable_json(legacy_marker).encode()
+        ).hexdigest(),
+        "preparation_receipt_id": current_preparation["receipt_id"],
+        "preparation_receipt_sha256": hashlib.sha256(
+            stable_json(current_preparation).encode()
+        ).hexdigest(),
+        "source_selection_sha256": predecessor_receipt[
+            "source_selection_sha256"
+        ],
+        "final_source_member_receipts_sha256": member_receipts_sha256,
+        "classifier_manifest_sha256": manifest_sha256,
+        "preprocessing_sha256": preprocessing_sha256,
+        "label_policy_sha256": policy["rule_policy_sha256"],
+        "trust_policy_sha256": policy["trust_policy_sha256"],
+        "classification_checkpoint_sha256": manifest["classifier"][
+            "checkpoint_sha256"
+        ],
+        "pseudonymization_key_id": key_id,
+        "max_sequence_length": predecessor_receipt[
+            "max_sequence_length"
+        ],
+        "membership": membership,
+        "store_snapshot_hmac_sha256": store_snapshot,
+        "authorized_output_paths": target_paths,
+        "authorized_output_paths_sha256": hashlib.sha256(
+            stable_json(target_paths).encode()
+        ).hexdigest(),
+    }
+    receipt: Dict[str, Any] | None = None
+    if history and _generation_compatibility_fields(history[-1]) == base:
+        receipt = history[-1]
+    if receipt is None:
+        receipt = {
+            **base,
+            "generation_number": len(history) + 1,
+            "predecessor_generation_id": (
+                history[-1]["generation_id"] if history else None
+            ),
+        }
+        receipt["generation_id"] = stable_id(
+            "nextbehaviorfinalpreparationgeneration", receipt
+        )
+    require_final_preparation_generation_receipt(receipt)
+    receipt_bytes = (stable_json(receipt) + "\n").encode()
+    if generation_receipt_path.exists():
+        if (
+            not generation_receipt_path.is_file()
+            or generation_receipt_path.is_symlink()
+            or generation_receipt_path.read_bytes() != receipt_bytes
+        ):
+            raise SelectedSafeCorpusError(
+                "generation receipt output exists with different provenance"
+            )
+    else:
+        temporary = _write_temp(generation_receipt_path, receipt_bytes)
+        try:
+            _publish_no_overwrite({generation_receipt_path: temporary})
+        finally:
+            temporary.unlink(missing_ok=True)
+    try:
+        ledger = record_final_preparation_generation(
+            private_database_path=private_database_path,
+            generation_receipt=receipt,
+        )
+    except SelectedCorpusBuildError as exc:
+        raise SelectedSafeCorpusError(str(exc)) from exc
+    return {
+        **receipt,
+        "migration_status": ledger["status"],
+        "generation_receipt_sha256": ledger["receipt_sha256"],
+    }
+
+
+def _require_final_preparation_generation(
+    value: Any,
+    *,
+    database: sqlite3.Connection,
+    code_commit: str,
+    classifier_manifest: Mapping[str, Any],
+    classifier_manifest_sha256: str,
+    preprocessing_sha256: str,
+    pseudonymization_key: bytes,
+    pseudonymization_key_id: str,
+    max_sequence_length: int,
+    output_paths: Mapping[str, str],
+) -> Dict[str, Any]:
+    try:
+        receipt = require_final_preparation_generation_marker(
+            database, value
+        )
+    except SelectedCorpusBuildError as exc:
+        raise SelectedSafeCorpusError(str(exc)) from exc
+    policy = classifier_manifest["classification_policy"]
+    bindings = {
+        "code_commit": code_commit,
+        "target_safe_build_schema_version": SAFE_BUILD_RECEIPT_SCHEMA_VERSION,
+        "classifier_manifest_sha256": classifier_manifest_sha256,
+        "preprocessing_sha256": preprocessing_sha256,
+        "label_policy_sha256": policy["rule_policy_sha256"],
+        "trust_policy_sha256": policy["trust_policy_sha256"],
+        "classification_checkpoint_sha256": classifier_manifest["classifier"][
+            "checkpoint_sha256"
+        ],
+        "pseudonymization_key_id": pseudonymization_key_id,
+        "max_sequence_length": max_sequence_length,
+        "authorized_output_paths": dict(output_paths),
+    }
+    for field, expected in bindings.items():
+        if receipt.get(field) != expected:
+            raise SelectedSafeCorpusError(
+                f"final preparation generation {field} is inconsistent"
+            )
+    if _store_snapshot_hmac_sha256(
+        database,
+        pseudonymization_key=pseudonymization_key,
+    ) != receipt["store_snapshot_hmac_sha256"]:
+        raise SelectedSafeCorpusError(
+            "final preparation generation store snapshot changed"
+        )
+    return receipt
+
+
 def _require_final_preparation_receipt(
     value: Any,
     *,
@@ -1666,6 +2352,7 @@ def build_selected_safe_corpus(
     max_sequence_length: int = 8,
     historical_split_evidence_path: Path | None = None,
     final_preparation_receipt: Mapping[str, Any] | None = None,
+    final_preparation_generation: Mapping[str, Any] | None = None,
     repository_root: Path | None = None,
 ) -> Dict[str, Any]:
     """Export one role without exposing any other role's private records.
@@ -1721,19 +2408,50 @@ def build_selected_safe_corpus(
     classifier_sha256 = _sha256_file(classifier_manifest_path)
     policy = classifier_manifest["classification_policy"]
     final_preparation_gate: Dict[str, Any] | None = None
+    final_preparation_generation_gate: Dict[str, Any] | None = None
+    generation_output_paths: Dict[str, str] | None = None
     if role == "test":
-        if final_preparation_receipt is None:
+        if (
+            final_preparation_receipt is not None
+            and final_preparation_generation is not None
+        ):
+            raise SelectedSafeCorpusError(
+                "final export cannot combine legacy preparation with a generation"
+            )
+        if final_preparation_generation is not None:
+            if historical_split_evidence_path is None:
+                raise SelectedSafeCorpusError(
+                    "preparation generation can authorize only v3 output"
+                )
+            try:
+                require_final_preparation_generation_receipt(
+                    final_preparation_generation
+                )
+            except SelectedCorpusBuildError as exc:
+                raise SelectedSafeCorpusError(str(exc)) from exc
+            generation_output_paths = _canonical_generation_output_paths(
+                safe_sessions_path=safe_sessions_path,
+                examples_path=examples_path,
+                source_receipts_path=source_receipts_path,
+                corpus_receipt_path=corpus_receipt_path,
+                build_receipt_path=build_receipt_path,
+                historical_split_evidence_path=(
+                    historical_split_evidence_path
+                ),
+            )
+        elif final_preparation_receipt is None:
             raise SelectedSafeCorpusError(
                 "final-test safe export remains sealed for preparation"
             )
-        final_preparation_gate = _require_final_preparation_receipt(
-            final_preparation_receipt,
-            code_commit=commit,
-            classifier_manifest=classifier_manifest,
-            classifier_manifest_sha256=classifier_sha256,
-            preprocessing_sha256=preprocessing_sha256,
-            pseudonymization_key_id=pseudonymization_key_id,
-        )
+        else:
+            final_preparation_gate = _require_final_preparation_receipt(
+                final_preparation_receipt,
+                code_commit=commit,
+                classifier_manifest=classifier_manifest,
+                classifier_manifest_sha256=classifier_sha256,
+                preprocessing_sha256=preprocessing_sha256,
+                pseudonymization_key_id=pseudonymization_key_id,
+            )
     historical, historical_sha256 = _load_historical_membership(
         historical_payload_path
     )
@@ -1753,16 +2471,36 @@ def build_selected_safe_corpus(
         source_selection_sha256 = _require_sha256(
             selection_row[0], "source_selection_sha256"
         )
-        if (
-            role == "test"
-            and source_selection_sha256
-            != final_preparation_gate["source_selection_sha256"]
+        expected_final_selection = (
+            final_preparation_generation["source_selection_sha256"]
+            if final_preparation_generation is not None
+            else (
+                final_preparation_gate["source_selection_sha256"]
+                if final_preparation_gate is not None
+                else None
+            )
+        )
+        if role == "test" and (
+            source_selection_sha256 != expected_final_selection
         ):
             raise SelectedSafeCorpusError(
                 "final private store source selection differs from "
                 "preparation freeze"
             )
         if role == "test":
+            generation_head = database.execute(
+                "SELECT value FROM metadata "
+                "WHERE key = 'final_corpus_preparation_generation_id'"
+            ).fetchone()
+            if (
+                generation_head is not None
+                and final_preparation_generation is None
+                and historical_split_evidence_path is not None
+            ):
+                raise SelectedSafeCorpusError(
+                    "migrated store v3 output requires its preparation "
+                    "generation"
+                )
             prepared = database.execute(
                 "SELECT value FROM metadata "
                 "WHERE key = 'final_corpus_prepared_at'"
@@ -1775,14 +2513,37 @@ def build_selected_safe_corpus(
                 "SELECT value FROM metadata "
                 "WHERE key = 'final_corpus_preparation_receipt_json'"
             ).fetchone()
+            if final_preparation_generation is not None:
+                final_preparation_generation_gate = (
+                    _require_final_preparation_generation(
+                        final_preparation_generation,
+                        database=database,
+                        code_commit=commit,
+                        classifier_manifest=classifier_manifest,
+                        classifier_manifest_sha256=classifier_sha256,
+                        preprocessing_sha256=preprocessing_sha256,
+                        pseudonymization_key=pseudonymization_key,
+                        pseudonymization_key_id=pseudonymization_key_id,
+                        max_sequence_length=max_sequence_length,
+                        output_paths=generation_output_paths,
+                    )
+                )
+                legacy_gate = _legacy_preparation_marker(database)
+                expected_preparation_id = legacy_gate["receipt_id"]
+                expected_preparation_json = stable_json(legacy_gate)
+            else:
+                expected_preparation_id = final_preparation_gate["receipt_id"]
+                expected_preparation_json = stable_json(
+                    final_preparation_gate
+                )
             if (
                 prepared is None
                 or preparation_id is None
                 or preparation_json is None
                 or str(preparation_id[0])
-                != final_preparation_gate["receipt_id"]
+                != expected_preparation_id
                 or str(preparation_json[0])
-                != stable_json(final_preparation_gate)
+                != expected_preparation_json
             ):
                 raise SelectedSafeCorpusError(
                     "final corpus preparation marker is missing or inconsistent"
@@ -1809,7 +2570,11 @@ def build_selected_safe_corpus(
                 )
             ]
             if final_member_receipts_sha256(final_member_rows) != (
-                final_preparation_gate[
+                (
+                    final_preparation_generation_gate
+                    if final_preparation_generation_gate is not None
+                    else final_preparation_gate
+                )[
                     "final_source_member_receipts_sha256"
                 ]
             ):
@@ -2053,6 +2818,14 @@ def build_selected_safe_corpus(
             "input_count": len(input_hashes),
             "input_membership_sha256": _membership_sha256(input_hashes),
         }
+        if (
+            final_preparation_generation_gate is not None
+            and membership
+            != final_preparation_generation_gate["membership"]
+        ):
+            raise SelectedSafeCorpusError(
+                "v3 output membership differs from authorized generation"
+            )
         pipeline_reconciliation = _role_pipeline_reconciliation(
             database,
             role=role,
@@ -2135,7 +2908,9 @@ def build_selected_safe_corpus(
             },
             "pipeline_reconciliation": pipeline_reconciliation,
             "final_preparation_gate": (
-                final_preparation_gate
+                final_preparation_generation_gate
+                if final_preparation_generation_gate is not None
+                else final_preparation_gate
                 if final_preparation_gate is not None
                 else {"status": "not_applicable"}
             ),
@@ -2210,7 +2985,9 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     final = subparsers.add_parser("safe-final-role")
-    final.add_argument("--preparation-receipt", type=Path, required=True)
+    final_preparation = final.add_mutually_exclusive_group(required=True)
+    final_preparation.add_argument("--preparation-receipt", type=Path)
+    final_preparation.add_argument("--preparation-generation", type=Path)
     for role_parser in (safe, final):
         role_parser.add_argument(
             "--private-database", type=Path, required=True
@@ -2245,6 +3022,26 @@ def build_parser() -> argparse.ArgumentParser:
         role_parser.add_argument(
             "--max-sequence-length", type=int, default=8
         )
+    migrate = subparsers.add_parser("migrate-final-preparation-generation")
+    migrate.add_argument("--private-database", type=Path, required=True)
+    migrate.add_argument("--preparation-receipt", type=Path, required=True)
+    migrate.add_argument("--predecessor-build-receipt", type=Path, required=True)
+    migrate.add_argument("--predecessor-safe-sessions", type=Path, required=True)
+    migrate.add_argument("--predecessor-examples", type=Path, required=True)
+    migrate.add_argument("--predecessor-source-receipts", type=Path, required=True)
+    migrate.add_argument("--predecessor-corpus-receipt", type=Path, required=True)
+    migrate.add_argument("--classifier-manifest", type=Path, required=True)
+    migrate.add_argument("--preprocessing-manifest", type=Path, required=True)
+    migrate.add_argument("--pseudonymization-key", type=Path, required=True)
+    migrate.add_argument("--safe-sessions", type=Path, required=True)
+    migrate.add_argument("--examples", type=Path, required=True)
+    migrate.add_argument("--source-receipts", type=Path, required=True)
+    migrate.add_argument("--corpus-receipt", type=Path, required=True)
+    migrate.add_argument("--build-receipt", type=Path, required=True)
+    migrate.add_argument("--historical-split-evidence", type=Path, required=True)
+    migrate.add_argument("--generation-receipt", type=Path, required=True)
+    migrate.add_argument("--repository-root", type=Path, default=Path("."))
+    migrate.add_argument("--code-commit", required=True)
     return parser
 
 
@@ -2258,6 +3055,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             private_database_path=args.private_database,
             code_commit=args.code_commit,
             command_batch_size=args.command_batch_size,
+        )
+    elif args.stage == "migrate-final-preparation-generation":
+        try:
+            key, key_id = load_or_create_pseudonymization_key(
+                args.pseudonymization_key,
+                create=False,
+            )
+        except ValueError as exc:
+            raise SelectedSafeCorpusError(str(exc)) from exc
+        result = migrate_final_preparation_generation(
+            private_database_path=args.private_database,
+            preparation_receipt=_load_json_object(
+                args.preparation_receipt,
+                "current final corpus preparation receipt",
+            ),
+            predecessor_build_receipt_path=args.predecessor_build_receipt,
+            predecessor_safe_sessions_path=args.predecessor_safe_sessions,
+            predecessor_examples_path=args.predecessor_examples,
+            predecessor_source_receipts_path=args.predecessor_source_receipts,
+            predecessor_corpus_receipt_path=args.predecessor_corpus_receipt,
+            classifier_manifest_path=args.classifier_manifest,
+            preprocessing_manifest_path=args.preprocessing_manifest,
+            pseudonymization_key=key,
+            pseudonymization_key_id=key_id,
+            safe_sessions_path=args.safe_sessions,
+            examples_path=args.examples,
+            source_receipts_path=args.source_receipts,
+            corpus_receipt_path=args.corpus_receipt,
+            build_receipt_path=args.build_receipt,
+            historical_split_evidence_path=args.historical_split_evidence,
+            generation_receipt_path=args.generation_receipt,
+            code_commit=args.code_commit,
+            repository_root=args.repository_root,
         )
     else:
         try:
@@ -2273,6 +3103,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "final corpus preparation receipt",
             )
             if args.stage == "safe-final-role"
+            and args.preparation_receipt is not None
+            else None
+        )
+        final_preparation_generation = (
+            _load_json_object(
+                args.preparation_generation,
+                "final corpus preparation generation",
+            )
+            if args.stage == "safe-final-role"
+            and args.preparation_generation is not None
             else None
         )
         result = build_selected_safe_corpus(
@@ -2296,6 +3136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             code_commit=args.code_commit,
             max_sequence_length=args.max_sequence_length,
             final_preparation_receipt=final_preparation_receipt,
+            final_preparation_generation=final_preparation_generation,
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
