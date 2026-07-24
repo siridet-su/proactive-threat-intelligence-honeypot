@@ -82,8 +82,13 @@ from production.tools.build_next_behavior_selected_safe_corpus import (
 TRAINING_BUNDLE_SCHEMA_VERSION = "next_behavior_training_bundle.v1"
 SEED_COMPLETION_SCHEMA_VERSION = "next_behavior_seed_completion.v1"
 SELECTION_DECISION_SCHEMA_VERSION = "next_behavior_selection_decision.v1"
-EXPERIMENT_BINDINGS_SCHEMA_VERSION = "next_behavior_experiment_bindings.v1"
+EXPERIMENT_BINDINGS_SCHEMA_VERSION_V1 = "next_behavior_experiment_bindings.v1"
+EXPERIMENT_BINDINGS_SCHEMA_VERSION = "next_behavior_experiment_bindings.v2"
+DECISION_FREEZE_BINDINGS_SCHEMA_VERSION = (
+    "next_behavior_decision_freeze_bindings.v1"
+)
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class NextBehaviorTrainingError(RuntimeError):
@@ -144,6 +149,56 @@ def _sha256_bytes(value: bytes) -> str:
 
 def _sha256_json(value: Any) -> str:
     return _sha256_bytes(stable_json(value).encode("utf-8"))
+
+
+def build_decision_freeze_bindings(policy: Mapping[str, Any]) -> Dict[str, Any]:
+    """Bind every pre-test decision rule to the validated policy bytes.
+
+    The individual digests intentionally remain the manifest's stable
+    decision-freeze interface.  The schema marker and aggregate digest make
+    it impossible for a manifest merger to silently mix rules from different
+    policy revisions.
+    """
+
+    bindings = {
+        "schema_version": DECISION_FREEZE_BINDINGS_SCHEMA_VERSION,
+        "selection_rule_sha256": _sha256_json(policy["selection"]),
+        "promotion_rule_sha256": _sha256_json(
+            {
+                "authority": policy["authority"],
+                "abstention": policy["abstention"],
+                "runtime_budgets": policy["runtime_budgets"],
+            }
+        ),
+        "feature_rule_sha256": _sha256_json(
+            {
+                "architecture": policy["architecture"],
+                "prediction_decision": policy["prediction_decision"],
+            }
+        ),
+        "seed_rule_sha256": _sha256_json(policy["training"]),
+        "calibration_rule_sha256": _sha256_json(policy["calibration"]),
+        "frozen_before_test": True,
+    }
+    bindings["bindings_sha256"] = _sha256_json(bindings)
+    return bindings
+
+
+def require_valid_decision_freeze_bindings(
+    value: Any,
+    *,
+    policy: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Fail closed unless decision bindings exactly derive from ``policy``."""
+
+    if not isinstance(value, Mapping):
+        raise NextBehaviorTrainingError("decision freeze bindings are invalid")
+    expected = build_decision_freeze_bindings(policy)
+    if dict(value) != expected:
+        raise NextBehaviorTrainingError(
+            "decision freeze bindings do not match the frozen experiment policy"
+        )
+    return deepcopy(expected)
 
 
 def _ordered_records_sha256(values: Sequence[Mapping[str, Any]]) -> str:
@@ -806,6 +861,94 @@ def _artifact_entry(path: Path, root: Path) -> Dict[str, Any]:
     }
 
 
+def require_valid_experiment_manifest_bindings(
+    value: Any,
+    *,
+    policy: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the v2 hand-off record consumed by the manifest merger.
+
+    This is deliberately a pre-test-only contract: it identifies the sealed
+    test role but contains neither a final payload path nor final examples.
+    Older v1 records remain readable by historic bundles, but cannot be used
+    to construct a new v2 experiment manifest because they did not bind every
+    decision-freeze rule.
+    """
+
+    if not isinstance(value, Mapping):
+        raise NextBehaviorTrainingError("experiment manifest bindings are invalid")
+    if value.get("schema_version") != EXPERIMENT_BINDINGS_SCHEMA_VERSION:
+        raise NextBehaviorTrainingError(
+            "experiment manifest bindings must use the v2 schema"
+        )
+    allowed = {
+        "schema_version",
+        "status",
+        "target_contract_id",
+        "code_commit",
+        "test_opened",
+        "partition_manifest_id",
+        "partition_manifest_sha256",
+        "partition_membership_sha256",
+        "pre_final_role_artifacts",
+        "policies",
+        "model",
+        "baselines",
+        "calibration",
+        "decision_freeze",
+        "artifact_hashes",
+        "artifact_paths_relative_to_bundle",
+        "bindings_sha256",
+    }
+    if set(value) != allowed:
+        raise NextBehaviorTrainingError(
+            "experiment manifest bindings fields do not match the v2 contract"
+        )
+    if (
+        value.get("status") != "ready_for_v2_experiment_manifest_merge"
+        or value.get("target_contract_id") != TARGET_CONTRACT_ID
+        or value.get("test_opened") is not False
+        or not _COMMIT.fullmatch(str(value.get("code_commit") or ""))
+    ):
+        raise NextBehaviorTrainingError("experiment manifest bindings are unsafe")
+    identity = deepcopy(dict(value))
+    bindings_sha256 = identity.pop("bindings_sha256")
+    if bindings_sha256 != _sha256_json(identity):
+        raise NextBehaviorTrainingError(
+            "experiment manifest bindings identity does not match its content"
+        )
+    memberships = value.get("partition_membership_sha256")
+    if not isinstance(memberships, Mapping) or set(memberships) != {
+        "train", "selection", "calibration", "test"
+    } or any(not _SHA256.fullmatch(str(item or "")) for item in memberships.values()):
+        raise NextBehaviorTrainingError(
+            "experiment manifest bindings partition memberships are invalid"
+        )
+    if not _SHA256.fullmatch(str(value.get("partition_manifest_sha256") or "")):
+        raise NextBehaviorTrainingError(
+            "experiment manifest bindings partition hash is invalid"
+        )
+    policies = value.get("policies")
+    if not isinstance(policies, Mapping) or any(
+        not _SHA256.fullmatch(str(policies.get(field) or ""))
+        for field in (
+            "experiment_policy_artifact_sha256",
+            "experiment_policy_sha256",
+            "preprocessing_sha256",
+            "vocabulary_artifact_sha256",
+            "vocabulary_sha256",
+            "environment_lock_sha256",
+        )
+    ):
+        raise NextBehaviorTrainingError("experiment manifest policy bindings are invalid")
+    if policies["experiment_policy_sha256"] != experiment_policy_sha256(policy):
+        raise NextBehaviorTrainingError("experiment manifest policy hash mismatch")
+    require_valid_decision_freeze_bindings(
+        value.get("decision_freeze"), policy=policy
+    )
+    return deepcopy(dict(value))
+
+
 def _verified_bundle_entry(
     root: Path,
     value: Mapping[str, Any],
@@ -1299,11 +1442,23 @@ def verify_frozen_training_bundle(
         raise NextBehaviorTrainingError(
             "calibration mapping does not reproduce from its frozen role"
         )
-    _verified_bundle_entry(
+    bindings_path = _verified_bundle_entry(
         root,
         bundle.get("experiment_manifest_bindings", {}),
         label="experiment manifest bindings",
     )
+    binding_value = _read_json(bindings_path, label="experiment manifest bindings")
+    # Accepted v1 bundles predate the complete decision-freeze hand-off.
+    # Keep their historical verification behavior intact; only v2 records may
+    # feed the new manifest merger.
+    if isinstance(binding_value, Mapping) and binding_value.get(
+        "schema_version"
+    ) == EXPERIMENT_BINDINGS_SCHEMA_VERSION:
+        require_valid_experiment_manifest_bindings(binding_value, policy=policy)
+    elif not isinstance(binding_value, Mapping) or binding_value.get(
+        "schema_version"
+    ) != EXPERIMENT_BINDINGS_SCHEMA_VERSION_V1:
+        raise NextBehaviorTrainingError("experiment manifest bindings are invalid")
     return {
         "status": "frozen_pre_test",
         "test_opened": False,
@@ -1814,9 +1969,7 @@ def run_training_experiment(
                     "calibration"
                 ],
             },
-            "selection_rule_sha256": selection_decision[
-                "selection_rule_sha256"
-            ],
+            "decision_freeze": build_decision_freeze_bindings(policy),
             "artifact_hashes": {
                 "experiment_policy": policy_file_sha256,
                 "preprocessing": preprocessing_sha256,
