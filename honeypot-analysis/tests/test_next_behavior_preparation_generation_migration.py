@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +22,10 @@ from production.tools.build_next_behavior_selected_safe_corpus import (
     SelectedSafeCorpusError,
     build_selected_safe_corpus,
     migrate_final_preparation_generation,
+    _store_snapshot_hmac_sha256,
     verify_selected_role_artifacts,
 )
-from production.utils.serialization import stable_id
+from production.utils.serialization import stable_id, stable_json
 from tests.test_next_behavior_selected_safe_corpus import (
     CLASSIFIER_MANIFEST,
     CODE_COMMIT,
@@ -34,6 +37,123 @@ from tests.test_next_behavior_selected_safe_corpus import (
 
 KEY = b"k" * 32
 KEY_ID = "fixture-key"
+
+
+def _reference_snapshot(database: sqlite3.Connection) -> str:
+    """The pre-optimization snapshot queries, retained only for equivalence."""
+
+    digest = hmac.new(
+        KEY,
+        b"next-behavior-final-store-snapshot.v1\0",
+        hashlib.sha256,
+    )
+    queries = (
+        (
+            "metadata",
+            """
+            SELECT key, value FROM metadata
+            WHERE key IN (
+                'store_schema_version', 'source_selection_sha256',
+                'final_corpus_prepared_at',
+                'final_corpus_preparation_receipt_id',
+                'final_corpus_preparation_receipt_json'
+            ) ORDER BY key
+            """,
+        ),
+        (
+            "source_members",
+            """
+            SELECT filename, source_sha256, source_size_bytes, archive_crc32,
+                   chronological_order, source_cohort, experiment_role,
+                   collection_start, collection_end, stats_json
+            FROM source_members WHERE experiment_role = 'test'
+            ORDER BY chronological_order
+            """,
+        ),
+        (
+            "sessions",
+            """
+            SELECT raw_session_id, source_member, source_cohort,
+                   experiment_role, first_seen, last_seen, protocol,
+                   configuration, connected, closed, cross_member, cross_role
+            FROM sessions WHERE experiment_role = 'test'
+            ORDER BY raw_session_id
+            """,
+        ),
+        (
+            "session_sources",
+            """
+            SELECT raw_session_id, source_member, source_cohort,
+                   experiment_role, chronological_order, first_seen,
+                   last_seen, protocol, configuration, connected, closed
+            FROM session_sources WHERE experiment_role = 'test'
+            ORDER BY raw_session_id, source_member
+            """,
+        ),
+        (
+            "command_events",
+            """
+            SELECT events.source_member, events.source_line,
+                   events.raw_session_id, events.event_time, events.command
+            FROM command_events AS events
+            JOIN source_members AS members
+              ON members.filename = events.source_member
+            WHERE members.experiment_role = 'test'
+            ORDER BY events.source_member, events.source_line
+            """,
+        ),
+        (
+            "context_events",
+            """
+            SELECT events.source_member, events.source_line,
+                   events.raw_session_id, events.event_time, events.event_type
+            FROM context_events AS events
+            JOIN source_members AS members
+              ON members.filename = events.source_member
+            WHERE members.experiment_role = 'test'
+            ORDER BY events.source_member, events.source_line
+            """,
+        ),
+        (
+            "quarantine",
+            """
+            SELECT q.raw_session_id, q.reason, q.source_members_json,
+                   q.experiment_roles_json
+            FROM quarantined_sessions AS q
+            WHERE EXISTS (
+                SELECT 1 FROM session_sources AS sources
+                WHERE sources.raw_session_id = q.raw_session_id
+                  AND sources.experiment_role = 'test'
+            ) ORDER BY q.raw_session_id
+            """,
+        ),
+        (
+            "command_labels",
+            """
+            SELECT labels.command, labels.labels_json,
+                   labels.unrepresented_json, labels.cache_receipt_id
+            FROM command_labels AS labels
+            WHERE EXISTS (
+                SELECT 1 FROM command_events AS events
+                JOIN source_members AS members
+                  ON members.filename = events.source_member
+                WHERE events.command = labels.command
+                  AND members.experiment_role = 'test'
+            ) ORDER BY labels.command
+            """,
+        ),
+    )
+    for table, query in queries:
+        digest.update(table.encode())
+        digest.update(b"\0")
+        count = 0
+        for row in database.execute(query):
+            digest.update(stable_json(list(row)).encode())
+            digest.update(b"\n")
+            count += 1
+        digest.update(str(count).encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 @pytest.fixture(autouse=True)
@@ -427,3 +547,67 @@ def test_new_compatible_generation_appends_to_history(
         (second["generation_id"],),
     ]
     database.close()
+
+
+def test_optimized_snapshot_matches_reference_and_reports_aggregate_progress(
+    migration_case: MigrationCase,
+) -> None:
+    database = sqlite3.connect(migration_case.database_path)
+    progress: list[tuple[str, int]] = []
+    try:
+        reference = _reference_snapshot(database)
+        optimized = _store_snapshot_hmac_sha256(
+            database,
+            pseudonymization_key=KEY,
+            progress=lambda table, count: progress.append((table, count)),
+        )
+    finally:
+        database.close()
+
+    assert optimized == reference
+    assert [table for table, _count in progress] == [
+        "metadata",
+        "source_members",
+        "sessions",
+        "session_sources",
+        "command_events",
+        "context_events",
+        "quarantine",
+        "command_labels",
+    ]
+    assert all(isinstance(count, int) and count >= 0 for _, count in progress)
+
+
+def test_snapshot_uses_single_pass_membership_filters_on_large_label_fixture(
+    migration_case: MigrationCase,
+) -> None:
+    database = sqlite3.connect(migration_case.database_path)
+    traced: list[str] = []
+    try:
+        database.executemany(
+            """
+            INSERT INTO command_labels(
+                command, labels_json, unrepresented_json, cache_receipt_id
+            ) VALUES (?, '[]', '[]', 'synthetic-cache')
+            """,
+            [(f"synthetic-unmatched-{index:04d}",) for index in range(600)],
+        )
+        database.commit()
+        database.set_trace_callback(traced.append)
+        _store_snapshot_hmac_sha256(database, pseudonymization_key=KEY)
+    finally:
+        database.set_trace_callback(None)
+        database.close()
+
+    normalized = [statement.upper() for statement in traced]
+    label_statements = [
+        statement for statement in normalized if "FROM COMMAND_LABELS" in statement
+    ]
+    quarantine_statements = [
+        statement
+        for statement in normalized
+        if "FROM QUARANTINED_SESSIONS" in statement
+    ]
+    assert len(label_statements) == 1
+    assert len(quarantine_statements) == 1
+    assert not any("WHERE EXISTS" in statement for statement in normalized)

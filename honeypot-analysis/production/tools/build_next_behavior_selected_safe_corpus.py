@@ -1596,6 +1596,7 @@ def _store_snapshot_hmac_sha256(
     database: sqlite3.Connection,
     *,
     pseudonymization_key: bytes,
+    progress: Callable[[str, int], None] | None = None,
 ) -> str:
     """Authenticate all final source, membership, event, and label state."""
 
@@ -1679,11 +1680,6 @@ def _store_snapshot_hmac_sha256(
             SELECT q.raw_session_id, q.reason, q.source_members_json,
                    q.experiment_roles_json
             FROM quarantined_sessions AS q
-            WHERE EXISTS (
-                SELECT 1 FROM session_sources AS sources
-                WHERE sources.raw_session_id = q.raw_session_id
-                  AND sources.experiment_role = 'test'
-            )
             ORDER BY q.raw_session_id
             """,
         ),
@@ -1693,27 +1689,32 @@ def _store_snapshot_hmac_sha256(
             SELECT labels.command, labels.labels_json,
                    labels.unrepresented_json, labels.cache_receipt_id
             FROM command_labels AS labels
-            WHERE EXISTS (
-                SELECT 1 FROM command_events AS events
-                JOIN source_members AS members
-                  ON members.filename = events.source_member
-                WHERE events.command = labels.command
-                  AND members.experiment_role = 'test'
-            )
             ORDER BY labels.command
             """,
         ),
     )
+    test_session_ids: set[str] = set()
+    test_commands: set[str] = set()
     for table, query in queries:
         digest.update(table.encode())
         digest.update(b"\0")
         count = 0
         for row in database.execute(query):
+            if table == "quarantine" and str(row[0]) not in test_session_ids:
+                continue
+            if table == "command_labels" and str(row[0]) not in test_commands:
+                continue
             digest.update(stable_json(list(row)).encode())
             digest.update(b"\n")
             count += 1
+            if table == "session_sources":
+                test_session_ids.add(str(row[0]))
+            elif table == "command_events":
+                test_commands.add(str(row[4]))
         digest.update(str(count).encode())
         digest.update(b"\0")
+        if progress is not None:
+            progress(table, count)
     return digest.hexdigest()
 
 
@@ -2062,6 +2063,16 @@ def migrate_final_preparation_generation(
         store_snapshot = _store_snapshot_hmac_sha256(
             database,
             pseudonymization_key=pseudonymization_key,
+            progress=lambda table, count: print(
+                stable_json(
+                    {
+                        "stage": "final_store_snapshot",
+                        "table": table,
+                        "row_count": count,
+                    }
+                ),
+                flush=True,
+            ),
         )
         history = _validated_generation_history(database)
     except (sqlite3.Error, SelectedCorpusBuildError) as exc:
