@@ -4,6 +4,7 @@ import copy
 
 import pytest
 
+from production.prediction import next_behavior_baseline as baseline_module
 from production.prediction.next_behavior_baseline import (
     NextBehaviorBaselineError,
     fit_corrected_target_baselines,
@@ -204,6 +205,42 @@ def test_complete_baseline_set_uses_identical_membership_and_preserves_ids() -> 
     assert [item["session_id"] for item in predictions] == [
         item["session_id"] for item in examples
     ]
+
+
+def test_batch_prediction_validates_and_indexes_artifact_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = fit_hard_backoff_vomm(_training(), maximum_order=3)
+    examples = _training() * 20
+    examples = [
+        {
+            **copy.deepcopy(example),
+            "example_id": f"{example['example_id']}-{index}",
+        }
+        for index, example in enumerate(examples)
+    ]
+    expected = [predict_baseline(artifact, example) for example in examples]
+    original_validate = baseline_module.require_valid_baseline
+    original_tables = baseline_module._artifact_tables
+    calls = {"validation": 0, "tables": 0}
+
+    def counted_validate(value: dict) -> dict:
+        calls["validation"] += 1
+        return original_validate(value)
+
+    def counted_tables(value: dict) -> tuple:
+        calls["tables"] += 1
+        return original_tables(value)
+
+    monkeypatch.setattr(
+        baseline_module,
+        "require_valid_baseline",
+        counted_validate,
+    )
+    monkeypatch.setattr(baseline_module, "_artifact_tables", counted_tables)
+
+    assert predict_many(artifact, examples) == expected
+    assert calls == {"validation": 1, "tables": 1}
 
 
 def test_artifacts_and_examples_fail_closed_on_contract_or_identity_changes() -> None:

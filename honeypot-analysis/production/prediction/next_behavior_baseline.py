@@ -601,15 +601,13 @@ def _prediction_from_distribution(
     }
 
 
-def predict_baseline(
-    artifact: Mapping[str, Any],
-    example: Mapping[str, Any],
+def _predict_validated(
+    model: Mapping[str, Any],
+    item: Mapping[str, Any],
+    *,
+    global_counts: Counter[PhaseState | None],
+    contexts: Mapping[History, Counter[PhaseState | None]],
 ) -> Dict[str, Any]:
-    """Predict one corrected example without implicit model substitution."""
-
-    model = require_valid_baseline(artifact)
-    item = _validated_example(example)
-    global_counts, contexts = _artifact_tables(model)
     history: History = tuple(
         tuple(phase["tactics"]) for phase in item["model_input"]["phase_sequence"]
     )
@@ -692,13 +690,40 @@ def predict_baseline(
     )
 
 
+def predict_baseline(
+    artifact: Mapping[str, Any],
+    example: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Predict one corrected example without implicit model substitution."""
+
+    model = require_valid_baseline(artifact)
+    item = _validated_example(example)
+    global_counts, contexts = _artifact_tables(model)
+    return _predict_validated(
+        model,
+        item,
+        global_counts=global_counts,
+        contexts=contexts,
+    )
+
+
 def predict_many(
     artifact: Mapping[str, Any],
     examples: Sequence[Mapping[str, Any]],
 ) -> List[Dict[str, Any]]:
     """Predict corrected examples in caller order while retaining their IDs."""
 
-    return [predict_baseline(artifact, example) for example in examples]
+    model = require_valid_baseline(artifact)
+    global_counts, contexts = _artifact_tables(model)
+    return [
+        _predict_validated(
+            model,
+            _validated_example(example),
+            global_counts=global_counts,
+            contexts=contexts,
+        )
+        for example in examples
+    ]
 
 
 def fit_corrected_target_baselines(
