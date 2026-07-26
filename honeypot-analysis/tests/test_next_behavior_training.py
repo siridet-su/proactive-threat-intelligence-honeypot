@@ -251,6 +251,12 @@ def test_cli_and_python_api_have_no_final_test_path() -> None:
     assert "final_test_path" not in parameters
     assert "--experiment-policy" in option_strings
     assert "--environment-lock" in option_strings
+    assert "--train-historical-split-evidence" in option_strings
+    assert "--selection-historical-split-evidence" in option_strings
+    assert "--calibration-historical-split-evidence" in option_strings
+    assert "train_historical_split_evidence_path" in parameters
+    assert "selection_historical_split_evidence_path" in parameters
+    assert "calibration_historical_split_evidence_path" in parameters
 
 
 def test_role_scoped_loading_never_opens_test(tmp_path: Path) -> None:
@@ -520,6 +526,9 @@ def test_existing_output_is_refused_before_any_input_is_opened(
             train_build_receipt_path=tmp_path / "missing-train-build.json",
             train_source_receipts_path=tmp_path / "missing-train-sources.json",
             train_corpus_receipt_path=tmp_path / "missing-train-corpus.json",
+            train_historical_split_evidence_path=(
+                tmp_path / "missing-train-historical.json"
+            ),
             selection_path=tmp_path / "missing-selection.jsonl",
             selection_safe_sessions_path=(
                 tmp_path / "missing-selection-sessions.jsonl"
@@ -533,6 +542,9 @@ def test_existing_output_is_refused_before_any_input_is_opened(
             selection_corpus_receipt_path=(
                 tmp_path / "missing-selection-corpus.json"
             ),
+            selection_historical_split_evidence_path=(
+                tmp_path / "missing-selection-historical.json"
+            ),
             calibration_path=tmp_path / "missing-calibration.jsonl",
             calibration_safe_sessions_path=(
                 tmp_path / "missing-calibration-sessions.jsonl"
@@ -545,6 +557,9 @@ def test_existing_output_is_refused_before_any_input_is_opened(
             ),
             calibration_corpus_receipt_path=(
                 tmp_path / "missing-calibration-corpus.json"
+            ),
+            calibration_historical_split_evidence_path=(
+                tmp_path / "missing-calibration-historical.json"
             ),
             partition_manifest_path=tmp_path / "missing-manifest.json",
             preprocessing_config_path=tmp_path / "missing-preprocessing.json",

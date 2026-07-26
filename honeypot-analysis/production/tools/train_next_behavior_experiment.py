@@ -1177,6 +1177,7 @@ def verify_frozen_training_bundle(
         "examples_path",
         "source_receipts_path",
         "corpus_receipt_path",
+        "historical_split_evidence_path",
     }
     if (
         not isinstance(role_artifact_paths, Mapping)
@@ -1474,16 +1475,19 @@ def run_training_experiment(
     train_build_receipt_path: Path,
     train_source_receipts_path: Path,
     train_corpus_receipt_path: Path,
+    train_historical_split_evidence_path: Path,
     selection_path: Path,
     selection_safe_sessions_path: Path,
     selection_build_receipt_path: Path,
     selection_source_receipts_path: Path,
     selection_corpus_receipt_path: Path,
+    selection_historical_split_evidence_path: Path,
     calibration_path: Path,
     calibration_safe_sessions_path: Path,
     calibration_build_receipt_path: Path,
     calibration_source_receipts_path: Path,
     calibration_corpus_receipt_path: Path,
+    calibration_historical_split_evidence_path: Path,
     partition_manifest_path: Path,
     preprocessing_config_path: Path,
     experiment_policy_path: Path,
@@ -1512,6 +1516,9 @@ def run_training_experiment(
                 "examples_path": train_path,
                 "source_receipts_path": train_source_receipts_path,
                 "corpus_receipt_path": train_corpus_receipt_path,
+                "historical_split_evidence_path": (
+                    train_historical_split_evidence_path
+                ),
             },
             "selection": {
                 "purpose": "select_model",
@@ -1520,6 +1527,9 @@ def run_training_experiment(
                 "examples_path": selection_path,
                 "source_receipts_path": selection_source_receipts_path,
                 "corpus_receipt_path": selection_corpus_receipt_path,
+                "historical_split_evidence_path": (
+                    selection_historical_split_evidence_path
+                ),
             },
             "calibration": {
                 "purpose": "fit_calibration",
@@ -1528,6 +1538,9 @@ def run_training_experiment(
                 "examples_path": calibration_path,
                 "source_receipts_path": calibration_source_receipts_path,
                 "corpus_receipt_path": calibration_corpus_receipt_path,
+                "historical_split_evidence_path": (
+                    calibration_historical_split_evidence_path
+                ),
             },
         }
         role_verifications: Dict[str, Dict[str, Any]] = {}
@@ -1539,6 +1552,9 @@ def run_training_experiment(
                 examples_path=inputs["examples_path"],
                 source_receipts_path=inputs["source_receipts_path"],
                 corpus_receipt_path=inputs["corpus_receipt_path"],
+                historical_split_evidence_path=inputs[
+                    "historical_split_evidence_path"
+                ],
                 expected_purpose=inputs["purpose"],
                 allow_final=False,
             )
@@ -2100,6 +2116,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--train-build-receipt", type=Path, required=True)
     parser.add_argument("--train-source-receipts", type=Path, required=True)
     parser.add_argument("--train-corpus-receipt", type=Path, required=True)
+    parser.add_argument(
+        "--train-historical-split-evidence", type=Path, required=True
+    )
     parser.add_argument("--selection", type=Path, required=True)
     parser.add_argument("--selection-safe-sessions", type=Path, required=True)
     parser.add_argument(
@@ -2110,6 +2129,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--selection-corpus-receipt", type=Path, required=True
+    )
+    parser.add_argument(
+        "--selection-historical-split-evidence", type=Path, required=True
     )
     parser.add_argument("--calibration", type=Path, required=True)
     parser.add_argument(
@@ -2123,6 +2145,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--calibration-corpus-receipt", type=Path, required=True
+    )
+    parser.add_argument(
+        "--calibration-historical-split-evidence", type=Path, required=True
     )
     parser.add_argument("--partition-manifest", type=Path, required=True)
     parser.add_argument("--preprocessing-config", type=Path, required=True)
@@ -2141,16 +2166,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         train_build_receipt_path=args.train_build_receipt,
         train_source_receipts_path=args.train_source_receipts,
         train_corpus_receipt_path=args.train_corpus_receipt,
+        train_historical_split_evidence_path=(
+            args.train_historical_split_evidence
+        ),
         selection_path=args.selection,
         selection_safe_sessions_path=args.selection_safe_sessions,
         selection_build_receipt_path=args.selection_build_receipt,
         selection_source_receipts_path=args.selection_source_receipts,
         selection_corpus_receipt_path=args.selection_corpus_receipt,
+        selection_historical_split_evidence_path=(
+            args.selection_historical_split_evidence
+        ),
         calibration_path=args.calibration,
         calibration_safe_sessions_path=args.calibration_safe_sessions,
         calibration_build_receipt_path=args.calibration_build_receipt,
         calibration_source_receipts_path=args.calibration_source_receipts,
         calibration_corpus_receipt_path=args.calibration_corpus_receipt,
+        calibration_historical_split_evidence_path=(
+            args.calibration_historical_split_evidence
+        ),
         partition_manifest_path=args.partition_manifest,
         preprocessing_config_path=args.preprocessing_config,
         experiment_policy_path=args.experiment_policy,
