@@ -1082,6 +1082,54 @@ def _verify_seed_completion(
     return deepcopy(dict(record))
 
 
+def require_consistent_role_provenance(
+    role_verifications: Mapping[str, Mapping[str, Any]],
+    *,
+    preprocessing_sha256: str,
+) -> str:
+    """Require one immutable export provenance across all development roles.
+
+    The export producer commit is deliberately distinct from the clean commit
+    executing training.  This permits a reviewed training-driver repair after
+    role publication without silently rebinding or rewriting sealed exports.
+    Both commits remain independently recorded in the frozen bundle.
+    """
+
+    if set(role_verifications) != {"train", "selection", "calibration"}:
+        raise NextBehaviorTrainingError(
+            "exactly three development role verifications are required"
+        )
+    provenance_fields = (
+        "source_selection_sha256",
+        "classifier_manifest_sha256",
+        "preprocessing_sha256",
+        "label_policy_sha256",
+        "trust_policy_sha256",
+        "classification_checkpoint_sha256",
+    )
+    reference = role_verifications["train"]
+    export_commit = str(reference.get("code_commit") or "")
+    if not _COMMIT.fullmatch(export_commit):
+        raise NextBehaviorTrainingError(
+            "development role export commit is invalid"
+        )
+    for role, verification in role_verifications.items():
+        if (
+            verification.get("code_commit") != export_commit
+            or verification.get("preprocessing_sha256")
+            != preprocessing_sha256
+            or any(
+                verification.get(field) != reference.get(field)
+                for field in provenance_fields
+            )
+        ):
+            raise NextBehaviorTrainingError(
+                f"{role} role provenance differs from the frozen "
+                "development cohort"
+            )
+    return export_commit
+
+
 def verify_frozen_training_bundle(
     bundle_dir: Path,
     *,
@@ -1583,29 +1631,11 @@ def run_training_experiment(
             raise NextBehaviorTrainingError(
                 "partition sequence length does not match experiment policy"
             )
-        provenance_fields = (
-            "source_selection_sha256",
-            "classifier_manifest_sha256",
-            "preprocessing_sha256",
-            "label_policy_sha256",
-            "trust_policy_sha256",
-            "classification_checkpoint_sha256",
+        require_consistent_role_provenance(
+            role_verifications,
+            preprocessing_sha256=preprocessing_sha256,
         )
-        reference_verification = role_verifications["train"]
         for role, verification in role_verifications.items():
-            if (
-                verification["code_commit"] != verified_commit
-                or verification["preprocessing_sha256"]
-                != preprocessing_sha256
-                or any(
-                    verification[field] != reference_verification[field]
-                    for field in provenance_fields
-                )
-            ):
-                raise NextBehaviorTrainingError(
-                    f"{role} role provenance differs from the frozen "
-                    "development cohort"
-                )
             role_manifest = partition_manifest["roles"][role]
             membership = verification["membership"]
             if (

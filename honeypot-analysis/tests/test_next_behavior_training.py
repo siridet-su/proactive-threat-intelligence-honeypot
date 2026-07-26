@@ -26,6 +26,7 @@ from production.tools.train_next_behavior_experiment import (
     build_training_vocabulary,
     load_pre_final_examples,
     require_all_declared_seeds,
+    require_consistent_role_provenance,
     require_selection_support,
     run_training_experiment,
     select_completed_seed,
@@ -257,6 +258,37 @@ def test_cli_and_python_api_have_no_final_test_path() -> None:
     assert "train_historical_split_evidence_path" in parameters
     assert "selection_historical_split_evidence_path" in parameters
     assert "calibration_historical_split_evidence_path" in parameters
+
+
+def test_role_export_and_training_commits_are_independently_bound() -> None:
+    export_commit = "1" * 40
+    common = {
+        "code_commit": export_commit,
+        "source_selection_sha256": "2" * 64,
+        "classifier_manifest_sha256": "3" * 64,
+        "preprocessing_sha256": "4" * 64,
+        "label_policy_sha256": "5" * 64,
+        "trust_policy_sha256": "6" * 64,
+        "classification_checkpoint_sha256": "7" * 64,
+    }
+    verifications = {
+        role: dict(common) for role in ("train", "selection", "calibration")
+    }
+
+    assert require_consistent_role_provenance(
+        verifications,
+        preprocessing_sha256="4" * 64,
+    ) == export_commit
+
+    verifications["selection"]["code_commit"] = "8" * 40
+    with pytest.raises(
+        NextBehaviorTrainingError,
+        match="selection role provenance differs",
+    ):
+        require_consistent_role_provenance(
+            verifications,
+            preprocessing_sha256="4" * 64,
+        )
 
 
 def test_role_scoped_loading_never_opens_test(tmp_path: Path) -> None:
