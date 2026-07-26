@@ -209,3 +209,36 @@ def test_assembly_requires_all_four_role_bundles(tmp_path: Path) -> None:
             role_bundle_directories={"train": tmp_path},
             output_directory=tmp_path / "out",
         )
+
+
+def test_role_bundle_verification_binds_exact_historical_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "train"
+    directory.mkdir()
+    paths = {
+        name: directory / filename
+        for name, filename in assembler.ROLE_BUNDLE_FILENAMES.items()
+    }
+    for path in paths.values():
+        path.write_text("{}\n", encoding="utf-8")
+    captured: dict[str, Path] = {}
+
+    def fake_verify(
+        *,
+        historical_split_evidence_path: Path,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        captured["path"] = historical_split_evidence_path
+        raise ValueError("verification boundary reached")
+
+    monkeypatch.setattr(
+        assembler, "verify_selected_role_artifacts", fake_verify
+    )
+    with pytest.raises(
+        assembler.PartitionInputAssemblyError,
+        match="verification boundary reached",
+    ):
+        assembler._load_role_bundle("train", directory)
+    assert captured["path"] == paths["historical_split_evidence"]

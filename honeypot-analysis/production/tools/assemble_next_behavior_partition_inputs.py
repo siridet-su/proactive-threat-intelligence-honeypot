@@ -344,6 +344,9 @@ def _load_role_bundle(role: str, directory: Path) -> RoleBundle:
             examples_path=paths["examples"],
             source_receipts_path=paths["source_receipts"],
             corpus_receipt_path=paths["corpus_receipt"],
+            historical_split_evidence_path=paths[
+                "historical_split_evidence"
+            ],
             expected_purpose=purpose,
             # This validates final preparation evidence only; it never invokes
             # the evaluator or opens any training/evaluation result.
