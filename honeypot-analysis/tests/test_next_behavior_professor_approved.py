@@ -125,9 +125,10 @@ def _manifest(tmp_path: Path):
     artifacts = {
         name: _write_descriptor(tmp_path, name)
         for name in (
-            "original_selection_blocked_receipt", "selected_checkpoint", "model_spec",
-            "hard_backoff_vomm", "partition_manifest", "train_receipt", "selection_receipt",
-            "calibration_receipt", "final_receipt", "environment_receipt",
+                "original_selection_blocked_receipt", "selected_checkpoint", "model_spec",
+                "hard_backoff_vomm", "partition_manifest", "train_receipt", "selection_receipt",
+                "calibration_receipt", "final_receipt", "environment_receipt",
+                "evaluator_source", "metrics_source", "ledger_contract",
         )
     }
     # Set an actual checkpoint byte binding before creating the approval record.

@@ -91,6 +91,9 @@ def freeze(*, experiment_root: Path, preparation_root: Path, output_root: Path, 
         "calibration_receipt": _descriptor(experiment_root / "roles" / "calibration" / "build_receipt.json", role="calibration"),
         "final_receipt": _descriptor(final_receipt_path),
         "environment_receipt": _descriptor(environment_path),
+        "evaluator_source": _descriptor(repository_root / "production" / "tools" / "evaluate_professor_approved_poc.py"),
+        "metrics_source": _descriptor(repository_root / "production" / "prediction" / "next_behavior_metrics.py"),
+        "ledger_contract": _descriptor(repository_root / "production" / "tools" / "evaluate_professor_approved_poc.py"),
     }
     environment = {
         "python": "3.12", "torch": "2.13.0+cpu", "cpu": "cpu_only",

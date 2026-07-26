@@ -281,6 +281,7 @@ def build_professor_approved_pretest_manifest(
         "vocabulary", "preprocessing_contract", "hard_backoff_vomm",
         "partition_manifest", "train_receipt", "selection_receipt",
         "calibration_receipt", "final_receipt", "environment_receipt",
+        "evaluator_source", "metrics_source", "ledger_contract",
     }
     if set(artifacts) != required_artifacts:
         raise ProfessorApprovedPocError("pre-test artifacts do not match required bindings")
