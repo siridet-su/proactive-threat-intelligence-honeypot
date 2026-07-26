@@ -24,7 +24,6 @@ from production.prediction.next_behavior_professor_approved import (
     build_professor_approved_decision,
 )
 from production.prediction.next_behavior_tensor import tensorize_example, vocabulary_sha256
-from production.tools.train_next_behavior_experiment import _calibration_rows
 from production.utils.serialization import stable_json
 
 
@@ -77,17 +76,25 @@ def _verify_blocked_files(blocked: Path, receipt: Mapping[str, Any]) -> None:
             )
 
 
-def _selection_raw_outputs(
-    examples: Sequence[Mapping[str, Any]], *, model: Any, spec: Mapping[str, Any], vocabulary: Mapping[str, Any]
+def _calibration_rows_streamed(
+    examples: Sequence[Mapping[str, Any]], *, model: Any, spec: Mapping[str, Any], vocabulary: Mapping[str, Any], checkpoint_sha256: str
 ) -> list[dict[str, Any]]:
+    """Build only the compact calibration-fit rows; never retain raw outputs twice."""
     result = []
     for example in examples:
+        raw = predict_next_behavior(model, tensorize_example(example, vocabulary), spec=spec)
         result.append({
             "example_id": example["example_id"],
-            "session_id": example["session_id"],
-            "model_output": predict_next_behavior(
-                model, tensorize_example(example, vocabulary), spec=spec
-            ),
+            "partition_role": "calibration",
+            "target_contract_id": "next_distinct_command_behavior_phase_or_session_end.v1",
+            "score_semantics": "raw_model_scores_not_probabilities",
+            "checkpoint_sha256": checkpoint_sha256,
+            "vocabulary_sha256": vocabulary_sha256(vocabulary),
+            "preprocessing_sha256": spec["preprocessing_sha256"],
+            "tactic_logits": raw["tactic_logits"],
+            "target_tactics": example["target"]["tactics"],
+            "terminal_logit": raw["terminal_logit"],
+            "terminal_target": example["target"]["outcome_type"] == "session_end",
         })
     return result
 
@@ -127,19 +134,15 @@ def prepare(
 
     calibration_examples_path = experiment_root / "roles" / "calibration" / "examples.jsonl"
     calibration_examples = _jsonl(calibration_examples_path)
-    calibration_raw = _selection_raw_outputs(
-        calibration_examples, model=model, spec=spec, vocabulary=vocabulary
+    calibration_rows = _calibration_rows_streamed(
+        calibration_examples, model=model, spec=spec, vocabulary=vocabulary,
+        checkpoint_sha256=selected_hash,
     )
     calibration_membership = membership_sha256(
         [row["example_id"] for row in calibration_examples]
     )
     calibration = fit_temperature_mapping(
-        _calibration_rows(
-            calibration_examples, calibration_raw,
-            checkpoint_sha256=selected_hash,
-            vocabulary_sha256_value=vocabulary_sha256(vocabulary),
-            preprocessing_sha256=spec["preprocessing_sha256"],
-        ),
+        calibration_rows,
         calibration_example_ids=[row["example_id"] for row in calibration_examples],
         fit_partition_membership_sha256=calibration_membership,
         checkpoint_sha256=selected_hash,
@@ -162,7 +165,12 @@ def prepare(
     try:
         _write_json(staging / "PROFESSOR_APPROVED_DECISION.json", decision)
         _write_json(staging / "calibration.json", calibration)
-        _write_json(staging / "calibration_raw_outputs.json", calibration_raw)
+        _write_json(staging / "calibration_fit_summary.json", {
+            "row_count": len(calibration_rows),
+            "row_membership_sha256": calibration_membership,
+            "raw_outputs_retained": False,
+            "reason": "compact fit rows were processed in memory; model and calibration mapping are fully replayable from immutable Calibration examples",
+        })
         _write_json(staging / "decision_policy.json", decision_policy)
         inventory = {
             "schema_version": "next_behavior_professor_approved_pretest_inventory.v1",
