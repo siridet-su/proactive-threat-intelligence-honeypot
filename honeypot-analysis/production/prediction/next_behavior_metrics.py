@@ -522,6 +522,238 @@ def _percentile(values: Sequence[float], probability: float) -> float:
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
+def _sufficient_statistics(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    tactic_vocabulary: Sequence[str],
+) -> tuple[list[str], list[list[float]]]:
+    """Aggregate metric inputs once per session without changing semantics."""
+
+    labels = tuple(tactic_vocabulary)
+    by_session: Dict[str, list[float]] = {}
+    width = len(labels) * 4 + 12
+    for row in rows:
+        values = by_session.setdefault(row["session_id"], [0.0] * width)
+        predicted = row["status"] == "predicted"
+        actual_tactics = set(row["target_tactics"])
+        predicted_tactics = (
+            set(row["predicted_tactics"]) if predicted else set()
+        )
+        offset = 0
+        for label in labels:
+            actual = label in actual_tactics
+            selected = label in predicted_tactics
+            category = (
+                0
+                if actual and selected
+                else 1
+                if selected
+                else 2
+                if actual
+                else 3
+            )
+            values[offset + category] += 1.0
+            offset += 4
+
+        actual_terminal = bool(row["target_terminal"])
+        predicted_terminal = bool(
+            predicted and row["predicted_terminal"] is True
+        )
+        values[offset + (
+            0
+            if actual_terminal and predicted_terminal
+            else 1
+            if predicted_terminal
+            else 2
+            if actual_terminal
+            else 3
+        )] += 1.0
+        offset += 4
+        values[offset] += float(
+            predicted and not actual_terminal and not predicted_terminal
+        )
+        values[offset + 1] += float(
+            predicted and actual_terminal and not predicted_terminal
+        )
+        if not actual_terminal:
+            ranking = row["ranked_tactics"] if predicted else []
+            truth = actual_tactics
+            values[offset + 2] += 1.0
+            values[offset + 3] += float(
+                bool(ranking) and ranking[0] in truth
+            )
+            values[offset + 4] += float(bool(set(ranking[:3]) & truth))
+            first = next(
+                (
+                    index
+                    for index, tactic in enumerate(ranking, start=1)
+                    if tactic in truth
+                ),
+                None,
+            )
+            values[offset + 5] += 0.0 if first is None else 1.0 / first
+        values[offset + 6] += float(predicted)
+        values[offset + 7] += 1.0
+    sessions = sorted(by_session)
+    return sessions, [by_session[session_id] for session_id in sessions]
+
+
+def _point_metrics_from_statistics(
+    values: Sequence[float],
+    *,
+    tactic_vocabulary: Sequence[str],
+    aggregate_labels: Sequence[str],
+) -> Dict[str, float]:
+    """Reconstruct `_point_metrics` from additive sufficient statistics."""
+
+    per_class: Dict[str, Dict[str, Any]] = {}
+    offset = 0
+    for label in tactic_vocabulary:
+        tp, fp, fn, tn = values[offset : offset + 4]
+        per_class[label] = _binary_metrics(tp, fp, fn, tn)
+        offset += 4
+    aggregates = _aggregate_classes(per_class, aggregate_labels)
+    terminal = _binary_metrics(*values[offset : offset + 4])
+    offset += 4
+    correct_tactic = values[offset]
+    terminal_as_tactic = values[offset + 1]
+    nonterminal_count = values[offset + 2]
+    top1 = values[offset + 3]
+    top3 = values[offset + 4]
+    reciprocal_rank_sum = values[offset + 5]
+    covered_count = values[offset + 6]
+    row_count = values[offset + 7]
+    terminal_targets = terminal["tp"] + terminal["fn"]
+    tactic_targets = terminal["fp"] + terminal["tn"]
+    tactic_binary = _binary_metrics(
+        correct_tactic,
+        terminal_as_tactic,
+        tactic_targets - correct_tactic,
+        terminal_targets - terminal_as_tactic,
+    )
+    class_count = aggregates["macro"]["class_count"]
+    return {
+        "macro_f1": _divide(
+            aggregates["macro"]["f1"] * class_count + terminal["f1"],
+            class_count + 1,
+        ),
+        "micro_f1": aggregates["micro"]["f1"],
+        "weighted_f1": aggregates["weighted"]["f1"],
+        "balanced_accuracy": _divide(
+            aggregates["macro"]["balanced_accuracy"] * class_count
+            + terminal["balanced_accuracy"],
+            class_count + 1,
+        ),
+        "terminal_f1": terminal["f1"],
+        "tactic_vs_end_balanced_accuracy": (
+            _divide(terminal["tp"], terminal_targets)
+            + _divide(correct_tactic, tactic_targets)
+        )
+        / 2.0,
+        "top1_accuracy": _divide(top1, nonterminal_count),
+        "top3_accuracy": _divide(top3, nonterminal_count),
+        "mrr": _divide(reciprocal_rank_sum, nonterminal_count),
+        "coverage": _divide(covered_count, row_count),
+    }
+
+
+def _sum_statistic_rows(
+    statistic_rows: Sequence[Sequence[float]],
+    sampled_indices: Sequence[int] | None = None,
+) -> list[float]:
+    """Sum rows with an optional session-bootstrap index sequence."""
+
+    width = len(statistic_rows[0])
+    totals = [0.0] * width
+    indices = (
+        range(len(statistic_rows))
+        if sampled_indices is None
+        else sampled_indices
+    )
+    for index in indices:
+        row = statistic_rows[index]
+        for position, value in enumerate(row):
+            totals[position] += value
+    return totals
+
+
+def _statistic_matrix(
+    statistic_rows: Sequence[Sequence[float]],
+) -> Any | None:
+    """Return an optional numerical matrix without making NumPy mandatory."""
+
+    try:
+        import numpy
+    except ImportError:
+        return None
+    return numpy.asarray(statistic_rows, dtype=numpy.float64)
+
+
+def _bootstrap_statistic_sum(
+    statistic_rows: Sequence[Sequence[float]],
+    sampled_indices: Sequence[int],
+    matrix: Any | None,
+) -> list[float]:
+    if matrix is None:
+        return _sum_statistic_rows(statistic_rows, sampled_indices)
+    import numpy
+
+    weights = numpy.bincount(
+        sampled_indices,
+        minlength=len(statistic_rows),
+    ).astype(numpy.float64, copy=False)
+    return (weights @ matrix).tolist()
+
+
+def _clustered_point_bootstrap(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    tactic_vocabulary: Sequence[str],
+    aggregate_labels: Sequence[str],
+    samples: int,
+    seed: int,
+) -> Dict[str, Any]:
+    """Exact whole-session bootstrap using additive sufficient statistics."""
+
+    sessions, statistic_rows = _sufficient_statistics(
+        rows,
+        tactic_vocabulary=tactic_vocabulary,
+    )
+    point = _point_metrics_from_statistics(
+        _sum_statistic_rows(statistic_rows),
+        tactic_vocabulary=tactic_vocabulary,
+        aggregate_labels=aggregate_labels,
+    )
+    draws: Dict[str, List[float]] = {key: [] for key in point}
+    generator = random.Random(seed)
+    population = range(len(sessions))
+    matrix = _statistic_matrix(statistic_rows)
+    for _ in range(samples):
+        selected = generator.choices(population, k=len(sessions))
+        values = _point_metrics_from_statistics(
+            _bootstrap_statistic_sum(statistic_rows, selected, matrix),
+            tactic_vocabulary=tactic_vocabulary,
+            aggregate_labels=aggregate_labels,
+        )
+        for key, value in values.items():
+            draws[key].append(float(value))
+    return {
+        "unit": "session",
+        "session_count": len(sessions),
+        "samples": samples,
+        "seed": seed,
+        "confidence_level": 0.95,
+        "metrics": {
+            key: {
+                "estimate": float(point[key]),
+                "lower": _percentile(values, 0.025),
+                "upper": _percentile(values, 0.975),
+            }
+            for key, values in draws.items()
+        },
+    }
+
+
 def session_cluster_bootstrap(
     aligned_rows: Sequence[Mapping[str, Any]],
     metric_function: Callable[[Sequence[Mapping[str, Any]]], Mapping[str, float]],
@@ -580,18 +812,18 @@ def _equal_session_aggregates(
     minimum_targets: int,
     aggregate_labels: Sequence[str],
 ) -> Dict[str, Any]:
-    by_session: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
-    for row in rows:
-        by_session[row["session_id"]].append(row)
+    labels = tuple(tactic_vocabulary)
+    _sessions, statistic_rows = _sufficient_statistics(
+        rows,
+        tactic_vocabulary=labels,
+    )
     values = [
-        _point_metrics(
-            by_session[session_id],
-            tactic_vocabulary=tactic_vocabulary,
-            minimum_target_sessions=minimum_target_sessions,
-            minimum_targets=minimum_targets,
+        _point_metrics_from_statistics(
+            statistics,
+            tactic_vocabulary=labels,
             aggregate_labels=aggregate_labels,
         )
-        for session_id in sorted(by_session)
+        for statistics in statistic_rows
     ]
     return {
         "aggregation": "equal_weight_per_session",
@@ -632,15 +864,6 @@ def evaluate_next_behavior_predictions(
     aggregate_labels = multi["reportable_classes"] or list(vocabulary)
     covered_count = sum(row["status"] == "predicted" for row in rows)
 
-    def point(sample: Sequence[Mapping[str, Any]]) -> Mapping[str, float]:
-        return _point_metrics(
-            sample,
-            tactic_vocabulary=vocabulary,
-            minimum_target_sessions=minimum_target_sessions,
-            minimum_targets=minimum_targets,
-            aggregate_labels=aggregate_labels,
-        )
-
     return {
         "schema_version": METRICS_SCHEMA_VERSION,
         "target_contract_id": TARGET_CONTRACT_ID,
@@ -664,9 +887,10 @@ def evaluate_next_behavior_predictions(
             minimum_targets=minimum_targets,
             aggregate_labels=aggregate_labels,
         ),
-        "session_cluster_bootstrap": session_cluster_bootstrap(
+        "session_cluster_bootstrap": _clustered_point_bootstrap(
             rows,
-            point,
+            tactic_vocabulary=vocabulary,
+            aggregate_labels=aggregate_labels,
             samples=bootstrap_samples,
             seed=bootstrap_seed,
         ),
@@ -709,17 +933,28 @@ def paired_model_comparison(
     )
     aggregate_labels = support["reportable_classes"] or list(vocabulary)
 
-    def metrics(rows: Sequence[Mapping[str, Any]]) -> Dict[str, float]:
-        return _point_metrics(
-            rows,
-            tactic_vocabulary=vocabulary,
-            minimum_target_sessions=minimum_target_sessions,
-            minimum_targets=minimum_targets,
-            aggregate_labels=aggregate_labels,
+    sessions_a, statistics_a = _sufficient_statistics(
+        rows_a,
+        tactic_vocabulary=vocabulary,
+    )
+    sessions_b, statistics_b = _sufficient_statistics(
+        rows_b,
+        tactic_vocabulary=vocabulary,
+    )
+    if sessions_a != sessions_b:
+        raise NextBehaviorMetricsError(
+            "paired prediction session membership differs"
         )
-
-    point_a = metrics(rows_a)
-    point_b = metrics(rows_b)
+    point_a = _point_metrics_from_statistics(
+        _sum_statistic_rows(statistics_a),
+        tactic_vocabulary=vocabulary,
+        aggregate_labels=aggregate_labels,
+    )
+    point_b = _point_metrics_from_statistics(
+        _sum_statistic_rows(statistics_b),
+        tactic_vocabulary=vocabulary,
+        aggregate_labels=aggregate_labels,
+    )
     deltas = {key: point_a[key] - point_b[key] for key in point_a}
     by_session: Dict[str, List[tuple[Mapping[str, Any], Mapping[str, Any]]]] = defaultdict(list)
     for pair in pairs:
@@ -727,23 +962,35 @@ def paired_model_comparison(
     sessions = sorted(by_session)
     draws: Dict[str, List[float]] = {key: [] for key in deltas}
     generator = random.Random(bootstrap_seed)
+    population = range(len(sessions))
+    matrix_a = _statistic_matrix(statistics_a)
+    matrix_b = _statistic_matrix(statistics_b)
     for _ in range(bootstrap_samples):
-        sample_a: List[Mapping[str, Any]] = []
-        sample_b: List[Mapping[str, Any]] = []
-        for session_id in generator.choices(sessions, k=len(sessions)):
-            for row_a, row_b in by_session[session_id]:
-                sample_a.append(row_a)
-                sample_b.append(row_b)
-        values_a = metrics(sample_a)
-        values_b = metrics(sample_b)
+        selected = generator.choices(population, k=len(sessions))
+        values_a = _point_metrics_from_statistics(
+            _bootstrap_statistic_sum(statistics_a, selected, matrix_a),
+            tactic_vocabulary=vocabulary,
+            aggregate_labels=aggregate_labels,
+        )
+        values_b = _point_metrics_from_statistics(
+            _bootstrap_statistic_sum(statistics_b, selected, matrix_b),
+            tactic_vocabulary=vocabulary,
+            aggregate_labels=aggregate_labels,
+        )
         for key in draws:
             draws[key].append(values_a[key] - values_b[key])
 
     session_wins = session_losses = session_ties = 0
-    for session_id in sessions:
-        session_a = [pair[0] for pair in by_session[session_id]]
-        session_b = [pair[1] for pair in by_session[session_id]]
-        difference = metrics(session_a)["macro_f1"] - metrics(session_b)["macro_f1"]
+    for stats_a, stats_b in zip(statistics_a, statistics_b):
+        difference = _point_metrics_from_statistics(
+            stats_a,
+            tactic_vocabulary=vocabulary,
+            aggregate_labels=aggregate_labels,
+        )["macro_f1"] - _point_metrics_from_statistics(
+            stats_b,
+            tactic_vocabulary=vocabulary,
+            aggregate_labels=aggregate_labels,
+        )["macro_f1"]
         if difference > 0:
             session_wins += 1
         elif difference < 0:

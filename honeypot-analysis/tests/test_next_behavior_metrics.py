@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import copy
+import random
+from collections import defaultdict
 
 import pytest
 
+from production.prediction import next_behavior_metrics as metrics_module
 from production.prediction.next_behavior_contract import (
     EXAMPLE_SCHEMA_VERSION,
     TARGET_CONTRACT_ID,
@@ -230,6 +233,70 @@ def test_cluster_bootstrap_is_deterministic_and_preserves_dependency_unit() -> N
     assert first["example_ids"] == [item["example_id"] for item in examples]
 
 
+def test_sufficient_statistics_bootstrap_matches_reference_resampling() -> None:
+    examples, predictions = _fixture()
+    labels = ("discovery", "execution", "persistence")
+    rows = align_examples_and_predictions(examples, predictions)
+    aggregate_labels = metrics_module.multilabel_tactic_metrics(
+        rows,
+        tactic_vocabulary=labels,
+        minimum_target_sessions=1,
+        minimum_targets=1,
+    )["reportable_classes"]
+
+    reference = metrics_module.session_cluster_bootstrap(
+        rows,
+        lambda sample: metrics_module._point_metrics(
+            sample,
+            tactic_vocabulary=labels,
+            minimum_target_sessions=1,
+            minimum_targets=1,
+            aggregate_labels=aggregate_labels,
+        ),
+        samples=40,
+        seed=37,
+    )
+    optimized = metrics_module._clustered_point_bootstrap(
+        rows,
+        tactic_vocabulary=labels,
+        aggregate_labels=aggregate_labels,
+        samples=40,
+        seed=37,
+    )
+
+    assert optimized == reference
+
+
+def test_bootstrap_does_not_repeat_full_row_metric_scans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    examples = [
+        _example(index, str(index), ["execution"])
+        for index in range(1, 101)
+    ]
+    predictions = [
+        _prediction(item, tactics=["execution"], ranking=["execution"])
+        for item in examples
+    ]
+
+    def forbidden(*_args: object, **_kwargs: object) -> dict:
+        raise AssertionError("full row metric stack was rescanned")
+
+    monkeypatch.setattr(metrics_module, "_point_metrics", forbidden)
+    result = evaluate_next_behavior_predictions(
+        examples,
+        predictions,
+        tactic_vocabulary=["execution"],
+        minimum_target_sessions=1,
+        minimum_targets=1,
+        bootstrap_samples=100,
+        bootstrap_seed=19,
+    )
+
+    assert result["session_cluster_bootstrap"]["samples"] == 100
+    assert result["session_cluster_bootstrap"]["session_count"] == 100
+
+
 def test_paired_comparison_uses_same_examples_sessions_and_bootstrap_draws() -> None:
     examples, imperfect = _fixture()
     perfect = [
@@ -264,6 +331,87 @@ def test_paired_comparison_uses_same_examples_sessions_and_bootstrap_draws() -> 
     assert result["metrics"]["top1_accuracy"]["difference"] > 0
     assert result["metrics"]["terminal_f1"]["difference"] > 0
     assert result["example_ids"] == [item["example_id"] for item in examples]
+
+
+def test_paired_sufficient_statistics_match_reference_draws() -> None:
+    examples, imperfect = _fixture()
+    perfect = [
+        _prediction(
+            item,
+            tactics=(
+                None
+                if item["target"]["outcome_type"] == "session_end"
+                else item["target"]["tactics"]
+            ),
+            ranking=(
+                []
+                if item["target"]["outcome_type"] == "session_end"
+                else list(item["target"]["tactics"])
+            ),
+        )
+        for item in examples
+    ]
+    labels = ("discovery", "execution", "persistence")
+    rows_a = align_examples_and_predictions(examples, perfect)
+    rows_b = align_examples_and_predictions(examples, imperfect)
+    aggregate_labels = metrics_module.multilabel_tactic_metrics(
+        rows_a,
+        tactic_vocabulary=labels,
+        minimum_target_sessions=1,
+        minimum_targets=1,
+    )["reportable_classes"]
+    pairs_by_session: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
+    by_b = {row["example_id"]: row for row in rows_b}
+    for row in rows_a:
+        pairs_by_session[row["session_id"]].append(
+            (row, by_b[row["example_id"]])
+        )
+    sessions = sorted(pairs_by_session)
+    generator = random.Random(29)
+    reference_draws: dict[str, list[float]] = {}
+    for _ in range(30):
+        sample_a: list[dict] = []
+        sample_b: list[dict] = []
+        for session_id in generator.choices(sessions, k=len(sessions)):
+            for row_a, row_b in pairs_by_session[session_id]:
+                sample_a.append(row_a)
+                sample_b.append(row_b)
+        values_a = metrics_module._point_metrics(
+            sample_a,
+            tactic_vocabulary=labels,
+            minimum_target_sessions=1,
+            minimum_targets=1,
+            aggregate_labels=aggregate_labels,
+        )
+        values_b = metrics_module._point_metrics(
+            sample_b,
+            tactic_vocabulary=labels,
+            minimum_target_sessions=1,
+            minimum_targets=1,
+            aggregate_labels=aggregate_labels,
+        )
+        for key in values_a:
+            reference_draws.setdefault(key, []).append(
+                values_a[key] - values_b[key]
+            )
+
+    optimized = paired_model_comparison(
+        examples,
+        perfect,
+        imperfect,
+        tactic_vocabulary=labels,
+        minimum_target_sessions=1,
+        minimum_targets=1,
+        bootstrap_samples=30,
+        bootstrap_seed=29,
+    )
+    for key, draws in reference_draws.items():
+        assert optimized["metrics"][key]["lower"] == metrics_module._percentile(
+            draws, 0.025
+        )
+        assert optimized["metrics"][key]["upper"] == metrics_module._percentile(
+            draws, 0.975
+        )
 
 
 def test_alignment_rejects_missing_extra_or_reassigned_identifiers() -> None:
