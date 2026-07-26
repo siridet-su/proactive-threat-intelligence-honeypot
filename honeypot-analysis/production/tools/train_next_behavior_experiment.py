@@ -784,6 +784,59 @@ def select_completed_seed(
     return min(complete, key=key)
 
 
+def publish_selection_blocked_bundle(
+    staging: Path,
+    output_dir: Path,
+    *,
+    seed_records: Sequence[Mapping[str, Any]],
+    code_commit: str,
+) -> Path:
+    """Atomically preserve complete pre-test evidence when selection blocks."""
+
+    destination = output_dir.with_name(f"{output_dir.name}.selection_blocked")
+    if destination.exists():
+        raise FileExistsError(
+            f"refusing to overwrite blocked selection evidence: {destination}"
+        )
+    candidates = []
+    for record in seed_records:
+        candidates.append(
+            {
+                "seed": record.get("seed"),
+                "status": record.get("status"),
+                "completion_marker_verified": record.get(
+                    "completion_marker_verified"
+                ),
+                "candidate": deepcopy(record.get("candidate")),
+                "checkpoint": deepcopy(record.get("checkpoint")),
+                "selection_metrics": deepcopy(
+                    record.get("selection_metrics")
+                ),
+                "completion": deepcopy(record.get("completion")),
+            }
+        )
+    artifact_hashes = {
+        str(path.relative_to(staging)): _sha256_path(path)
+        for path in sorted(staging.rglob("*"))
+        if path.is_file()
+    }
+    receipt = {
+        "schema_version": "next_behavior_selection_blocked.v1",
+        "status": "selection_blocked_pre_test",
+        "reason_code": "no_eligible_complete_seed",
+        "test_opened": False,
+        "final_test_path_accepted_by_command": False,
+        "code_commit": code_commit,
+        "declared_seeds": list(DECLARED_SEEDS),
+        "seed_candidates": candidates,
+        "pre_test_artifact_hashes": artifact_hashes,
+    }
+    receipt["receipt_sha256"] = _sha256_json(receipt)
+    _write_json(staging / "SELECTION_BLOCKED.json", receipt)
+    os.replace(staging, destination)
+    return destination
+
+
 def require_all_declared_seeds(
     seed_records: Sequence[Mapping[str, Any]],
 ) -> None:
@@ -1881,7 +1934,16 @@ def run_training_experiment(
                 )
 
         require_all_declared_seeds(seed_records)
-        selected = select_completed_seed(seed_records)
+        try:
+            selected = select_completed_seed(seed_records)
+        except NextBehaviorTrainingError:
+            publish_selection_blocked_bundle(
+                staging,
+                output_dir,
+                seed_records=seed_records,
+                code_commit=verified_commit,
+            )
+            raise
         selected_seed = int(selected["seed"])
         selected_checkpoint_path = staging / selected["checkpoint"]["path"]
         selected_model, selected_metadata = load_checkpoint(

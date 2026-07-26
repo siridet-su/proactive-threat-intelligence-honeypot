@@ -25,6 +25,7 @@ from production.tools.train_next_behavior_experiment import (
     build_parser,
     build_training_vocabulary,
     load_pre_final_examples,
+    publish_selection_blocked_bundle,
     require_all_declared_seeds,
     require_consistent_role_provenance,
     require_selection_support,
@@ -541,6 +542,88 @@ def test_no_complete_eligible_seed_cannot_be_frozen() -> None:
                 for seed in DECLARED_SEEDS
             ]
         )
+
+
+def test_selection_blocker_evidence_is_atomic_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    staging = tmp_path / ".training.staging"
+    staging.mkdir()
+    checkpoint = staging / "seed_runs" / "seed" / "checkpoint.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    output = tmp_path / "training"
+    records = [
+        {
+            "seed": seed,
+            "status": "complete",
+            "completion_marker_verified": True,
+            "candidate": {
+                "eligible": False,
+                "blockers": [
+                    "high_consequence_recall_regression:execution"
+                ],
+            },
+            "checkpoint": {
+                "path": str(checkpoint.relative_to(staging)),
+                "sha256": hashlib.sha256(b"checkpoint").hexdigest(),
+            },
+            "selection_metrics": {
+                "path": f"seed_runs/{seed}/selection_metrics.json",
+                "sha256": HASH_A,
+            },
+            "completion": {
+                "path": f"seed_runs/{seed}/completion.json",
+                "sha256": HASH_B,
+            },
+        }
+        for seed in DECLARED_SEEDS
+    ]
+
+    blocked = publish_selection_blocked_bundle(
+        staging,
+        output,
+        seed_records=records,
+        code_commit="1" * 40,
+    )
+    receipt = json.loads(
+        (blocked / "SELECTION_BLOCKED.json").read_text(encoding="utf-8")
+    )
+
+    assert not staging.exists()
+    assert not output.exists()
+    assert receipt["status"] == "selection_blocked_pre_test"
+    assert receipt["test_opened"] is False
+    assert receipt["final_test_path_accepted_by_command"] is False
+    assert receipt["declared_seeds"] == list(DECLARED_SEEDS)
+    assert receipt["pre_test_artifact_hashes"] == {
+        "seed_runs/seed/checkpoint.pt": hashlib.sha256(
+            b"checkpoint"
+        ).hexdigest()
+    }
+    identity = dict(receipt)
+    receipt_sha256 = identity.pop("receipt_sha256")
+    assert receipt_sha256 == hashlib.sha256(
+        json.dumps(
+            identity,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    second_staging = tmp_path / ".training.second"
+    second_staging.mkdir()
+    sentinel = blocked / "SELECTION_BLOCKED.json"
+    before = sentinel.read_bytes()
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        publish_selection_blocked_bundle(
+            second_staging,
+            output,
+            seed_records=records,
+            code_commit="1" * 40,
+        )
+    assert sentinel.read_bytes() == before
+    assert second_staging.exists()
 
 
 def test_existing_output_is_refused_before_any_input_is_opened(
