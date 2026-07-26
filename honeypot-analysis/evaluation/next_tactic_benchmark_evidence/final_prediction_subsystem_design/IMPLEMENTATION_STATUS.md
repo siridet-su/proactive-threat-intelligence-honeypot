@@ -1,16 +1,21 @@
 # Final prediction subsystem implementation status
 
-Status date: 2026-07-23
+Status date: 2026-07-26
 
 Initial implementation HEAD before source recovery:
 `69a6cf82a056ededbdc36f730c25037722afeab1`
 
-Latest verified preprocessing-inventory commit:
-`556677821b37f7c7d220e337957623e0781b3d22`
+Latest corrected-target closure commit:
+`720a793646bf0010713400565b1ca22ff70b1c33`
 
 Production deployment status: not deployed; the deployed prediction policy and model were not changed.
 
 ## 2026-07-26 corrected-target Selection update
+
+**Formal status: `BLOCKED_AT_SELECTION`.** This generation is complete as a
+pre-test blocked experiment. It is not a paused training run: no retraining,
+policy amendment, Calibration, or Final Test access is authorized under its
+frozen protocol.
 
 The independent 13-member v3 experiment advanced through verified role
 exports, disjoint partition assembly, Train-only vocabulary construction,
@@ -19,14 +24,18 @@ Selection gate rejected every seed because `defense-evasion` is reportable
 (44 targets in 44 sessions), the hard-backoff VOMM has nonzero recall
 (`0.1363636364`), and every Transformer seed has zero recall.
 
-No checkpoint was selected. Calibration was not used. Final Test remains
-sealed and no evaluation-access ledger exists. Final metrics and runtime
-measurements for a selected checkpoint are `NOT_DETERMINABLE`.
+No checkpoint was selected. The selected checkpoint, Calibration, merged
+pre-test manifest, Final Test evaluation, final metrics, confidence intervals,
+error analysis, and selected-checkpoint runtime measurements are
+`NOT_DETERMINABLE`, not zero-valued or failed Final-Test results. Final Test
+remains sealed and no evaluation-access ledger exists.
 
 The compact result and interpretation are:
 
 - `corrected_target_selection_blocked.json`
 - `CORRECTED_TARGET_SELECTION_STATUS.md`
+- `CORRECTED_TARGET_SELECTION_TABLE.md`
+- `corrected_target_selection_gate.svg`
 
 The complete private evidence is an atomic
 `training.selection_blocked/` bundle whose receipt SHA-256 is
@@ -35,6 +44,12 @@ The receipt file SHA-256 is
 `fea344c71e9757a8f6794f7e7e0290f24ac80d9ccefebd0dbded917a5ae75da8`.
 This later evidence supersedes the older Phase 3–6 “source unavailable”
 status below; the historical narrative is retained rather than rewritten.
+
+The thesis conclusion is intentionally two-sided: the Transformer seeds exceed
+the VOMM baseline on aggregate Selection macro-F1 and balanced accuracy, but
+all five fail the frozen reportable-class defense-evasion recall gate. The
+aggregate advantage is preserved and does not override the predeclared safety
+criterion.
 
 ## Source-recovery update
 
@@ -121,7 +136,13 @@ evidence for the old target and are not relabeled as evidence for
 | `99b78ec` | Historical-overlap preflight | Rejects accepted historical session reuse despite changed safe identifiers. |
 | `5566778` | Real-corpus preprocessing inventory | Validates and inventories every real causal example without opening model partitions. |
 
-## Phase status
+## Historical pre-amendment phase status (superseded)
+
+The following Phase 0–9 table records the earlier seven-member source-recovery
+attempt. It is retained for audit history only. The 2026-07-26
+`BLOCKED_AT_SELECTION` record above is the authoritative status for the
+corrected 13-member v3 experiment and supersedes these earlier availability
+claims.
 
 | Phase | Status | Evidence and exact boundary |
 |---|---|---|
@@ -136,7 +157,13 @@ evidence for the old target and are not relabeled as evidence for
 | 8 — Prospective shadow validation | **BLOCKED** | Depends on Phase 7 and future production-local observations. No cohort, timestamp, backfill, or production claim was created. |
 | 9 — Documentation and final acceptance | **PARTIAL** | This record classifies all criteria and preserves the historical/new-target distinction. A final model card, redesigned evidence index, accepted model decision, restoration rehearsal, and prospective claim remain impossible until the blocked phases complete. |
 
-## Acceptance criteria classification
+## Historical pre-amendment acceptance classification (superseded)
+
+The classifications below describe the same earlier source-overlap attempt and
+must not be read as the status of the completed 13-member v3 preparation and
+Selection run. The current experiment's unavailable downstream outputs are
+`NOT_DETERMINABLE` because the frozen Selection gate blocked the generation
+before Final Test access.
 
 ### A. Experimental subsystem final
 

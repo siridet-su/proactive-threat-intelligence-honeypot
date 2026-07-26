@@ -1,6 +1,10 @@
 # Corrected-target experiment: frozen Selection result
 
-Status: **BLOCKED_AT_FROZEN_SELECTION_GATE**
+Status: **BLOCKED_AT_SELECTION**
+
+This experiment is formally complete as a pre-test blocked experiment. The
+frozen Selection gate is the terminal result for this generation: it does not
+authorize retraining, a policy change, Calibration, or Final Test access.
 
 The corrected-target experiment completed canonical role preparation,
 partitioning, the Train-only vocabulary, four independently fitted same-target
@@ -26,8 +30,9 @@ frozen policy post hoc.
 Consequently:
 
 - no checkpoint was selected;
-- Calibration was not used;
-- the pre-test experiment manifest was not merged;
+- Calibration, the merged pre-test experiment manifest, and the one-time Final
+  Test evaluation are `NOT_DETERMINABLE` for this generation because selection
+  did not produce an eligible checkpoint;
 - Final Test remains sealed and its access ledger was never created;
 - final Transformer/VOMM metrics, calibration diagnostics, final error
   analysis, and selected-checkpoint runtime measurements are
@@ -40,7 +45,22 @@ experiment cache as `training.selection_blocked/`. Its receipt SHA-256 is
 (the receipt file SHA-256 is
 `fea344c71e9757a8f6794f7e7e0290f24ac80d9ccefebd0dbded917a5ae75da8`),
 and all 51 referenced artifacts verify. The compact machine-readable summary
-is `corrected_target_selection_blocked.json`.
+is `corrected_target_selection_blocked.json`. The versioned thesis-ready
+[Selection table](CORRECTED_TARGET_SELECTION_TABLE.md) and
+[gate figure](corrected_target_selection_gate.svg) are presentation-only
+derivatives of that receipt; their hashes are recorded in the summary.
+
+## Thesis interpretation
+
+On the frozen Selection partition, every Transformer seed exceeded the
+hard-backoff VOMM baseline on aggregate macro-F1 and balanced accuracy. That
+aggregate result is retained as evidence, not treated as a promotion decision:
+every seed also had zero recall for the reportable `defense-evasion` class
+where the independently trained VOMM recalled six of 44 targets. The
+predeclared reportable-class recall gate therefore blocks the model family for
+this experiment generation. Unavailable downstream quantities are explicitly
+`NOT_DETERMINABLE`; they are neither zero-valued nor failed Final-Test
+metrics.
 
 ## Scientifically valid next step
 
