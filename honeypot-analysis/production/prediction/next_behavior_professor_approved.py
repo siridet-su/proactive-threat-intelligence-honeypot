@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import hashlib
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
+
+from production.prediction.next_behavior_calibration import (
+    require_valid_calibration_mapping,
+)
 
 from production.utils.serialization import stable_json
 
@@ -23,6 +28,17 @@ DECLARED_RULE = (
     "highest_selection_macro_f1_then_highest_selection_balanced_accuracy_"
     "then_highest_terminal_f1_then_lowest_p95_latency_then_lowest_seed"
 )
+PRETEST_MANIFEST_SCHEMA_VERSION = "next_behavior_professor_approved_pretest_manifest.v1"
+PRETEST_MANIFEST_STATUS = "frozen_pre_test"
+_REQUIRED_AUTHORITY_RESTRICTIONS = {
+    "prediction_may_authorize_alerts": False,
+    "prediction_may_authorize_hypotheses": False,
+    "prediction_may_authorize_guidance": False,
+    "prediction_may_authorize_recommendations": False,
+    "prediction_may_authorize_blocking": False,
+    "prediction_may_authorize_response_actions": False,
+    "observed_command_derived_evidence_remains_authoritative": True,
+}
 
 
 class ProfessorApprovedPocError(ValueError):
@@ -185,3 +201,173 @@ def require_valid_professor_approved_decision(value: Any) -> Dict[str, Any]:
     if actual != _sha256(identity):
         raise ProfessorApprovedPocError("approval decision hash mismatch")
     return deepcopy(value)
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _valid_artifact_descriptor(value: Any, *, name: str, allow_test: bool = False) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ProfessorApprovedPocError(f"{name} descriptor must be an object")
+    required = {"path", "sha256"}
+    if set(value) - (required | {"semantic_sha256", "membership_sha256", "role", "kind"}):
+        raise ProfessorApprovedPocError(f"{name} descriptor has unknown fields")
+    if not required <= set(value):
+        raise ProfessorApprovedPocError(f"{name} descriptor is incomplete")
+    path = value.get("path")
+    if not isinstance(path, str) or not path:
+        raise ProfessorApprovedPocError(f"{name} path is invalid")
+    result = deepcopy(dict(value))
+    result["sha256"] = _require_sha256(result["sha256"], f"{name}.sha256")
+    for field in ("semantic_sha256", "membership_sha256"):
+        if field in result:
+            result[field] = _require_sha256(result[field], f"{name}.{field}")
+    if not allow_test and result.get("role") == "test":
+        raise ProfessorApprovedPocError("test descriptor may only occur in final_test")
+    return result
+
+
+def build_professor_approved_pretest_manifest(
+    *,
+    decision: Mapping[str, Any],
+    calibration: Mapping[str, Any],
+    decision_policy: Mapping[str, Any],
+    code_commit: str,
+    artifacts: Mapping[str, Mapping[str, Any]],
+    final_test: Mapping[str, Any],
+    environment: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Create a strict additive freeze without reading Final Test payloads.
+
+    ``final_test`` is a descriptor only.  Its bytes may be hash-verified by a
+    caller but are never parsed or semantically inspected by this constructor.
+    """
+    approved = require_valid_professor_approved_decision(dict(decision))
+    try:
+        valid_calibration = require_valid_calibration_mapping(dict(calibration))
+    except Exception as exc:
+        raise ProfessorApprovedPocError("calibration mapping is invalid") from exc
+    if valid_calibration.get("status") != "valid":
+        raise ProfessorApprovedPocError("calibration mapping is not valid")
+    if not isinstance(decision_policy, Mapping):
+        raise ProfessorApprovedPocError("decision policy must be an object")
+    policy = deepcopy(dict(decision_policy))
+    expected_policy = {
+        "schema_version": "next_behavior_professor_approved_decision_policy.v1",
+        "status": "frozen_pre_test",
+        "score_semantics": "global_temperature_sigmoid_probabilities",
+        "tactic_threshold": 0.5,
+        "terminal_threshold": 0.5,
+        "terminal_precedence": True,
+        "empty_nonterminal_rule": "highest_ranked_tactic",
+        "abstention": {"score_based": False, "asset_or_schema_failure": True, "fallback_model": None},
+        "objective": "calibration_binary_log_loss_only; thresholds_fixed_by_probability_semantics",
+    }
+    for field, expected in expected_policy.items():
+        if policy.get(field) != expected:
+            raise ProfessorApprovedPocError(f"decision policy {field} is not frozen")
+    policy_hash = policy.pop("sha256", None)
+    if policy_hash != _sha256(policy):
+        raise ProfessorApprovedPocError("decision policy hash mismatch")
+    if not isinstance(artifacts, Mapping):
+        raise ProfessorApprovedPocError("artifacts must be an object")
+    required_artifacts = {
+        "original_selection_blocked_receipt", "selected_checkpoint", "model_spec",
+        "vocabulary", "preprocessing_contract", "hard_backoff_vomm",
+        "partition_manifest", "train_receipt", "selection_receipt",
+        "calibration_receipt", "final_receipt", "environment_receipt",
+    }
+    if set(artifacts) != required_artifacts:
+        raise ProfessorApprovedPocError("pre-test artifacts do not match required bindings")
+    bound = {
+        name: _valid_artifact_descriptor(value, name=name)
+        for name, value in artifacts.items()
+    }
+    selected = bound["selected_checkpoint"]
+    if selected["sha256"] != approved["selection"]["selected_checkpoint_sha256"]:
+        raise ProfessorApprovedPocError("selected checkpoint disagrees with approval")
+    if valid_calibration["checkpoint_sha256"] != selected["sha256"]:
+        raise ProfessorApprovedPocError("calibration checkpoint binding mismatch")
+    if valid_calibration["vocabulary_sha256"] != bound["vocabulary"].get("semantic_sha256"):
+        raise ProfessorApprovedPocError("calibration vocabulary binding mismatch")
+    if valid_calibration["preprocessing_sha256"] != bound["preprocessing_contract"].get("semantic_sha256"):
+        raise ProfessorApprovedPocError("calibration preprocessing binding mismatch")
+    test = _valid_artifact_descriptor(final_test, name="final_test", allow_test=True)
+    if test.get("role") != "test" or "membership_sha256" not in test:
+        raise ProfessorApprovedPocError("final_test must be a sealed test descriptor")
+    if not isinstance(environment, Mapping) or set(environment) != {"python", "torch", "cpu", "receipt_sha256"}:
+        raise ProfessorApprovedPocError("environment receipt is incomplete")
+    env = deepcopy(dict(environment))
+    env["receipt_sha256"] = _require_sha256(env["receipt_sha256"], "environment.receipt_sha256")
+    restriction = deepcopy(_REQUIRED_AUTHORITY_RESTRICTIONS)
+    result: Dict[str, Any] = {
+        "schema_version": PRETEST_MANIFEST_SCHEMA_VERSION,
+        "status": PRETEST_MANIFEST_STATUS,
+        "test_opened": False,
+        "decision": approved,
+        "calibration": valid_calibration,
+        "decision_policy": deepcopy(decision_policy),
+        "code_commit": str(code_commit),
+        "artifacts": bound,
+        "final_test": test,
+        "environment": env,
+        "authority_restrictions": restriction,
+    }
+    result["manifest_sha256"] = _sha256(result)
+    return result
+
+
+def require_valid_professor_approved_pretest_manifest(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ProfessorApprovedPocError("pre-test manifest must be an object")
+    required = {
+        "schema_version", "status", "test_opened", "decision", "calibration",
+        "decision_policy", "code_commit", "artifacts", "final_test", "environment",
+        "authority_restrictions", "manifest_sha256",
+    }
+    if set(value) != required:
+        raise ProfessorApprovedPocError("pre-test manifest fields are invalid")
+    if value["schema_version"] != PRETEST_MANIFEST_SCHEMA_VERSION or value["status"] != PRETEST_MANIFEST_STATUS or value["test_opened"] is not False:
+        raise ProfessorApprovedPocError("pre-test manifest is not sealed")
+    identity = deepcopy(value)
+    actual = identity.pop("manifest_sha256")
+    if actual != _sha256(identity):
+        raise ProfessorApprovedPocError("pre-test manifest hash mismatch")
+    # Rebuilding performs all semantic cross-binding checks without inspecting
+    # the Final payload.
+    rebuilt = build_professor_approved_pretest_manifest(
+        decision=value["decision"], calibration=value["calibration"],
+        decision_policy=value["decision_policy"], code_commit=value["code_commit"],
+        artifacts=value["artifacts"], final_test=value["final_test"],
+        environment=value["environment"],
+    )
+    if rebuilt != value:
+        raise ProfessorApprovedPocError("pre-test manifest is noncanonical")
+    if value["authority_restrictions"] != _REQUIRED_AUTHORITY_RESTRICTIONS:
+        raise ProfessorApprovedPocError("authority restrictions are invalid")
+    return deepcopy(value)
+
+
+def verify_professor_approved_pretest_artifacts(
+    manifest: Mapping[str, Any], *, verify_final_test_bytes: bool = False
+) -> Dict[str, Any]:
+    """Hash-check immutable artifacts without parsing Final Test by default."""
+    frozen = require_valid_professor_approved_pretest_manifest(dict(manifest))
+    descriptors = dict(frozen["artifacts"])
+    if verify_final_test_bytes:
+        descriptors["final_test"] = frozen["final_test"]
+    verified: Dict[str, Any] = {}
+    for name, descriptor in descriptors.items():
+        path = Path(descriptor["path"])
+        if not path.is_file():
+            raise ProfessorApprovedPocError(f"pre-test artifact missing: {name}")
+        actual = _file_sha256(path)
+        if actual != descriptor["sha256"]:
+            raise ProfessorApprovedPocError(f"pre-test artifact hash mismatch: {name}")
+        verified[name] = {"path": str(path), "sha256": actual}
+    return {"status": "verified_pre_test", "test_opened": False, "artifacts": verified}
