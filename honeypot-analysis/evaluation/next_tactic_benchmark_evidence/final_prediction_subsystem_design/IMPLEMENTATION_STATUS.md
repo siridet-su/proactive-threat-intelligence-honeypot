@@ -10,6 +10,32 @@ Latest verified preprocessing-inventory commit:
 
 Production deployment status: not deployed; the deployed prediction policy and model were not changed.
 
+## 2026-07-26 corrected-target Selection update
+
+The independent 13-member v3 experiment advanced through verified role
+exports, disjoint partition assembly, Train-only vocabulary construction,
+same-target baselines, and all five declared Transformer seeds. The frozen
+Selection gate rejected every seed because `defense-evasion` is reportable
+(44 targets in 44 sessions), the hard-backoff VOMM has nonzero recall
+(`0.1363636364`), and every Transformer seed has zero recall.
+
+No checkpoint was selected. Calibration was not used. Final Test remains
+sealed and no evaluation-access ledger exists. Final metrics and runtime
+measurements for a selected checkpoint are `NOT_DETERMINABLE`.
+
+The compact result and interpretation are:
+
+- `corrected_target_selection_blocked.json`
+- `CORRECTED_TARGET_SELECTION_STATUS.md`
+
+The complete private evidence is an atomic
+`training.selection_blocked/` bundle whose receipt SHA-256 is
+`1845249166196898fd2f50a15bcc2e828b584b61189a526ef97c56e7bf12b379`.
+The receipt file SHA-256 is
+`fea344c71e9757a8f6794f7e7e0290f24ac80d9ccefebd0dbded917a5ae75da8`.
+This later evidence supersedes the older Phase 3–6 “source unavailable”
+status below; the historical narrative is retained rather than rewritten.
+
 ## Source-recovery update
 
 The earlier statement that the source corpus, event mapping, classifier
