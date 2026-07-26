@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import production.tools.build_next_behavior_selected_safe_corpus as safe_corpus
 from production.prediction.next_behavior_label_policy import (
     normalize_classifier_outputs,
 )
@@ -1031,3 +1032,60 @@ def test_no_overwrite_and_secret_field_scan(tmp_path: Path) -> None:
         )
     with pytest.raises(SelectedSafeCorpusError, match="forbidden field"):
         _scan_public_value({"nested": {"raw_command": "secret"}})
+
+
+def test_verify_role_cli_reports_only_aggregate_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_verify(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            "status": "selected_role_artifacts_verified",
+            "purpose": "final_evaluation",
+            "role": "test",
+            "build_receipt_id": "nextbehaviorselectedsafebuild_fixture",
+            "membership": {
+                "source_member_count": 7,
+                "session_count": 11,
+                "example_count": 19,
+            },
+        }
+
+    monkeypatch.setattr(
+        safe_corpus, "verify_selected_role_artifacts", fake_verify
+    )
+    paths = {
+        option: tmp_path / filename
+        for option, filename in {
+            "safe-sessions": "safe_sessions.jsonl",
+            "examples": "examples.jsonl",
+            "source-receipts": "source_receipts.json",
+            "corpus-receipt": "corpus_receipt.json",
+            "build-receipt": "build_receipt.json",
+            "historical-split-evidence": "historical.json",
+        }.items()
+    }
+    argv = ["verify-role", "--purpose", "final_evaluation"]
+    for option, path in paths.items():
+        argv.extend((f"--{option}", str(path)))
+    assert safe_corpus.main(argv) == 0
+    assert captured["allow_final"] is True
+    assert captured["expected_purpose"] == "final_evaluation"
+    assert captured["historical_split_evidence_path"] == paths[
+        "historical-split-evidence"
+    ]
+    assert json.loads(capsys.readouterr().out) == {
+        "build_receipt_id": "nextbehaviorselectedsafebuild_fixture",
+        "membership": {
+            "example_count": 19,
+            "session_count": 11,
+            "source_member_count": 7,
+        },
+        "purpose": "final_evaluation",
+        "role": "test",
+        "status": "selected_role_artifacts_verified",
+    }

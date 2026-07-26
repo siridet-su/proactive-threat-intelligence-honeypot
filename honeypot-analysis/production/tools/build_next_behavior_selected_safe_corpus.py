@@ -3033,6 +3033,23 @@ def build_parser() -> argparse.ArgumentParser:
         role_parser.add_argument(
             "--max-sequence-length", type=int, default=8
         )
+    verify = subparsers.add_parser("verify-role")
+    verify.add_argument(
+        "--purpose",
+        choices=(
+            "fit_model",
+            "select_model",
+            "fit_calibration",
+            "final_evaluation",
+        ),
+        required=True,
+    )
+    verify.add_argument("--safe-sessions", type=Path, required=True)
+    verify.add_argument("--examples", type=Path, required=True)
+    verify.add_argument("--source-receipts", type=Path, required=True)
+    verify.add_argument("--corpus-receipt", type=Path, required=True)
+    verify.add_argument("--build-receipt", type=Path, required=True)
+    verify.add_argument("--historical-split-evidence", type=Path)
     migrate = subparsers.add_parser("migrate-final-preparation-generation")
     migrate.add_argument("--private-database", type=Path, required=True)
     migrate.add_argument("--preparation-receipt", type=Path, required=True)
@@ -3067,6 +3084,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             code_commit=args.code_commit,
             command_batch_size=args.command_batch_size,
         )
+    elif args.stage == "verify-role":
+        result = verify_selected_role_artifacts(
+            build_receipt_path=args.build_receipt,
+            safe_sessions_path=args.safe_sessions,
+            examples_path=args.examples,
+            source_receipts_path=args.source_receipts,
+            corpus_receipt_path=args.corpus_receipt,
+            historical_split_evidence_path=args.historical_split_evidence,
+            expected_purpose=args.purpose,
+            allow_final=args.purpose == "final_evaluation",
+        )
+        result = {
+            "status": result["status"],
+            "purpose": result["purpose"],
+            "role": result["role"],
+            "build_receipt_id": result["build_receipt_id"],
+            "membership": result["membership"],
+        }
     elif args.stage == "migrate-final-preparation-generation":
         try:
             key, key_id = load_or_create_pseudonymization_key(

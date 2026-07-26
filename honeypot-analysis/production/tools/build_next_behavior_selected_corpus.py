@@ -2449,6 +2449,15 @@ def build_parser() -> argparse.ArgumentParser:
     cache.add_argument("--donor-database", type=Path, required=True)
     cache.add_argument("--private-database", type=Path, required=True)
     cache.add_argument("--receipt-output", type=Path, required=True)
+    inventory = subparsers.add_parser("role-inventory")
+    inventory.add_argument(
+        "--purpose",
+        choices=tuple(sorted(PURPOSE_TO_ROLE)),
+        required=True,
+    )
+    inventory.add_argument("--private-database", type=Path, required=True)
+    inventory.add_argument("--pseudonymization-key", type=Path, required=True)
+    inventory.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -2505,6 +2514,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             (stable_json(receipt) + "\n").encode(),
         )
         print(stable_json(receipt))
+        return 0
+    if args.command == "role-inventory":
+        key_id = _pseudonymization_key_id(args.pseudonymization_key)
+        key = args.pseudonymization_key.read_bytes()
+        inventory = build_role_inventory(
+            private_database_path=args.private_database,
+            purpose=args.purpose,
+            pseudonymization_key=key,
+            pseudonymization_key_id=key_id,
+            output_path=args.output,
+        )
+        print(
+            stable_json(
+                {
+                    "status": inventory["status"],
+                    "role": inventory["role"],
+                    "purpose": inventory["purpose"],
+                    "inventory_id": inventory["inventory_id"],
+                    "eligible_complete_session_count": inventory[
+                        "eligible_complete_session_count"
+                    ],
+                }
+            )
+        )
         return 0
     raise SelectedCorpusBuildError("unsupported command")
 

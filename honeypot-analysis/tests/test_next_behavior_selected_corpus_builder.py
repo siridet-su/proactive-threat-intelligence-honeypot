@@ -1066,3 +1066,56 @@ def test_cache_import_fails_closed_before_any_destination_labels(
         ).fetchone()[0] == 0
     finally:
         connection.close()
+
+
+def test_role_inventory_cli_uses_existing_key_and_emits_aggregate_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "role_inventory.json"
+    key_path = tmp_path / "key"
+    key_path.write_bytes(b"k" * 32)
+    key_path.chmod(0o600)
+    captured: dict[str, object] = {}
+
+    def fake_inventory(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            "status": "role_membership_frozen",
+            "role": "train",
+            "purpose": "fit_model",
+            "inventory_id": "nextbehaviorroleinventory_fixture",
+            "eligible_complete_session_count": 17,
+        }
+
+    monkeypatch.setattr(selected_corpus, "build_role_inventory", fake_inventory)
+    assert (
+        selected_corpus.main(
+            [
+                "role-inventory",
+                "--purpose",
+                "fit_model",
+                "--private-database",
+                str(tmp_path / "private.sqlite"),
+                "--pseudonymization-key",
+                str(key_path),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert captured["output_path"] == output
+    assert captured["pseudonymization_key"] == b"k" * 32
+    assert captured["pseudonymization_key_id"] == (
+        "next-behavior-hmac-"
+        + hashlib.sha256(b"k" * 32).hexdigest()[:16]
+    )
+    assert json.loads(capsys.readouterr().out) == {
+        "eligible_complete_session_count": 17,
+        "inventory_id": "nextbehaviorroleinventory_fixture",
+        "purpose": "fit_model",
+        "role": "train",
+        "status": "role_membership_frozen",
+    }
