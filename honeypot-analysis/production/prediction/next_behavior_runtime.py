@@ -311,6 +311,31 @@ class FrozenTransformerPocPredictor:
                 "transformer_preprocessing_sha256",
             ):
                 raise NextBehaviorRuntimeError("preprocessing SHA-256 mismatch")
+            for path_field, hash_field, label in (
+                (
+                    "runtime_rule_policy_path",
+                    "runtime_rule_policy_sha256",
+                    "runtime rule policy",
+                ),
+                (
+                    "runtime_trust_policy_path",
+                    "runtime_trust_policy_sha256",
+                    "runtime trust policy",
+                ),
+                (
+                    "runtime_classifier_checkpoint_path",
+                    "runtime_classifier_checkpoint_sha256",
+                    "runtime classifier checkpoint",
+                ),
+            ):
+                runtime_path = Path(self.policy[path_field])
+                if not runtime_path.is_file():
+                    raise NextBehaviorRuntimeError(f"{label} is missing")
+                if _sha256_file(runtime_path) != _require_sha(
+                    self.policy[hash_field],
+                    hash_field,
+                ):
+                    raise NextBehaviorRuntimeError(f"{label} SHA-256 mismatch")
             self.model, self.metadata = load_checkpoint(
                 self.policy["transformer_checkpoint_path"],
                 expected_spec=self.spec,
@@ -383,6 +408,15 @@ class FrozenTransformerPocPredictor:
                 ),
                 "immutable_final_result_sha256": _clean(
                     self.policy.get("immutable_final_result_sha256")
+                ),
+                "runtime_rule_policy_sha256": _clean(
+                    self.policy.get("runtime_rule_policy_sha256")
+                ),
+                "runtime_trust_policy_sha256": _clean(
+                    self.policy.get("runtime_trust_policy_sha256")
+                ),
+                "runtime_classifier_checkpoint_sha256": _clean(
+                    self.policy.get("runtime_classifier_checkpoint_sha256")
                 ),
             },
             "authority": deepcopy(AUTHORITY),

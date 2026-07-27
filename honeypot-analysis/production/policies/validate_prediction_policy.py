@@ -122,8 +122,11 @@ def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None
             "transformer_calibration_path",
             "transformer_calibration_file_sha256",
             "calibration_membership_sha256",
+            "runtime_rule_policy_path",
             "runtime_rule_policy_sha256",
+            "runtime_trust_policy_path",
             "runtime_trust_policy_sha256",
+            "runtime_classifier_checkpoint_path",
             "runtime_classifier_checkpoint_sha256",
             "immutable_final_result_sha256",
         )

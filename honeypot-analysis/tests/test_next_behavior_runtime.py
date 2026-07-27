@@ -50,6 +50,20 @@ def _policy() -> dict:
                 ROOT / "configs/next_behavior_preprocessing.v1.json"
             ),
             "transformer_calibration_path": str(CALIBRATION),
+            "runtime_rule_policy_path": str(
+                ROOT / "configs/classification_rules.trusted.json"
+            ),
+            "runtime_rule_policy_sha256": (
+                "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b"
+            ),
+            "runtime_trust_policy_path": str(
+                ROOT / "production/classification/trust.py"
+            ),
+            "runtime_classifier_checkpoint_path": str(
+                Path("/home/rubchek/Desktop/honeypot-threat-intelligence")
+                / "securebert_ttp_model_v2-20260714T172948Z-1-002"
+                / "securebert_ttp_model_v2/checkpoint-6765/model.safetensors"
+            ),
         }
     )
     return policy
