@@ -3276,6 +3276,64 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         suffix = f" {_html(error)}" if error else ""
         return f'<div class="empty">No prediction snapshot recorded for this session yet.{suffix}</div>'
 
+    if payload.get("prediction_mode") == "professor_approved_corrected_target_transformer_poc":
+        model = payload.get("active_model") or {}
+        output = payload.get("next_behavior_output") or {}
+        runtime = payload.get("runtime") or {}
+        status = payload.get("prediction_status") or "model_unavailable"
+        rows = [
+            ("snapshot_role", "primary experimental PoC forecast"),
+            ("target_contract", payload.get("prediction_contract") or "-"),
+            ("status", status),
+            ("status_reason", payload.get("prediction_status_reason") or "-"),
+            ("model_type", model.get("model_type") or "-"),
+            ("checkpoint_sha256", model.get("checkpoint_sha256") or "-"),
+            ("seed", model.get("seed")),
+            ("vocabulary_sha256", model.get("vocabulary_sha256") or "-"),
+            ("preprocessing_sha256", model.get("preprocessing_sha256") or "-"),
+            ("outcome_type", output.get("outcome_type") or "-"),
+            ("prediction_set", _format_list(output.get("prediction_set") or [], limit=14)),
+            ("inference_latency_ms", runtime.get("inference_latency_ms")),
+            ("authority", "advisory / non-authoritative"),
+            ("original_selection_status", payload.get("original_selection_status") or "-"),
+        ]
+        meta = '<div class="overview-grid prediction-meta">' + "\n".join(
+            f'<div class="kv"><span>{_html(label)}</span><strong>{_html(value if value not in (None, "") else "-")}</strong></div>'
+            for label, value in rows
+        ) + "</div>"
+        warning = (
+            '<div class="warning"><strong>Experimental PoC:</strong> '
+            + _html(
+                payload.get("deployment_decision")
+                or "This statistical forecast is advisory and cannot authorize alerts, hypotheses, guidance, recommendations, or actions."
+            )
+            + "</div>"
+        )
+        ranked = output.get("ranked_tactics") or []
+        if ranked and status == "predicted":
+            table_rows = "\n".join(
+                "<tr>"
+                f"<td class=\"num\">{_html(item.get('rank'))}</td>"
+                f"<td><strong>{_html(item.get('tactic'))}</strong></td>"
+                f"<td class=\"num\">{_html(item.get('calibrated_probability'))}</td>"
+                f"<td class=\"num\">{_html(item.get('raw_score'))}</td>"
+                "</tr>"
+                for item in ranked
+                if isinstance(item, dict)
+            )
+            body = (
+                "<table><thead><tr><th>#</th><th>tactic</th>"
+                "<th>calibrated probability</th><th>raw logit</th></tr></thead><tbody>"
+                + table_rows
+                + "</tbody></table>"
+            )
+        else:
+            body = (
+                f'<div class="empty">Transformer forecast {_html(status)}: '
+                f'{_html(payload.get("prediction_status_reason") or "unavailable")}</div>'
+            )
+        return warning + meta + body
+
     ranking = payload.get("final_ranking") or []
     prediction_status = str(payload.get("prediction_status") or ("predicted" if ranking else "abstained"))
     prediction_status_reason = str(payload.get("prediction_status_reason") or "")

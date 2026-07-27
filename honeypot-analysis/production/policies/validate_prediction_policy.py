@@ -24,6 +24,7 @@ TRUSTED_RULE_SECTIONS = (
     "mitre_association_rules",
     "sigma_correlation_rules",
 )
+TRANSFORMER_POC_MODE = "professor_approved_corrected_target_transformer_poc"
 
 
 def load_policy_file(path: str | Path) -> Dict[str, Any]:
@@ -77,8 +78,8 @@ def _validate_weights(policy: Dict[str, Any], errors: List[str]) -> None:
 
 def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None:
     mode = str(policy.get("prediction_mode") or "primary_transition_with_fallback").strip()
-    if mode not in {"primary_transition_with_fallback", "weighted_ensemble_baseline", "external_hard_backoff_vomm"}:
-        errors.append("policy.prediction_mode must be primary_transition_with_fallback, weighted_ensemble_baseline, or external_hard_backoff_vomm")
+    if mode not in {"primary_transition_with_fallback", "weighted_ensemble_baseline", "external_hard_backoff_vomm", TRANSFORMER_POC_MODE}:
+        errors.append("policy.prediction_mode is unsupported")
     if "compute_weighted_ensemble_baseline" in policy and not isinstance(
         policy.get("compute_weighted_ensemble_baseline"),
         bool,
@@ -90,7 +91,7 @@ def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None
             "production_ranking"
             if mode == "weighted_ensemble_baseline"
             else "not_applicable_external_authority"
-            if mode == "external_hard_backoff_vomm"
+            if mode in {"external_hard_backoff_vomm", TRANSFORMER_POC_MODE}
             else "diagnostic_only"
         )
         if influence_scope not in {"diagnostic_only", "production_ranking", "not_applicable_external_authority"}:
@@ -103,6 +104,54 @@ def _validate_prediction_mode(policy: Dict[str, Any], errors: List[str]) -> None
                 f"({expected_scope})"
             )
     primary_transition = policy.get("primary_transition")
+    if mode == TRANSFORMER_POC_MODE:
+        if policy.get("compute_weighted_ensemble_baseline") is not False:
+            errors.append(f"{TRANSFORMER_POC_MODE} requires compute_weighted_ensemble_baseline=false")
+        if primary_transition not in (None, {}):
+            errors.append(f"{TRANSFORMER_POC_MODE} must not configure primary_transition")
+        required = (
+            "transformer_checkpoint_path",
+            "transformer_checkpoint_sha256",
+            "transformer_model_spec_path",
+            "transformer_model_spec_file_sha256",
+            "transformer_vocabulary_path",
+            "transformer_vocabulary_file_sha256",
+            "transformer_vocabulary_sha256",
+            "transformer_preprocessing_path",
+            "transformer_preprocessing_sha256",
+            "transformer_calibration_path",
+            "transformer_calibration_file_sha256",
+            "calibration_membership_sha256",
+            "runtime_rule_policy_sha256",
+            "runtime_trust_policy_sha256",
+            "runtime_classifier_checkpoint_sha256",
+            "immutable_final_result_sha256",
+        )
+        for field in required:
+            value = str(policy.get(field) or "").strip().lower()
+            if not value:
+                errors.append(f"{TRANSFORMER_POC_MODE} requires policy.{field}")
+            elif field.endswith("sha256") and (
+                len(value) != 64
+                or any(character not in "0123456789abcdef" for character in value)
+            ):
+                errors.append(f"policy.{field} must be a SHA-256 digest")
+        for field in ("transformer_seed", "transformer_parameter_count"):
+            value = policy.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                errors.append(f"policy.{field} must be a positive integer")
+        for field in ("tactic_probability_threshold", "terminal_probability_threshold"):
+            value = policy.get(field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or not 0.0 <= float(value) <= 1.0
+            ):
+                errors.append(f"policy.{field} must be in [0, 1]")
+        if policy.get("predictive_alerts") != {"enabled": False}:
+            errors.append(f"{TRANSFORMER_POC_MODE} requires predictive_alerts.enabled=false")
+        return
     if primary_transition is None:
         return
     if not isinstance(primary_transition, dict):
@@ -434,7 +483,10 @@ def validate_policy_document(document: Dict[str, Any]) -> List[str]:
         return errors
     # External hard-backoff authority deliberately has no ensemble weights.
     # Legacy policies keep the existing positive-weight validation.
-    if str(policy.get("prediction_mode") or "").strip() != "external_hard_backoff_vomm":
+    if str(policy.get("prediction_mode") or "").strip() not in {
+        "external_hard_backoff_vomm",
+        TRANSFORMER_POC_MODE,
+    }:
         _validate_weights(policy, errors)
     _validate_prediction_mode(policy, errors)
     _validate_external_seed_decay(policy, errors)

@@ -45,6 +45,10 @@ from production.prediction.realtime_prediction import (
     build_actor_fingerprint_transition_model,
     build_transition_model,
 )
+from production.prediction.next_behavior_runtime import (
+    MODE as TRANSFORMER_POC_MODE,
+    FrozenTransformerPocPredictor,
+)
 from production.prediction.external_vomm_artifact import load_external_vomm_artifact
 from production.prediction.predictive_alerts import evaluate_predictive_alert
 from production.utils.runtime_context import attach_runtime_context
@@ -784,7 +788,12 @@ class SessionWorker:
             recency_half_life_sessions=float(policy.get("recency_decay_half_life_sessions") or 0.0),
         )
 
-    def _new_prediction_engine(self) -> RealtimePredictionEngine:
+    def _new_prediction_engine(self) -> Any:
+        if (
+            str((self.config.prediction_policy or {}).get("prediction_mode") or "")
+            == TRANSFORMER_POC_MODE
+        ):
+            return FrozenTransformerPocPredictor(self.config.prediction_policy)
         external_model = self._load_external_transition_model()
         return RealtimePredictionEngine(
             self.config.prediction_policy,
@@ -810,6 +819,16 @@ class SessionWorker:
         return merged
 
     def _reload_calibration_output_if_changed(self, force: bool = False) -> None:
+        if (
+            str((self.config.prediction_policy or {}).get("prediction_mode") or "")
+            == TRANSFORMER_POC_MODE
+        ):
+            self.weight_calibration_status = {
+                "enabled": False,
+                "status": "not_applicable",
+                "reason": "frozen corrected-target calibration is bound to the model policy",
+            }
+            return
         policy = self.config.calibration_policy or {}
         enabled = bool(policy.get("enabled", True))
         output_path = str(policy.get("output_path") or "").strip()
@@ -1141,6 +1160,10 @@ class SessionWorker:
         """
         if not self.prediction_engine.enabled:
             return []
+        if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
+            # The corrected-target PoC forecast is advisory and can never feed
+            # the legacy realtime alert callback.
+            return []
         if hasattr(self.monitor, "_apply_session_enrichment"):
             self.monitor._apply_session_enrichment(state)
         self._apply_session_ttp_correlations(state)
@@ -1171,8 +1194,14 @@ class SessionWorker:
         payload.setdefault("status", "closed" if payload.get("is_ended") else "active")
         mark_session_outcome(payload)
         self._apply_campaign_clustering(payload, "closed" if payload.get("is_ended") else "active")
-        features = build_session_features(payload, current_event=event)
-        snapshot = self.prediction_engine.predict(features, event_id=event_id)
+        if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
+            snapshot = self.prediction_engine.predict_session(
+                payload,
+                event_id=event_id,
+            )
+        else:
+            features = build_session_features(payload, current_event=event)
+            snapshot = self.prediction_engine.predict(features, event_id=event_id)
         snapshot["weight_calibration"] = self.weight_calibration_status
         snapshot["prediction_trigger"] = trigger_info or self._prediction_trigger_for_event(event)
         if self.config.enable_smb_decisions:
@@ -1185,7 +1214,16 @@ class SessionWorker:
             )
             snapshot["smb_decision"] = decision
             self._maybe_store_smb_decision_alert(decision, snapshot)
-        self._maybe_store_predictive_alert(snapshot)
+        if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
+            snapshot.setdefault(
+                "predictive_alert",
+                {
+                    "status": "prohibited",
+                    "reason": "corrected-target prediction alone cannot create an alert",
+                },
+            )
+        else:
+            self._maybe_store_predictive_alert(snapshot)
         self.storage.save_prediction_snapshot(snapshot)
         self._record_event_effect("prediction_saved")
         session_id = str(snapshot.get("session_id") or "")

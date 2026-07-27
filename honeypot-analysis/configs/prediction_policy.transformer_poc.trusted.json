@@ -1,0 +1,65 @@
+{
+  "schema_version": "prediction_policy.v1",
+  "policy_id": "professor-approved-corrected-target-transformer-poc",
+  "version": "2026-07-27-frozen-seed-20260721",
+  "updated_at": "2026-07-27T00:00:00Z",
+  "owner": "honeypot-cloud-analysis",
+  "review_status": "professor_approved_experimental_poc",
+  "policy": {
+    "enabled": true,
+    "prediction_mode": "professor_approved_corrected_target_transformer_poc",
+    "compute_weighted_ensemble_baseline": false,
+    "weight_influence_scope": "not_applicable_external_authority",
+    "transformer_checkpoint_path": "data/models/corrected_target_transformer_seed_20260721.pt",
+    "transformer_checkpoint_sha256": "7fbd73c4bd071336fa52a589bf41e39f5a3122a67aee398dfb8e6dd9cfdfb04a",
+    "transformer_seed": 20260721,
+    "transformer_parameter_count": 3951,
+    "transformer_model_spec_path": "data/models/corrected_target_transformer_seed_20260721.model_spec.json",
+    "transformer_model_spec_file_sha256": "2f4ea5531ce08adbd78f53832d7a6e23ba34617549c56aa50f04d069dee6ccc6",
+    "transformer_vocabulary_path": "data/models/corrected_target_transformer_seed_20260721.vocabulary.json",
+    "transformer_vocabulary_file_sha256": "1b46db302d2a92f80f1385e63fa01968cc23a9ce50cb77ef24f20ce8a9e494e9",
+    "transformer_vocabulary_sha256": "527a65c6d6cee94a3bbb0af6d5df95981a6438cf703e053484c9e7e116f0306f",
+    "transformer_preprocessing_path": "configs/next_behavior_preprocessing.v1.json",
+    "transformer_preprocessing_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
+    "transformer_calibration_path": "data/models/corrected_target_transformer_seed_20260721.calibration.json",
+    "transformer_calibration_file_sha256": "528bbdd8f21d7e0a5f4446657639ccbc994b9d469876e8f026eb716e9a8d7cc9",
+    "calibration_membership_sha256": "0d209ffe4380cfb707eb714dc12ffc41a4878a5e70e62f9561c1d6d8c1c1d78f",
+    "runtime_rule_policy_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "runtime_trust_policy_sha256": "1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd",
+    "runtime_classifier_checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+    "trusted_model_only_threshold": 0.9,
+    "tactic_probability_threshold": 0.5,
+    "terminal_probability_threshold": 0.5,
+    "terminal_precedence": true,
+    "empty_nonterminal_behavior": "select_highest_ranked_tactic",
+    "immutable_final_result_sha256": "3e82ccd46dd1114488e8e8c7cfc45522ded38ed580969f853687b233e5440c08",
+    "original_selection_status": "BLOCKED_AT_SELECTION",
+    "authority": {
+      "advisory_only": true,
+      "prediction_only_alerts": false,
+      "prediction_only_hypotheses": false,
+      "prediction_only_guidance": false,
+      "prediction_only_recommendations": false,
+      "prediction_only_actions": false
+    },
+    "predictive_alerts": {
+      "enabled": false
+    },
+    "prediction_triggers": {
+      "enabled": true,
+      "eventids": [
+        "cowrie.login.success",
+        "cowrie.login.failed",
+        "cowrie.session.file_download",
+        "cowrie.session.file_upload",
+        "cowrie.session.closed"
+      ],
+      "eventid_prefixes": [
+        "cowrie.command."
+      ]
+    },
+    "tactic_combination_rules": [],
+    "mitre_association_rules": [],
+    "sigma_correlation_rules": []
+  }
+}
