@@ -11,6 +11,7 @@ Recovery baseline: annotated local tag
 | `evaluation/generated/` | 2.3 GiB of ignored deterministic duplicate rebuild output | Retained source receipts, canonical cache artifacts, and committed compact evidence | Regenerate with reviewed evaluation tooling; directory was untracked |
 | `build/` and `honeypot_analysis.egg-info/` | Local packaging output | `pyproject.toml` | `python -m build` or editable install |
 | `.pytest_cache/` and Python bytecode caches | Interpreter/test-generated | Source and tests | Rerun Python/pytest |
+| `evaluation/authoritative_external_vomm/` | Pre-provenance evaluation superseded by the exact Zenodo-seven-day evaluation | `evaluation/authoritative_external_vomm_zenodo7_20260721/` | Commit `744dca3` or the recovery tag |
 
 No runtime subsystem was removed merely because it was inactive. Historical
 prediction helpers remain where current rollback evaluators, corrected
