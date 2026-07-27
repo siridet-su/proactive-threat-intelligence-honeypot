@@ -29,11 +29,11 @@ Validate policies explicitly:
 
 ```bash
 python -m production.policies.validate_prediction_policy \
-  configs/prediction_policy.transformer_poc.trusted.json
+  --policy configs/prediction_policy.transformer_poc.trusted.json
 python -m production.policies.validate_classification_rules \
-  configs/classification_rules.trusted.json
+  --policy configs/classification_rules.trusted.json
 python -m production.policies.validate_smb_policy \
-  configs/smb_policy.trusted.json
+  --action-policy configs/smb_action_playbooks.trusted.json
 ```
 
 ## Safe changes
