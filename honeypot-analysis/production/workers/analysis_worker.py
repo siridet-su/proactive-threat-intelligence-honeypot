@@ -574,6 +574,8 @@ async def analyze_job(
         enable_vertex_narrative=config.enable_vertex_narrative,
         smb_asset_profile_path=config.smb_asset_profile_path,
         smb_action_policy_path=config.smb_action_policy_path,
+        response_guidance_policy_path=config.response_guidance_policy_path,
+        response_guidance_asset_profile_path=config.response_guidance_asset_profile_path,
         cisa_cache_path=config.cisa_cache_path,
         sigma_cache_path=config.sigma_cache_path,
         mitre_cache_path=config.mitre_attack_path,

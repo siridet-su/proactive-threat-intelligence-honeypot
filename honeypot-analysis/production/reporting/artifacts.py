@@ -20,7 +20,7 @@ from production.utils.sensitive_data import (
     redact_for_artifact,
 )
 from production.utils.serialization import stable_id, stable_json, utc_now
-from production.reporting.smb_decision import is_trusted_recommendation_action
+from production.reporting.response_guidance_v3 import validate_response_guidance_v3
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
@@ -409,29 +409,18 @@ def _append_stix_object(
 
 
 def _trusted_recommendation_actions(report: Dict[str, Any]) -> List[Dict[str, Any]]:
-    candidates: List[Any] = []
-    candidates.extend(report.get("recommended_actions_structured") or [])
-    recommendations = report.get("recommendations")
-    if isinstance(recommendations, dict):
-        candidates.extend(recommendations.get("recommended_actions_structured") or [])
-        candidates.extend(recommendations.get("operator_actions") or [])
-    hypothesis = report.get("threat_hypothesis")
-    if isinstance(hypothesis, dict):
-        candidates.extend(hypothesis.get("recommended_actions_structured") or [])
-
-    actions: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in candidates:
-        if not isinstance(item, dict):
-            continue
-        if not is_trusted_recommendation_action(item):
-            continue
-        key = str(item.get("action_id") or item.get("rule_id") or item.get("action") or stable_json(item))
-        if key in seen:
-            continue
-        seen.add(key)
-        actions.append(item)
-    return actions
+    guidance = report.get("response_guidance_v3")
+    if not isinstance(guidance, dict) or guidance.get("schema_version") != "response_guidance.v3":
+        return []
+    if validate_response_guidance_v3(guidance):
+        return []
+    return [
+        item for item in guidance.get("advisory_actions") or []
+        if isinstance(item, dict)
+        and item.get("requires_manual_approval") is True
+        and item.get("safe_to_auto_execute") is False
+        and item.get("execution_integration") == "not_implemented"
+    ]
 
 
 def _external_references(raw_refs: Any) -> List[Dict[str, Any]]:
@@ -736,33 +725,24 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
             }, seen_ids, reference_from_report=False)
 
     for action in _trusted_recommendation_actions(report):
-        action_id_value = str(action.get("action_id") or action.get("rule_id") or action.get("action") or stable_json(action))
+        action_id_value = str(action.get("action_id") or action.get("rule_id") or action.get("description") or stable_json(action))
         coa_id = _stix_id("course-of-action", "policy-action:" + action_id_value)
-        safety = action.get("automation_safety") if isinstance(action.get("automation_safety"), dict) else {}
         coa = {
             "type": "course-of-action",
             "spec_version": "2.1",
             "id": coa_id,
             "created": now,
             "modified": now,
-            "name": str(action.get("action") or action_id_value),
-            "description": str(action.get("why") or action.get("reason") or ""),
+            "name": str(action.get("description") or action_id_value),
+            "description": str(action.get("rationale") or ""),
             "external_references": _external_references(action.get("references")),
             "x_honeypot_action_id": action.get("action_id") or "",
             "x_honeypot_rule_id": action.get("rule_id") or "",
-            "x_honeypot_authority": "trusted_policy_engine",
-            "x_honeypot_source_type": action.get("source_type") or "",
-            "x_honeypot_severity": action.get("severity") or "",
-            "x_honeypot_confidence": action.get("confidence") or "",
-            "x_honeypot_evidence": action.get("evidence") or [],
+            "x_honeypot_authority": "deterministic_observed_evidence_policy",
             "x_honeypot_evidence_refs": action.get("evidence_refs") or [],
             "x_honeypot_evidence_scope": action.get("evidence_scope") or [],
-            "x_honeypot_grounding_status": action.get("grounding_status") or "",
-            "x_honeypot_visibility_limitations": action.get("visibility_limitations") or [],
-            "x_honeypot_requires_manual_approval": bool(
-                action.get("requires_manual_approval") or safety.get("requires_manual_approval")
-            ),
-            "x_honeypot_safe_to_auto_execute": bool(safety.get("safe_to_auto_execute")),
+            "x_honeypot_requires_manual_approval": True,
+            "x_honeypot_safe_to_auto_execute": False,
         }
         _append_stix_object(objects, report_obj, coa, seen_ids)
         for tid in _extract_ttp_ids_from_action(action):
@@ -918,11 +898,10 @@ def write_markdown_report(
     if actions:
         for action in actions:
             lines.append(
-                f"- P{action.get('priority', 50)} [{action.get('severity', 'info')}] "
-                f"{action.get('action', '')} (rule `{action.get('rule_id', '')}`; manual approval required)"
+                f"- P{action.get('policy_order', 50)} {action.get('description', '')} "
+                f"(rule `{action.get('rule_id', '')}`; manual approval required)"
             )
-            for limitation in (action.get("visibility_limitations") or [])[:2]:
-                lines.append(f"  - Limitation: {limitation}")
+            lines.append(f"  - Canonical evidence: {', '.join(action.get('evidence_refs') or [])}")
     else:
         lines.append("- No policy-approved operator action matched the available evidence.")
     lines.extend(["", "## IoCs"])
@@ -1023,8 +1002,8 @@ def write_pdf_report(
         for action in actions[:8]:
             story.append(Paragraph(
                 escape(
-                    f"P{action.get('priority', 50)} [{action.get('severity', 'info')}] "
-                    f"{action.get('action', '')} (manual approval required)"
+                    f"P{action.get('policy_order', 50)} {action.get('description', '')} "
+                    "(manual approval required)"
                 ),
                 body,
             ))

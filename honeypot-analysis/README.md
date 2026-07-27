@@ -52,6 +52,13 @@ audit-only evidence into fact. All response actions require canonical
 behavioral evidence, policy provenance, scope, preconditions, verification,
 rollback guidance, and manual approval.
 
+New guidance uses `response_guidance.v3`: an immutable observed-evidence
+snapshot plus exact policy/profile SHA-256 values determine its stable ID and
+advisory tasks. Forecast and enrichment are display-only context. Guidance is
+not written into prediction snapshots, never creates alerts, and has no
+execution integration. Historical v1/v2 guidance remains readable only through
+a non-authorizing legacy adapter.
+
 Never expose Cowrie or administrative services without explicit authorization,
 isolation, monitoring, egress controls, and tested recovery. No live secrets,
 keys, databases, raw production telemetry, private network configuration, or

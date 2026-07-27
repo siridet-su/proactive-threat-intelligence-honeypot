@@ -34,6 +34,8 @@ python -m production.policies.validate_classification_rules \
   --policy configs/classification_rules.trusted.json
 python -m production.policies.validate_smb_policy \
   --action-policy configs/smb_action_playbooks.trusted.json
+python -m production.policies.validate_response_guidance_policy \
+  --policy configs/response_guidance_policy.v3.json
 ```
 
 The only supported prediction runtimes are the frozen Transformer policy and
@@ -64,9 +66,11 @@ test. Never tune after Final access or silently reinterpret stored snapshots.
 
 ### Guidance change
 
-Use canonical behavioral evidence references and scope. Add adversarial tests
-for prediction-only input, copied provenance, malformed scopes, stale nested
-guidance, policy drift, and historical point-in-time display.
+Use `response_guidance.v3` and immutable canonical observed evidence. Add
+adversarial tests for prediction/enrichment-only input, policy/profile hash
+drift, malformed references, automatic-execution attempts, deterministic IDs,
+and historical read-only adapter display. Do not write guidance into prediction
+snapshots or derive alerting from it.
 
 ### Storage change
 

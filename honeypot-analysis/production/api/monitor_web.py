@@ -49,11 +49,7 @@ from production.utils.http_security import (
 )
 from production.utils.serialization import html_script_json, stable_id, utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
-from production.reporting.smb_decision import (
-    is_trusted_recommendation_action,
-    is_trusted_recommendation_decision,
-    is_trusted_recommendation_provenance,
-)
+from production.reporting.response_guidance_v3 import read_legacy_response_guidance
 from production.storage import open_storage, safe_database_descriptor
 
 
@@ -81,10 +77,15 @@ class MonitorConfig:
     external_seed_validation_path: str = ""
     external_seed_review_path: str = ""
     external_seed_health_path: str = ""
+    # Accepted only for backwards-compatible monitor configuration decoding;
+    # the monitor does not evaluate or expose legacy SMB decisions.
     smb_asset_profile_path: str = ""
     smb_action_policy_path: str = ""
     mitre_attack_path: str = ""
-    enable_smb_decisions: bool = True
+    enable_smb_decisions: bool = False
+    response_guidance_policy_path: str = ""
+    response_guidance_asset_profile_path: str = ""
+    enable_response_guidance: bool = True
     refresh_seconds: int = DEFAULT_REFRESH_SECONDS
     production_config: Optional[ProductionConfig] = None
 
@@ -106,10 +107,10 @@ def _load_monitor_config(config_path: Optional[str] = None) -> MonitorConfig:
         external_seed_validation_path=external_seed_paths["validation"],
         external_seed_review_path=external_seed_paths["review"],
         external_seed_health_path=external_seed_paths["health"],
-        smb_asset_profile_path=cfg.smb_asset_profile_path,
-        smb_action_policy_path=cfg.smb_action_policy_path,
         mitre_attack_path=cfg.mitre_attack_path,
-        enable_smb_decisions=cfg.enable_smb_decisions,
+        response_guidance_policy_path=cfg.response_guidance_policy_path,
+        response_guidance_asset_profile_path=cfg.response_guidance_asset_profile_path,
+        enable_response_guidance=cfg.enable_response_guidance,
         production_config=cfg,
     )
 
@@ -184,10 +185,15 @@ def _monitor_runtime_config(config: MonitorConfig) -> ProductionConfig:
     cfg = copy.copy(config.production_config or ProductionConfig())
     cfg.database_url = _monitor_database_url(config)
     cfg.reports_dir = config.reports_dir
-    cfg.smb_asset_profile_path = config.smb_asset_profile_path or cfg.smb_asset_profile_path
-    cfg.smb_action_policy_path = config.smb_action_policy_path or cfg.smb_action_policy_path
     cfg.mitre_attack_path = config.mitre_attack_path or cfg.mitre_attack_path
-    cfg.enable_smb_decisions = config.enable_smb_decisions
+    cfg.response_guidance_policy_path = (
+        config.response_guidance_policy_path or cfg.response_guidance_policy_path
+    )
+    cfg.response_guidance_asset_profile_path = (
+        config.response_guidance_asset_profile_path
+        or cfg.response_guidance_asset_profile_path
+    )
+    cfg.enable_response_guidance = config.enable_response_guidance
     return cfg
 
 
@@ -248,7 +254,7 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         return HTTPStatus.OK, {
             "item": api_row_view("prediction_snapshots", snapshot),
             "current_prediction": _current_prediction_payload(snapshot, feedback_rows),
-            "smb_decision": _current_decision_payload(runtime_config, storage, session_id, snapshot),
+            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
             "session_id": session_id,
             "timestamp": utc_now(),
         }
@@ -259,7 +265,7 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
             return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
         snapshot = storage.get_latest_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
         return HTTPStatus.OK, {
-            "smb_decision": _current_decision_payload(runtime_config, storage, session_id, snapshot),
+            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
             "session_id": session_id,
             "timestamp": utc_now(),
         }
@@ -1517,38 +1523,24 @@ def _report_recommendations(
         or merged.get("predicted_next_action")
         or ""
     )
+    response_guidance = merged.get("response_guidance_v3") or {}
+    if not isinstance(response_guidance, dict) or response_guidance.get("schema_version") != "response_guidance.v3":
+        response_guidance = {}
     structured_actions = [
-        item for item in (merged.get("recommended_actions_structured") or [])
+        item for item in response_guidance.get("advisory_actions") or []
         if isinstance(item, dict)
     ]
     canonical_recommendations = merged.get("recommendations") or {}
-    if not structured_actions and isinstance(canonical_recommendations, dict):
-        structured_actions = [
-            item for item in canonical_recommendations.get("operator_actions") or []
-            if isinstance(item, dict)
-        ]
-    trusted_decision = merged.get("trusted_recommendation_decision") or {}
-    if not structured_actions and isinstance(trusted_decision, dict):
-        structured_actions = [
-            item for item in (trusted_decision.get("immediate_actions") or [])
-            if isinstance(item, dict)
-        ]
-    policy_actions: List[Dict[str, Any]] = []
-    for item in structured_actions:
-        if is_trusted_recommendation_action(item):
-            policy_actions.append(item)
-    structured_actions = policy_actions
-    provenance = merged.get("recommendation_provenance") or {}
-    policy_authoritative = (
-        is_trusted_recommendation_provenance(provenance)
-        or is_trusted_recommendation_decision(trusted_decision)
+    context_notes = (
+        _as_text_list(canonical_recommendations.get("context_notes"))
+        if isinstance(canonical_recommendations, dict) else []
     )
+    policy_authoritative = response_guidance.get("authority") == "deterministic_observed_evidence_policy"
     recommended_actions = [
-        str(item.get("action") or "").strip()
+        str(item.get("description") or "").strip()
         for item in structured_actions
-        if str(item.get("action") or "").strip()
+        if str(item.get("description") or "").strip()
     ]
-    strategic = _as_text_list(merged.get("strategic_recommendations"))
     falsification = _as_text_list(
         [
             item.get("text")
@@ -1558,18 +1550,17 @@ def _report_recommendations(
         or threat.get("falsification_conditions")
         or merged.get("falsification_conditions")
     )
-    source = "trusted_policy_engine" if policy_authoritative else "policy_unavailable"
+    source = response_guidance.get("authority") or "policy_unavailable"
     return {
         "source": source,
         "post_session_follow_on_hypothesis": predicted,
         "predicted_next_action": predicted,
         "recommended_actions": recommended_actions,
         "recommended_actions_structured": structured_actions,
-        "trusted_recommendation_decision": trusted_decision if isinstance(trusted_decision, dict) else {},
-        "recommendation_provenance": provenance if isinstance(provenance, dict) else {},
+        "response_guidance": copy.deepcopy(response_guidance),
         "policy_authoritative": policy_authoritative,
         "policy_action_count": len(structured_actions),
-        "strategic_recommendations": strategic,
+        "context_notes": context_notes,
         "falsification_conditions": falsification,
         "evidence_gaps": [
             _text(item.get("text"))
@@ -1589,28 +1580,42 @@ def _report_recommendations(
     }
 
 
-def _historical_decision_payload(report_payload: Any) -> Dict[str, Any]:
-    """Return a view copy of the decision stored with a historical report."""
+def _historical_response_guidance_payload(report_payload: Any) -> Dict[str, Any]:
+    """Return stored v3 guidance without recomputation.
+
+    Old v1/v2 records are adapted as non-actionable, read-only historical
+    evidence rather than being re-evaluated or promoted to v3 tasks.
+    """
 
     if not isinstance(report_payload, dict):
         return {}
-    stored = report_payload.get("trusted_recommendation_decision")
-    if not isinstance(stored, dict):
-        return {}
-    decision = copy.deepcopy(stored)
-    top_level_guidance = report_payload.get("response_guidance_v2")
-    if isinstance(top_level_guidance, dict):
-        decision["response_guidance_v2"] = copy.deepcopy(top_level_guidance)
-    decision["presentation_semantics"] = {
+    stored = report_payload.get("response_guidance_v3")
+    if isinstance(stored, dict) and stored.get("schema_version") == "response_guidance.v3":
+        guidance = copy.deepcopy(stored)
+    else:
+        legacy = report_payload.get("response_guidance_v2") or report_payload.get("trusted_recommendation_decision")
+        if not isinstance(legacy, dict):
+            return {}
+        guidance = read_legacy_response_guidance(legacy)
+    guidance["presentation_semantics"] = {
         "mode": "point_in_time_stored_decision",
         "historical_record": True,
         "replaces_stored_historical_guidance": False,
         "description": (
-            "Stored with the historical report and displayed without current-policy "
-            "recomputation."
+            "Stored with the historical report and displayed without current-policy recomputation."
         ),
     }
-    return decision
+    return guidance
+
+
+def _historical_decision_payload(report_payload: Any) -> Dict[str, Any]:
+    """Compatibility reader for callers using the former helper name.
+
+    It returns the same read-only v3/legacy-adapter payload and performs no
+    decision evaluation.
+    """
+
+    return _historical_response_guidance_payload(report_payload)
 
 
 def _likely_next_steps(session_payload: Dict[str, Any]) -> List[str]:
@@ -1869,7 +1874,7 @@ def load_session_detail(
     latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
     report_recommendations = _report_recommendations(report_payload, artifact_payload, payload)
     current_policy_reevaluation: Dict[str, Any] = {}
-    if config.enable_smb_decisions:
+    if config.enable_response_guidance:
         current_policy_reevaluation = _current_decision_payload(
             config,
             storage,
@@ -1877,10 +1882,10 @@ def load_session_detail(
             latest_prediction,
             report_recommendations=report_recommendations,
         )
-    historical_smb_decision = _historical_decision_payload(
+    historical_response_guidance = _historical_response_guidance_payload(
         _merged_report_payload(report_payload, artifact_payload)
     )
-    primary_smb_decision = historical_smb_decision or current_policy_reevaluation
+    primary_response_guidance = historical_response_guidance or current_policy_reevaluation
     detail = {
         "ok": True,
         "timestamp": utc_now(),
@@ -1918,17 +1923,16 @@ def load_session_detail(
         "reports": [_row_with_payload(row) for row in report_rows],
         "report_summary": _report_summary(report_payload, artifact_payload),
         "report_recommendations": report_recommendations,
-        # Backward-compatible primary field: a stored report decision wins.
-        "smb_decision": primary_smb_decision,
-        "historical_smb_decision": historical_smb_decision,
+        "response_guidance": primary_response_guidance,
+        "historical_response_guidance": historical_response_guidance,
         "current_policy_reevaluation": current_policy_reevaluation,
-        "smb_decision_semantics": {
+        "response_guidance_semantics": {
             "primary": (
-                "point_in_time_stored_decision"
-                if historical_smb_decision
+                "point_in_time_stored_guidance"
+                if historical_response_guidance
                 else "current_policy_reevaluation"
             ),
-            "historical_available": bool(historical_smb_decision),
+            "historical_available": bool(historical_response_guidance),
             "current_reevaluation_available": bool(current_policy_reevaluation),
             "current_reevaluation_replaces_historical": False,
         },
@@ -3620,12 +3624,12 @@ def _render_feedback_panel(
     predicted_top_tactic = str((ranking[0] or {}).get("tactic") or "") if ranking else ""
     predicted_ranking = json.dumps(_compact_prediction_ranking(ranking), sort_keys=True)
     rows = detail.get("analyst_feedback") or []
-    smb_decision = detail.get("smb_decision") or {}
-    smb_risk = (smb_decision.get("risk") or {}).get("severity") or ""
-    smb_top_actions = json.dumps(
+    response_guidance = detail.get("response_guidance") or {}
+    guidance_priority = (response_guidance.get("triage") or {}).get("review_priority") or ""
+    guidance_actions = json.dumps(
         [
             item.get("action_id")
-            for item in (smb_decision.get("immediate_actions") or [])[:5]
+            for item in (response_guidance.get("advisory_actions") or [])[:5]
             if isinstance(item, dict)
         ],
         sort_keys=True,
@@ -3637,9 +3641,9 @@ def _render_feedback_panel(
   <input type="hidden" name="observed_prefix" value="{_html(observed_prefix)}">
   <input type="hidden" name="predicted_top_tactic" value="{_html(predicted_top_tactic)}">
   <input type="hidden" name="predicted_ranking" value="{_html(predicted_ranking)}">
-  <input type="hidden" name="smb_decision_id" value="{_html(smb_decision.get('decision_id') or '')}">
-  <input type="hidden" name="smb_risk" value="{_html(smb_risk)}">
-  <input type="hidden" name="smb_top_actions" value="{_html(smb_top_actions)}">
+  <input type="hidden" name="response_guidance_id" value="{_html(response_guidance.get('guidance_id') or '')}">
+  <input type="hidden" name="response_guidance_priority" value="{_html(guidance_priority)}">
+  <input type="hidden" name="response_guidance_actions" value="{_html(guidance_actions)}">
 """
     history = ""
     if error:
@@ -3749,28 +3753,29 @@ def _render_reference_links(references: Iterable[Any], limit: int = 6) -> str:
     return "<ul>" + "\n".join(refs) + "</ul>"
 
 
-def _render_smb_decision(decision: Dict[str, Any]) -> str:
+def _render_response_guidance(decision: Dict[str, Any]) -> str:
+    """Render only the v3 response-guidance contract.
+
+    It renders no v1 immediate actions or v2 adapters.
+    """
+
     if not decision:
         return ""
-    guidance = decision.get("response_guidance_v2") or {}
-    if isinstance(guidance, dict) and guidance.get("schema_version") == "response_guidance.v2":
-        finding = guidance.get("finding") or {}
+    guidance = decision
+    if isinstance(guidance, dict) and guidance.get("schema_version") == "response_guidance.v3":
+        findings = [item for item in guidance.get("findings") or [] if isinstance(item, dict)]
+        finding = findings[0] if findings else {}
         triage = guidance.get("triage") or {}
-        actions = [
-            item for item in guidance.get("advisory_actions") or []
-            if isinstance(item, dict)
-        ]
+        actions = [item for item in guidance.get("advisory_actions") or [] if isinstance(item, dict)]
         rendered_actions = []
         for action in actions[:8]:
-            approval = action.get("manual_approval") or {}
-            applicability = action.get("applicability") or {}
+            refs = ", ".join(str(ref) for ref in action.get("evidence_refs") or [])
             rendered_actions.append(
                 "<li>"
                 f"<strong>{_html(action.get('description') or '-')}</strong>"
                 f"<br><span class=\"muted\">{_html(action.get('rationale') or '')}</span>"
-                f"<div class=\"muted\">applicability: {_html(applicability.get('status') or '-')} | "
-                f"owner: {_html(action.get('owner_role') or '-')} | manual approval: "
-                f"{_html(approval.get('state') or '-')}</div>"
+                f"<div class=\"muted\">rule: {_html(action.get('rule_id') or '-')} | "
+                f"canonical evidence: {_html(refs or '-')} | manual approval: required</div>"
                 f"<details><summary>Preconditions</summary>{_render_list_items(action.get('preconditions') or [])}</details>"
                 f"<details><summary>Verification</summary>{_render_list_items(action.get('verification_steps') or [])}</details>"
                 f"<details><summary>Rollback guidance</summary><p>{_html(action.get('rollback_guidance') or '')}</p></details>"
@@ -3785,7 +3790,7 @@ def _render_smb_decision(decision: Dict[str, Any]) -> str:
         return (
             '<div class="decision-panel">'
             '<div class="overview-grid">'
-            f'<div class="kv"><span>finding</span><strong>{_html(finding.get("policy_severity") or "-")}</strong></div>'
+            f'<div class="kv"><span>finding</span><strong>{_html(finding.get("severity") or "-")}</strong></div>'
             f'<div class="kv"><span>review urgency</span><strong>{_html(triage.get("urgency") or "-")}</strong></div>'
             f'<div class="kv"><span>guidance status</span><strong>{_html(guidance.get("status") or "-")}</strong></div>'
             f'<div class="kv"><span>policy</span><strong>{_html(policy.get("policy_id") or "-")}</strong></div>'
@@ -3796,49 +3801,14 @@ def _render_smb_decision(decision: Dict[str, Any]) -> str:
             + '<p class="muted">This guidance has no execution authority; a human must approve and verify any action.</p>'
             + "</div>"
         )
-    risk = decision.get("risk") or {}
-    goal = decision.get("likely_goal") or {}
-    next_step = decision.get("likely_next_step") or {}
-    trust = decision.get("trust") or {}
-    policy = trust.get("policy") or {}
-    actions = [item for item in decision.get("immediate_actions") or [] if isinstance(item, dict)]
-    reference_guidance = [item for item in decision.get("reference_guidance") or [] if isinstance(item, dict)]
-    action_html = (
-        _render_structured_report_actions(actions)
-        if actions
-        else '<div class="empty">No immediate SMB action matched this session.</div>'
-    )
-    guidance_html = _render_mitre_reference_guidance(reference_guidance) if reference_guidance else ""
-    references: List[Any] = []
-    for item in [risk, goal] + actions + reference_guidance:
-        references.extend(item.get("references") or [])
-    assets = ((decision.get("asset_context") or {}).get("matched_assets") or [])
-    asset_text = ", ".join(
-        str(asset.get("display_name") or asset.get("asset_id") or "")
-        for asset in assets
-        if isinstance(asset, dict)
-    )
-    limitations = trust.get("limitations") or []
+    if guidance.get("schema_version") == "response_guidance_legacy_adapter.v1":
+        return (
+            '<div class="decision-panel"><div class="empty">'
+            f'{_html(guidance.get("semantics") or "Historical guidance is read-only.")}'
+            "</div></div>"
+        )
     return (
-        '<div class="decision-panel">'
-        '<div class="overview-grid">'
-        f'<div class="kv"><span>risk</span><strong>{_html(str(risk.get("severity") or "-").upper())}</strong></div>'
-        f'<div class="kv"><span>likely_goal</span><strong>{_html(goal.get("likely_goal") or "-")}</strong></div>'
-        f'<div class="kv"><span>predicted_next_tactic</span><strong>{_html(next_step.get("tactic") or "-")}</strong></div>'
-        f'<div class="kv"><span>confidence</span><strong>{_html(next_step.get("confidence") or "-")}</strong></div>'
-        f'<div class="kv"><span>asset_context</span><strong>{_html(asset_text or "-")}</strong></div>'
-        f'<div class="kv"><span>policy</span><strong>{_html(policy.get("policy_id") or policy.get("source_path") or "-")}</strong></div>'
-        "</div>"
-        "<h3>Do Now</h3>"
-        + action_html
-        + ("<h3>MITRE Reference Guidance</h3>" + guidance_html if guidance_html else "")
-        + "<h3>Why This Was Shown</h3>"
-        + _render_list_items((risk.get("evidence") or []) + (goal.get("evidence") or []))
-        + "<h3>Trusted Source References</h3>"
-        + _render_reference_links(references)
-        + "<h3>Trust Notes</h3>"
-        + _render_list_items(limitations)
-        + "</div>"
+        '<div class="decision-panel"><div class="empty">Response guidance is unavailable.</div></div>'
     )
 
 
@@ -3905,8 +3875,14 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     if not selected and not detail:
         return '<div class="empty">No selected session.</div>'
     payload = selected["payload"] if selected else (detail or {}).get("session_payload", {})
-    smb_decision = (detail or {}).get("smb_decision") or {}
-    historical_decision = (detail or {}).get("historical_smb_decision") or {}
+    response_guidance = (detail or {}).get("response_guidance") or {}
+    historical_decision = (
+        (detail or {}).get("historical_response_guidance")
+        # Read-only compatibility with callers holding the pre-v3 key.  New
+        # detail responses expose only historical_response_guidance.
+        or (detail or {}).get("historical_smb_decision")
+        or {}
+    )
     reevaluated_decision = (detail or {}).get("current_policy_reevaluation") or {}
     recommendations = (detail or {}).get("report_recommendations") or {}
     latest_prediction = (detail or {}).get("latest_prediction_snapshot") or {}
@@ -3919,8 +3895,7 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         or ""
     )
     operator_actions = recommendations.get("recommended_actions") or []
-    strategic = recommendations.get("strategic_recommendations") or []
-    structured_report_actions = recommendations.get("recommended_actions_structured") or []
+    context_notes = recommendations.get("context_notes") or []
     falsification = recommendations.get("falsification_conditions") or []
     evidence_gaps = recommendations.get("evidence_gaps") or []
     external_suggestions = recommendations.get("external_validation_suggestions") or []
@@ -3929,24 +3904,24 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         parts.extend([
             "<h3>Point-in-Time Stored Advisory Response Guidance</h3>",
             '<p class="muted">Historical report decision; it is not recomputed under the current policy.</p>',
-            _render_smb_decision(historical_decision),
+            _render_response_guidance(historical_decision),
         ])
         if reevaluated_decision:
             parts.extend([
                 "<h3>Current Policy Reevaluation</h3>",
                 '<p class="muted">Recomputed from current policy and context; it does not replace the stored historical guidance.</p>',
-                _render_smb_decision(reevaluated_decision),
+                _render_response_guidance(reevaluated_decision),
             ])
         parts.append("<h3>Technical Prediction / Report Detail</h3>")
     elif reevaluated_decision:
         parts.extend([
             "<h3>Current Policy Reevaluation</h3>",
             '<p class="muted">No stored report decision is available. This guidance was recomputed from current policy and context.</p>',
-            _render_smb_decision(reevaluated_decision),
+            _render_response_guidance(reevaluated_decision),
             "<h3>Technical Prediction / Report Detail</h3>",
         ])
-    elif smb_decision:
-        parts.extend(["<h3>Advisory Response Guidance</h3>", _render_smb_decision(smb_decision)])
+    elif response_guidance:
+        parts.extend(["<h3>Advisory Response Guidance</h3>", _render_response_guidance(response_guidance)])
         parts.append("<h3>Technical Prediction / Report Detail</h3>")
     parts.extend([
         '<div class="overview-grid">',
@@ -3954,14 +3929,10 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         f'<div class="kv"><span>post_session_follow_on_hypothesis</span><strong>{_html(predicted or "Report pending; using rule-based session inference.")}</strong></div>',
         "</div>",
         '<p class="muted">This field is the post-session report hypothesis. It is separate from the live realtime prediction engine above.</p>',
-        "<h3>Recommended Operator Actions</h3>",
-        (
-            _render_structured_report_actions(structured_report_actions)
-            or _render_list_items(operator_actions)
-            or '<div class="empty">No policy-approved operator actions are available for this report.</div>'
-        ),
+        "<h3>Response Guidance Actions</h3>",
+        '<p class="muted">Actions, when present, are rendered only in the v3 response-guidance panel above.</p>',
     ])
-    if realtime_ranking and not smb_decision:
+    if realtime_ranking and not response_guidance:
         parts.extend([
             "<h3>Statistical Next-Tactic Forecast</h3>",
             '<p class="muted">Advisory model output; not observed evidence or factual confidence.</p>',
@@ -3971,8 +3942,8 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
                 for item in realtime_ranking
             ]),
         ])
-    if strategic:
-        parts.extend(["<h3>Strategic Recommendations</h3>", _render_list_items(strategic)])
+    if context_notes:
+        parts.extend(["<h3>Non-Authoritative Context Notes</h3>", _render_list_items(context_notes)])
     if falsification:
         parts.extend(["<h3>What To Check Next</h3>", _render_list_items(falsification)])
     if evidence_gaps:

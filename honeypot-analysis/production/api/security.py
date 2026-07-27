@@ -463,7 +463,7 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         ],
         "report_summary": detail.get("report_summary") or {},
         "report_recommendations": detail.get("report_recommendations") or [],
-        "smb_decision": detail.get("smb_decision") or {},
+        "response_guidance": detail.get("response_guidance") or {},
         "errors": detail.get("errors") or {},
     }
     return public_payload(output)

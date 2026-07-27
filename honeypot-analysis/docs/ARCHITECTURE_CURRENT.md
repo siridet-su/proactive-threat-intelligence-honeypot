@@ -22,9 +22,13 @@
 8. `session_assessment.v3` organizes observations, claims, counterevidence,
    assumptions, limitations, gaps, alternatives, and falsification conditions.
    `threat_hypothesis.v2` remains readable as a compatibility/report contract.
-9. `response_guidance.v2` derives finding, triage, and advisory actions from
-   validated canonical behavioral evidence and reviewed policy. Forecast or
-   enrichment alone is never action eligibility.
+9. `response_guidance.v3` evaluates a SHA-256-bound reviewed policy directly
+   against an immutable canonical observed-behaviour snapshot. Its guidance ID
+   is derived from the evidence, policy, optional explicitly configured asset
+   profile, selected rules, and actions—not timestamps, scores, forecasts, or
+   enrichment. Forecast and enrichment may appear only as non-authoritative
+   context. V1/v2 payloads remain display-only historical adapters and are
+   never promoted into current actions.
 10. Reporting writes JSON/HTML/STIX/PDF artifacts where enabled. Dashboard and
     monitor endpoints revalidate authority-bearing fields at their boundary.
 
@@ -64,7 +68,7 @@ Offline reproduction is isolated under
 | Forecast | Advisory model output only |
 | Enrichment | Context only |
 | Claim | Canonical cited evidence and claim validator |
-| Response guidance | Trusted action policy plus canonical behavioral scope |
+| Response guidance | SHA-256-bound v3 policy plus immutable canonical observed evidence |
 | Execution | Human operator outside this application |
 
 Secrets pass through centralized redaction and serialization policy. HMAC keys,

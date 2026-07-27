@@ -12,7 +12,7 @@ import pytest
 
 from production.storage import open_storage
 from production.utils.config import ProductionConfig
-from production.workers.session_monitor import SessionMonitor
+from production.workers.session_monitor import SessionMonitor, SessionState
 from production.workers.analysis_worker import AnalysisWorker
 from production.workers.session_worker import SessionWorker, WorkerError
 
@@ -103,6 +103,53 @@ def test_worker_completes_claim_only_after_durable_session_save(
     assert row["processing_outcome"] == "succeeded"
     assert effects["event_applied"] is True
     assert effects["session_saved"] is True
+
+
+def test_prediction_snapshot_never_persists_response_guidance_or_creates_alert(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The forecast persistence path cannot become a guidance authority."""
+
+    class _Predictor:
+        enabled = True
+
+        def predict(self, _features: object, *, event_id: str = "") -> dict:
+            return {
+                "snapshot_id": "guidance-free-snapshot",
+                "session_id": "guidance-free-session",
+                "src_ip": "203.0.113.27",
+                "event_id": event_id,
+                "prediction": ["execution"],
+                "final_ranking": [{"tactic": "execution", "score": 0.9}],
+            }
+
+    worker = SessionWorker(_config(tmp_path))
+    worker.prediction_engine = _Predictor()
+    monkeypatch.setattr(worker, "_apply_campaign_clustering", lambda *_args, **_kwargs: {})
+    state = SessionState(
+        session_id="guidance-free-session",
+        src_ip="203.0.113.27",
+        start_time="2026-07-27T00:00:00Z",
+        commands=["whoami"],
+    )
+    try:
+        assert worker._save_prediction_snapshot_unobserved(
+            state,
+            {"eventid": "cowrie.command.input", "input": "whoami"},
+            event_id="event-guidance-free",
+        )
+        saved = worker.storage.get_latest_prediction_snapshot("guidance-free-session")
+        assert saved is not None
+        payload = saved["payload"]
+        assert "response_guidance" not in payload
+        assert "response_guidance_v3" not in payload
+        assert "smb_decision" not in payload
+        assert "recommended_actions" not in payload
+        assert payload["predictive_alert"]["status"] == "prohibited"
+        assert worker.storage.list_rows("alerts", limit=20) == []
+    finally:
+        worker.close()
 
 
 def test_partial_write_failure_retries_without_duplicate_in_memory_state_or_secret(

@@ -26,7 +26,7 @@ from production.utils.http_security import (
 )
 from production.utils.serialization import utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
-from production.reporting.smb_decision import build_smb_decision_from_paths
+from production.reporting.response_guidance_v3 import build_response_guidance_v3_from_session
 from production.storage import open_storage
 from production.api.security import (
     api_row_view,
@@ -193,26 +193,27 @@ def _current_decision_payload(
     *,
     report_recommendations: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    if not config.enable_smb_decisions:
-        return {"enabled": False, "reason": "SMB decision layer disabled"}
-    decision = build_smb_decision_from_paths(
-        session_payload=_session_payload_for_id(storage, session_id),
-        prediction_snapshot=snapshot,
-        report_recommendations=report_recommendations,
-        asset_profile_path=config.smb_asset_profile_path,
-        action_policy_path=config.smb_action_policy_path,
-        mitre_attack_path=config.mitre_attack_path,
+    if not config.enable_response_guidance:
+        return {"enabled": False, "reason": "response guidance layer disabled"}
+    session_payload = _session_payload_for_id(storage, session_id)
+    prediction_context = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else snapshot
+    guidance = build_response_guidance_v3_from_session(
+        session_payload,
+        policy_path=config.response_guidance_policy_path,
+        asset_profile_path=config.response_guidance_asset_profile_path,
+        forecast_context=prediction_context or {},
+        enrichment_context=session_payload.get("enrichment_status") or {},
     )
-    decision["presentation_semantics"] = {
+    guidance["presentation_semantics"] = {
         "mode": "current_policy_reevaluation",
         "historical_record": False,
         "replaces_stored_historical_guidance": False,
         "description": (
-            "Recomputed from current policy and context; this is not the stored "
-            "point-in-time report decision."
+            "Recomputed from the current v3 policy and immutable current observed "
+            "evidence; it does not replace stored point-in-time guidance."
         ),
     }
-    return decision
+    return guidance
 
 
 def _external_seed_health_payload(config: ProductionConfig) -> Dict[str, Any]:
@@ -427,7 +428,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 {
                     "item": api_row_view("prediction_snapshots", snapshot),
                     "current_prediction": _current_prediction_payload(snapshot, feedback_rows),
-                    "smb_decision": _current_decision_payload(self.config, storage, session_id, snapshot),
+                    "response_guidance": _current_decision_payload(self.config, storage, session_id, snapshot),
                     "session_id": session_id,
                     "timestamp": utc_now(),
                 },
@@ -444,7 +445,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.OK,
                 {
-                    "smb_decision": _current_decision_payload(self.config, storage, session_id, snapshot),
+                    "response_guidance": _current_decision_payload(self.config, storage, session_id, snapshot),
                     "session_id": session_id,
                     "timestamp": utc_now(),
                 },

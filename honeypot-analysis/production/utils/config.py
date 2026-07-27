@@ -244,11 +244,16 @@ class ProductionConfig:
     censys_platform_token: str = ""
     censys_organization_id: str = ""
     threat_intel_config_path: str = "configs/threat_intel_config.json"
-    smb_asset_profile_path: str = "configs/smb_asset_profile.example.json"
+    # Legacy v1 SMB decision configuration. It is retained only to read
+    # historical payloads; new response guidance must use the v3 fields below.
+    smb_asset_profile_path: str = ""
     smb_action_policy_path: str = "configs/smb_action_playbooks.trusted.json"
-    enable_smb_decisions: bool = True
-    enable_smb_decision_alerts: bool = True
+    enable_smb_decisions: bool = False
+    enable_smb_decision_alerts: bool = False
     smb_alert_min_severity: str = "high"
+    response_guidance_policy_path: str = "configs/response_guidance_policy.v3.json"
+    response_guidance_asset_profile_path: str = ""
+    enable_response_guidance: bool = True
     cisa_cache_path: str = ""
     sigma_cache_path: str = ""
     mitre_attack_path: str = ""
@@ -1050,6 +1055,15 @@ class ProductionConfig:
         cfg.enable_smb_decisions = _env_bool("ENABLE_SMB_DECISIONS", cfg.enable_smb_decisions)
         cfg.enable_smb_decision_alerts = _env_bool("ENABLE_SMB_DECISION_ALERTS", cfg.enable_smb_decision_alerts)
         cfg.smb_alert_min_severity = os.getenv("SMB_ALERT_MIN_SEVERITY", cfg.smb_alert_min_severity)
+        cfg.response_guidance_policy_path = os.getenv(
+            "RESPONSE_GUIDANCE_POLICY_PATH", cfg.response_guidance_policy_path
+        )
+        cfg.response_guidance_asset_profile_path = os.getenv(
+            "RESPONSE_GUIDANCE_ASSET_PROFILE_PATH", cfg.response_guidance_asset_profile_path
+        )
+        cfg.enable_response_guidance = _env_bool(
+            "ENABLE_RESPONSE_GUIDANCE", cfg.enable_response_guidance
+        )
         cfg.cisa_cache_path = os.getenv("CISA_CACHE_PATH", cfg.cisa_cache_path)
         cfg.sigma_cache_path = os.getenv("SIGMA_CACHE_PATH", cfg.sigma_cache_path)
         cfg.mitre_attack_path = os.getenv("MITRE_ATTACK_PATH", cfg.mitre_attack_path)

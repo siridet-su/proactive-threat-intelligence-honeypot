@@ -1555,32 +1555,6 @@ def _generate_strategic_recommendations(
     return recommendations
 
 
-def _default_recommendation_policy_paths() -> Tuple[str, str]:
-    configured_asset = str(os.getenv("SMB_ASSET_PROFILE_PATH") or "").strip()
-    configured_policy = str(os.getenv("SMB_ACTION_POLICY_PATH") or "").strip()
-    if (
-        configured_asset
-        and configured_policy
-        and os.path.exists(configured_asset)
-        and os.path.exists(configured_policy)
-    ):
-        return configured_asset, configured_policy
-    candidates = [
-        os.path.dirname(os.path.abspath(__file__)),
-        os.getcwd(),
-    ]
-    for base_dir in candidates:
-        asset_path = os.path.join(base_dir, "configs", "smb_asset_profile.example.json")
-        policy_path = os.path.join(base_dir, "configs", "smb_action_playbooks.trusted.json")
-        if os.path.exists(asset_path) and os.path.exists(policy_path):
-            return asset_path, policy_path
-    base_dir = candidates[0]
-    return (
-        os.path.join(base_dir, "configs", "smb_asset_profile.example.json"),
-        os.path.join(base_dir, "configs", "smb_action_playbooks.trusted.json"),
-    )
-
-
 def _default_prediction_policy_path() -> str:
     candidates = [
         os.path.dirname(os.path.abspath(__file__)),
@@ -1666,71 +1640,6 @@ def _completed_actions_from_observed_ttps(
     return [text for _rank, _ttp, text in candidates[:limit]]
 
 
-def _session_payload_for_recommendations(
-        sessions: List[Any],
-        raw_events: List[dict],
-        tactic_summary: Dict[str, List[str]],
-        ttp_command_map: Dict[str, List[str]]) -> Dict[str, Any]:
-    commands = _extract_observed_commands(sessions)
-    first = sessions[0] if sessions else None
-    classification_events: List[dict] = []
-    commands_success: List[str] = []
-    commands_failed: List[str] = []
-    for session in sessions or []:
-        for command in getattr(session, "commands_success", []) or []:
-            text = str(command or "").strip()
-            if text and text not in commands_success:
-                commands_success.append(text)
-        for command in getattr(session, "commands_failed", []) or []:
-            text = str(command or "").strip()
-            if text and text not in commands_failed:
-                commands_failed.append(text)
-        for event in getattr(session, "classification_events", []) or []:
-            if isinstance(event, dict):
-                classification_events.append(event)
-
-    src_ip = getattr(first, "src_ip", None) if first is not None else None
-    sensor = getattr(first, "sensor", None) if first is not None else None
-    protocol = getattr(first, "protocol", None) if first is not None else None
-    dst_port = getattr(first, "dst_port", None) if first is not None else None
-    login_success = bool(getattr(first, "login_success", False)) if first is not None else False
-    username = getattr(first, "login_username", None) if first is not None else None
-
-    for event in raw_events or []:
-        if not isinstance(event, dict):
-            continue
-        src_ip = src_ip or event.get("src_ip")
-        sensor = sensor or event.get("sensor") or event.get("sensor_id")
-        protocol = protocol or event.get("protocol")
-        dst_port = dst_port or event.get("dst_port")
-        username = username or event.get("username")
-        if event.get("eventid") == "cowrie.login.success":
-            login_success = True
-
-    ttps = list(dict.fromkeys(str(ttp) for ttps in (tactic_summary or {}).values() for ttp in ttps))
-    tactics = list(dict.fromkeys(str(tactic) for tactic in (tactic_summary or {}).keys()))
-    return {
-        "session_id": getattr(first, "session_id", "unknown") if first is not None else "unknown",
-        "src_ip": src_ip or "unknown",
-        "sensor": sensor or "",
-        "protocol": protocol or "ssh",
-        "dst_port": dst_port or 22,
-        "login_success": login_success,
-        "login_username": username or "",
-        "commands": commands,
-        "commands_success": commands_success,
-        "commands_failed": commands_failed,
-        "raw_events": raw_events or [],
-        "classification_events": classification_events,
-        "session_evidence_graph": (
-            getattr(first, "session_evidence_graph", {}) if first is not None else {}
-        ) or {},
-        "tactics": tactics,
-        "ttps": ttps,
-        "ttp_command_map": ttp_command_map or {},
-    }
-
-
 def _build_trusted_recommendation_decision(
         sessions: List[Any],
         raw_events: List[dict],
@@ -1741,52 +1650,31 @@ def _build_trusted_recommendation_decision(
     action_policy_path: str = "",
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Build report actions from the same trusted policy engine used by production.
+    """Deprecated v1/v2 compatibility shim; it never evaluates a policy.
 
-    This keeps the report recommendation authority out of the LLM. The AI may
-    explain the report, but the actual actions come from policy-as-code with
-    evidence conditions, references, and asset context.
+    Reports use ``response_guidance.v3`` directly.  Keeping this private
+    symbol avoids an import-time break for historical integrations while
+    preventing the reporting path from generating a new SMB decision.
     """
-    try:
-        from production.reporting.smb_decision import (
-            build_smb_decision,
-            load_action_policy,
-            load_asset_profile,
-        )
-    except Exception as exc:
-        return {
-            "status": "unavailable",
-            "authority": "policy_unavailable",
-            "reason": f"policy engine import failed: {_safe_exception_text(exc)}",
-            "immediate_actions": [],
-        }
 
-    default_asset_path, default_policy_path = _default_recommendation_policy_paths()
-    asset_path = asset_profile_path or default_asset_path
-    policy_path = action_policy_path or default_policy_path
-    session_payload = _session_payload_for_recommendations(
-        sessions, raw_events, tactic_summary, ttp_command_map
+    del (
+        sessions,
+        raw_events,
+        tactic_summary,
+        ttp_command_map,
+        mitre_db,
+        asset_profile_path,
+        action_policy_path,
+        prediction_snapshot,
     )
-    try:
-        decision = build_smb_decision(
-            session_payload=session_payload,
-            prediction_snapshot=prediction_snapshot,
-            report_recommendations={},
-            asset_profile=load_asset_profile(asset_path),
-            action_policy=load_action_policy(policy_path),
-            mitre_db=mitre_db,
-        )
-        decision.setdefault("status", "unavailable")
-        decision.setdefault("authority", "policy_unavailable")
-        return decision
-    except Exception as exc:
-        return {
-            "status": "error",
-            "authority": "policy_unavailable",
-            "reason": f"policy engine failed: {_safe_exception_text(exc)}",
-            "immediate_actions": [],
-        }
+    return {
+        "schema_version": "response_guidance_legacy_adapter.v1",
+        "status": "not_available",
+        "authority": "legacy_generation_prohibited",
+        "reason": "new v1/v2 recommendation generation is prohibited; use response_guidance.v3",
+        "immediate_actions": [],
+        "advisory_actions": [],
+    }
 
 
 # HONEYPOT-SPECIFIC ANALYSIS FUNCTIONS
@@ -3473,6 +3361,8 @@ class ImprovedAsyncSwarmCoordinator:
         prediction_context: Optional[Dict[str, Any]] = None,
         recommendation_asset_profile_path: str = "",
         recommendation_action_policy_path: str = "",
+        response_guidance_policy_path: str = "",
+        response_guidance_asset_profile_path: str = "",
         cisa_cache_path: str = "",
         sigma_cache_path: str = "",
         mitre_cache_path: str = "",
@@ -3506,6 +3396,10 @@ class ImprovedAsyncSwarmCoordinator:
         )
         self.recommendation_action_policy_path = str(
             recommendation_action_policy_path or ""
+        )
+        self.response_guidance_policy_path = str(response_guidance_policy_path or "")
+        self.response_guidance_asset_profile_path = str(
+            response_guidance_asset_profile_path or ""
         )
         self.behavior_policy_document = (
             copy.deepcopy(behavior_policy_document)
@@ -3698,41 +3592,14 @@ class ImprovedAsyncSwarmCoordinator:
         if not detected_ttps:
             print("\nEARLY EXIT: No TTPs detected â€” returning fallback hypothesis")
             fallback = self._fallback_hypothesis(ioc_bundle, tactic_summary)
-            decision = _build_trusted_recommendation_decision(
-                sessions,
-                raw_events,
-                tactic_summary,
-                ttp_command_map or {},
-                mitre_db=self.mitre_db,
-                asset_profile_path=self.recommendation_asset_profile_path,
-                action_policy_path=self.recommendation_action_policy_path,
-                prediction_snapshot=self.prediction_context,
-            )
-            actions = [
-                item for item in decision.get("immediate_actions") or []
-                if isinstance(item, dict)
-            ]
-            fallback["trusted_recommendation_decision"] = decision
-            fallback["recommended_actions_structured"] = actions
-            fallback["recommended_mitigations"] = [
-                str(item.get("action") or "").strip()
-                for item in actions
-                if str(item.get("action") or "").strip()
-            ]
-            fallback["recommendation_provenance"] = {
-                "authority": decision.get("authority") or "policy_unavailable",
-                "status": decision.get("status") or "unavailable",
-                "policy": (decision.get("trust") or {}).get("policy") or {},
-                "policy_action_count": len(actions),
-                "rejected_action_count": len(decision.get("rejected_actions") or []),
-                "fallback_actions_allowed": False,
-            }
             fallback_report = build_v2_report(
                 fallback,
                 sessions,
                 raw_events=raw_events,
                 behavior_policy_document=self.behavior_policy_document,
                 behavior_policy_path=self.behavior_policy_path,
+                response_guidance_policy_path=self.response_guidance_policy_path,
+                response_guidance_asset_profile_path=self.response_guidance_asset_profile_path,
             )
             return _safe_reporting_mapping(
                 attach_model_prediction(fallback_report, self.prediction_context),
@@ -3773,6 +3640,8 @@ class ImprovedAsyncSwarmCoordinator:
             raw_events=raw_events,
             behavior_policy_document=self.behavior_policy_document,
             behavior_policy_path=self.behavior_policy_path,
+            response_guidance_policy_path=self.response_guidance_policy_path,
+            response_guidance_asset_profile_path=self.response_guidance_asset_profile_path,
         )
         canonical_report = attach_model_prediction(
             canonical_report,
@@ -4178,6 +4047,8 @@ class ImprovedAsyncSwarmCoordinator:
             raw_events=raw_events or [],
             behavior_policy_document=self.behavior_policy_document,
             behavior_policy_path=self.behavior_policy_path,
+            response_guidance_policy_path=self.response_guidance_policy_path,
+            response_guidance_asset_profile_path=self.response_guidance_asset_profile_path,
         )
         report = attach_model_prediction(report, self.prediction_context)
         return apply_validated_vertex_presentation(report, analytical)
@@ -4794,29 +4665,6 @@ class ImprovedAsyncSwarmCoordinator:
             print("  VT intel: no confirmed hits "
                   "(absence does not mean clean â€” polymorphic malware evades AV)")
 
-        artifact_recommendations = _generate_dynamic_recommendations(
-            ttp_command_map, ioc_bundle, raw_events, vt_intel=vt_intel
-        )
-        trusted_recommendation_decision = _build_trusted_recommendation_decision(
-            sessions,
-            raw_events,
-            tactic_summary,
-            ttp_command_map,
-            mitre_db=self.mitre_db,
-            asset_profile_path=self.recommendation_asset_profile_path,
-            action_policy_path=self.recommendation_action_policy_path,
-            prediction_snapshot=self.prediction_context,
-        )
-        structured_recommendations = [
-            action for action in trusted_recommendation_decision.get("immediate_actions", [])
-            if isinstance(action, dict)
-        ]
-        recommendations = [
-            str(action.get("action") or "").strip()
-            for action in structured_recommendations
-            if str(action.get("action") or "").strip()
-        ]
-
         honeypot_awareness = _assess_honeypot_awareness(sessions, self.behavioral_rules)
         campaign_correlation = _build_campaign_correlation(ioc_bundle, source_ips=source_ips)
         playbook = _extract_attacker_playbook(ttp_command_map)
@@ -4959,28 +4807,10 @@ class ImprovedAsyncSwarmCoordinator:
             "session_correlations": hunting_context.get("session_correlations", []),
             "correlation_rules_fired": hunting_context.get("correlation_rules_fired", []),
             "kill_chain_analysis": kill_chain,
-            "recommended_mitigations": recommendations,
-            "recommended_actions_structured": structured_recommendations,
-            "trusted_recommendation_decision": trusted_recommendation_decision,
-            "artifact_recommendations": artifact_recommendations,
-            "recommendation_provenance": {
-                "authority": (
-                    trusted_recommendation_decision.get("authority")
-                    or "policy_unavailable"
-                ),
-                "status": trusted_recommendation_decision.get("status") or "unavailable",
-                "policy": (
-                    (trusted_recommendation_decision.get("trust") or {}).get("policy")
-                    if isinstance(trusted_recommendation_decision, dict) else {}
-                ),
-                "policy_action_count": len(structured_recommendations),
-                "rejected_action_count": len(trusted_recommendation_decision.get("rejected_actions", [])),
-                "fallback_actions_allowed": False,
-                "note": (
-                    "Recommended actions are produced only by the trusted policy engine. "
-                    "AI and artifact parser outputs are not operator-action authorities."
-                ),
-            },
+            # Response guidance is constructed exactly once at the report
+            # boundary from the canonical observed-behaviour snapshot.  This
+            # intermediate analysis may retain context, but never produces
+            # recommendation actions or policy decisions.
             "strategic_recommendations": strategic_recs,
             "campaign_intelligence": campaign_intel,
             "ioc_table": ioc_table,

@@ -16,7 +16,7 @@ from production.reporting.response_guidance import (
 )
 from production.reporting.smb_decision import build_smb_decision
 from production.reporting.smb_decision import build_smb_decision_from_paths
-from production.reporting.reporting_pipeline import _build_trusted_recommendation_decision
+from production.reporting.response_guidance_v3 import build_response_guidance_v3_from_session
 from production.reporting.threat_hypothesis import build_v2_report
 from production.reporting.threat_hypothesis import build_observed_behavior
 from production.api.dashboard_api import _current_decision_payload
@@ -39,6 +39,7 @@ def _session() -> dict:
     command = "whoami"
     return {
         "session_id": "response-guidance-v2",
+        "src_ip": "192.0.2.10",
         "protocol": "ssh",
         "dst_port": 22,
         "commands": [command],
@@ -224,7 +225,7 @@ def test_canonical_degraded_mode_suppresses_v2_actions_but_preserves_v1() -> Non
     assert degraded["immediate_actions"] == decision["immediate_actions"]
 
 
-def test_report_exposes_both_additive_contracts_without_rewriting_v1_v2() -> None:
+def test_new_report_emits_v3_and_keeps_legacy_input_read_only() -> None:
     decision = build_smb_decision(
         _session(), action_policy=_policy(), asset_profile=_asset_profile()
     )
@@ -234,16 +235,18 @@ def test_report_exposes_both_additive_contracts_without_rewriting_v1_v2() -> Non
     )
 
     assert report["schema_version"] == "threat_hypothesis.v2"
-    assert report["trusted_recommendation_decision"]["schema_version"] == "smb_decision.v1"
-    assert report["response_guidance_v2"]["schema_version"] == "response_guidance.v2"
+    assert "trusted_recommendation_decision" not in report
+    assert "response_guidance_v2" not in report
+    assert report["legacy_recommendation_adapter"]["status"] == "legacy_read_only"
+    assert report["response_guidance_v3"]["schema_version"] == "response_guidance.v3"
     assert report["session_assessment_v3"]["response_guidance_ref"] == {
-        "schema_version": "response_guidance.v2",
-        "guidance_id": report["response_guidance_v2"]["guidance_id"],
-        "status": report["response_guidance_v2"]["status"],
+        "schema_version": "response_guidance.v3",
+        "guidance_id": report["response_guidance_v3"]["guidance_id"],
+        "status": report["response_guidance_v3"]["status"],
     }
 
 
-def test_report_rebuilds_forged_nested_guidance_from_filtered_v1_actions() -> None:
+def test_report_ignores_forged_v1_v2_actions_and_builds_v3_from_evidence() -> None:
     decision = build_smb_decision(
         _session(), action_policy=_policy(), asset_profile=_asset_profile()
     )
@@ -271,22 +274,19 @@ def test_report_rebuilds_forged_nested_guidance_from_filtered_v1_actions() -> No
         [_session()],
     )
 
-    canonical_ids = {
-        item["action_id"]
-        for item in report["trusted_recommendation_decision"]["immediate_actions"]
-    }
-    guidance = report["response_guidance_v2"]
+    guidance = report["response_guidance_v3"]
     assert guidance["guidance_id"] != "forged-guidance"
-    assert {item["action_id"] for item in guidance["advisory_actions"]} == canonical_ids
+    assert "forged-action" not in {
+        item["action_id"] for item in guidance["advisory_actions"]
+    }
     assert all(
-        item["manual_approval"]["required"] is True
+        item["requires_manual_approval"] is True
         for item in guidance["advisory_actions"]
     )
-    assert report["trusted_recommendation_decision"]["response_guidance_v2"] == guidance
     assert guidance["validation"] == {"status": "valid", "errors": []}
 
 
-def test_report_worker_api_and_direct_builder_share_one_guidance_semantics() -> None:
+def test_report_and_api_share_v3_guidance_semantics() -> None:
     prediction = {
         "snapshot_id": "guidance-parity-snapshot",
         "final_ranking": [{
@@ -296,23 +296,8 @@ def test_report_worker_api_and_direct_builder_share_one_guidance_semantics() -> 
             "reasons": ["separate forecast"],
         }],
     }
-    asset_path = str(ROOT / "configs/smb_asset_profile.example.json")
-    policy_path = str(ROOT / "configs/smb_action_playbooks.trusted.json")
-    direct = build_smb_decision_from_paths(
-        _session(),
-        prediction_snapshot=prediction,
-        asset_profile_path=asset_path,
-        action_policy_path=policy_path,
-    )
-    report_path = _build_trusted_recommendation_decision(
-        [SimpleNamespace(**_session())],
-        [],
-        {"discovery": ["T1033"]},
-        {"T1033": ["whoami"]},
-        asset_profile_path=asset_path,
-        action_policy_path=policy_path,
-        prediction_snapshot=prediction,
-    )
+    direct = build_response_guidance_v3_from_session(_session(), forecast_context=prediction)
+    report_path = build_v2_report({}, [_session()])["response_guidance_v3"]
 
     class Storage:
         @staticmethod
@@ -320,9 +305,8 @@ def test_report_worker_api_and_direct_builder_share_one_guidance_semantics() -> 
             return {"payload": _session(), "src_ip": "192.0.2.10"}
 
     config = ProductionConfig(
-        smb_asset_profile_path=asset_path,
-        smb_action_policy_path=policy_path,
-        enable_smb_decisions=True,
+        response_guidance_policy_path="configs/response_guidance_policy.v3.json",
+        enable_response_guidance=True,
     )
     api_path = _current_decision_payload(
         config,
@@ -332,22 +316,17 @@ def test_report_worker_api_and_direct_builder_share_one_guidance_semantics() -> 
     )
 
     for result in (report_path, api_path):
-        assert result["likely_next_step"] == direct["likely_next_step"]
-        assert result["response_guidance_v2"]["guidance_id"] == (
-            direct["response_guidance_v2"]["guidance_id"]
-        )
-        assert [
-            item["action_id"] for item in result["response_guidance_v2"]["advisory_actions"]
-        ] == [
-            item["action_id"] for item in direct["response_guidance_v2"]["advisory_actions"]
+        assert result["guidance_id"] == direct["guidance_id"]
+        assert [item["action_id"] for item in result["advisory_actions"]] == [
+            item["action_id"] for item in direct["advisory_actions"]
         ]
     assert api_path["presentation_semantics"] == {
         "mode": "current_policy_reevaluation",
         "historical_record": False,
         "replaces_stored_historical_guidance": False,
         "description": (
-            "Recomputed from current policy and context; this is not the stored "
-            "point-in-time report decision."
+            "Recomputed from the current v3 policy and immutable current observed "
+            "evidence; it does not replace stored point-in-time guidance."
         ),
     }
 
@@ -365,29 +344,23 @@ def test_stored_historical_decision_is_copied_without_recomputation() -> None:
     historical = _historical_decision_payload(report)
 
     assert report == original
-    assert historical["decision_id"] == decision["decision_id"]
-    assert historical["response_guidance_v2"] == report["response_guidance_v2"]
+    assert historical["schema_version"] == "response_guidance_legacy_adapter.v1"
+    assert historical["advisory_actions"] == []
     assert historical["presentation_semantics"]["mode"] == (
         "point_in_time_stored_decision"
     )
 
 
 def test_policy_version_drift_is_rendered_as_separate_reevaluation() -> None:
-    historical = build_smb_decision(
-        _session(), action_policy=_policy(), asset_profile=_asset_profile()
-    )
+    historical = build_response_guidance_v3_from_session(_session())
     reevaluated = copy.deepcopy(historical)
-    historical["response_guidance_v2"]["provenance"]["policy"]["policy_id"] = (
-        "stored-policy"
-    )
-    reevaluated["response_guidance_v2"]["provenance"]["policy"]["policy_id"] = (
-        "current-policy"
-    )
+    historical["provenance"]["policy"]["policy_id"] = "stored-policy"
+    reevaluated["provenance"]["policy"]["policy_id"] = "current-policy"
 
     html = _render_next_steps(
         {"payload": _session()},
         {
-            "smb_decision": historical,
+            "response_guidance": historical,
             "historical_smb_decision": historical,
             "current_policy_reevaluation": reevaluated,
             "report_recommendations": {},
@@ -404,26 +377,16 @@ def test_policy_version_drift_is_rendered_as_separate_reevaluation() -> None:
 
 
 def test_monitor_renders_advisory_contract_without_duplicate_forecast() -> None:
-    decision = build_smb_decision(
-        _session(),
-        prediction_snapshot={
-            "final_ranking": [{
-                "tactic": "execution",
-                "confidence": "possible",
-                "score": 0.6,
-                "reasons": ["separate forecast"],
-            }]
-        },
-        action_policy=_policy(),
-        asset_profile=_asset_profile(),
+    decision = build_response_guidance_v3_from_session(
+        _session(), forecast_context={"final_ranking": [{"tactic": "execution"}]}
     )
     html = _render_next_steps(
         {"payload": _session()},
         {
-            "smb_decision": decision,
+            "response_guidance": decision,
             "report_recommendations": {
                 "post_session_follow_on_hypothesis": "No bounded hypothesis.",
-                "source": "trusted_policy_engine",
+                    "source": "deterministic_observed_evidence_policy",
             },
         },
     )

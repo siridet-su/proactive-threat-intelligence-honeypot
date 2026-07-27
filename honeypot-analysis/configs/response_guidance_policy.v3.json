@@ -1,0 +1,364 @@
+{
+  "schema_version": "response_guidance_policy.v3",
+  "policy_id": "cowrie-observed-evidence-response-guidance",
+  "version": "3.0.0",
+  "updated_at": "2026-07-27",
+  "review_expires_at": "2027-07-16",
+  "owner": "honeypot-production",
+  "automatic_execution": false,
+  "migration": {
+    "replaces_new_writes_from": ["smb_action_policy.v1", "response_guidance.v2"],
+    "legacy_policy_sha256": "3f07b615dc63b01bdefd69ee3bd5d9fad1ee08030d6861d0f675362df5ab7fab",
+    "semantics": "Only immutable observed Cowrie evidence may select findings, triage, or advisory tasks. Forecast and enrichment are context only."
+  },
+  "trusted_sources": {
+    "cisa-small-business": {
+      "name": "CISA Cyber Guidance for Small Businesses",
+      "type": "government_guidance",
+      "url": "https://www.cisa.gov/cyber-guidance-small-businesses",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "nist-small-business": {
+      "name": "NIST Small Business Cybersecurity Corner",
+      "type": "government_guidance",
+      "url": "https://www.nist.gov/itl/smallbusinesscyber",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1552": {
+      "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1552/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1105": {
+      "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1105/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1059": {
+      "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1059/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1053": {
+      "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1053/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1070": {
+      "name": "MITRE ATT&CK T1070 Indicator Removal",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1070/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    }
+  },
+  "finding_rules": [
+    {
+      "rule_id": "observed-interactive-command",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "severity": "low",
+      "statement": "One or more interactive commands were observed inside Cowrie. This is honeypot evidence, not evidence of activity on a real system.",
+      "applies_when": {"min_command_count": 1},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Migrated from reviewed SMB policy guidance", "Limited to canonical Cowrie command observations"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      }
+    },
+    {
+      "rule_id": "observed-credential-access-candidate",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1552", "cisa-small-business"],
+      "severity": "high",
+      "statement": "A trusted command mapping indicates possible credential-related discovery or access preparation inside Cowrie; successful acquisition or real-system use is not established.",
+      "applies_when": {"any_tactics": ["credential-access"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Migrated from reviewed credential-access rule", "Limited to trusted ATT&CK mappings attached to observed commands"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      }
+    },
+    {
+      "rule_id": "observed-transfer-candidate",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "cisa-small-business"],
+      "severity": "medium",
+      "statement": "A trusted command mapping indicates a possible transfer attempt inside Cowrie; a real-host transfer or execution is not established.",
+      "applies_when": {"any_ttps": ["T1105"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Migrated from reviewed transfer rule", "Limited to trusted ATT&CK mappings attached to observed commands"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      }
+    },
+    {
+      "rule_id": "observed-persistence-or-evasion-candidate",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1053", "mitre-t1070"],
+      "severity": "high",
+      "statement": "A trusted command mapping indicates possible persistence or trace-removal activity inside Cowrie; successful modification of a real system is not established.",
+      "applies_when": {"any_tactics": ["persistence", "defense-evasion"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Migrated from reviewed persistence and cleanup rules", "Limited to trusted ATT&CK mappings attached to observed commands"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      }
+    }
+  ],
+  "action_playbooks": [
+    {
+      "rule_id": "observed-command-corroboration",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {"min_command_count": 1},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Observed Cowrie commands support corroboration only", "No source reputation or prediction eligibility"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      },
+      "actions": [
+        {
+          "action_id": "review-observed-source-in-real-auth-logs",
+          "priority": 20,
+          "action": "Check authorized SSH, VPN, and authentication logs for source {src_ip} in the Cowrie session time window.",
+          "rationale": "Observed Cowrie interaction is useful correlation context but does not establish activity on real systems.",
+          "source_type": "trusted_control_guidance",
+          "references": ["cisa-small-business", "nist-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from remote-access corroboration guidance", "No real-system action is executed"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-27",
+            "review_expires_at": "2027-07-16",
+            "version": "3.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "observed-credential-access-corroboration",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1552", "cisa-small-business"],
+      "applies_when": {"any_tactics": ["credential-access"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Observed credential-access candidate", "Corroboration is conditional on authorized real-system telemetry"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      },
+      "actions": [
+        {
+          "action_id": "review-credential-exposure-and-reuse",
+          "priority": 10,
+          "action": "Review authorized systems for exposure of the observed credential paths or account names: {credential_paths}; {account_names}.",
+          "rationale": "The observed mapping supports a targeted review, not a claim that credentials were acquired or reused.",
+          "source_type": "trusted_control_guidance",
+          "references": ["mitre-t1552", "cisa-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from credential-access response", "No credential rotation is automatically authorized"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-27",
+            "review_expires_at": "2027-07-16",
+            "version": "3.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "observed-transfer-corroboration",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "cisa-small-business"],
+      "applies_when": {"any_ttps": ["T1105"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Observed transfer candidate", "No transfer success is inferred without a Cowrie transfer event"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      },
+      "actions": [
+        {
+          "action_id": "hunt-observed-transfer-indicators",
+          "priority": 15,
+          "action": "Search authorized proxy, DNS, and host telemetry for the observed transfer indicators: {urls}; {artifact_hashes}.",
+          "rationale": "The Cowrie observation supports corroboration; it does not establish a completed transfer or real-host execution.",
+          "source_type": "trusted_control_guidance",
+          "references": ["mitre-t1105", "cisa-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from transfer response", "No network block is automatically authorized"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-27",
+            "review_expires_at": "2027-07-16",
+            "version": "3.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "observed-execution-corroboration",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1059", "cisa-small-business"],
+      "applies_when": {"any_tactics": ["execution"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Observed execution candidate", "Cowrie command outcome does not prove real-host execution"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      },
+      "actions": [
+        {
+          "action_id": "correlate-observed-execution-attempt",
+          "priority": 12,
+          "action": "Check authorized process, audit, and endpoint telemetry for execution matching the observed paths and session time window: {executed_paths}.",
+          "rationale": "A Cowrie execution command supports a bounded corroboration check only.",
+          "source_type": "trusted_control_guidance",
+          "references": ["mitre-t1059", "cisa-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from execution response", "No containment or host change is automatically authorized"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-27",
+            "review_expires_at": "2027-07-16",
+            "version": "3.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "observed-persistence-or-evasion-corroboration",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1053", "mitre-t1070", "cisa-small-business"],
+      "applies_when": {"any_tactics": ["persistence", "defense-evasion"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Observed persistence or cleanup candidate", "No real-system change is inferred"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      },
+      "actions": [
+        {
+          "action_id": "audit-observed-persistence-or-log-tampering",
+          "priority": 12,
+          "action": "Review authorized persistence locations and log-retention evidence around the Cowrie session time window.",
+          "rationale": "The observation supports preservation and review, not automatic account removal, isolation, or remediation.",
+          "source_type": "trusted_control_guidance",
+          "references": ["mitre-t1053", "mitre-t1070", "cisa-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from persistence and cleanup responses", "No automatic response authority"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-27",
+            "review_expires_at": "2027-07-16",
+            "version": "3.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

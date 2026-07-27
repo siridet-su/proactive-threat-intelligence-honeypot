@@ -254,7 +254,7 @@ def build_session_assessment_v3(v2_report: Dict[str, Any]) -> Dict[str, Any]:
         },
         "next_tactic_forecast": forecast_section(v2_report.get("model_prediction")),
         "response_guidance_ref": {
-            "schema_version": "response_guidance.v2",
+            "schema_version": "response_guidance.v3",
             "status": "not_attached",
         },
         "compatibility": {

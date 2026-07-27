@@ -1465,6 +1465,8 @@ def build_pipeline_trigger(
     enable_vertex_narrative: bool = False,
     smb_asset_profile_path: str = "",
     smb_action_policy_path: str = "",
+    response_guidance_policy_path: str = "",
+    response_guidance_asset_profile_path: str = "",
     cisa_cache_path: str = "",
     sigma_cache_path: str = "",
     mitre_cache_path: str = "",
@@ -1747,6 +1749,8 @@ def build_pipeline_trigger(
                 "prediction_context": prediction_context or {},
                 "recommendation_asset_profile_path": smb_asset_profile_path,
                 "recommendation_action_policy_path": smb_action_policy_path,
+                "response_guidance_policy_path": response_guidance_policy_path,
+                "response_guidance_asset_profile_path": response_guidance_asset_profile_path,
                 "cisa_cache_path": cisa_cache_path,
                 "sigma_cache_path": sigma_cache_path,
                 "mitre_cache_path": mitre_cache_path,
@@ -1781,6 +1785,8 @@ def build_pipeline_trigger(
                 "prediction_context": prediction_context or {},
                 "recommendation_asset_profile_path": str(smb_asset_profile_path or ""),
                 "recommendation_action_policy_path": str(smb_action_policy_path or ""),
+                "response_guidance_policy_path": str(response_guidance_policy_path or ""),
+                "response_guidance_asset_profile_path": str(response_guidance_asset_profile_path or ""),
             }
             for attribute, value in injected_attributes.items():
                 if not hasattr(coord, attribute):

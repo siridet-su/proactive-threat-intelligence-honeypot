@@ -18,16 +18,15 @@ from production.policies.threat_hypothesis_behavior_policy import (
     policy_summary,
     resolve_behavior_policy,
 )
-from production.reporting.smb_decision import (
-    is_trusted_recommendation_action,
-    is_trusted_recommendation_decision,
-    is_trusted_recommendation_provenance,
-)
 from production.reporting.session_assessment import (
     attach_forecast_to_session_assessment,
     build_session_assessment_v3,
 )
-from production.reporting.response_guidance import build_response_guidance_v2
+from production.reporting.response_guidance_v3 import (
+    attach_non_authoritative_guidance_context,
+    build_response_guidance_v3_from_paths,
+    read_legacy_response_guidance,
+)
 from production.utils.serialization import stable_id
 
 
@@ -54,6 +53,15 @@ _OPERATOR_ACTION_RE = re.compile(
 
 def _clean(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _texts(values: Iterable[Any]) -> List[str]:
+    output: List[str] = []
+    for value in values or []:
+        text = _clean(value.get("text")) if isinstance(value, dict) else _clean(value)
+        if text and text not in output:
+            output.append(text)
+    return output
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -92,6 +100,7 @@ def _first_session_payload(sessions: Iterable[Any], raw_events: List[Dict[str, A
     session = session_list[0] if session_list else {}
     return {
         "session_id": _session_value(session, "session_id", "unknown"),
+        "src_ip": _clean(_session_value(session, "src_ip", "")),
         "commands": list(_session_value(session, "commands", []) or []),
         "commands_success": list(_session_value(session, "commands_success", []) or []),
         "commands_failed": list(_session_value(session, "commands_failed", []) or []),
@@ -200,6 +209,7 @@ def build_observed_behavior(
     events = _event_evidence(payload.get("raw_events") or [], _clean(payload.get("session_id")))
     return {
         "session_id": _clean(payload.get("session_id")) or "unknown",
+        "src_ip": _clean(payload.get("src_ip")),
         "behavior_policy": graph.get("behavior_policy") or policy_summary(document),
         "ordered_behavior_chain": chain,
         "ordered_command_observations": [
@@ -857,63 +867,6 @@ def _default_context(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _canonical_operator_actions(
-    legacy_report: Dict[str, Any],
-    observed: Dict[str, Any],
-) -> List[Dict[str, Any]]:
-    """Retain only policy-approved actions and label their evidence boundary."""
-
-    candidates = [
-        item for item in legacy_report.get("recommended_actions_structured") or []
-        if isinstance(item, dict)
-    ]
-    trusted_decision = legacy_report.get("trusted_recommendation_decision") or {}
-    if not candidates and isinstance(trusted_decision, dict):
-        candidates = [
-            item for item in trusted_decision.get("immediate_actions") or []
-            if isinstance(item, dict)
-        ]
-
-    canonical_refs: set[str] = set()
-    for key in (
-        "ordered_behavior_chain",
-        "ordered_command_observations",
-        "cowrie_event_evidence",
-    ):
-        for item in observed.get(key) or []:
-            if isinstance(item, dict) and _clean(item.get("evidence_id")):
-                canonical_refs.add(_clean(item.get("evidence_id")))
-    for chain in observed.get("connected_behavior_chains") or []:
-        if not isinstance(chain, dict):
-            continue
-        canonical_refs.update(
-            _clean(ref) for ref in chain.get("evidence_refs") or [] if _clean(ref)
-        )
-
-    output: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for action in candidates:
-        if not is_trusted_recommendation_action(action):
-            continue
-        action_id = _clean(action.get("action_id") or action.get("action"))
-        if not action_id or action_id in seen:
-            continue
-        seen.add(action_id)
-        item = dict(action)
-        refs = {_clean(ref) for ref in item.get("evidence_refs") or [] if _clean(ref)}
-        matched_refs = sorted(refs.intersection(canonical_refs))
-        if matched_refs:
-            item["grounding_status"] = "canonical_observed_evidence"
-            item["canonical_evidence_refs"] = matched_refs
-        else:
-            # Context, enrichment, prediction, policy defaults, and copied
-            # provenance cannot turn an unverified reference into an operator
-            # action at the report boundary.
-            continue
-        output.append(item)
-    return output
-
-
 def build_v2_report(
     legacy_report: Dict[str, Any],
     sessions: Iterable[Any],
@@ -922,6 +875,8 @@ def build_v2_report(
     *,
     behavior_policy_document: Optional[Dict[str, Any]] = None,
     behavior_policy_path: str = "",
+    response_guidance_policy_path: str = "",
+    response_guidance_asset_profile_path: str = "",
 ) -> Dict[str, Any]:
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     report = dict(legacy_report or {})
@@ -942,23 +897,9 @@ def build_v2_report(
         behavior_policy_path=behavior_policy_path,
     )
     evidence_summary = build_claim_evidence_summary(assessment, follow_on)
-    operator_actions = _canonical_operator_actions(report, observed)
-    recommendation_provenance = report.get("recommendation_provenance") or {}
+    # Legacy v1/v2 objects are an input-only display concern.  Their contents
+    # are never read to select v3 findings, triage, or actions.
     trusted_decision = report.get("trusted_recommendation_decision")
-    recommendation_authority = "trusted_policy_engine" if (
-        is_trusted_recommendation_provenance(recommendation_provenance)
-        or is_trusted_recommendation_decision(trusted_decision)
-    ) else "policy_unavailable"
-    report["recommended_actions_structured"] = operator_actions
-    report["recommended_mitigations"] = [
-        _clean(action.get("action"))
-        for action in operator_actions
-        if _clean(action.get("action"))
-    ]
-    if isinstance(trusted_decision, dict):
-        trusted_decision = dict(trusted_decision)
-        trusted_decision["immediate_actions"] = operator_actions
-        report["trusted_recommendation_decision"] = trusted_decision
     report.update({
         "schema_version": SCHEMA_VERSION,
         "behavior_policy": policy_summary(document),
@@ -972,11 +913,11 @@ def build_v2_report(
         },
         "contextual_intelligence": contextual_intelligence or _default_context(report),
         "recommendations": {
-            "operator_actions": operator_actions,
-            "mitigations": report.get("recommended_mitigations") or [],
-            "strategic": report.get("strategic_recommendations") or [],
-            "authority": recommendation_authority,
-            "grounding_contract": "canonical_v2_evidence_or_explicit_context_only",
+            "operator_actions": [],
+            "mitigations": [],
+            "context_notes": _texts(report.get("strategic_recommendations") or []),
+            "authority": "response_guidance_v3_reference_only",
+            "grounding_contract": "response_guidance.v3_canonical_observed_evidence_only",
             "manual_approval_required": True,
         },
         "limitations": [
@@ -993,22 +934,59 @@ def build_v2_report(
     })
     report = apply_legacy_aliases(report)
     report["session_assessment_v3"] = build_session_assessment_v3(report)
-    # The report boundary never promotes a nested adapter payload. Rebuilding
-    # from the filtered v1 decision prevents stale or forged v2 guidance from
-    # disagreeing with the canonical action and evidence lists above.
-    response_guidance = build_response_guidance_v2(
-        trusted_decision if isinstance(trusted_decision, dict) else {},
-        observed_behavior=observed,
+    session_context = _first_session_payload(sessions, raw_events or [])
+    response_guidance = build_response_guidance_v3_from_paths(
+        observed,
+        policy_path=response_guidance_policy_path,
+        asset_profile_path=response_guidance_asset_profile_path,
+        session_context=session_context,
+        forecast_context=report.get("model_prediction") or {},
+        enrichment_context=report.get("contextual_intelligence") or {},
     )
+    report["response_guidance_v3"] = response_guidance
+    report["recommendations"] = {
+        "response_guidance_ref": {
+            "schema_version": "response_guidance.v3",
+            "guidance_id": _clean(response_guidance.get("guidance_id")),
+            "status": _clean(response_guidance.get("status")),
+        },
+        "authority": response_guidance.get("authority") or "policy_unavailable",
+        "grounding_contract": "response_guidance.v3_canonical_observed_evidence_only",
+        "manual_approval_required": True,
+    }
     if isinstance(trusted_decision, dict):
-        trusted_decision["response_guidance_v2"] = response_guidance
-        report["trusted_recommendation_decision"] = trusted_decision
-    report["response_guidance_v2"] = response_guidance
+        report["legacy_recommendation_adapter"] = read_legacy_response_guidance(trusted_decision)
+    elif isinstance(report.get("response_guidance_v2"), dict):
+        report["legacy_recommendation_adapter"] = read_legacy_response_guidance(
+            report["response_guidance_v2"]
+        )
+    elif report.get("recommended_actions_structured"):
+        report["legacy_recommendation_adapter"] = {
+            "schema_version": "response_guidance_legacy_adapter.v1",
+            "status": "legacy_read_only",
+            "legacy_schema_version": "legacy_structured_recommendations",
+            "advisory_actions": [],
+            "semantics": "Legacy action records were retained without promotion to response authority.",
+        }
     report["session_assessment_v3"]["response_guidance_ref"] = {
-        "schema_version": "response_guidance.v2",
+        "schema_version": "response_guidance.v3",
         "guidance_id": _clean(response_guidance.get("guidance_id")),
         "status": _clean(response_guidance.get("status")),
     }
+    # New reports have one response authority.  Legacy recommendation payloads
+    # are represented only by the display-only adapter above; historical rows
+    # in storage are never touched by this construction path.
+    for key in (
+        "trusted_recommendation_decision",
+        "response_guidance_v2",
+        "recommendation_provenance",
+        "artifact_recommendations",
+        "strategic_recommendations",
+        "recommended_actions_structured",
+        "recommended_mitigations",
+        "recommended_actions",
+    ):
+        report.pop(key, None)
     return report
 
 
@@ -1062,6 +1040,13 @@ def attach_model_prediction(
         report["session_assessment_v3"] = attach_forecast_to_session_assessment(
             assessment,
             report["model_prediction"],
+        )
+    guidance = report.get("response_guidance_v3")
+    if isinstance(guidance, dict):
+        report["response_guidance_v3"] = attach_non_authoritative_guidance_context(
+            guidance,
+            forecast_context=report.get("model_prediction") or {},
+            enrichment_context=report.get("contextual_intelligence") or {},
         )
     return report
 

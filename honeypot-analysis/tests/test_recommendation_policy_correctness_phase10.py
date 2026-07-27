@@ -330,7 +330,7 @@ def test_default_guidance_is_separate_and_not_promoted_as_operator_action() -> N
     )
     monitor = _report_recommendations(report, {}, {})
 
-    assert report["recommendations"]["operator_actions"] == []
+    assert report["response_guidance_v3"]["advisory_actions"] == []
     assert monitor["recommended_actions_structured"] == []
 
 
@@ -356,7 +356,11 @@ def test_unreviewed_serialized_action_is_rejected_by_every_consumer() -> None:
     monitor = _report_recommendations(legacy_report, {}, {})
     stix = build_stix_bundle(legacy_report, _discovery_session())
 
-    assert report["recommendations"]["operator_actions"] == []
+    assert report["response_guidance_v3"]["advisory_actions"]
+    assert all(
+        item["action_id"] != action["action_id"]
+        for item in report["response_guidance_v3"]["advisory_actions"]
+    )
     assert monitor["recommended_actions_structured"] == []
     assert not any(item.get("type") == "course-of-action" for item in stix["objects"])
 
@@ -388,6 +392,6 @@ def test_missing_or_invalid_policy_file_is_failure_safe(tmp_path: Path) -> None:
         asset_profile_path=str(ASSET_PATH),
         action_policy_path=str(missing),
     )
-    assert report_decision["status"] == "unavailable"
-    assert report_decision["authority"] == "policy_unavailable"
+    assert report_decision["status"] == "not_available"
+    assert report_decision["authority"] == "legacy_generation_prohibited"
     assert report_decision["immediate_actions"] == []

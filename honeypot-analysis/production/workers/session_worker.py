@@ -56,7 +56,6 @@ from production.utils.service_lifecycle import ServiceLifecycle
 from production.utils.http_security import safe_correlation_id
 from production.prediction.session_features import build_session_features
 from production.correlation.session_ttp_correlation import apply_session_ttp_correlations, load_knowledge as load_session_ttp_correlation_knowledge
-from production.reporting.smb_decision import RISK_ORDER, build_smb_decision_from_paths
 from production.classification.securebert_classifier import load_securebert_classifier
 from production.storage import open_storage
 from production.storage.contract import EVENT_FAILURE_TYPES
@@ -725,51 +724,6 @@ class SessionWorker:
             "filter_enabled": True,
         }
 
-    def _maybe_store_smb_decision_alert(self, decision: Dict[str, Any], snapshot: Dict[str, Any]) -> None:
-        if not self.config.enable_smb_decision_alerts:
-            return
-        risk = decision.get("risk") or {}
-        severity = str(risk.get("severity") or "info").lower()
-        threshold = str(self.config.smb_alert_min_severity or "high").lower()
-        if RISK_ORDER.get(severity, 0) < RISK_ORDER.get(threshold, 3):
-            return
-        actions = [
-            str(item.get("action_id") or "")
-            for item in (decision.get("immediate_actions") or [])[:3]
-            if isinstance(item, dict)
-        ]
-        alert_id = stable_id(
-            "smbalert",
-            {
-                "session_id": decision.get("session_id"),
-                "severity": severity,
-                "risk_rule": risk.get("rule_id") or "",
-                "actions": actions,
-            },
-        )
-        self.storage.store_alert(
-            {
-                "alert_id": alert_id,
-                "session_id": decision.get("session_id", "unknown"),
-                "severity": severity.upper(),
-                "reason": risk.get("reason") or f"SMB decision risk: {severity}",
-                "created_at": utc_now(),
-                "alert_type": "smb_decision",
-                "payload": {
-                    "alert_type": "smb_decision",
-                    "decision_id": decision.get("decision_id"),
-                    "snapshot_id": snapshot.get("snapshot_id"),
-                    "risk": risk,
-                    "likely_goal": decision.get("likely_goal") or {},
-                    "likely_next_step": decision.get("likely_next_step") or {},
-                    "immediate_actions": decision.get("immediate_actions") or [],
-                    "asset_context": decision.get("asset_context") or {},
-                    "trust": decision.get("trust") or {},
-                },
-            }
-        )
-        self._record_event_effect("alerts_created", 1)
-
     def _maybe_store_predictive_alert(self, snapshot: Dict[str, Any]) -> None:
         """Persist the fixed advisory boundary; never evaluate alert thresholds."""
 
@@ -879,16 +833,10 @@ class SessionWorker:
             features = build_session_features(payload, current_event=event)
             snapshot = self.prediction_engine.predict(features, event_id=event_id)
         snapshot["prediction_trigger"] = trigger_info or self._prediction_trigger_for_event(event)
-        if self.config.enable_smb_decisions:
-            decision = build_smb_decision_from_paths(
-                session_payload=payload,
-                prediction_snapshot=snapshot,
-                asset_profile_path=self.config.smb_asset_profile_path,
-                action_policy_path=self.config.smb_action_policy_path,
-                mitre_attack_path=self.config.mitre_attack_path,
-            )
-            snapshot["smb_decision"] = decision
-            self._maybe_store_smb_decision_alert(decision, snapshot)
+        # Response guidance is intentionally not embedded in prediction
+        # snapshots.  Forecast generation has no recommendation or alerting
+        # authority; v3 is created from immutable observed evidence at the
+        # report/current-guidance boundary instead.
         if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
             snapshot.setdefault(
                 "predictive_alert",
