@@ -109,3 +109,28 @@ because a historical document names them.
 
 Protected untracked audit bundles and external cache artifacts were not read,
 modified, staged, or deleted during this cleanup.
+
+## Final validation and size
+
+- Focused supported paths: 152 passed, 6 dependency-gated skips.
+- Canonical reproduction libraries: 127 passed.
+- Runtime/deployment/documentation subset: 44 passed, 2 dependency-gated
+  skips; documentation links: zero broken.
+- Full socket-enabled suite: 822 passed, 7 dependency-gated skips.
+- Policy validation passed for both the frozen Transformer and explicit VOMM
+  rollback policies.
+- Real repository VOMM artifact/manifest loading and supported-prefix inference
+  passed with artifact SHA-256
+  `b5a60951764648ed242d7b9acfe1df6f5f314f96e341badb7f4bd55107614e3e`.
+- The frozen deployed Transformer checkpoint is intentionally outside Git and
+  external cache access was prohibited for this cleanup. Strict loading,
+  inference, unavailable behavior, and authority boundaries passed using
+  retained deterministic fixtures; the immutable deployment handoff remains
+  the real-artifact verification record.
+- Compile/import checks, the retained CLI `--help`, systemd dead-reference
+  scan, tracked secret scan, and generated Python-cache cleanup passed.
+
+The tracked repository changed from 469 files, 616,526 lines, 246,922,176
+bytes (about 238 MiB working directory) at the initial cleanup baseline to 389
+files, 410,304 lines, 103,754,833 bytes (about 113 MiB). Prediction modules are
+12, prediction-related tests are 17, and `production/tools` contains 14 files.
