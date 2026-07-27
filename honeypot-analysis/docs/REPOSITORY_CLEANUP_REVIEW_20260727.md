@@ -151,3 +151,37 @@ Each removal commit must leave:
 6. MongoDB disabled and isolated;
 7. production behavior unchanged.
 
+## Completed validation
+
+Final cleanup state:
+
+- tracked files: 469 (baseline 482);
+- tracked lines: 616,492 (baseline 621,147);
+- tracked blob bytes: 246,920,566 (baseline 247,114,080);
+- working-directory apparent size: approximately 238 MiB (baseline 2.6 GiB,
+  dominated by ignored generated copies);
+- ignored generated data, packaging output, test caches, and bytecode removed;
+- superseded pre-provenance `evaluation/authoritative_external_vomm/` removed;
+  the exact seven-day replacement remains.
+
+Validation performed:
+
+- full socket-capable suite: `1194 passed, 16 skipped`;
+- affected runtime/deployment/storage suite: 218 passed, 2 skipped;
+- VOMM-focused regression: 14 passed;
+- repository reproducibility documentation suite: 6 passed;
+- all current CLI entrypoints accepted `--help`;
+- Python compile/import validation passed;
+- prediction, classification, and SMB policy validation passed;
+- systemd module references and documentation links passed;
+- tracked-production private-key/token pattern scan passed;
+- VOMM artifact and manifest hashes matched;
+- the real frozen Transformer checkpoint loaded strictly in eval mode with
+  3,951 parameters using the locked Torch environment.
+
+The old external/early-Zenodo/500-MiB benchmark payloads remain
+`AMBIGUOUS_DO_NOT_REMOVE`: current authoritative evaluators and immutable audit
+evidence still import or cite their shared tools and exact historical paths.
+Removing them safely requires first extracting a stable evaluation-common
+module and updating immutable reproducibility documentation; that is future
+work, not a safe cleanup shortcut.
