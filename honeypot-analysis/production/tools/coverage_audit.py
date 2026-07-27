@@ -132,12 +132,6 @@ def _smb_policy_ttps(policy_path: str) -> Set[str]:
     return _extract_ttps(policy)
 
 
-def _prediction_policy_ttps(policy_path: str, policy: Optional[Dict[str, Any]] = None) -> Set[str]:
-    loaded = _load_json(policy_path)
-    active = policy or loaded.get("policy") or loaded
-    return _extract_ttps(active)
-
-
 def _coverage_entry(name: str, covered: Iterable[str], universe: Iterable[str], *, notes: str = "") -> Dict[str, Any]:
     covered_set = {main_ttp_id(item) for item in covered if _clean(item)}
     universe_set = {main_ttp_id(item) for item in universe if _clean(item)}
@@ -187,12 +181,6 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
             notes="Combined trusted policy plus configured knowledge packs.",
         ),
         _coverage_entry(
-            "prediction_policy_ttp_references",
-            _prediction_policy_ttps(config.prediction_policy_path, config.prediction_policy),
-            mitre_universe,
-            notes="TTP references in realtime prediction policy. Tactic-only rules are not counted.",
-        ),
-        _coverage_entry(
             "smb_action_policy_ttp_references",
             _smb_policy_ttps(config.smb_action_policy_path),
             mitre_universe,
@@ -209,11 +197,6 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
             "file": "production/workers/session_monitor.py",
             "symbol": "_KEYWORD_TTP_RULES / _TACTIC_PROGRESSION",
             "risk": "Legacy fallback classification and next-step text are manually bounded.",
-        },
-        {
-            "file": "production/prediction/realtime_prediction.py",
-            "symbol": "TACTIC_PROGRESSION / DEFAULT_TACTIC_COMBINATION_RULES",
-            "risk": "Fallback prediction priors are manual and should remain low-weight.",
         },
         {
             "file": "configs/session_ttp_correlation.trusted.json",
@@ -235,7 +218,7 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
         "coverage": entries,
         "hardcoded_surfaces": hardcoded_surfaces,
         "recommendations": [
-            "Use generated session TTP knowledge packs as the main expansion path; keep generated rules apply_to_prediction=false until reviewed.",
+            "Use generated session TTP knowledge packs for observed-evidence coverage; prediction remains advisory and consumes no generated correlation rules.",
             "Expand command coverage through versioned classification rule policy files, not Python tables.",
             "Use MITRE mitigations as reference guidance for uncovered techniques, not as automatic remediation authority.",
             "Keep AI outputs explanatory only; reject any AI-added operator action not backed by trusted policy.",

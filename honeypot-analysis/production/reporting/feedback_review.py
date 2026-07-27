@@ -1,15 +1,11 @@
-"""Summarize analyst feedback for safe prediction tuning review."""
+"""Summarize advisory prediction feedback for the current dashboard."""
 
 from __future__ import annotations
 
-import argparse
-import json
 from collections import Counter, defaultdict
 from typing import Any, Dict, Iterable, List
 
-from production.utils.config import ProductionConfig
 from production.utils.serialization import utc_now
-from production.storage import open_storage
 
 
 NEGATIVE_LABELS = {"wrong", "not_useful", "false_positive"}
@@ -328,26 +324,3 @@ def _recommendations(
     if not recommendations:
         recommendations.append("Feedback volume and fields look usable for manual policy review.")
     return recommendations
-
-
-def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Summarize analyst prediction feedback.")
-    parser.add_argument("--config", help="Path to production JSON config.")
-    parser.add_argument("--database-url", help="Override DATABASE_URL.")
-    parser.add_argument("--limit", type=int, default=1000, help="Maximum feedback rows to read.")
-    return parser
-
-
-def main(argv: List[str] | None = None) -> int:
-    args = build_arg_parser().parse_args(argv)
-    config = ProductionConfig.from_env(args.config)
-    if args.database_url:
-        config.database_url = args.database_url
-    storage = open_storage(config.database_url)
-    review = build_feedback_review(storage.list_rows("analyst_feedback", limit=max(args.limit, 1)))
-    print(json.dumps(review, indent=2, sort_keys=True))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

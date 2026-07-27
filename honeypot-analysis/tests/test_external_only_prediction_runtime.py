@@ -6,10 +6,8 @@ from types import SimpleNamespace
 from production.api.dashboard_api import _current_prediction_payload
 from production.api.monitor_web import _render_prediction_panel
 from production.policies.validate_prediction_policy import validate_policy_document
-from production.prediction.predictive_alerts import evaluate_predictive_alert
-from production.prediction.realtime_prediction import (
-    RealtimePredictionEngine,
-    build_transition_model,
+from production.prediction.vomm_rollback import (
+    ValidatedVommRollbackPredictor,
 )
 from production.reporting.threat_hypothesis import attach_model_prediction
 from production.workers.session_worker import SessionWorker
@@ -64,19 +62,24 @@ def _external_only_policy() -> dict:
     }
 
 
-def _models() -> tuple[dict, dict]:
-    local = build_transition_model([_payload("local", ["discovery", "impact"])])
-    external = build_transition_model([_payload("external", ["discovery", "execution"])])
-    external.update(
-        {
+def _model() -> dict:
+    return {
             "schema_version": "external_transition_model.v1",
             "model_id": "external-fixture-v1",
             "artifact_version": "fixture-v1",
             "source_type": "external_cowrie_seed",
             "provenance": {"manifest_id": "manifest-fixture-v1"},
+            "usable_sessions": 1,
+            "transition_count": 1,
+            "prefix_transition_count": 0,
+            "technique_transition_count": 0,
+            "prefix_max_length": 3,
+            "transitions": {"discovery": {"execution": 1}},
+            "prefix_transitions": {},
+            "technique_transitions": {},
+            "technique_tactics": {},
+            "start_counts": {"discovery": 1},
         }
-    )
-    return local, external
 
 
 def _valid_artifact() -> dict:
@@ -107,13 +110,11 @@ def _features(last_tactic: str = "discovery") -> dict:
     }
 
 
-def test_external_only_uses_external_output_and_keeps_local_shadow_non_authoritative() -> None:
-    local, external = _models()
-    engine = RealtimePredictionEngine(
+def test_external_only_uses_only_validated_external_output() -> None:
+    engine = ValidatedVommRollbackPredictor(
         _external_only_policy(),
-        transition_model=local,
-        external_transition_model=external,
-        external_artifact_validation=_valid_artifact(),
+        model=_model(),
+        artifact_validation=_valid_artifact(),
     )
 
     snapshot = engine.predict(_features(), event_id="external-only-supported")
@@ -126,28 +127,20 @@ def test_external_only_uses_external_output_and_keeps_local_shadow_non_authorita
     assert snapshot["fallback_used"] is False
     assert snapshot["external_artifact"]["artifact_sha256"] == "a" * 64
     assert snapshot["external_artifact"]["manifest_id"] == "manifest-fixture-v1"
-    assert snapshot["local_shadow_prediction"]["authority"] == "shadow_offline_only"
-    assert snapshot["local_shadow_prediction"]["ranking"][0]["tactic"] == "impact"
-    assert snapshot["ranking_influence"]["local_transition"] == "shadow_offline_only"
+    assert snapshot["local_shadow_prediction"]["authority"] == "removed"
+    assert snapshot["local_shadow_prediction"]["ranking"] == []
+    assert snapshot["ranking_influence"]["local_transition"] == "not_computed"
     assert snapshot["generic_progression_prior"]["not_empirical_prediction"] is True
-    assert "confidence" not in snapshot["generic_progression_prior"]["tactics"][0]
+    assert snapshot["generic_progression_prior"]["tactics"] == []
     assert set(snapshot["scorer_outputs"]) == {"external_seed_transition"}
     assert "fallback_progression" not in snapshot["scorer_outputs"]
     assert "local_transition" not in snapshot["scorer_outputs"]
 
-    alert, evaluation = evaluate_predictive_alert(snapshot, _external_only_policy())
-    assert alert is None
-    assert evaluation["status"] == "suppressed"
-    assert any("external seed prior" in reason for reason in evaluation["suppressed_reasons"])
-
-
 def test_external_only_abstains_for_unsupported_context_without_heuristic_fallback() -> None:
-    local, external = _models()
-    engine = RealtimePredictionEngine(
+    engine = ValidatedVommRollbackPredictor(
         _external_only_policy(),
-        transition_model=local,
-        external_transition_model=external,
-        external_artifact_validation=_valid_artifact(),
+        model=_model(),
+        artifact_validation=_valid_artifact(),
     )
 
     snapshot = engine.predict(_features("execution"), event_id="external-only-unsupported")
@@ -157,39 +150,32 @@ def test_external_only_abstains_for_unsupported_context_without_heuristic_fallba
     assert snapshot["final_ranking"] == []
     assert snapshot["fallback_used"] is False
     assert snapshot["coverage"]["below_minimum"] is True
-    assert snapshot["generic_progression_prior"]["tactics"] == [{
-        "tactic": "persistence", "ordinal": 1,
-        "reason": snapshot["generic_progression_prior"]["tactics"][0]["reason"],
-    }]
+    assert snapshot["generic_progression_prior"]["tactics"] == []
 
 
 def test_external_only_fails_closed_when_manifest_validation_is_missing_or_invalid() -> None:
-    local, external = _models()
     invalid = _valid_artifact()
     invalid.update({"status": "unavailable", "valid": False, "reasons": ["artifact_sha256_mismatch"]})
-    engine = RealtimePredictionEngine(
+    engine = ValidatedVommRollbackPredictor(
         _external_only_policy(),
-        transition_model=local,
-        external_transition_model=external,
-        external_artifact_validation=invalid,
+        model=_model(),
+        artifact_validation=invalid,
     )
 
     snapshot = engine.predict(_features(), event_id="external-only-invalid")
 
     assert snapshot["prediction_status"] == "model_unavailable"
     assert snapshot["final_ranking"] == []
-    assert snapshot["local_shadow_prediction"]["ranking"][0]["tactic"] == "impact"
+    assert snapshot["local_shadow_prediction"]["ranking"] == []
     assert snapshot["ranking_influence"]["production_effective_scorers"] == []
     assert "artifact_sha256_mismatch" in snapshot["prediction_status_reason"]
 
 
 def test_api_and_report_preserve_new_status_and_old_snapshot_reading() -> None:
-    local, external = _models()
-    snapshot = RealtimePredictionEngine(
+    snapshot = ValidatedVommRollbackPredictor(
         _external_only_policy(),
-        transition_model=local,
-        external_transition_model=external,
-        external_artifact_validation=_valid_artifact(),
+        model=_model(),
+        artifact_validation=_valid_artifact(),
     ).predict(_features("execution"), event_id="report-abstained")
     current = _current_prediction_payload({"payload": snapshot}, [])
     report = attach_model_prediction({}, snapshot)

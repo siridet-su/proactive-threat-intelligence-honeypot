@@ -1415,7 +1415,7 @@ def build_smb_decision(
             "confidence": prediction.get("confidence") or "",
             "score": prediction.get("score", ""),
             "reasons": prediction.get("reasons") or [],
-            "source": "realtime_prediction" if prediction else "not_available",
+            "source": "advisory_prediction_snapshot" if prediction else "not_available",
         },
         "immediate_actions": matched_actions[:8],
         "default_guidance": default_actions[:8],

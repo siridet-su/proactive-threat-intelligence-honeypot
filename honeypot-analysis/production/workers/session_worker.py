@@ -40,17 +40,16 @@ from production.reporting.analysis_policy import (
     session_analysis_skip_reason,
 )
 from production.correlation.campaign_clustering import create_or_update_campaign
-from production.prediction.realtime_prediction import (
-    RealtimePredictionEngine,
-    build_actor_fingerprint_transition_model,
-    build_transition_model,
-)
 from production.prediction.next_behavior_runtime import (
     MODE as TRANSFORMER_POC_MODE,
     FrozenTransformerPocPredictor,
 )
 from production.prediction.external_vomm_artifact import load_external_vomm_artifact
-from production.prediction.predictive_alerts import evaluate_predictive_alert
+from production.prediction.vomm_rollback import (
+    MODE as VOMM_ROLLBACK_MODE,
+    ValidatedVommRollbackPredictor,
+    empty_transition_model,
+)
 from production.utils.runtime_context import attach_runtime_context
 from production.utils.serialization import session_to_payload, stable_id, utc_now
 from production.utils.service_lifecycle import ServiceLifecycle
@@ -59,7 +58,7 @@ from production.prediction.session_features import build_session_features
 from production.correlation.session_ttp_correlation import apply_session_ttp_correlations, load_knowledge as load_session_ttp_correlation_knowledge
 from production.reporting.smb_decision import RISK_ORDER, build_smb_decision_from_paths
 from production.classification.securebert_classifier import load_securebert_classifier
-from production.storage import open_storage, safe_database_label
+from production.storage import open_storage
 from production.storage.contract import EVENT_FAILURE_TYPES
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
@@ -159,6 +158,12 @@ def alert_payload(alert: Any) -> Dict[str, Any]:
     return payload
 
 
+class _DisabledPredictionEngine:
+    """Explicit no-op used when prediction is disabled by configuration."""
+
+    enabled = False
+
+
 class SessionWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
@@ -183,12 +188,6 @@ class SessionWorker:
         self.feeds = None
         self.mitre_db = None
         self.enrichment_db: Dict[str, Any] = {}
-        self._base_prediction_policy = deepcopy(config.prediction_policy or {})
-        self._calibration_output_mtime: Optional[float] = None
-        self.weight_calibration_status: Dict[str, Any] = {
-            "enabled": bool((config.calibration_policy or {}).get("enabled", True)),
-            "status": "not_checked",
-        }
         self.external_artifact_validation: Dict[str, Any] = {
             "status": "unavailable",
             "valid": False,
@@ -199,7 +198,6 @@ class SessionWorker:
         self.bert_fn = load_securebert_classifier(config)
         self.classifier = None
         self.session_ttp_correlation_policy = self._load_session_ttp_correlation_policy()
-        self._reload_calibration_output_if_changed(force=True)
         self.prediction_engine = self._new_prediction_engine()
         if config.enable_feed_loading:
             self.feeds = load_threat_feeds(
@@ -420,18 +418,7 @@ class SessionWorker:
         }
 
     def _recover_prediction_cache(self, session_id: str) -> None:
-        try:
-            history_limit = max(
-                1,
-                int(
-                    (self.config.calibration_policy or {}).get(
-                        "auto_evidence_snapshot_cache_limit",
-                        25,
-                    )
-                ),
-            )
-        except (TypeError, ValueError):
-            history_limit = 25
+        history_limit = 25
         rows = self.storage.list_rows_for_session(
             "prediction_snapshots",
             session_id,
@@ -554,371 +541,74 @@ class SessionWorker:
             )
             return {"policy": {"enabled": False, "rules": []}}
 
-    def _load_transition_model(self) -> Dict[str, Any]:
-        policy = self.config.prediction_policy or {}
-        limit = int(policy.get("transition_history_limit", 500))
-        try:
-            if hasattr(self.storage, "list_session_rows"):
-                rows = self.storage.list_session_rows(
-                    limit=limit,
-                    session_source=SESSION_SOURCE_PRODUCTION_LIVE,
-                    external_only=True,
-                )
-            else:
-                rows = self.storage.list_rows("sessions", limit=limit)
-        except Exception:
-            return build_transition_model([])
-
-        payloads: List[Dict[str, Any]] = []
-        for row in rows:
-            raw = row.get("payload_json")
-            if isinstance(raw, dict):
-                payloads.append(raw)
-            elif isinstance(raw, str):
-                try:
-                    loaded = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(loaded, dict):
-                    payloads.append(loaded)
-        return build_transition_model(
-            payloads,
-            prefix_max_length=int(policy.get("prefix_max_length", 3)),
-            source_name="local_transition",
-            source_database=safe_database_label(self.config.database_url),
-            recency_half_life_sessions=float(policy.get("recency_decay_half_life_sessions") or 0.0),
-        )
-
     def _load_external_transition_model(self) -> Dict[str, Any]:
         policy = self.config.prediction_policy or {}
         path_text = str(policy.get("external_transition_model_path") or "").strip()
         manifest_path_text = str(policy.get("external_transition_manifest_path") or "").strip()
-        external_only = str(policy.get("prediction_mode") or "").strip() in {
-            "external_hard_backoff_vomm",
-            "external_only_hard_backoff_vomm",
-        }
         if not path_text:
             self.external_artifact_validation = {
                 "status": "unavailable",
                 "valid": False,
                 "reasons": ["external_transition_model_path_not_configured"],
             }
-            return build_transition_model([])
-        if manifest_path_text:
-            model, validation = load_external_vomm_artifact(
-                path_text,
-                manifest_path_text,
-                expected_artifact_sha256=str(policy.get("external_transition_expected_artifact_sha256") or ""),
-                expected_model_id=str(policy.get("external_transition_expected_model_id") or ""),
-                expected_manifest_id=str(policy.get("external_transition_expected_manifest_id") or ""),
-            )
-            self.external_artifact_validation = validation
-            if validation.get("valid"):
-                return model
-            print(
-                json.dumps(
-                    {
-                        "service": "session_worker",
-                        "warning": "external_vomm_artifact_unavailable",
-                        "path": path_text,
-                        "manifest_path": manifest_path_text,
-                        "reasons": list(validation.get("reasons") or []),
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            return build_transition_model([])
-        if external_only:
+            return empty_transition_model()
+        if not manifest_path_text:
             self.external_artifact_validation = {
                 "status": "unavailable",
                 "valid": False,
                 "reasons": ["external_only_mode_requires_manifest_path"],
                 "artifact_path": path_text,
             }
-            return build_transition_model([])
-        path = Path(path_text)
-        if not path.exists():
-            self.external_artifact_validation = {
-                "status": "unavailable",
-                "valid": False,
-                "reasons": ["artifact_path_missing"],
-                "artifact_path": path_text,
-            }
-            print(
-                json.dumps(
-                    {
-                        "service": "session_worker",
-                        "warning": "external_transition_model_not_found",
-                        "path": path_text,
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            return build_transition_model([])
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                loaded = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
-            self.external_artifact_validation = {
-                "status": "unavailable",
-                "valid": False,
-                "reasons": ["artifact_json_malformed"],
-                "artifact_path": path_text,
-            }
-            print(
-                json.dumps(
-                    {
-                        "service": "session_worker",
-                        "warning": "external_transition_model_load_failed",
-                        "path": path_text,
-                        "error": _safe_exception_text(exc),
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            return build_transition_model([])
-        if isinstance(loaded, dict) and isinstance(loaded.get("model"), dict):
-            self.external_artifact_validation = {
-                "status": "legacy_unverified",
-                "valid": False,
-                "reasons": ["legacy_external_transition_model_has_no_manifest"],
-                "artifact_path": path_text,
-            }
-            return loaded["model"]
-        if isinstance(loaded, dict):
-            self.external_artifact_validation = {
-                "status": "legacy_unverified",
-                "valid": False,
-                "reasons": ["legacy_external_transition_model_has_no_manifest"],
-                "artifact_path": path_text,
-            }
-            return loaded
-        self.external_artifact_validation = {
-            "status": "unavailable",
-            "valid": False,
-            "reasons": ["external_transition_model_not_object"],
-            "artifact_path": path_text,
-        }
-        return build_transition_model([])
-
-    def _load_actor_fingerprint_transition_model(self) -> Dict[str, Any]:
-        policy = self.config.prediction_policy or {}
-        actor_policy = policy.get("actor_fingerprint_prior") or {}
-        if not isinstance(actor_policy, dict):
-            actor_policy = {}
-        if not bool(actor_policy.get("enabled", False)):
-            return build_actor_fingerprint_transition_model([], policy)
-
-        path_text = str(actor_policy.get("model_path") or policy.get("actor_fingerprint_model_path") or "").strip()
-        if path_text:
-            path = Path(path_text)
-            if not path.exists():
-                print(
-                    json.dumps(
-                        {
-                            "service": "session_worker",
-                            "warning": "actor_fingerprint_transition_model_not_found",
-                            "path": path_text,
-                            "timestamp": utc_now(),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-            else:
-                try:
-                    with path.open("r", encoding="utf-8") as f:
-                        loaded = json.load(f)
-                except (OSError, json.JSONDecodeError) as exc:
-                    print(
-                        json.dumps(
-                            {
-                                "service": "session_worker",
-                                "warning": "actor_fingerprint_transition_model_load_failed",
-                                "path": path_text,
-                                "error": _safe_exception_text(exc),
-                                "timestamp": utc_now(),
-                            },
-                            sort_keys=True,
-                        ),
-                        flush=True,
-                    )
-                else:
-                    if isinstance(loaded, dict) and isinstance(loaded.get("model"), dict):
-                        return loaded["model"]
-                    if isinstance(loaded, dict):
-                        return loaded
-
-        limit = int(actor_policy.get("history_limit") or policy.get("transition_history_limit", 500))
-        try:
-            if hasattr(self.storage, "list_session_rows"):
-                rows = self.storage.list_session_rows(
-                    limit=max(limit, 1),
-                    session_source=SESSION_SOURCE_PRODUCTION_LIVE,
-                    external_only=True,
-                )
-            else:
-                rows = self.storage.list_rows("sessions", limit=max(limit, 1))
-        except Exception:
-            return build_actor_fingerprint_transition_model([], policy)
-
-        payloads: List[Dict[str, Any]] = []
-        for row in rows:
-            raw = row.get("payload_json")
-            if isinstance(raw, dict):
-                payloads.append(raw)
-            elif isinstance(raw, str):
-                try:
-                    loaded = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(loaded, dict):
-                    payloads.append(loaded)
-        return build_actor_fingerprint_transition_model(
-            payloads,
-            policy=policy,
-            prefix_max_length=int(actor_policy.get("prefix_max_length") or policy.get("prefix_max_length", 3)),
-            source_database=safe_database_label(self.config.database_url),
-            recency_half_life_sessions=float(policy.get("recency_decay_half_life_sessions") or 0.0),
+            return empty_transition_model()
+        model, validation = load_external_vomm_artifact(
+            path_text,
+            manifest_path_text,
+            expected_artifact_sha256=str(
+                policy.get("external_transition_expected_artifact_sha256") or ""
+            ),
+            expected_model_id=str(
+                policy.get("external_transition_expected_model_id") or ""
+            ),
+            expected_manifest_id=str(
+                policy.get("external_transition_expected_manifest_id") or ""
+            ),
         )
+        self.external_artifact_validation = validation
+        if validation.get("valid"):
+            return model
+        print(
+            json.dumps(
+                {
+                    "service": "session_worker",
+                    "warning": "external_vomm_artifact_unavailable",
+                    "path": path_text,
+                    "manifest_path": manifest_path_text,
+                    "reasons": list(validation.get("reasons") or []),
+                    "timestamp": utc_now(),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return empty_transition_model()
 
     def _new_prediction_engine(self) -> Any:
-        if (
-            str((self.config.prediction_policy or {}).get("prediction_mode") or "")
-            == TRANSFORMER_POC_MODE
-        ):
+        policy = self.config.prediction_policy or {}
+        if policy.get("enabled") is False:
+            return _DisabledPredictionEngine()
+        if str(policy.get("prediction_mode") or "") == TRANSFORMER_POC_MODE:
             return FrozenTransformerPocPredictor(self.config.prediction_policy)
-        external_model = self._load_external_transition_model()
-        return RealtimePredictionEngine(
+        if str(policy.get("prediction_mode") or "") != VOMM_ROLLBACK_MODE:
+            raise WorkerError(
+                "prediction policy must select the frozen Transformer or explicit VOMM rollback"
+            )
+        return ValidatedVommRollbackPredictor(
             self.config.prediction_policy,
-            transition_model=self._load_transition_model(),
-            external_transition_model=external_model,
-            actor_fingerprint_transition_model=self._load_actor_fingerprint_transition_model(),
-            external_artifact_validation=self.external_artifact_validation,
+            model=self._load_external_transition_model(),
+            artifact_validation=self.external_artifact_validation,
         )
-
-    def _merge_prediction_policy_overlay(self, overlay: Dict[str, Any]) -> Dict[str, Any]:
-        merged = deepcopy(self._base_prediction_policy)
-        for key, value in overlay.items():
-            if key == "weights" and isinstance(value, dict):
-                base_weights = dict(merged.get("weights") or {})
-                base_weights.update(value)
-                merged["weights"] = base_weights
-            elif isinstance(value, dict) and isinstance(merged.get(key), dict):
-                nested = dict(merged.get(key) or {})
-                nested.update(value)
-                merged[key] = nested
-            else:
-                merged[key] = value
-        return merged
-
-    def _reload_calibration_output_if_changed(self, force: bool = False) -> None:
-        if (
-            str((self.config.prediction_policy or {}).get("prediction_mode") or "")
-            == TRANSFORMER_POC_MODE
-        ):
-            self.weight_calibration_status = {
-                "enabled": False,
-                "status": "not_applicable",
-                "reason": "frozen corrected-target calibration is bound to the model policy",
-            }
-            return
-        policy = self.config.calibration_policy or {}
-        enabled = bool(policy.get("enabled", True))
-        output_path = str(policy.get("output_path") or "").strip()
-        if not enabled:
-            self.config.prediction_policy = deepcopy(self._base_prediction_policy)
-            self.weight_calibration_status = {
-                "enabled": False,
-                "status": "disabled",
-                "reason": "calibration policy disabled",
-            }
-            return
-        if not output_path:
-            self.config.prediction_policy = deepcopy(self._base_prediction_policy)
-            self.weight_calibration_status = {
-                "enabled": True,
-                "status": "missing",
-                "reason": "calibration output path is not configured",
-            }
-            return
-
-        path = Path(output_path)
-        if not path.exists():
-            if force or self._calibration_output_mtime != -1.0:
-                self.config.prediction_policy = deepcopy(self._base_prediction_policy)
-                self.weight_calibration_status = {
-                    "enabled": True,
-                    "status": "missing",
-                    "path": output_path,
-                    "reason": "calibration output file does not exist",
-                }
-                self._calibration_output_mtime = -1.0
-            return
-
-        mtime = path.stat().st_mtime
-        if not force and self._calibration_output_mtime == mtime:
-            return
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            self.config.prediction_policy = deepcopy(self._base_prediction_policy)
-            self.weight_calibration_status = {
-                "enabled": True,
-                "status": "error",
-                "path": output_path,
-                "reason": _safe_exception_text(exc),
-            }
-            self._calibration_output_mtime = mtime
-            return
-        if not isinstance(loaded, dict):
-            self.config.prediction_policy = deepcopy(self._base_prediction_policy)
-            self.weight_calibration_status = {
-                "enabled": True,
-                "status": "error",
-                "path": output_path,
-                "reason": "calibration output is not a JSON object",
-            }
-            self._calibration_output_mtime = mtime
-            return
-
-        apply_output = bool(policy.get("apply_output", True))
-        applied = bool(loaded.get("applied") or loaded.get("apply"))
-        overlay = loaded.get("policy_overlay") or {}
-        if apply_output and applied and isinstance(overlay, dict):
-            self.config.prediction_policy = self._merge_prediction_policy_overlay(overlay)
-            status = "applied"
-        else:
-            self.config.prediction_policy = deepcopy(self._base_prediction_policy)
-            status = str(loaded.get("status") or "not_applied")
-        self.weight_calibration_status = redact_for_artifact(
-            {
-                "enabled": True,
-                "status": status,
-                "path": output_path,
-                "run_id": loaded.get("run_id") or "",
-                "generated_at": loaded.get("generated_at") or "",
-                "reason": loaded.get("reason") or "",
-                "applied": apply_output and applied,
-                "influence_scope": (
-                    "production_ranking"
-                    if str(self.config.prediction_policy.get("prediction_mode") or "")
-                    == "weighted_ensemble_baseline"
-                    else "diagnostic_only"
-                ),
-                "inputs": loaded.get("inputs") or {},
-            }
-        )
-        self._calibration_output_mtime = mtime
 
     def _refresh_prediction_engine(self) -> None:
-        self._reload_calibration_output_if_changed()
         if self.prediction_engine.enabled:
             self.prediction_engine = self._new_prediction_engine()
 
@@ -1081,42 +771,28 @@ class SessionWorker:
         self._record_event_effect("alerts_created", 1)
 
     def _maybe_store_predictive_alert(self, snapshot: Dict[str, Any]) -> None:
-        # The evaluator remains available to reproduce accepted historical
-        # "would alert" analysis. Runtime treats its alert payload as a
-        # non-authoritative diagnostic and never stores or acts on it.
-        alert, evaluation = evaluate_predictive_alert(
-            snapshot,
-            self.config.prediction_policy or {},
-        )
-        evaluation = dict(evaluation or {})
-        evaluation["authority"] = {
+        """Persist the fixed advisory boundary; never evaluate alert thresholds."""
+
+        snapshot["predictive_alert"] = {
+            "schema_version": "predictive_alert_evaluation.v1",
+            "enabled": False,
+            "status": "prohibited",
+            "reason": "prediction-only alert creation is prohibited",
+            "suppressed_reasons": [
+                "advisory next-behavior output has no alert authority"
+            ],
+            "legacy_candidate_thresholds_crossed": False,
+            "authority": {
             "prediction_only": True,
             "may_create_alert": False,
             "may_escalate_enrichment": False,
-            "semantics": "diagnostic_threshold_evaluation_only",
+                "semantics": "advisory_forecast_only",
+            },
+            "enrichment_escalation": {
+                "status": "prohibited",
+                "reason": "prediction alone cannot escalate enrichment",
+            },
         }
-        evaluation["legacy_candidate_thresholds_crossed"] = bool(alert)
-        if alert:
-            reason = (
-                "prediction-only alert creation is prohibited; the legacy "
-                "threshold candidate is diagnostic only"
-            )
-            evaluation["status"] = "suppressed"
-            evaluation["reason"] = reason
-            evaluation.pop("alert_id", None)
-            suppressed = [
-                str(item)
-                for item in evaluation.get("suppressed_reasons") or []
-                if str(item)
-            ]
-            if reason not in suppressed:
-                suppressed.append(reason)
-            evaluation["suppressed_reasons"] = suppressed
-        evaluation["enrichment_escalation"] = {
-            "status": "prohibited",
-            "reason": "prediction alone cannot escalate enrichment",
-        }
-        snapshot["predictive_alert"] = evaluation
 
     def _apply_campaign_clustering(self, payload: Dict[str, Any], status: str) -> Dict[str, Any]:
         try:
@@ -1202,7 +878,6 @@ class SessionWorker:
         else:
             features = build_session_features(payload, current_event=event)
             snapshot = self.prediction_engine.predict(features, event_id=event_id)
-        snapshot["weight_calibration"] = self.weight_calibration_status
         snapshot["prediction_trigger"] = trigger_info or self._prediction_trigger_for_event(event)
         if self.config.enable_smb_decisions:
             decision = build_smb_decision_from_paths(
@@ -1231,13 +906,7 @@ class SessionWorker:
             self._session_latest_snapshots[session_id] = snapshot
             snapshot_history = self._session_prediction_snapshots.setdefault(session_id, [])
             snapshot_history.append(snapshot)
-            try:
-                history_limit = max(
-                    1,
-                    int((self.config.calibration_policy or {}).get("auto_evidence_snapshot_cache_limit", 25)),
-                )
-            except (TypeError, ValueError):
-                history_limit = 25
+            history_limit = 25
             if len(snapshot_history) > history_limit:
                 del snapshot_history[:-history_limit]
         return True
@@ -1365,9 +1034,7 @@ class SessionWorker:
                 snapshots = [latest_snapshot]
             if not snapshots:
                 return
-            min_confidence = float(
-                (self.config.calibration_policy or {}).get("min_auto_evidence_confidence", 0.90)
-            )
+            min_confidence = 0.90
             for snapshot in reversed(snapshots):
                 feedback = build_auto_evidence_feedback(
                     {"payload": snapshot},

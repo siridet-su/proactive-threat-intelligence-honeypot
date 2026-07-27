@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-from production.prediction.prune_prediction_snapshots import main
 from production.storage import open_storage
 
 
@@ -103,67 +99,3 @@ def test_latest_tie_break_is_deterministic_and_dry_run_does_not_write(tmp_path) 
     assert result["deleted"] == 0
     assert storage.get_prediction_snapshot("snapshot-a") is not None
     assert storage.get_prediction_snapshot("snapshot-z") is not None
-
-
-def test_retention_cli_requires_apply_for_deletion(tmp_path, capsys) -> None:
-    database = tmp_path / "cli.db"
-    storage = _seed_retention_graph(database)
-    arguments = [
-        "--database-url",
-        f"sqlite:///{database}",
-        "--retention-days",
-        "90",
-        "--now",
-        REFERENCE_NOW,
-    ]
-
-    assert main(arguments) == 0
-    dry_output = json.loads(capsys.readouterr().out)
-    assert dry_output["schema_version"] == "prediction_snapshot_retention.v2"
-    assert dry_output["dry_run"] is True
-    assert dry_output["eligible"] == 1
-    assert dry_output["deleted"] == 0
-    assert storage.get_prediction_snapshot("old-intermediate") is not None
-
-    assert main([*arguments, "--apply"]) == 0
-    applied_output = json.loads(capsys.readouterr().out)
-    assert applied_output["dry_run"] is False
-    assert applied_output["deleted"] == 1
-    assert storage.get_prediction_snapshot("old-intermediate") is None
-
-
-def test_scheduled_retention_is_auditing_only_and_inventory_is_complete() -> None:
-    root = Path(__file__).resolve().parents[1]
-    unit = (
-        root / "deployment/systemd/honeypot-prediction-retention.service"
-    ).read_text(encoding="utf-8")
-    policy = (root / "docs/RETENTION_POLICY.md").read_text(encoding="utf-8")
-    entities = {
-        "events",
-        "sessions",
-        "alerts",
-        "analysis_jobs",
-        "reports",
-        "feed_status",
-        "observables",
-        "observable_sightings",
-        "enrichment_records",
-        "enrichment_jobs",
-        "webhook_deliveries",
-        "prediction_snapshots",
-        "prediction_backtest_runs",
-        "prediction_calibration_runs",
-        "analyst_feedback",
-        "classification_review_labels",
-        "threat_hunt_jobs",
-        "session_links",
-        "campaigns",
-        "campaign_sessions",
-        "worker_leases",
-    }
-
-    assert "--apply" not in next(
-        line for line in unit.splitlines() if line.startswith("ExecStart=")
-    )
-    for entity in entities:
-        assert f"`{entity}`" in policy

@@ -34,8 +34,8 @@ from production.api.security import (
 )
 from production.classification.classification_evaluation import classification_metrics
 from production.utils.config import ProductionConfig
-from production.prediction.external_seed_health import infer_external_seed_paths, load_external_seed_health
-from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
+from production.prediction.prediction_health import infer_prediction_paths, load_prediction_health
+from production.reporting.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
 from production.utils.feedback import normalize_submitted_feedback_payload
 from production.utils.http_security import (
     BoundedThreadingHTTPServer,
@@ -97,7 +97,7 @@ def _sqlite_path(database_url: str) -> str:
 
 def _load_monitor_config(config_path: Optional[str] = None) -> MonitorConfig:
     cfg = ProductionConfig.from_env(config_path)
-    external_seed_paths = infer_external_seed_paths(cfg.prediction_policy)
+    external_seed_paths = infer_prediction_paths(cfg.prediction_policy)
     return MonitorConfig(
         database_url=cfg.database_url,
         db_path=_sqlite_path(cfg.database_url),
@@ -1151,12 +1151,19 @@ def _summarize_calibration_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _load_external_seed_health(config: MonitorConfig) -> Dict[str, Any]:
     try:
-        health = load_external_seed_health(
+        health = load_prediction_health(
             config.external_seed_health_path,
             model_path=config.external_seed_model_path,
             validation_path=config.external_seed_validation_path,
             review_path=config.external_seed_review_path,
             include_review=False,
+            mode=str(
+                (config.production_config.prediction_policy or {}).get(
+                    "prediction_mode"
+                )
+                if config.production_config
+                else ""
+            ),
         )
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return {

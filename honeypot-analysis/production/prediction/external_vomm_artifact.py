@@ -11,17 +11,140 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
-from production.prediction.realtime_prediction import build_transition_model
+from production.classification.trust import is_trusted_classification_event
+from production.correlation.session_ttp_knowledge import main_ttp_id
 
 
 ARTIFACT_SCHEMA = "external_transition_model.v1"
 MANIFEST_SCHEMA = "external_vomm_manifest.v1"
 BUILDER_VERSION = "external_hard_backoff_vomm_builder.v1"
+
+
+def _tactic_sequence(payload: Mapping[str, Any]) -> list[str]:
+    events = [
+        item
+        for item in payload.get("classification_events") or []
+        if isinstance(item, dict)
+    ]
+    sequence = [
+        str(item.get("tactic") or "").strip()
+        for item in events
+        if is_trusted_classification_event(item)
+        and str(item.get("tactic") or "").strip() not in {"", "unknown"}
+    ]
+    if not sequence and not events:
+        sequence = [
+            str(item or "").strip()
+            for item in payload.get("tactics") or []
+            if str(item or "").strip() not in {"", "unknown"}
+        ]
+    return [
+        item
+        for index, item in enumerate(sequence)
+        if index == 0 or sequence[index - 1] != item
+    ]
+
+
+def _technique_sequence(payload: Mapping[str, Any]) -> list[str]:
+    events = [
+        item
+        for item in payload.get("classification_events") or []
+        if isinstance(item, dict)
+    ]
+    sequence = [
+        main_ttp_id(item.get("ttp") or item.get("technique"))
+        for item in events
+        if is_trusted_classification_event(item)
+    ]
+    if not sequence and not events:
+        sequence = [
+            main_ttp_id(item)
+            for item in payload.get("ttps") or []
+            if str(item or "").strip() not in {"", "unknown"}
+        ]
+    sequence = [item for item in sequence if item and item != "unknown"]
+    return [
+        item
+        for index, item in enumerate(sequence)
+        if index == 0 or sequence[index - 1] != item
+    ]
+
+
+def _build_transition_model(
+    payloads: Sequence[Mapping[str, Any]],
+    *,
+    prefix_max_length: int,
+) -> Dict[str, Any]:
+    """Build the deterministic aggregate counts used by the rollback artifact."""
+
+    transitions: Dict[str, Counter[str]] = defaultdict(Counter)
+    prefixes: Dict[str, Counter[str]] = defaultdict(Counter)
+    techniques: Dict[str, Counter[str]] = defaultdict(Counter)
+    technique_tactics: Dict[str, Counter[str]] = defaultdict(Counter)
+    starts: Counter[str] = Counter()
+    usable = 0
+    completed = 0
+    for payload in payloads:
+        if not payload.get("is_ended") and str(payload.get("status") or "") != "closed":
+            continue
+        completed += 1
+        tactics = _tactic_sequence(payload)
+        if tactics:
+            usable += 1
+            starts[tactics[0]] += 1
+        for current, following in zip(tactics, tactics[1:]):
+            transitions[current][following] += 1
+        for index in range(1, len(tactics)):
+            for start in range(max(0, index - prefix_max_length), index):
+                prefix = tactics[start:index]
+                if len(prefix) >= 2:
+                    prefixes[">".join(prefix)][tactics[index]] += 1
+
+        technique_sequence = _technique_sequence(payload)
+        for current, following in zip(technique_sequence, technique_sequence[1:]):
+            techniques[current][following] += 1
+        for event in payload.get("classification_events") or []:
+            if not isinstance(event, dict) or not is_trusted_classification_event(event):
+                continue
+            technique = main_ttp_id(event.get("ttp") or event.get("technique"))
+            tactic = str(event.get("tactic") or "").strip()
+            if technique and technique != "unknown" and tactic and tactic != "unknown":
+                technique_tactics[technique][tactic] += 1
+
+    serialized_transitions = {
+        key: dict(value) for key, value in sorted(transitions.items())
+    }
+    serialized_prefixes = {
+        key: dict(value) for key, value in sorted(prefixes.items())
+    }
+    serialized_techniques = {
+        key: dict(value) for key, value in sorted(techniques.items())
+    }
+    return {
+        "schema_version": "local_transition_model.v2",
+        "source_name": "external_seed_transition",
+        "source_database": "external_immutable_manifest",
+        "completed_sessions": completed,
+        "usable_sessions": usable,
+        "transition_count": sum(sum(value.values()) for value in transitions.values()),
+        "prefix_transition_count": sum(sum(value.values()) for value in prefixes.values()),
+        "technique_transition_count": sum(sum(value.values()) for value in techniques.values()),
+        "prefix_max_length": prefix_max_length,
+        "transitions": serialized_transitions,
+        "prefix_transitions": serialized_prefixes,
+        "technique_transitions": serialized_techniques,
+        "technique_tactics": {
+            key: value.most_common(1)[0][0]
+            for key, value in sorted(technique_tactics.items())
+            if value
+        },
+        "start_counts": dict(starts),
+    }
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -188,12 +311,9 @@ def _artifact_model(
     classification: Mapping[str, Any],
     trust_policy: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    model = build_transition_model(
+    model = _build_transition_model(
         training_payloads,
         prefix_max_length=prefix_max_length,
-        source_name="external_seed_transition",
-        source_database="external_immutable_manifest",
-        recency_half_life_sessions=0.0,
     )
     model_id = _stable_identifier(
         "externalvomm",

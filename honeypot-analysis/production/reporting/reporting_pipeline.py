@@ -1603,13 +1603,16 @@ def _prediction_tactic_severity_map(
     of maintaining a separate hardcoded TTP allowlist in the report builder.
     """
 
-    severity: Dict[str, str] = {}
-    try:
-        from production.prediction.predictive_alerts import DEFAULT_TACTIC_SEVERITY
-
-        severity.update(DEFAULT_TACTIC_SEVERITY)
-    except Exception:
-        pass
+    severity: Dict[str, str] = {
+        "credential-access": "medium",
+        "defense-evasion": "medium",
+        "command-and-control": "high",
+        "persistence": "high",
+        "privilege-escalation": "high",
+        "lateral-movement": "critical",
+        "exfiltration": "critical",
+        "impact": "critical",
+    }
     document: Any = policy_document
     if document is None:
         path = policy_path or _default_prediction_policy_path()

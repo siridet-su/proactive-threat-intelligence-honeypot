@@ -102,7 +102,6 @@ def test_all_packaged_service_modules_have_working_help() -> None:
         "production.workers.threat_hunt_worker",
         "production.workers.webhook_dispatcher",
         "production.enrichment.refresh_feeds",
-        "production.prediction.prune_prediction_snapshots",
     )
     for module in modules:
         result = subprocess.run(

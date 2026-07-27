@@ -166,7 +166,10 @@ def test_report_only_correlations_cannot_influence_downstream_consumers() -> Non
     assert validate_policy_document(scoped_policy) == []
     scoped = correlate_session(session, scoped_policy)["correlations"][0]
     scoped_payload = {**session, "session_ttp_correlations": [scoped]}
-    assert build_session_features(scoped_payload)["correlated_tactics"] == ["impact"]
+    # Reviewed correlation remains available to its declared downstream
+    # consumers, but the simplified rollback predictor consumes only direct,
+    # trusted classification evidence.
+    assert build_session_features(scoped_payload)["correlated_tactics"] == []
     assert _confirmed_tactics(scoped_payload) == ["impact"]
     assert _tactics(scoped_payload) == ["impact"]
     assert _source_severity(severity_policy, "ip", scoped_payload) == "low"

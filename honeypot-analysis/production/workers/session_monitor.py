@@ -88,22 +88,6 @@ except Exception:
         return bool(re.match(r"^T\d{4}\.\d{3}$", str(value or "").strip().upper()))
 
 
-# Maps: current tactic â†’ likely next tactics (probability order)
-_TACTIC_PROGRESSION: Dict[str, List[str]] = {
-    "initial-access":       ["execution", "discovery", "persistence"],
-    "execution":            ["discovery", "credential-access", "collection"],
-    "discovery":            ["credential-access", "lateral-movement", "collection"],
-    "credential-access":    ["persistence", "lateral-movement", "exfiltration"],
-    "persistence":          ["defense-evasion", "command-and-control", "collection"],
-    "privilege-escalation": ["defense-evasion", "credential-access", "persistence"],
-    "defense-evasion":      ["collection", "command-and-control", "exfiltration"],
-    "lateral-movement":     ["collection", "command-and-control", "exfiltration"],
-    "collection":           ["exfiltration", "command-and-control"],
-    "command-and-control":  ["exfiltration", "impact"],
-    "exfiltration":         ["impact"],
-    "impact":               [],
-}
-
 # Each tuple: (regex, TTP_ID, tactic)
 _KEYWORD_TTP_RULES: List[tuple] = [
     (r'\b(whoami|id\b|uname)', 'T1033', 'discovery'),
@@ -1266,10 +1250,7 @@ class SessionMonitor:
             except Exception:
                 pass
 
-        if not state.unique_tactics:
-            return ["discovery", "execution"]
-        last_tactic = state.unique_tactics[-1]
-        return _TACTIC_PROGRESSION.get(last_tactic, ["unknown"])
+        return []
 
     def _check_thresholds(self, state: SessionState) -> List[AlertEvent]:
         """Check all thresholds. Return new alerts not previously fired."""

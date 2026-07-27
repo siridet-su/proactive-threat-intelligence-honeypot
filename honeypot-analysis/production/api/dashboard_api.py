@@ -10,9 +10,9 @@ from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
 from production.utils.config import ProductionConfig
-from production.prediction.external_seed_health import infer_external_seed_paths, load_external_seed_health
+from production.prediction.prediction_health import infer_prediction_paths, load_prediction_health
 from production.classification.classification_evaluation import classification_metrics
-from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
+from production.reporting.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
 from production.utils.feedback import normalize_submitted_feedback_payload
 from production.utils.http_security import (
     BoundedThreadingHTTPServer,
@@ -216,13 +216,14 @@ def _current_decision_payload(
 
 
 def _external_seed_health_payload(config: ProductionConfig) -> Dict[str, Any]:
-    paths = infer_external_seed_paths(config.prediction_policy)
-    return load_external_seed_health(
+    paths = infer_prediction_paths(config.prediction_policy)
+    return load_prediction_health(
         paths["health"],
         model_path=paths["model"],
         validation_path=paths["validation"],
         review_path=paths["review"],
         include_review=False,
+        mode=paths["mode"],
     )
 
 

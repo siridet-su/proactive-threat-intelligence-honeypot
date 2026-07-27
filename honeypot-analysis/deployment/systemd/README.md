@@ -110,12 +110,6 @@ sudo cp deployment/systemd/honeypot-feed-refresh.timer /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-analysis-worker.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-dashboard-api.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-webhook-dispatcher.service /etc/systemd/system/
-sudo cp deployment/systemd/honeypot-prediction-backtest.service /etc/systemd/system/
-sudo cp deployment/systemd/honeypot-prediction-backtest.timer /etc/systemd/system/
-sudo cp deployment/systemd/honeypot-calibration-worker.service /etc/systemd/system/
-sudo cp deployment/systemd/honeypot-calibration-worker.timer /etc/systemd/system/
-sudo cp deployment/systemd/honeypot-prediction-retention.service /etc/systemd/system/
-sudo cp deployment/systemd/honeypot-prediction-retention.timer /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-session-count-monitor.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-session-count-monitor.timer /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -131,9 +125,6 @@ sudo systemctl enable --now honeypot-feed-refresh.timer
 sudo systemctl enable --now honeypot-analysis-worker
 sudo systemctl enable --now honeypot-dashboard-api
 sudo systemctl enable --now honeypot-webhook-dispatcher
-sudo systemctl enable --now honeypot-prediction-backtest.timer
-sudo systemctl enable --now honeypot-calibration-worker.timer
-sudo systemctl enable --now honeypot-prediction-retention.timer
 sudo systemctl enable --now honeypot-session-count-monitor.timer
 ```
 
