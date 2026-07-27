@@ -6,13 +6,13 @@ from collections import defaultdict
 
 import pytest
 
-from production.prediction import next_behavior_metrics as metrics_module
+from production.reproduction.next_behavior import metrics as metrics_module
 from production.prediction.next_behavior_contract import (
     EXAMPLE_SCHEMA_VERSION,
     TARGET_CONTRACT_ID,
     TERMINAL_OUTCOME,
 )
-from production.prediction.next_behavior_metrics import (
+from production.reproduction.next_behavior.metrics import (
     NextBehaviorMetricsError,
     align_examples_and_predictions,
     evaluate_next_behavior_predictions,

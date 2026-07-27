@@ -17,7 +17,7 @@ from production.prediction.next_behavior_contract import (
     NextBehaviorContractError,
     require_valid_next_behavior_session,
 )
-from production.prediction.next_behavior_corpus import (
+from production.reproduction.next_behavior.corpus import (
     NextBehaviorCorpusError,
     require_valid_corpus_receipt,
 )

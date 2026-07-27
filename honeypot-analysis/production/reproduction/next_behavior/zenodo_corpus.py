@@ -39,7 +39,7 @@ from production.classification.securebert_classifier import (
     SecureBertCommandClassifier,
 )
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
-from production.prediction.next_behavior_corpus import (
+from production.reproduction.next_behavior.corpus import (
     build_privacy_safe_session,
     build_source_member_receipt,
     build_streaming_corpus_receipt,
@@ -50,11 +50,11 @@ from production.prediction.next_behavior_label_policy import (
 )
 from production.utils.serialization import stable_json
 
-from production.tools.fetch_next_behavior_zenodo_members import (
+from production.reproduction.next_behavior.zenodo_members import (
     file_sha256,
     load_source_manifest,
 )
-from production.tools.verify_next_behavior_classifier_assets import (
+from production.reproduction.next_behavior.classifier_assets import (
     load_classifier_manifest,
     verify_classifier_assets,
 )
@@ -1721,7 +1721,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

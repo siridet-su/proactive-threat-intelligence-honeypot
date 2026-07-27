@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from production.prediction.next_behavior_contract import SESSION_SCHEMA_VERSION
-from production.prediction.next_behavior_partitions import (
+from production.reproduction.next_behavior.partitions import (
     V2_DEVELOPMENT_CUTOFF,
     V2_FINAL_WINDOW_START,
     build_partition_manifest_v2,

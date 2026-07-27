@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from production.prediction.next_behavior_calibration import (
+from production.reproduction.next_behavior.calibration import (
     CALIBRATION_METHOD,
     MAX_TEMPERATURE,
     MIN_TEMPERATURE,
@@ -22,7 +22,7 @@ from production.prediction.next_behavior_contract import (
     TARGET_CONTRACT_ID,
     TERMINAL_OUTCOME,
 )
-from production.prediction.next_behavior_partitions import membership_sha256
+from production.reproduction.next_behavior.partitions import membership_sha256
 
 
 HASH_A = "a" * 64

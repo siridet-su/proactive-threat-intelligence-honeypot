@@ -4,8 +4,8 @@ import copy
 
 import pytest
 
-from production.prediction import next_behavior_baseline as baseline_module
-from production.prediction.next_behavior_baseline import (
+from production.reproduction.next_behavior import baseline as baseline_module
+from production.reproduction.next_behavior.baseline import (
     NextBehaviorBaselineError,
     fit_corrected_target_baselines,
     fit_first_order_phase_state_markov,

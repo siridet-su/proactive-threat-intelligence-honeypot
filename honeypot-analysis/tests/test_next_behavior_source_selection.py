@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from production.prediction.next_behavior_source_selection import (
+from production.reproduction.next_behavior.source_selection import (
     COMPLETE_STATUS,
     NextBehaviorSourceSelectionError,
     load_source_selection,

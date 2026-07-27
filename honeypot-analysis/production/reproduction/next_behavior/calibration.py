@@ -26,7 +26,7 @@ from production.prediction.next_behavior_contract import (
     TARGET_CONTRACT_ID,
     TERMINAL_OUTCOME,
 )
-from production.prediction.next_behavior_partitions import membership_sha256
+from production.reproduction.next_behavior.partitions import membership_sha256
 from production.utils.serialization import stable_json
 
 CALIBRATION_MAPPING_SCHEMA_VERSION = "next_behavior_calibration_mapping.v1"

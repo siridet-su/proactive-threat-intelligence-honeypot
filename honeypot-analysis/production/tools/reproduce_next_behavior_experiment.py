@@ -31,12 +31,12 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Sequence
 
-from production.prediction.next_behavior_baseline import (
+from production.reproduction.next_behavior.baseline import (
     fit_corrected_target_baselines,
     predict_many as predict_baseline_many,
     require_valid_baseline,
 )
-from production.prediction.next_behavior_calibration import (
+from production.reproduction.next_behavior.calibration import (
     RAW_SCORE_SEMANTICS,
     fit_temperature_mapping,
     require_valid_calibration_mapping,
@@ -45,10 +45,10 @@ from production.prediction.next_behavior_contract import (
     EXAMPLE_SCHEMA_VERSION,
     TARGET_CONTRACT_ID,
 )
-from production.prediction.next_behavior_metrics import (
+from production.reproduction.next_behavior.metrics import (
     evaluate_next_behavior_predictions,
 )
-from production.prediction.next_behavior_experiment_policy import (
+from production.reproduction.next_behavior.experiment_policy import (
     DECLARED_SEEDS,
     experiment_policy_sha256,
     load_experiment_policy,
@@ -62,7 +62,7 @@ from production.prediction.next_behavior_model import (
     require_valid_model_spec,
     save_checkpoint,
 )
-from production.prediction.next_behavior_partitions import (
+from production.reproduction.next_behavior.partitions import (
     PARTITION_SCHEMA_VERSION_V2,
     load_partition_for_purpose_v2,
     membership_sha256,
@@ -74,7 +74,7 @@ from production.prediction.next_behavior_tensor import (
     vocabulary_sha256,
 )
 from production.utils.serialization import stable_id, stable_json
-from production.tools.build_next_behavior_selected_safe_corpus import (
+from production.reproduction.next_behavior.safe_export import (
     verify_selected_role_artifacts,
 )
 

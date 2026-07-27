@@ -36,7 +36,7 @@ from production.classification.securebert_classifier import (
     SecureBertCommandClassifier,
 )
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
-from production.prediction.next_behavior_corpus import (
+from production.reproduction.next_behavior.corpus import (
     build_privacy_safe_session,
     build_source_member_receipt,
     build_streaming_corpus_receipt,
@@ -53,7 +53,7 @@ from production.prediction.next_behavior_label_policy import (
 from production.prediction.next_behavior_preprocessing import (
     build_next_behavior_examples,
 )
-from production.tools.build_next_behavior_selected_corpus import (
+from production.reproduction.next_behavior.selected_store import (
     FINAL_PREPARATION_SCHEMA_VERSION,
     FINAL_PREPARATION_FIELDS,
     FINAL_PREPARATION_GENERATION_SCHEMA_VERSION,
@@ -70,10 +70,10 @@ from production.tools.build_next_behavior_selected_corpus import (
     require_final_preparation_generation_marker,
     require_final_preparation_generation_receipt,
 )
-from production.tools.build_next_behavior_zenodo_corpus import (
+from production.reproduction.next_behavior.zenodo_corpus import (
     load_or_create_pseudonymization_key,
 )
-from production.tools.verify_next_behavior_classifier_assets import (
+from production.reproduction.next_behavior.classifier_assets import (
     load_classifier_manifest,
     verify_classifier_assets,
 )
@@ -3186,7 +3186,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -19,21 +19,21 @@ from production.prediction.next_behavior_contract import (
     NextBehaviorContractError,
     require_valid_next_behavior_session,
 )
-from production.prediction.next_behavior_corpus import (
+from production.reproduction.next_behavior.corpus import (
     NextBehaviorCorpusError,
     require_valid_corpus_receipt,
     require_valid_source_member_receipt,
 )
-from production.prediction.next_behavior_partitions import MEMBER_ROLES
-from production.prediction.next_behavior_partitions import (
+from production.reproduction.next_behavior.partitions import MEMBER_ROLES
+from production.reproduction.next_behavior.partitions import (
     PARTITION_SCHEMA_VERSION_V2,
 )
-from production.prediction.next_behavior_experiment_policy import (
+from production.reproduction.next_behavior.experiment_policy import (
     NextBehaviorExperimentPolicyError,
     experiment_policy_sha256,
     require_valid_experiment_policy,
 )
-from production.prediction.next_behavior_source_selection import (
+from production.reproduction.next_behavior.source_selection import (
     NextBehaviorSourceSelectionError,
     require_completed_source_selection,
 )
@@ -46,11 +46,11 @@ from production.prediction.next_behavior_model import (
     NextBehaviorModelError,
     require_valid_model_spec,
 )
-from production.prediction.next_behavior_baseline import (
+from production.reproduction.next_behavior.baseline import (
     NextBehaviorBaselineError,
     require_valid_baseline,
 )
-from production.prediction.next_behavior_calibration import (
+from production.reproduction.next_behavior.calibration import (
     NextBehaviorCalibrationError,
     require_valid_calibration_mapping,
 )

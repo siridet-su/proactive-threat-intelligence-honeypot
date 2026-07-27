@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from production.prediction.next_behavior_corpus import (
+from production.reproduction.next_behavior.corpus import (
     NextBehaviorCorpusError,
     build_corpus_receipt,
     build_privacy_safe_session,

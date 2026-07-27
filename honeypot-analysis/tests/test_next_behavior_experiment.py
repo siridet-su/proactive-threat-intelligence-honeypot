@@ -11,7 +11,7 @@ from production.prediction.next_behavior_contract import (
     MODEL_INPUT_SCHEMA_VERSION,
     TARGET_CONTRACT_ID,
 )
-from production.prediction.next_behavior_experiment import (
+from production.reproduction.next_behavior.experiment import (
     EXPERIMENT_MANIFEST_SCHEMA_VERSION,
     EXPERIMENT_MANIFEST_SCHEMA_VERSION_V2,
     REQUIRED_ARTIFACT_ROLES,
@@ -23,7 +23,7 @@ from production.prediction.next_behavior_experiment import (
     verify_experiment_artifacts_v2_pretest,
     with_experiment_manifest_id,
 )
-from production.prediction.next_behavior_experiment_policy import (
+from production.reproduction.next_behavior.experiment_policy import (
     experiment_policy_sha256,
 )
 from production.prediction.next_behavior_preprocessing import (
@@ -35,10 +35,10 @@ from production.prediction.next_behavior_tensor import (
     vocabulary_sha256,
 )
 from production.prediction.next_behavior_model import build_model_spec
-from production.prediction.next_behavior_baseline import (
+from production.reproduction.next_behavior.baseline import (
     fit_corrected_target_baselines,
 )
-from production.prediction.next_behavior_calibration import (
+from production.reproduction.next_behavior.calibration import (
     build_not_implemented_mapping,
 )
 from production.utils.serialization import stable_id, stable_json

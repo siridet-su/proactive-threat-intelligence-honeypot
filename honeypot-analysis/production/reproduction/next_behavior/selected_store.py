@@ -30,10 +30,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Sequence
 
 from production.prediction.next_behavior_contract import TARGET_CONTRACT_ID
-from production.prediction.next_behavior_source_selection import (
+from production.reproduction.next_behavior.source_selection import (
     require_completed_source_selection,
 )
-from production.tools.verify_next_behavior_classifier_assets import (
+from production.reproduction.next_behavior.classifier_assets import (
     load_classifier_manifest,
 )
 from production.utils.serialization import stable_id, stable_json
@@ -2540,7 +2540,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     raise SelectedCorpusBuildError("unsupported command")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

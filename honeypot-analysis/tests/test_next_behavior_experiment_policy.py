@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from production.prediction.next_behavior_experiment_policy import (
+from production.reproduction.next_behavior.experiment_policy import (
     DECLARED_SEEDS,
     NextBehaviorExperimentPolicyError,
     experiment_policy_sha256,

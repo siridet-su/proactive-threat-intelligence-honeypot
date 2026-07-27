@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from production.prediction.next_behavior_contract import SESSION_SCHEMA_VERSION
-from production.prediction.next_behavior_partitions import (
+from production.reproduction.next_behavior.partitions import (
     MEMBER_ROLES,
     PARTITION_SCHEMA_VERSION,
     PARTITION_SCHEMA_VERSION_V2,
@@ -28,7 +28,7 @@ from production.prediction.next_behavior_partitions import (
     records_for_purpose_v2,
     require_historical_membership_independence,
 )
-from production.prediction.next_behavior_corpus import (
+from production.reproduction.next_behavior.corpus import (
     build_corpus_receipt,
     build_privacy_safe_session,
     build_source_member_receipt,
