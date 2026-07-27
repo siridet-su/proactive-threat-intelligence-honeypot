@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
-from production.prediction.next_behavior_calibration import apply_temperature_mapping
 from production.prediction.next_behavior_contract import (
     SESSION_SCHEMA_VERSION,
     TARGET_CONTRACT_ID,
@@ -88,6 +87,88 @@ def _load_json(path: str | Path, expected_sha256: str, field: str) -> Dict[str, 
     if not isinstance(value, dict):
         raise NextBehaviorRuntimeError(f"{field} must contain an object")
     return value
+
+
+def _sigmoid_temperature(logit: float, temperature: float) -> float:
+    scaled = float(logit) / temperature
+    if scaled >= 0:
+        return 1.0 / (1.0 + math.exp(-scaled))
+    exponential = math.exp(scaled)
+    return exponential / (1.0 + exponential)
+
+
+def _apply_frozen_calibration(
+    raw: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    vocabulary_hash: str,
+) -> Dict[str, Any]:
+    expected = {
+        "schema_version": "next_behavior_calibration_mapping.v1",
+        "status": "valid",
+        "method": "global_scalar_temperature_sigmoid.v1",
+        "score_semantics": "raw_model_scores_not_probabilities",
+        "target_contract_id": TARGET_CONTRACT_ID,
+        "checkpoint_sha256": policy["transformer_checkpoint_sha256"],
+        "vocabulary_sha256": vocabulary_hash,
+        "preprocessing_sha256": policy["transformer_preprocessing_sha256"],
+        "fit_partition_membership_sha256": policy[
+            "calibration_membership_sha256"
+        ],
+    }
+    for field, expected_value in expected.items():
+        if mapping.get(field) != expected_value:
+            raise NextBehaviorRuntimeError(
+                f"calibration {field} does not match the frozen runtime"
+            )
+    if mapping.get("mapping_sha256") != policy.get("calibration_mapping_sha256"):
+        raise NextBehaviorRuntimeError("calibration semantic SHA-256 mismatch")
+    try:
+        tactic_temperature = float(mapping["tactic_temperature"])
+        terminal_temperature = float(mapping["terminal_temperature"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise NextBehaviorRuntimeError("calibration temperatures are invalid") from exc
+    if (
+        not math.isfinite(tactic_temperature)
+        or tactic_temperature <= 0
+        or not math.isfinite(terminal_temperature)
+        or terminal_temperature <= 0
+    ):
+        raise NextBehaviorRuntimeError("calibration temperatures are invalid")
+    ranked = sorted(
+        (
+            {
+                "tactic": tactic,
+                "raw_score": float(score),
+                "rank": 0,
+                "calibrated_probability": _sigmoid_temperature(
+                    float(score), tactic_temperature
+                ),
+            }
+            for tactic, score in raw["tactic_logits"].items()
+        ),
+        key=lambda item: (-item["raw_score"], item["tactic"]),
+    )
+    for index, item in enumerate(ranked, start=1):
+        item["rank"] = index
+    return {
+        "ranked_tactics": ranked,
+        "terminal_outcome": {
+            "label": TERMINAL_OUTCOME,
+            "raw_score": float(raw["terminal_logit"]),
+            "calibrated_probability": _sigmoid_temperature(
+                float(raw["terminal_logit"]), terminal_temperature
+            ),
+        },
+        "calibration": {
+            "status": "valid",
+            "method": mapping["method"],
+            "mapping_sha256": mapping["mapping_sha256"],
+            "fit_partition_membership_sha256": mapping[
+                "fit_partition_membership_sha256"
+            ],
+        },
+    }
 
 
 def _pseudonymous_id(kind: str, value: str) -> str:
@@ -305,6 +386,17 @@ class FrozenTransformerPocPredictor:
                 self.policy["transformer_calibration_file_sha256"],
                 "calibration",
             )
+            _apply_frozen_calibration(
+                {
+                    "tactic_logits": {
+                        tactic: 0.0 for tactic in self.spec["output"]["tactics"]
+                    },
+                    "terminal_logit": 0.0,
+                },
+                self.calibration,
+                self.policy,
+                self.vocabulary_hash,
+            )
             preprocessing_path = Path(self.policy["transformer_preprocessing_path"])
             if _sha256_file(preprocessing_path) != _require_sha(
                 self.policy["transformer_preprocessing_sha256"],
@@ -484,38 +576,11 @@ class FrozenTransformerPocPredictor:
             )
             tensor = tensorize_model_input(model_input, self.vocabulary)
             raw = predict_next_behavior(self.model, tensor, spec=self.spec)
-            ranked = sorted(
-                (
-                    {"tactic": tactic, "raw_score": score, "rank": 0, "calibrated_probability": None}
-                    for tactic, score in raw["tactic_logits"].items()
-                ),
-                key=lambda item: (-item["raw_score"], item["tactic"]),
-            )
-            for index, item in enumerate(ranked, start=1):
-                item["rank"] = index
-            calibrated = apply_temperature_mapping(
-                {
-                    "score_semantics": "raw_model_scores_not_probabilities",
-                    "ranked_tactics": ranked,
-                    "terminal_outcome": {
-                        "label": TERMINAL_OUTCOME,
-                        "raw_score": raw["terminal_logit"],
-                        "calibrated_probability": None,
-                    },
-                    "calibration": {
-                        "status": "not_implemented",
-                        "method": "",
-                        "mapping_sha256": "",
-                        "fit_partition_membership_sha256": "",
-                    },
-                },
+            calibrated = _apply_frozen_calibration(
+                raw,
                 self.calibration,
-                fit_partition_membership_sha256=self.policy[
-                    "calibration_membership_sha256"
-                ],
-                checkpoint_sha256=self.policy["transformer_checkpoint_sha256"],
-                vocabulary_sha256=self.vocabulary_hash,
-                preprocessing_sha256=self.policy["transformer_preprocessing_sha256"],
+                self.policy,
+                self.vocabulary_hash,
             )
             threshold = float(self.policy.get("tactic_probability_threshold", 0.5))
             terminal_threshold = float(

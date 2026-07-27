@@ -23,6 +23,7 @@
     "transformer_preprocessing_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
     "transformer_calibration_path": "data/models/corrected_target_transformer_seed_20260721.calibration.json",
     "transformer_calibration_file_sha256": "528bbdd8f21d7e0a5f4446657639ccbc994b9d469876e8f026eb716e9a8d7cc9",
+    "calibration_mapping_sha256": "aa27813af96eaa2674b07d76f41565e71835bfa1a5bba8a3232eaa0a396a4e2d",
     "calibration_membership_sha256": "0d209ffe4380cfb707eb714dc12ffc41a4878a5e70e62f9561c1d6d8c1c1d78f",
     "runtime_rule_policy_path": "/etc/honeypot/classification_rules.trusted.json",
     "runtime_rule_policy_sha256": "3352f889fe25f88075d53c18d439746653a795045cd3571c46e3364733ad0f39",
