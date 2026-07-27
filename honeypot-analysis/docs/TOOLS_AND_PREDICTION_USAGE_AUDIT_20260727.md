@@ -107,8 +107,9 @@ implementations are recoverable from the annotated tag
 `pre-aggressive-prediction-cleanup-20260727`; they must not be restored merely
 because a historical document names them.
 
-Protected untracked audit bundles and external cache artifacts were not read,
-modified, staged, or deleted during this cleanup.
+At the time of this cleanup, protected untracked audit bundles and external
+cache artifacts were not read, modified, staged, or deleted. Their later
+resolution is recorded in `UNTRACKED_FILES_RESOLUTION_20260727.md`.
 
 ## Final validation and size
 

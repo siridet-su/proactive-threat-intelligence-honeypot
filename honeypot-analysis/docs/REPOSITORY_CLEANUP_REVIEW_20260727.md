@@ -1,5 +1,11 @@
 # Repository cleanup review — 2026-07-27
 
+> Historical inventory note: the untracked bundles described below were
+> subsequently resolved. Their unique conclusions are now in
+> `HISTORICAL_NEXT_TACTIC_AUDITS_20260727.md`, and the cache-maintenance
+> package was moved outside the repository. See
+> `UNTRACKED_FILES_RESOLUTION_20260727.md`.
+
 This is the pre-removal inventory for handoff cleanup. It is bound to
 `3fe1482d8047deb9592cf1fb1a52d2cc68df2d18`. Git history and the local tag
 `pre-handoff-repository-cleanup-20260727` are the recovery mechanism for

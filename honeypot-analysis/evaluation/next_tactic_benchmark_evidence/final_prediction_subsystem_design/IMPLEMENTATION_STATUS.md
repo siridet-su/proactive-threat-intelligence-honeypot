@@ -290,6 +290,11 @@ still answers a different target and remains ineligible for relabeling.
 
 ## Preserved untracked audit evidence
 
+Resolution note (2026-07-27): these working bundles were subsequently reviewed
+and removed after their unique conclusions and original hashes were
+consolidated into `docs/HISTORICAL_NEXT_TACTIC_AUDITS_20260727.md`. This
+section remains as historical execution-state evidence.
+
 The following pre-existing, unrelated audit bundles were intentionally left
 untracked and unchanged:
 
