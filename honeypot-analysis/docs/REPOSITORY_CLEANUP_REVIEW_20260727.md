@@ -50,7 +50,7 @@ Current entrypoints:
 | API/UI | `production.api.dashboard_api` and `monitor_web` |
 | Backup/restore | SQLite online-backup/restore procedure in `docs/GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md` |
 | Deployment | reviewed systemd units under `deployment/systemd/` |
-| VOMM rollback | `external_vomm_artifact`, `external_seed_validation`, frozen artifact/manifest, and deployment rollback procedure |
+| VOMM rollback | `external_vomm_artifact`, frozen artifact/manifest, and deployment rollback procedure |
 | Offline reproduction | corrected-target builders/train/evaluator tools and frozen evidence under `evaluation/next_tactic_benchmark_evidence/` |
 
 The deployed policy is one frozen Transformer checkpoint. VOMM is explicit

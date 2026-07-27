@@ -75,8 +75,6 @@ from production.utils.feedback import (
     normalize_feedback_payload,
 )
 from production.utils.serialization import session_to_payload
-from production.prediction.external_seed_validation import validate_external_seed_payloads
-from production.prediction.domain_shift import compare_transition_domain_shift
 from production.prediction.prediction_backtest import (
     _tactic_steps as backtest_tactic_steps,
     backtest_sessions,
@@ -3868,90 +3866,6 @@ def test_actor_fingerprint_transition_scorer_is_inactive_without_matching_finger
     assert snapshot["scorer_outputs"]["actor_fingerprint_transition"] == []
     assert "actor_fingerprint_transition" not in snapshot["active_scorers"]
     assert snapshot["final_ranking"] == []
-
-
-def test_external_seed_validation_reports_holdout_accuracy() -> None:
-    seed_payloads = [
-        {
-            "session_id": "seed-val-1",
-            "is_ended": True,
-            "classification_events": [
-                {"tactic": "discovery", "command": "whoami"},
-                {"tactic": "execution", "command": "sh"},
-            ],
-        },
-        {
-            "session_id": "seed-val-2",
-            "is_ended": True,
-            "classification_events": [
-                {"tactic": "discovery", "command": "id"},
-                {"tactic": "execution", "command": "bash"},
-            ],
-        },
-        {
-            "session_id": "seed-val-3",
-            "is_ended": True,
-            "classification_events": [
-                {"tactic": "discovery", "command": "uname -a"},
-                {"tactic": "credential-access", "command": "cat /etc/passwd"},
-            ],
-        },
-    ]
-    result = validate_external_seed_payloads(seed_payloads, include_cases=True)
-    assert result["schema_version"] == "external_seed_validation.v1"
-    assert result["metrics"]["total_cases"] == 3
-    assert "recommendation" in result
-    assert result["interpretation"].startswith("This validates external seed")
-
-
-def test_transition_domain_shift_reports_local_external_divergence() -> None:
-    local_model = build_transition_model(
-        [
-            {
-                "session_id": "local-shift-1",
-                "is_ended": True,
-                "classification_events": [
-                    {"tactic": "discovery", "ttp": "T1033"},
-                    {"tactic": "credential-access", "ttp": "T1003"},
-                ],
-            },
-            {
-                "session_id": "local-shift-2",
-                "is_ended": True,
-                "classification_events": [
-                    {"tactic": "discovery", "ttp": "T1082"},
-                    {"tactic": "credential-access", "ttp": "T1003"},
-                ],
-            },
-        ],
-        source_name="local_transition",
-    )
-    external_model = build_transition_model(
-        [
-            {
-                "session_id": "external-shift-1",
-                "is_ended": True,
-                "classification_events": [
-                    {"tactic": "discovery", "ttp": "T1033"},
-                    {"tactic": "command-and-control", "ttp": "T1105"},
-                ],
-            }
-        ],
-        source_name="external_seed_transition",
-    )
-    result = compare_transition_domain_shift(local_model, external_model)
-    assert result["schema_version"] == "transition_domain_shift.v1"
-    tactic_overall = result["sections"]["tactic_transitions"]["overall"]
-    assert tactic_overall["local_support"] == 2
-    assert tactic_overall["external_support"] == 1
-    assert tactic_overall["jensen_shannon_divergence"] > 0
-    discovery = [
-        row
-        for row in result["sections"]["tactic_transitions"]["contexts"]
-        if row["context"] == "discovery"
-    ][0]
-    assert discovery["target_count"] == 2
-    assert discovery["kl_local_to_external"] > 0
 
 
 def test_external_seed_health_summarizes_quality_and_validation() -> None:
@@ -8657,8 +8571,6 @@ if __name__ == "__main__":
     test_session_features_include_actor_fingerprint_context()
     test_actor_fingerprint_transition_scorer_uses_matching_fingerprint_history()
     test_actor_fingerprint_transition_scorer_is_inactive_without_matching_fingerprint()
-    test_external_seed_validation_reports_holdout_accuracy()
-    test_transition_domain_shift_reports_local_external_divergence()
     test_external_seed_health_summarizes_quality_and_validation()
     test_external_seed_builder_uses_securebert_rules_and_quality_filters()
     test_external_seed_builder_accepts_rule_securebert_tactic_agreement()
