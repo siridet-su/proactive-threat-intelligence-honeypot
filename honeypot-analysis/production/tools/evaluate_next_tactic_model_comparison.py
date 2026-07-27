@@ -18,6 +18,7 @@ import random
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence
 
@@ -33,10 +34,6 @@ from production.prediction.realtime_prediction import (
 )
 from production.prediction.session_features import build_session_features
 from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
-from production.tools.primary_transition_evaluation import (
-    chronological_split,
-    live_model_training_payloads,
-)
 from production.utils.serialization import utc_now
 
 
@@ -50,6 +47,74 @@ DEFAULT_OUTPUT_JSON = "evaluation/next_tactic_model_comparison.json"
 DEFAULT_OUTPUT_CSV = "evaluation/next_tactic_model_comparison.csv"
 DEFAULT_SEED = 20260714
 DEFAULT_KAPPA_GRID = (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0)
+
+
+def _payload_time(payload: Mapping[str, Any]) -> datetime:
+    for key in ("start_time", "created_at", "first_seen", "timestamp", "end_time"):
+        value = payload.get(key)
+        if not value:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def chronological_split(
+    payloads: Iterable[Dict[str, Any]],
+    *,
+    train_fraction: float = 0.70,
+    calibration_fraction: float = 0.15,
+) -> Dict[str, List[Dict[str, Any]]]:
+    eligible = [
+        payload for payload in payloads
+        if isinstance(payload, dict) and len(_tactic_steps(payload)) >= 2
+    ]
+    eligible.sort(
+        key=lambda payload: (_payload_time(payload), str(payload.get("session_id") or ""))
+    )
+    size = len(eligible)
+    train_end = min(max(int(size * train_fraction), 0), size)
+    calibration_end = min(
+        max(train_end + int(size * calibration_fraction), train_end),
+        size,
+    )
+    return {
+        "train": eligible[:train_end],
+        "calibration": eligible[train_end:calibration_end],
+        "test": eligible[calibration_end:],
+    }
+
+
+def live_model_training_payloads(
+    payloads: Iterable[Dict[str, Any]],
+    policy: Dict[str, Any],
+    *,
+    history_limit: int | None = None,
+) -> List[Dict[str, Any]]:
+    """Order and cap offline inputs like the live newest-first query."""
+
+    ordered = [payload for payload in payloads if isinstance(payload, dict)]
+    minimum_time = datetime.min.replace(tzinfo=timezone.utc)
+    if any(_payload_time(payload) != minimum_time for payload in ordered):
+        ordered.sort(
+            key=lambda payload: (
+                _payload_time(payload),
+                str(payload.get("session_id") or ""),
+            ),
+            reverse=True,
+        )
+    limit = max(
+        int(
+            history_limit
+            if history_limit is not None
+            else policy.get("transition_history_limit", 500)
+        ),
+        1,
+    )
+    return ordered[:limit]
 
 
 MODEL_SPECS: List[Dict[str, str]] = [

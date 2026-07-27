@@ -19,7 +19,6 @@ from production.enrichment.feed_status import _cache_status
 from production.classification.classification_pipeline import load_classification_rule_policy
 from production.policies import validate_stix_bundle
 from production.policies.threat_hypothesis_behavior_policy import load_behavior_policy
-from production.tools import build_external_seed_model as seed_model_module
 from production.workers import webhook_dispatcher
 from production.workers import sensor_forwarder
 from production.workers.threat_hunt_worker import ThreatHuntWorker
@@ -237,28 +236,6 @@ def test_runtime_policy_load_errors_do_not_render_parser_input(tmp_path) -> None
     assert classification["load_errors"] == ["ValueError: operation_failed"]
     assert BARE_SENTINEL not in json.dumps(classification)
     assert BARE_SENTINEL not in json.dumps(behavior)
-
-
-def test_securebert_fail_fast_error_does_not_render_exception_arguments(monkeypatch) -> None:
-    monkeypatch.setattr(
-        seed_model_module,
-        "SecureBertCommandClassifier",
-        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError(BARE_SENTINEL)),
-    )
-
-    with pytest.raises(RuntimeError) as error:
-        seed_model_module._load_bert_fn(
-            True,
-            None,
-            f"models/{BARE_SENTINEL}",
-            "",
-            "cpu",
-            128,
-            False,
-        )
-
-    assert str(error.value) == "RuntimeError: operation_failed"
-    assert BARE_SENTINEL not in str(error.value)
 
 
 @pytest.mark.parametrize(

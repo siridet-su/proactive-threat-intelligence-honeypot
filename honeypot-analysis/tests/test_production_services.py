@@ -20,7 +20,6 @@ from production.workers.analysis_worker import (
     build_threat_evidence_layers,
     deterministic_baseline_report,
 )
-from production.tools.build_external_seed_model import build_external_seed_model
 from production.tools.build_session_ttp_knowledge_pack import build_knowledge_pack
 from production.correlation.campaign_clustering import (
     _ordered_tactics as campaign_ordered_tactics,
@@ -66,7 +65,6 @@ from production.classification.classification_evaluation import (
 from production.tools.coverage_audit import build_coverage_audit
 from production.tools.prepare_classification_adjudication import prepare_queue
 from production.tools.classification_consistency_benchmark import evaluate_review_artifact
-from production.tools.primary_transition_evaluation import evaluate as evaluate_primary_transition
 from production.workers.calibration_worker import build_calibration_run, write_calibration_output
 from production.tools.feedback_review import build_feedback_review, filter_feedback_rows
 from production.utils.feedback import (
@@ -3948,194 +3946,6 @@ def test_external_seed_health_summarizes_quality_and_validation() -> None:
         health_path.write_text(json.dumps(health), encoding="utf-8")
         loaded = load_external_seed_health(str(health_path))
         assert loaded["model"]["model_id"] == "externaltransition-test"
-
-
-def test_external_seed_builder_uses_securebert_rules_and_quality_filters() -> None:
-    class FakeMitre:
-        def get_tactics(self, tid):
-            return {
-                "T1033": ["discovery"],
-                "T1082": ["discovery"],
-                "T1059": ["execution"],
-                "T1105": ["command-and-control"],
-            }.get(tid, [])
-
-        def get_name(self, tid):
-            return tid
-
-    def fake_bert(command: str):
-        if command == "whoami":
-            return "T1033", 0.98
-        if command == "uname -a":
-            return "T1059", 0.96
-        if command == "customimplant --stage":
-            return "T1105", 0.94
-        if command == "weirdlow":
-            return "T1059", 0.40
-        return None, 0.0
-
-    with tempfile.TemporaryDirectory() as tmp:
-        input_path = Path(tmp) / "seed.ndjson"
-        output_path = Path(tmp) / "model.json"
-        session_output = Path(tmp) / "sessions.json"
-        review_output = Path(tmp) / "review.json"
-        events = [
-            {"session": "seed-hybrid-1", "eventid": "cowrie.command.input", "input": "whoami"},
-            {"session": "seed-hybrid-1", "eventid": "cowrie.command.input", "input": "customimplant --stage"},
-            {"session": "seed-hybrid-1", "eventid": "cowrie.session.closed"},
-            {"session": "seed-hybrid-2", "eventid": "cowrie.command.input", "input": "uname -a"},
-            {"session": "seed-hybrid-2", "eventid": "cowrie.command.input", "input": "weirdlow"},
-            {"session": "seed-hybrid-2", "eventid": "cowrie.command.input", "input": "exit"},
-            {"session": "seed-hybrid-2", "eventid": "cowrie.session.closed"},
-        ]
-        input_path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
-
-        model = build_external_seed_model(
-            input_root=str(input_path),
-            output_path=str(output_path),
-            use_securebert=True,
-            bert_fn=fake_bert,
-            mitre_db=FakeMitre(),
-            min_label_confidence=0.90,
-            session_output_path=str(session_output),
-            review_output_path=str(review_output),
-        )
-
-        quality = model["classification_quality"]
-        assert quality["accepted_command_events"] == 2
-        assert quality["source_counts"]["both_agree"] == 1
-        assert quality["source_counts"]["securebert"] == 1
-        assert quality["source_counts"]["both_disagree"] == 1
-        assert quality["disagreement_commands_skipped"] == 1
-        assert quality["low_confidence_commands_skipped"] == 1
-        assert quality["noise_commands_skipped"] == 1
-        assert model["provenance"]["securebert_used"] is True
-        assert model["transition_count"] >= 1
-
-        sessions_doc = json.loads(session_output.read_text(encoding="utf-8"))
-        assert sessions_doc["schema_version"] == "external_seed_sessions.v1"
-        accepted_events = sessions_doc["sessions"][0]["classification_events"]
-        assert accepted_events[0]["external_seed_validation"]["validation_source"] == "auto_rule_securebert_consensus"
-        review_doc = json.loads(review_output.read_text(encoding="utf-8"))
-        review_reasons = {item["reason"] for item in review_doc["review_records"]}
-        assert {"classifier_disagreement", "low_confidence", "shell_noise"}.issubset(review_reasons)
-
-
-def test_external_seed_builder_accepts_rule_securebert_tactic_agreement() -> None:
-    class FakeMitre:
-        def get_tactics(self, tid):
-            return {
-                "T1033": ["discovery"],
-                "T1070": ["defense-evasion"],
-                "T1562": ["defense-evasion"],
-            }.get(tid, [])
-
-        def get_name(self, tid):
-            return tid
-
-    def fake_bert(command: str):
-        if command == "whoami":
-            return "T1033", 0.98
-        if command == "history -c":
-            return "T1562", 0.96
-        return None, 0.0
-
-    with tempfile.TemporaryDirectory() as tmp:
-        input_path = Path(tmp) / "seed.ndjson"
-        output_path = Path(tmp) / "model.json"
-        review_output = Path(tmp) / "review.json"
-        events = [
-            {"session": "seed-tactic-agree", "eventid": "cowrie.command.input", "input": "whoami"},
-            {"session": "seed-tactic-agree", "eventid": "cowrie.command.input", "input": "history -c"},
-            {"session": "seed-tactic-agree", "eventid": "cowrie.session.closed"},
-        ]
-        input_path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
-
-        model = build_external_seed_model(
-            input_root=str(input_path),
-            output_path=str(output_path),
-            use_securebert=True,
-            bert_fn=fake_bert,
-            mitre_db=FakeMitre(),
-            min_label_confidence=0.90,
-            review_output_path=str(review_output),
-        )
-
-        quality = model["classification_quality"]
-        assert quality["source_counts"]["both_agree"] == 1
-        assert quality["source_counts"]["both_tactic_disagree"] == 1
-        assert quality["disagreement_commands_skipped"] == 1
-        assert quality["accepted_command_events"] == 1
-        review_doc = json.loads(review_output.read_text(encoding="utf-8"))
-        review_reasons = {item["reason"] for item in review_doc["review_records"]}
-        assert "classifier_disagreement" in review_reasons
-
-
-def test_primary_transition_chronological_evaluation_compares_current_architecture_and_baselines() -> None:
-    payloads = []
-    for index in range(20):
-        payloads.append(
-            {
-                "session_id": f"chronological-{index:02d}",
-                "start_time": f"2026-01-{index + 1:02d}T00:00:00Z",
-                "status": "closed",
-                "is_ended": True,
-                "classification_events": [
-                    {
-                        "command": "whoami",
-                        "ttp": "T1033",
-                        "tactic": "discovery",
-                        "source": "rule",
-                        "confidence": 1.0,
-                    },
-                    {
-                        "command": "sh /tmp/a",
-                        "ttp": "T1059",
-                        "tactic": "execution",
-                        "source": "rule",
-                        "confidence": 1.0,
-                    },
-                ],
-            }
-        )
-    policy = json.loads(Path("configs/prediction_policy.trusted.json").read_text())["policy"]
-    policy["min_sessions_for_local"] = 1
-    policy["min_transition_count"] = 1
-    policy["min_prefix_transition_count"] = 1
-    policy["min_technique_transition_count"] = 1
-    policy["min_tactic_transition_count"] = 1
-    result = evaluate_primary_transition(payloads, policy, build_transition_model([]))
-
-    assert result["split_sizes"] == {"train": 14, "calibration": 3, "test": 3}
-    assert "not independent human ground truth" in result["label_origin"]
-    assert result["data_sufficiency"]["status"] == "insufficient_data"
-    assert result["data_sufficiency"]["evaluated_examples"] == 3
-    assert result["data_sufficiency"]["metrics_are_descriptive_only"] is True
-    assert result["production_policy_changed"] is False
-    assert set(result["results"]) == {
-        "current_primary_transition_with_fallback",
-        "local_transition_only",
-        "external_transition_only",
-        "fallback_progression_only",
-        "weighted_ensemble_baseline",
-        "global_majority_baseline",
-        "last_tactic_majority_baseline",
-    }
-    current = result["results"]["current_primary_transition_with_fallback"]["metrics"]
-    assert current["evaluated_examples"] == 3
-    assert current["top1_accuracy"] == 1.0
-    assert current["selected_source_counts"] == {"local_transition": 3}
-    assert current["fallback_use_rate"] == 0.0
-    assert current["abstention_rate"] == 0.0
-    assert current["performance_by_support_level"] == {
-        "transition_support_5_plus": {
-            "evaluated_examples": 3,
-            "coverage": 1.0,
-            "top1_accuracy": 1.0,
-            "top3_accuracy": 1.0,
-        }
-    }
-    assert current["bootstrap_95ci"]["top1_accuracy"] == [1.0, 1.0]
 
 
 def test_prediction_backtest_scores_next_tactic_accuracy() -> None:
@@ -8572,8 +8382,6 @@ if __name__ == "__main__":
     test_actor_fingerprint_transition_scorer_uses_matching_fingerprint_history()
     test_actor_fingerprint_transition_scorer_is_inactive_without_matching_fingerprint()
     test_external_seed_health_summarizes_quality_and_validation()
-    test_external_seed_builder_uses_securebert_rules_and_quality_filters()
-    test_external_seed_builder_accepts_rule_securebert_tactic_agreement()
     test_prediction_backtest_scores_next_tactic_accuracy()
     test_prediction_backtest_reports_baseline_and_ablation_modes()
     test_external_seed_shrinkage_grid_search_marks_empty_metrics_missing()
