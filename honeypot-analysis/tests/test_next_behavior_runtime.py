@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -108,8 +109,9 @@ def test_live_adapter_uses_no_raw_command_text() -> None:
 
 
 @pytest.mark.skipif(
-    not (TRAINING / "seed_runs/transformer_seed_20260721/checkpoint.pt").is_file(),
-    reason="private frozen checkpoint is unavailable",
+    not (TRAINING / "seed_runs/transformer_seed_20260721/checkpoint.pt").is_file()
+    or importlib.util.find_spec("torch") is None,
+    reason="private frozen checkpoint or PyTorch is unavailable",
 )
 def test_exact_frozen_checkpoint_predicts_deterministically() -> None:
     predictor = FrozenTransformerPocPredictor(_policy())
@@ -140,6 +142,8 @@ def test_corrupt_checkpoint_fails_only_the_predictor(tmp_path: Path) -> None:
 
 
 def test_no_trusted_phase_is_explicit_not_a_fallback() -> None:
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("PyTorch is unavailable")
     predictor = FrozenTransformerPocPredictor(_policy())
     payload = _payload()
     payload["classification_events"][0]["source"] = "shell_noise"
