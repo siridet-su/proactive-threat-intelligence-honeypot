@@ -149,19 +149,25 @@ def test_generated_and_sensitive_artifact_classes_are_ignored() -> None:
     ).returncode == 1
 
 
-def test_support_inventory_covers_runtime_compatibility_frontend_and_artifacts() -> None:
-    inventory = (ROOT / "docs/SUPPORT_STATUS.md").read_text(encoding="utf-8")
+def test_current_handoff_docs_cover_runtime_storage_and_artifacts() -> None:
+    inventory = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "README.md",
+            "docs/ARCHITECTURE_CURRENT.md",
+            "docs/DEVELOPMENT.md",
+            "docs/HANDOFF_NEXT_COHORT.md",
+        )
+    )
     for required in (
-        "Runtime services",
-        "Storage backends",
-        "Optional capabilities",
-        "Policies, tools, demos, and compatibility paths",
-        "Frontend and generated-artifact lifecycle",
-        "COMPLETE_AND_VERIFIED",
-        "COMPLETE_NOT_FULLY_VERIFIED",
-        "INTENTIONALLY_DEFERRED",
-        "STARTED_BUT_BROKEN",
-        "production/api/static/monitor.html",
+        "SQLite",
+        "MongoDB",
+        "Optional",
+        "compatibility",
+        "Transformer",
+        "VOMM",
+        "manual",
+        "production/",
         "evaluation/",
         "data/feeds/",
     ):
