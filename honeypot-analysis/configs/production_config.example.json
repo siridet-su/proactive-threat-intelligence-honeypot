@@ -106,7 +106,7 @@
   },
   "classification_rules_path": "configs/classification_rules.trusted.json",
   "threat_hypothesis_behavior_policy_path": "configs/threat_hypothesis_behavior.trusted.json",
-  "prediction_policy_path": "configs/prediction_policy.trusted.json",
+  "prediction_policy_path": "configs/prediction_policy.transformer_poc.trusted.json",
   "prediction_snapshot_retention_days": 90,
   "prediction_snapshot_keep_latest_per_session": true,
   "enable_session_ttp_correlation": true,
@@ -129,12 +129,12 @@
   },
   "prediction_policy": {
     "enabled": true,
-    "prediction_mode": "external_hard_backoff_vomm",
+    "prediction_mode": "professor_approved_corrected_target_transformer_poc",
     "compute_weighted_ensemble_baseline": false,
     "weight_influence_scope": "not_applicable_external_authority",
     "primary_transition": {
-      "primary_model": "external_hard_backoff_vomm",
-      "source_order": ["external_seed_transition"],
+      "primary_model": "corrected_target_transformer",
+      "source_order": ["corrected_target_transformer"],
       "fallback_scorer": "",
       "min_transition_score": 0.01
     },
