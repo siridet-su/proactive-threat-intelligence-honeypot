@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,22 @@ def test_transformer_policy_is_explicit_single_model() -> None:
     assert policy["prediction_mode"] == MODE
     assert "primary_transition" not in policy
     assert policy["predictive_alerts"] == {"enabled": False}
+
+
+def test_transformer_production_config_uses_policy_bound_rule_file() -> None:
+    """The live classifier must use the exact artifact stamped into forecasts."""
+
+    config = json.loads((ROOT / "configs/production_config.example.json").read_text())
+    policy = json.loads(
+        (ROOT / "configs/prediction_policy.transformer_poc.trusted.json").read_text()
+    )["policy"]
+    assert config["prediction_policy_path"] == (
+        "configs/prediction_policy.transformer_poc.trusted.json"
+    )
+    assert config["classification_rules_path"] == policy["runtime_rule_policy_path"]
+    assert hashlib.sha256(
+        (ROOT / config["classification_rules_path"]).read_bytes()
+    ).hexdigest() == policy["runtime_rule_policy_sha256"]
 
 
 def test_live_adapter_uses_no_raw_command_text() -> None:

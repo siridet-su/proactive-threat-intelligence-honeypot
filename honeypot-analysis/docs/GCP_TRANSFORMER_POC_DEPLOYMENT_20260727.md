@@ -32,14 +32,21 @@ balanced and rare-tactic coverage. Neither is universally superior.
 - Target:
   `next_distinct_command_behavior_phase_or_session_end.v1`.
 
-The live GCP rule file is explicitly bound at SHA-256
-`3352f889fe25f88075d53c18d439746653a795045cd3571c46e3364733ad0f39`.
-It differs from the later corpus rule file (`33f332…`), so this is recorded as
-deployment-domain provenance rather than falsely representing the training
-policy as the live policy. The live trust module matches
+The canonical live GCP rule file is
+`/opt/honeypot/configs/classification_rules.trusted.json`, bound at SHA-256
+`33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b`.
+It is the reviewed 111-rule corpus/runtime artifact. The older 87-rule
+`/etc/honeypot/classification_rules.trusted.json` file has no reviewed rules
+and cannot supply trusted behavior under the configured `reviewed_only` policy;
+it must not be selected for Transformer classification. The live trust module matches
 `1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd`,
 and the SecureBERT checkpoint matches
 `dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b`.
+
+`CLASSIFICATION_RULES_PATH` must be exactly
+`/opt/honeypot/configs/classification_rules.trusted.json` while this Transformer
+policy is selected. The classifier input, policy validation, and snapshot
+provenance must all refer to this same reviewed file and SHA-256.
 
 ## Production semantics
 
@@ -145,4 +152,3 @@ then restored and revalidated the Transformer.
   (`SAFE_TO_DELETE`). The managed execution environment rejected the deletion,
   so no cache item was removed and recovered space is zero. This is an
   operational cleanup blocker only; it does not affect deployment correctness.
-
