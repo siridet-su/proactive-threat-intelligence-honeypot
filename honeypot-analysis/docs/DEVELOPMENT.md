@@ -36,6 +36,17 @@ python -m production.policies.validate_smb_policy \
   --action-policy configs/smb_action_playbooks.trusted.json
 ```
 
+The only supported prediction runtimes are the frozen Transformer policy and
+the explicitly configured, hash-validated VOMM rollback policy. The only
+supported experiment CLI is:
+
+```bash
+python -m production.tools.reproduce_next_behavior_experiment --help
+```
+
+Internal modules under `production.reproduction.next_behavior` are libraries
+for that CLI, not independently supported command-line programs.
+
 ## Safe changes
 
 ### Classifier rule

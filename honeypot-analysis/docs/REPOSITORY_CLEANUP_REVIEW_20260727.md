@@ -44,7 +44,7 @@ Current entrypoints:
 | Classification | `production.classification.classification_pipeline` |
 | Evidence reconstruction | `production.correlation.session_evidence_graph` and `session_behavior_relationships` |
 | Threat assessment | `production.reporting.session_assessment` and `threat_hypothesis` |
-| Transformer prediction | `production.prediction.next_behavior_runtime` invoked by `realtime_prediction` |
+| Transformer prediction | `production.prediction.next_behavior_runtime` invoked by `session_worker` |
 | Reporting | `production.reporting.reporting_pipeline` and `artifacts` |
 | Guidance | `production.reporting.response_guidance` and `smb_decision` |
 | API/UI | `production.api.dashboard_api` and `monitor_web` |

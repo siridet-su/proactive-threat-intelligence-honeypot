@@ -13,9 +13,11 @@ Recovery baseline: annotated local tag
 | `.pytest_cache/` and Python bytecode caches | Interpreter/test-generated | Source and tests | Rerun Python/pytest |
 | `evaluation/authoritative_external_vomm/` | Pre-provenance evaluation superseded by the exact Zenodo-seven-day evaluation | `evaluation/authoritative_external_vomm_zenodo7_20260721/` | Commit `744dca3` or the recovery tag |
 
-No runtime subsystem was removed merely because it was inactive. Historical
-prediction helpers remain where current rollback evaluators, corrected
-benchmark reproduction, or stored-snapshot compatibility still import them.
+| Legacy prediction scorers, cascade, heuristic fallback, local transitions, weight fitting, old predictive alerts and backtests | Unsupported by the frozen Transformer runtime and explicit VOMM rollback | `next_behavior_runtime.py` and `vomm_rollback.py` | `pre-aggressive-prediction-cleanup-20260727` |
+| Superseded next-tactic and professor-protocol runners | Immutable reports, receipts and manifests are authoritative; duplicate executables obscured the supported path | `production.tools.reproduce_next_behavior_experiment` | `pre-aggressive-prediction-cleanup-20260727` |
+| Calibration/backtest/retention timer units | No current production caller; prediction calibration is frozen into the Transformer artifact contract | Current application services and storage retention API | `pre-aggressive-prediction-cleanup-20260727` |
+| Monolithic `test_production_services.py` and obsolete experiment tests | Primarily protected removed scorer/backtest/calibration implementations | Focused runtime, authority, report/API, storage, VOMM rollback, and reproduction suites | `pre-aggressive-prediction-cleanup-20260727` |
+
 MongoDB remains isolated supported future work, not deployed architecture.
 
 Any later source removal must add its exact paths, replacement, tests, and

@@ -17,8 +17,8 @@
 6. Correlation builds occurrence-preserving evidence graphs and report-only
    relationships. It cannot rewrite the trusted tactic sequence.
 7. `production.prediction.next_behavior_runtime` verifies and loads the frozen
-   Transformer. `realtime_prediction` stores its advisory snapshot separately
-   from factual observations.
+   Transformer and emits an advisory snapshot separately from factual
+   observations. There is no scorer cascade or automatic fallback.
 8. `session_assessment.v3` organizes observations, claims, counterevidence,
    assumptions, limitations, gaps, alternatives, and falsification conditions.
    `threat_hypothesis.v2` remains readable as a compatibility/report contract.
@@ -45,8 +45,14 @@ unavailable/abstained semantics. Historical snapshots retain their original
 model and policy meaning.
 
 The external VOMM artifact and manifest under `data/models/` are an explicit
-operator-selected rollback/reference. Weighted, local-first, heuristic, and
-other benchmark paths are offline/historical only.
+operator-selected rollback/reference implemented by
+`production.prediction.vomm_rollback`. Weighted, local-first, heuristic,
+cascade, and predictive-alert implementations have been removed; recover them
+only from tag `pre-aggressive-prediction-cleanup-20260727`.
+
+Offline reproduction is isolated under
+`production.reproduction.next_behavior` and has one public entrypoint:
+`python -m production.tools.reproduce_next_behavior_experiment`.
 
 ## Ownership and trust boundaries
 

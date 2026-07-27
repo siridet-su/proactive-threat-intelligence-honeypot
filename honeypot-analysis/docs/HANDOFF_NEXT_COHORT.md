@@ -26,7 +26,17 @@ validation.
 
 ## Important paths
 
-- Runtime: `production/`
+- Current prediction runtime, read in this order:
+  `production/prediction/next_behavior_runtime.py`,
+  `next_behavior_preprocessing.py`, `next_behavior_tensor.py`,
+  `next_behavior_model.py`, and `next_behavior_contract.py`
+- Explicit manual rollback:
+  `production/prediction/vomm_rollback.py` and
+  `external_vomm_artifact.py`
+- Canonical offline reproduction:
+  `production/tools/reproduce_next_behavior_experiment.py` with libraries
+  under `production/reproduction/next_behavior/`
+- Other runtime: `production/`
 - Trusted policies: `configs/*.trusted.json`
 - Units: `deployment/systemd/`
 - Rollback model: `data/models/external_cowrie_vomm_zenodo_7day_20260721.*`
@@ -47,8 +57,8 @@ intentionally outside Git. Verify hashes from receipts before use.
    experiment—not by retuning the completed Final evaluation.
 3. Decide whether MongoDB remains worthwhile. Promotion requires live parity,
    indexing, migration, backup/restore, rollback, and operational ownership.
-4. Reduce historical evaluation tooling only after extracting shared parsing
-   and metric functions used by current VOMM/corrected-target reproduction.
+4. Treat removed historical experiment implementations as Git-history
+   material; do not restore them to add a second reproduction path.
 
 ## Do not repeat
 
@@ -63,6 +73,5 @@ intentionally outside Git. Verify hashes from receipts before use.
 
 - Run the focused and full local suites in a socket-capable environment.
 - Review documentation links and configuration examples.
-- Add read-only dashboards for forecast disagreement/domain shift.
 - Improve operator-facing limitations and evidence navigation without changing
   analytical authority.
