@@ -1,0 +1,25 @@
+path	classification	size_bytes	replacement_or_entrypoint	evidence	last_relevant_commit	git_history_preserves
+production/	CURRENT_RUNTIME_REQUIRED	14336000	systemd and pyproject entrypoints	imported, packaged, deployed, and tested	3fe1482	yes
+configs/	CURRENT_RUNTIME_REQUIRED	569344	production policy/config loaders	validated by policy and service tests	3fe1482	yes
+deployment/	CURRENT_DEVELOPMENT_OR_TEST_REQUIRED	94208	GCP deployment handoff	systemd ExecStart references current modules	3fe1482	yes
+tests/	CURRENT_DEVELOPMENT_OR_TEST_REQUIRED	8601600	pytest	protects supported behavior; pycache excluded	3fe1482	yes
+evaluation/next_tactic_benchmark_evidence/	THESIS_OR_REPRODUCIBILITY_REQUIRED	8388608	immutable corrected benchmark evidence	referenced by thesis/design/deployment chain	3fe1482	yes
+evaluation/next_tactic_zenodo_7day_session_payload.jsonl	THESIS_OR_REPRODUCIBILITY_REQUIRED	88766335	external VOMM artifact manifest	exact path/hash referenced by current rollback manifest	edb40f4	yes
+production/storage/mongodb.py	SUPPORTED_FUTURE_WORK	164820	backend factory and migration tests	disabled; coherent tested opt-in boundary	3fe1482	yes
+production/tools/migrate_sqlite_to_mongodb.py	SUPPORTED_FUTURE_WORK	57151	MongoDB future cutover	security/preflight/no-write tests; not production-active	3fe1482	yes
+evaluation/generated/	GENERATED_SAFE_TO_REMOVE	2469606195	rebuild from retained inputs	ignored; two deterministic generated copies	untracked	no
+build/	GENERATED_SAFE_TO_REMOVE	3565158	python -m build	ignored setuptools output	untracked	no
+honeypot_analysis.egg-info/	GENERATED_SAFE_TO_REMOVE	61440	pip install -e .	ignored packaging output	untracked	no
+.pytest_cache/	GENERATED_SAFE_TO_REMOVE	167936	pytest	ignored cache	untracked	no
+tests/__pycache__/	GENERATED_SAFE_TO_REMOVE	7235174	pytest	ignored bytecode	untracked	no
+production/**/__pycache__/	GENERATED_SAFE_TO_REMOVE	unknown	python import	ignored bytecode	untracked	no
+evaluation/next_tactic_external_session_payload.jsonl	LEGACY_SAFE_TO_REMOVE	35732884	seven-day VOMM/corrected-target evidence	pre-Zenodo benchmark only	edb40f4	yes
+evaluation/next_tactic_zenodo_session_payload.jsonl	LEGACY_SAFE_TO_REMOVE	48326204	seven-day VOMM/corrected-target evidence	early Zenodo benchmark only	edb40f4	yes
+evaluation/next_tactic_zenodo_500mb_session_payload.jsonl	LEGACY_SAFE_TO_REMOVE	55702227	seven-day VOMM/corrected-target evidence	superseded tuning benchmark	edb40f4	yes
+production/prediction/weighted-and-local-baselines	AMBIGUOUS_DO_NOT_REMOVE	unknown	backtest/historical compatibility	inactive production but referenced by tests and snapshots	3fe1482	yes
+historical report/schema aliases	AMBIGUOUS_DO_NOT_REMOVE	unknown	additive v3/v2 adapters	active historical-read compatibility	3fe1482	yes
+CODEX_REMEDIATION_HANDOFF.md	AMBIGUOUS_DO_NOT_REMOVE	256751	local handoff	ignored owner operational history	untracked	no
+evaluation/next_tactic_benchmark_evidence/data_preparation_training_audit/	AMBIGUOUS_DO_NOT_REMOVE	unknown	user audit bundle	explicitly protected	untracked	no
+evaluation/next_tactic_benchmark_evidence/execution_persistence_investigation/	AMBIGUOUS_DO_NOT_REMOVE	unknown	user audit bundle	explicitly protected	untracked	no
+evaluation/next_tactic_benchmark_evidence/gru_transformer_runtime_comparison/	AMBIGUOUS_DO_NOT_REMOVE	unknown	user audit bundle	explicitly protected	untracked	no
+local_cache_cleanup_review/	AMBIGUOUS_DO_NOT_REMOVE	61440	manual owner scripts	outside repository simplification scope	untracked	no
