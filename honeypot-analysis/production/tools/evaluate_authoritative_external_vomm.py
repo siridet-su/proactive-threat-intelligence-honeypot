@@ -33,7 +33,7 @@ from production.prediction.realtime_prediction import (
     RealtimePredictionEngine,
     build_transition_model,
 )
-from production.tools.evaluate_next_tactic_model_comparison import (
+from production.prediction.vomm_evaluation import (
     EvaluationCase,
     Predictor,
     build_cases,
@@ -47,7 +47,11 @@ from production.tools.evaluate_next_tactic_model_comparison import (
 
 SCHEMA_VERSION = "authoritative_external_vomm_evaluation.v1"
 DEFAULT_POLICY_PATH = "configs/prediction_policy.trusted.json"
-DEFAULT_MODEL_PATH = "data/models/external_cowrie_seed_transition_model.compound_securebert.json"
+DEFAULT_MODEL_PATH = "data/models/external_cowrie_vomm_zenodo_7day_20260721.json"
+DEFAULT_MANIFEST_PATH = "data/models/external_cowrie_vomm_zenodo_7day_20260721.manifest.json"
+DEFAULT_ARTIFACT_SHA256 = "b5a60951764648ed242d7b9acfe1df6f5f314f96e341badb7f4bd55107614e3e"
+DEFAULT_MODEL_ID = "externalvomm_8dabca1f770b06e73fb051766539435a"
+DEFAULT_MANIFEST_ID = "externalvommmanifest_f97d2d3770c6ac44f9eb7e7905c7736b"
 DEFAULT_PAYLOAD_PATH = "evaluation/next_tactic_zenodo_7day_session_payload.jsonl"
 DEFAULT_OUTPUT_DIR = "evaluation/authoritative_external_vomm"
 DEFAULT_BOOTSTRAP_ITERATIONS = 500
@@ -1390,10 +1394,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--payload", default=DEFAULT_PAYLOAD_PATH)
     parser.add_argument("--policy", default=DEFAULT_POLICY_PATH)
     parser.add_argument("--artifact", default=DEFAULT_MODEL_PATH)
-    parser.add_argument("--expected-artifact-sha256", default="")
-    parser.add_argument("--expected-model-id", default="")
-    parser.add_argument("--manifest", default="")
-    parser.add_argument("--expected-manifest-id", default="")
+    parser.add_argument("--expected-artifact-sha256", default=DEFAULT_ARTIFACT_SHA256)
+    parser.add_argument("--expected-model-id", default=DEFAULT_MODEL_ID)
+    parser.add_argument("--manifest", default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument("--expected-manifest-id", default=DEFAULT_MANIFEST_ID)
     parser.add_argument(
         "--external-only-authority",
         action="store_true",

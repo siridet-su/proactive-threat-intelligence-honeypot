@@ -1,10 +1,8 @@
-"""Deterministic comparison of scoped next-tactic prediction models.
+"""Shared deterministic case and metric support for manual VOMM evaluation.
 
-The tool evaluates only trusted, adjacent-deduplicated tactic sequences from
-whole Cowrie sessions. It never mutates runtime policy, model artifacts, or
-storage. The public package intentionally omits raw external and local session
-data, so a run without session payload inputs produces an explicit
-not-evaluated availability report rather than synthetic metrics.
+This module is not a CLI and never mutates runtime policy, artifacts, storage,
+or services.  It remains only because the explicit VOMM rollback evaluator
+uses its deterministic whole-session parsing and metric contracts.
 """
 
 from __future__ import annotations
@@ -39,10 +37,10 @@ from production.utils.serialization import utc_now
 
 DEFAULT_POLICY_PATH = "configs/prediction_policy.trusted.json"
 DEFAULT_EXTERNAL_MODEL_PATH = (
-    "data/models/external_cowrie_seed_transition_model.compound_securebert.json"
+    "data/models/external_cowrie_vomm_zenodo_7day_20260721.json"
 )
-DEFAULT_HISTORICAL_EVIDENCE_PATH = "evaluation/external_seed_weight_fit.json"
-DEFAULT_EXTERNAL_PAYLOAD_PATH = "evaluation/next_tactic_external_session_payload.jsonl"
+DEFAULT_HISTORICAL_EVIDENCE_PATH = ""
+DEFAULT_EXTERNAL_PAYLOAD_PATH = "evaluation/next_tactic_zenodo_7day_session_payload.jsonl"
 DEFAULT_OUTPUT_JSON = "evaluation/next_tactic_model_comparison.json"
 DEFAULT_OUTPUT_CSV = "evaluation/next_tactic_model_comparison.csv"
 DEFAULT_SEED = 20260714
@@ -1806,37 +1804,3 @@ def build_result(args: argparse.Namespace) -> Dict[str, Any]:
             "Returned scores are not called calibrated probabilities without held-out calibration evidence.",
         ],
     }
-
-
-def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--policy", default=DEFAULT_POLICY_PATH)
-    parser.add_argument("--external-model", default=DEFAULT_EXTERNAL_MODEL_PATH)
-    parser.add_argument("--historical-evidence", default=DEFAULT_HISTORICAL_EVIDENCE_PATH)
-    parser.add_argument("--external-payload-json", default=DEFAULT_EXTERNAL_PAYLOAD_PATH)
-    parser.add_argument("--dataset-summary-json")
-    parser.add_argument("--local-payload-json")
-    parser.add_argument("--output-json", default=DEFAULT_OUTPUT_JSON)
-    parser.add_argument("--output-csv", default=DEFAULT_OUTPUT_CSV)
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--alpha", type=float, default=0.05)
-    parser.add_argument("--kappa-grid", type=float, nargs="+", default=list(DEFAULT_KAPPA_GRID))
-    parser.add_argument("--min-calibration-cases", type=int, default=10)
-    parser.add_argument("--min-evaluation-examples", type=int, default=30)
-    parser.add_argument("--min-per-tactic-support", type=int, default=5)
-    parser.add_argument("--bootstrap-iterations", type=int, default=1000)
-    return parser
-
-
-def main() -> int:
-    args = build_arg_parser().parse_args()
-    result = build_result(args)
-    write_outputs(result, args.output_json, args.output_csv)
-    print(comparison_markdown(result))
-    print("\n### Thesis-defense questions\n")
-    print(thesis_qa_markdown())
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
