@@ -16,7 +16,7 @@ from production.prediction.next_behavior_partitions import (
 from production.prediction.next_behavior_preprocessing import (
     build_next_behavior_examples,
 )
-from production.tools.train_next_behavior_experiment import (
+from production.tools.reproduce_next_behavior_experiment import (
     DECLARED_SEEDS,
     NextBehaviorTrainingError,
     _calibration_rows,
