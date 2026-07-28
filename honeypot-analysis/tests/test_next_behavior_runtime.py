@@ -15,6 +15,7 @@ from production.prediction.next_behavior_runtime import (
     MODE,
     FrozenTransformerPocPredictor,
     build_live_next_behavior_session,
+    validate_prediction_snapshot_integrity,
 )
 
 
@@ -152,6 +153,9 @@ def test_exact_frozen_checkpoint_predicts_deterministically() -> None:
     assert first["prediction_status"] == "predicted"
     assert first["prediction"] == second["prediction"]
     assert first["next_behavior_output"] == second["next_behavior_output"]
+    assert first["snapshot_id"] == second["snapshot_id"]
+    assert first["snapshot_sha256"] == second["snapshot_sha256"]
+    assert validate_prediction_snapshot_integrity(first) == []
     assert first["active_model"]["checkpoint_sha256"] == (
         "7fbd73c4bd071336fa52a589bf41e39f5a3122a67aee398dfb8e6dd9cfdfb04a"
     )
@@ -191,6 +195,7 @@ def test_api_and_ui_expose_advisory_corrected_target_semantics() -> None:
     predictor = FrozenTransformerPocPredictor(_policy())
     snapshot = predictor.predict_session(_payload(), event_id="event-4")
     api = _current_prediction_payload({"payload": snapshot}, [])
+    assert api["snapshot_sha256"] == snapshot["snapshot_sha256"]
     assert api["prediction_contract"] == (
         "next_distinct_command_behavior_phase_or_session_end.v1"
     )
@@ -200,5 +205,6 @@ def test_api_and_ui_expose_advisory_corrected_target_semantics() -> None:
         {"ok": True, "latest_prediction_snapshot": {"payload": snapshot}}
     )
     assert "primary experimental PoC forecast" in html
+    assert snapshot["snapshot_sha256"] in html
     assert "advisory / non-authoritative" in html
     assert "BLOCKED_AT_SELECTION" in html

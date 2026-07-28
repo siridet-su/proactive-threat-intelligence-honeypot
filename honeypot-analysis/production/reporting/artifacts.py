@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -20,7 +21,7 @@ from production.utils.sensitive_data import (
     redact_exception_for_log,
     redact_for_artifact,
 )
-from production.utils.serialization import stable_id, stable_json, utc_now
+from production.utils.serialization import stable_id, stable_json
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
 
 
@@ -205,6 +206,9 @@ def _safe_name(value: Any) -> str:
 
 
 _ARTIFACT_VERSION_PATTERN = re.compile(r"^artifact_[0-9a-f]{32}$")
+_INTEGRITY_MANIFEST_PATTERN = re.compile(
+    r"^artifact_[0-9a-f]{32}_artifact_manifest_([0-9a-f]{64})\.json$"
+)
 
 
 def _artifact_version_id(
@@ -317,10 +321,19 @@ def _private_artifact_path(
                 pass
 
 
-def _stix_timestamp(value: str) -> str:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _stix_timestamp(
+    value: str,
+    fallback: str = "1970-01-01T00:00:00Z",
+) -> str:
     if not value:
-        return now
+        return fallback
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z"):
         try:
             parsed = datetime.strptime(value, fmt)
@@ -329,7 +342,24 @@ def _stix_timestamp(value: str) -> str:
             return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         except ValueError:
             continue
-    return now
+    return fallback
+
+
+def _artifact_timestamp(
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+) -> str:
+    """Choose a source-bound timestamp without consulting the wall clock."""
+
+    for value in (
+        report.get("generated_at"),
+        session_payload.get("end_time"),
+        session_payload.get("updated_at"),
+        session_payload.get("start_time"),
+    ):
+        if str(value or "").strip():
+            return _stix_timestamp(str(value))
+    return "1970-01-01T00:00:00Z"
 
 
 def _ioc_items(ioc_summary: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
@@ -538,20 +568,25 @@ def _build_identity(now: str, session_payload: Dict[str, Any]) -> Dict[str, Any]
 def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -> Dict[str, Any]:
     report = _safe_artifact_mapping(report, "report")
     session_payload = _safe_artifact_mapping(session_payload, "session")
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = _artifact_timestamp(report, session_payload)
     session_id = session_payload.get("session_id", "unknown")
+    artifact_version = _artifact_version_id(report, session_payload)
     objects: List[Dict[str, Any]] = []
     seen_ids: set[str] = set()
     report_obj = {
         "type": "report",
         "spec_version": "2.1",
-        "id": f"report--{uuid.uuid4()}",
+        "id": _stix_id("report", artifact_version),
         "created": now,
         "modified": now,
         "name": f"Automated Threat Intelligence Report - {session_id}",
         "published": now,
         "report_types": ["threat-actor-activity"],
         "object_refs": [],
+        "x_honeypot_artifact_version": artifact_version,
+        "x_honeypot_source_report_sha256": hashlib.sha256(
+            stable_json(report).encode("utf-8")
+        ).hexdigest(),
     }
 
     if report.get("schema_version") == "session_assessment.v4":
@@ -827,7 +862,7 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
 
     summary_text = report.get("executive_summary") or report.get("summary") or ""
     if summary_text:
-        note_id = f"note--{uuid.uuid4()}"
+        note_id = _stix_id("note", f"{artifact_version}:{summary_text}")
         note = {
             "type": "note",
             "spec_version": "2.1",
@@ -841,7 +876,11 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
         }
         _append_stix_object(objects, report_obj, note, seen_ids)
 
-    return {"type": "bundle", "id": f"bundle--{uuid.uuid4()}", "objects": [report_obj] + objects}
+    return {
+        "type": "bundle",
+        "id": _stix_id("bundle", artifact_version),
+        "objects": [report_obj] + objects,
+    }
 
 
 def write_stix_bundle(
@@ -891,7 +930,7 @@ def write_markdown_report(
     lines = [
         "# Threat Intelligence Report",
         "",
-        f"Generated: {utc_now()}",
+        f"Generated: {_artifact_timestamp(report, session_payload)}",
         f"Session: {session_id}",
         f"Source IP: {session_payload.get('src_ip', 'unknown')}",
         "",
@@ -1044,7 +1083,10 @@ def write_pdf_report(
     meta = ParagraphStyle("MetaCustom", parent=styles["Normal"], fontSize=8, textColor=colors.grey)
     story = [
         Paragraph("Threat Intelligence Report", title),
-        Paragraph(f"Generated: {utc_now()}", meta),
+        Paragraph(
+            f"Generated: {_artifact_timestamp(report, session_payload)}",
+            meta,
+        ),
         HRFlowable(width="100%", thickness=2, color=colors.HexColor("#C0392B"), spaceAfter=12),
         Paragraph("Executive Summary", h2),
         Paragraph(
@@ -1169,9 +1211,176 @@ def write_pdf_report(
                 rightMargin=2 * cm,
                 topMargin=2 * cm,
                 bottomMargin=2 * cm,
+                invariant=1,
             )
             doc.build(story)
         return _verified_artifact_path(directory, filename)
+
+
+def _artifact_file_record(
+    directory: _ReportsDirectory,
+    kind: str,
+    path_text: str,
+) -> Dict[str, Any]:
+    path = Path(path_text)
+    if path.parent != directory.path:
+        raise ValueError("artifact path escaped the reports directory")
+    _assert_reports_directory_identity(directory)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path.name, flags, dir_fd=directory.descriptor)
+    digest = hashlib.sha256()
+    try:
+        metadata = os.fstat(descriptor)
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    finally:
+        os.close(descriptor)
+    media_types = {
+        "json": "application/json",
+        "stix": "application/stix+json",
+        "markdown": "text/markdown",
+        "pdf": "application/pdf",
+        "pdf_fallback_markdown": "text/markdown",
+    }
+    return {
+        "kind": kind,
+        "filename": path.name,
+        "media_type": media_types.get(kind, "application/octet-stream"),
+        "sha256": digest.hexdigest(),
+        "size_bytes": metadata.st_size,
+    }
+
+
+def _write_artifact_integrity_manifest(
+    directory: _ReportsDirectory,
+    artifacts: Dict[str, Any],
+    *,
+    artifact_version: str,
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+) -> str:
+    entries = [
+        _artifact_file_record(directory, kind, path_text)
+        for kind, path_text in sorted(artifacts.items())
+        if kind in {
+            "json",
+            "stix",
+            "markdown",
+            "pdf",
+            "pdf_fallback_markdown",
+        }
+        and isinstance(path_text, str)
+    ]
+    manifest = {
+        "schema_version": "report_artifact_manifest.v1",
+        "artifact_version": artifact_version,
+        "source_report_sha256": hashlib.sha256(
+            stable_json(report).encode("utf-8")
+        ).hexdigest(),
+        "source_session_sha256": hashlib.sha256(
+            stable_json(session_payload).encode("utf-8")
+        ).hexdigest(),
+        "generated_at": _artifact_timestamp(report, session_payload),
+        "artifacts": entries,
+    }
+    rendered = (
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
+    manifest_sha256 = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+    filename = (
+        f"{artifact_version}_artifact_manifest_{manifest_sha256}.json"
+    )
+    with _private_artifact_path(directory, filename) as temporary_path:
+        temporary_path.write_text(rendered, encoding="utf-8")
+    return _verified_artifact_path(directory, filename)
+
+
+def validate_report_artifact_manifest(path_text: str | Path) -> List[str]:
+    """Verify a manifest filename digest and every bound artifact file."""
+
+    path = Path(path_text).resolve()
+    match = _INTEGRITY_MANIFEST_PATTERN.fullmatch(path.name)
+    if not match:
+        return ["artifact manifest filename is invalid"]
+    errors: List[str] = []
+    try:
+        with _reports_directory_handle(path.parent) as directory:
+            manifest_record = _artifact_file_record(
+                directory, "integrity_manifest", str(path)
+            )
+            if manifest_record["sha256"] != match.group(1):
+                errors.append("artifact manifest SHA-256 mismatch")
+            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path.name, flags, dir_fd=directory.descriptor)
+            try:
+                blocks = []
+                while True:
+                    block = os.read(descriptor, 1024 * 1024)
+                    if not block:
+                        break
+                    blocks.append(block)
+            finally:
+                os.close(descriptor)
+            manifest = json.loads(b"".join(blocks).decode("utf-8"))
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("schema_version")
+                != "report_artifact_manifest.v1"
+            ):
+                return errors + ["artifact manifest schema is invalid"]
+            if not _ARTIFACT_VERSION_PATTERN.fullmatch(
+                str(manifest.get("artifact_version") or "")
+            ):
+                errors.append("artifact manifest version is invalid")
+            entries = manifest.get("artifacts")
+            if not isinstance(entries, list):
+                return errors + ["artifact manifest entries are invalid"]
+            seen_kinds: set[str] = set()
+            seen_filenames: set[str] = set()
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    errors.append("artifact manifest entry is invalid")
+                    continue
+                kind = str(entry.get("kind") or "")
+                filename = str(entry.get("filename") or "")
+                if (
+                    not kind
+                    or kind in seen_kinds
+                    or not filename
+                    or Path(filename).name != filename
+                ):
+                    errors.append("artifact manifest entry identity is invalid")
+                    continue
+                seen_kinds.add(kind)
+                if filename in seen_filenames:
+                    # A PDF fallback may intentionally point at the canonical
+                    # Markdown file; both records must still hash identically.
+                    if kind != "pdf_fallback_markdown":
+                        errors.append("artifact manifest filename is duplicated")
+                seen_filenames.add(filename)
+                actual = _artifact_file_record(
+                    directory,
+                    kind,
+                    str(directory.path / filename),
+                )
+                if actual["sha256"] != str(entry.get("sha256") or ""):
+                    errors.append(f"artifact SHA-256 mismatch: {kind}")
+                if actual["size_bytes"] != entry.get("size_bytes"):
+                    errors.append(f"artifact size mismatch: {kind}")
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ):
+        errors.append("artifact manifest verification failed")
+    return errors
 
 
 def attach_report_artifacts(report: Dict[str, Any], session_payload: Dict[str, Any], config: ProductionConfig) -> Dict[str, Any]:
@@ -1209,6 +1418,17 @@ def attach_report_artifacts(report: Dict[str, Any], session_payload: Dict[str, A
                 raise
             except Exception as exc:
                 artifacts["stix_error"] = _safe_artifact_error(exc)
+        try:
+            artifacts["markdown"] = write_markdown_report(
+                safe_report,
+                safe_session,
+                output_dir,
+                artifact_version=artifact_version,
+            )
+        except _ReportsDirectoryIdentityChanged:
+            raise
+        except Exception as exc:
+            artifacts["markdown_error"] = _safe_artifact_error(exc)
         if config.enable_pdf_export:
             try:
                 artifacts["pdf"] = write_pdf_report(
@@ -1218,21 +1438,31 @@ def attach_report_artifacts(report: Dict[str, Any], session_payload: Dict[str, A
                     artifact_version=artifact_version,
                 )
             except _PDFExportUnavailable:
-                try:
-                    artifacts["pdf_fallback_markdown"] = write_markdown_report(
-                        safe_report,
-                        safe_session,
-                        output_dir,
-                        artifact_version=artifact_version,
+                if artifacts.get("markdown"):
+                    artifacts["pdf_fallback_markdown"] = artifacts["markdown"]
+                else:
+                    artifacts["pdf_error"] = artifacts.get(
+                        "markdown_error",
+                        "markdown fallback unavailable",
                     )
-                except _ReportsDirectoryIdentityChanged:
-                    raise
-                except Exception as exc:
-                    artifacts["pdf_error"] = _safe_artifact_error(exc)
             except _ReportsDirectoryIdentityChanged:
                 raise
             except Exception as exc:
                 artifacts["pdf_error"] = _safe_artifact_error(exc)
+        try:
+            artifacts["integrity_manifest"] = (
+                _write_artifact_integrity_manifest(
+                    output_dir,
+                    artifacts,
+                    artifact_version=artifact_version,
+                    report=safe_report,
+                    session_payload=safe_session,
+                )
+            )
+        except _ReportsDirectoryIdentityChanged:
+            raise
+        except Exception as exc:
+            artifacts["integrity_manifest_error"] = _safe_artifact_error(exc)
         _assert_reports_directory_identity(output_dir)
     safe_report["artifacts"] = artifacts
     return _safe_artifact_mapping(safe_report, "report")

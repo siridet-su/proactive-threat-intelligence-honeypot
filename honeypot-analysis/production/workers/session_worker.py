@@ -43,6 +43,7 @@ from production.correlation.campaign_clustering import create_or_update_campaign
 from production.prediction.next_behavior_runtime import (
     MODE as TRANSFORMER_POC_MODE,
     FrozenTransformerPocPredictor,
+    finalize_prediction_snapshot,
 )
 from production.prediction.external_vomm_artifact import load_external_vomm_artifact
 from production.prediction.vomm_rollback import (
@@ -845,6 +846,7 @@ class SessionWorker:
                     "reason": "corrected-target prediction alone cannot create an alert",
                 },
             )
+            snapshot = finalize_prediction_snapshot(snapshot)
         else:
             self._maybe_store_predictive_alert(snapshot)
         self.storage.save_prediction_snapshot(snapshot)

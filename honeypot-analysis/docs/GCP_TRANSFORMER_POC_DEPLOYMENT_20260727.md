@@ -63,6 +63,12 @@ status, target contract, and advisory authority. Prediction alone cannot create
 alerts, establish intent, support factual claims, select guidance or
 recommendations, authorize an action, or execute anything.
 
+Current snapshots also carry a content-derived `snapshot_sha256` and
+`snapshot_id`. Generation time and runtime latency are excluded from identity;
+prediction content, status, event binding, input hash, model provenance, and
+authority are included. Report exports are bound by
+`report_artifact_manifest.v1`; see `docs/ARTIFACT_INTEGRITY.md`.
+
 ## Backup and rollback evidence
 
 GCP root-only bundle:

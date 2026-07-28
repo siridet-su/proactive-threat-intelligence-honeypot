@@ -122,6 +122,7 @@ def _current_prediction_payload(snapshot: Dict[str, Any], feedback_rows: list[Di
             entry["hypothesis_count"] += 1
     return {
         "snapshot_id": payload.get("snapshot_id") or snapshot.get("snapshot_id"),
+        "snapshot_sha256": payload.get("snapshot_sha256") or "",
         "session_id": payload.get("session_id") or snapshot.get("session_id"),
         "generated_at": payload.get("generated_at") or snapshot.get("created_at"),
         "final_ranking": final_ranking,

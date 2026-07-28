@@ -3302,6 +3302,11 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         status = payload.get("prediction_status") or "model_unavailable"
         rows = [
             ("snapshot_role", "primary experimental PoC forecast"),
+            (
+                "snapshot_id",
+                payload.get("snapshot_id") or latest.get("snapshot_id") or "-",
+            ),
+            ("snapshot_sha256", payload.get("snapshot_sha256") or "-"),
             ("target_contract", payload.get("prediction_contract") or "-"),
             ("status", status),
             ("status_reason", payload.get("prediction_status_reason") or "-"),

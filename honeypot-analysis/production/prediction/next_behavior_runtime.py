@@ -32,7 +32,7 @@ from production.prediction.next_behavior_tensor import (
     tensorize_model_input,
     vocabulary_sha256,
 )
-from production.utils.serialization import stable_id, utc_now
+from production.utils.serialization import stable_id, stable_json, utc_now
 
 
 MODE = "professor_approved_corrected_target_transformer_poc"
@@ -57,6 +57,48 @@ class NextBehaviorRuntimeError(ValueError):
 
 def _clean(value: Any) -> str:
     return str(value or "").strip()
+
+
+def prediction_snapshot_hash_input(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return the immutable prediction content used for IDs and verification."""
+
+    value = deepcopy(dict(snapshot))
+    value.pop("snapshot_id", None)
+    value.pop("snapshot_sha256", None)
+    value.pop("generated_at", None)
+    runtime = value.get("runtime")
+    if isinstance(runtime, dict):
+        runtime.pop("model_load_time_ms", None)
+        runtime.pop("inference_latency_ms", None)
+    return value
+
+
+def finalize_prediction_snapshot(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
+    """Attach a retry-stable ID and SHA-256 after all canonical fields exist."""
+
+    value = deepcopy(dict(snapshot))
+    hash_input = prediction_snapshot_hash_input(value)
+    digest = hashlib.sha256(stable_json(hash_input).encode("utf-8")).hexdigest()
+    value["snapshot_sha256"] = digest
+    value["snapshot_id"] = stable_id(
+        "prediction",
+        {"schema_version": value.get("schema_version"), "sha256": digest},
+    )
+    return value
+
+
+def validate_prediction_snapshot_integrity(snapshot: Mapping[str, Any]) -> list[str]:
+    """Validate the content-addressed prediction envelope without inference."""
+
+    if not isinstance(snapshot, Mapping):
+        return ["prediction snapshot must be an object"]
+    errors: list[str] = []
+    expected = finalize_prediction_snapshot(snapshot)
+    if _clean(snapshot.get("snapshot_sha256")).lower() != expected["snapshot_sha256"]:
+        errors.append("snapshot_sha256 mismatch")
+    if _clean(snapshot.get("snapshot_id")) != expected["snapshot_id"]:
+        errors.append("snapshot_id mismatch")
+    return errors
 
 
 def _sha256_file(path: str | Path) -> str:
@@ -456,21 +498,11 @@ class FrozenTransformerPocPredictor:
         status: str,
         reason: str,
     ) -> Dict[str, Any]:
-        generated_at = utc_now()
         session_id = _clean(payload.get("session_id") or "unknown")
         snapshot = {
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
-            "snapshot_id": stable_id(
-                "prediction",
-                {
-                    "session_id": session_id,
-                    "event_id": event_id,
-                    "generated_at": generated_at,
-                    "mode": MODE,
-                },
-            ),
             "session_id": session_id,
-            "generated_at": generated_at,
+            "generated_at": utc_now(),
             "event_id": event_id,
             "session_status": "closed" if payload.get("is_ended") else "active",
             "prediction_mode": MODE,
@@ -540,16 +572,16 @@ class FrozenTransformerPocPredictor:
         event_id: str = "",
     ) -> Dict[str, Any]:
         if not self.enabled:
-            return self._base_snapshot(
+            return finalize_prediction_snapshot(self._base_snapshot(
                 payload, event_id=event_id, status="model_unavailable", reason="predictor_disabled"
-            )
+            ))
         if self.model is None:
-            return self._base_snapshot(
+            return finalize_prediction_snapshot(self._base_snapshot(
                 payload,
                 event_id=event_id,
                 status="model_unavailable",
                 reason=f"frozen_artifact_validation_failed:{self.load_error or 'unknown'}",
-            )
+            ))
         started = time.perf_counter()
         try:
             safe_session = build_live_next_behavior_session(
@@ -564,12 +596,12 @@ class FrozenTransformerPocPredictor:
                 ),
             )
             if safe_session is None:
-                return self._base_snapshot(
+                return finalize_prediction_snapshot(self._base_snapshot(
                     payload,
                     event_id=event_id,
                     status="insufficient_history",
                     reason="no_trusted_behavior_phase",
-                )
+                ))
             model_input = build_live_model_input(
                 safe_session,
                 max_sequence_length=int(self.spec["architecture"]["maximum_sequence_length"]),
@@ -644,7 +676,7 @@ class FrozenTransformerPocPredictor:
             snapshot["runtime"]["inference_latency_ms"] = (
                 time.perf_counter() - started
             ) * 1000.0
-            return snapshot
+            return finalize_prediction_snapshot(snapshot)
         except Exception as exc:
             snapshot = self._base_snapshot(
                 payload,
@@ -655,4 +687,4 @@ class FrozenTransformerPocPredictor:
             snapshot["runtime"]["inference_latency_ms"] = (
                 time.perf_counter() - started
             ) * 1000.0
-            return snapshot
+            return finalize_prediction_snapshot(snapshot)
