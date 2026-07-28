@@ -159,6 +159,18 @@ def canonical_evidence_snapshot(observed_behavior: Any) -> Dict[str, Any]:
     """
 
     observed = observed_behavior if isinstance(observed_behavior, dict) else {}
+    if observed.get("schema_version") == "canonical_evidence_snapshot.v1":
+        snapshot = json.loads(stable_json(observed))
+        recorded = _clean(snapshot.get("evidence_sha256")).lower()
+        hash_input = deepcopy(snapshot)
+        hash_input.pop("evidence_sha256", None)
+        if (
+            len(recorded) != 64
+            or any(character not in "0123456789abcdef" for character in recorded)
+            or recorded != _document_sha256(hash_input)
+        ):
+            raise ValueError("canonical evidence snapshot digest is inconsistent")
+        return snapshot
     snapshot = {
         "schema_version": CANONICAL_EVIDENCE_SCHEMA_VERSION,
         "session_id": _clean(observed.get("session_id")) or "unknown",
@@ -174,21 +186,38 @@ def canonical_evidence_snapshot(observed_behavior: Any) -> Dict[str, Any]:
     return json.loads(stable_json(snapshot))
 
 
+def canonical_evidence_sha256(observed_behavior: Any) -> str:
+    snapshot = canonical_evidence_snapshot(observed_behavior)
+    if snapshot.get("schema_version") == "canonical_evidence_snapshot.v1":
+        return _clean(snapshot.get("evidence_sha256")).lower()
+    return _document_sha256(snapshot)
+
+
+def _snapshot_values(
+    snapshot: Mapping[str, Any],
+    legacy_name: str,
+    canonical_name: str,
+) -> Any:
+    if snapshot.get("schema_version") == "canonical_evidence_snapshot.v1":
+        return snapshot.get(canonical_name) or []
+    return snapshot.get(legacy_name) or []
+
+
 def canonical_behavioral_evidence_refs(observed_behavior: Any) -> Set[str]:
     """Return evidence IDs from the immutable v3 observed-evidence snapshot."""
 
     snapshot = canonical_evidence_snapshot(observed_behavior)
     refs: Set[str] = set()
-    for key in (
-        "ordered_behavior_chain",
-        "ordered_command_observations",
-        "cowrie_event_evidence",
-        "transfer_event_observations",
-        "trusted_attck_candidates",
-        "connected_behavior_chains",
-        "behavior_relationships",
+    for legacy_name, canonical_name in (
+        ("ordered_behavior_chain", "connected_behavior_chains"),
+        ("ordered_command_observations", "observations"),
+        ("cowrie_event_evidence", "direct_cowrie_events"),
+        ("transfer_event_observations", "transfer_observations"),
+        ("trusted_attck_candidates", "trusted_attck_candidates"),
+        ("connected_behavior_chains", "connected_behavior_chains"),
+        ("behavior_relationships", "relationships"),
     ):
-        for item in snapshot.get(key) or []:
+        for item in _snapshot_values(snapshot, legacy_name, canonical_name):
             if isinstance(item, dict):
                 refs.update(_evidence_refs_from_item(item))
     return refs
@@ -206,13 +235,19 @@ def _mapping_values(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Set[str]], Dict
         if ttp_text:
             ttps.setdefault(ttp_text, set()).update(refs)
 
-    for item in snapshot.get("trusted_attck_candidates") or []:
+    for item in _snapshot_values(
+        snapshot, "trusted_attck_candidates", "trusted_attck_candidates"
+    ):
         if isinstance(item, dict):
             add(item.get("tactic"), item.get("technique_id") or item.get("ttp"), _evidence_refs_from_item(item))
-    for item in snapshot.get("ordered_behavior_chain") or []:
+    for item in _snapshot_values(
+        snapshot, "ordered_behavior_chain", "connected_behavior_chains"
+    ):
         if isinstance(item, dict):
             add(item.get("tactic"), item.get("ttp"), _evidence_refs_from_item(item))
-    for observation in snapshot.get("ordered_command_observations") or []:
+    for observation in _snapshot_values(
+        snapshot, "ordered_command_observations", "observations"
+    ):
         if not isinstance(observation, dict):
             continue
         refs = _evidence_refs_from_item(observation)
@@ -225,7 +260,9 @@ def _mapping_values(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Set[str]], Dict
 def _observed_facts(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     all_refs = canonical_behavioral_evidence_refs(snapshot)
     tactics, ttps = _mapping_values(snapshot)
-    command_observations = snapshot.get("ordered_command_observations") or []
+    command_observations = _snapshot_values(
+        snapshot, "ordered_command_observations", "observations"
+    )
     command_refs: Set[str] = set()
     entities: Dict[str, Set[str]] = {
         "account_names": set(),
@@ -251,7 +288,9 @@ def _observed_facts(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             entities[entity_type].update(_texts(values or []))
     transfer_refs: Set[str] = set()
-    for observation in snapshot.get("transfer_event_observations") or []:
+    for observation in _snapshot_values(
+        snapshot, "transfer_event_observations", "transfer_observations"
+    ):
         if isinstance(observation, dict):
             transfer_refs.update(_evidence_refs_from_item(observation))
     return {
@@ -480,7 +519,12 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
     if not isinstance(evidence, dict):
         errors.append("canonical_evidence is required")
         evidence = {}
-    expected_evidence_hash = _document_sha256(canonical_evidence_snapshot(evidence)) if evidence else ""
+    try:
+        expected_evidence_hash = (
+            canonical_evidence_sha256(evidence) if evidence else ""
+        )
+    except ValueError:
+        expected_evidence_hash = ""
     recorded_evidence_hash = _clean((value.get("provenance") or {}).get("canonical_evidence_sha256"))
     if not recorded_evidence_hash or recorded_evidence_hash != expected_evidence_hash:
         errors.append("canonical evidence digest is inconsistent")
@@ -567,7 +611,7 @@ def build_response_guidance_v3(
     """Evaluate v3 policy directly against immutable observed Cowrie evidence."""
 
     snapshot = canonical_evidence_snapshot(observed_behavior)
-    evidence_sha256 = _document_sha256(snapshot)
+    evidence_sha256 = canonical_evidence_sha256(snapshot)
     facts = _observed_facts(snapshot)
     document = deepcopy(policy) if isinstance(policy, dict) else {}
     policy_errors = list(policy_validation_errors or validate_response_guidance_policy(document))
@@ -757,19 +801,29 @@ def build_response_guidance_v3_from_paths(
 def build_response_guidance_v3_from_session(
     session_payload: Dict[str, Any],
     *,
+    raw_events: Optional[Iterable[Dict[str, Any]]] = None,
     policy_path: str = "",
     asset_profile_path: str = "",
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
     forecast_context: Any = None,
     enrichment_context: Any = None,
 ) -> Dict[str, Any]:
     """Build a current-policy reevaluation without using forecast for selection."""
 
-    from production.reporting.threat_hypothesis import build_observed_behavior
+    from production.reporting.session_assessment_v4 import (
+        build_canonical_evidence_snapshot,
+    )
 
     session = deepcopy(session_payload) if isinstance(session_payload, dict) else {}
-    observed = build_observed_behavior([session], raw_events=session.get("raw_events") or [])
+    snapshot, _observed, _source, _behavior = build_canonical_evidence_snapshot(
+        session,
+        list(raw_events) if raw_events is not None else session.get("raw_events") or [],
+        behavior_policy_document=behavior_policy_document,
+        behavior_policy_path=behavior_policy_path,
+    )
     return build_response_guidance_v3_from_paths(
-        observed,
+        snapshot,
         policy_path=policy_path,
         asset_profile_path=asset_profile_path,
         session_context=session,

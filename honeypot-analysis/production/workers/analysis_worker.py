@@ -451,6 +451,7 @@ def deterministic_baseline_report(
         prediction_context=prediction_snapshot or {},
         enrichment_context=session_payload.get("enrichment_status") or {},
         correlation_context=session_payload.get("session_ttp_correlations") or [],
+        mitre_cache_path=selected.mitre_attack_path,
         response_guidance_policy_path=selected.response_guidance_policy_path,
         response_guidance_asset_profile_path=(
             selected.response_guidance_asset_profile_path

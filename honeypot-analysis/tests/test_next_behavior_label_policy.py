@@ -51,7 +51,7 @@ def test_reviewed_rule_is_trusted_without_fake_probability() -> None:
     assert label["checkpoint_sha256"] == ""
 
 
-def test_model_only_uses_frozen_ninety_percent_threshold() -> None:
+def test_model_only_never_becomes_observed_evidence_from_score_alone() -> None:
     outputs = [
         {
             "ttp": "T1059",
@@ -76,7 +76,10 @@ def test_model_only_uses_frozen_ninety_percent_threshold() -> None:
 
     assert result["labels"][0]["trust_tier"] == "audit_only_candidate"
     assert result["labels"][0]["exclusion_reason"] == "below_trusted_threshold"
-    assert result["labels"][1]["trust_tier"] == "trusted_observation"
+    assert result["labels"][1]["trust_tier"] == "audit_only_candidate"
+    assert result["labels"][1]["exclusion_reason"] == (
+        "model_only_not_observed_evidence"
+    )
     assert all(
         label["checkpoint_sha256"] == CHECKPOINT_SHA
         for label in result["labels"]

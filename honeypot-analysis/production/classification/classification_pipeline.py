@@ -10,6 +10,7 @@ This module moves the runtime parts of notebook cell 3A into importable code:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,9 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from production.policies.validate_classification_rules import (
+    validate_classification_rule_policy,
+)
 from production.utils.sensitive_data import redact_exception_for_log
 
 
@@ -119,24 +123,53 @@ def _attack_url(ttp: str) -> str:
 
 def load_classification_rule_policy(path_text: str = "") -> Dict[str, Any]:
     errors: List[str] = []
+    explicitly_configured = bool(
+        _clean_text(path_text) or _clean_text(os.getenv("CLASSIFICATION_RULES_PATH", ""))
+    )
     for path in _candidate_policy_paths(path_text):
         try:
             if not path.exists():
                 errors.append(f"not found: {path}")
                 continue
-            loaded = json.loads(path.read_text(encoding="utf-8"))
+            raw = path.read_bytes()
+            loaded = json.loads(raw.decode("utf-8"))
             if not isinstance(loaded, dict):
                 errors.append(f"JSON root must be object: {path}")
                 continue
+            validation_errors = validate_classification_rule_policy(loaded)
+            if validation_errors:
+                errors.extend(
+                    f"{path}: {error}" for error in validation_errors
+                )
+                continue
             loaded.setdefault("source_path", str(path))
+            loaded["source_sha256"] = hashlib.sha256(raw).hexdigest()
+            loaded["load_status"] = "loaded"
             return loaded
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             errors.append(redact_exception_for_log(exc))
+    if explicitly_configured:
+        return {
+            "schema_version": CLASSIFICATION_RULE_POLICY_SCHEMA,
+            "policy_id": "configured-policy-unavailable",
+            "version": "0",
+            "source_path": "configured_path_unavailable",
+            "source_sha256": "",
+            "load_status": "invalid",
+            "load_errors": errors,
+            "policy": {
+                "enabled": False,
+                "rule_review_mode": "reviewed_only",
+                "rules": [],
+            },
+        }
     return {
         "schema_version": CLASSIFICATION_RULE_POLICY_SCHEMA,
         "policy_id": "emergency-python-fallback",
         "version": "0",
         "source_path": "python:production.classification.classification_pipeline.EMERGENCY_RULE_SPECS",
+        "source_sha256": "",
+        "load_status": "emergency_audit_only",
         "load_errors": errors,
         "policy": {
             "enabled": True,
@@ -196,8 +229,17 @@ def _rule_allowed_for_runtime(rule: Dict[str, Any], review_mode: str, *, emergen
     return provenance.get("reviewed") is True
 
 
-def load_rule_specs(path_text: str = "", rule_review_mode: str = "") -> List[Tuple[str, str, str]]:
-    document = load_classification_rule_policy(path_text)
+def load_rule_specs(
+    path_text: str = "",
+    rule_review_mode: str = "",
+    *,
+    policy_document: Optional[Dict[str, Any]] = None,
+) -> List[Tuple[str, str, str]]:
+    document = (
+        policy_document
+        if isinstance(policy_document, dict)
+        else load_classification_rule_policy(path_text)
+    )
     review_mode = _runtime_rule_review_mode(document, rule_review_mode)
     emergency_fallback = document.get("policy_id") == "emergency-python-fallback"
     specs: List[Tuple[str, str, str]] = []
@@ -438,7 +480,15 @@ class NotebookParityClassifier:
         self.high_confidence = high_confidence
         self.rule_policy = load_classification_rule_policy(rule_policy_path) if rule_specs is None else {}
         self.rule_review_mode = _runtime_rule_review_mode(self.rule_policy, rule_review_mode) if rule_specs is None else "explicit_rule_specs"
-        self.rule_specs = list(rule_specs) if rule_specs is not None else load_rule_specs(rule_policy_path, self.rule_review_mode)
+        self.rule_specs = (
+            list(rule_specs)
+            if rule_specs is not None
+            else load_rule_specs(
+                rule_policy_path,
+                self.rule_review_mode,
+                policy_document=self.rule_policy,
+            )
+        )
         self.rules = _compile_rules(self.rule_specs)
         self.combined_pattern = re.compile(
             "|".join(pattern.pattern for pattern, _, _ in self.rules) if self.rules else r"(?!)",
@@ -457,6 +507,13 @@ class NotebookParityClassifier:
             "rule_policy_id": self.rule_policy_id,
             "rule_policy_version": self.rule_policy_version,
             "rule_review_mode": self.rule_review_mode,
+            "rule_policy_path": _clean_text(self.rule_policy.get("source_path")),
+            "rule_policy_sha256": _clean_text(
+                self.rule_policy.get("source_sha256")
+            ).lower(),
+            "rule_policy_load_status": _clean_text(
+                self.rule_policy.get("load_status")
+            ),
         }
 
     def _technique_name(self, tid: Optional[str]) -> str:

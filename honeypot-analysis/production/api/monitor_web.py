@@ -88,6 +88,7 @@ class MonitorConfig:
     enable_smb_decisions: bool = False
     response_guidance_policy_path: str = ""
     response_guidance_asset_profile_path: str = ""
+    threat_hypothesis_behavior_policy_path: str = ""
     enable_response_guidance: bool = True
     refresh_seconds: int = DEFAULT_REFRESH_SECONDS
     production_config: Optional[ProductionConfig] = None
@@ -113,6 +114,9 @@ def _load_monitor_config(config_path: Optional[str] = None) -> MonitorConfig:
         mitre_attack_path=cfg.mitre_attack_path,
         response_guidance_policy_path=cfg.response_guidance_policy_path,
         response_guidance_asset_profile_path=cfg.response_guidance_asset_profile_path,
+        threat_hypothesis_behavior_policy_path=(
+            cfg.threat_hypothesis_behavior_policy_path
+        ),
         enable_response_guidance=cfg.enable_response_guidance,
         production_config=cfg,
     )

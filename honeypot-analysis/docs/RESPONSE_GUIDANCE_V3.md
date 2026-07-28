@@ -11,8 +11,11 @@ inputs.
 
 ## Selection boundary
 
-Only the immutable `observed_behavior` snapshot can select a finding, triage
-value, or advisory action. The policy validator rejects prediction,
+Only the exact immutable `canonical_evidence_snapshot.v1` embedded in the
+sibling `session_assessment.v4` can select a finding, triage value, or advisory
+action. Current API reevaluations and the read-only legacy report adapter call
+the same snapshot builder instead of constructing a parallel evidence shape.
+The policy validator rejects prediction,
 enrichment/reputation, regex, default-guidance, and automatic-execution action
 conditions. Every selected task records its complete predicate trace and at
 least one canonical Cowrie evidence reference.

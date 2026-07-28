@@ -878,10 +878,11 @@ def build_v2_report(
     response_guidance_policy_path: str = "",
     response_guidance_asset_profile_path: str = "",
 ) -> Dict[str, Any]:
+    session_list = list(sessions or [])
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     report = dict(legacy_report or {})
     observed = build_observed_behavior(
-        sessions,
+        session_list,
         raw_events=raw_events,
         behavior_policy_document=document,
         behavior_policy_path=behavior_policy_path,
@@ -934,12 +935,20 @@ def build_v2_report(
     })
     report = apply_legacy_aliases(report)
     report["session_assessment_v3"] = build_session_assessment_v3(report)
-    session_context = _first_session_payload(sessions, raw_events or [])
-    response_guidance = build_response_guidance_v3_from_paths(
-        observed,
+    session_context = _first_session_payload(session_list, raw_events or [])
+    # The historical report adapter consumes the same canonical evidence
+    # builder as session_assessment.v4 and every current API/UI path.
+    from production.reporting.response_guidance_v3 import (
+        build_response_guidance_v3_from_session,
+    )
+
+    response_guidance = build_response_guidance_v3_from_session(
+        session_context,
+        raw_events=raw_events,
         policy_path=response_guidance_policy_path,
         asset_profile_path=response_guidance_asset_profile_path,
-        session_context=session_context,
+        behavior_policy_document=document,
+        behavior_policy_path=behavior_policy_path,
         forecast_context=report.get("model_prediction") or {},
         enrichment_context=report.get("contextual_intelligence") or {},
     )

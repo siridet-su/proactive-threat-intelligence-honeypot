@@ -287,6 +287,9 @@ def normalize_classifier_outputs(
                     else "opaque_model_probe"
                     if opaque
                     else "below_trusted_threshold"
+                    if confidence is None
+                    or confidence < float(trusted_model_only_threshold)
+                    else "model_only_not_observed_evidence"
                 ),
             )
             continue

@@ -82,6 +82,12 @@ def test_v4_is_direct_content_addressed_and_whole_contract_valid() -> None:
     assert len(report["provenance"]["evaluator_git_revision"]) == 40
     assert report["provenance"]["cached_graph"]["accepted"] is False
     assert "deterministically_rebuilt" in report["provenance"]["cached_graph"]["disposition"]
+    guidance = report["response_guidance_v3"]
+    assert guidance["canonical_evidence"] == report["canonical_evidence"]
+    assert (
+        guidance["provenance"]["canonical_evidence_sha256"]
+        == report["provenance"]["evidence_sha256"]
+    )
     assert "recommendations" not in report
     assert report["authority"]["automatic_alerts_authorized"] is False
     assert all(
@@ -118,6 +124,84 @@ def test_prediction_enrichment_correlation_and_llm_context_cannot_change_authori
         "global_score", "recommended_actions", "mitigations", "response_actions", "alerts",
     }
     assert not (set(_walk_keys(canonical)) & prohibited)
+
+
+def test_classifier_scores_and_model_only_context_cannot_change_evidence_or_ids() -> None:
+    base = _build()
+    payload = _payload()
+    payload["classification_events"][0].update({
+        "confidence": 0.01,
+        "score": 99,
+        "reputation_risk_score": 100,
+        "predicted_tactic": "impact",
+    })
+    contextual = build_session_assessment_v4(
+        [payload],
+        raw_events=payload["raw_events"],
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_policy_path=CLASSIFICATION_POLICY,
+    )
+    assert contextual["canonical_evidence"] == base["canonical_evidence"]
+    assert contextual["assessment_id"] == base["assessment_id"]
+    assert contextual["response_guidance_v3"]["guidance_id"] == (
+        base["response_guidance_v3"]["guidance_id"]
+    )
+
+
+def test_exact_mitre_and_model_artifact_hashes_are_recorded(tmp_path: Path) -> None:
+    mitre = tmp_path / "enterprise-attack.json"
+    model = tmp_path / "frozen-transformer.pt"
+    mitre.write_bytes(b'{"type":"bundle","objects":[]}')
+    model.write_bytes(b"immutable frozen transformer")
+    model_sha = hashlib.sha256(model.read_bytes()).hexdigest()
+
+    report = _build(
+        mitre_cache_path=str(mitre),
+        model_artifact_provenance={
+            "policy": {
+                "transformer_checkpoint_path": str(model),
+                "transformer_checkpoint_sha256": model_sha,
+            }
+        },
+    )
+
+    assert report["provenance"]["mitre_attack"] == {
+        "name": "mitre_attack_cache",
+        "path": str(mitre.resolve()),
+        "status": "verified",
+        "sha256": hashlib.sha256(mitre.read_bytes()).hexdigest(),
+        "expected_sha256": "",
+    }
+    assert report["provenance"]["model_artifacts"] == [{
+        "name": "transformer_checkpoint",
+        "path": str(model.resolve()),
+        "status": "verified",
+        "sha256": model_sha,
+        "expected_sha256": model_sha,
+    }]
+    assert validate_session_assessment_v4(report) == []
+
+
+def test_configured_mitre_or_model_hash_mismatch_is_explicit(tmp_path: Path) -> None:
+    missing_mitre = tmp_path / "missing-enterprise-attack.json"
+    abstained = _build(mitre_cache_path=str(missing_mitre))
+    assert abstained["status"] == "observation_only_abstention"
+    assert abstained["provenance"]["mitre_attack"]["status"] == "missing"
+
+    model = tmp_path / "frozen-transformer.pt"
+    model.write_bytes(b"current artifact bytes")
+    recorded = _build(
+        model_artifact_provenance={
+            "policy": {
+                "transformer_checkpoint_path": str(model),
+                "transformer_checkpoint_sha256": "0" * 64,
+            }
+        }
+    )
+    assert recorded["provenance"]["model_artifacts"][0]["status"] == "sha256_mismatch"
+    assert recorded["provenance"]["model_artifacts"][0]["sha256"] == hashlib.sha256(
+        model.read_bytes()
+    ).hexdigest()
 
 
 def test_explicit_invalid_policies_fail_closed_without_substitution(tmp_path: Path) -> None:

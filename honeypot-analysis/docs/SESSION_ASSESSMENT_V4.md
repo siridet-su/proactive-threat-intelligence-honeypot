@@ -8,11 +8,21 @@ read-only compatibility adapters.
 ## Construction and authority
 
 The evaluator in `production/reporting/session_assessment_v4.py` normalizes one
-Cowrie session into `canonical_cowrie_evidence_snapshot.v1`, hashes it, and
-rebuilds the evidence relationships without accepting a caller-supplied cached
-graph. The derived canonical snapshot contains observations, Cowrie transfer
-events, entities, relationships, connected chains, trusted ATT&CK candidates,
-and audit-only candidates. Its SHA-256 is the sole evidence boundary.
+Cowrie session and rebuilds its evidence relationships without accepting a
+caller-supplied cached graph. It then creates exactly one
+`canonical_evidence_snapshot.v1`, consumed unchanged by both the v4 assessment
+and its `response_guidance.v3` sibling. The snapshot contains sensor evidence,
+observations, Cowrie transfer events, entities, relationships, connected
+chains, and trusted ATT&CK candidates. Model-only/audit-only classifier
+candidates remain outside the authority snapshot. Classifier confidence,
+scores, predictions, and enrichment therefore cannot change its SHA-256 or any
+content-addressed assessment or guidance ID.
+
+The runtime classification policy is read once, validated as a whole, hashed
+from those exact bytes, and compiled from that same in-memory document.
+Explicitly configured missing or invalid rule policies compile no fallback
+rules. SecureBERT-only labels remain audit-only context even above a model
+score threshold; a score cannot promote model output into observed evidence.
 
 The canonical output has two analytical collections:
 
@@ -28,11 +38,16 @@ findings, hypotheses, statuses, or IDs.
 ## Provenance and failure semantics
 
 Every new assessment records the canonical evidence SHA-256, exact behavior
-and classification policy file SHA-256 values and effective paths, relevant
-model-provenance hashes, evaluator Git revision, and the cache rebuild binding.
+and classification policy file SHA-256 values and effective paths, the actual
+SHA-256 and expected SHA-256 for each configured Transformer/runtime model
+artifact, the configured MITRE cache path and actual SHA-256, evaluator Git
+revision, and the cache rebuild binding. Missing artifacts and digest
+mismatches remain explicit provenance states; metadata never turns a mismatch
+into a verified artifact.
 
-An explicitly configured missing, malformed, or invalid policy is never
-replaced with a bundled policy. The assessment fails closed to
+An explicitly configured missing, malformed, or invalid behavior,
+classification, or MITRE source is never replaced with a bundled source. The
+assessment fails closed to
 `observation_only_abstention`, retaining the evidence snapshot while emitting
 no findings or hypothesis sets.
 

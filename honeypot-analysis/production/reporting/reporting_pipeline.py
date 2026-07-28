@@ -3604,6 +3604,7 @@ class ImprovedAsyncSwarmCoordinator:
                 model_artifact_provenance=self.prediction_policy,
                 prediction_context=self.prediction_context,
                 correlation_context=session_correlations or [],
+                mitre_cache_path=self.mitre_cache_path,
                 response_guidance_policy_path=self.response_guidance_policy_path,
                 response_guidance_asset_profile_path=self.response_guidance_asset_profile_path,
             ),

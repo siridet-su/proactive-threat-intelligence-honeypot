@@ -7,7 +7,10 @@ from pathlib import Path
 
 from production.api.monitor_web import _render_report_panel, _report_summary
 from production.classification.classification_pipeline import NotebookParityClassifier
-from production.classification.trust import is_trusted_classification_event
+from production.classification.trust import (
+    classification_evidence_tier,
+    is_trusted_classification_event,
+)
 from production.correlation.session_evidence_graph import build_session_evidence_graph
 from production.reporting.actor_attribution import enrich_report_with_actor_attribution
 from production.reporting.artifacts import build_stix_bundle, write_markdown_report
@@ -111,7 +114,8 @@ def test_classifier_agreement_matrix_enforces_trust_boundary() -> None:
     ).classify("printf system-facts")[0]
     assert model_only["source"] == "securebert"
     assert model_only["agreement_status"] == "model_only"
-    assert is_trusted_classification_event(model_only) is True
+    assert is_trusted_classification_event(model_only) is False
+    assert classification_evidence_tier(model_only) == "audit_only_candidate"
 
     low_model_only = NotebookParityClassifier(
         bert_fn=lambda _command: ("T1562", 0.20),

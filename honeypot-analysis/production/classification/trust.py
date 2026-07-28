@@ -63,6 +63,8 @@ def classification_evidence_tier(event: Dict[str, Any]) -> str:
     if is_opaque_securebert_probe(event):
         return "audit_only_candidate"
     if source == "securebert":
+        if event.get("model_authority") != "reviewed_trusted_model_only":
+            return "audit_only_candidate"
         try:
             if float(event.get("confidence")) < MIN_TRUSTED_SECUREBERT_CONFIDENCE:
                 return "audit_only_candidate"

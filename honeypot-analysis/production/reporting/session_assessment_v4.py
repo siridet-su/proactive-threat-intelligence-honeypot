@@ -22,6 +22,7 @@ from production.policies.threat_hypothesis_behavior_policy import (
 )
 from production.reporting.response_guidance_v3 import (
     build_response_guidance_v3_from_paths,
+    canonical_evidence_snapshot as guidance_evidence_snapshot,
     validate_response_guidance_v3,
 )
 from production.reporting.threat_hypothesis import (
@@ -89,6 +90,74 @@ def _source_payload(session: Any, raw_events: Iterable[Dict[str, Any]]) -> Dict[
         ],
         "login_success": bool(get("login_success", False)),
     }
+
+
+def build_canonical_evidence_snapshot(
+    session: Any,
+    raw_events: Optional[Iterable[Dict[str, Any]]] = None,
+    *,
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Build the one immutable evidence snapshot used by v4 and guidance v3."""
+
+    source = redact_for_artifact(_source_payload(session, raw_events or []))
+    if not isinstance(source, dict):
+        raise SessionAssessmentV4Error(
+            "canonical evidence redaction did not return an object"
+        )
+    behavior_document = resolve_behavior_policy(
+        behavior_policy_document, behavior_policy_path
+    )
+    observed = build_observed_behavior(
+        [deepcopy(source)],
+        raw_events=source["raw_events"],
+        behavior_policy_document=behavior_document,
+        behavior_policy_path=behavior_policy_path,
+    )
+    authoritative = guidance_evidence_snapshot(observed)
+    source_evidence = {
+        key: deepcopy(source[key])
+        for key in (
+            "schema_version",
+            "session_id",
+            "src_ip",
+            "commands",
+            "commands_success",
+            "commands_failed",
+            "raw_events",
+            "login_success",
+        )
+    }
+    snapshot = {
+        "schema_version": "canonical_evidence_snapshot.v1",
+        # Classifier scores and model-only candidates are deliberately excluded
+        # from this sensor-evidence digest and the authoritative snapshot.
+        "source_evidence_sha256": _sha256_json(source_evidence),
+        "session_id": source["session_id"],
+        "src_ip": source["src_ip"],
+        "observations": deepcopy(
+            authoritative.get("ordered_command_observations") or []
+        ),
+        "transfer_observations": deepcopy(
+            authoritative.get("transfer_event_observations") or []
+        ),
+        "direct_cowrie_events": deepcopy(
+            authoritative.get("cowrie_event_evidence") or []
+        ),
+        "entities": deepcopy(observed.get("normalized_entities") or []),
+        "relationships": deepcopy(
+            authoritative.get("behavior_relationships") or []
+        ),
+        "connected_behavior_chains": deepcopy(
+            authoritative.get("connected_behavior_chains") or []
+        ),
+        "trusted_attck_candidates": deepcopy(
+            authoritative.get("trusted_attck_candidates") or []
+        ),
+    }
+    snapshot["evidence_sha256"] = _sha256_json(snapshot)
+    return snapshot, observed, source, behavior_document
 
 
 def _file_policy(path_text: str, default_relative: str, provided: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -217,6 +286,73 @@ def _artifact_hashes(*values: Any) -> List[Dict[str, str]]:
     return [{"name": key, "sha256": found[key]} for key in sorted(found)]
 
 
+def _resolved_artifact_path(path_text: str) -> Path:
+    path = Path(path_text)
+    return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path
+
+
+def _file_artifact_provenance(
+    name: str,
+    path_text: Any,
+    expected_sha256: Any = "",
+) -> Dict[str, Any]:
+    configured = _clean(path_text)
+    expected = _clean(expected_sha256).lower()
+    if not configured:
+        return {
+            "name": name,
+            "path": "",
+            "status": "not_configured",
+            "sha256": "",
+            "expected_sha256": expected,
+        }
+    path = _resolved_artifact_path(configured)
+    result = {
+        "name": name,
+        "path": str(path.resolve()),
+        "status": "missing",
+        "sha256": "",
+        "expected_sha256": expected,
+    }
+    try:
+        actual = _sha256_bytes(path.read_bytes())
+    except OSError:
+        return result
+    result["sha256"] = actual
+    if expected and not SHA256_RE.fullmatch(expected):
+        result["status"] = "invalid_expected_sha256"
+    elif expected and actual != expected:
+        result["status"] = "sha256_mismatch"
+    else:
+        result["status"] = "verified"
+    return result
+
+
+def _verified_model_artifacts(policy_value: Any) -> List[Dict[str, Any]]:
+    document = policy_value if isinstance(policy_value, dict) else {}
+    policy = document.get("policy") if isinstance(document.get("policy"), dict) else document
+    pairs = (
+        ("transformer_checkpoint", "transformer_checkpoint_path", "transformer_checkpoint_sha256"),
+        ("transformer_model_spec", "transformer_model_spec_path", "transformer_model_spec_file_sha256"),
+        ("transformer_vocabulary", "transformer_vocabulary_path", "transformer_vocabulary_file_sha256"),
+        ("transformer_preprocessing", "transformer_preprocessing_path", "transformer_preprocessing_sha256"),
+        ("transformer_calibration", "transformer_calibration_path", "transformer_calibration_file_sha256"),
+        ("runtime_rule_policy", "runtime_rule_policy_path", "runtime_rule_policy_sha256"),
+        ("runtime_trust_policy", "runtime_trust_policy_path", "runtime_trust_policy_sha256"),
+        (
+            "runtime_classifier_checkpoint",
+            "runtime_classifier_checkpoint_path",
+            "runtime_classifier_checkpoint_sha256",
+        ),
+    )
+    artifacts = [
+        _file_artifact_provenance(name, policy.get(path_key), policy.get(hash_key))
+        for name, path_key, hash_key in pairs
+        if _clean(policy.get(path_key)) or _clean(policy.get(hash_key))
+    ]
+    return sorted(artifacts, key=lambda item: item["name"])
+
+
 def _finding(claim: Dict[str, Any], connected: bool) -> Dict[str, Any]:
     refs = sorted({_clean(ref) for ref in claim.get("evidence_refs") or [] if _clean(ref)})
     content = {
@@ -336,24 +472,29 @@ def build_session_assessment_v4(
     enrichment_context: Optional[Dict[str, Any]] = None,
     correlation_context: Optional[List[Dict[str, Any]]] = None,
     llm_context: Optional[Dict[str, Any]] = None,
+    mitre_cache_path: str = "",
     response_guidance_policy_path: str = "",
     response_guidance_asset_profile_path: str = "",
 ) -> Dict[str, Any]:
     session_list = list(sessions or [])
     session = session_list[0] if session_list else {}
-    source = redact_for_artifact(_source_payload(session, raw_events or []))
-    if not isinstance(source, dict):
-        raise SessionAssessmentV4Error("canonical evidence redaction did not return an object")
-    evidence_hash = _sha256_json(source)
-    # Never trust a caller's cached graph: rebuild deterministically from the
-    # exact source snapshot and currently selected policy.
-    evaluation_session = deepcopy(source)
-    behavior_document = resolve_behavior_policy(behavior_policy_document, behavior_policy_path)
+    snapshot, observed, source, behavior_document = (
+        build_canonical_evidence_snapshot(
+            session,
+            raw_events or [],
+            behavior_policy_document=behavior_policy_document,
+            behavior_policy_path=behavior_policy_path,
+        )
+    )
     behavior = policy_summary(behavior_document, include_integrity=True)
     classification = _file_policy(
         classification_policy_path,
         "configs/classification_rules.trusted.json",
         classification_policy,
+    )
+    mitre_attack = _file_artifact_provenance(
+        "mitre_attack_cache",
+        mitre_cache_path,
     )
     policy_valid = (
         behavior.get("enabled") is True
@@ -361,27 +502,10 @@ def build_session_assessment_v4(
         and SHA256_RE.fullmatch(_clean(behavior.get("sha256")).lower()) is not None
         and classification.get("status") in {"loaded", "provided"}
         and SHA256_RE.fullmatch(_clean(classification.get("sha256")).lower()) is not None
+        and (
+            mitre_attack.get("status") in {"not_configured", "verified"}
+        )
     )
-    observed = build_observed_behavior(
-        [evaluation_session],
-        raw_events=source["raw_events"],
-        behavior_policy_document=behavior_document,
-        behavior_policy_path=behavior_policy_path,
-    )
-    snapshot = {
-        "schema_version": "canonical_evidence_snapshot.v1",
-        "source_evidence_sha256": evidence_hash,
-        "session_id": source["session_id"],
-        "observations": deepcopy(observed.get("ordered_command_observations") or []),
-        "transfer_observations": deepcopy(observed.get("transfer_event_observations") or []),
-        "direct_cowrie_events": deepcopy(observed.get("cowrie_event_evidence") or []),
-        "entities": deepcopy(observed.get("normalized_entities") or []),
-        "relationships": deepcopy(observed.get("behavior_relationships") or []),
-        "connected_behavior_chains": deepcopy(observed.get("connected_behavior_chains") or []),
-        "trusted_attck_candidates": deepcopy(observed.get("trusted_attck_candidates") or []),
-        "audit_only_candidates": deepcopy(observed.get("audit_only_candidates") or []),
-    }
-    snapshot["evidence_sha256"] = _sha256_json(snapshot)
     findings: List[Dict[str, Any]] = []
     hypothesis_sets: List[Dict[str, Any]] = []
     if policy_valid:
@@ -402,11 +526,14 @@ def build_session_assessment_v4(
         "evidence_sha256": snapshot["evidence_sha256"],
         "behavior_policy": behavior,
         "classification_policy": classification,
-        "model_artifacts": _artifact_hashes(
+        "model_artifacts": _verified_model_artifacts(
+            model_artifact_provenance or {}
+        ),
+        "declared_context_hashes": _artifact_hashes(
             source.get("classification_events"),
-            model_artifact_provenance or {},
             prediction_context or {},
         ),
+        "mitre_attack": mitre_attack,
         "evaluator_git_revision": evaluator_revision,
         "cached_graph": {
             "accepted": False,
@@ -464,7 +591,7 @@ def build_session_assessment_v4(
         },
     }
     guidance = build_response_guidance_v3_from_paths(
-        observed,
+        snapshot,
         policy_path=response_guidance_policy_path,
         asset_profile_path=response_guidance_asset_profile_path,
         session_context=source,
@@ -504,12 +631,28 @@ def validate_session_assessment_v4(
         if value.get("status") != "observation_only_abstention" and not SHA256_RE.fullmatch(digest):
             errors.append(f"provenance.{name}.sha256 is required")
     for artifact in provenance.get("model_artifacts") or []:
-        if (
-            not isinstance(artifact, dict)
-            or not _clean(artifact.get("name"))
-            or not SHA256_RE.fullmatch(_clean(artifact.get("sha256")).lower())
-        ):
-            errors.append("provenance.model_artifacts entries require a name and SHA-256")
+        if not isinstance(artifact, dict) or not _clean(artifact.get("name")):
+            errors.append("provenance.model_artifacts entries require a name")
+            continue
+        status = _clean(artifact.get("status"))
+        actual = _clean(artifact.get("sha256")).lower()
+        expected = _clean(artifact.get("expected_sha256")).lower()
+        if status == "verified" and not SHA256_RE.fullmatch(actual):
+            errors.append("verified model artifacts require an actual SHA-256")
+        if expected and not SHA256_RE.fullmatch(expected):
+            errors.append("model artifact expected SHA-256 is malformed")
+        if status == "verified" and expected and actual != expected:
+            errors.append("verified model artifact does not match expected SHA-256")
+    mitre_attack = provenance.get("mitre_attack") or {}
+    mitre_status = _clean(mitre_attack.get("status"))
+    mitre_sha = _clean(mitre_attack.get("sha256")).lower()
+    if mitre_status == "verified" and not SHA256_RE.fullmatch(mitre_sha):
+        errors.append("verified MITRE ATT&CK cache requires a SHA-256")
+    if (
+        value.get("status") != "observation_only_abstention"
+        and mitre_status not in {"not_configured", "verified"}
+    ):
+        errors.append("configured MITRE ATT&CK cache must verify")
     authority = value.get("authority") or {}
     required_false = (
         "predictions_authoritative",

@@ -120,11 +120,14 @@ def test_disagreement_and_emergency_fallback_are_audit_only(tmp_path) -> None:
         mitre_db=_Mitre(),
         rule_policy_path=str(missing_policy),
     ).classify("whoami")[0]
-    assert emergency["rule_policy_id"] == "emergency-python-fallback"
-    assert emergency["source"] == "emergency_python_fallback"
-    assert emergency["agreement_status"] == "emergency_rule_model_agreement_audit_only"
+    assert emergency["rule_policy_id"] == "configured-policy-unavailable"
+    assert emergency["rule_policy_load_status"] == "invalid"
+    assert emergency["rule_policy_sha256"] == ""
+    assert emergency["source"] == "shell_noise"
+    assert emergency["agreement_status"] == "not_applicable"
     assert emergency["high_confidence"] is False
     assert classification_evidence_tier(emergency) == "audit_only_candidate"
+    assert is_trusted_classification_event(emergency) is False
     assert build_session_features(
         {
             "session_id": "phase8-emergency",
@@ -132,6 +135,30 @@ def test_disagreement_and_emergency_fallback_are_audit_only(tmp_path) -> None:
             "classification_events": [emergency],
         }
     )["observed_ttps"] == []
+
+
+def test_explicit_malformed_classification_policy_never_compiles_rules(
+    tmp_path,
+) -> None:
+    malformed = tmp_path / "malformed-classification-policy.json"
+    malformed.write_text(
+        '{"schema_version":"classification_rule_policy.v1",'
+        '"policy_id":"malformed","version":"1","policy":{"rules":[]}}',
+        encoding="utf-8",
+    )
+
+    classifier = NotebookParityClassifier(
+        bert_fn=lambda _command: ("T1033", 0.99),
+        mitre_db=_Mitre(),
+        rule_policy_path=str(malformed),
+    )
+    event = classifier.classify("curl https://example.invalid/a")[0]
+
+    assert classifier.rule_specs == []
+    assert event["rule_policy_id"] == "configured-policy-unavailable"
+    assert event["rule_policy_load_status"] == "invalid"
+    assert event["rule_policy_sha256"] == ""
+    assert classification_evidence_tier(event) == "audit_only_candidate"
 
 
 def test_report_only_correlations_cannot_influence_downstream_consumers() -> None:

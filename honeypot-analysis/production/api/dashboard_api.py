@@ -201,6 +201,9 @@ def _current_decision_payload(
         session_payload,
         policy_path=config.response_guidance_policy_path,
         asset_profile_path=config.response_guidance_asset_profile_path,
+        behavior_policy_path=getattr(
+            config, "threat_hypothesis_behavior_policy_path", ""
+        ),
         forecast_context=prediction_context or {},
         enrichment_context=session_payload.get("enrichment_status") or {},
     )
