@@ -148,3 +148,7 @@ def test_config_rejects_unknown_file_keys_and_invalid_boolean(tmp_path, monkeypa
     monkeypatch.setenv("ENABLE_ENRICHMENT_JOBS", "sometimes")
     with pytest.raises(ValueError, match="ENABLE_ENRICHMENT_JOBS"):
         ProductionConfig.from_env(str(path))
+
+
+def test_enrichment_context_fails_closed_on_stale_records_by_default() -> None:
+    assert ProductionConfig().enrichment_allow_stale is False

@@ -67,7 +67,7 @@
   "enrichment_max_attempts": 3,
   "enrichment_retry_seconds": 300.0,
   "enrichment_ttl_seconds": 86400,
-  "enrichment_allow_stale": true,
+  "enrichment_allow_stale": false,
   "otx_api_key": "",
   "abuseipdb_api_key": "",
   "shodan_api_key": "",

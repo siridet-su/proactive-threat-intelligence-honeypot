@@ -286,7 +286,7 @@ class ProductionConfig:
     enrichment_max_attempts: int = 3
     enrichment_retry_seconds: float = 300.0
     enrichment_ttl_seconds: int = 86400
-    enrichment_allow_stale: bool = True
+    enrichment_allow_stale: bool = False
     enrichment_provider_timeout_seconds: float = 20.0
     enrichment_provider_workers: int = 4
     enrichment_provider_http_retries: int = 1
