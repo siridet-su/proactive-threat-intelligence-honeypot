@@ -77,6 +77,7 @@ OPERATIONAL_COUNT_TABLES = (
     "enrichment_records",
     "enrichment_jobs",
     "prediction_snapshots",
+    "prediction_outbox",
     "threat_hunt_jobs",
     "webhook_deliveries",
 )
@@ -130,6 +131,7 @@ EVENT_EFFECT_SUMMARY_KEYS = frozenset(
         "enrichment_jobs_enqueued",
         "event_applied",
         "observable_sightings_recorded",
+        "prediction_outbox_enqueued",
         "prediction_saved",
         "session_closed",
         "session_saved",

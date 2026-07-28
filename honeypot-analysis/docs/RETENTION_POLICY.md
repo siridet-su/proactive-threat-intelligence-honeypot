@@ -1,5 +1,13 @@
 # Retention policy and safety status
 
+The machine-validated authority is
+`configs/data_lifecycle_policy.v1.json`. Its exact file SHA-256 is recorded in
+`data_lifecycle_policy_ledger` when the session worker starts. A missing,
+invalid, or runtime-inconsistent policy prevents that writer from starting.
+The policy explicitly prohibits automatic deletion and external sharing of
+source IP data, prohibits credential plaintext storage, requires artifact
+redaction, and binds processing to the honeypot-security-research purpose.
+
 Retention commands are non-destructive unless an operator supplies `--apply`.
 The installed prediction-retention timer is deliberately an audit: it reports
 counts and never deletes records. No remediation or deployment procedure may
@@ -64,3 +72,23 @@ until storage ownership, reference tracking, and restore behavior are defined.
 6. Verify protected snapshot IDs still resolve, start writers, and monitor
    storage/service health.
 7. Restore the backup if protected data is missing or counts are inconsistent.
+
+The current release contains no supported scheduled deletion entrypoint.
+Database backup, verification, and restore-to-a-new-path are available through:
+
+```bash
+python -m production.tools.sqlite_backup_restore backup \
+  --source /var/lib/honeypot/production_state.db \
+  --destination /var/backups/honeypot/state-YYYYMMDD.sqlite3
+python -m production.tools.sqlite_backup_restore verify \
+  --backup /var/backups/honeypot/state-YYYYMMDD.sqlite3 \
+  --manifest /var/backups/honeypot/state-YYYYMMDD.sqlite3.manifest.json
+python -m production.tools.sqlite_backup_restore restore \
+  --backup /var/backups/honeypot/state-YYYYMMDD.sqlite3 \
+  --manifest /var/backups/honeypot/state-YYYYMMDD.sqlite3.manifest.json \
+  --destination /var/lib/honeypot/restore-rehearsal/state.sqlite3
+```
+
+Backup and restore never overwrite an existing target. Verification checks the
+manifest SHA-256 and byte count, SQLite `quick_check`/`integrity_check`, schema
+version, and every application table count.

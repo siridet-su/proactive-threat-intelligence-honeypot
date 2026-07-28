@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import stat
 from dataclasses import dataclass, field
 from numbers import Integral, Real
 from pathlib import Path
@@ -14,6 +15,47 @@ from production.storage.session_provenance import (
     normalize_session_source,
 )
 from production.utils.http_security import parse_bearer_token
+
+
+def _read_secret_file(path_text: str, name: str) -> str:
+    path = Path(path_text)
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{name}_FILE is unavailable") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise ValueError(f"{name}_FILE must name a regular non-symlink file")
+    if metadata.st_mode & 0o077:
+        raise ValueError(f"{name}_FILE must not grant group or other permissions")
+    if metadata.st_size > 1024 * 1024:
+        raise ValueError(f"{name}_FILE exceeds the 1 MiB limit")
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"{name}_FILE cannot be read as UTF-8") from exc
+    if not value:
+        raise ValueError(f"{name}_FILE must not be empty")
+    return value
+
+
+def _env_secret(name: str, default: str = "") -> str:
+    file_variable = f"{name}_FILE"
+    path_text = os.getenv(file_variable, "").strip()
+    if path_text:
+        if name in os.environ:
+            raise ValueError(f"{name} and {file_variable} cannot both be set")
+        return _read_secret_file(path_text, name)
+    return os.getenv(name, default)
+
+
+def _env_secret_json(name: str, default: Dict[str, Any]) -> Dict[str, Any]:
+    raw = _env_secret(name, "")
+    if not raw:
+        return dict(default)
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{name} must be a JSON object")
+    return parsed
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -195,6 +237,11 @@ class ProductionConfig:
     job_lease_heartbeat_seconds: float = 60.0
     job_retry_base_seconds: float = 30.0
     job_retry_max_seconds: float = 1800.0
+    prediction_outbox_batch_size: int = 20
+    prediction_outbox_lease_seconds: float = 60.0
+    prediction_outbox_max_attempts: int = 5
+    prediction_outbox_retry_base_seconds: float = 10.0
+    prediction_outbox_retry_max_seconds: float = 600.0
     threat_hunt_batch_size: int = 20
     threat_hunt_poll_seconds: float = 10.0
     threat_hunt_max_attempts: int = 3
@@ -289,6 +336,7 @@ class ProductionConfig:
     classification_rules_path: str = "configs/classification_rules.trusted.json"
     threat_hypothesis_behavior_policy_path: str = "configs/threat_hypothesis_behavior.trusted.json"
     prediction_policy_path: str = "configs/prediction_policy.trusted.json"
+    data_lifecycle_policy_path: str = "configs/data_lifecycle_policy.v1.json"
     prediction_snapshot_retention_days: int = 90
     prediction_snapshot_keep_latest_per_session: bool = True
     enable_session_ttp_correlation: bool = True
@@ -580,6 +628,9 @@ class ProductionConfig:
             "job_lease_heartbeat_seconds": self.job_lease_heartbeat_seconds,
             "job_retry_base_seconds": self.job_retry_base_seconds,
             "job_retry_max_seconds": self.job_retry_max_seconds,
+            "prediction_outbox_lease_seconds": self.prediction_outbox_lease_seconds,
+            "prediction_outbox_retry_base_seconds": self.prediction_outbox_retry_base_seconds,
+            "prediction_outbox_retry_max_seconds": self.prediction_outbox_retry_max_seconds,
             "vertex_request_timeout_seconds": self.vertex_request_timeout_seconds,
             "vertex_outer_timeout_seconds": self.vertex_outer_timeout_seconds,
             "enrichment_provider_timeout_seconds": self.enrichment_provider_timeout_seconds,
@@ -758,6 +809,23 @@ class ProductionConfig:
                 "job_retry_max_seconds must be greater than or equal to "
                 "job_retry_base_seconds"
             )
+        if self.prediction_outbox_retry_max_seconds < (
+            self.prediction_outbox_retry_base_seconds
+        ):
+            raise ValueError(
+                "prediction_outbox_retry_max_seconds must be greater than or "
+                "equal to prediction_outbox_retry_base_seconds"
+            )
+        for name, value in {
+            "prediction_outbox_batch_size": self.prediction_outbox_batch_size,
+            "prediction_outbox_max_attempts": self.prediction_outbox_max_attempts,
+        }.items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Integral)
+                or value < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer")
         if (
             isinstance(self.threat_hunt_max_attempts, bool)
             or not isinstance(self.threat_hunt_max_attempts, Integral)
@@ -809,14 +877,16 @@ class ProductionConfig:
             file_values = loaded
 
         database_backend_from_env = "DATABASE_BACKEND" in os.environ
-        database_url_from_env = "DATABASE_URL" in os.environ
+        database_url_from_env = (
+            "DATABASE_URL" in os.environ or "DATABASE_URL_FILE" in os.environ
+        )
         raw_database_backend = (
             os.getenv("DATABASE_BACKEND", "")
             if database_backend_from_env
             else str(file_values.get("database_backend") or "")
         )
         raw_database_url = (
-            os.getenv("DATABASE_URL", "")
+            _env_secret("DATABASE_URL", "")
             if database_url_from_env
             else (
                 ""
@@ -831,9 +901,8 @@ class ProductionConfig:
                 "SQLITE_DATABASE_PATH",
                 str(file_values.get("sqlite_database_path") or ""),
             ),
-            mongodb_uri=os.getenv(
-                "MONGODB_URI",
-                str(file_values.get("mongodb_uri") or ""),
+            mongodb_uri=_env_secret(
+                "MONGODB_URI", str(file_values.get("mongodb_uri") or "")
             ),
             mongodb_database=os.getenv(
                 "MONGODB_DATABASE",
@@ -859,9 +928,9 @@ class ProductionConfig:
             os.getenv("HONEYPOT_SESSION_SOURCE") or os.getenv("SESSION_SOURCE") or cfg.session_source,
             SESSION_SOURCE_PRODUCTION_LIVE,
         )
-        cfg.api_token = os.getenv("HONEYPOT_API_TOKEN", cfg.api_token)
+        cfg.api_token = _env_secret("HONEYPOT_API_TOKEN", cfg.api_token)
         cfg.ingest_sensor_tokens = _token_mapping(
-            _env_json(
+            _env_secret_json(
                 "INGEST_SENSOR_TOKENS_JSON",
                 cfg.ingest_sensor_tokens,
             ),
@@ -887,11 +956,11 @@ class ProductionConfig:
         )
         cfg.dashboard_host = os.getenv("DASHBOARD_HOST", cfg.dashboard_host)
         cfg.dashboard_port = _env_int("DASHBOARD_PORT", cfg.dashboard_port)
-        cfg.dashboard_read_token = os.getenv(
+        cfg.dashboard_read_token = _env_secret(
             "DASHBOARD_READ_TOKEN",
             cfg.dashboard_read_token,
         )
-        cfg.dashboard_write_token = os.getenv(
+        cfg.dashboard_write_token = _env_secret(
             "DASHBOARD_WRITE_TOKEN",
             cfg.dashboard_write_token,
         )
@@ -972,6 +1041,26 @@ class ProductionConfig:
             "JOB_RETRY_MAX_SECONDS",
             cfg.job_retry_max_seconds,
         )
+        cfg.prediction_outbox_batch_size = _env_int(
+            "PREDICTION_OUTBOX_BATCH_SIZE",
+            cfg.prediction_outbox_batch_size,
+        )
+        cfg.prediction_outbox_lease_seconds = _env_float(
+            "PREDICTION_OUTBOX_LEASE_SECONDS",
+            cfg.prediction_outbox_lease_seconds,
+        )
+        cfg.prediction_outbox_max_attempts = _env_int(
+            "PREDICTION_OUTBOX_MAX_ATTEMPTS",
+            cfg.prediction_outbox_max_attempts,
+        )
+        cfg.prediction_outbox_retry_base_seconds = _env_float(
+            "PREDICTION_OUTBOX_RETRY_BASE_SECONDS",
+            cfg.prediction_outbox_retry_base_seconds,
+        )
+        cfg.prediction_outbox_retry_max_seconds = _env_float(
+            "PREDICTION_OUTBOX_RETRY_MAX_SECONDS",
+            cfg.prediction_outbox_retry_max_seconds,
+        )
         cfg.threat_hunt_batch_size = _env_int("THREAT_HUNT_BATCH_SIZE", cfg.threat_hunt_batch_size)
         cfg.threat_hunt_poll_seconds = _env_float("THREAT_HUNT_POLL_SECONDS", cfg.threat_hunt_poll_seconds)
         cfg.threat_hunt_max_attempts = _env_int(
@@ -1036,13 +1125,21 @@ class ProductionConfig:
             "ENRICHMENT_PROVIDER_MAX_RESPONSE_BYTES",
             cfg.enrichment_provider_max_response_bytes,
         )
-        cfg.otx_api_key = os.getenv("OTX_API_KEY", cfg.otx_api_key)
-        cfg.abuseipdb_api_key = os.getenv("ABUSEIPDB_API_KEY", cfg.abuseipdb_api_key)
-        cfg.shodan_api_key = os.getenv("SHODAN_API_KEY", cfg.shodan_api_key)
-        cfg.virustotal_api_key = os.getenv("VIRUSTOTAL_API_KEY", cfg.virustotal_api_key)
-        cfg.censys_api_id = os.getenv("CENSYS_API_ID", cfg.censys_api_id)
-        cfg.censys_api_secret = os.getenv("CENSYS_API_SECRET", cfg.censys_api_secret)
-        cfg.censys_platform_token = os.getenv("CENSYS_PLATFORM_TOKEN", cfg.censys_platform_token)
+        cfg.otx_api_key = _env_secret("OTX_API_KEY", cfg.otx_api_key)
+        cfg.abuseipdb_api_key = _env_secret(
+            "ABUSEIPDB_API_KEY", cfg.abuseipdb_api_key
+        )
+        cfg.shodan_api_key = _env_secret("SHODAN_API_KEY", cfg.shodan_api_key)
+        cfg.virustotal_api_key = _env_secret(
+            "VIRUSTOTAL_API_KEY", cfg.virustotal_api_key
+        )
+        cfg.censys_api_id = _env_secret("CENSYS_API_ID", cfg.censys_api_id)
+        cfg.censys_api_secret = _env_secret(
+            "CENSYS_API_SECRET", cfg.censys_api_secret
+        )
+        cfg.censys_platform_token = _env_secret(
+            "CENSYS_PLATFORM_TOKEN", cfg.censys_platform_token
+        )
         cfg.censys_organization_id = (
             os.getenv("CENSYS_ORGANIZATION_ID")
             or os.getenv("CENSYS_PLATFORM_ORG_ID")
@@ -1109,6 +1206,10 @@ class ProductionConfig:
             cfg.threat_hypothesis_behavior_policy_path,
         )
         cfg.prediction_policy_path = os.getenv("PREDICTION_POLICY_PATH", cfg.prediction_policy_path)
+        cfg.data_lifecycle_policy_path = os.getenv(
+            "DATA_LIFECYCLE_POLICY_PATH",
+            cfg.data_lifecycle_policy_path,
+        )
         cfg.prediction_snapshot_retention_days = _env_int(
             "PREDICTION_SNAPSHOT_RETENTION_DAYS",
             cfg.prediction_snapshot_retention_days,

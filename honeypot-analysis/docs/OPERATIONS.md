@@ -33,6 +33,12 @@ availability, and report errors without printing secrets.
 7. Roll back immediately on semantic, artifact, compatibility, or health
    failure.
 
+Use `python -m production.tools.sqlite_backup_restore` for the backup,
+verification, and rehearsal steps. It creates mode-0600 outputs with a SHA-256
+manifest, refuses overwrite, checks SQLite integrity and table counts, and
+restores only to a new path. A copied database that has not passed both
+`verify` and an isolated restore is not rollback evidence.
+
 The exact most recent deployment and rollback rehearsal, including commands and
 hashes, is [GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md](GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md).
 Do not infer current host state solely from repository templates.

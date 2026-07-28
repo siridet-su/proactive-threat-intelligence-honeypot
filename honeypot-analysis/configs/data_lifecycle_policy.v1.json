@@ -1,0 +1,42 @@
+{
+  "schema_version": "data_lifecycle_policy.v1",
+  "policy_id": "honeypot-thesis-data-lifecycle",
+  "version": "1.0.0",
+  "authority": {
+    "automatic_deletion_authorized": false,
+    "manual_approval_required": true,
+    "verified_backup_required_before_deletion": true,
+    "restore_rehearsal_required_before_deletion": true
+  },
+  "privacy": {
+    "credential_plaintext_storage_allowed": false,
+    "source_ip_purpose": "honeypot_security_research",
+    "source_ip_external_sharing_allowed": false,
+    "artifact_redaction_required": true
+  },
+  "entities": {
+    "prediction_snapshots": {
+      "mode": "manual_apply_only",
+      "minimum_age_days": 90,
+      "preserve_latest_per_session": true,
+      "preserve_feedback_references": true
+    },
+    "events": {"mode": "retain"},
+    "sessions": {"mode": "retain"},
+    "alerts": {"mode": "retain"},
+    "reports": {"mode": "retain"},
+    "analysis_jobs": {"mode": "retain"},
+    "enrichment_jobs": {"mode": "retain"},
+    "threat_hunt_jobs": {"mode": "retain"},
+    "webhook_deliveries": {"mode": "retain"},
+    "observables": {"mode": "retain"},
+    "observable_sightings": {"mode": "retain"},
+    "enrichment_records": {"mode": "retain_expired_for_provenance"},
+    "campaigns": {"mode": "retain"},
+    "campaign_sessions": {"mode": "retain"},
+    "session_links": {"mode": "retain"},
+    "analyst_feedback": {"mode": "retain"},
+    "classification_review_labels": {"mode": "retain"},
+    "prediction_outbox": {"mode": "retain"}
+  }
+}

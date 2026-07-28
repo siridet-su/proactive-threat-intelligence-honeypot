@@ -176,6 +176,12 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
 
         processed = SessionWorker(cfg).process_unprocessed()
         assert processed == len(events)
+        prediction_outbox = storage.list_rows("prediction_outbox")
+        prediction_snapshots = storage.list_rows("prediction_snapshots")
+        assert prediction_outbox
+        assert len(prediction_outbox) == len(prediction_snapshots)
+        assert all(row["status"] == "completed" for row in prediction_outbox)
+        assert all(row["snapshot_id"] for row in prediction_outbox)
 
         sessions = storage.list_rows("sessions")
         assert len(sessions) == 1

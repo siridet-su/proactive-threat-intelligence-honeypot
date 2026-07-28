@@ -55,19 +55,26 @@ sudo -u honeypot .venv/bin/pip install -r requirements-mongodb.txt
 sudo -u honeypot .venv/bin/pip install -r requirements-artifacts.txt
 ```
 
-4. Install config and secrets.
+4. Install config and service-specific secrets.
 
 ```bash
 sudo install -o root -g honeypot -m 0640 configs/production_config.example.json /etc/honeypot/production_config.json
-sudo cp deployment/systemd/honeypot.env.example /etc/honeypot/honeypot.env
-sudo chmod 600 /etc/honeypot/honeypot.env
-sudo chown root:root /etc/honeypot/honeypot.env
+sudo install -o root -g root -m 0644 deployment/systemd/common.env.example /etc/honeypot/common.env
+sudo install -d -o root -g root -m 0755 /etc/honeypot/services
+sudo install -d -o root -g root -m 0711 /etc/honeypot/credentials
+# Install only each enabled service's matching *.env.example as *.env.
+# Create each referenced credential as owner honeypot, mode 0600, in that
+# service's private 0700 credential directory.
 ```
 
-Edit `/etc/honeypot/production_config.json` and `/etc/honeypot/honeypot.env`.
+Edit `/etc/honeypot/production_config.json`, `/etc/honeypot/common.env`, and
+only the enabled files under `/etc/honeypot/services/`. Shared settings contain
+no secrets. Secret values are read from the service-scoped `*_FILE` paths;
+plaintext and file environment variables for the same secret are rejected,
+as are symlinks, empty files, and files with group/other permissions.
 Create `/etc/honeypot/credential-hmac-keyring.json` through the deployment
 secret manager as `root:root` mode `0600`. Never put its contents in the
-shared environment file, project checkout, shell history, logs, or command
+environment files, project checkout, shell history, logs, or command
 output. The document contract is:
 
 ```json

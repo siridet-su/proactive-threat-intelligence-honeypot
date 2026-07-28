@@ -17,6 +17,7 @@ from production.enrichment.threat_feed_loader import load_threat_feeds
 
 from production.classification.classification_pipeline import NotebookParityClassifier
 from production.utils.config import ProductionConfig
+from production.policies.data_lifecycle_policy import load_data_lifecycle_policy
 from production.utils.credential_hmac import (
     load_credential_hmac_keyring,
     resolve_credential_hmac_keyring_path,
@@ -176,6 +177,35 @@ class SessionWorker:
         self.credential_hasher = load_credential_hmac_keyring(keyring_path)
         config.apply_environment()
         self.storage = open_storage(config.database_url)
+        self.data_lifecycle_policy = load_data_lifecycle_policy(
+            config.data_lifecycle_policy_path
+        )
+        prediction_lifecycle = self.data_lifecycle_policy.document["entities"][
+            "prediction_snapshots"
+        ]
+        if (
+            config.prediction_snapshot_retention_days
+            != prediction_lifecycle["minimum_age_days"]
+            or config.prediction_snapshot_keep_latest_per_session
+            is not prediction_lifecycle["preserve_latest_per_session"]
+        ):
+            raise RuntimeError(
+                "runtime prediction retention does not match the exact "
+                "data-lifecycle policy"
+            )
+        record_lifecycle_policy = getattr(
+            self.storage, "record_data_lifecycle_policy", None
+        )
+        if not callable(record_lifecycle_policy):
+            raise RuntimeError(
+                "selected storage backend lacks lifecycle-policy provenance support"
+            )
+        record_lifecycle_policy(
+            policy_id=self.data_lifecycle_policy.policy_id,
+            policy_version=self.data_lifecycle_policy.version,
+            policy_sha256=self.data_lifecycle_policy.sha256,
+            effective_path=self.data_lifecycle_policy.path,
+        )
         self.worker_owner = f"session-worker:{uuid.uuid4()}"
         self.worker_token = str(uuid.uuid4())
         self._leader_held = False
@@ -825,41 +855,125 @@ class SessionWorker:
         payload.setdefault("status", "closed" if payload.get("is_ended") else "active")
         mark_session_outcome(payload)
         self._apply_campaign_clustering(payload, "closed" if payload.get("is_ended") else "active")
-        if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
-            snapshot = self.prediction_engine.predict_session(
-                payload,
-                event_id=event_id,
-            )
-        else:
-            features = build_session_features(payload, current_event=event)
-            snapshot = self.prediction_engine.predict(features, event_id=event_id)
-        snapshot["prediction_trigger"] = trigger_info or self._prediction_trigger_for_event(event)
-        # Response guidance is intentionally not embedded in prediction
-        # snapshots.  Forecast generation has no recommendation or alerting
-        # authority; v3 is created from immutable observed evidence at the
-        # report/current-guidance boundary instead.
-        if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
-            snapshot.setdefault(
-                "predictive_alert",
-                {
-                    "status": "prohibited",
-                    "reason": "corrected-target prediction alone cannot create an alert",
-                },
-            )
-            snapshot = finalize_prediction_snapshot(snapshot)
-        else:
-            self._maybe_store_predictive_alert(snapshot)
-        self.storage.save_prediction_snapshot(snapshot)
-        self._record_event_effect("prediction_saved")
-        session_id = str(snapshot.get("session_id") or "")
-        if session_id:
-            self._session_latest_snapshots[session_id] = snapshot
-            snapshot_history = self._session_prediction_snapshots.setdefault(session_id, [])
-            snapshot_history.append(snapshot)
-            history_limit = 25
-            if len(snapshot_history) > history_limit:
-                del snapshot_history[:-history_limit]
+        safe_event = redact_for_artifact(event)
+        if not isinstance(safe_event, dict):
+            raise WorkerError("prediction trigger event redaction failed")
+        task = {
+            "schema_version": "prediction_outbox_task.v1",
+            "session_id": str(payload.get("session_id") or "unknown"),
+            "event_id": str(event_id or ""),
+            "prediction_mode": str(
+                self.config.prediction_policy.get("prediction_mode") or ""
+            ),
+            "session_payload": payload,
+            "event": safe_event,
+            "trigger": (
+                trigger_info or self._prediction_trigger_for_event(event)
+            ),
+        }
+        self.storage.enqueue_prediction_outbox(task)
+        self._record_event_effect("prediction_outbox_enqueued")
+        self._drain_prediction_outbox(limit=1)
         return True
+
+    def _prediction_outbox_retry_delay(self, attempts: int) -> float:
+        exponent = min(max(int(attempts) - 1, 0), 31)
+        return min(
+            float(self.config.prediction_outbox_retry_max_seconds),
+            float(self.config.prediction_outbox_retry_base_seconds)
+            * (2**exponent),
+        )
+
+    def _drain_prediction_outbox(self, *, limit: Optional[int] = None) -> int:
+        if not hasattr(self.storage, "claim_prediction_outbox"):
+            raise WorkerError("selected storage lacks prediction outbox support")
+        claimed = self.storage.claim_prediction_outbox(
+            self.worker_owner,
+            int(limit or self.config.prediction_outbox_batch_size),
+            self.config.prediction_outbox_lease_seconds,
+            self.config.prediction_outbox_max_attempts,
+        )
+        completed = 0
+        for row in claimed:
+            try:
+                task = row["task"]
+                payload = task.get("session_payload")
+                event = task.get("event")
+                if not isinstance(payload, dict) or not isinstance(event, dict):
+                    raise ValueError("prediction outbox task is invalid")
+                event_id = str(task.get("event_id") or "")
+                if isinstance(
+                    self.prediction_engine, FrozenTransformerPocPredictor
+                ):
+                    snapshot = self.prediction_engine.predict_session(
+                        payload,
+                        event_id=event_id,
+                    )
+                else:
+                    features = build_session_features(
+                        payload, current_event=event
+                    )
+                    snapshot = self.prediction_engine.predict(
+                        features, event_id=event_id
+                    )
+                snapshot["prediction_trigger"] = task.get("trigger") or {}
+                snapshot["predictive_alert"] = {
+                    "status": "prohibited",
+                    "reason": "prediction alone cannot create an alert",
+                }
+                if isinstance(
+                    self.prediction_engine, FrozenTransformerPocPredictor
+                ):
+                    snapshot = finalize_prediction_snapshot(snapshot)
+                snapshot_id = self.storage.save_prediction_snapshot(snapshot)
+                if not self.storage.complete_prediction_outbox(
+                    row["outbox_id"],
+                    row["claim_owner"],
+                    row["claim_token"],
+                    snapshot_id,
+                ):
+                    raise LeaseExpired("prediction outbox completion lost claim")
+                self._record_event_effect("prediction_saved")
+                session_id = str(snapshot.get("session_id") or "")
+                if session_id:
+                    self._session_latest_snapshots[session_id] = snapshot
+                    history = self._session_prediction_snapshots.setdefault(
+                        session_id, []
+                    )
+                    history.append(snapshot)
+                    if len(history) > 25:
+                        del history[:-25]
+                completed += 1
+            except Exception as exc:
+                self._prediction_generation_errors += 1
+                error_type = type(exc).__name__
+                retryable = not isinstance(exc, (TypeError, ValueError))
+                self.storage.fail_prediction_outbox(
+                    row["outbox_id"],
+                    row["claim_owner"],
+                    row["claim_token"],
+                    "prediction_generation_failed",
+                    error_type,
+                    retryable,
+                    self.config.prediction_outbox_max_attempts,
+                    self._prediction_outbox_retry_delay(
+                        int(row.get("attempts") or 1)
+                    ),
+                )
+                print(
+                    json.dumps(
+                        {
+                            "service": "session_worker",
+                            "event": "prediction_outbox_failed",
+                            "outbox_id": row.get("outbox_id"),
+                            "error": _safe_exception_text(exc),
+                            "timestamp": utc_now(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+        return completed
 
     def _save_prediction_snapshot(
         self,
@@ -1034,6 +1148,7 @@ class SessionWorker:
         if not self._ensure_leadership():
             return 0
         self._refresh_enrichment_cache()
+        self._drain_prediction_outbox()
         processed = 0
         attempted = 0
         prediction_refreshed = False

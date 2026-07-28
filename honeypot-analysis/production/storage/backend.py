@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sqlite3
@@ -39,6 +40,67 @@ from production.storage.session_provenance import (
 
 class StorageError(RuntimeError):
     pass
+
+
+SQLITE_SCHEMA_VERSION = 3
+
+
+def _sqlite_migration_definitions() -> tuple[tuple[int, str, tuple[str, ...]], ...]:
+    return (
+        (1, "establish_versioned_schema_ledger", ()),
+        (
+            2,
+            "durable_prediction_outbox",
+            (
+                """
+                CREATE TABLE IF NOT EXISTS prediction_outbox (
+                    outbox_id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    payload_json TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_retry_at TEXT,
+                    claim_owner TEXT,
+                    claim_token TEXT,
+                    claim_expires_at TEXT,
+                    snapshot_id TEXT,
+                    last_error_code TEXT,
+                    last_error_type TEXT,
+                    last_error_at TEXT,
+                    completed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_prediction_outbox_claimable
+                ON prediction_outbox(
+                    status, next_retry_at, claim_expires_at, created_at, outbox_id
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_prediction_outbox_session
+                ON prediction_outbox(session_id, created_at, outbox_id)
+                """,
+            ),
+        ),
+        (
+            3,
+            "data_lifecycle_policy_ledger",
+            (
+                """
+                CREATE TABLE IF NOT EXISTS data_lifecycle_policy_ledger (
+                    policy_sha256 TEXT PRIMARY KEY,
+                    policy_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    effective_path TEXT NOT NULL,
+                    activated_at TEXT NOT NULL
+                )
+                """,
+            ),
+        ),
+    )
 
 
 def _decode_json(value: Any) -> Any:
@@ -181,6 +243,7 @@ SESSION_SCOPED_TABLE_ORDER = {
     "reports": "created_at",
     "enrichment_jobs": "updated_at",
     "prediction_snapshots": "created_at",
+    "prediction_outbox": "updated_at",
     "analyst_feedback": "created_at",
     "classification_review_labels": "created_at",
     "observable_sightings": "created_at",
@@ -597,6 +660,78 @@ class SQLiteStorage:
             self._ensure_sqlite_session_source_column(conn)
             self._ensure_sqlite_enrichment_priority_columns(conn)
             self._ensure_sqlite_webhook_delivery_columns(conn)
+            self._run_sqlite_migrations(conn)
+
+    def _run_sqlite_migrations(self, conn: sqlite3.Connection) -> None:
+        """Apply additive, checksummed migrations in one transaction each."""
+
+        check = conn.execute("PRAGMA quick_check").fetchone()
+        if not check or str(check[0]).lower() != "ok":
+            raise StorageError("SQLite quick_check failed before migration")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        current_user_version = int(
+            conn.execute("PRAGMA user_version").fetchone()[0]
+        )
+        if current_user_version > SQLITE_SCHEMA_VERSION:
+            raise StorageError("SQLite schema is newer than this release")
+        applied = {
+            int(row["version"]): dict(row)
+            for row in conn.execute(
+                "SELECT version, name, checksum FROM schema_migrations"
+            ).fetchall()
+        }
+        if any(version > SQLITE_SCHEMA_VERSION for version in applied):
+            raise StorageError("SQLite migration ledger is newer than this release")
+        for version, name, statements in _sqlite_migration_definitions():
+            checksum = hashlib.sha256(
+                stable_json(
+                    {
+                        "version": version,
+                        "name": name,
+                        "statements": statements,
+                    }
+                ).encode("utf-8")
+            ).hexdigest()
+            existing = applied.get(version)
+            if existing:
+                if (
+                    existing.get("name") != name
+                    or existing.get("checksum") != checksum
+                ):
+                    raise StorageError(
+                        f"SQLite migration {version} checksum mismatch"
+                    )
+                continue
+            conn.execute("SAVEPOINT sqlite_schema_migration")
+            try:
+                for statement in statements:
+                    conn.execute(statement)
+                conn.execute(
+                    """
+                    INSERT INTO schema_migrations
+                    (version, name, checksum, applied_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (version, name, checksum, utc_now()),
+                )
+                conn.execute(f"PRAGMA user_version={version}")
+                conn.execute("RELEASE SAVEPOINT sqlite_schema_migration")
+            except Exception:
+                conn.execute("ROLLBACK TO SAVEPOINT sqlite_schema_migration")
+                conn.execute("RELEASE SAVEPOINT sqlite_schema_migration")
+                raise
+        final_check = conn.execute("PRAGMA quick_check").fetchone()
+        if not final_check or str(final_check[0]).lower() != "ok":
+            raise StorageError("SQLite quick_check failed after migration")
 
     def health_check(self) -> Dict[str, Any]:
         with self.connection() as conn:
@@ -3173,6 +3308,311 @@ class SQLiteStorage:
             output.append(item)
         return output
 
+    def enqueue_prediction_outbox(self, payload: Dict[str, Any]) -> str:
+        event_identity = _required_identity(payload.get("event_id"), "event_id")
+        session_identity = _required_identity(
+            payload.get("session_id"), "session_id"
+        )
+        outbox_id = stable_id(
+            "prediction_outbox",
+            {
+                "event_id": event_identity,
+                "session_id": session_identity,
+                "prediction_mode": payload.get("prediction_mode") or "",
+            },
+        )
+        now = utc_now()
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO prediction_outbox
+                (outbox_id, event_id, session_id, status, payload_json,
+                 attempts, created_at, updated_at)
+                VALUES (?, ?, ?, 'queued', ?, 0, ?, ?)
+                """,
+                (
+                    outbox_id,
+                    event_identity,
+                    session_identity,
+                    stable_json(payload),
+                    now,
+                    now,
+                ),
+            )
+        return outbox_id
+
+    def record_data_lifecycle_policy(
+        self,
+        *,
+        policy_id: str,
+        policy_version: str,
+        policy_sha256: str,
+        effective_path: str,
+    ) -> None:
+        digest = str(policy_sha256 or "").strip().lower()
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ValueError("policy_sha256 must be a lowercase SHA-256 digest")
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO data_lifecycle_policy_ledger
+                (policy_sha256, policy_id, policy_version, effective_path, activated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    digest,
+                    _required_identity(policy_id, "policy_id"),
+                    _required_identity(policy_version, "policy_version"),
+                    _required_identity(effective_path, "effective_path"),
+                    utc_now(),
+                ),
+            )
+
+    def claim_prediction_outbox(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        claim_owner = _required_identity(owner, "owner")
+        claim_limit = max(0, int(limit))
+        attempt_limit = int(max_attempts)
+        if attempt_limit < 1:
+            raise ValueError("max_attempts must be positive")
+        current_time = _utc_timestamp(now)
+        expires_at = _future_timestamp(
+            current_time, lease_seconds, field="lease_seconds"
+        )
+        claimed: List[Dict[str, Any]] = []
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                UPDATE prediction_outbox
+                SET status='dead_letter',
+                    last_error_code='prediction_attempts_exhausted',
+                    last_error_type='RetryLimitExceeded',
+                    last_error_at=?,
+                    claim_owner=NULL,
+                    claim_token=NULL,
+                    claim_expires_at=NULL,
+                    updated_at=?
+                WHERE status IN ('queued', 'retry', 'in_progress')
+                  AND attempts >= ?
+                  AND (
+                    status != 'in_progress'
+                    OR claim_expires_at IS NULL
+                    OR claim_expires_at <= ?
+                  )
+                """,
+                (current_time, current_time, attempt_limit, current_time),
+            )
+            rows = conn.execute(
+                """
+                SELECT outbox_id, payload_json, attempts
+                FROM prediction_outbox
+                WHERE status IN ('queued', 'retry', 'in_progress')
+                  AND attempts < ?
+                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                  AND (
+                    status != 'in_progress'
+                    OR claim_expires_at IS NULL
+                    OR claim_expires_at <= ?
+                  )
+                ORDER BY created_at, outbox_id
+                LIMIT ?
+                """,
+                (attempt_limit, current_time, current_time, claim_limit),
+            ).fetchall()
+            for row in rows:
+                token = str(uuid.uuid4())
+                cursor = conn.execute(
+                    """
+                    UPDATE prediction_outbox
+                    SET status='in_progress',
+                        attempts=attempts + 1,
+                        claim_owner=?,
+                        claim_token=?,
+                        claim_expires_at=?,
+                        updated_at=?
+                    WHERE outbox_id=?
+                      AND attempts < ?
+                      AND status IN ('queued', 'retry', 'in_progress')
+                    """,
+                    (
+                        claim_owner,
+                        token,
+                        expires_at,
+                        current_time,
+                        row["outbox_id"],
+                        attempt_limit,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                try:
+                    task = json.loads(row["payload_json"])
+                except (TypeError, json.JSONDecodeError):
+                    conn.execute(
+                        """
+                        UPDATE prediction_outbox
+                        SET status='dead_letter',
+                            last_error_code='prediction_task_invalid',
+                            last_error_type='ValidationError',
+                            last_error_at=?,
+                            claim_owner=NULL,
+                            claim_token=NULL,
+                            claim_expires_at=NULL,
+                            updated_at=?
+                        WHERE outbox_id=? AND claim_token=?
+                        """,
+                        (current_time, current_time, row["outbox_id"], token),
+                    )
+                    continue
+                if not isinstance(task, dict):
+                    conn.execute(
+                        """
+                        UPDATE prediction_outbox
+                        SET status='dead_letter',
+                            last_error_code='prediction_task_invalid',
+                            last_error_type='ValidationError',
+                            last_error_at=?,
+                            claim_owner=NULL,
+                            claim_token=NULL,
+                            claim_expires_at=NULL,
+                            updated_at=?
+                        WHERE outbox_id=? AND claim_token=?
+                        """,
+                        (current_time, current_time, row["outbox_id"], token),
+                    )
+                    continue
+                claimed.append(
+                    {
+                        "outbox_id": row["outbox_id"],
+                        "task": task,
+                        "attempts": int(row["attempts"] or 0) + 1,
+                        "claim_owner": claim_owner,
+                        "claim_token": token,
+                        "claim_expires_at": expires_at,
+                    }
+                )
+        return claimed
+
+    def complete_prediction_outbox(
+        self,
+        outbox_id: str,
+        owner: str,
+        token: str,
+        snapshot_id: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        current_time = _utc_timestamp(now)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE prediction_outbox
+                SET status='completed',
+                    snapshot_id=?,
+                    next_retry_at=NULL,
+                    claim_owner=NULL,
+                    claim_token=NULL,
+                    claim_expires_at=NULL,
+                    last_error_code=NULL,
+                    last_error_type=NULL,
+                    last_error_at=NULL,
+                    completed_at=?,
+                    updated_at=?
+                WHERE outbox_id=?
+                  AND status='in_progress'
+                  AND claim_owner=?
+                  AND claim_token=?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    _required_identity(snapshot_id, "snapshot_id"),
+                    current_time,
+                    current_time,
+                    _required_identity(outbox_id, "outbox_id"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def fail_prediction_outbox(
+        self,
+        outbox_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str:
+        current_time = _utc_timestamp(now)
+        retry_at = _future_timestamp(
+            current_time,
+            retry_delay_seconds,
+            field="retry_delay_seconds",
+        )
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT attempts FROM prediction_outbox
+                WHERE outbox_id=?
+                  AND status='in_progress'
+                  AND claim_owner=?
+                  AND claim_token=?
+                  AND claim_expires_at > ?
+                """,
+                (
+                    _required_identity(outbox_id, "outbox_id"),
+                    _required_identity(owner, "owner"),
+                    _uuid_token(token, "token"),
+                    current_time,
+                ),
+            ).fetchone()
+            if row is None:
+                return "lost_claim"
+            should_retry = (
+                bool(retryable)
+                and int(row["attempts"] or 0) < int(max_attempts)
+            )
+            status = "retry" if should_retry else "dead_letter"
+            conn.execute(
+                """
+                UPDATE prediction_outbox
+                SET status=?,
+                    next_retry_at=?,
+                    last_error_code=?,
+                    last_error_type=?,
+                    last_error_at=?,
+                    claim_owner=NULL,
+                    claim_token=NULL,
+                    claim_expires_at=NULL,
+                    updated_at=?
+                WHERE outbox_id=?
+                """,
+                (
+                    status,
+                    retry_at if should_retry else None,
+                    _required_identity(error_code, "error_code"),
+                    _required_identity(error_type, "error_type"),
+                    current_time,
+                    current_time,
+                    outbox_id,
+                ),
+            )
+            return status
+
     def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str:
         snapshot_id = snapshot.get("snapshot_id") or stable_id("predsnap", snapshot)
         now = snapshot.get("generated_at") or utc_now()
@@ -3554,7 +3994,7 @@ class SQLiteStorage:
         return output
 
     def list_rows(self, table: str, limit: int = 100) -> List[Dict[str, Any]]:
-        allowed = {"events", "sessions", "alerts", "analysis_jobs", "reports", "feed_status", "webhook_deliveries", "enrichment_records", "enrichment_jobs", "prediction_snapshots", "prediction_backtest_runs", "prediction_calibration_runs", "analyst_feedback", "classification_review_labels", "observables", "observable_sightings", "threat_hunt_jobs", "session_links", "campaigns", "campaign_sessions"}
+        allowed = {"events", "sessions", "alerts", "analysis_jobs", "reports", "feed_status", "webhook_deliveries", "enrichment_records", "enrichment_jobs", "prediction_snapshots", "prediction_outbox", "prediction_backtest_runs", "prediction_calibration_runs", "analyst_feedback", "classification_review_labels", "observables", "observable_sightings", "threat_hunt_jobs", "session_links", "campaigns", "campaign_sessions"}
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
         with self.connection() as conn:
