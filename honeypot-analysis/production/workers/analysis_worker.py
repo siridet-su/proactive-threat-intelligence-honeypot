@@ -357,6 +357,15 @@ def attach_threat_evidence_layers(
     session_payload: Dict[str, Any],
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    if report.get("schema_version") == "session_assessment.v4":
+        # Compatibility visualization only.  It cannot mutate the canonical
+        # snapshot, findings, hypotheses, status, or their content IDs.
+        report["threat_evidence_layers"] = build_threat_evidence_layers(
+            session_payload,
+            prediction_snapshot=prediction_snapshot,
+            hunting_context=report.get("threat_hunting_context") or {},
+        )
+        return report
     if report.get("schema_version") != "threat_hypothesis.v2":
         report = build_v2_report(
             report,

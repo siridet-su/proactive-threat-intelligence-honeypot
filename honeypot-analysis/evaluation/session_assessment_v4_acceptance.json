@@ -1,0 +1,24 @@
+{
+  "evaluation_type": "deterministic_contract_acceptance",
+  "schema_version": "session_assessment.v4",
+  "authority": "developer_authored_controlled_functional_evaluation",
+  "acceptance_checks": [
+    "canonical evidence hash integrity",
+    "exact behavior and classification policy hashes",
+    "evaluator Git revision",
+    "cache mismatch deterministic rebuild",
+    "content-addressed assessment, finding, and hypothesis IDs",
+    "prediction, enrichment, correlation, and LLM non-interference",
+    "explicit invalid policy observation-only abstention",
+    "prohibited intent, objective, next-action, score, response, and alert fields",
+    "monitor, Markdown, and STIX consumer parity",
+    "legacy v2/v3 read-only adaptation",
+    "production coordinator bypass of legacy generation"
+  ],
+  "automated_test": "tests/test_session_assessment_v4.py",
+  "limitations": [
+    "The acceptance suite is developer-authored and is not independent analyst validation.",
+    "Synthetic sessions exercise supported deterministic parser patterns, not complete shell semantics.",
+    "Passing checks does not establish attacker intent, real-host impact, or field usefulness."
+  ]
+}

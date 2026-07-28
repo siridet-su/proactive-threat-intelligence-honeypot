@@ -19,9 +19,11 @@
 7. `production.prediction.next_behavior_runtime` verifies and loads the frozen
    Transformer and emits an advisory snapshot separately from factual
    observations. There is no scorer cascade or automatic fallback.
-8. `session_assessment.v3` organizes observations, claims, counterevidence,
-   assumptions, limitations, gaps, alternatives, and falsification conditions.
-   `threat_hypothesis.v2` remains readable as a compatibility/report contract.
+8. `session_assessment.v4` is built directly from one immutable, hashed Cowrie
+   evidence snapshot and is the only authority for new threat assessments.
+   It separates behavioral findings from falsifiable alternatives and records
+   exact evidence, policy, model-provenance, and evaluator Git hashes.
+   Historical v2/v3 records remain readable through read-only adapters.
 9. `response_guidance.v3` evaluates a SHA-256-bound reviewed policy directly
    against an immutable canonical observed-behaviour snapshot. Its guidance ID
    is derived from the evidence, policy, optional explicitly configured asset
@@ -67,7 +69,7 @@ Offline reproduction is isolated under
 | Correlation | Explanation only |
 | Forecast | Advisory model output only |
 | Enrichment | Context only |
-| Claim | Canonical cited evidence and claim validator |
+| Finding / hypothesis | Canonical v4 evidence references and whole-contract validator |
 | Response guidance | SHA-256-bound v3 policy plus immutable canonical observed evidence |
 | Execution | Human operator outside this application |
 

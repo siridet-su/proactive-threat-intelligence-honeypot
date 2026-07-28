@@ -86,6 +86,7 @@ from production.reporting.threat_hypothesis import (
     build_observed_behavior,
     build_v2_report,
 )
+from production.reporting.session_assessment_v4 import build_session_assessment_v4
 from production.utils.sensitive_data import (
     redact_exception_for_log,
     redact_for_artifact,
@@ -3589,109 +3590,25 @@ class ImprovedAsyncSwarmCoordinator:
             f"{_safe_log_text(detected_ttps)}"
         )
 
-        if not detected_ttps:
-            print("\nEARLY EXIT: No TTPs detected â€” returning fallback hypothesis")
-            fallback = self._fallback_hypothesis(ioc_bundle, tactic_summary)
-            fallback_report = build_v2_report(
-                fallback,
+        # session_assessment.v4 is the only authority for newly generated
+        # reports. Legacy builders remain import-compatible for read-only
+        # historical adapters and direct legacy tests, but are not on this path.
+        return _safe_reporting_mapping(
+            build_session_assessment_v4(
                 sessions,
                 raw_events=raw_events,
                 behavior_policy_document=self.behavior_policy_document,
                 behavior_policy_path=self.behavior_policy_path,
+                classification_policy=self.classification_policy,
+                classification_policy_path=self.classification_rules_path,
+                model_artifact_provenance=self.prediction_policy,
+                prediction_context=self.prediction_context,
+                correlation_context=session_correlations or [],
                 response_guidance_policy_path=self.response_guidance_policy_path,
                 response_guidance_asset_profile_path=self.response_guidance_asset_profile_path,
-            )
-            return _safe_reporting_mapping(
-                attach_model_prediction(fallback_report, self.prediction_context),
-                "report",
-            )
-
-        # STEP 1: Deterministic baseline
-        print("\n[Step 1] Building deterministic baseline...")
-        base_hypothesis = await self._build_deterministic_hypothesis(
-            ioc_bundle, tactic_summary, sessions,
-            ttp_command_map=ttp_command_map,
-            raw_events=raw_events,
-            session_correlations=session_correlations,
+            ),
+            "report",
         )
-
-        base_is_grounded, base_msg = JSONValidator.enforce_grounding_strict(
-            base_hypothesis, detected_ttps
-        )
-        if not base_is_grounded:
-            raise RuntimeError(f"Baseline hallucination detected: {base_msg}")
-        print(f"  Baseline validated: {_safe_log_text(base_msg)}")
-
-        normalized_base = self._normalize_hypothesis(
-            base_hypothesis,
-            ioc_bundle,
-            tactic_summary,
-            sessions,
-            ttp_command_map=ttp_command_map,
-            raw_events=raw_events,
-            session_correlations=session_correlations,
-            confidence="Unscored",
-            confidence_source="claim_evidence_summary_v2",
-            ai_enriched=False,
-        )
-        canonical_report = build_v2_report(
-            normalized_base,
-            sessions,
-            raw_events=raw_events,
-            behavior_policy_document=self.behavior_policy_document,
-            behavior_policy_path=self.behavior_policy_path,
-            response_guidance_policy_path=self.response_guidance_policy_path,
-            response_guidance_asset_profile_path=self.response_guidance_asset_profile_path,
-        )
-        canonical_report = attach_model_prediction(
-            canonical_report,
-            self.prediction_context,
-        )
-
-        if not self.enable_vertex_narrative:
-            print("\n[Step 2] Vertex narrative disabled; returning deterministic v2 claims")
-            return _safe_reporting_mapping(
-                apply_validated_vertex_presentation(canonical_report, None),
-                "report",
-            )
-
-        # Vertex receives only validated canonical claims and can edit wording only.
-        print("\n[Step 2] Optional Vertex presentation wording...")
-        vertex_evidence = _safe_reporting_mapping(
-            {
-                "schema_version": canonical_report.get("schema_version"),
-                "observed_behavior": canonical_report.get("observed_behavior"),
-                "supported_assessment": canonical_report.get("supported_assessment"),
-                "follow_on_hypothesis": canonical_report.get("follow_on_hypothesis"),
-                "limitations": canonical_report.get("limitations"),
-            },
-            "Vertex evidence",
-        )
-        evidence_brief = json.dumps(
-            vertex_evidence,
-            sort_keys=True,
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-        analytical_result = await self.ai_client.infer_analytical(
-            evidence_brief=evidence_brief,
-            detected_ttps=detected_ttps
-        )
-
-        if not analytical_result:
-            canonical_report["presentation"]["vertex_validation"] = {
-                "status": "unavailable",
-                "reason": "no_valid_model_output",
-            }
-            return _safe_reporting_mapping(canonical_report, "report")
-
-        report = apply_validated_vertex_presentation(canonical_report, analytical_result)
-        print(
-            "Final: presentation="
-            f"{_safe_log_text(report.get('presentation', {}).get('vertex_validation', {}).get('status', 'unknown'))} "
-            f"| tokens={self.budget.used}/{self.budget.max_tokens}"
-        )
-        return _safe_reporting_mapping(report, "report")
 
     def _verify_analytical_claims(
             self,

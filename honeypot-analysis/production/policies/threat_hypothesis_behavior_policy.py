@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from copy import deepcopy
@@ -287,7 +288,8 @@ def _candidate_paths(
     candidates: List[Path] = []
     if requested:
         candidates.append(Path(requested))
-    candidates.extend([working_directory / DEFAULT_POLICY_PATH, project_root / DEFAULT_POLICY_PATH])
+    else:
+        candidates.extend([working_directory / DEFAULT_POLICY_PATH, project_root / DEFAULT_POLICY_PATH])
     unique: List[Path] = []
     for candidate in candidates:
         if candidate not in unique:
@@ -301,7 +303,8 @@ def _load_cached(path_text: str, env_path: str, cwd_text: str) -> Dict[str, Any]
     requested = path_text or env_path
     for candidate in _candidate_paths(path_text, env_path, cwd_text):
         try:
-            loaded = json.loads(candidate.read_text(encoding="utf-8"))
+            raw = candidate.read_bytes()
+            loaded = json.loads(raw.decode("utf-8"))
             if not isinstance(loaded, dict):
                 raise ValueError("JSON root must be an object")
             validation_errors = validate_behavior_policy(loaded)
@@ -312,7 +315,9 @@ def _load_cached(path_text: str, env_path: str, cwd_text: str) -> Dict[str, Any]
             document["load_status"] = {
                 "status": "loaded",
                 "source": candidate.name,
-                "fallback_used": bool(requested and Path(requested) != candidate),
+                "source_path": str(candidate.resolve()),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "fallback_used": False,
                 "errors": errors,
             }
             return document
@@ -356,13 +361,26 @@ def resolve_behavior_policy(
     document.setdefault("load_status", {
         "status": "provided",
         "source": "in_memory",
+        "sha256": hashlib.sha256(
+            json.dumps(
+                policy_document,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest(),
         "fallback_used": False,
         "errors": [],
     })
     return document
 
 
-def policy_summary(document: Dict[str, Any]) -> Dict[str, Any]:
+def policy_summary(
+    document: Dict[str, Any],
+    *,
+    include_integrity: bool = False,
+) -> Dict[str, Any]:
     status = document.get("load_status") or {}
     provenance = document.get("provenance") or {}
     load_status = str(status.get("status") or "unknown")
@@ -374,7 +392,7 @@ def policy_summary(document: Dict[str, Any]) -> Dict[str, Any]:
         operating_mode = "trusted_bundled_fallback"
     else:
         operating_mode = "trusted_selected_policy"
-    return {
+    summary = {
         "schema_version": str(document.get("schema_version") or ""),
         "policy_id": str(document.get("policy_id") or ""),
         "version": str(document.get("version") or ""),
@@ -390,6 +408,10 @@ def policy_summary(document: Dict[str, Any]) -> Dict[str, Any]:
         "requested_policy_honored": not fallback_used,
         "load_error_count": len(_as_list(status.get("errors"))),
     }
+    if include_integrity:
+        summary["sha256"] = str(status.get("sha256") or "")
+        summary["effective_path"] = str(status.get("source_path") or status.get("source") or "")
+    return summary
 
 
 def compile_pattern(document: Dict[str, Any], value: Any) -> re.Pattern[str]:

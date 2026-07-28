@@ -19,7 +19,7 @@ Cowrie sensor
   -> deterministic classification and trust filtering
   -> evidence graph and report-only correlation
   -> frozen Transformer forecast
-  -> session assessment / threat hypothesis
+  -> canonical session_assessment.v4 findings + falsifiable alternatives
   -> manually approved response guidance
   -> reports, dashboard API, and monitor
 ```
@@ -58,6 +58,12 @@ advisory tasks. Forecast and enrichment are display-only context. Guidance is
 not written into prediction snapshots, never creates alerts, and has no
 execution integration. Historical v1/v2 guidance remains readable only through
 a non-authorizing legacy adapter.
+
+New threat assessments use `session_assessment.v4`. They are constructed
+directly from one content-addressed Cowrie evidence snapshot, fail closed when
+an explicitly selected behavior or classification policy is unavailable, and
+keep predictions, enrichment, correlations, and LLM prose outside canonical
+authority. See [the v4 contract](docs/SESSION_ASSESSMENT_V4.md).
 
 Never expose Cowrie or administrative services without explicit authorization,
 isolation, monitoring, egress controls, and tested recovery. No live secrets,

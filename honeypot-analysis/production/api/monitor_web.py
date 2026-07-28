@@ -1242,6 +1242,35 @@ def _load_report_json_from_artifact(paths: Dict[str, str], reports_dir: str) -> 
 
 def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> Dict[str, str]:
     merged = _merged_report_payload(report_payload, artifact_payload)
+    if merged.get("schema_version") == "session_assessment.v4":
+        findings = [
+            item for item in merged.get("behavioral_findings") or [] if isinstance(item, dict)
+        ]
+        hypothesis_sets = [
+            item for item in merged.get("hypothesis_sets") or [] if isinstance(item, dict)
+        ]
+        return {
+            "schema_version": "session_assessment.v4",
+            "campaign_name": "",
+            "confidence": "Unscored",
+            "confidence_source": "no_global_scoring_in_v4",
+            "analytical_evidence_strength": _text(merged.get("status") or ""),
+            "evidence_strength_reason": (
+                f"{len(findings)} canonical behavioral findings; "
+                f"{len(hypothesis_sets)} falsifiable hypothesis sets"
+            ),
+            "ai_enriched": "false",
+            "analysis_mode": "deterministic_session_assessment_v4",
+            "post_session_follow_on_hypothesis": "; ".join(
+                _text(hypothesis.get("statement"))
+                for hypothesis_set in hypothesis_sets
+                for hypothesis in hypothesis_set.get("hypotheses") or []
+                if isinstance(hypothesis, dict) and _text(hypothesis.get("statement"))
+            ),
+            "summary": "; ".join(
+                _text(item.get("statement")) for item in findings if _text(item.get("statement"))
+            ) or "No policy-supported behavioral finding.",
+        }
     assessment = merged.get("supported_assessment") or {}
     follow_on = merged.get("follow_on_hypothesis") or {}
     presentation = merged.get("presentation") or {}
@@ -3993,9 +4022,49 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     else:
         artifacts = '<div class="empty">No report artifact paths recorded yet.</div>'
     summary_text = summary.get("summary") or "No compact report summary available yet."
+    merged = _merged_report_payload(report_payload, artifact_payload)
+    v4_detail = ""
+    if merged.get("schema_version") == "session_assessment.v4":
+        finding_items = [
+            (
+                f"[{item.get('status', '')}] {item.get('statement', '')} "
+                f"(finding {item.get('finding_id', '')}; evidence "
+                f"{', '.join(item.get('evidence_refs') or [])})"
+            )
+            for item in merged.get("behavioral_findings") or []
+            if isinstance(item, dict)
+        ]
+        hypothesis_items = [
+            (
+                f"{hypothesis.get('statement', '')} "
+                f"(hypothesis {hypothesis.get('hypothesis_id', '')}; evidence "
+                f"{', '.join(hypothesis.get('supporting_evidence_refs') or []) or 'none'})"
+            )
+            for hypothesis_set in merged.get("hypothesis_sets") or []
+            if isinstance(hypothesis_set, dict)
+            for hypothesis in hypothesis_set.get("hypotheses") or []
+            if isinstance(hypothesis, dict)
+        ]
+        provenance = merged.get("provenance") or {}
+        v4_detail = (
+            "<h3>Canonical Behavioral Findings</h3>"
+            + _render_list_items(finding_items)
+            + "<h3>Falsifiable Hypothesis Alternatives</h3>"
+            + _render_list_items(hypothesis_items)
+            + "<h3>Canonical Provenance</h3>"
+            + _render_list_items([
+                f"Evidence SHA-256: {provenance.get('evidence_sha256', '')}",
+                "Behavior policy SHA-256: "
+                f"{(provenance.get('behavior_policy') or {}).get('sha256', '')}",
+                "Classification policy SHA-256: "
+                f"{(provenance.get('classification_policy') or {}).get('sha256', '')}",
+                f"Evaluator Git revision: {provenance.get('evaluator_git_revision', '')}",
+            ])
+        )
     return (
         meta
-        + f"<h3>Threat hypothesis summary</h3><p>{_html(summary_text)}</p>"
+        + f"<h3>Session assessment summary</h3><p>{_html(summary_text)}</p>"
+        + v4_detail
         + "<h3>AI Validation Warnings</h3>"
         + _render_ai_validation_warnings(report_payload, artifact_payload)
         + "<h3>Evidence Layers</h3>"

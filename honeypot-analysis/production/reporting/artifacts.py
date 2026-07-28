@@ -345,6 +345,13 @@ def _evidence_layer_summary_lines(report: Dict[str, Any]) -> List[str]:
 
 
 def _trusted_ttp_ids(report: Dict[str, Any], session_payload: Dict[str, Any]) -> List[str]:
+    if report.get("schema_version") == "session_assessment.v4":
+        evidence = report.get("canonical_evidence") or {}
+        return list(dict.fromkeys(
+            str(item.get("technique_id") or "").strip()
+            for item in evidence.get("trusted_attck_candidates") or []
+            if isinstance(item, dict) and str(item.get("technique_id") or "").strip()
+        ))
     observed = report.get("observed_behavior") or {}
     candidates = observed.get("trusted_attck_candidates") if isinstance(observed, dict) else []
     if report.get("schema_version") == "threat_hypothesis.v2":
@@ -531,6 +538,48 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
         "report_types": ["threat-actor-activity"],
         "object_refs": [],
     }
+
+    if report.get("schema_version") == "session_assessment.v4":
+        provenance = report.get("provenance") or {}
+        for finding in report.get("behavioral_findings") or []:
+            if not isinstance(finding, dict):
+                continue
+            finding_id = _stix_id(
+                "x-honeypot-behavioral-finding",
+                str(finding.get("finding_id") or stable_json(finding)),
+            )
+            _append_stix_object(objects, report_obj, {
+                "type": "x-honeypot-behavioral-finding",
+                "spec_version": "2.1",
+                "id": finding_id,
+                "created": now,
+                "modified": now,
+                "x_honeypot_finding_id": finding.get("finding_id") or "",
+                "x_honeypot_finding_type": finding.get("finding_type") or "",
+                "x_honeypot_statement": finding.get("statement") or "",
+                "x_honeypot_status": finding.get("status") or "",
+                "x_honeypot_evidence_refs": finding.get("evidence_refs") or [],
+                "x_honeypot_relationship_refs": finding.get("relationship_refs") or [],
+                "x_honeypot_evidence_sha256": provenance.get("evidence_sha256") or "",
+            }, seen_ids)
+        for hypothesis_set in report.get("hypothesis_sets") or []:
+            if not isinstance(hypothesis_set, dict):
+                continue
+            set_id = _stix_id(
+                "x-honeypot-hypothesis-set",
+                str(hypothesis_set.get("hypothesis_set_id") or stable_json(hypothesis_set)),
+            )
+            _append_stix_object(objects, report_obj, {
+                "type": "x-honeypot-hypothesis-set",
+                "spec_version": "2.1",
+                "id": set_id,
+                "created": now,
+                "modified": now,
+                "x_honeypot_hypothesis_set_id": hypothesis_set.get("hypothesis_set_id") or "",
+                "x_honeypot_question": hypothesis_set.get("question") or "",
+                "x_honeypot_hypotheses": hypothesis_set.get("hypotheses") or [],
+                "x_honeypot_evidence_sha256": provenance.get("evidence_sha256") or "",
+            }, seen_ids)
 
     ttp_obj_map = {}
     for tid in sorted(set(_trusted_ttp_ids(report, session_payload))):
@@ -832,12 +881,46 @@ def write_markdown_report(
         f"Source IP: {session_payload.get('src_ip', 'unknown')}",
         "",
         "## Summary",
-        str((report.get("presentation") or {}).get("summary") or report.get("executive_summary") or report.get("summary") or "No summary available."),
+        str(
+            "Canonical behavioral findings and falsifiable alternatives are listed below."
+            if report.get("schema_version") == "session_assessment.v4"
+            else (report.get("presentation") or {}).get("summary")
+            or report.get("executive_summary") or report.get("summary") or "No summary available."
+        ),
         "",
         "## TTPs",
     ]
     for tid in _trusted_ttp_ids(report, session_payload):
         lines.append(f"- {tid}")
+    if report.get("schema_version") == "session_assessment.v4":
+        lines.extend(["", "## Behavioral Findings"])
+        for finding in report.get("behavioral_findings") or []:
+            lines.append(
+                f"- [{finding.get('status', '')}] {finding.get('statement', '')} "
+                f"(finding `{finding.get('finding_id', '')}`; evidence: "
+                f"{', '.join(finding.get('evidence_refs') or [])})"
+            )
+        if not report.get("behavioral_findings"):
+            lines.append("- No policy-supported behavioral finding.")
+        lines.extend(["", "## Falsifiable Hypothesis Alternatives"])
+        for hypothesis_set in report.get("hypothesis_sets") or []:
+            lines.append(f"- {hypothesis_set.get('question', '')} (`{hypothesis_set.get('hypothesis_set_id', '')}`)")
+            for hypothesis in hypothesis_set.get("hypotheses") or []:
+                lines.append(
+                    f"  - {hypothesis.get('statement', '')} "
+                    f"(`{hypothesis.get('hypothesis_id', '')}`)"
+                )
+        if not report.get("hypothesis_sets"):
+            lines.append("- No evidence-bounded alternative set was warranted.")
+        provenance = report.get("provenance") or {}
+        lines.extend([
+            "",
+            "## Canonical Provenance",
+            f"- Evidence SHA-256: {provenance.get('evidence_sha256', '')}",
+            f"- Behavior policy SHA-256: {(provenance.get('behavior_policy') or {}).get('sha256', '')}",
+            f"- Classification policy SHA-256: {(provenance.get('classification_policy') or {}).get('sha256', '')}",
+            f"- Evaluator Git revision: {provenance.get('evaluator_git_revision', '')}",
+        ])
     assessment = report.get("supported_assessment") or {}
     follow_on = report.get("follow_on_hypothesis") or {}
     if report.get("schema_version") == "threat_hypothesis.v2":
@@ -952,7 +1035,9 @@ def write_pdf_report(
         Paragraph(
             escape(
                 str(
-                    (report.get("presentation") or {}).get("summary")
+                    "Canonical behavioral findings and falsifiable alternatives are listed below."
+                    if report.get("schema_version") == "session_assessment.v4"
+                    else (report.get("presentation") or {}).get("summary")
                     or report.get("executive_summary")
                     or report.get("summary")
                     or "No summary available."
@@ -962,6 +1047,38 @@ def write_pdf_report(
         ),
         Spacer(1, 8),
     ]
+
+    if report.get("schema_version") == "session_assessment.v4":
+        story.append(Paragraph("Behavioral Findings", h2))
+        if report.get("behavioral_findings"):
+            for finding in report.get("behavioral_findings") or []:
+                story.append(Paragraph(escape(
+                    f"[{finding.get('status', '')}] {finding.get('statement', '')} "
+                    f"(finding {finding.get('finding_id', '')}; evidence "
+                    f"{', '.join(finding.get('evidence_refs') or [])})"
+                ), body))
+        else:
+            story.append(Paragraph("No policy-supported behavioral finding.", body))
+        story.append(Paragraph("Falsifiable Hypothesis Alternatives", h2))
+        if report.get("hypothesis_sets"):
+            for hypothesis_set in report.get("hypothesis_sets") or []:
+                story.append(Paragraph(escape(str(hypothesis_set.get("question") or "")), body))
+                for hypothesis in hypothesis_set.get("hypotheses") or []:
+                    story.append(Paragraph(escape(
+                        f"{hypothesis.get('statement', '')} ({hypothesis.get('hypothesis_id', '')})"
+                    ), body))
+        else:
+            story.append(Paragraph("No evidence-bounded alternative set was warranted.", body))
+        provenance = report.get("provenance") or {}
+        story.extend([
+            Paragraph("Canonical Provenance", h2),
+            Paragraph(escape(
+                f"Evidence SHA-256: {provenance.get('evidence_sha256', '')}<br/>"
+                f"Behavior policy SHA-256: {(provenance.get('behavior_policy') or {}).get('sha256', '')}<br/>"
+                f"Classification policy SHA-256: {(provenance.get('classification_policy') or {}).get('sha256', '')}<br/>"
+                f"Evaluator Git revision: {provenance.get('evaluator_git_revision', '')}"
+            ), body),
+        ])
 
     ttp_rows = [["TTP ID", "Source"]]
     sources = session_payload.get("ttp_sources", {})

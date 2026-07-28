@@ -120,16 +120,16 @@ def test_invalid_in_memory_policy_fails_closed_without_behavior_claims() -> None
     assert report["follow_on_hypothesis"]["abstained"] is True
 
 
-def test_malformed_requested_file_falls_back_to_bundled_trusted_policy(tmp_path: Path) -> None:
+def test_malformed_explicit_policy_fails_closed_without_substitution(tmp_path: Path) -> None:
     malformed = tmp_path / "invalid-policy.json"
     malformed.write_text("{not-json", encoding="utf-8")
 
     loaded = load_behavior_policy(str(malformed))
     summary = policy_summary(loaded)
-    assert summary["policy_id"] == "cowrie-ssh-threat-hypothesis-behavior"
-    assert summary["enabled"] is True
+    assert summary["policy_id"] == "fail-closed-threat-hypothesis-behavior"
+    assert summary["enabled"] is False
     assert summary["fallback_used"] is True
-    assert summary["operating_mode"] == "trusted_bundled_fallback"
+    assert summary["operating_mode"] == "fail_closed"
     assert summary["requested_policy_honored"] is False
     assert summary["load_error_count"] >= 1
 

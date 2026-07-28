@@ -48,5 +48,7 @@ writes.
 
 No historical report or prediction snapshot is rewritten. Stored v1/v2 records
 are exposed only through `response_guidance_legacy_adapter.v1`, which has no
-advisory actions. New reports contain `response_guidance_v3` and reference it
-from `session_assessment_v3.response_guidance_ref`.
+advisory actions. New `session_assessment.v4` reports contain
+`response_guidance_v3` as a separate advisory-only sibling contract.
+Historical `session_assessment_v3.response_guidance_ref` fields remain
+read-only.
