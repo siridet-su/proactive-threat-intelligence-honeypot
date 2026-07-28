@@ -7,7 +7,6 @@ from pathlib import Path
 from production.policies.data_lifecycle_policy import load_data_lifecycle_policy
 from production.storage import open_storage
 from production.tools.sqlite_backup_restore import create_backup, restore_backup
-from production.utils.sensitive_data import sanitize_cowrie_event_for_persistence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,15 +26,13 @@ def test_migration_backup_restore_preserve_sanitized_events_and_ledger(
     tmp_path,
 ) -> None:
     storage = open_storage(f"sqlite:///{tmp_path / 'source.db'}")
-    event = sanitize_cowrie_event_for_persistence(
-        {
-            "eventid": "cowrie.login.success",
-            "session": "backup-privacy",
-            "src_ip": "203.0.113.70",
-            "username": "root",
-            "password": "must-not-enter-backup",
-        }
-    )
+    event = {
+        "eventid": "cowrie.login.success",
+        "session": "backup-privacy",
+        "src_ip": "203.0.113.70",
+        "username": "root",
+        "password": "must-not-enter-backup",
+    }
     storage.store_event("sensor-phase7", event)
     with storage.connection() as connection:
         source_ledger = [

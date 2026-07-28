@@ -28,7 +28,10 @@ from production.storage.contract import (
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.utils.feedback import normalize_feedback_payload
-from production.utils.sensitive_data import redact_error_for_log
+from production.utils.sensitive_data import (
+    redact_error_for_log,
+    sanitize_cowrie_event_for_persistence,
+)
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     SESSION_SOURCE_UNKNOWN_LEGACY,
@@ -948,7 +951,8 @@ class SQLiteStorage:
         )
 
     def store_event(self, sensor_id: str, event: Dict[str, Any]) -> tuple[str, bool]:
-        eid = make_event_id(sensor_id, event)
+        persisted_event = sanitize_cowrie_event_for_persistence(event)
+        eid = make_event_id(sensor_id, persisted_event)
         now = utc_now()
         with self.connection() as conn:
             cur = conn.execute(
@@ -960,11 +964,11 @@ class SQLiteStorage:
                 (
                     eid,
                     sensor_id,
-                    str(event.get("session", "unknown")),
-                    str(event.get("src_ip", "unknown")),
-                    str(event.get("eventid", "")),
-                    event.get("timestamp"),
-                    stable_json(event),
+                    str(persisted_event.get("session", "unknown")),
+                    str(persisted_event.get("src_ip", "unknown")),
+                    str(persisted_event.get("eventid", "")),
+                    persisted_event.get("timestamp"),
+                    stable_json(persisted_event),
                     now,
                 ),
             )
