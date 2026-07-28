@@ -55,8 +55,8 @@ intentionally outside Git. Verify hashes from receipts before use.
    changing the frozen checkpoint; reassess domain shift and weak-label bias.
 2. Improve defense-evasion support through a new, separately preregistered
    experiment—not by retuning the completed Final evaluation.
-3. Decide whether MongoDB remains worthwhile. Promotion requires live parity,
-   indexing, migration, backup/restore, rollback, and operational ownership.
+3. Keep SQLite as the sole runtime backend. Any future backend is a separately
+   justified design, not restoration of the archived adapters.
 4. Treat removed historical experiment implementations as Git-history
    material; do not restore them to add a second reproduction path.
 

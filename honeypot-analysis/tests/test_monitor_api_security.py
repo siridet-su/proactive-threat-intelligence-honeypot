@@ -45,7 +45,6 @@ def _config(
         reports_dir=str(tmp_path / "reports"),
         bind_host=host,
         production_config=production_config,
-        enable_smb_decisions=False,
     )
 
 
@@ -414,7 +413,7 @@ def test_monitor_request_log_sanitizes_sensitive_query_values(
     assert "[REDACTED]" in output
 
 
-def test_legacy_monitor_uses_central_redaction_and_safe_script_json(
+def test_monitor_uses_central_redaction_and_one_static_ui(
     tmp_path: Path,
 ) -> None:
     secret = "legacy-secret"
@@ -427,39 +426,7 @@ def test_legacy_monitor_uses_central_redaction_and_safe_script_json(
     )
     assert secret not in json.dumps(redacted, sort_keys=True)
 
-    breakout = "</script><script>window.PWNED=1</script>"
-    html = monitor_web.render_html(
-        {
-            "ok": True,
-            "timestamp": "2026-07-17T00:00:00Z",
-            "summary": {},
-            "sessions": [],
-            "events": [
-                {
-                    "timestamp": "2026-07-17T00:00:00Z",
-                    "src_ip": "203.0.113.10",
-                    "eventid": "cowrie.command.input",
-                    "detail": breakout,
-                }
-            ],
-            "selected": {
-                "session_id": "session-breakout",
-                "payload": {
-                    "commands": ["echo password=legacy-command-secret"],
-                    "classification_events": [],
-                },
-            },
-            "selected_detail": {
-                "ok": True,
-                "session_id": "session-breakout",
-            },
-        },
-        _config(tmp_path),
-        "",
-    )
-    assert breakout not in html
-    assert "\\u003c/script\\u003e" in html
-    assert "legacy-command-secret" not in html
+    assert not hasattr(monitor_web, "render_html")
 
     historical_secret = "historical-database-secret"
     detail = {

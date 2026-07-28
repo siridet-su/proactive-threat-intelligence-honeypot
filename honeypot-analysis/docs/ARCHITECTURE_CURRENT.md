@@ -31,8 +31,9 @@
    enrichment. Forecast and enrichment may appear only as non-authoritative
    context. V1/v2 payloads remain display-only historical adapters and are
    never promoted into current actions.
-10. Reporting writes JSON/HTML/STIX/PDF artifacts where enabled. Dashboard and
-    monitor endpoints revalidate authority-bearing fields at their boundary.
+10. Reporting writes JSON/Markdown/STIX/PDF artifacts where enabled. Dashboard
+    APIs and the single static monitor UI revalidate authority-bearing fields
+    at their boundary.
 
 ## Prediction policy
 
@@ -79,10 +80,10 @@ remain outside Git.
 
 ## Storage
 
-SQLite is authoritative in the validated deployment. MongoDB is disabled and
-is retained only as tested future work; selecting it requires independent live
-parity, indexing, migration, backup, restore, and rollback gates. PostgreSQL is
-legacy compatibility and deliberately rejects modern durable leasing.
+SQLite is the only runtime backend. MongoDB and PostgreSQL adapters,
+dependencies, schemas, migrations, and backend-specific tests were archived in
+Phase 6 because neither met the durable runtime contract. Historical records
+are preserved in SQLite and remain readable; no database migration was run.
 
 ## Compatibility
 

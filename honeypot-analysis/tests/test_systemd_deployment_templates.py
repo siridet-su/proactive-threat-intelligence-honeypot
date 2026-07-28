@@ -30,7 +30,7 @@ def test_credential_hmac_keyring_is_worker_only_systemd_credential() -> None:
 
 
 def test_common_environment_and_pi_template_contain_no_hmac_secret_setting() -> None:
-    environment_example = (SYSTEMD_DIR / "honeypot.env.example").read_text(
+    environment_example = (SYSTEMD_DIR / "common.env.example").read_text(
         encoding="utf-8"
     )
     pi_service = (SYSTEMD_DIR / "honeypot-sensor-forwarder.service").read_text(
@@ -60,7 +60,7 @@ def test_analysis_artifact_directory_contract_is_private_and_absolute() -> None:
         SYSTEMD_DIR / "honeypot-analysis-worker.service"
     ).read_text(encoding="utf-8")
     environment_example = (
-        SYSTEMD_DIR / "honeypot.env.example"
+        SYSTEMD_DIR / "common.env.example"
     ).read_text(encoding="utf-8")
     deployment_readme = (
         SYSTEMD_DIR / "README.md"

@@ -22,8 +22,6 @@ DATABASE_ENVIRONMENT_KEYS = (
     "DATABASE_BACKEND",
     "DATABASE_URL",
     "SQLITE_DATABASE_PATH",
-    "MONGODB_URI",
-    "MONGODB_DATABASE",
     "HONEYPOT_CONFIG_FILE",
 )
 
@@ -78,10 +76,10 @@ def test_legacy_database_url_still_selects_backend(
     assert config.sqlite_database_path == str(database_path)
 
 
-def test_explicit_backend_conflict_with_legacy_url_fails() -> None:
+def test_non_sqlite_url_fails_closed() -> None:
     with pytest.raises(
         DatabaseConfigurationError,
-        match="database_backend conflicts",
+        match="supports SQLite only",
     ):
         DatabaseSettings.from_values(
             database_backend="sqlite",
@@ -100,94 +98,10 @@ def test_explicit_sqlite_path_conflict_with_legacy_url_fails() -> None:
             database_url="sqlite:///one.db",
             sqlite_database_path="two.db",
         )
-
-
-def test_mongodb_backend_requires_uri_and_database() -> None:
-    with pytest.raises(DatabaseConfigurationError, match="requires MONGODB_URI"):
-        DatabaseSettings.from_values(
-            database_backend="mongodb",
-            mongodb_database="honeypot",
-        )
-
-    with pytest.raises(
-        DatabaseConfigurationError,
-        match="requires MONGODB_DATABASE",
-    ):
-        DatabaseSettings.from_values(
-            database_backend="mongodb",
-            mongodb_uri="mongodb://database.internal:27017/",
-        )
-
-
-def test_mongodb_file_backend_can_receive_secret_uri_from_environment(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _clear_database_environment(monkeypatch)
-    config_path = tmp_path / "production.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "database_backend": "mongodb",
-                "mongodb_database": "honeypot",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv(
-        "MONGODB_URI",
-        "mongodb://unit-user:unit-password@database.internal:27017/"
-        "?authSource=admin&token=unit-secret",
-    )
-
-    config = ProductionConfig.from_env(str(config_path))
-
-    assert config.database_backend == "mongodb"
-    assert config.mongodb_database == "honeypot"
-    descriptor = config.safe_database_descriptor()
-    assert descriptor == {
-        "backend": "mongodb",
-        "endpoint": "database.internal:27017",
-        "database": "honeypot",
-    }
-    assert "unit-user" not in str(descriptor)
-    assert "unit-password" not in str(descriptor)
-    assert "unit-secret" not in str(descriptor)
-    assert "authSource" not in str(descriptor)
-
-
-def test_safe_descriptor_redacts_postgresql_credentials_and_options() -> None:
-    descriptor = safe_database_descriptor(
-        "postgresql://unit-user:unit-password@database.internal:5432/honeypot"
-        "?sslpassword=unit-secret"
-    )
-
-    assert descriptor == {
-        "backend": "postgresql",
-        "endpoint": "database.internal:5432",
-        "database": "honeypot",
-    }
-    assert "unit-user" not in str(descriptor)
-    assert "unit-password" not in str(descriptor)
-    assert "unit-secret" not in str(descriptor)
-
-
-def test_safe_database_label_omits_credentials_and_connection_options() -> None:
-    label = safe_database_label(
-        "mongodb://unit-user:unit-password@database.internal:27017/honeypot"
-        "?authSource=admin&token=unit-secret"
-    )
-
-    assert label == "mongodb://database.internal:27017/honeypot"
-    assert "unit-user" not in label
-    assert "unit-password" not in label
-    assert "unit-secret" not in label
-
-    srv_label = safe_database_label(
-        "mongodb+srv://unit-user:unit-password@cluster.example.invalid/honeypot"
-        "?retryWrites=true"
-    )
-    assert srv_label == "mongodb+srv://cluster.example.invalid/honeypot"
+@pytest.mark.parametrize("backend", ["mongodb", "postgresql", "postgres"])
+def test_archived_database_backends_are_rejected(backend: str) -> None:
+    with pytest.raises(DatabaseConfigurationError, match="expected sqlite"):
+        DatabaseSettings.from_values(database_backend=backend)
 
 
 def test_unsupported_url_error_does_not_echo_credentials() -> None:
@@ -196,7 +110,7 @@ def test_unsupported_url_error_does_not_echo_credentials() -> None:
     with pytest.raises(StorageError) as raised:
         safe_database_descriptor(database_url)
 
-    assert "mysql" in str(raised.value)
+    assert "SQLite only" in str(raised.value)
     assert "unit-user" not in str(raised.value)
     assert "unit-password" not in str(raised.value)
 
@@ -225,6 +139,13 @@ def test_sqlite_adapter_implements_contract_and_health_check(
     assert isinstance(storage, SQLiteStorage)
     assert isinstance(storage, StorageBackend)
     assert storage.health_check() == {"ok": True, "backend": "sqlite"}
+
+
+def test_safe_database_label_is_canonical_sqlite_path(tmp_path: Path) -> None:
+    database_path = tmp_path / "safe-label.db"
+    assert safe_database_label(f"sqlite:///{database_path}") == (
+        f"sqlite:///{database_path}"
+    )
 
 
 def test_sqlite_list_rows_for_session_matches_list_rows_shape_and_order(

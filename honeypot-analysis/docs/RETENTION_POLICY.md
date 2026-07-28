@@ -16,17 +16,12 @@ backup, maintenance window, and restore test.
 
 ## Supported deletion scope
 
-`prediction_snapshots` is `COMPLETE_AND_VERIFIED` for local SQLite and mocked
-MongoDB. A dry run reports the cutoff, total rows, age candidates, feedback
-protections, latest-per-session protections, eligible rows, and zero deletions.
-Only explicit `--apply` deletes eligible rows. Analyst-feedback references are
+`prediction_snapshots` retention selection is implemented only for SQLite. A
+dry run reports the cutoff, total rows, age candidates, feedback protections,
+latest-per-session protections, eligible rows, and zero deletions. Only
+explicit `--apply` deletes eligible rows. Analyst-feedback references are
 always preserved. The latest snapshot per session is preserved by default with
 a deterministic `(created_at, snapshot_id)` tie break.
-
-MongoDB also marks a snapshot before feedback is recorded and includes that
-marker in the delete predicate. The marker is a conservative additional guard
-against a cross-collection race. PostgreSQL implements the same selection and
-report contract, but has not been exercised against an authorized live server.
 
 An apply run requires all prediction writers and feedback writers to be stopped
 for the maintenance window. This closes the remaining cross-transaction race in
@@ -66,7 +61,7 @@ until storage ownership, reference tracking, and restore behavior are defined.
 1. Run the command without `--apply` and retain the JSON report.
 2. Confirm `dry_run: true`, `deleted: 0`, and review every protection/eligible
    count.
-3. Take and verify a backend-consistent backup.
+3. Take and verify a SQLite online backup.
 4. Stop prediction and feedback writers for an approved maintenance window.
 5. Re-run the identical command with `--apply`.
 6. Verify protected snapshot IDs still resolve, start writers, and monitor

@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import builtins
 import copy
 import json
 import stat
-import sys
-import types
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 import production.reporting.artifacts as artifact_module
-import production.reporting.reporting_pipeline as reporting_pipeline
 from production.policies.validate_stix_bundle import validate_stix_bundle_document
 from production.reporting.artifacts import (
     attach_report_artifacts,
@@ -22,7 +17,6 @@ from production.reporting.artifacts import (
     write_markdown_report,
     write_stix_bundle,
 )
-from production.reporting.reporting_pipeline import TokenBudget, VertexAIClient
 from production.utils.config import ProductionConfig
 from production.utils.sensitive_data import REDACTION_MARKER
 from production.workers import analysis_worker as analysis_worker_module
@@ -87,24 +81,6 @@ def _config(reports_dir: Path, *, enabled: bool) -> ProductionConfig:
 
 def _encoded(value: object) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False)
-
-
-def _run_with_inline_executor(async_operation):
-    async def invoke():
-        loop = asyncio.get_running_loop()
-
-        def run_inline(_executor, function, *args):
-            future = loop.create_future()
-            try:
-                future.set_result(function(*args))
-            except BaseException as exc:
-                future.set_exception(exc)
-            return future
-
-        loop.run_in_executor = run_inline
-        return await async_operation()
-
-    return asyncio.run(invoke())
 
 
 def test_artifact_boundaries_redact_without_mutating_inputs(
@@ -280,7 +256,6 @@ def test_exception_boundaries_never_render_unlabelled_attacker_text() -> None:
     helpers = (
         analysis_worker_module._safe_exception_text,
         artifact_module._safe_artifact_error,
-        reporting_pipeline._safe_exception_text,
         session_monitor_module._safe_exception_text,
     )
 
@@ -302,20 +277,6 @@ def test_exception_boundaries_never_render_unlabelled_attacker_text() -> None:
     assert baseline["non_authoritative_context"]["analysis_processing"]["error"] == (
         "operation_failed"
     )
-
-
-def test_vertex_retry_metadata_does_not_render_exception_text() -> None:
-    class StructuredHTTPError(RuntimeError):
-        status_code = 429
-        response = SimpleNamespace(headers={"retry-after": "999999"})
-
-        def __str__(self) -> str:
-            raise AssertionError("exception text must not be inspected")
-
-    error = StructuredHTTPError(SECRET)
-
-    assert reporting_pipeline._exception_http_status(error) == 429
-    assert reporting_pipeline._exception_retry_after(error) == 120
 
 
 def test_artifact_write_fails_when_configured_directory_identity_changes(
@@ -450,151 +411,6 @@ def test_missing_pdf_renderer_is_recorded_as_markdown_fallback(
     assert fallback.suffix == ".md"
     assert fallback.exists()
     assert SECRET not in fallback.read_text(encoding="utf-8")
-
-
-def _install_fake_genai(monkeypatch: pytest.MonkeyPatch) -> None:
-    google_module = types.ModuleType("google")
-    genai_module = types.ModuleType("google.genai")
-    genai_types_module = types.ModuleType("google.genai.types")
-    genai_types_module.GenerateContentConfig = lambda **kwargs: kwargs
-    genai_module.types = genai_types_module
-    google_module.genai = genai_module
-    monkeypatch.setitem(sys.modules, "google", google_module)
-    monkeypatch.setitem(sys.modules, "google.genai", genai_module)
-    monkeypatch.setitem(sys.modules, "google.genai.types", genai_types_module)
-
-
-def test_vertex_sdk_boundary_redacts_all_prompt_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_fake_genai(monkeypatch)
-    captured: dict = {}
-
-    def generate_content(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(text="{}")
-
-    fake_client = SimpleNamespace(
-        models=SimpleNamespace(generate_content=generate_content)
-    )
-    client = VertexAIClient(TokenBudget(max_tokens=1_000))
-    monkeypatch.setattr(client, "_get_client", lambda _timeout=None: fake_client)
-    user_content = json.dumps(
-        {
-            "command": f"sshpass -p {SECRET} ssh root@example.invalid",
-            "login_password_hash": DIGEST,
-        }
-    )
-
-    assert client._post_sync(
-        [
-            {"role": "system", "content": f"api_token={SECRET}"},
-            {"role": "user", "content": user_content},
-        ],
-        timeout=1,
-    ) == "{}"
-
-    sdk_text = _encoded(captured)
-    assert SECRET not in sdk_text
-    assert DIGEST not in sdk_text
-    assert REDACTION_MARKER in sdk_text
-
-
-def test_vertex_prompt_redaction_failure_never_calls_sdk(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_fake_genai(monkeypatch)
-    calls = 0
-    client_initializations = 0
-
-    def generate_content(**_kwargs):
-        nonlocal calls
-        calls += 1
-        return SimpleNamespace(text="{}")
-
-    def get_client(_timeout=None):
-        nonlocal client_initializations
-        client_initializations += 1
-        return SimpleNamespace(
-            models=SimpleNamespace(generate_content=generate_content)
-        )
-
-    client = VertexAIClient(TokenBudget(max_tokens=1_000))
-    monkeypatch.setattr(
-        client,
-        "_get_client",
-        get_client,
-    )
-    monkeypatch.setattr(
-        reporting_pipeline,
-        "redact_for_artifact",
-        lambda _value: (_ for _ in ()).throw(RuntimeError(SECRET)),
-    )
-
-    with pytest.raises(RuntimeError, match="Vertex prompt redaction failed") as error:
-        client._post_sync(
-            [{"role": "user", "content": f"password={SECRET}"}],
-            timeout=1,
-        )
-
-    assert SECRET not in str(error.value)
-    assert calls == 0
-    assert client_initializations == 0
-
-
-def test_vertex_model_output_is_redacted_before_validation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = VertexAIClient(TokenBudget(max_tokens=1_000), model="unit-model")
-    client.MAX_RETRIES = 1
-    client._TIMEOUTS = [1]
-    monkeypatch.setattr(client, "available", lambda: True)
-    monkeypatch.setattr(
-        client,
-        "_post_sync",
-        lambda *_args, **_kwargs: json.dumps(
-            {
-                "presentation_summary": (
-                    f"Observed sshpass -p {SECRET} ssh root@example.invalid"
-                ),
-                "grounded_claim_ids": [],
-            }
-        ),
-    )
-
-    result = _run_with_inline_executor(
-        lambda: client.infer_analytical(
-            evidence_brief="{}",
-            detected_ttps=[],
-        )
-    )
-
-    assert SECRET not in _encoded(result)
-    assert REDACTION_MARKER in result["presentation_summary"]
-
-
-def test_vertex_phase_and_model_diagnostics_are_redacted(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    client = VertexAIClient(
-        TokenBudget(max_tokens=1_000),
-        model=f"password={SECRET}",
-    )
-    client.MAX_RETRIES = 1
-    client._TIMEOUTS = [1]
-    monkeypatch.setattr(client, "available", lambda: True)
-    monkeypatch.setattr(client, "_post_sync", lambda *_args, **_kwargs: "{}")
-    phase = SimpleNamespace(value=f"api_token={SECRET}")
-
-    result = _run_with_inline_executor(
-        lambda: client.infer_with_retry("{}", phase=phase)
-    )
-
-    output = capsys.readouterr().out
-    assert result == {}
-    assert SECRET not in output
-    assert REDACTION_MARKER in output
 
 
 def test_worker_json_and_replayer_path_diagnostics_are_redacted(

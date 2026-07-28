@@ -10,15 +10,13 @@ from typing import Any
 
 import pytest
 
-from production.storage import PostgresStorage, SQLiteStorage, StorageError, open_storage
+from production.storage import SQLiteStorage, open_storage
 from production.storage.contract import StorageBackend
-from production.storage.mongodb import MongoStorage
 from production.tools.job_queue import execute as execute_job_queue_command
 from production.utils.config import ProductionConfig
 from production.workers.enrichment_worker import EnrichmentWorker
 from production.workers.job_lifecycle import JobLeaseHeartbeat
 from production.workers.threat_hunt_worker import ThreatHuntWorker
-from tests.test_mongodb_storage import make_storage
 
 
 BASE = "2026-07-18T10:00:00+00:00"
@@ -28,11 +26,9 @@ def _sqlite(tmp_path: Path):
     return open_storage(f"sqlite:///{tmp_path / 'jobs.db'}")
 
 
-@pytest.fixture(params=["sqlite", "mongodb"])
-def storage(request: pytest.FixtureRequest, tmp_path: Path):
-    if request.param == "sqlite":
-        return _sqlite(tmp_path)
-    return make_storage()[0]
+@pytest.fixture
+def storage(tmp_path: Path):
+    return _sqlite(tmp_path)
 
 
 def _enqueue(storage: Any, queue: str) -> str:
@@ -346,17 +342,9 @@ def test_job_schema_upgrade_and_backend_contract_are_structurally_complete(
         "fail_threat_hunt_job",
     ):
         protocol_signature = inspect.signature(getattr(StorageBackend, method))
-        for implementation in (SQLiteStorage, PostgresStorage, MongoStorage):
-            assert inspect.signature(getattr(implementation, method)) == protocol_signature
-
-    postgres_schema = (
-        Path(__file__).parents[1] / "production/storage/postgres_schema.sql"
-    ).read_text(encoding="utf-8")
-    for table in ("analysis_jobs", "enrichment_jobs", "threat_hunt_jobs"):
-        assert f"idx_{table}_claimable" in postgres_schema
-    postgres = PostgresStorage.__new__(PostgresStorage)
-    with pytest.raises(Exception, match="compatibility backend"):
-        postgres.claim_jobs("analysis", "worker-a", 1, 30, 3)
+        assert inspect.signature(
+            getattr(SQLiteStorage, method)
+        ) == protocol_signature
 
 
 def test_operator_queue_command_reports_age_and_retries_only_terminal_jobs(
@@ -392,31 +380,6 @@ def test_operator_queue_command_reports_age_and_retries_only_terminal_jobs(
     assert code == 0
     assert retried["retried"] is True
     assert retried["metrics"]["ready"] == 1
-
-
-def test_mongodb_analysis_completion_rolls_back_report_on_job_write_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    storage, database = make_storage()
-    job_id = _enqueue(storage, "analysis")
-    claim = storage.claim_jobs("analysis", "worker-a", 1, 30, 3)[0]
-
-    def fail_job_update(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("injected job write failure")
-
-    monkeypatch.setattr(database["analysis_jobs"], "update_one", fail_job_update)
-    with pytest.raises(StorageError, match="fenced transaction failed"):
-        storage.complete_analysis_job(
-            job_id,
-            "worker-a",
-            claim["claim_token"],
-            {"session_id": "session-analysis", "summary": "complete"},
-        )
-
-    assert database["reports"].documents == {}
-    persisted = database["analysis_jobs"].documents[job_id]
-    assert persisted["status"] == "running"
-    assert persisted["claim_token"] == claim["claim_token"]
 
 
 def test_threat_hunt_effect_is_idempotent_when_completion_is_interrupted(

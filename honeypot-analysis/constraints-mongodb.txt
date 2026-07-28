@@ -1,3 +1,0 @@
-# Resolved on Python 3.14/Linux for the reviewed MongoDB deployment group.
-dnspython==2.8.0
-pymongo==4.17.0

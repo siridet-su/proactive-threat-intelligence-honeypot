@@ -49,8 +49,6 @@ python3 -m venv .venv
 sudo chown -R honeypot:honeypot .venv
 sudo -u honeypot .venv/bin/pip install --upgrade pip
 sudo -u honeypot .venv/bin/pip install -r requirements.txt
-# Install this only after a private MongoDB deployment is explicitly selected:
-sudo -u honeypot .venv/bin/pip install -r requirements-mongodb.txt
 # Install only explicitly enabled optional groups, for example:
 sudo -u honeypot .venv/bin/pip install -r requirements-artifacts.txt
 ```
@@ -99,11 +97,9 @@ defined correlation-retention window, then restart only the session worker.
 Each listed prior key must also be present in `keys`. For a suspected key
 compromise, do not retain the compromised key as a correlation alias.
 
-Select MongoDB only after private provisioning, index validation, migration
-preflight, backup, and rollback approval. SQLite remains the supported local
-and emergency fallback. PostgreSQL is a legacy compatibility adapter and its
-modern durable job-lease methods fail closed, so it must not run this worker
-topology. Use explicit `DATABASE_BACKEND` and backend-specific settings; keep
+SQLite is the only supported runtime backend. Set `DATABASE_BACKEND=sqlite`
+and provide a `sqlite:///` URL through each service-specific credential; any
+other backend fails closed. Keep
 `ANALYSIS_SKIP_EMPTY_SESSIONS=true`, and keep `ANALYSIS_SUPPRESS_STDOUT=true`.
 
 5. Install backend services.
@@ -202,7 +198,7 @@ sudo systemctl enable --now honeypot-sensor-forwarder
 
 The Pi environment needs `HONEYPOT_API_TOKEN`, `SENSOR_ID`,
 `COWRIE_LOG_PATH`, `FORWARDER_SPOOL_PATH`, and `INGEST_URL`. It does not need
-database credentials, Vertex credentials, SecureBERT, or enrichment provider
+database credentials, SecureBERT, or enrichment provider
 API keys.
 
 ## Read-Only Web Monitor

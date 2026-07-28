@@ -10,21 +10,16 @@ from typing import Any
 
 import pytest
 
-from production.storage import PostgresStorage, SQLiteStorage, open_storage
-from production.storage import StorageError
+from production.storage import SQLiteStorage, open_storage
 from production.storage.contract import StorageBackend
-from production.storage.mongodb import MongoStorage
 from production.utils.config import ProductionConfig
 from production.workers.session_worker import SessionWorker
-from tests.test_mongodb_storage import make_storage
 from tests.test_session_worker_event_lifecycle import _config, _event, _event_row
 
 
-@pytest.fixture(params=["sqlite", "mongodb"])
-def storage(request: pytest.FixtureRequest, tmp_path: Path):
-    if request.param == "sqlite":
-        return open_storage(f"sqlite:///{tmp_path / 'sessions.db'}")
-    return make_storage()[0]
+@pytest.fixture
+def storage(tmp_path: Path):
+    return open_storage(f"sqlite:///{tmp_path / 'sessions.db'}")
 
 
 def test_stale_session_save_preserves_newer_analysis_fields(storage: Any) -> None:
@@ -71,26 +66,9 @@ def test_session_revision_upgrade_and_status_contract_are_backend_neutral(
         }
     assert "revision" in columns
     protocol = inspect.signature(StorageBackend.update_session_analysis_status)
-    for implementation in (SQLiteStorage, PostgresStorage, MongoStorage):
-        assert inspect.signature(implementation.update_session_analysis_status) == protocol
-    postgres_schema = (
-        Path(__file__).parents[1] / "production/storage/postgres_schema.sql"
-    ).read_text(encoding="utf-8")
-    assert "ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0" in postgres_schema
-
-    mongo, database = make_storage()
-    mongo.save_session(
-        {"session_id": "legacy-revision", "src_ip": "203.0.113.32"}
-    )
-    database["sessions"].documents["legacy-revision"].pop("revision")
-    mongo.save_session(
-        {
-            "session_id": "legacy-revision",
-            "src_ip": "203.0.113.32",
-            "commands": ["id"],
-        }
-    )
-    assert mongo.get_session("legacy-revision")["revision"] == 1
+    assert inspect.signature(
+        SQLiteStorage.update_session_analysis_status
+    ) == protocol
 
 
 def test_sqlite_concurrent_close_save_cannot_erase_report_status(tmp_path: Path) -> None:
@@ -181,41 +159,6 @@ def test_sqlite_report_job_and_session_status_roll_back_together(tmp_path: Path)
     job = next(row for row in storage.list_rows("analysis_jobs") if row["job_id"] == job_id)
     assert job["status"] == "running"
     assert storage.get_session("session-report-atomic")["payload"]["analysis_status"] == "queued"
-
-
-def test_mongodb_report_job_and_session_status_roll_back_together(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    storage, database = make_storage()
-    session = {
-        "session_id": "session-mongo-report-atomic",
-        "src_ip": "203.0.113.34",
-        "is_ended": True,
-        "analysis_status": "queued",
-    }
-    storage.save_session(session)
-    job_id = storage.enqueue_analysis_job(session)
-    claim = storage.claim_analysis_jobs("analysis-worker", 1, 30, 3)[0]
-
-    def reject_status(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("injected session status failure")
-
-    monkeypatch.setattr(database["sessions"], "update_one", reject_status)
-    with pytest.raises(StorageError, match="fenced transaction failed"):
-        storage.complete_analysis_job(
-            job_id,
-            "analysis-worker",
-            claim["claim_token"],
-            {"session_id": "session-mongo-report-atomic", "summary": "complete"},
-        )
-    assert database["reports"].documents == {}
-    assert database["analysis_jobs"].documents[job_id]["status"] == "running"
-    assert (
-        database["sessions"].documents["session-mongo-report-atomic"]["payload"][
-            "analysis_status"
-        ]
-        == "queued"
-    )
 
 
 def _prepare_worker(tmp_path: Path) -> tuple[ProductionConfig, Any, SessionWorker]:

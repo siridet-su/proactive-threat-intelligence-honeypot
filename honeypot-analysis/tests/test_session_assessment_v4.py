@@ -7,7 +7,7 @@ from pathlib import Path
 
 from production.api.monitor_web import _render_report_panel, _report_summary
 from production.reporting.artifacts import build_stix_bundle, write_markdown_report
-from production.reporting.reporting_pipeline import ImprovedAsyncSwarmCoordinator
+from production.reporting.canonical_pipeline import CanonicalAssessmentCoordinator
 from production.reporting.session_assessment_v4 import (
     build_session_assessment_v4,
     read_legacy_session_assessment,
@@ -360,17 +360,11 @@ def test_v4_consumers_share_findings_hypotheses_refs_and_provenance(tmp_path: Pa
 
 
 def test_coordinator_new_report_path_never_calls_legacy_generation(monkeypatch) -> None:
-    coordinator = ImprovedAsyncSwarmCoordinator(
-        base_url="",
-        model="",
+    coordinator = CanonicalAssessmentCoordinator(
         behavior_policy_path=BEHAVIOR_POLICY,
         classification_rules_path=CLASSIFICATION_POLICY,
     )
-
-    async def forbidden(*args, **kwargs):
-        raise AssertionError("legacy generator executed")
-
-    monkeypatch.setattr(coordinator, "_build_deterministic_hypothesis", forbidden)
+    assert not hasattr(coordinator, "_build_deterministic_hypothesis")
     payload = _payload()
     report = asyncio.run(coordinator.analyze(
         {},

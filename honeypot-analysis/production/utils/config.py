@@ -192,12 +192,10 @@ class ProductionConfig:
     api_token: str = ""
     ingest_sensor_tokens: Dict[str, str] = field(default_factory=dict)
 
-    # Explicit backend fields are authoritative. ``database_url`` remains as a
-    # compatibility input and canonical runtime URL for existing callers.
+    # SQLite is the sole canonical runtime backend. ``database_url`` remains a
+    # compatibility input for callers already using sqlite:/// URLs.
     database_backend: str = ""
     sqlite_database_path: str = ""
-    mongodb_uri: str = ""
-    mongodb_database: str = ""
     database_url: str = ""
     ingest_host: str = "127.0.0.1"
     ingest_port: int = 8080
@@ -290,14 +288,6 @@ class ProductionConfig:
     censys_api_secret: str = ""
     censys_platform_token: str = ""
     censys_organization_id: str = ""
-    threat_intel_config_path: str = "configs/threat_intel_config.json"
-    # Legacy v1 SMB decision configuration. It is retained only to read
-    # historical payloads; new response guidance must use the v3 fields below.
-    smb_asset_profile_path: str = ""
-    smb_action_policy_path: str = "configs/smb_action_playbooks.trusted.json"
-    enable_smb_decisions: bool = False
-    enable_smb_decision_alerts: bool = False
-    smb_alert_min_severity: str = "high"
     response_guidance_policy_path: str = "configs/response_guidance_policy.v3.json"
     response_guidance_asset_profile_path: str = ""
     enable_response_guidance: bool = True
@@ -316,16 +306,6 @@ class ProductionConfig:
     enable_stix_export: bool = True
     actor_db_path: str = ""
     enable_actor_attribution: bool = False
-    enable_vertex_narrative: bool = False
-
-    vertex_project_id: str = ""
-    vertex_location: str = "us-central1"
-    vertex_model: str = "gemini-2.5-pro"
-    vertex_request_timeout_seconds: float = 45.0
-    vertex_outer_timeout_seconds: float = 50.0
-    vertex_max_retries: int = 2
-    vertex_retry_delay_seconds: float = 2.0
-
     classification_policy: Dict[str, Any] = field(default_factory=lambda: {
         "strategy": "notebook_merge",
         "bert_min_confidence": 0.55,
@@ -631,8 +611,6 @@ class ProductionConfig:
             "prediction_outbox_lease_seconds": self.prediction_outbox_lease_seconds,
             "prediction_outbox_retry_base_seconds": self.prediction_outbox_retry_base_seconds,
             "prediction_outbox_retry_max_seconds": self.prediction_outbox_retry_max_seconds,
-            "vertex_request_timeout_seconds": self.vertex_request_timeout_seconds,
-            "vertex_outer_timeout_seconds": self.vertex_outer_timeout_seconds,
             "enrichment_provider_timeout_seconds": self.enrichment_provider_timeout_seconds,
         }
         for name, value in positive_durations.items():
@@ -757,26 +735,6 @@ class ProductionConfig:
             raise ValueError(
                 "session_event_history_limit must be an integer of at least 1"
             )
-        if (
-            isinstance(self.vertex_max_retries, bool)
-            or not isinstance(self.vertex_max_retries, Integral)
-            or not 1 <= self.vertex_max_retries <= 5
-        ):
-            raise ValueError("vertex_max_retries must be an integer between 1 and 5")
-        if (
-            isinstance(self.vertex_retry_delay_seconds, bool)
-            or not isinstance(self.vertex_retry_delay_seconds, Real)
-            or not math.isfinite(float(self.vertex_retry_delay_seconds))
-            or self.vertex_retry_delay_seconds < 0
-        ):
-            raise ValueError(
-                "vertex_retry_delay_seconds must be a non-negative finite number"
-            )
-        if self.vertex_outer_timeout_seconds < self.vertex_request_timeout_seconds:
-            raise ValueError(
-                "vertex_outer_timeout_seconds must be greater than or equal to "
-                "vertex_request_timeout_seconds"
-            )
         if self.event_lease_heartbeat_seconds >= self.event_lease_seconds:
             raise ValueError(
                 "event_lease_heartbeat_seconds must be less than event_lease_seconds"
@@ -847,8 +805,6 @@ class ProductionConfig:
             database_backend=self.database_backend,
             database_url=self.database_url,
             sqlite_database_path=self.sqlite_database_path,
-            mongodb_uri=self.mongodb_uri,
-            mongodb_database=self.mongodb_database,
         )
 
     def safe_database_descriptor(self) -> Dict[str, str]:
@@ -859,8 +815,6 @@ class ProductionConfig:
         self.database_backend = settings.backend
         self.database_url = settings.database_url
         self.sqlite_database_path = settings.sqlite_database_path
-        self.mongodb_uri = settings.mongodb_uri
-        self.mongodb_database = settings.mongodb_database
 
     @classmethod
     def from_env(cls, config_path: Optional[str] = None) -> "ProductionConfig":
@@ -901,13 +855,6 @@ class ProductionConfig:
                 "SQLITE_DATABASE_PATH",
                 str(file_values.get("sqlite_database_path") or ""),
             ),
-            mongodb_uri=_env_secret(
-                "MONGODB_URI", str(file_values.get("mongodb_uri") or "")
-            ),
-            mongodb_database=os.getenv(
-                "MONGODB_DATABASE",
-                str(file_values.get("mongodb_database") or ""),
-            ),
         )
         config_values = {
             k: v for k, v in file_values.items() if k in cls.__dataclass_fields__
@@ -917,8 +864,6 @@ class ProductionConfig:
                 "database_backend": database_settings.backend,
                 "database_url": database_settings.database_url,
                 "sqlite_database_path": database_settings.sqlite_database_path,
-                "mongodb_uri": database_settings.mongodb_uri,
-                "mongodb_database": database_settings.mongodb_database,
             }
         )
         cfg = cls(**config_values)
@@ -1146,12 +1091,6 @@ class ProductionConfig:
             or os.getenv("CENSYS_PLATFORM_ORGANIZATION_ID")
             or cfg.censys_organization_id
         )
-        cfg.threat_intel_config_path = os.getenv("THREAT_INTEL_CONFIG_PATH", cfg.threat_intel_config_path)
-        cfg.smb_asset_profile_path = os.getenv("SMB_ASSET_PROFILE_PATH", cfg.smb_asset_profile_path)
-        cfg.smb_action_policy_path = os.getenv("SMB_ACTION_POLICY_PATH", cfg.smb_action_policy_path)
-        cfg.enable_smb_decisions = _env_bool("ENABLE_SMB_DECISIONS", cfg.enable_smb_decisions)
-        cfg.enable_smb_decision_alerts = _env_bool("ENABLE_SMB_DECISION_ALERTS", cfg.enable_smb_decision_alerts)
-        cfg.smb_alert_min_severity = os.getenv("SMB_ALERT_MIN_SEVERITY", cfg.smb_alert_min_severity)
         cfg.response_guidance_policy_path = os.getenv(
             "RESPONSE_GUIDANCE_POLICY_PATH", cfg.response_guidance_policy_path
         )
@@ -1176,29 +1115,6 @@ class ProductionConfig:
         cfg.enable_stix_export = _env_bool("ENABLE_STIX_EXPORT", cfg.enable_stix_export)
         cfg.actor_db_path = os.getenv("ACTOR_DB_PATH", cfg.actor_db_path)
         cfg.enable_actor_attribution = _env_bool("ENABLE_ACTOR_ATTRIBUTION", cfg.enable_actor_attribution)
-        cfg.enable_vertex_narrative = _env_bool(
-            "ENABLE_VERTEX_NARRATIVE",
-            cfg.enable_vertex_narrative,
-        )
-        cfg.vertex_project_id = os.getenv("VERTEX_PROJECT_ID", cfg.vertex_project_id)
-        cfg.vertex_location = os.getenv("VERTEX_LOCATION", cfg.vertex_location)
-        cfg.vertex_model = os.getenv("VERTEX_MODEL", cfg.vertex_model)
-        cfg.vertex_request_timeout_seconds = _env_float(
-            "VERTEX_REQUEST_TIMEOUT_SECONDS",
-            cfg.vertex_request_timeout_seconds,
-        )
-        cfg.vertex_outer_timeout_seconds = _env_float(
-            "VERTEX_OUTER_TIMEOUT_SECONDS",
-            cfg.vertex_outer_timeout_seconds,
-        )
-        cfg.vertex_max_retries = _env_int(
-            "VERTEX_MAX_RETRIES",
-            cfg.vertex_max_retries,
-        )
-        cfg.vertex_retry_delay_seconds = _env_float(
-            "VERTEX_RETRY_DELAY_SECONDS",
-            cfg.vertex_retry_delay_seconds,
-        )
         cfg.classification_policy = _env_json("CLASSIFICATION_POLICY_JSON", cfg.classification_policy)
         cfg.classification_rules_path = os.getenv("CLASSIFICATION_RULES_PATH", cfg.classification_rules_path)
         cfg.threat_hypothesis_behavior_policy_path = os.getenv(
@@ -1245,12 +1161,6 @@ class ProductionConfig:
 
     def apply_environment(self) -> None:
         """Expose selected config to libraries that still resolve from env vars."""
-        if self.vertex_project_id:
-            os.environ.setdefault("VERTEX_PROJECT_ID", self.vertex_project_id)
-        if self.vertex_location:
-            os.environ.setdefault("VERTEX_LOCATION", self.vertex_location)
-        if self.vertex_model:
-            os.environ.setdefault("VERTEX_MODEL", self.vertex_model)
         if self.threat_hypothesis_behavior_policy_path:
             os.environ.setdefault(
                 "THREAT_HYPOTHESIS_BEHAVIOR_POLICY_PATH",

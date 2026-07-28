@@ -4,8 +4,8 @@
 
 Reviewed generic units are under `deployment/systemd/`. Runtime daemons cover
 ingest, session/analysis/enrichment/threat-hunt workers, webhook delivery,
-dashboard/monitor, and the sensor forwarder. Timers cover feeds, backtesting,
-calibration diagnostics, dry-run retention, and session-count monitoring.
+dashboard/monitor, and the sensor forwarder. Timers cover feed refresh and
+session-count monitoring.
 
 List state without changing it:
 
@@ -67,4 +67,4 @@ Never introduce a cascade or silent fallback during incident recovery.
   unredacted commands into shared logs.
 - Treat `python_script.service` and other unrelated failed units as outside
   scope.
-- MongoDB must remain disabled unless its separate cutover gates are approved.
+- Configure only `sqlite:///` database URLs. Other backends fail closed.

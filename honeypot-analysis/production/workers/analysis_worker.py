@@ -15,7 +15,10 @@ from production.classification.trust import (
     classification_audit_reason,
     is_trusted_classification_event,
 )
-from production.reporting.reporting_pipeline import ImprovedAsyncSwarmCoordinator, _build_session_correlation_hunting_context
+from production.reporting.canonical_pipeline import (
+    CanonicalAssessmentCoordinator,
+    build_session_correlation_hunting_context,
+)
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 from production.workers.session_monitor import SessionState, build_pipeline_trigger
 from production.enrichment.threat_feed_loader import load_threat_feeds
@@ -29,10 +32,6 @@ from production.reporting.session_assessment_v4 import (
     build_session_assessment_v4,
     canonical_assessment_id,
     validate_session_assessment_v4,
-)
-from production.reporting.threat_hypothesis import (
-    attach_model_prediction,
-    build_v2_report,
 )
 from production.utils.credential_hmac import credential_metadata_for_provenance
 from production.utils.config import ProductionConfig
@@ -326,7 +325,7 @@ def build_threat_evidence_layers(
     prediction_snapshot: Optional[Dict[str, Any]] = None,
     hunting_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    hunting = hunting_context or _build_session_correlation_hunting_context(
+    hunting = hunting_context or build_session_correlation_hunting_context(
         session_payload.get("session_ttp_correlations", []),
         session_payload.get("session_id", "unknown"),
     )
@@ -374,52 +373,15 @@ def attach_threat_evidence_layers(
         context["threat_evidence_layers"] = build_threat_evidence_layers(
             session_payload,
             prediction_snapshot=prediction_snapshot,
-            hunting_context=_build_session_correlation_hunting_context(
+            hunting_context=build_session_correlation_hunting_context(
                 session_payload.get("session_ttp_correlations", []),
                 session_payload.get("session_id", "unknown"),
             ),
         )
         return report
-    if report.get("schema_version") != "threat_hypothesis.v2":
-        report = build_v2_report(
-            report,
-            [session_payload],
-            raw_events=session_payload.get("raw_events") or [],
-        )
-    report = attach_model_prediction(report, prediction_snapshot)
-    hunting_context = report.get("threat_hunting_context")
-    if not isinstance(hunting_context, dict):
-        hunting_context = _build_session_correlation_hunting_context(
-            session_payload.get("session_ttp_correlations", []),
-            session_payload.get("session_id", "unknown"),
-        )
-        report["threat_hunting_context"] = hunting_context
-    layers = build_threat_evidence_layers(
-        session_payload,
-        prediction_snapshot=prediction_snapshot,
-        hunting_context=hunting_context,
+    raise SessionAssessmentV4Error(
+        "threat evidence layers can only attach to session_assessment.v4"
     )
-    report["threat_evidence_layers"] = layers
-    report.setdefault("evidence_confidence", layers["summary"])
-    hypothesis = report.get("threat_hypothesis")
-    if not isinstance(hypothesis, dict):
-        hypothesis = {"summary": _clean_text(hypothesis or report.get("summary") or "")}
-        report["threat_hypothesis"] = hypothesis
-    hypothesis["evidence_layer_summary"] = layers["summary"]
-    strength = hypothesis.get("analytical_evidence_strength") or hypothesis.get("analytical_confidence")
-    if isinstance(strength, dict):
-        strength.setdefault("metric_name", "analytical_evidence_strength")
-        strength.setdefault("calibrated_probability", False)
-        strength.setdefault(
-            "description",
-            "Heuristic evidence strength for post-session analysis; not a calibrated probability.",
-        )
-        hypothesis.setdefault("analytical_evidence_strength", strength)
-        hypothesis.setdefault("analytical_confidence", strength)
-    provenance = report.setdefault("data_provenance", {})
-    if isinstance(provenance, dict):
-        provenance["threat_evidence_layers"] = layers["summary"]
-    return report
 
 
 def session_state_from_payload(payload: Dict[str, Any]) -> SessionState:
@@ -479,12 +441,6 @@ def deterministic_baseline_report(
     return _safe_report_mapping(report)
 
 
-def load_json_config(path: str) -> Dict[str, Any]:
-    if not path or not Path(path).exists():
-        return {}
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
 def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
     config.apply_environment()
     storage = open_storage(config.database_url)
@@ -515,7 +471,6 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
         allow_stale=config.enrichment_allow_stale,
     )
     return {
-        "config": load_json_config(config.threat_intel_config_path),
         "feeds": feeds,
         "mitre_attack": mitre_attack,
         "enrichment_db": enrichment_db,
@@ -529,7 +484,7 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
 async def analyze_job(
     job: Dict[str, Any],
     config: ProductionConfig,
-    coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator,
+    coordinator_class: Type[Any] = CanonicalAssessmentCoordinator,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     session_payload = job.get("session") or json.loads(job["payload_json"])
@@ -541,7 +496,6 @@ async def analyze_job(
         coordinator_class=coordinator_class,
         feeds=context["feeds"],
         mitre_db=context["mitre_attack"],
-        config=context["config"],
         enrichment_db=context["enrichment_db"],
         feed_loading_enabled=config.enable_feed_loading,
         feed_status=context["feed_status"],
@@ -552,22 +506,9 @@ async def analyze_job(
         prediction_policy=config.prediction_policy,
         prediction_policy_path=config.prediction_policy_path,
         prediction_context=prediction_snapshot,
-        max_tokens=config.analysis_max_tokens,
-        enable_vertex_narrative=config.enable_vertex_narrative,
-        smb_asset_profile_path=config.smb_asset_profile_path,
-        smb_action_policy_path=config.smb_action_policy_path,
         response_guidance_policy_path=config.response_guidance_policy_path,
         response_guidance_asset_profile_path=config.response_guidance_asset_profile_path,
-        cisa_cache_path=config.cisa_cache_path,
-        sigma_cache_path=config.sigma_cache_path,
         mitre_cache_path=config.mitre_attack_path,
-        vertex_project_id=config.vertex_project_id,
-        vertex_location=config.vertex_location,
-        vertex_model=config.vertex_model,
-        vertex_request_timeout_seconds=config.vertex_request_timeout_seconds,
-        vertex_outer_timeout_seconds=config.vertex_outer_timeout_seconds,
-        vertex_max_retries=config.vertex_max_retries,
-        vertex_retry_delay_seconds=config.vertex_retry_delay_seconds,
     )
     if config.analysis_suppress_stdout:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -597,7 +538,7 @@ async def analyze_job(
             str(job.get("job_id") or ""),
         ),
     )
-    hunting_context = _build_session_correlation_hunting_context(
+    hunting_context = build_session_correlation_hunting_context(
         session_payload.get("session_ttp_correlations", []),
         session_payload.get("session_id", state.session_id),
     )
@@ -648,7 +589,7 @@ class AnalysisWorker:
 
     async def process_once(
         self,
-        coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator,
+        coordinator_class: Type[Any] = CanonicalAssessmentCoordinator,
         *,
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> int:

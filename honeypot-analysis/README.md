@@ -34,7 +34,8 @@ Cowrie sensor
   VOMM fallback.
 - Missing, malformed, incompatible, or hash-mismatched Transformer artifacts
   fail closed to model-unavailable/abstained forecast semantics.
-- MongoDB is disabled. Its adapter remains future work, not production state.
+- SQLite is the only active runtime backend. Removed MongoDB/PostgreSQL
+  implementations remain recoverable from Git history, not selectable code.
 
 See [current architecture](docs/ARCHITECTURE_CURRENT.md), [operations](docs/OPERATIONS.md),
 [development](docs/DEVELOPMENT.md), and [next-cohort handoff](docs/HANDOFF_NEXT_COHORT.md).
@@ -114,10 +115,9 @@ python -m production.api.dashboard_api --help
 Reviewed offline bootstrap feeds live under `data/feeds/`; runtime refreshes
 must use configured writable deployment paths.
 
-Historical evaluators under `production/tools` are not production entrypoints.
-Some remain because current rollback evaluation and immutable research evidence
-import their deterministic parsing and metric functions. Their presence does
-not make their old prediction policies supported runtime modes.
+Retained evaluators under `production/tools` support current reproducibility or
+review workflows. Superseded hypothesis evaluators remain only as immutable
+results under `evaluation/` and in Git history.
 
 ## Evidence and deployment status
 
@@ -135,9 +135,9 @@ rollback evidence; this README does not duplicate those operational facts.
 ## Optional components
 
 Optional dependency groups are separated in `pyproject.toml` and
-`requirements-*.txt`. MongoDB, SecureBERT, Vertex presentation, PDF/STIX
-artifacts, PostgreSQL compatibility, and research training are not part of the
-minimal deployed runtime. Optional imports must remain lazy and fail closed.
+`requirements-*.txt`. SecureBERT, PDF/STIX artifacts, evaluation, and research
+training are not part of the minimal runtime. Optional imports must remain lazy
+and fail closed. MongoDB, PostgreSQL, and Vertex dependencies are archived.
 
 For retention rules and generated output policy, see
 [RETENTION_POLICY.md](docs/RETENTION_POLICY.md).

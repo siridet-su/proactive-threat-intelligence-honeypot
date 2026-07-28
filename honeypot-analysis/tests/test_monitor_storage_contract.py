@@ -208,7 +208,6 @@ def _mongo_config(tmp_path: Path) -> monitor_web.MonitorConfig:
             "honeypot?authSource=admin"
         ),
         reports_dir=str(tmp_path / "reports"),
-        enable_smb_decisions=False,
     )
 
 
@@ -387,7 +386,6 @@ def test_explicit_legacy_db_path_remains_supported_through_storage_contract(
     config = monitor_web.MonitorConfig(
         db_path=str(database_path),
         reports_dir=str(tmp_path / "reports"),
-        enable_smb_decisions=False,
     )
 
     snapshot = monitor_web.load_snapshot(config)

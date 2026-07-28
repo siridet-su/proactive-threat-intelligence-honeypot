@@ -25,7 +25,6 @@ from production.workers.enrichment_worker import EnrichmentWorker
 from production.workers.analysis_worker import AnalysisWorker
 from production.workers.session_monitor import CampaignTracker, SessionMonitor, SessionState
 from production.workers.session_worker import SessionWorker
-from tests.test_mongodb_storage import make_storage
 
 
 def test_lifecycle_signal_is_interruptible_and_previous_handler_is_restored() -> None:
@@ -240,15 +239,10 @@ def test_forwarder_logs_idle_spool_status_initially_but_not_each_poll(
     assert results == [idle]
 
 
-@pytest.mark.parametrize("backend", ["sqlite", "mongodb"])
 def test_operational_metrics_cover_connectivity_counts_queues_and_webhooks(
-    backend: str,
     tmp_path,
 ) -> None:
-    if backend == "sqlite":
-        storage = open_storage(f"sqlite:///{tmp_path / 'metrics.db'}")
-    else:
-        storage = make_storage()[0]
+    storage = open_storage(f"sqlite:///{tmp_path / 'metrics.db'}")
 
     event_id, inserted = storage.store_event(
         "sensor-a",
@@ -286,10 +280,7 @@ def test_operational_metrics_cover_connectivity_counts_queues_and_webhooks(
         assert queue["oldest_ready_age_seconds"] is not None
     assert isinstance(metrics["webhook_delivery_status"], dict)
     assert "checked_at" in metrics
-    if backend == "sqlite":
-        assert metrics["database_bytes"] > 0
-    else:
-        assert metrics["database_bytes"] is None
+    assert metrics["database_bytes"] > 0
 
 
 def test_ingest_process_metrics_report_duplicate_rate_without_event_content() -> None:

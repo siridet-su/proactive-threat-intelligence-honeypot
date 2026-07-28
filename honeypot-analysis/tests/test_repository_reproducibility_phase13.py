@@ -19,17 +19,12 @@ def test_pyproject_separates_runtime_and_optional_dependency_groups() -> None:
     assert project["requires-python"] == ">=3.11"
     assert project["dependencies"] == ["requests>=2.31,<3"]
     assert set(extras) == {
-        "mongodb",
-        "postgresql",
         "securebert",
         "training",
-        "vertex",
         "artifacts",
         "evaluation",
         "test",
     }
-    assert any(item.startswith("pymongo") for item in extras["mongodb"])
-    assert any(item.startswith("google-genai") for item in extras["vertex"])
     assert any(item.startswith("reportlab") for item in extras["artifacts"])
     assert any(item.startswith("stix2-validator") for item in extras["artifacts"])
     assert any(item.startswith("torch") for item in extras["securebert"])
@@ -41,11 +36,8 @@ def test_requirement_files_match_documented_optional_groups() -> None:
     expected = {
         "requirements.txt": "requests>=2.31,<3",
         "requirements-dev.txt": "pytest>=8,<10",
-        "requirements-mongodb.txt": "pymongo>=4.6,<5",
-        "requirements-postgresql.txt": "psycopg[binary]>=3.1,<4",
         "requirements-securebert.txt": "transformers>=4.40,<5",
         "requirements-training.txt": "pandas>=2.2,<4",
-        "requirements-vertex.txt": "google-genai>=1,<2",
         "requirements-artifacts.txt": "stix2-validator>=3.2,<4",
         "requirements-evaluation.txt": "scikit-learn>=1.4,<2",
     }
@@ -55,9 +47,13 @@ def test_requirement_files_match_documented_optional_groups() -> None:
     constraints = (ROOT / "constraints-core-test.txt").read_text(encoding="utf-8")
     assert "requests==" in constraints
     assert "pytest==" in constraints
-    mongo_constraints = (ROOT / "constraints-mongodb.txt").read_text(encoding="utf-8")
-    assert "pymongo==" in mongo_constraints
-    assert "dnspython==" in mongo_constraints
+    for archived in (
+        "requirements-mongodb.txt",
+        "requirements-postgresql.txt",
+        "requirements-vertex.txt",
+        "constraints-mongodb.txt",
+    ):
+        assert not (ROOT / archived).exists()
 
 
 def test_core_environment_imports_every_production_module_in_isolation() -> None:

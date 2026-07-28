@@ -2,7 +2,7 @@
 
 This module is intentionally read-only. It answers which ATT&CK techniques are
 covered by command rules, SecureBERT labels, session-correlation knowledge,
-prediction policy, and SMB recommendation policy. It does not change runtime
+and response-guidance policy. It does not change runtime
 classification or recommendation behavior.
 """
 
@@ -127,7 +127,7 @@ def _session_correlation_ttps(policy_path: str, knowledge_pack_paths: Any) -> Di
     }
 
 
-def _smb_policy_ttps(policy_path: str) -> Set[str]:
+def _guidance_policy_ttps(policy_path: str) -> Set[str]:
     policy = _load_json(policy_path)
     return _extract_ttps(policy)
 
@@ -181,10 +181,10 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
             notes="Combined trusted policy plus configured knowledge packs.",
         ),
         _coverage_entry(
-            "smb_action_policy_ttp_references",
-            _smb_policy_ttps(config.smb_action_policy_path),
+            "response_guidance_policy_ttp_references",
+            _guidance_policy_ttps(config.response_guidance_policy_path),
             mitre_universe,
-            notes="TTP references in SMB action playbooks/trusted source metadata.",
+            notes="TTP references in the canonical advisory-only v3 policy.",
         ),
     ]
     hardcoded_surfaces = [
@@ -204,9 +204,9 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
             "risk": "Base session-level correlations are curated subset unless generated knowledge packs are configured.",
         },
         {
-            "file": "configs/smb_action_playbooks.trusted.json",
-            "symbol": "risk_rules / goal_rules / action_playbooks",
-            "risk": "Curated SMB playbooks are trustworthy but do not contain per-technique coverage for the full ATT&CK space.",
+            "file": "configs/response_guidance_policy.v3.json",
+            "symbol": "finding_rules / action_playbooks",
+            "risk": "Curated advisory guidance does not cover the full ATT&CK space.",
         },
     ]
     return {

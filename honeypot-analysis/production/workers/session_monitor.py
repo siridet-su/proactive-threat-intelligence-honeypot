@@ -1450,7 +1450,6 @@ def build_pipeline_trigger(
     coordinator_class,
     feeds=None,
     mitre_db=None,
-    config: dict = None,
     enrichment_db: dict = None,
     feed_loading_enabled: Optional[bool] = None,
     feed_status: Optional[Dict[str, Any]] = None,
@@ -1461,22 +1460,9 @@ def build_pipeline_trigger(
     prediction_policy: Optional[Dict[str, Any]] = None,
     prediction_policy_path: str = "",
     prediction_context: Optional[Dict[str, Any]] = None,
-    max_tokens: int = 4000,
-    enable_vertex_narrative: bool = False,
-    smb_asset_profile_path: str = "",
-    smb_action_policy_path: str = "",
     response_guidance_policy_path: str = "",
     response_guidance_asset_profile_path: str = "",
-    cisa_cache_path: str = "",
-    sigma_cache_path: str = "",
     mitre_cache_path: str = "",
-    vertex_project_id: str = "",
-    vertex_location: str = "",
-    vertex_model: str = "",
-    vertex_request_timeout_seconds: float = 45.0,
-    vertex_outer_timeout_seconds: float = 50.0,
-    vertex_max_retries: int = 2,
-    vertex_retry_delay_seconds: float = 2.0,
 ):
     """
     Returns an on_session_end callback that runs the full analysis pipeline
@@ -1484,9 +1470,11 @@ def build_pipeline_trigger(
 
     Usage (Colab)
     -------------
-        from production.reporting.reporting_pipeline import ImprovedAsyncSwarmCoordinator
+        from production.reporting.canonical_pipeline import (
+            CanonicalAssessmentCoordinator,
+        )
         trigger = build_pipeline_trigger(
-            ImprovedAsyncSwarmCoordinator,
+            CanonicalAssessmentCoordinator,
             feeds=feeds, mitre_db=mitre_db, config=config,
         )
         monitor = SessionMonitor(feeds=feeds, mitre_db=mitre_db, on_session_end=trigger)
@@ -1733,13 +1721,6 @@ def build_pipeline_trigger(
             import inspect
 
             coordinator_kwargs = {
-                "base_url": "",
-                "model": vertex_model or "",
-                "max_tokens": max_tokens,
-                "enable_vertex_narrative": bool(enable_vertex_narrative),
-                "threat_intel_config": config if config is not None else {},
-                "threat_feeds": feeds,
-                "mitre_db": mitre_db,
                 "behavior_policy_document": behavior_policy_document,
                 "behavior_policy_path": behavior_policy_path,
                 "classification_policy": classification_policy or {},
@@ -1747,19 +1728,9 @@ def build_pipeline_trigger(
                 "prediction_policy": prediction_policy,
                 "prediction_policy_path": prediction_policy_path,
                 "prediction_context": prediction_context or {},
-                "recommendation_asset_profile_path": smb_asset_profile_path,
-                "recommendation_action_policy_path": smb_action_policy_path,
                 "response_guidance_policy_path": response_guidance_policy_path,
                 "response_guidance_asset_profile_path": response_guidance_asset_profile_path,
-                "cisa_cache_path": cisa_cache_path,
-                "sigma_cache_path": sigma_cache_path,
                 "mitre_cache_path": mitre_cache_path,
-                "vertex_project_id": vertex_project_id,
-                "vertex_location": vertex_location,
-                "vertex_request_timeout_seconds": vertex_request_timeout_seconds,
-                "vertex_outer_timeout_seconds": vertex_outer_timeout_seconds,
-                "vertex_max_retries": vertex_max_retries,
-                "vertex_retry_delay_seconds": vertex_retry_delay_seconds,
             }
             signature = inspect.signature(coordinator_class)
             accepts_kwargs = any(
@@ -1773,9 +1744,6 @@ def build_pipeline_trigger(
             }
             coord = coordinator_class(**constructor_kwargs)
             injected_attributes = {
-                "enable_vertex_narrative": bool(enable_vertex_narrative),
-                "threat_feeds": feeds,
-                "mitre_db": mitre_db,
                 "behavior_policy_document": behavior_policy_document,
                 "behavior_policy_path": str(behavior_policy_path or ""),
                 "classification_policy": classification_policy or {},
@@ -1783,8 +1751,6 @@ def build_pipeline_trigger(
                 "prediction_policy": prediction_policy,
                 "prediction_policy_path": str(prediction_policy_path or ""),
                 "prediction_context": prediction_context or {},
-                "recommendation_asset_profile_path": str(smb_asset_profile_path or ""),
-                "recommendation_action_policy_path": str(smb_action_policy_path or ""),
                 "response_guidance_policy_path": str(response_guidance_policy_path or ""),
                 "response_guidance_asset_profile_path": str(response_guidance_asset_profile_path or ""),
             }

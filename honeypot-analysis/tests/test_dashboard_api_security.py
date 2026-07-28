@@ -62,7 +62,6 @@ def _config(
         dashboard_read_token=read_token,
         dashboard_write_token=write_token,
         database_url="sqlite:///:memory:",
-        enable_smb_decisions=False,
     )
 
 

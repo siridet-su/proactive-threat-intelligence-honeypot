@@ -9,7 +9,6 @@ from production.policies.validate_prediction_policy import validate_policy_docum
 from production.prediction.vomm_rollback import (
     ValidatedVommRollbackPredictor,
 )
-from production.reporting.threat_hypothesis import attach_model_prediction
 from production.workers.session_worker import SessionWorker
 
 
@@ -178,21 +177,14 @@ def test_api_and_report_preserve_new_status_and_old_snapshot_reading() -> None:
         artifact_validation=_valid_artifact(),
     ).predict(_features("execution"), event_id="report-abstained")
     current = _current_prediction_payload({"payload": snapshot}, [])
-    report = attach_model_prediction({}, snapshot)
-
     assert current["prediction_status"] == "abstained"
     assert current["generic_progression_prior"]["not_for_response_guidance"] is True
-    assert report["model_prediction"]["status"] == "abstained"
-    assert report["model_prediction"]["next_tactic_ranking"] == []
-    assert report["model_prediction"]["generic_progression_prior"]["not_empirical_prediction"] is True
     html = _render_prediction_panel({"ok": True, "latest_prediction_snapshot": {"payload": snapshot}})
     assert "explicitly abstained" in html
     assert "Generic Progression Prior (Non-empirical, Offline Planning Only)" in html
 
     historical = {"payload": {"snapshot_id": "old", "final_ranking": [{"tactic": "discovery"}]}}
     assert _current_prediction_payload(historical, [])["prediction_status"] == "predicted"
-    historical_report = attach_model_prediction({}, historical)
-    assert historical_report["model_prediction"]["status"] == "available"
 
 
 def test_external_only_policy_contract_rejects_fallback_or_missing_pins() -> None:

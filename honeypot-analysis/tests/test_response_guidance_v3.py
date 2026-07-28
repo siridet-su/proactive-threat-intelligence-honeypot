@@ -14,9 +14,10 @@ from production.reporting.response_guidance_v3 import (
     build_response_guidance_v3_from_session,
     load_response_guidance_asset_profile,
     load_response_guidance_policy,
+    read_legacy_response_guidance,
     validate_response_guidance_v3,
 )
-from production.reporting.threat_hypothesis import build_v2_report
+from production.reporting.session_assessment_v4 import build_session_assessment_v4
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,19 +118,33 @@ def test_v3_detects_tampered_canonical_refs_and_uses_explicit_profile_hash(tmp_p
 
 
 def test_new_reports_store_v3_only_and_preserve_legacy_input_as_read_only_metadata() -> None:
-    report = build_v2_report(
-        {"response_guidance_v2": {"schema_version": "response_guidance.v2", "guidance_id": "historical"}},
+    historical = {
+        "schema_version": "response_guidance.v2",
+        "guidance_id": "historical",
+    }
+    original = copy.deepcopy(historical)
+    adapter = read_legacy_response_guidance(historical)
+    report = build_session_assessment_v4(
         [_session()],
+        behavior_policy_path="configs/threat_hypothesis_behavior.trusted.json",
+        classification_policy_path="configs/classification_rules.trusted.json",
     )
 
+    assert historical == original
+    assert adapter["status"] == "legacy_read_only"
+    assert adapter["record"] == historical
+    assert adapter["recomputed"] is False
     assert report["response_guidance_v3"]["schema_version"] == "response_guidance.v3"
     assert "response_guidance_v2" not in report
-    assert report["legacy_recommendation_adapter"]["status"] == "legacy_read_only"
-    assert report["session_assessment_v3"]["response_guidance_ref"]["schema_version"] == "response_guidance.v3"
+    assert "legacy_recommendation_adapter" not in report
 
 
 def test_report_monitor_and_artifact_consumers_use_the_same_v3_actions() -> None:
-    report = build_v2_report({}, [_session()])
+    report = build_session_assessment_v4(
+        [_session()],
+        behavior_policy_path="configs/threat_hypothesis_behavior.trusted.json",
+        classification_policy_path="configs/classification_rules.trusted.json",
+    )
     guidance = report["response_guidance_v3"]
     monitor = _report_recommendations(report, {}, _session())
     bundle = build_stix_bundle(report, _session())

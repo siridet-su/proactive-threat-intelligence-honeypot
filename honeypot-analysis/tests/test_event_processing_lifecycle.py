@@ -4,14 +4,13 @@ import json
 import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
 
 import pytest
 
-from production.storage import PostgresStorage, SQLiteStorage, StorageBackend
+from production.storage import SQLiteStorage
 
 
 BASE_TIME = datetime(2026, 7, 18, 8, 0, tzinfo=timezone.utc)
@@ -146,80 +145,6 @@ def test_initialize_migrates_legacy_event_and_session_schema(tmp_path: Path) -> 
         "processed_at": None,
     }
     assert storage.claim_events("worker-a", 10, 30, now=BASE_TIME) == []
-
-
-def test_postgres_lifecycle_contract_and_schema_are_structurally_complete() -> None:
-    # Construction is deliberately bypassed so this remains a no-driver,
-    # no-connection structural check rather than a claim of PostgreSQL runtime
-    # verification.
-    postgres = PostgresStorage.__new__(PostgresStorage)
-    assert isinstance(postgres, StorageBackend)
-
-    root = Path(__file__).parents[1]
-    schema = (root / "production/storage/postgres_schema.sql").read_text(
-        encoding="utf-8"
-    )
-    for column in (
-        "claim_owner",
-        "claim_token",
-        "claim_leader_scope",
-        "claim_leader_token",
-        "claim_expires_at",
-        "attempts",
-        "next_retry_at",
-        "last_error_code",
-        "last_error_type",
-        "last_error_at",
-        "processing_outcome",
-        "processed_at",
-        "effect_summary_json",
-    ):
-        assert f"ADD COLUMN IF NOT EXISTS {column} " in schema
-    assert "CREATE TABLE IF NOT EXISTS worker_leases" in schema
-    assert "CREATE INDEX IF NOT EXISTS idx_events_claimable" in schema
-    assert "CREATE INDEX IF NOT EXISTS idx_events_failed" in schema
-    assert "CREATE INDEX IF NOT EXISTS idx_events_leader_claims" in schema
-    assert "CREATE INDEX IF NOT EXISTS idx_events_session_queue" in schema
-    assert "CREATE INDEX IF NOT EXISTS idx_sessions_active_source_updated" in schema
-
-    backend_source = (root / "production/storage/backend.py").read_text(
-        encoding="utf-8"
-    ).split("class PostgresStorage", 1)[1]
-    assert "FOR UPDATE OF candidate SKIP LOCKED" in backend_source
-    assert "RETURNING attempts" in backend_source
-
-
-def test_postgres_failed_event_timestamps_are_canonical_iso_strings() -> None:
-    postgres = PostgresStorage.__new__(PostgresStorage)
-
-    class Cursor:
-        def fetchall(self) -> list[dict]:
-            return [
-                {
-                    "event_id": "event-a",
-                    "sensor_id": "sensor-a",
-                    "payload_json": {},
-                    "attempts": 2,
-                    "last_error_code": "database_unavailable",
-                    "last_error_type": "StorageError",
-                    "last_error_at": datetime(
-                        2026, 7, 18, 8, 1, tzinfo=timezone(timedelta(hours=2))
-                    ),
-                    "processing_outcome": "dead_letter",
-                    "processed_at": datetime(2026, 7, 18, 8, 2),
-                }
-            ]
-
-    @contextmanager
-    def connection():
-        yield object()
-
-    postgres.connection = connection  # type: ignore[method-assign]
-    postgres._execute = lambda *_args, **_kwargs: Cursor()  # type: ignore[method-assign]
-
-    failed = postgres.list_failed_events()
-    assert failed[0]["last_error_at"] == "2026-07-18T06:01:00+00:00"
-    assert failed[0]["processed_at"] == "2026-07-18T08:02:00+00:00"
 
 
 def test_two_sqlite_claimers_receive_disjoint_events(tmp_path: Path) -> None:

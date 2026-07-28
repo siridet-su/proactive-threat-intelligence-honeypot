@@ -10,8 +10,8 @@ pip install -r requirements-dev.txt
 ```
 
 Optional dependencies are installed only for their scoped work. Core imports
-and `--help` must work without MongoDB, Torch/Transformers, Vertex, ReportLab,
-or STIX validation libraries.
+and `--help` must work without Torch/Transformers, ReportLab, or STIX
+validation libraries.
 
 ## Validation
 
@@ -32,8 +32,6 @@ python -m production.policies.validate_prediction_policy \
   --policy configs/prediction_policy.transformer_poc.trusted.json
 python -m production.policies.validate_classification_rules \
   --policy configs/classification_rules.trusted.json
-python -m production.policies.validate_smb_policy \
-  --action-policy configs/smb_action_playbooks.trusted.json
 python -m production.policies.validate_response_guidance_policy \
   --policy configs/response_guidance_policy.v3.json
 ```
@@ -74,10 +72,9 @@ snapshots or derive alerting from it.
 
 ### Storage change
 
-Maintain SQLite transaction/lease semantics and backend contract tests.
-Migration preflight must validate every record before destination writes and
-leave SQLite unchanged. MongoDB changes remain future/offline until separately
-authorized.
+Maintain SQLite transaction, migration, lease, backup, and restore semantics.
+Adding another backend is a new design requiring its own durable contract and
+operational evidence; it is not a compatibility toggle.
 
 ## Generated artifacts
 

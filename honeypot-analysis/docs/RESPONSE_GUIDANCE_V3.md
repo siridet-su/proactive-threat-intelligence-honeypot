@@ -43,9 +43,9 @@ python -m production.policies.validate_response_guidance_policy \
 an explicit non-example asset profile and its byte SHA-256 is recorded in
 provenance. Asset context is not used to select v3 tasks.
 
-Legacy `SMB_*` policy fields are retained only so historical v1/v2 documents
-can be decoded. They do not cause new v1/v2 guidance, alerts, or snapshot
-writes.
+Legacy `SMB_*` runtime fields and generators are removed. Historical v1/v2
+documents are decoded by the read-only adapter from their stored payloads;
+they do not require an active legacy policy or generator.
 
 ## Migration and historical data
 

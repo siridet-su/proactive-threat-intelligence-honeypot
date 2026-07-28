@@ -17,9 +17,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from production.policies.validate_response_guidance_policy import (
     SCHEMA_VERSION as POLICY_SCHEMA_VERSION,
+    validate_response_guidance_asset_profile,
     validate_response_guidance_policy,
 )
-from production.policies.validate_smb_policy import validate_asset_profile
 from production.utils.serialization import stable_id, stable_json, utc_now
 
 
@@ -457,7 +457,7 @@ def load_response_guidance_asset_profile(path_text: str = "") -> Dict[str, Any]:
         document = json.loads(raw.decode("utf-8"))
         if not isinstance(document, dict):
             raise ValueError("asset profile root must be an object")
-        errors = validate_asset_profile(document)
+        errors = validate_response_guidance_asset_profile(document)
         return {
             "document": document,
             "sha256": _sha256_bytes(raw),
@@ -619,7 +619,11 @@ def build_response_guidance_v3(
     profile_document = deepcopy(asset_profile) if isinstance(asset_profile, dict) else {}
     profile_errors = list(
         asset_profile_validation_errors
-        or (validate_asset_profile(profile_document) if profile_document else [])
+        or (
+            validate_response_guidance_asset_profile(profile_document)
+            if profile_document
+            else []
+        )
     )
     profile_digest = _clean(asset_profile_sha256) or (_document_sha256(profile_document) if profile_document else "")
     policy_ok = policy_status == "valid" and not policy_errors and bool(digest)
@@ -865,6 +869,8 @@ def read_legacy_response_guidance(record: Any) -> Dict[str, Any]:
         "status": "legacy_read_only" if schema in {"smb_decision.v1", "response_guidance.v2"} else "not_available",
         "legacy_schema_version": schema,
         "legacy_guidance_id": _clean(value.get("guidance_id") or value.get("decision_id")),
+        "record": deepcopy(value),
+        "recomputed": False,
         "advisory_actions": [],
         "semantics": "Historical v1/v2 data is retained without recomputation or action authorization. Reevaluate under response_guidance.v3 for current advisory tasks.",
     }

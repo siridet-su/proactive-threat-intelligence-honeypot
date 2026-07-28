@@ -12,7 +12,7 @@ Feeds included:
   2. Sigma Rules (SigmaHQ community detection rules)
      - Source: https://github.com/SigmaHQ/sigma (rules/linux/*, rules/network/*)
      - Updates: continuous community contributions
-     - Use: replace/supplement hardcoded keyword lists in configs/threat_intel_config.json
+     - Use: provide contextual CISA/Sigma evidence without changing canonical findings
 
 Both feeds are cached locally and auto-refreshed on schedule.
 

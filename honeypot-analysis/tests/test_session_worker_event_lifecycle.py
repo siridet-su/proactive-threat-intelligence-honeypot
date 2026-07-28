@@ -44,7 +44,6 @@ def _config(tmp_path: Path, *, batch_size: int = 10) -> ProductionConfig:
         enable_securebert=False,
         enable_enrichment_jobs=False,
         enable_session_ttp_correlation=False,
-        enable_smb_decisions=False,
         analysis_skip_empty_sessions=False,
         credential_hmac_keyring_file=str(keyring),
         prediction_policy={"enabled": False},

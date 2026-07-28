@@ -54,6 +54,39 @@ def _as_list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else [value]
 
 
+def validate_response_guidance_asset_profile(
+    profile: Dict[str, Any],
+) -> List[str]:
+    """Validate the optional, context-only asset profile.
+
+    The historical schema label remains accepted so existing reviewed profile
+    documents can be hashed and displayed without rewriting them. Asset data
+    is never an action-selection input in response_guidance.v3.
+    """
+
+    errors: List[str] = []
+    if profile.get("schema_version") != "smb_asset_profile.v1":
+        errors.append(
+            "asset profile: schema_version must be smb_asset_profile.v1"
+        )
+    assets = _as_list(profile.get("assets"))
+    if not assets:
+        errors.append("asset profile: at least one asset should be defined")
+    for index, asset in enumerate(assets):
+        if not isinstance(asset, dict):
+            errors.append(f"assets[{index}]: asset must be an object")
+            continue
+        for key in (
+            "asset_id",
+            "display_name",
+            "service_category",
+            "criticality",
+        ):
+            if not asset.get(key):
+                errors.append(f"assets[{index}]: missing {key}")
+    return errors
+
+
 def _date(value: Any) -> Optional[date]:
     try:
         return date.fromisoformat(str(value))

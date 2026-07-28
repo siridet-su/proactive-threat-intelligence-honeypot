@@ -3,22 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
 from production.utils.sensitive_data import redact_error_for_log
 
 
 SQLITE_BACKEND = "sqlite"
-MONGODB_BACKEND = "mongodb"
-POSTGRESQL_BACKEND = "postgresql"
-SUPPORTED_DATABASE_BACKENDS = {
-    SQLITE_BACKEND,
-    MONGODB_BACKEND,
-    POSTGRESQL_BACKEND,
-}
-MONGODB_SCHEMES = {"mongodb", "mongodb+srv"}
-POSTGRESQL_SCHEMES = {"postgres", "postgresql"}
+SUPPORTED_DATABASE_BACKENDS = {SQLITE_BACKEND}
 DEFAULT_SQLITE_DATABASE_PATH = "production_state.db"
 
 EVENT_FAILURE_CODES = frozenset(
@@ -266,27 +257,19 @@ class DatabaseConfigurationError(ValueError):
 
 
 def _normalize_backend(value: str) -> str:
-    backend = str(value or "").strip().lower()
-    if backend == "postgres":
-        return POSTGRESQL_BACKEND
-    return backend
+    return str(value or "").strip().lower()
 
 
 def _backend_from_url(database_url: str) -> str:
     value = str(database_url or "").strip()
     if value.startswith("sqlite:///"):
         return SQLITE_BACKEND
-    scheme = urlsplit(value).scheme.lower()
-    if scheme in MONGODB_SCHEMES:
-        return MONGODB_BACKEND
-    if scheme in POSTGRESQL_SCHEMES:
-        return POSTGRESQL_BACKEND
-    if not scheme:
+    if "://" not in value:
         raise DatabaseConfigurationError(
-            "legacy database_url must be a supported URL; plain filesystem paths are not accepted"
+            "database_url must use sqlite:///DATABASE_PATH; plain paths are not accepted"
         )
     raise DatabaseConfigurationError(
-        f"unsupported database URL scheme {scheme!r}; select sqlite or mongodb explicitly"
+        "unsupported database URL; the canonical runtime supports SQLite only"
     )
 
 
@@ -299,54 +282,13 @@ def _sqlite_path_from_url(database_url: str) -> str:
     return path
 
 
-def _mongodb_database_from_uri(uri: str) -> str:
-    parsed = urlsplit(uri)
-    path = unquote(parsed.path.lstrip("/"))
-    if not path:
-        return ""
-    if "/" in path:
-        raise DatabaseConfigurationError("MongoDB URI must contain at most one database name")
-    return path
-
-
-def _mongodb_uri_with_database(uri: str, database: str) -> str:
-    parsed = urlsplit(uri)
-    if parsed.scheme.lower() not in MONGODB_SCHEMES or not parsed.netloc:
-        raise DatabaseConfigurationError(
-            "MONGODB_URI must use mongodb:// or mongodb+srv:// and include a host"
-        )
-    uri_database = _mongodb_database_from_uri(uri)
-    if uri_database and uri_database != database:
-        raise DatabaseConfigurationError(
-            "MONGODB_URI database name conflicts with MONGODB_DATABASE"
-        )
-    return urlunsplit(
-        (
-            parsed.scheme,
-            parsed.netloc,
-            f"/{quote(database, safe='')}",
-            parsed.query,
-            parsed.fragment,
-        )
-    )
-
-
-def _safe_endpoint(database_url: str) -> str:
-    parsed = urlsplit(database_url)
-    # Removing everything through the final @ strips URI user information even
-    # when a password contains a percent-encoded @. Query parameters are omitted.
-    return parsed.netloc.rsplit("@", 1)[-1]
-
-
 @dataclass(frozen=True)
 class DatabaseSettings:
-    """Validated, backend-neutral database connection settings."""
+    """Validated canonical SQLite connection settings."""
 
     backend: str
     database_url: str
     sqlite_database_path: str = ""
-    mongodb_uri: str = ""
-    mongodb_database: str = ""
 
     @classmethod
     def from_values(
@@ -355,19 +297,15 @@ class DatabaseSettings:
         database_backend: str = "",
         database_url: str = "",
         sqlite_database_path: str = "",
-        mongodb_uri: str = "",
-        mongodb_database: str = "",
     ) -> "DatabaseSettings":
         backend = _normalize_backend(database_backend)
         legacy_url = str(database_url or "").strip()
         sqlite_path = str(sqlite_database_path or "").strip()
-        mongo_uri = str(mongodb_uri or "").strip()
-        mongo_database = str(mongodb_database or "").strip()
 
         url_backend = _backend_from_url(legacy_url) if legacy_url else ""
         if backend and backend not in SUPPORTED_DATABASE_BACKENDS:
             raise DatabaseConfigurationError(
-                f"unsupported database backend {backend!r}; expected sqlite or mongodb"
+                f"unsupported database backend {backend!r}; expected sqlite"
             )
         if backend and url_backend and backend != url_backend:
             raise DatabaseConfigurationError(
@@ -375,67 +313,16 @@ class DatabaseSettings:
             )
         selected_backend = backend or url_backend or SQLITE_BACKEND
 
-        if selected_backend == SQLITE_BACKEND:
-            legacy_path = _sqlite_path_from_url(legacy_url) if legacy_url else ""
-            if legacy_path and sqlite_path and legacy_path != sqlite_path:
-                raise DatabaseConfigurationError(
-                    "SQLITE_DATABASE_PATH conflicts with legacy sqlite database_url"
-                )
-            selected_path = sqlite_path or legacy_path or DEFAULT_SQLITE_DATABASE_PATH
-            return cls(
-                backend=SQLITE_BACKEND,
-                database_url=f"sqlite:///{selected_path}",
-                sqlite_database_path=selected_path,
-                mongodb_uri=mongo_uri,
-                mongodb_database=mongo_database,
-            )
-
-        if selected_backend == MONGODB_BACKEND:
-            legacy_mongo_uri = legacy_url if url_backend == MONGODB_BACKEND else ""
-            selected_uri = mongo_uri or legacy_mongo_uri
-            if not selected_uri:
-                raise DatabaseConfigurationError(
-                    "DATABASE_BACKEND=mongodb requires MONGODB_URI"
-                )
-            uri_database = _mongodb_database_from_uri(selected_uri)
-            legacy_database = (
-                _mongodb_database_from_uri(legacy_mongo_uri)
-                if legacy_mongo_uri
-                else ""
-            )
-            selected_database = mongo_database or uri_database or legacy_database
-            if not selected_database:
-                raise DatabaseConfigurationError(
-                    "DATABASE_BACKEND=mongodb requires MONGODB_DATABASE"
-                )
-            canonical_url = _mongodb_uri_with_database(selected_uri, selected_database)
-            if legacy_mongo_uri:
-                canonical_legacy = _mongodb_uri_with_database(
-                    legacy_mongo_uri,
-                    selected_database,
-                )
-                if mongo_uri and canonical_legacy != canonical_url:
-                    raise DatabaseConfigurationError(
-                        "MONGODB_URI conflicts with legacy mongodb database_url"
-                    )
-            return cls(
-                backend=MONGODB_BACKEND,
-                database_url=canonical_url,
-                mongodb_uri=selected_uri,
-                mongodb_database=selected_database,
-                sqlite_database_path=sqlite_path,
-            )
-
-        if not legacy_url:
+        legacy_path = _sqlite_path_from_url(legacy_url) if legacy_url else ""
+        if legacy_path and sqlite_path and legacy_path != sqlite_path:
             raise DatabaseConfigurationError(
-                "legacy PostgreSQL compatibility requires a postgresql:// database_url"
+                "SQLITE_DATABASE_PATH conflicts with legacy sqlite database_url"
             )
+        selected_path = sqlite_path or legacy_path or DEFAULT_SQLITE_DATABASE_PATH
         return cls(
-            backend=POSTGRESQL_BACKEND,
-            database_url=legacy_url,
-            sqlite_database_path=sqlite_path,
-            mongodb_uri=mongo_uri,
-            mongodb_database=mongo_database,
+            backend=SQLITE_BACKEND,
+            database_url=f"sqlite:///{selected_path}",
+            sqlite_database_path=selected_path,
         )
 
     @classmethod
@@ -443,18 +330,10 @@ class DatabaseSettings:
         return cls.from_values(database_url=database_url)
 
     def safe_descriptor(self) -> Dict[str, str]:
-        """Return connection identity without credentials or query parameters."""
-        if self.backend == SQLITE_BACKEND:
-            return {
-                "backend": SQLITE_BACKEND,
-                "database_path": self.sqlite_database_path,
-            }
-        parsed = urlsplit(self.database_url)
-        database = unquote(parsed.path.lstrip("/"))
+        """Return the non-secret SQLite connection identity."""
         return {
-            "backend": self.backend,
-            "endpoint": _safe_endpoint(self.database_url),
-            "database": database,
+            "backend": SQLITE_BACKEND,
+            "database_path": self.sqlite_database_path,
         }
 
 
@@ -473,17 +352,7 @@ def safe_database_label(database: str | DatabaseSettings) -> str:
         else DatabaseSettings.from_url(database)
     )
     descriptor = settings.safe_descriptor()
-    if settings.backend == SQLITE_BACKEND:
-        return f"sqlite:///{descriptor['database_path']}"
-    endpoint = descriptor.get("endpoint") or "private"
-    database_name = descriptor.get("database") or "default"
-    configured_scheme = urlsplit(settings.database_url).scheme.lower()
-    label_scheme = (
-        configured_scheme
-        if configured_scheme in MONGODB_SCHEMES | POSTGRESQL_SCHEMES
-        else settings.backend
-    )
-    return f"{label_scheme}://{endpoint}/{database_name}"
+    return f"sqlite:///{descriptor['database_path']}"
 
 
 @runtime_checkable
