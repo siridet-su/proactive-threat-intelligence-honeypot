@@ -11,6 +11,7 @@ from production.reporting.artifacts import _artifact_version_id
 from production.reporting.session_assessment_v4 import SessionAssessmentV4Error
 from production.storage import open_storage
 from production.utils.config import ProductionConfig
+from production.utils.serialization import stable_json
 from production.workers.analysis_worker import (
     AnalysisWorker,
     reconstruct_canonical_session_events,
@@ -114,6 +115,87 @@ def test_large_session_report_uses_complete_durable_event_manifest(tmp_path) -> 
     assert report["provenance"]["durable_event_manifest"] == (
         job_payload["canonical_event_manifest"]
     )
+
+
+def test_reconstruction_exceeds_default_ten_thousand_event_history_bound(
+    tmp_path,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'large-storage.db'}")
+    session_id = "large-default-bound"
+    event_count = 10_001
+    rows = []
+    for index in range(event_count):
+        event_id = f"large_event_{index:05d}"
+        event = {
+            "eventid": (
+                "cowrie.session.closed"
+                if index == event_count - 1
+                else "cowrie.command.input"
+            ),
+            "session": session_id,
+            "src_ip": "203.0.113.45",
+            "timestamp": f"2026-07-29T02:00:{index % 60:02d}Z",
+            "input": f"echo large-{index}",
+        }
+        rows.append(
+            (
+                event_id,
+                "sensor-phase7",
+                session_id,
+                event["src_ip"],
+                event["eventid"],
+                event["timestamp"],
+                stable_json(event),
+                f"2026-07-29T03:00:00.{index:05d}+00:00",
+            )
+        )
+    with storage.connection() as connection:
+        connection.executemany(
+            """
+            INSERT INTO events
+            (event_id, sensor_id, session_id, src_ip, eventid, timestamp,
+             payload_json, received_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+    snapshot = storage.load_session_event_snapshot(
+        session_id,
+        rows[-1][0],
+        max_events=event_count,
+    )
+    assert snapshot["event_count"] == event_count
+    assert len(snapshot["events"]) == event_count
+    assert snapshot["events"][-1]["eventid"] == "cowrie.session.closed"
+    assert len(snapshot["manifest_sha256"]) == 64
+
+    expected = {
+        key: snapshot[key]
+        for key in (
+            "schema_version",
+            "session_id",
+            "through_event_id",
+            "event_count",
+            "manifest_sha256",
+        )
+    }
+    reconstructed = reconstruct_canonical_session_events(
+        storage,
+        {
+            "session_id": session_id,
+            "raw_events": snapshot["events"][-10_000:],
+            "canonical_event_manifest": expected,
+        },
+        max_events=event_count,
+    )
+    assert len(reconstructed["raw_events"]) == event_count
+    with pytest.raises(Exception, match="event limit"):
+        storage.load_session_event_snapshot(
+            session_id,
+            rows[-1][0],
+            max_events=10_000,
+        )
 
 
 def test_durable_evidence_manifest_mismatch_and_size_excess_fail_closed(
