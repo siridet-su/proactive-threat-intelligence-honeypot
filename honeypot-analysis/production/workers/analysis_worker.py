@@ -441,9 +441,13 @@ def deterministic_baseline_report(
     return _safe_report_mapping(report)
 
 
-def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
+def load_analysis_context(
+    config: ProductionConfig,
+    *,
+    storage: Any = None,
+) -> Dict[str, Any]:
     config.apply_environment()
-    storage = open_storage(config.database_url)
+    storage = storage or open_storage(config.database_url)
     feeds = None
     mitre_attack = None
     if config.enable_feed_loading:
@@ -473,6 +477,7 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
         local_max_records=config.local_enrichment_max_records,
     )
     return {
+        "storage": storage,
         "feeds": feeds,
         "mitre_attack": mitre_attack,
         "enrichment_db": enrichment_db,
@@ -483,17 +488,64 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
     }
 
 
+def reconstruct_canonical_session_events(
+    storage: Any,
+    session_payload: Dict[str, Any],
+    *,
+    max_events: int,
+) -> Dict[str, Any]:
+    """Replace bounded monitor history with its exact durable event prefix."""
+
+    expected = session_payload.get("canonical_event_manifest")
+    if not isinstance(expected, dict):
+        raise SessionAssessmentV4Error(
+            "analysis job lacks a canonical durable event manifest"
+        )
+    required = {
+        "schema_version",
+        "session_id",
+        "through_event_id",
+        "event_count",
+        "manifest_sha256",
+    }
+    if set(expected) != required:
+        raise SessionAssessmentV4Error(
+            "analysis job canonical event manifest contract is invalid"
+        )
+    actual = storage.load_session_event_snapshot(
+        str(expected.get("session_id") or ""),
+        str(expected.get("through_event_id") or ""),
+        max_events,
+    )
+    actual_summary = {key: actual[key] for key in required}
+    if actual_summary != expected:
+        raise SessionAssessmentV4Error(
+            "durable session evidence does not match the analysis manifest"
+        )
+    reconstructed = dict(session_payload)
+    reconstructed["raw_events"] = list(actual["events"])
+    reconstructed["canonical_event_manifest"] = dict(expected)
+    return reconstructed
+
+
 async def analyze_job(
     job: Dict[str, Any],
     config: ProductionConfig,
     coordinator_class: Type[Any] = CanonicalAssessmentCoordinator,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
+    storage: Any = None,
 ) -> Dict[str, Any]:
     session_payload = job.get("session") or json.loads(job["payload_json"])
+    selected_storage = storage or open_storage(config.database_url)
+    session_payload = reconstruct_canonical_session_events(
+        selected_storage,
+        session_payload,
+        max_events=config.canonical_evidence_max_events,
+    )
     state = session_state_from_payload(session_payload)
     if not getattr(state, "bpg_list", None) or not getattr(state, "ioc_summary", None):
         attach_runtime_context(state)
-    context = load_analysis_context(config)
+    context = load_analysis_context(config, storage=selected_storage)
     trigger = build_pipeline_trigger(
         coordinator_class=coordinator_class,
         feeds=context["feeds"],
@@ -663,6 +715,7 @@ class AnalysisWorker:
                         self.config,
                         coordinator_class=coordinator_class,
                         prediction_snapshot=latest_prediction,
+                        storage=self.storage,
                     )
                 except Exception as exc:
                     safe_error = _safe_exception_text(exc)

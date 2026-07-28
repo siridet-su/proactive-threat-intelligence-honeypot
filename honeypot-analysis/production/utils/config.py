@@ -4,6 +4,7 @@ import json
 import math
 import os
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from numbers import Integral, Real
 from pathlib import Path
@@ -231,6 +232,7 @@ class ProductionConfig:
     active_session_recovery_limit: int = 10_000
     campaign_profile_cache_limit: int = 10_000
     session_event_history_limit: int = 10_000
+    canonical_evidence_max_events: int = 100_000
     event_lease_seconds: float = 60.0
     event_lease_heartbeat_seconds: float = 20.0
     event_max_attempts: int = 5
@@ -765,6 +767,22 @@ class ProductionConfig:
             raise ValueError(
                 "session_event_history_limit must be an integer of at least 1"
             )
+        if (
+            isinstance(self.canonical_evidence_max_events, bool)
+            or not isinstance(self.canonical_evidence_max_events, Integral)
+            or not 1 <= self.canonical_evidence_max_events <= 1_000_000
+        ):
+            raise ValueError(
+                "canonical_evidence_max_events must be between 1 and 1000000"
+            )
+        if (
+            not isinstance(self.classification_policy, Mapping)
+            or self.classification_policy.get("strategy") != "notebook_merge"
+        ):
+            raise ValueError(
+                "classification_policy.strategy must use the canonical "
+                "notebook_merge classifier"
+            )
         if self.event_lease_heartbeat_seconds >= self.event_lease_seconds:
             raise ValueError(
                 "event_lease_heartbeat_seconds must be less than event_lease_seconds"
@@ -985,6 +1003,10 @@ class ProductionConfig:
         cfg.session_event_history_limit = _env_int(
             "SESSION_EVENT_HISTORY_LIMIT",
             cfg.session_event_history_limit,
+        )
+        cfg.canonical_evidence_max_events = _env_int(
+            "CANONICAL_EVIDENCE_MAX_EVENTS",
+            cfg.canonical_evidence_max_events,
         )
         cfg.event_lease_heartbeat_seconds = _env_float(
             "EVENT_LEASE_HEARTBEAT_SECONDS",

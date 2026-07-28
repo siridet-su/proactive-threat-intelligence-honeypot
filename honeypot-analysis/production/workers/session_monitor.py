@@ -264,6 +264,7 @@ class AlertEvent:
     tactics_observed: List[str]
     prediction:     List[str]    # predicted next tactics
     commands_sample: List[str]
+    alert_key:      str = ""
     kev_matches:    List[dict] = field(default_factory=list)
     sigma_hits:     List[str]  = field(default_factory=list)
 
@@ -451,6 +452,7 @@ class SessionMonitor:
         credential_hasher: Optional[CredentialHasher] = None,
         campaign_profile_cache_limit: int = 10_000,
         session_event_history_limit: int = 10_000,
+        enable_legacy_campaign_tracker: bool = True,
     ):
         self.feeds          = feeds
         self.mitre_db       = mitre_db
@@ -509,9 +511,11 @@ class SessionMonitor:
         self._sessions:     Dict[str, SessionState] = {}
         self._sigma_kws:    List[str] = self._load_sigma_keywords()
         self._stats         = {"events": 0, "alerts": 0, "sessions": 0}
-        self.campaign_tracker = CampaignTracker(
-            max_profiles=campaign_profile_cache_limit
-        )  # cross-session correlation
+        self.campaign_tracker = (
+            CampaignTracker(max_profiles=campaign_profile_cache_limit)
+            if enable_legacy_campaign_tracker
+            else None
+        )
         if (
             isinstance(session_event_history_limit, bool)
             or int(session_event_history_limit) < 1
@@ -986,6 +990,15 @@ class SessionMonitor:
                     "confidence": 0.0,
                     "error": _safe_exception_text(exc),
                 }]
+        if strategy == "notebook_merge":
+            return [{
+                "command": cmd,
+                "ttp": None,
+                "tactic": "unknown",
+                "source": "canonical_classifier_unavailable",
+                "confidence": 0.0,
+                "authority": "audit_only",
+            }]
 
         events: List[dict] = []
         for fragment in self._split_command_fragments(cmd):
@@ -1299,6 +1312,7 @@ class SessionMonitor:
                 tactics_observed=list(state.unique_tactics),
                 prediction=self._predict_next(state),
                 commands_sample=state.commands[-3:],
+                alert_key=key,
                 kev_matches=kev or state.kev_matches,
                 sigma_hits=sigma or [],
             )
@@ -1360,7 +1374,16 @@ class SessionMonitor:
         alerts: List[AlertEvent] = []
         self._apply_session_enrichment(state)
 
-        campaign = self.campaign_tracker.check_and_register(state)
+        campaign = (
+            self.campaign_tracker.check_and_register(state)
+            if self.campaign_tracker is not None
+            else {
+                "is_returning_actor": False,
+                "confidence": "LOW",
+                "match_signals": [],
+                "linked_ips": [],
+            }
+        )
         if campaign["is_returning_actor"] and campaign["confidence"] in ("HIGH", "MEDIUM"):
             reason = (
                 f"Returning actor [{campaign['confidence']}] | "
@@ -1381,6 +1404,7 @@ class SessionMonitor:
                     tactics_observed=list(state.unique_tactics),
                     prediction=self._predict_next(state),
                     commands_sample=state.commands[-3:],
+                    alert_key=key,
                 )
                 alerts.append(alert)
 

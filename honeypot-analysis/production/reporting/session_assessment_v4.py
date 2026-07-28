@@ -116,6 +116,9 @@ def _source_payload(session: Any, raw_events: Iterable[Dict[str, Any]]) -> Dict[
         "raw_events": [
             deepcopy(item) for item in raw_events or get("raw_events", []) or [] if isinstance(item, dict)
         ],
+        "canonical_event_manifest": deepcopy(
+            get("canonical_event_manifest", {}) or {}
+        ),
         "login_success": bool(get("login_success", False)),
     }
 
@@ -154,6 +157,7 @@ def build_canonical_evidence_snapshot(
             "commands_success",
             "commands_failed",
             "raw_events",
+            "canonical_event_manifest",
             "login_success",
         )
     }
@@ -164,6 +168,9 @@ def build_canonical_evidence_snapshot(
         "source_evidence_sha256": _sha256_json(source_evidence),
         "session_id": source["session_id"],
         "src_ip": source["src_ip"],
+        "durable_event_manifest": deepcopy(
+            source.get("canonical_event_manifest") or {}
+        ),
         "observations": deepcopy(
             authoritative.get("ordered_command_observations") or []
         ),
@@ -575,6 +582,9 @@ def build_session_assessment_v4(
             "bound_behavior_policy_sha256": _clean(behavior.get("sha256")),
             "bound_classification_policy_sha256": _clean(classification.get("sha256")),
         },
+        "durable_event_manifest": deepcopy(
+            snapshot.get("durable_event_manifest") or {}
+        ),
     }
     authority = {
         "observed_evidence_authoritative": True,

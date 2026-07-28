@@ -373,6 +373,13 @@ class StorageBackend(Protocol):
 
     def fetch_unprocessed_events(self, limit: int) -> List[Dict[str, Any]]: ...
 
+    def load_session_event_snapshot(
+        self,
+        session_id: str,
+        through_event_id: str,
+        max_events: int,
+    ) -> Dict[str, Any]: ...
+
     def claim_events(
         self,
         owner: str,

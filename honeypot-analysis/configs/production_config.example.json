@@ -22,6 +22,7 @@
   "active_session_recovery_limit": 10000,
   "campaign_profile_cache_limit": 10000,
   "session_event_history_limit": 10000,
+  "canonical_evidence_max_events": 100000,
   "event_lease_seconds": 60.0,
   "event_lease_heartbeat_seconds": 20.0,
   "event_max_attempts": 5,

@@ -152,9 +152,25 @@ def _safe_exception_text(exc: BaseException) -> str:
     return redact_exception_for_log(exc)
 
 
-def alert_payload(alert: Any) -> Dict[str, Any]:
+def alert_payload(alert: Any, *, triggering_event_id: str = "") -> Dict[str, Any]:
     payload = dict(getattr(alert, "__dict__", alert))
-    payload.setdefault("alert_id", stable_id("alert", payload))
+    payload.setdefault(
+        "alert_id",
+        stable_id(
+            "alert",
+            {
+                "session_id": payload.get("session_id", "unknown"),
+                "alert_key": (
+                    payload.get("alert_key")
+                    or payload.get("reason")
+                    or payload.get("severity")
+                    or "observed_threshold"
+                ),
+                "triggering_event_id": str(triggering_event_id or ""),
+            },
+        ),
+    )
+    payload.setdefault("triggering_event_id", str(triggering_event_id or ""))
     payload.setdefault("created_at", utc_now())
     return payload
 
@@ -353,7 +369,11 @@ class SessionWorker:
             "session_existed": state is not None,
             "session": deepcopy(state),
             "stats": deepcopy(self.monitor._stats),
-            "campaign_profiles": deepcopy(self.monitor.campaign_tracker._profiles),
+            "campaign_profiles": (
+                deepcopy(self.monitor.campaign_tracker._profiles)
+                if self.monitor.campaign_tracker is not None
+                else None
+            ),
             "latest_existed": session_id in self._session_latest_snapshots,
             "latest": deepcopy(self._session_latest_snapshots.get(session_id)),
             "history_existed": session_id in self._session_prediction_snapshots,
@@ -367,7 +387,10 @@ class SessionWorker:
         else:
             self.monitor._sessions.pop(session_id, None)
         self.monitor._stats = checkpoint["stats"]
-        self.monitor.campaign_tracker._profiles = checkpoint["campaign_profiles"]
+        if self.monitor.campaign_tracker is not None:
+            self.monitor.campaign_tracker._profiles = (
+                checkpoint["campaign_profiles"] or []
+            )
         if checkpoint["latest_existed"]:
             self._session_latest_snapshots[session_id] = checkpoint["latest"]
         else:
@@ -477,7 +500,8 @@ class SessionWorker:
         if len(rows) > limit:
             raise WorkerError("active session recovery limit exceeded")
         self.monitor._sessions.clear()
-        self.monitor.campaign_tracker._profiles.clear()
+        if self.monitor.campaign_tracker is not None:
+            self.monitor.campaign_tracker._profiles.clear()
         self._session_latest_snapshots.clear()
         self._session_prediction_snapshots.clear()
         for row in rows:
@@ -660,6 +684,7 @@ class SessionWorker:
             credential_hasher=self.credential_hasher,
             campaign_profile_cache_limit=self.config.campaign_profile_cache_limit,
             session_event_history_limit=self.config.session_event_history_limit,
+            enable_legacy_campaign_tracker=False,
         )
 
     def _refresh_enrichment_cache(self) -> None:
@@ -698,7 +723,9 @@ class SessionWorker:
         )
 
     def _on_alert(self, alert: Any) -> None:
-        self.storage.store_alert(alert_payload(alert))
+        self.storage.store_alert(
+            alert_payload(alert, triggering_event_id=self._processing_event_id)
+        )
         self._record_event_effect("alerts_created", 1)
 
     def _prediction_trigger_for_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1016,6 +1043,21 @@ class SessionWorker:
         self._apply_session_ttp_correlations(state)
         payload = self._session_payload(state)
         payload["status"] = "closed"
+        durable_snapshot = self.storage.load_session_event_snapshot(
+            str(payload.get("session_id") or ""),
+            self._processing_event_id,
+            self.config.canonical_evidence_max_events,
+        )
+        payload["canonical_event_manifest"] = {
+            key: durable_snapshot[key]
+            for key in (
+                "schema_version",
+                "session_id",
+                "through_event_id",
+                "event_count",
+                "manifest_sha256",
+            )
+        }
         mark_session_outcome(payload)
         self._apply_campaign_clustering(payload, "closed")
         self._record_event_effect(

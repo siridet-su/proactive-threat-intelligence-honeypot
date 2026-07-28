@@ -987,6 +987,87 @@ class SQLiteStorage:
             for row in rows
         ]
 
+    def load_session_event_snapshot(
+        self,
+        session_id: str,
+        through_event_id: str,
+        max_events: int,
+    ) -> Dict[str, Any]:
+        """Load and bind the exact durable event prefix used by analysis."""
+
+        selected_session = str(session_id or "").strip()
+        watermark = str(through_event_id or "").strip()
+        if not selected_session or not watermark:
+            raise StorageError(
+                "canonical session evidence requires session and event watermark"
+            )
+        if (
+            isinstance(max_events, bool)
+            or not isinstance(max_events, int)
+            or max_events < 1
+        ):
+            raise ValueError("max_events must be a positive integer")
+
+        events: List[Dict[str, Any]] = []
+        entries: List[Dict[str, str]] = []
+        found = False
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT event_id, payload_json
+                FROM events
+                WHERE session_id = ?
+                ORDER BY received_at, event_id
+                """,
+                (selected_session,),
+            )
+            for row in cursor:
+                if len(events) >= max_events:
+                    raise StorageError(
+                        "canonical session evidence exceeds configured event limit"
+                    )
+                try:
+                    event = json.loads(row["payload_json"])
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise StorageError(
+                        "canonical session evidence contains invalid JSON"
+                    ) from exc
+                if not isinstance(event, dict):
+                    raise StorageError(
+                        "canonical session evidence event must be an object"
+                    )
+                event_id = str(row["event_id"])
+                events.append(event)
+                entries.append(
+                    {
+                        "event_id": event_id,
+                        "payload_sha256": hashlib.sha256(
+                            row["payload_json"].encode("utf-8")
+                        ).hexdigest(),
+                    }
+                )
+                if event_id == watermark:
+                    found = True
+                    break
+        if not found:
+            raise StorageError(
+                "canonical session evidence watermark is unavailable"
+            )
+        manifest_basis = {
+            "schema_version": "durable_session_event_manifest.v1",
+            "session_id": selected_session,
+            "through_event_id": watermark,
+            "event_entries": entries,
+        }
+        return {
+            **manifest_basis,
+            "event_count": len(events),
+            "manifest_sha256": hashlib.sha256(
+                stable_json(manifest_basis).encode("utf-8")
+            ).hexdigest(),
+            "events": events,
+        }
+
     def claim_events(
         self,
         owner: str,
@@ -2347,7 +2428,24 @@ class SQLiteStorage:
         *,
         now: Any = None,
     ) -> Optional[str]:
-        report_id = stable_id("report", {"job_id": job_id, "report": report_payload})
+        assessment_id = str(report_payload.get("assessment_id") or "").strip()
+        if (
+            report_payload.get("schema_version") == "session_assessment.v4"
+            and assessment_id
+        ):
+            report_id = stable_id(
+                "report",
+                {
+                    "job_id": job_id,
+                    "schema_version": "session_assessment.v4",
+                    "assessment_id": assessment_id,
+                },
+            )
+        else:
+            # Preserve the historical identity algorithm for legacy payloads.
+            report_id = stable_id(
+                "report", {"job_id": job_id, "report": report_payload}
+            )
         current_time = _utc_timestamp(now)
         session_id = report_payload.get("session_id") or report_payload.get("data_provenance", {}).get("session", {}).get("session_id", "unknown")
         with self.connection() as conn:

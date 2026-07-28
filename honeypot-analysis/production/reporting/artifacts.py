@@ -217,6 +217,26 @@ def _artifact_version_id(
 ) -> str:
     """Derive a retry-stable version before artifact paths are attached."""
 
+    if report.get("schema_version") == "session_assessment.v4":
+        provenance = report.get("provenance") or {}
+        evidence_sha256 = str(provenance.get("evidence_sha256") or "").strip()
+        assessment_id = str(report.get("assessment_id") or "").strip()
+        if assessment_id and evidence_sha256:
+            return stable_id(
+                "artifact",
+                {
+                    "contract": "canonical_report_artifacts.v2",
+                    "schema_version": "session_assessment.v4",
+                    "assessment_id": assessment_id,
+                    "evidence_sha256": evidence_sha256,
+                    "session_id": (
+                        session_payload.get("session_id")
+                        or report.get("session_id")
+                        or "unknown"
+                    ),
+                },
+            )
+
     report_basis = dict(report)
     report_basis.pop("artifacts", None)
     session_basis = dict(session_payload)
