@@ -29,7 +29,10 @@ from production.utils.http_security import (
     single_header_value,
     validate_bind_auth,
 )
-from production.utils.sensitive_data import redact_for_log
+from production.utils.sensitive_data import (
+    redact_for_log,
+    sanitize_cowrie_event_for_persistence,
+)
 from production.utils.serialization import utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
 
@@ -521,9 +524,10 @@ class IngestHandler(BaseHTTPRequestHandler):
                     }
                 )
                 continue
+            sanitized_event = sanitize_cowrie_event_for_persistence(event)
             try:
                 stored_event_id, inserted = self.server.storage.store_event(
-                    sensor_id, event
+                    sensor_id, sanitized_event
                 )
             except Exception as exc:
                 self._log_event(

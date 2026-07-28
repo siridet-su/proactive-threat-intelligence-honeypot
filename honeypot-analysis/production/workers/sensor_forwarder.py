@@ -24,7 +24,10 @@ if __package__ == "production":
     from .service_lifecycle import ServiceLifecycle
 else:
     from production.utils.config import ProductionConfig
-    from production.utils.sensitive_data import redact_exception_for_log
+    from production.utils.sensitive_data import (
+        redact_exception_for_log,
+        sanitize_cowrie_event_for_persistence,
+    )
     from production.utils.service_lifecycle import ServiceLifecycle
     from production.utils.serialization import utc_now
 
@@ -33,6 +36,25 @@ DEFAULT_MAX_SPOOL_BYTES = 64 * 1024 * 1024
 DEFAULT_MIN_FREE_BYTES = 32 * 1024 * 1024
 DEFAULT_MAX_LINE_BYTES = 256 * 1024
 OFFSET_SCHEMA = "cowrie_forwarder_offset.v2"
+
+
+if __package__ == "production":
+    # Compatibility for the retired flat Pi package layout.  The supported
+    # module layout imports the shared sanitizer above.
+    def sanitize_cowrie_event_for_persistence(event: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized = dict(event)
+        fields = []
+        for field in ("username", "password", "passwd", "pwd"):
+            if sanitized.get(field) not in (None, ""):
+                sanitized[field] = "[REDACTED]"
+                fields.append(field)
+        if fields:
+            sanitized["_honeypot_privacy"] = {
+                "schema_version": "cowrie_credential_sanitizer.v1",
+                "credential_plaintext_removed": True,
+                "credential_fields_redacted": sorted(fields),
+            }
+        return sanitized
 
 
 def _safe_exception_text(exc: BaseException) -> str:
@@ -429,7 +451,9 @@ class DiskSpool:
         max_spool_bytes: int = DEFAULT_MAX_SPOOL_BYTES,
         min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
     ) -> int:
-        materialized = list(events)
+        materialized = [
+            sanitize_cowrie_event_for_persistence(event) for event in events
+        ]
         if not materialized:
             return 0
         payload = b"".join(

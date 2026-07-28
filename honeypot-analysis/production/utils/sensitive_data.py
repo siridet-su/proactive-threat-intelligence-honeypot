@@ -36,6 +36,19 @@ MAX_ARTIFACT_STRING_CHARS = 262_144
 MAX_WEBHOOK_STRING_CHARS = 32_768
 MAX_REDACTION_DEPTH = 48
 
+COWRIE_CREDENTIAL_SANITIZER_SCHEMA = "cowrie_credential_sanitizer.v1"
+_COWRIE_CREDENTIAL_KEYS = frozenset(
+    {
+        "username",
+        "user_name",
+        "login_username",
+        "password",
+        "passwd",
+        "pwd",
+        "login_password",
+    }
+)
+
 
 _SAFE_EXCEPTION_CATEGORIES = (
     TimeoutError,
@@ -197,6 +210,67 @@ _DATABASE_URL_SCHEMES = {
     "postgresql",
     "sqlite",
 }
+
+
+def sanitize_cowrie_event_for_persistence(event: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return an idempotent Cowrie event with credential plaintext removed.
+
+    This is intentionally narrower than the public-output redactor: it preserves
+    the event shape needed by the durable worker while replacing only known
+    login credential fields.  The metadata contains field names and presence
+    only; it never contains attacker-supplied values.
+    """
+
+    if not isinstance(event, Mapping):
+        raise ValueError("Cowrie event must be an object")
+
+    redacted_fields: set[str] = set()
+
+    def sanitize(value: Any, depth: int = 0) -> Any:
+        if depth > MAX_REDACTION_DEPTH:
+            return OVERSIZED_JSON_MARKER
+        if isinstance(value, Mapping):
+            output: Dict[str, Any] = {}
+            for raw_key, item in value.items():
+                key = str(raw_key)
+                normalized = key.strip().lower()
+                if normalized in _COWRIE_CREDENTIAL_KEYS:
+                    if item not in (None, "", REDACTION_MARKER):
+                        redacted_fields.add(normalized)
+                    elif item == REDACTION_MARKER:
+                        redacted_fields.add(normalized)
+                    output[key] = REDACTION_MARKER if item not in (None, "") else item
+                else:
+                    output[key] = sanitize(item, depth + 1)
+            return output
+        if isinstance(value, list):
+            return [sanitize(item, depth + 1) for item in value]
+        if isinstance(value, tuple):
+            return [sanitize(item, depth + 1) for item in value]
+        return value
+
+    sanitized = sanitize(event)
+    if not isinstance(sanitized, dict):  # pragma: no cover - guarded above
+        raise ValueError("sanitized Cowrie event must be an object")
+
+    prior = event.get("_honeypot_privacy")
+    prior_fields = []
+    if isinstance(prior, Mapping):
+        prior_fields = [
+            str(item).strip().lower()
+            for item in prior.get("credential_fields_redacted", []) or []
+            if str(item).strip().lower() in _COWRIE_CREDENTIAL_KEYS
+        ]
+    all_fields = sorted(redacted_fields | set(prior_fields))
+    if all_fields:
+        sanitized["_honeypot_privacy"] = {
+            "schema_version": COWRIE_CREDENTIAL_SANITIZER_SCHEMA,
+            "credential_plaintext_removed": True,
+            "credential_fields_redacted": all_fields,
+        }
+    else:
+        sanitized.pop("_honeypot_privacy", None)
+    return sanitized
 
 _URL_PATTERN = re.compile(
     r"\b[a-z][a-z0-9+.-]*://[^\s<>'\"]+",

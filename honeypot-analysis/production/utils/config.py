@@ -62,7 +62,14 @@ def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"{name} must be one of true/false, 1/0, yes/no, or on/off"
+    )
 
 
 def _env_int(name: str, default: int) -> int:
@@ -269,7 +276,10 @@ class ProductionConfig:
     })
 
     enrichment_db_path: str = ""
+    local_enrichment_max_bytes: int = 16 * 1024 * 1024
+    local_enrichment_max_records: int = 100_000
     enable_enrichment_jobs: bool = True
+    external_enrichment_profile: str = "disabled"
     enrichment_batch_size: int = 20
     enrichment_max_attempts: int = 3
     enrichment_retry_seconds: float = 300.0
@@ -668,6 +678,26 @@ class ProductionConfig:
             raise ValueError(
                 "enrichment_provider_max_response_bytes must be between 1024 and 16777216"
             )
+        for name, value, maximum in (
+            ("local_enrichment_max_bytes", self.local_enrichment_max_bytes, 256 * 1024 * 1024),
+            ("local_enrichment_max_records", self.local_enrichment_max_records, 1_000_000),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Integral)
+                or not 1 <= value <= maximum
+            ):
+                raise ValueError(
+                    f"{name} must be an integer between 1 and {maximum}"
+                )
+        if self.external_enrichment_profile not in {
+            "disabled",
+            "non_ip_observables",
+        }:
+            raise ValueError(
+                "external_enrichment_profile must be disabled or "
+                "non_ip_observables"
+            )
         if (
             isinstance(self.enrichment_provider_retry_delay_seconds, bool)
             or not isinstance(self.enrichment_provider_retry_delay_seconds, Real)
@@ -829,6 +859,13 @@ class ProductionConfig:
             if not isinstance(loaded, dict):
                 raise ValueError("production config file must contain a JSON object")
             file_values = loaded
+            unknown_keys = sorted(
+                set(file_values) - set(cls.__dataclass_fields__)
+            )
+            if unknown_keys:
+                raise ValueError(
+                    f"production config file contains unknown keys: {unknown_keys}"
+                )
 
         database_backend_from_env = "DATABASE_BACKEND" in os.environ
         database_url_from_env = (
@@ -1045,7 +1082,19 @@ class ProductionConfig:
         )
         cfg.webhook_policy = _env_json("WEBHOOK_POLICY_JSON", cfg.webhook_policy)
         cfg.enrichment_db_path = os.getenv("ENRICHMENT_DB_PATH", cfg.enrichment_db_path)
+        cfg.local_enrichment_max_bytes = _env_int(
+            "LOCAL_ENRICHMENT_MAX_BYTES",
+            cfg.local_enrichment_max_bytes,
+        )
+        cfg.local_enrichment_max_records = _env_int(
+            "LOCAL_ENRICHMENT_MAX_RECORDS",
+            cfg.local_enrichment_max_records,
+        )
         cfg.enable_enrichment_jobs = _env_bool("ENABLE_ENRICHMENT_JOBS", cfg.enable_enrichment_jobs)
+        cfg.external_enrichment_profile = os.getenv(
+            "EXTERNAL_ENRICHMENT_PROFILE",
+            cfg.external_enrichment_profile,
+        ).strip().lower()
         cfg.enrichment_batch_size = _env_int("ENRICHMENT_BATCH_SIZE", cfg.enrichment_batch_size)
         cfg.enrichment_max_attempts = _env_int("ENRICHMENT_MAX_ATTEMPTS", cfg.enrichment_max_attempts)
         cfg.enrichment_retry_seconds = _env_float("ENRICHMENT_RETRY_SECONDS", cfg.enrichment_retry_seconds)

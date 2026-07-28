@@ -6,7 +6,7 @@ import ipaddress
 from typing import Any, Dict, Iterable, Iterator, Optional, Tuple
 from urllib.parse import urlparse
 
-from production.enrichment.enrichment_mapping import load_enrichment_db
+from production.enrichment.local_snapshot import load_local_enrichment_snapshot
 
 
 SUPPORTED_OBSERVABLES = {"ip", "url", "domain", "hash", "hassh", "ja3"}
@@ -122,16 +122,25 @@ def load_combined_ip_enrichment(
     storage: Any = None,
     file_path: str = "",
     allow_stale: bool = True,
+    local_max_bytes: int = 16 * 1024 * 1024,
+    local_max_records: int = 100_000,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Load IP enrichment from the legacy JSON file and durable storage cache.
+    Load IP enrichment from a verified local snapshot and durable storage cache.
 
     File data is loaded first for notebook/demo compatibility. Storage records
     then override the same IP when a fresher production enrichment record exists.
     """
     merged: Dict[str, Dict[str, Any]] = {}
     if file_path:
-        merged.update(load_enrichment_db(file_path))
+        merged.update(
+            load_local_enrichment_snapshot(
+                file_path,
+                max_bytes=local_max_bytes,
+                max_records=local_max_records,
+                allow_stale=allow_stale,
+            )
+        )
     if storage is not None:
         merged.update(storage.load_enrichment_cache("ip", allow_stale=allow_stale))
     return merged

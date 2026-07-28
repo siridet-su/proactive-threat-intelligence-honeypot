@@ -57,6 +57,7 @@ class ProviderResult:
 class EnrichmentProvider:
     name = "base"
     supported_types: set[str] = set()
+    external = False
 
     def supports(self, observable_type: str) -> bool:
         return observable_type in self.supported_types
@@ -87,6 +88,8 @@ class StaticProvider(EnrichmentProvider):
 
 class HTTPProvider(EnrichmentProvider):
     """Small stdlib HTTP helper for JSON enrichment APIs."""
+
+    external = True
 
     def __init__(
         self,

@@ -749,8 +749,16 @@ class SessionMonitor:
         event: dict,
         field: str,
     ) -> tuple[str, tuple[str, ...]]:
+        privacy = event.get("_honeypot_privacy")
+        if (
+            isinstance(privacy, dict)
+            and privacy.get("credential_plaintext_removed") is True
+        ):
+            return "", ()
         raw_value = event.get(field, "")
         value = "" if raw_value is None else str(raw_value)
+        if value == "[REDACTED]":
+            return "", ()
         # SessionMonitor consumes raw Cowrie events. Never trust sensor-supplied
         # derived hashes; recompute them from the raw value at this boundary.
         return self._hash_secret_bundle(value)
@@ -790,6 +798,12 @@ class SessionMonitor:
         return sanitized
 
     def _record_login_success(self, state: SessionState, event: dict) -> None:
+        privacy = event.get("_honeypot_privacy")
+        credential_fields = (
+            set(privacy.get("credential_fields_redacted") or [])
+            if isinstance(privacy, dict)
+            else set()
+        )
         raw_password = event.get("password", "")
         password = "" if raw_password is None else str(raw_password)
         redaction = str(self.credential_policy.get("redaction", "[REDACTED]"))
@@ -801,9 +815,22 @@ class SessionMonitor:
         state.login_password_hash_aliases = list(digest_aliases)
         state.login_password_redacted = redaction if password else ""
         state.login_password = state.login_password_redacted
+        hash_summary = (
+            {
+                "hash_algorithm": "disabled",
+                "hashing_enabled": False,
+                "active_key_id": "",
+                "correlation_key_ids": [],
+            }
+            if (
+                isinstance(privacy, dict)
+                and privacy.get("credential_plaintext_removed") is True
+            )
+            else self._credential_hash_summary()
+        )
         state.credential_metadata = credential_metadata_for_provenance(
             {
-                "credential_observed": bool(password),
+                "credential_observed": bool(password) or "password" in credential_fields,
                 "raw_password_stored": bool(
                     self.credential_policy.get("store_raw_credentials", False)
                 ),
@@ -812,7 +839,7 @@ class SessionMonitor:
                 "raw_events_sanitized": bool(
                     self.credential_policy.get("sanitize_raw_events", True)
                 ),
-                **self._credential_hash_summary(),
+                **hash_summary,
             }
         )
 

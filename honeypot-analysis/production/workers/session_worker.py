@@ -667,6 +667,8 @@ class SessionWorker:
             storage=self.storage,
             file_path=self.config.enrichment_db_path,
             allow_stale=self.config.enrichment_allow_stale,
+            local_max_bytes=self.config.local_enrichment_max_bytes,
+            local_max_records=self.config.local_enrichment_max_records,
         )
         if hasattr(self, "monitor"):
             self.monitor.enrichment_db = self.enrichment_db

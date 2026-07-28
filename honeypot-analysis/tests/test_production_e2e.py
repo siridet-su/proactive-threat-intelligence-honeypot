@@ -172,7 +172,21 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
             server.server_close()
             thread.join(timeout=5)
 
-        assert len(storage.list_rows("events", limit=100)) == len(events)
+        stored_events = storage.list_rows("events", limit=100)
+        assert len(stored_events) == len(events)
+        serialized_events = json.dumps(stored_events)
+        assert "1234" not in serialized_events
+        login_events = [
+            json.loads(row["payload_json"])
+            for row in stored_events
+            if row["eventid"].startswith("cowrie.login.")
+        ]
+        assert login_events
+        assert all(
+            event.get("username") == "[REDACTED]"
+            and event.get("password") == "[REDACTED]"
+            for event in login_events
+        )
 
         processed = SessionWorker(cfg).process_unprocessed()
         assert processed == len(events)
@@ -189,9 +203,9 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         serialized_session = json.dumps(session_payload)
         assert session_payload["is_ended"] is True
         assert session_payload["login_password"] == "[REDACTED]"
-        assert session_payload["login_password_hash"].startswith(
-            "hmac-sha256-v1:e2e-test-key:"
-        )
+        assert session_payload["login_password_hash"] == ""
+        assert session_payload["credential_metadata"]["credential_observed"] is True
+        assert session_payload["credential_metadata"]["raw_password_stored"] is False
         assert "real-secret" not in serialized_session
         assert session_payload["hassh"] == "hassh-test-value"
         assert session_payload["client_version"] == "SSH-2.0-libssh"

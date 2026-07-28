@@ -469,6 +469,8 @@ def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
         storage=storage,
         file_path=config.enrichment_db_path,
         allow_stale=config.enrichment_allow_stale,
+        local_max_bytes=config.local_enrichment_max_bytes,
+        local_max_records=config.local_enrichment_max_records,
     )
     return {
         "feeds": feeds,

@@ -8,6 +8,7 @@ import json
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from production.policies.data_lifecycle_policy import load_data_lifecycle_policy
 from production.utils.config import ProductionConfig
 from production.enrichment.enrichment_providers import (
     EnrichmentProvider,
@@ -34,12 +35,34 @@ class EnrichmentWorker:
         self.config = config
         self.storage = open_storage(config.database_url)
         self.providers = providers if providers is not None else build_default_providers(config)
+        self.data_lifecycle_policy = load_data_lifecycle_policy(
+            config.data_lifecycle_policy_path
+        )
         self.worker_owner = new_job_owner("enrichment")
 
     def _run_providers(self, observable_type: str, observable_value: str) -> List[ProviderResult]:
-        selected = [
+        supported = [
             provider for provider in self.providers if provider.supports(observable_type)
         ]
+        profile = getattr(self.config, "external_enrichment_profile", "disabled")
+        lifecycle = getattr(self, "data_lifecycle_policy", None)
+        source_ip_sharing_allowed = (
+            lifecycle is not None
+            and lifecycle.document["privacy"][
+                "source_ip_external_sharing_allowed"
+            ]
+            is True
+        )
+        selected: List[EnrichmentProvider] = []
+        blocked: List[EnrichmentProvider] = []
+        for provider in supported:
+            if not getattr(provider, "external", False):
+                selected.append(provider)
+                continue
+            allowed = profile == "non_ip_observables" and observable_type != "ip"
+            if observable_type == "ip" and not source_ip_sharing_allowed:
+                allowed = False
+            (selected if allowed else blocked).append(provider)
 
         def run_provider(provider: EnrichmentProvider) -> ProviderResult:
             started_at = time.monotonic()
@@ -77,7 +100,19 @@ class EnrichmentWorker:
                 # executor.map preserves configured provider order even though
                 # requests execute concurrently.
                 results = list(executor.map(run_provider, selected))
-        if not results:
+        if not results and blocked:
+            results.append(
+                ProviderResult(
+                    provider="external_policy",
+                    status="policy_prohibited",
+                    data={
+                        "profile": profile,
+                        "observable_type": observable_type,
+                    },
+                    ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
+                )
+            )
+        elif not results:
             results.append(
                 ProviderResult(
                     provider="none",
@@ -144,6 +179,19 @@ class EnrichmentWorker:
                         results,
                         default_ttl_seconds=self.config.enrichment_ttl_seconds,
                     )
+                    payload["enrichment_policy"] = {
+                        "external_profile": self.config.external_enrichment_profile,
+                        "data_lifecycle_policy_id": self.data_lifecycle_policy.policy_id,
+                        "data_lifecycle_policy_version": self.data_lifecycle_policy.version,
+                        "data_lifecycle_policy_sha256": self.data_lifecycle_policy.sha256,
+                        "source_ip_external_sharing_allowed": (
+                            self.data_lifecycle_policy.document["privacy"][
+                                "source_ip_external_sharing_allowed"
+                            ]
+                            is True
+                        ),
+                        "authority": "non_authoritative_context_only",
+                    }
                     self.storage.save_enrichment_record(
                         observable_type,
                         observable_value,
