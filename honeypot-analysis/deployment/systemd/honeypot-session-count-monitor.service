@@ -11,6 +11,7 @@ WorkingDirectory=/opt/honeypot
 EnvironmentFile=-/etc/honeypot/common.env
 EnvironmentFile=-/etc/honeypot/services/session-count-monitor.env
 ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.session_count_monitor --config /etc/honeypot/production_config.json --no-syslog
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

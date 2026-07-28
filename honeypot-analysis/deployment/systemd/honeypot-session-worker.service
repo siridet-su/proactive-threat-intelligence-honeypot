@@ -16,6 +16,7 @@ Restart=always
 RestartSec=5
 TimeoutStopSec=120
 KillSignal=SIGTERM
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

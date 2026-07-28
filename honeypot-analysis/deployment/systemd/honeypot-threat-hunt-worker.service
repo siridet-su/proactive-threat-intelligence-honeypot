@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=honeypot
+Group=honeypot
 WorkingDirectory=/opt/honeypot
 EnvironmentFile=-/etc/honeypot/common.env
 EnvironmentFile=-/etc/honeypot/services/threat-hunt-worker.env
@@ -14,6 +15,11 @@ Restart=always
 RestartSec=5
 TimeoutStopSec=120
 KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot
 StandardOutput=journal
 StandardError=journal
 

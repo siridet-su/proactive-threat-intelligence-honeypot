@@ -4107,7 +4107,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             "font-src 'self' data: https://fonts.gstatic.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
             "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com "
-            "https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self' https:",
+            "https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self'",
         )
         self.send_header("X-Request-ID", self._request_id())
         self.end_headers()
