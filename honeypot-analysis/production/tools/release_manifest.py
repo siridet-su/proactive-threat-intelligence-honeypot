@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable
+
+
+SCHEMA_VERSION = "honeypot_release_manifest.v2"
+REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+EXCLUDED_RELEASE_FILES = frozenset({"DEPLOYED_COMMIT", "DEPLOYMENT_MANIFEST.json"})
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def release_file_inventory(root: Path) -> dict[str, dict[str, Any]]:
+    root = root.resolve()
+    if not root.is_dir():
+        raise ValueError("release root must be a directory")
+    inventory: dict[str, dict[str, Any]] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if relative in EXCLUDED_RELEASE_FILES:
+            continue
+        if path.is_symlink():
+            target = os.readlink(path)
+            inventory[relative] = {
+                "type": "symlink",
+                "target": target,
+                "sha256": _sha256_bytes(target.encode("utf-8")),
+            }
+        elif path.is_dir():
+            continue
+        elif path.is_file():
+            inventory[relative] = {
+                "type": "file",
+                "bytes": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+        else:
+            raise ValueError(f"unsupported release entry: {relative}")
+    if not inventory:
+        raise ValueError("release inventory must not be empty")
+    return inventory
+
+
+def inventory_sha256(inventory: dict[str, dict[str, Any]]) -> str:
+    encoded = json.dumps(
+        inventory, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return _sha256_bytes(encoded)
+
+
+def _named_paths(values: Iterable[str], field: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        name, separator, path = value.partition("=")
+        name = name.strip()
+        path = path.strip()
+        if not separator or not name or not path or name in parsed:
+            raise ValueError(f"{field} values must be unique NAME=PATH pairs")
+        parsed[name] = str(Path(path).resolve())
+    return dict(sorted(parsed.items()))
+
+
+def _artifact_hashes(paths: dict[str, str]) -> dict[str, dict[str, Any]]:
+    artifacts: dict[str, dict[str, Any]] = {}
+    for name, path_text in paths.items():
+        path = Path(path_text)
+        if not path.is_file() or path.is_symlink():
+            raise ValueError(f"artifact {name} must be a regular file")
+        artifacts[name] = {
+            "path": str(path.resolve()),
+            "bytes": path.stat().st_size,
+            "sha256": _sha256_file(path),
+        }
+    return artifacts
+
+
+def build_manifest(
+    *,
+    revision: str,
+    release_root: Path,
+    package_path: Path,
+    rollback_location: Path,
+    configuration_paths: dict[str, str],
+    artifact_paths: dict[str, str],
+    deployed_at: str | None = None,
+) -> dict[str, Any]:
+    if not REVISION_PATTERN.fullmatch(revision):
+        raise ValueError("revision must be a full lowercase Git SHA-1")
+    package_path = package_path.resolve()
+    rollback_location = rollback_location.resolve()
+    if not package_path.is_file():
+        raise ValueError("release package does not exist")
+    if not rollback_location.exists():
+        raise ValueError("rollback location does not exist")
+    inventory = release_file_inventory(release_root)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "git_revision": revision,
+        "deployed_at": deployed_at or datetime.now(timezone.utc).isoformat(),
+        "release_path": str(release_root.resolve()),
+        "release_files": inventory,
+        "release_tree_sha256": inventory_sha256(inventory),
+        "package": {
+            "path": str(package_path),
+            "bytes": package_path.stat().st_size,
+            "sha256": _sha256_file(package_path),
+        },
+        "effective_configurations": _artifact_hashes(configuration_paths),
+        "model_artifacts": _artifact_hashes(artifact_paths),
+        "rollback_location": str(rollback_location),
+    }
+
+
+def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
+    path = path.resolve()
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(manifest, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("unsupported release manifest schema")
+    if not REVISION_PATTERN.fullmatch(str(manifest.get("git_revision", ""))):
+        raise ValueError("manifest Git revision is invalid")
+    if Path(str(manifest.get("release_path", ""))).resolve() != release_root.resolve():
+        raise ValueError("manifest release path mismatch")
+    actual_inventory = release_file_inventory(release_root)
+    if actual_inventory != manifest.get("release_files"):
+        raise ValueError("deployed release files do not match manifest")
+    if inventory_sha256(actual_inventory) != manifest.get("release_tree_sha256"):
+        raise ValueError("deployed release tree hash does not match manifest")
+    package = manifest.get("package")
+    if not isinstance(package, dict):
+        raise ValueError("manifest package metadata is invalid")
+    package_path = Path(str(package.get("path", "")))
+    if (
+        not package_path.is_file()
+        or package_path.stat().st_size != package.get("bytes")
+        or _sha256_file(package_path) != package.get("sha256")
+    ):
+        raise ValueError("release package does not match manifest")
+    for name, artifact in (manifest.get("model_artifacts") or {}).items():
+        if not isinstance(artifact, dict):
+            raise ValueError(f"artifact metadata invalid: {name}")
+        artifact_path = Path(str(artifact.get("path", "")))
+        if (
+            not artifact_path.is_file()
+            or artifact_path.stat().st_size != artifact.get("bytes")
+            or _sha256_file(artifact_path) != artifact.get("sha256")
+        ):
+            raise ValueError(f"artifact does not match manifest: {name}")
+    for name, config in (manifest.get("effective_configurations") or {}).items():
+        if not isinstance(config, dict):
+            raise ValueError(f"effective configuration metadata invalid: {name}")
+        config_path = Path(str(config.get("path", "")))
+        if (
+            not config_path.is_file()
+            or config_path.stat().st_size != config.get("bytes")
+            or _sha256_file(config_path) != config.get("sha256")
+        ):
+            raise ValueError(f"effective configuration does not match: {name}")
+    if not Path(str(manifest.get("rollback_location", ""))).exists():
+        raise ValueError("rollback location is missing")
+    return {
+        "verified": True,
+        "git_revision": manifest["git_revision"],
+        "release_tree_sha256": manifest["release_tree_sha256"],
+        "release_file_count": len(actual_inventory),
+        "manifest_sha256": _sha256_file(path),
+    }
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Create or verify a hash-bound honeypot release manifest"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    create = subparsers.add_parser("create")
+    create.add_argument("--revision", required=True)
+    create.add_argument("--release-root", required=True, type=Path)
+    create.add_argument("--package", required=True, type=Path)
+    create.add_argument("--rollback-location", required=True, type=Path)
+    create.add_argument("--configuration", action="append", default=[])
+    create.add_argument("--artifact", action="append", default=[])
+    create.add_argument("--output", required=True, type=Path)
+    verify = subparsers.add_parser("verify")
+    verify.add_argument("--manifest", required=True, type=Path)
+    verify.add_argument("--release-root", required=True, type=Path)
+    return parser
+
+
+def main() -> int:
+    args = _parser().parse_args()
+    if args.command == "create":
+        manifest = build_manifest(
+            revision=args.revision,
+            release_root=args.release_root,
+            package_path=args.package,
+            rollback_location=args.rollback_location,
+            configuration_paths=_named_paths(args.configuration, "configuration"),
+            artifact_paths=_named_paths(args.artifact, "artifact"),
+        )
+        write_manifest(args.output, manifest)
+        result = verify_manifest(args.output, args.release_root)
+    else:
+        result = verify_manifest(args.manifest, args.release_root)
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

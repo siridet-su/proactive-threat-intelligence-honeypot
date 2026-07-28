@@ -97,6 +97,30 @@ def test_v4_is_direct_content_addressed_and_whole_contract_valid() -> None:
     )
 
 
+def test_v4_is_redaction_idempotent_before_content_addressing() -> None:
+    payload = _payload()
+    payload["commands"] = ["cat /etc/passwd"]
+    payload["classification_events"][0].update(
+        {
+            "command": "cat /etc/passwd",
+            "original_command": "cat /etc/passwd",
+            "ttp": "T1555",
+            "tactic": "credential-access",
+        }
+    )
+    payload["raw_events"][0]["input"] = "cat /etc/passwd"
+
+    report = build_session_assessment_v4(
+        [payload],
+        raw_events=payload["raw_events"],
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_policy_path=CLASSIFICATION_POLICY,
+    )
+
+    assert redact_for_artifact(report) == report
+    assert validate_session_assessment_v4(report) == []
+
+
 def test_prediction_enrichment_correlation_and_llm_context_cannot_change_authority() -> None:
     base = _build()
     contextual = _build(

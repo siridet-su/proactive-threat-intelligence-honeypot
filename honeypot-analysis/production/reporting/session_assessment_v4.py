@@ -59,6 +59,34 @@ class SessionAssessmentV4Error(ValueError):
     """Raised when a v4 record violates the whole-contract validator."""
 
 
+def canonical_assessment_id(value: Dict[str, Any]) -> str:
+    """Derive the v4 ID from the current canonical findings and provenance."""
+
+    provenance = value.get("provenance") or {}
+    evidence = value.get("canonical_evidence") or {}
+    return stable_id(
+        "session_assessment",
+        {
+            "evidence_sha256": evidence.get("evidence_sha256"),
+            "behavior_policy_sha256": (
+                provenance.get("behavior_policy") or {}
+            ).get("sha256"),
+            "classification_policy_sha256": (
+                provenance.get("classification_policy") or {}
+            ).get("sha256"),
+            "evaluator_git_revision": provenance.get("evaluator_git_revision"),
+            "finding_ids": [
+                item.get("finding_id")
+                for item in value.get("behavioral_findings") or []
+            ],
+            "hypothesis_set_ids": [
+                item.get("hypothesis_set_id")
+                for item in value.get("hypothesis_sets") or []
+            ],
+        },
+    )
+
+
 def _clean(value: Any) -> str:
     return str(value or "").strip()
 
@@ -156,6 +184,11 @@ def build_canonical_evidence_snapshot(
             authoritative.get("trusted_attck_candidates") or []
         ),
     }
+    snapshot = redact_for_artifact(snapshot)
+    if not isinstance(snapshot, dict):
+        raise SessionAssessmentV4Error(
+            "canonical evidence snapshot redaction did not return an object"
+        )
     snapshot["evidence_sha256"] = _sha256_json(snapshot)
     return snapshot, observed, source, behavior_document
 
@@ -552,17 +585,9 @@ def build_session_assessment_v4(
         "automatic_response_authorized": False,
         "automatic_alerts_authorized": False,
     }
-    id_content = {
-        "evidence_sha256": snapshot["evidence_sha256"],
-        "behavior_policy_sha256": behavior.get("sha256"),
-        "classification_policy_sha256": classification.get("sha256"),
-        "evaluator_git_revision": evaluator_revision,
-        "finding_ids": [item["finding_id"] for item in findings],
-        "hypothesis_set_ids": [item["hypothesis_set_id"] for item in hypothesis_sets],
-    }
     record = {
         "schema_version": SCHEMA_VERSION,
-        "assessment_id": stable_id("session_assessment", id_content),
+        "assessment_id": "",
         "generated_at": utc_now(),
         "status": (
             "observation_only_abstention"
@@ -599,6 +624,7 @@ def build_session_assessment_v4(
         enrichment_context=enrichment_context or {},
     )
     record["response_guidance_v3"] = guidance
+    record["assessment_id"] = canonical_assessment_id(record)
     validate_session_assessment_v4(record, raise_on_error=True)
     return record
 
@@ -761,14 +787,7 @@ def validate_session_assessment_v4(
             "hypothesis_ids": hypothesis_ids,
         }):
             errors.append(f"hypothesis set ID mismatch: {_clean(hypothesis_set.get('hypothesis_set_id'))}")
-    expected_assessment_id = stable_id("session_assessment", {
-        "evidence_sha256": recorded_hash,
-        "behavior_policy_sha256": (provenance.get("behavior_policy") or {}).get("sha256"),
-        "classification_policy_sha256": (provenance.get("classification_policy") or {}).get("sha256"),
-        "evaluator_git_revision": provenance.get("evaluator_git_revision"),
-        "finding_ids": [item.get("finding_id") for item in value.get("behavioral_findings") or []],
-        "hypothesis_set_ids": [item.get("hypothesis_set_id") for item in value.get("hypothesis_sets") or []],
-    })
+    expected_assessment_id = canonical_assessment_id(value)
     if value.get("assessment_id") != expected_assessment_id:
         errors.append("assessment_id mismatch")
     canonical = {

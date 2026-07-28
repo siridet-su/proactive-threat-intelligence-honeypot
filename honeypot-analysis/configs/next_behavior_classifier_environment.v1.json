@@ -35,7 +35,7 @@
     "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
     "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
     "trust_policy_path": "production/classification/trust.py",
-    "trust_policy_sha256": "1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd",
+    "trust_policy_sha256": "e4fcf976a18e079a493fcab0472bb220d42e42512a8ae78dc9ccb52799c38b39",
     "securebert_candidate_threshold": 0.55,
     "trusted_model_only_threshold": 0.9,
     "drop_rule_securebert_disagreements": true,

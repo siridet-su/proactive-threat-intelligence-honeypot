@@ -28,7 +28,7 @@
     "runtime_rule_policy_path": "configs/classification_rules.trusted.json",
     "runtime_rule_policy_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
     "runtime_trust_policy_path": "production/classification/trust.py",
-    "runtime_trust_policy_sha256": "1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd",
+    "runtime_trust_policy_sha256": "e4fcf976a18e079a493fcab0472bb220d42e42512a8ae78dc9ccb52799c38b39",
     "runtime_classifier_checkpoint_path": "models/securebert_ttp/checkpoint-6765/model.safetensors",
     "runtime_classifier_checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
     "trusted_model_only_threshold": 0.9,

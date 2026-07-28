@@ -58,6 +58,7 @@ honeypot-webhook-dispatcher = "production.workers.webhook_dispatcher:main"
 honeypot-feed-refresh = "production.enrichment.refresh_feeds:main"
 honeypot-prediction-retention = "production.prediction.prune_prediction_snapshots:main"
 honeypot-sqlite-recovery = "production.tools.sqlite_backup_restore:main"
+honeypot-release-manifest = "production.tools.release_manifest:main"
 
 [tool.setuptools.packages.find]
 include = ["production*"]

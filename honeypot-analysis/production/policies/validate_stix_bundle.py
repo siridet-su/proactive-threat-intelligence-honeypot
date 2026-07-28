@@ -116,12 +116,25 @@ def _validate_type_contract(index: int, obj: Dict[str, Any], errors: List[str]) 
         if obj.get("pattern_type") != "stix":
             errors.append(f"{path}: indicator pattern_type must be stix")
     elif object_type == "course-of-action":
-        if obj.get("x_honeypot_authority") != "trusted_policy_engine":
-            errors.append(f"{path}: course-of-action must be trusted_policy_engine-authorized")
-        if "x_honeypot_requires_manual_approval" not in obj:
-            errors.append(f"{path}: course-of-action missing manual approval flag")
-        if "x_honeypot_safe_to_auto_execute" not in obj:
-            errors.append(f"{path}: course-of-action missing automation safety flag")
+        authority = obj.get("x_honeypot_authority")
+        if authority not in {
+            "deterministic_observed_evidence_policy",
+            "trusted_policy_engine",
+        }:
+            errors.append(f"{path}: course-of-action has unsupported authority")
+        if obj.get("x_honeypot_requires_manual_approval") is not True:
+            errors.append(f"{path}: course-of-action must require manual approval")
+        if obj.get("x_honeypot_safe_to_auto_execute") is not False:
+            errors.append(f"{path}: course-of-action must prohibit automatic execution")
+        if authority == "deterministic_observed_evidence_policy":
+            if not _as_list(obj.get("x_honeypot_evidence_refs")):
+                errors.append(
+                    f"{path}: canonical course-of-action requires observed evidence refs"
+                )
+            if obj.get("x_honeypot_evidence_scope") != ["observed_behavior"]:
+                errors.append(
+                    f"{path}: canonical course-of-action has invalid evidence scope"
+                )
     elif object_type == "observed-data":
         if not _as_list(obj.get("object_refs")):
             errors.append(f"{path}: observed-data missing object_refs")

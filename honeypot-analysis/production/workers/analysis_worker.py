@@ -27,6 +27,7 @@ from production.policies.threat_hypothesis_behavior_policy import load_behavior_
 from production.reporting.session_assessment_v4 import (
     SessionAssessmentV4Error,
     build_session_assessment_v4,
+    canonical_assessment_id,
     validate_session_assessment_v4,
 )
 from production.reporting.threat_hypothesis import (
@@ -464,6 +465,7 @@ def deterministic_baseline_report(
     }
     report["behavioral_findings"] = []
     report["hypothesis_sets"] = []
+    report["assessment_id"] = canonical_assessment_id(report)
     context = report["non_authoritative_context"]
     context["analysis_processing"] = {
         "status": "failed",
