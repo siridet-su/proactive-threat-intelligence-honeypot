@@ -49,7 +49,10 @@ from production.utils.http_security import (
 )
 from production.utils.serialization import html_script_json, stable_id, utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
-from production.reporting.response_guidance_v3 import read_legacy_response_guidance
+from production.reporting.response_guidance_v3 import (
+    read_legacy_response_guidance,
+    validate_response_guidance_v3,
+)
 from production.storage import open_storage, safe_database_descriptor
 
 
@@ -1533,27 +1536,12 @@ def _report_recommendations(
     session_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     merged = _merged_report_payload(report_payload, artifact_payload)
-    threat = merged.get("threat_hypothesis") or {}
-    if not isinstance(threat, dict):
-        threat = {}
-
-    follow_on = merged.get("follow_on_hypothesis") or {}
-    canonical_predicted = "; ".join(
-        _text(item.get("text"))
-        for item in follow_on.get("claims") or []
-        if isinstance(item, dict) and _text(item.get("text"))
-    )
-    predicted = _text(
-        canonical_predicted
-        or follow_on.get("abstention_reason")
-        or threat.get("post_session_follow_on_hypothesis")
-        or merged.get("post_session_follow_on_hypothesis")
-        or threat.get("predicted_next_action")
-        or merged.get("predicted_next_action")
-        or ""
-    )
     response_guidance = merged.get("response_guidance_v3") or {}
-    if not isinstance(response_guidance, dict) or response_guidance.get("schema_version") != "response_guidance.v3":
+    if (
+        not isinstance(response_guidance, dict)
+        or response_guidance.get("schema_version") != "response_guidance.v3"
+        or validate_response_guidance_v3(response_guidance)
+    ):
         response_guidance = {}
     structured_actions = [
         item for item in response_guidance.get("advisory_actions") or []
@@ -1570,20 +1558,26 @@ def _report_recommendations(
         for item in structured_actions
         if str(item.get("description") or "").strip()
     ]
-    falsification = _as_text_list(
-        [
-            item.get("text")
-            for item in follow_on.get("disconfirming_observations") or []
-            if isinstance(item, dict)
-        ]
-        or threat.get("falsification_conditions")
-        or merged.get("falsification_conditions")
-    )
+    hypothesis_alternatives = [
+        _text(hypothesis.get("statement"))
+        for hypothesis_set in merged.get("hypothesis_sets") or []
+        if isinstance(hypothesis_set, dict)
+        for hypothesis in hypothesis_set.get("hypotheses") or []
+        if isinstance(hypothesis, dict) and _text(hypothesis.get("statement"))
+    ]
+    falsification = [
+        _text(item)
+        for hypothesis_set in merged.get("hypothesis_sets") or []
+        if isinstance(hypothesis_set, dict)
+        for hypothesis in hypothesis_set.get("hypotheses") or []
+        if isinstance(hypothesis, dict)
+        for item in hypothesis.get("falsification_conditions") or []
+        if _text(item)
+    ]
     source = response_guidance.get("authority") or "policy_unavailable"
     return {
         "source": source,
-        "post_session_follow_on_hypothesis": predicted,
-        "predicted_next_action": predicted,
+        "hypothesis_alternatives": hypothesis_alternatives,
         "recommended_actions": recommended_actions,
         "recommended_actions_structured": structured_actions,
         "response_guidance": copy.deepcopy(response_guidance),
@@ -1591,21 +1585,8 @@ def _report_recommendations(
         "policy_action_count": len(structured_actions),
         "context_notes": context_notes,
         "falsification_conditions": falsification,
-        "evidence_gaps": [
-            _text(item.get("text"))
-            for item in follow_on.get("evidence_gaps") or []
-            if isinstance(item, dict) and _text(item.get("text"))
-        ],
-        "external_validation_suggestions": [
-            _text(item.get("text"))
-            for item in follow_on.get("external_validation_suggestions") or []
-            if isinstance(item, dict) and _text(item.get("text"))
-        ],
-        # Compatibility only.  This heuristic is no longer rendered because it
-        # competed with both the canonical post-session hypothesis and the
-        # separately evaluated statistical forecast.
-        "rule_based_likely_next_steps": _likely_next_steps(session_payload),
-        "rule_based_likely_next_steps_deprecated": True,
+        "evidence_gaps": [],
+        "external_validation_suggestions": [],
     }
 
 
@@ -1620,6 +1601,21 @@ def _historical_response_guidance_payload(report_payload: Any) -> Dict[str, Any]
         return {}
     stored = report_payload.get("response_guidance_v3")
     if isinstance(stored, dict) and stored.get("schema_version") == "response_guidance.v3":
+        validation_errors = validate_response_guidance_v3(stored)
+        if validation_errors:
+            return {
+                "schema_version": "response_guidance_legacy_adapter.v1",
+                "status": "invalid_stored_guidance",
+                "semantics": (
+                    "Stored response guidance failed current whole-contract "
+                    "validation and is non-actionable."
+                ),
+                "source_schema_version": "response_guidance.v3",
+                "advisory_actions": [],
+                "validation_error_count": len(validation_errors),
+                "recomputed": False,
+                "authoritative_for_new_actions": False,
+            }
         guidance = copy.deepcopy(stored)
     else:
         legacy = report_payload.get("response_guidance_v2") or report_payload.get("trusted_recommendation_decision")
@@ -1645,26 +1641,6 @@ def _historical_decision_payload(report_payload: Any) -> Dict[str, Any]:
     """
 
     return _historical_response_guidance_payload(report_payload)
-
-
-def _likely_next_steps(session_payload: Dict[str, Any]) -> List[str]:
-    commands = session_payload.get("commands") or []
-    tactics = {str(t).lower() for t in session_payload.get("tactics") or [] if t}
-    if not commands:
-        return ["Likely scanner/no-command session. Keep for volume tracking, but no post-compromise behavior was observed."]
-
-    steps = []
-    if {"discovery", "credential-access"}.issubset(tactics):
-        steps.append("Likely reconnaissance has moved into credential interest; possible next steps include payload download or persistence setup.")
-    if {"command-and-control", "execution"}.issubset(tactics):
-        steps.append("Command-and-control plus execution suggests possible persistence, staging, or defense evasion activity.")
-    if "defense-evasion" in tactics:
-        steps.append("Defense evasion is present; possible next steps include log cleanup, hiding activity, or removing command history.")
-    if "execution" in tactics and "command-and-control" not in tactics:
-        steps.append("Execution is present; watch for follow-on download, privilege checks, or persistence commands.")
-    if not steps:
-        steps.append("No strong follow-on pattern yet. Continue watching for download, persistence, credential, or cleanup commands.")
-    return steps
 
 
 def _summarize_session(
@@ -1923,7 +1899,6 @@ def load_session_detail(
         "source_geo": selected.get("geo") or (_extract_geo(payload) if selected.get("src_ip_is_public") else {}),
         "source_geo_context": selected.get("source_geo_context") or selected.get("geo_context") or {},
         "observables": [{"type": t, "value": v} for t, v in _session_observables(payload, session_id)],
-        "likely_next_steps": _likely_next_steps(payload),
         "commands": payload.get("commands") or [],
         "classification_events": payload.get("classification_events") or [],
         "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
@@ -3918,11 +3893,7 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     prediction_payload = latest_prediction.get("payload") or {}
     realtime_ranking = prediction_payload.get("final_ranking") or []
     source = recommendations.get("source") or "policy_unavailable"
-    predicted = (
-        recommendations.get("post_session_follow_on_hypothesis")
-        or recommendations.get("predicted_next_action")
-        or ""
-    )
+    hypothesis_alternatives = recommendations.get("hypothesis_alternatives") or []
     operator_actions = recommendations.get("recommended_actions") or []
     context_notes = recommendations.get("context_notes") or []
     falsification = recommendations.get("falsification_conditions") or []
@@ -3955,12 +3926,17 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     parts.extend([
         '<div class="overview-grid">',
         f'<div class="kv"><span>source</span><strong>{_html(source)}</strong></div>',
-        f'<div class="kv"><span>post_session_follow_on_hypothesis</span><strong>{_html(predicted or "Report pending; using rule-based session inference.")}</strong></div>',
+        f'<div class="kv"><span>hypothesis alternatives</span><strong>{_html(len(hypothesis_alternatives))}</strong></div>',
         "</div>",
-        '<p class="muted">This field is the post-session report hypothesis. It is separate from the live realtime prediction engine above.</p>',
+        '<p class="muted">Hypothesis alternatives are falsifiable analytical questions, not attacker intent or predicted next actions.</p>',
         "<h3>Response Guidance Actions</h3>",
         '<p class="muted">Actions, when present, are rendered only in the v3 response-guidance panel above.</p>',
     ])
+    if hypothesis_alternatives:
+        parts.extend([
+            "<h3>Falsifiable Hypothesis Alternatives</h3>",
+            _render_list_items(hypothesis_alternatives),
+        ])
     if realtime_ranking and not response_guidance:
         parts.extend([
             "<h3>Statistical Next-Tactic Forecast</h3>",
@@ -4009,7 +3985,6 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
         ),
         ("analysis_mode", summary.get("analysis_mode")),
         ("campaign", summary.get("campaign_name")),
-        ("post_session_follow_on_hypothesis", summary.get("post_session_follow_on_hypothesis")),
     ]
     meta = "\n".join(
         f"<div class=\"kv\"><span>{_html(label)}</span><strong>{_html(value or '-')}</strong></div>"

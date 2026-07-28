@@ -19,6 +19,10 @@ from production.api.ingest_api import build_server
 from production.workers.sensor_forwarder import forward_once, post_events
 from production.workers.session_worker import SessionWorker
 from production.storage import open_storage
+from production.reporting.session_assessment_v4 import (
+    build_session_assessment_v4,
+    validate_session_assessment_v4,
+)
 
 
 def _config(tmp: str) -> ProductionConfig:
@@ -121,24 +125,10 @@ class FakeCoordinator:
         self.max_tokens = max_tokens
 
     async def analyze(self, ioc_bundle, tactic_summary, sessions_obj, **kwargs):
-        return {
-            "campaign_name": "E2E Deterministic Test",
-            "confidence": "High - local e2e",
-            "executive_summary": "Local production e2e test report.",
-            "tactic_summary": tactic_summary,
-            "raw_event_count": len(kwargs.get("raw_events", [])),
-            "ioc_summary": {
-                "total": 1,
-                "urls": [
-                    {
-                        "type": "url",
-                        "value": "http://evil.example.com/dropper.sh",
-                        "confidence": "high",
-                        "first_seen": "2026-05-12T00:00:09Z",
-                    }
-                ],
-            },
-        }
+        return build_session_assessment_v4(
+            sessions_obj,
+            raw_events=kwargs.get("raw_events", []),
+        )
 
 
 def test_forwarder_spool_replay_to_analysis_report() -> None:
@@ -217,10 +207,11 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert len(reports) == 1
         report = json.loads(reports[0]["payload_json"])
         assert report["session_id"] == "e2e-session-1"
-        assert report["raw_event_count"] == len(events)
-        assert report["data_provenance"]["session"]["raw_event_count"] == len(events)
-        assert report["data_provenance"]["credential_metadata"]["raw_password_stored"] is False
-        assert report["data_provenance"]["behavior_graph"]["bpg_count"] >= 1
+        assert report["schema_version"] == "session_assessment.v4"
+        assert validate_session_assessment_v4(report) == []
+        assert report["canonical_evidence"]["source_evidence_sha256"]
+        assert report["authority"]["predictions_authoritative"] is False
+        assert report["authority"]["automatic_response_authorized"] is False
         assert report["artifacts"]["json"]
         assert report["artifacts"]["stix"]
         rendered_report = (

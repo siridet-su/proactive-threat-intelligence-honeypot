@@ -24,6 +24,11 @@ from production.reporting.actor_attribution import enrich_report_with_actor_attr
 from production.reporting.analysis_policy import session_analysis_skip_reason
 from production.reporting.artifacts import attach_report_artifacts
 from production.policies.threat_hypothesis_behavior_policy import load_behavior_policy
+from production.reporting.session_assessment_v4 import (
+    SessionAssessmentV4Error,
+    build_session_assessment_v4,
+    validate_session_assessment_v4,
+)
 from production.reporting.threat_hypothesis import (
     attach_model_prediction,
     build_v2_report,
@@ -358,12 +363,20 @@ def attach_threat_evidence_layers(
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if report.get("schema_version") == "session_assessment.v4":
-        # Compatibility visualization only.  It cannot mutate the canonical
-        # snapshot, findings, hypotheses, status, or their content IDs.
-        report["threat_evidence_layers"] = build_threat_evidence_layers(
+        # Visualization is context only. It cannot become a sibling authority
+        # field or mutate canonical findings, hypotheses, status, or IDs.
+        context = report.setdefault("non_authoritative_context", {})
+        if not isinstance(context, dict):
+            raise SessionAssessmentV4Error(
+                "non_authoritative_context must be an object"
+            )
+        context["threat_evidence_layers"] = build_threat_evidence_layers(
             session_payload,
             prediction_snapshot=prediction_snapshot,
-            hunting_context=report.get("threat_hunting_context") or {},
+            hunting_context=_build_session_correlation_hunting_context(
+                session_payload.get("session_ttp_correlations", []),
+                session_payload.get("session_id", "unknown"),
+            ),
         )
         return report
     if report.get("schema_version") != "threat_hypothesis.v2":
@@ -424,86 +437,43 @@ def deterministic_baseline_report(
     session_payload: Dict[str, Any],
     error: str,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
+    config: Optional[ProductionConfig] = None,
 ) -> Dict[str, Any]:
     safe_error = _safe_error_text(error)
-    commands = session_payload.get("commands", [])
-    trusted = _trusted_payload_views(session_payload)
-    ttps = trusted["ttps"]
-    raw_events = session_payload.get("raw_events", [])
-    hunting_context = _build_session_correlation_hunting_context(
-        session_payload.get("session_ttp_correlations", []),
-        session_payload.get("session_id", "unknown"),
-    )
-    report = {
-        "session_id": session_payload.get("session_id", "unknown"),
-        "created_at": utc_now(),
-        "worker": "analysis_worker",
-        "analysis_mode": "deterministic_fallback",
-        "confidence": "Low - heuristic evidence strength; deterministic fallback",
-        "confidence_semantics": "not_a_calibrated_probability",
-        "summary": (
-            f"AI analysis failed, so this report was generated from session facts only. "
-            f"Observed {len(commands)} commands and {len(ttps)} unique TTPs."
+    selected = config or ProductionConfig()
+    report = build_session_assessment_v4(
+        [session_payload],
+        raw_events=session_payload.get("raw_events") or [],
+        behavior_policy_path=selected.threat_hypothesis_behavior_policy_path,
+        classification_policy=selected.classification_policy,
+        classification_policy_path=selected.classification_rules_path,
+        model_artifact_provenance=selected.prediction_policy,
+        prediction_context=prediction_snapshot or {},
+        enrichment_context=session_payload.get("enrichment_status") or {},
+        correlation_context=session_payload.get("session_ttp_correlations") or [],
+        response_guidance_policy_path=selected.response_guidance_policy_path,
+        response_guidance_asset_profile_path=(
+            selected.response_guidance_asset_profile_path
         ),
-        "commands": commands,
-        "ttps": ttps,
-        "tactics": trusted["tactics"],
-        "session_ttp_correlations": session_payload.get("session_ttp_correlations", []),
-        "session_ttp_correlation_summary": session_payload.get("session_ttp_correlation_summary", {}),
-        "threat_hunting_context": hunting_context,
-        "session_correlations": hunting_context.get("session_correlations", []),
-        "correlation_rules_fired": hunting_context.get("correlation_rules_fired", []),
-        "kev_matches": session_payload.get("kev_matches", []),
-        "sigma_hits": session_payload.get("sigma_hits", []),
-        "ttp_command_map": trusted["ttp_command_map"],
-        "threat_hypothesis": {
-            "stated_intent": "Under analysis",
-            "predicted_next_action": "Insufficient evidence to construct a falsifiable follow-on hypothesis.",
-            "post_session_follow_on_hypothesis": "Insufficient evidence to construct a falsifiable follow-on hypothesis.",
-            "falsification_conditions": [],
-            "analytical_evidence_strength": {
-                "level": "Low",
-                "reason": "The analysis coordinator failed; only trusted observed evidence is retained.",
-                "metric_name": "analytical_evidence_strength",
-                "method": "heuristic_evidence_strength_v1",
-                "calibrated_probability": False,
-                "description": "Heuristic evidence strength; not a calibrated probability.",
-            },
-            "hypothesis_status": "insufficient_evidence",
-            "scope": "post_session_cowrie_observable_behavior",
-        },
-        "error": safe_error,
-        "data_provenance": {
-            "session": {
-                "session_id": session_payload.get("session_id", "unknown"),
-                "src_ip": session_payload.get("src_ip", "unknown"),
-                "raw_event_count": len(raw_events),
-                **command_observation_provenance(
-                    commands,
-                    session_payload.get("commands_success", []),
-                    session_payload.get("commands_failed", []),
-                ),
-            },
-            "classification": {
-                "policy": session_payload.get("classification_policy", {}),
-                "event_count": len(session_payload.get("classification_events", [])),
-                "ttp_sources": session_payload.get("ttp_sources", {}),
-            },
-            "session_ttp_correlation": session_payload.get("session_ttp_correlation_summary", {}),
-            "credential_metadata": credential_metadata_for_provenance(
-                session_payload.get("credential_metadata", {})
-            ),
-            "enrichment": session_payload.get("enrichment_status", {}),
-            "ai": {
-                "status": "failed",
-                "fallback": "deterministic_baseline",
-                "error": safe_error,
-            },
-        },
-    }
-    return _safe_report_mapping(
-        attach_threat_evidence_layers(report, session_payload, prediction_snapshot)
     )
+    report["status"] = "observation_only_abstention"
+    report["abstention"] = {
+        "abstained": True,
+        "reason": "analysis_pipeline_failed",
+    }
+    report["behavioral_findings"] = []
+    report["hypothesis_sets"] = []
+    context = report["non_authoritative_context"]
+    context["analysis_processing"] = {
+        "status": "failed",
+        "fallback": "canonical_observation_only_abstention",
+        "error": safe_error,
+    }
+    report = attach_threat_evidence_layers(
+        report, session_payload, prediction_snapshot
+    )
+    validate_session_assessment_v4(report, raise_on_error=True)
+    return _safe_report_mapping(report)
 
 
 def load_json_config(path: str) -> Dict[str, Any]:
@@ -610,6 +580,10 @@ async def analyze_job(
             )
         )
         raise RuntimeError(safe_pipeline_error) from None
+    if result.get("schema_version") != "session_assessment.v4":
+        raise SessionAssessmentV4Error(
+            "new analysis reports must use session_assessment.v4"
+        )
     result.setdefault("session_id", state.session_id)
     result.setdefault("created_at", utc_now())
     result.setdefault("worker", "analysis_worker")
@@ -624,29 +598,28 @@ async def analyze_job(
         session_payload.get("session_ttp_correlations", []),
         session_payload.get("session_id", state.session_id),
     )
-    result.setdefault("threat_hunting_context", hunting_context)
-    result.setdefault("session_correlations", hunting_context.get("session_correlations", []))
-    result.setdefault("correlation_rules_fired", hunting_context.get("correlation_rules_fired", []))
-    if isinstance(result.get("threat_hypothesis"), dict):
-        result["threat_hypothesis"].setdefault(
-            "session_correlations",
-            hunting_context.get("session_correlations", []),
+    context_payload = result.setdefault("non_authoritative_context", {})
+    if not isinstance(context_payload, dict):
+        raise SessionAssessmentV4Error(
+            "non_authoritative_context must be an object"
         )
-        result["threat_hypothesis"].setdefault(
-            "correlation_rules_fired",
-            hunting_context.get("correlation_rules_fired", []),
-        )
-    if isinstance(result.get("honeypot_intelligence"), dict):
-        result["honeypot_intelligence"].setdefault("session_correlation_findings", hunting_context)
+    context_payload["threat_hunting"] = hunting_context
     result = attach_threat_evidence_layers(result, session_payload, prediction_snapshot)
     if config.enable_actor_attribution:
-        result = enrich_report_with_actor_attribution(
-            result,
+        attribution = enrich_report_with_actor_attribution(
+            {},
             session_payload,
             config.actor_db_path,
             mitre_db=context["mitre_attack"],
         )
-    return attach_report_artifacts(result, session_payload, config)
+        context_payload["actor_attribution"] = {
+            "authority": "non_authoritative_context_only",
+            "actor_matches": attribution.get("actor_matches") or [],
+        }
+    validate_session_assessment_v4(result, raise_on_error=True)
+    result = attach_report_artifacts(result, session_payload, config)
+    validate_session_assessment_v4(result, raise_on_error=True)
+    return result
 
 
 class AnalysisWorker:
@@ -758,18 +731,19 @@ class AnalysisWorker:
                                 job["session"],
                                 safe_error,
                                 prediction_snapshot=latest_prediction,
+                                config=self.config,
                             )
                             fallback.setdefault("correlation_id", correlation_id)
-                            if self.config.enable_actor_attribution:
-                                fallback = enrich_report_with_actor_attribution(
-                                    fallback,
-                                    job["session"],
-                                    self.config.actor_db_path,
-                                )
+                            validate_session_assessment_v4(
+                                fallback, raise_on_error=True
+                            )
                             fallback = attach_report_artifacts(
                                 fallback,
                                 job["session"],
                                 self.config,
+                            )
+                            validate_session_assessment_v4(
+                                fallback, raise_on_error=True
                             )
                             heartbeat.check(renew=True)
                             report_id = self.storage.complete_analysis_job(

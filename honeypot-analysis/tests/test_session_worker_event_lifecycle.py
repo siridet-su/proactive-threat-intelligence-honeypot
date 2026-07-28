@@ -426,14 +426,15 @@ class _RecoveryCoordinator:
     def __init__(self, **_kwargs: object) -> None:
         pass
 
-    async def analyze(self, _ioc_bundle: object, tactic_summary: object, _sessions: object, **kwargs: object) -> dict:
-        return {
-            "campaign_name": "Restart Recovery Test",
-            "confidence": "Low - deterministic test",
-            "executive_summary": "Recovered active session retained complete history.",
-            "tactic_summary": tactic_summary,
-            "raw_event_count": len(kwargs.get("raw_events", [])),
-        }
+    async def analyze(self, _ioc_bundle: object, _tactic_summary: object, sessions: object, **kwargs: object) -> dict:
+        from production.reporting.session_assessment_v4 import (
+            build_session_assessment_v4,
+        )
+
+        return build_session_assessment_v4(
+            sessions,
+            raw_events=kwargs.get("raw_events", []),
+        )
 
 
 def test_active_session_restart_preserves_ordered_analysis_and_prediction_history(
@@ -529,7 +530,8 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
     ) == 1
     report = json.loads(storage.list_rows("reports", limit=1)[0]["payload_json"])
     assert report["session_id"] == "session-restart"
-    assert report["data_provenance"]["session"]["raw_event_count"] == 5
+    assert report["schema_version"] == "session_assessment.v4"
+    assert report["canonical_evidence"]["source_evidence_sha256"]
 
 
 def test_restart_after_durable_session_save_does_not_reapply_event(

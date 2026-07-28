@@ -395,7 +395,6 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "source_geo": detail.get("source_geo") or {},
         "source_geo_context": detail.get("source_geo_context") or {},
         "observables": detail.get("observables") or [],
-        "likely_next_steps": detail.get("likely_next_steps") or [],
         "commands": detail.get("commands") or [],
         "classification_events": detail.get("classification_events") or [],
         "session_ttp_correlations": detail.get("session_ttp_correlations") or [],

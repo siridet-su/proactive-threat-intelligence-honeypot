@@ -297,7 +297,11 @@ def test_exception_boundaries_never_render_unlabelled_attacker_text() -> None:
 
     assert SECRET not in rendered
     assert json.loads(rendered)["error"] == "operation_failed"
-    assert baseline["error"] == "operation_failed"
+    assert baseline["schema_version"] == "session_assessment.v4"
+    assert baseline["status"] == "observation_only_abstention"
+    assert baseline["non_authoritative_context"]["analysis_processing"]["error"] == (
+        "operation_failed"
+    )
 
 
 def test_vertex_retry_metadata_does_not_render_exception_text() -> None:

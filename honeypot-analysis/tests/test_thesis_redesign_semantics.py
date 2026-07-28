@@ -77,7 +77,7 @@ def test_same_timestamp_duplicate_occurrences_have_distinct_identity() -> None:
     assert observations[1]["duplicate_of"] == observations[0]["evidence_id"]
 
 
-def test_monitor_keeps_legacy_heuristic_only_as_deprecated_data() -> None:
+def test_monitor_does_not_generate_legacy_next_action_heuristics() -> None:
     report = {
         "follow_on_hypothesis": {
             "claims": [],
@@ -89,12 +89,14 @@ def test_monitor_keeps_legacy_heuristic_only_as_deprecated_data() -> None:
         {},
         {"commands": ["whoami"], "tactics": ["discovery"]},
     )
-    assert recommendations["rule_based_likely_next_steps"]
-    assert recommendations["rule_based_likely_next_steps_deprecated"] is True
+    assert "rule_based_likely_next_steps" not in recommendations
+    assert "predicted_next_action" not in recommendations
+    assert "post_session_follow_on_hypothesis" not in recommendations
 
     html = _render_next_steps(
         {"payload": {"commands": ["whoami"], "tactics": ["discovery"]}},
         {"report_recommendations": recommendations},
     )
     assert "Likely Attacker Next Step" not in html
-    assert "No bounded follow-on hypothesis is supported." in html
+    assert "possible next steps" not in html
+    assert "predicted next actions" in html

@@ -8,6 +8,7 @@ import re
 import stat
 import uuid
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
@@ -37,6 +38,20 @@ class _ReportsDirectoryIdentityChanged(ValueError):
 def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
     """Return a redacted mapping or fail without exposing the input."""
 
+    if (
+        label == "report"
+        and isinstance(value, dict)
+        and value.get("schema_version") == "session_assessment.v4"
+    ):
+        # V4 has already been redacted before its evidence digest and content
+        # IDs are computed. Re-redacting at each consumer can alter an
+        # otherwise valid canonical snapshot and invalidate its guidance hash.
+        from production.reporting.session_assessment_v4 import (
+            validate_session_assessment_v4,
+        )
+
+        validate_session_assessment_v4(value, raise_on_error=True)
+        return deepcopy(value)
     try:
         redacted = redact_for_artifact(value)
     except Exception:

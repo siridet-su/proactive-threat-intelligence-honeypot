@@ -1907,13 +1907,28 @@ def build_pipeline_trigger(
 
             if not isinstance(result, dict):
                 raise RuntimeError("Coordinator returned no report")
-            result.setdefault("data_provenance", {}).update(data_provenance)
-            result.setdefault(
-                "ioc_summary",
-                reporting_view.get("ioc_summary", {}),
-            )
-            result.setdefault("bpg_list", bpg_list)
-            result = _safe_reporting_mapping(result, "report")
+            if result.get("schema_version") == "session_assessment.v4":
+                non_authoritative = result.setdefault(
+                    "non_authoritative_context", {}
+                )
+                if not isinstance(non_authoritative, dict):
+                    raise ValueError(
+                        "v4 non_authoritative_context must be an object"
+                    )
+                non_authoritative["pipeline_compatibility"] = {
+                    "data_provenance": data_provenance,
+                    "ioc_summary": reporting_view.get("ioc_summary", {}),
+                    "bpg_list": bpg_list,
+                }
+            else:
+                result.setdefault("data_provenance", {}).update(data_provenance)
+                result.setdefault(
+                    "ioc_summary",
+                    reporting_view.get("ioc_summary", {}),
+                )
+                result.setdefault("bpg_list", bpg_list)
+            if result.get("schema_version") != "session_assessment.v4":
+                result = _safe_reporting_mapping(result, "report")
             level = _extract_level(result)
             print(
                 "  [Pipeline] Done - analytical_evidence_strength="

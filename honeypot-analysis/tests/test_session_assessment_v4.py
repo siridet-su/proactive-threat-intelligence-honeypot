@@ -303,3 +303,21 @@ def test_report_boundary_redaction_preserves_v4_hash_integrity() -> None:
     boundary_copy = redact_for_artifact(report)
     assert "do-not-store-this" not in str(boundary_copy)
     assert validate_session_assessment_v4(boundary_copy) == []
+
+
+def test_whole_contract_validation_rejects_forged_response_guidance() -> None:
+    payload = _payload()
+    report = build_session_assessment_v4(
+        [payload],
+        raw_events=payload["raw_events"],
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_policy_path=CLASSIFICATION_POLICY,
+    )
+    report["response_guidance_v3"]["safety"]["automatic_execution"] = True
+
+    errors = validate_session_assessment_v4(report)
+
+    assert any(
+        "response_guidance_v3: automatic execution must be false" in error
+        for error in errors
+    )

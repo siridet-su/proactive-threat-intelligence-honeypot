@@ -20,7 +20,10 @@ from production.policies.threat_hypothesis_behavior_policy import (
     policy_summary,
     resolve_behavior_policy,
 )
-from production.reporting.response_guidance_v3 import build_response_guidance_v3_from_paths
+from production.reporting.response_guidance_v3 import (
+    build_response_guidance_v3_from_paths,
+    validate_response_guidance_v3,
+)
 from production.reporting.threat_hypothesis import (
     build_follow_on_hypothesis,
     build_observed_behavior,
@@ -460,7 +463,6 @@ def build_session_assessment_v4(
             "new_record_authority": SCHEMA_VERSION,
         },
     }
-    validate_session_assessment_v4(record, raise_on_error=True)
     guidance = build_response_guidance_v3_from_paths(
         observed,
         policy_path=response_guidance_policy_path,
@@ -469,7 +471,9 @@ def build_session_assessment_v4(
         forecast_context=prediction_context or {},
         enrichment_context=enrichment_context or {},
     )
-    return {**record, "response_guidance_v3": guidance}
+    record["response_guidance_v3"] = guidance
+    validate_session_assessment_v4(record, raise_on_error=True)
+    return record
 
 
 def validate_session_assessment_v4(
@@ -538,6 +542,14 @@ def validate_session_assessment_v4(
         ids = [_clean(item.get(id_key)) for item in values if isinstance(item, dict)]
         if len(ids) != len(values) or len(ids) != len(set(ids)) or any(not item for item in ids):
             errors.append(f"{collection} IDs must be present and unique")
+    guidance = value.get("response_guidance_v3")
+    if not isinstance(guidance, dict):
+        errors.append("response_guidance_v3 must be an object")
+    else:
+        guidance_errors = validate_response_guidance_v3(guidance)
+        errors.extend(
+            f"response_guidance_v3: {error}" for error in guidance_errors
+        )
     evidence_refs = {
         _clean(item.get("evidence_id"))
         for key in (
