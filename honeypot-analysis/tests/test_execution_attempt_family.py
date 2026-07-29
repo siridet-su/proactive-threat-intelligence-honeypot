@@ -41,6 +41,12 @@ SPEC_PATH = (
 SPEC_SHA256 = (
     "d3a4df7312b455cc1cae93d930102012368a2632d7cf28eeac503707c576bcfc"
 )
+HOLDOUT_PATH = (
+    ROOT / "evaluation/execution_attempt_holdout_frozen.v1.json"
+)
+HOLDOUT_SHA256 = (
+    "930561045adb67f8943c0ddca1a74647ce4ffc4572feaf0daf55b2e9c56c2e8a"
+)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -60,6 +66,18 @@ def _spec() -> dict[str, Any]:
     )
     assert value["expected_labels_frozen_before_execution"] is True
     assert len(value["cases"]) == 24
+    return value
+
+
+def _holdout() -> dict[str, Any]:
+    raw = HOLDOUT_PATH.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
+    value = json.loads(raw)
+    assert value["schema_version"] == (
+        "typed_execution_attempt_holdout.v1"
+    )
+    assert value["expected_labels_frozen_before_execution"] is True
+    assert len(value["cases"]) == 12
     return value
 
 
@@ -283,6 +301,23 @@ def test_frozen_execution_attempt_evaluation() -> None:
     assert counts == {"tp": 8, "fp": 0, "fn": 0, "tn": 16}
 
 
+def test_frozen_execution_attempt_holdout() -> None:
+    counts = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    for case in _holdout()["cases"]:
+        _payload_value, _facts, selection, _report = _assert_case(
+            case
+        )
+        expected = int(case["eligible_matches"]) > 0
+        actual = bool(selection["matches"])
+        counts[
+            "tp" if actual and expected
+            else "fp" if actual
+            else "fn" if expected
+            else "tn"
+        ] += 1
+    assert counts == {"tp": 4, "fp": 0, "fn": 0, "tn": 8}
+
+
 def test_frozen_execution_cases_persist_and_render(
     tmp_path: Path,
 ) -> None:
@@ -326,4 +361,3 @@ def test_frozen_execution_cases_persist_and_render(
             rendered["artifacts"]["integrity_manifest"]
         ) == []
         assert validate_session_assessment_v4(rendered) == []
-
