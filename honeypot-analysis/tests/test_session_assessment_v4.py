@@ -296,9 +296,7 @@ def test_noneligible_transfer_attempt_does_not_create_connected_transfer_finding
     assert "connected_artifact_activity" not in {
         item["finding_type"] for item in report["behavioral_findings"]
     }
-    assert [item["finding_type"] for item in report["behavioral_findings"]] == [
-        "attempted_artifact_execution"
-    ]
+    assert report["behavioral_findings"] == []
 
 
 def test_typed_transfer_observation_does_not_authorize_follow_on_hypothesis() -> None:

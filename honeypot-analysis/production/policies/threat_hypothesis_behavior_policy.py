@@ -332,6 +332,12 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
         execution = independent.get("execution") or {}
         _validate_action_types(execution.get("literal_action_types"), "policy.claims.independent.execution.literal_action_types", errors)
         _validate_pattern(execution.get("legacy_command_pattern"), "policy.claims.independent.execution.legacy_command_pattern", errors)
+        _validate_typed_semantic_claim(
+            execution.get("typed_semantic"),
+            "policy.claims.independent.execution.typed_semantic",
+            errors,
+            expected_family="execution",
+        )
         claim_types = execution.get("claim_types") or {}
         for key in ("success", "failure_or_unknown"):
             if not str(claim_types.get(key) or "").strip():

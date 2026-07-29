@@ -355,6 +355,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "transfer": "activated",
                     "inspection": "activated",
                     "filesystem": "activated",
+                    "execution": "activated",
                 }.get(family, "not_activated")
                 if state != expected:
                     errors.append(
@@ -368,10 +369,12 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
             "transfer",
             "inspection",
             "filesystem",
+            "execution",
         }:
             errors.append(
                 "activation.family_requirements must contain only "
-                "sensitive_read, transfer, inspection, and filesystem"
+                "sensitive_read, transfer, inspection, filesystem, and "
+                "execution"
             )
         else:
             expected_requirements = {
@@ -477,6 +480,29 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                         "literal_data_emission",
                     },
                     "operation_match_mode": "exactly_one_required",
+                    "required_entity_role": None,
+                    "required_entity_type": None,
+                    "entity_match_mode": "referenced_required",
+                    "required_outcome_status": "reported_success",
+                    "required_outcome_scope": "fragment",
+                    "required_effect_status": "reported_completed",
+                    "required_parse_status": "parsed",
+                    "allowed_path_resolution_statuses": {
+                        "recorded_resolved",
+                        "context_resolved",
+                    },
+                    "require_same_entity": False,
+                    "require_linkable_identity": True,
+                    "require_empty_abstention_reasons": True,
+                },
+                "execution": {
+                    "required_operation_types": {
+                        "execution_attempt",
+                    },
+                    "allowed_operation_types": {
+                        "execution_attempt",
+                    },
+                    "operation_match_mode": "all_required",
                     "required_entity_role": None,
                     "required_entity_type": None,
                     "entity_match_mode": "referenced_required",

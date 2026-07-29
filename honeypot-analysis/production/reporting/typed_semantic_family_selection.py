@@ -27,6 +27,7 @@ ACTIVATED_FAMILIES = (
     "transfer",
     "inspection",
     "filesystem",
+    "execution",
 )
 INSPECTION_OPERATIONS = frozenset({
     "host_uptime_inspection",
@@ -47,6 +48,9 @@ FILESYSTEM_CHANGE_OPERATIONS = frozenset({
     "directory_create",
     "file_move",
     "file_delete",
+})
+EXECUTION_ATTEMPT_OPERATIONS = frozenset({
+    "execution_attempt",
 })
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SELECTION_KEYS = {
@@ -286,7 +290,7 @@ def _match_or_reasons(
                 entities_by_id.setdefault(entity_ref, []).append(
                     (entity_role, entity)
                 )
-        filesystem_roles = {
+        operation_roles = {
             "file_write": {"created_paths"},
             "file_append": {"appended_paths"},
             "file_modify": {"modified_paths"},
@@ -294,11 +298,15 @@ def _match_or_reasons(
             "directory_create": {"created_paths"},
             "file_move": {"source_paths", "destination_paths"},
             "file_delete": {"deleted_paths"},
+            "execution_attempt": {
+                "executed_paths",
+                "literal_values",
+            },
         }
         required_roles = {
             role_name
             for operation_type in eligible_operation_types
-            for role_name in filesystem_roles.get(
+            for role_name in operation_roles.get(
                 operation_type,
                 set(),
             )
@@ -318,7 +326,7 @@ def _match_or_reasons(
         else:
             for entity_ref in referenced_entity_ids:
                 entries = entities_by_id.get(entity_ref) or []
-                if family == "filesystem":
+                if family in {"filesystem", "execution"}:
                     entries = [
                         entry
                         for entry in entries
@@ -791,6 +799,11 @@ def validate_policy_output_trace(
                         and operation_types[0]
                         in FILESYSTEM_CHANGE_OPERATIONS
                     )
+                    or (
+                        family == "execution"
+                        and operation_types[0]
+                        in EXECUTION_ATTEMPT_OPERATIONS
+                    )
                 )
             )
         )
@@ -923,6 +936,38 @@ def validate_policy_output_trace(
                 errors.append(
                     f"typed semantic policy trace matches[{index}] "
                     "filesystem entity is invalid"
+                )
+        if family == "execution":
+            operation_type = (
+                operation_types[0]
+                if isinstance(operation_types, list)
+                and len(operation_types) == 1
+                else ""
+            )
+            role = _clean(match.get("entity_role"))
+            entity_type = _clean(match.get("entity_type"))
+            entity_value = _clean(match.get("entity_value"))
+            path_status = _clean(
+                match.get("path_resolution_status")
+            )
+            if (
+                operation_type != "execution_attempt"
+                or role not in {"executed_paths", "literal_values"}
+                or entity_type
+                != ("path" if role == "executed_paths" else "literal")
+                or not entity_value
+                or (
+                    role == "executed_paths"
+                    and path_status not in {
+                        "recorded_resolved",
+                        "context_resolved",
+                    }
+                )
+                or (role == "literal_values" and path_status)
+            ):
+                errors.append(
+                    f"typed semantic policy trace matches[{index}] "
+                    "execution entity is invalid"
                 )
         proof_scopes = frozenset(match.get("proof_scopes") or [])
         allowed_proof_scopes = (

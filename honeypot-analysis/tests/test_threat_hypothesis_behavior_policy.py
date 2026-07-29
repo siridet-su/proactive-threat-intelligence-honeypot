@@ -65,7 +65,7 @@ def test_trusted_behavior_policy_is_valid_and_records_provenance() -> None:
     assert summary == {
         "schema_version": "threat_hypothesis_behavior_policy.v1",
         "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-        "version": "2026-07-30-filesystem-observation-v1",
+        "version": "2026-07-30-execution-observation-v1",
         "enabled": True,
         "reviewed": True,
         "review_status": "approved for scoped Cowrie SSH analysis",
@@ -165,7 +165,10 @@ def test_new_remote_executable_remains_context_but_cannot_bypass_typed_transfer(
 
     report = _session_report(commands, policy_document=policy)
     assert "connected_transfer_execution" not in _finding_types(report)
-    assert "attempted_artifact_execution" in _finding_types(report)
+    assert "attempted_artifact_execution" not in _finding_types(report)
+    assert "observed_cowrie_execution_attempt_command" not in (
+        _finding_types(report)
+    )
     observations = report["canonical_evidence"]["observations"]
     assert len(observations) == 2
     assert report["canonical_evidence"]["connected_behavior_chains"]
@@ -193,7 +196,10 @@ def test_connected_transfer_rule_cannot_bypass_typed_family_containment() -> Non
     assert "reviewed_transfer_execution_observation" not in _finding_types(
         report
     )
-    assert "attempted_artifact_execution" in _finding_types(report)
+    assert "attempted_artifact_execution" not in _finding_types(report)
+    assert "observed_cowrie_execution_attempt_command" not in (
+        _finding_types(report)
+    )
 
 
 def test_policy_provenance_is_exposed_across_canonical_sections() -> None:

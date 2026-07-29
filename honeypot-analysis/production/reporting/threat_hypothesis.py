@@ -516,6 +516,11 @@ def build_supported_assessment(
             "permission_modification_attempt",
             "deletion_attempt",
         })
+    if "execution" in activated_families:
+        suppressed_action_types.update({
+            "execution_attempt",
+            "shell_pipe_consumer",
+        })
     connected_claims = _connected_behavior_claims(
         observed,
         document,
@@ -543,6 +548,7 @@ def build_supported_assessment(
                     "transfer",
                     "inspection",
                     "filesystem",
+                    "execution",
                 }
             )
         ):
@@ -572,12 +578,20 @@ def build_supported_assessment(
         observed,
         *(execution_definition.get("literal_action_types") or []),
     )
-    execution = literal_execution or (
-        _matching_chain(
-            chain,
-            compile_pattern(document, execution_definition.get("legacy_command_pattern")),
+    execution = [] if "execution" in activated_families else (
+        literal_execution or (
+            _matching_chain(
+                chain,
+                compile_pattern(
+                    document,
+                    execution_definition.get(
+                        "legacy_command_pattern"
+                    ),
+                ),
+            )
+            if not observed.get("ordered_command_observations")
+            else []
         )
-        if not observed.get("ordered_command_observations") else []
     )
     persistence = _persistence_chain(
         observed,
@@ -665,6 +679,38 @@ def build_supported_assessment(
                     typed_definition.get("rule_id")
                 ),
                 "semantic_family": "inspection",
+                "semantic_trace": policy_output_trace(selection),
+            })
+            objectives.append(claim)
+
+    if "execution" in activated_families:
+        selection = semantic_selections.get("execution") or {}
+        matches = selection.get("matches") or []
+        if matches:
+            typed_definition = execution_definition.get(
+                "typed_semantic"
+            ) or {}
+            refs = sorted({
+                _clean(ref)
+                for match in matches
+                if isinstance(match, dict)
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            claim = _claim(
+                _clean(typed_definition.get("claim_type")),
+                _clean(typed_definition.get("text")),
+                _clean(typed_definition.get("evidence_status"))
+                or "supported",
+                refs,
+                typed_definition.get("limitations") or [],
+            )
+            claim.update({
+                "claim_basis": "typed_semantic_fact_set.v2",
+                "behavior_policy_rule_id": _clean(
+                    typed_definition.get("rule_id")
+                ),
+                "semantic_family": "execution",
                 "semantic_trace": policy_output_trace(selection),
             })
             objectives.append(claim)

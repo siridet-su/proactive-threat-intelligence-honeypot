@@ -1,7 +1,7 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "updated_at": "2026-07-30",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
@@ -127,6 +127,29 @@
         "last_reviewed": "2026-07-30",
         "review_expires_at": "2027-07-16",
         "version": "3.4.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-execution-attempt-command",
+      "semantic_family": "execution",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1059", "cisa-small-business"],
+      "severity": "medium",
+      "statement": "Cowrie reported success for a parsed, supported execution-attempt command in its simulated shell; program existence, completed execution, program effects, malicious intent, compromise, persistence, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["execution"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires one supported typed execution-attempt operation with successful fragment outcome", "Every referenced script path or inline-program entity must resolve", "ATT&CK candidates, predictions, enrichment, hypotheses, and generic command labels cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.5.0"
       }
     },
     {
@@ -310,12 +333,13 @@
     },
     {
       "rule_id": "observed-execution-corroboration",
+      "semantic_family": "execution",
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1059", "cisa-small-business"],
-      "applies_when": {"any_action_types": ["execution_attempt", "shell_pipe_consumer"]},
+      "applies_when": {"activated_semantic_families": ["execution"]},
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
-        "basis": ["Literal execution or shell-pipe observation", "Cowrie command outcome does not prove real-host execution"],
+        "basis": ["Exact activated typed execution-attempt observation", "Resolved script path or explicit inline-program identity", "Cowrie command outcome does not prove completed or real-host execution"],
         "author": "honeypot-policy-maintainer",
         "reviewer": "reviewed-policy-record-preserved",
         "reviewed": true,
@@ -323,14 +347,14 @@
         "created": "2026-07-27",
         "last_reviewed": "2026-07-29",
         "review_expires_at": "2027-07-16",
-        "version": "3.0.1-phase9a"
+        "version": "3.5.0"
       },
       "actions": [
         {
           "action_id": "correlate-observed-execution-attempt",
           "priority": 12,
-          "action": "Check authorized process, audit, and endpoint telemetry for execution matching the observed paths and session time window: {executed_paths}.",
-          "rationale": "A Cowrie execution command supports a bounded corroboration check only.",
+          "action": "Check authorized process and audit telemetry for activity matching the resolved script path or explicit inline-program observation and the Cowrie session time window: {executed_paths}.",
+          "rationale": "An exact typed Cowrie execution-attempt observation supports only a bounded, manual corroboration check.",
           "source_type": "trusted_control_guidance",
           "references": ["mitre-t1059", "cisa-small-business"],
           "requires_manual_approval": true,
@@ -338,7 +362,7 @@
           "execution_integration": "not_implemented",
           "provenance": {
             "method": "reviewed_observed_evidence_policy_migration",
-            "basis": ["Migrated from execution response", "No containment or host change is automatically authorized"],
+            "basis": ["Selected independently from the activated typed execution fact", "No containment or host change is automatically authorized"],
             "author": "honeypot-policy-maintainer",
             "reviewer": "reviewed-policy-record-preserved",
             "reviewed": true,
@@ -346,7 +370,7 @@
             "created": "2026-07-27",
             "last_reviewed": "2026-07-27",
             "review_expires_at": "2027-07-16",
-            "version": "3.0.0"
+            "version": "3.5.0"
           }
         }
       ]

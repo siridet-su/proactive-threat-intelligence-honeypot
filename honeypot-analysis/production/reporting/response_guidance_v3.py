@@ -41,6 +41,7 @@ CURRENT_ACTIVATED_SEMANTIC_FAMILIES = (
     "transfer",
     "inspection",
     "filesystem",
+    "execution",
 )
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -656,6 +657,7 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
     legacy_one_family = policy_version.startswith("3.1.")
     legacy_two_families = policy_version.startswith("3.2.")
     legacy_three_families = policy_version.startswith("3.3.")
+    legacy_four_families = policy_version.startswith("3.4.")
     typed = typed_value if isinstance(typed_value, dict) else {}
     if not legacy_pre_typed and not isinstance(typed_value, dict):
         errors.append("typed semantic provenance is required")
@@ -696,7 +698,18 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                 else (
                     ["sensitive_read", "transfer", "inspection"]
                     if legacy_three_families
-                    else list(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+                    else (
+                        [
+                            "sensitive_read",
+                            "transfer",
+                            "inspection",
+                            "filesystem",
+                        ]
+                        if legacy_four_families
+                        else list(
+                            CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+                        )
+                    )
                 )
             )
         )
@@ -734,7 +747,18 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                 else (
                     {"sensitive_read", "transfer", "inspection"}
                     if legacy_three_families
-                    else set(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+                    else (
+                        {
+                            "sensitive_read",
+                            "transfer",
+                            "inspection",
+                            "filesystem",
+                        }
+                        if legacy_four_families
+                        else set(
+                            CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+                        )
+                    )
                 )
             )
         ):
@@ -759,7 +783,18 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                         else (
                             {"sensitive_read", "transfer", "inspection"}
                             if legacy_three_families
-                            else set(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+                            else (
+                                {
+                                    "sensitive_read",
+                                    "transfer",
+                                    "inspection",
+                                    "filesystem",
+                                }
+                                if legacy_four_families
+                                else set(
+                                    CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+                                )
+                            )
                         )
                     )
                     or not SHA256_RE.fullmatch(_clean(digest).lower())

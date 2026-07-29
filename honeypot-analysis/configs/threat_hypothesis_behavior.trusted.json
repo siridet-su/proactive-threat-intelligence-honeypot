@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-30-filesystem-observation-v1",
+  "version": "2026-07-30-execution-observation-v1",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -13,7 +13,8 @@
       "Direct Cowrie transfer-event typed authority decision",
       "Observed transfer URI, working-directory, and event-order preservation review",
       "Observation-only typed inspection activation decision",
-      "Observation-only typed filesystem-change activation decision"
+      "Observation-only typed filesystem-change activation decision",
+      "Bounded typed Cowrie execution-attempt activation decision"
     ],
     "reviewed": true,
     "reviewer": "project developer",
@@ -283,6 +284,18 @@
           "claim_types": {
             "success": "possible_artifact_execution",
             "failure_or_unknown": "attempted_artifact_execution"
+          },
+          "typed_semantic": {
+            "rule_id": "observed-supported-cowrie-execution-attempt",
+            "family": "execution",
+            "claim_type": "observed_cowrie_execution_attempt_command",
+            "text": "Cowrie reported success for a parsed, supported execution-attempt command in its simulated shell.",
+            "evidence_status": "supported",
+            "limitations": [
+              "Cowrie-reported success does not establish that the referenced program existed or completed execution.",
+              "The observation does not establish program effects, attacker intent, compromise, persistence, or an effect on a real host.",
+              "ATT&CK mappings, predictions, enrichment, correlations, hypotheses, guidance, and optional prose do not support this finding."
+            ]
           }
         },
         "persistence": {

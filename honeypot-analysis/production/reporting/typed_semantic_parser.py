@@ -51,8 +51,8 @@ _UNSUPPORTED_SHELL_TOKENS = {
     "<&",
     ">&",
 }
-_SHELL_EXECUTABLES = {"sh", "bash", "dash", "zsh", "ksh"}
-_SCRIPT_EXECUTABLE_PREFIXES = ("python", "perl", "ruby", "node")
+_SHELL_EXECUTABLES = {"sh", "bash", "dash"}
+_SCRIPT_EXECUTABLES = {"python", "python2", "python3", "perl"}
 
 
 def _clean(value: Any) -> str:
@@ -1164,9 +1164,7 @@ def _general_operations(
                 proof_scope="general_command_semantics",
                 entity_refs=refs,
             ))
-    elif executable in _SHELL_EXECUTABLES or executable.startswith(
-        _SCRIPT_EXECUTABLE_PREFIXES
-    ):
+    elif executable in _SHELL_EXECUTABLES | _SCRIPT_EXECUTABLES:
         inline = "-c" in arguments
         if any(
             value.startswith("-") and value not in {"-c", "--"}

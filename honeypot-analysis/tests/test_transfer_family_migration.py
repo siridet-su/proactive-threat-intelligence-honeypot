@@ -667,8 +667,12 @@ def test_historical_one_family_v4_v3_record_remains_readable() -> None:
     typed = historical["provenance"]["typed_semantics"]
     typed["activated_families"] = ["sensitive_read"]
     typed["non_activated_families"].insert(
-        typed["non_activated_families"].index("execution"),
+        typed["non_activated_families"].index("transformation"),
         "transfer",
+    )
+    typed["non_activated_families"].insert(
+        typed["non_activated_families"].index("transformation"),
+        "execution",
     )
     guidance = historical["response_guidance_v3"]
     guidance_typed = guidance["provenance"]["typed_semantics"]
