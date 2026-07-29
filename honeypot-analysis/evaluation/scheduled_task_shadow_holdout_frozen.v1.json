@@ -1,0 +1,13 @@
+{
+  "schema_version": "typed_scheduled_task_shadow_holdout.v1",
+  "evaluation_id": "cowrie-scheduled-task-shadow-holdout-20260730",
+  "expected_labels_frozen_before_execution": true,
+  "cases": [
+    {"case_id": "SHH-001", "command": "crontab --list", "outcome": "success", "expected_operations": ["schedule_inspect"]},
+    {"case_id": "SHH-002", "command": "crontab --edit", "outcome": "success", "expected_operations": ["schedule_modify"]},
+    {"case_id": "SHH-003", "command": "crontab --remove", "outcome": "failure", "expected_operations": ["schedule_delete"]},
+    {"case_id": "SHH-004", "command": "crontab", "outcome": "success", "expected_operations": ["unknown"]},
+    {"case_id": "SHH-005", "command": "crontab '/var/tmp/unclosed", "outcome": "success", "expected_operations": ["unknown"]},
+    {"case_id": "SHH-006", "command": "printf '* * * * * id'", "outcome": "success", "expected_operations": ["literal_data_emission"]}
+  ]
+}

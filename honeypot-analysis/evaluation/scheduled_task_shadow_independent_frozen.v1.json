@@ -1,0 +1,19 @@
+{
+  "schema_version": "typed_scheduled_task_shadow_evaluation.v1",
+  "evaluation_id": "cowrie-scheduled-task-shadow-20260730",
+  "expected_labels_frozen_before_execution": true,
+  "cases": [
+    {"case_id": "SCH-001", "command": "crontab -l", "outcome": "success", "expected_operations": ["schedule_inspect"]},
+    {"case_id": "SCH-002", "command": "crontab -e", "outcome": "success", "expected_operations": ["schedule_modify"]},
+    {"case_id": "SCH-003", "command": "crontab -r", "outcome": "success", "expected_operations": ["schedule_delete"]},
+    {"case_id": "SCH-004", "command": "crontab /var/tmp/nightly.tab", "outcome": "success", "expected_operations": ["schedule_modify"]},
+    {"case_id": "SCH-005", "command": "crontab '/var/tmp/night jobs.tab'", "outcome": "success", "expected_operations": ["schedule_modify"]},
+    {"case_id": "SCH-006", "command": "crontab -l", "outcome": "failure", "expected_operations": ["schedule_inspect"]},
+    {"case_id": "SCH-007", "command": "crontab -r", "outcome": "unknown", "expected_operations": ["schedule_delete"]},
+    {"case_id": "SCH-008", "command": "crontab -l && crontab -r", "outcome": "success", "expected_operations": ["schedule_inspect", "schedule_delete"]},
+    {"case_id": "SCH-009", "command": "cat /etc/crontab", "outcome": "success", "expected_operations": ["file_read"]},
+    {"case_id": "SCH-010", "command": "crontab \"$TASK_FILE\"", "outcome": "success", "expected_operations": ["unknown"]},
+    {"case_id": "SCH-011", "command": "crontab -u root -l", "outcome": "success", "expected_operations": ["unknown"]},
+    {"case_id": "SCH-012", "command": "at now + 5 minutes", "outcome": "success", "expected_operations": ["unknown"]}
+  ]
+}
