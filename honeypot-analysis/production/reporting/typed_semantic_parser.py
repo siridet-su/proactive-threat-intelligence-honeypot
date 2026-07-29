@@ -664,32 +664,78 @@ def _general_operations(
             entity_refs=refs,
         ))
     elif executable == "uname":
-        if any(not value.startswith("-") for value in arguments):
-            abstentions.append("unsupported_option")
-        else:
-            _add_operation(operations, _operation(
-                "system_identity_inspection",
-                proof_scope="general_command_semantics",
-            ))
-    elif executable in {"id", "whoami"}:
+        if _unsupported_option(
+            arguments,
+            exact={
+                "--all",
+                "--kernel-name",
+                "--nodename",
+                "--kernel-release",
+                "--kernel-version",
+                "--machine",
+                "--processor",
+                "--hardware-platform",
+                "--operating-system",
+            },
+            short_characters="asnrvmpio",
+        ) or non_options:
+            return [], ["unsupported_option"]
+        _add_operation(operations, _operation(
+            "system_identity_inspection",
+            proof_scope="general_command_semantics",
+        ))
+    elif executable == "id":
         if _unsupported_option(
             arguments,
             exact={"--user", "--group", "--groups", "--name"},
             short_characters="ugGnrz",
         ):
             return [], ["unsupported_option"]
+        if len(non_options) > 1:
+            return [], ["unsupported_option"]
+        refs = (
+            [
+                _add_entity(
+                    entities,
+                    "account_names",
+                    "account",
+                    non_options[0],
+                )
+            ]
+            if non_options
+            else []
+        )
+        _add_operation(operations, _operation(
+            "account_identity_inspection",
+            proof_scope="general_command_semantics",
+            entity_refs=refs,
+        ))
+    elif executable == "whoami":
+        if arguments:
+            return [], ["unsupported_option"]
         _add_operation(operations, _operation(
             "account_identity_inspection",
             proof_scope="general_command_semantics",
         ))
     elif executable == "hostname":
-        if non_options:
-            abstentions.append("unsupported_option")
-        else:
-            _add_operation(operations, _operation(
-                "system_identity_inspection",
-                proof_scope="general_command_semantics",
-            ))
+        if _unsupported_option(
+            arguments,
+            exact={
+                "--domain",
+                "--fqdn",
+                "--long",
+                "--short",
+                "--ip-address",
+                "--all-ip-addresses",
+                "--all-fqdns",
+            },
+            short_characters="dfsiIA",
+        ) or non_options:
+            return [], ["unsupported_option"]
+        _add_operation(operations, _operation(
+            "system_identity_inspection",
+            proof_scope="general_command_semantics",
+        ))
     elif executable == "ip":
         positional = [value.lower() for value in arguments if not value.startswith("-")]
         if positional[:2] in (["route", "show"], ["route", "list"]):
@@ -733,7 +779,17 @@ def _general_operations(
             abstentions.append("unsupported_option")
     elif executable == "find":
         if any(
-            value in {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
+            value in {
+                "-delete",
+                "-exec",
+                "-execdir",
+                "-ok",
+                "-okdir",
+                "-fprint",
+                "-fprint0",
+                "-fprintf",
+                "-fls",
+            }
             for value in arguments
         ):
             return [], ["unsupported_option"]
@@ -1360,12 +1416,32 @@ def extract_typed_semantics(
                     & set(general_abstentions)
                 )
                 literal_map = policy.get("literal_action_map") or {}
+                has_inspection_operation = any(
+                    (
+                        policy.get("operations", {}).get(
+                            _clean(item.get("operation_type")),
+                            {},
+                        )
+                        or {}
+                    ).get("family") == "inspection"
+                    for item in operations
+                )
                 if not hard_abstention:
                     for literal in observation.get("action_types") or []:
                         operation_type = literal_map.get(literal)
                         if not operation_type:
                             continue
                         if operation_type == "credential_path_read":
+                            continue
+                        if (
+                            operation_type == "execution_attempt"
+                            and has_inspection_operation
+                        ):
+                            # The legacy action extractor treats any absolute
+                            # executable path as an artifact-execution attempt.
+                            # A reviewed read-only utility remains its exact
+                            # inspection operation; path qualification alone
+                            # must not add a second, overstated operation.
                             continue
                         refs = [
                             item.get("entity_id")

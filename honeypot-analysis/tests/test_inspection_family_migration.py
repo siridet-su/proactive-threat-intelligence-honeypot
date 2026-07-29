@@ -213,6 +213,16 @@ def _operation_types(fact_set: dict[str, Any]) -> list[str]:
         ("ss -tln", "network_socket_inspection", ""),
         ("getent passwd root", "account_database_inspection", "passwd"),
         ("find /opt -type f", "filesystem_search", "/opt"),
+        (
+            "env -i id -G service-account",
+            "account_identity_inspection",
+            "service-account",
+        ),
+        (
+            "/usr/bin/uname -n",
+            "system_identity_inspection",
+            "",
+        ),
     ],
 )
 def test_each_reviewed_inspection_operation_selects_only_from_exact_facts(
@@ -322,9 +332,13 @@ def test_failed_unknown_multi_operation_and_unresolved_inputs_abstain(
     "command",
     [
         "uname '",
+        "uname --help",
+        "hostname -F/tmp/new-hostname",
+        "whoami unexpected",
         "ip address show",
         "ps --forest",
         "find /tmp -delete",
+        "find /var -fprintf /tmp/results '%p\\n'",
         "hostinfo --all",
         "df \"$TARGET\"",
     ],
