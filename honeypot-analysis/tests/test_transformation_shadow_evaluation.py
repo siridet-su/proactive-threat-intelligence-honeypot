@@ -34,6 +34,12 @@ SPEC_PATH = (
 SPEC_SHA256 = (
     "759b485fd471bad75abef787ec747ff9e2369c76fcfe9ccbfc69d722024c8518"
 )
+HOLDOUT_PATH = (
+    ROOT / "evaluation/transformation_shadow_holdout_frozen.v1.json"
+)
+HOLDOUT_SHA256 = (
+    "8dc32288c153c29d711b3e3091ca9be49086ed26deb099f1e2a5873391baf7fa"
+)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -50,6 +56,18 @@ def _spec() -> dict[str, Any]:
     )
     assert value["expected_labels_frozen_before_execution"] is True
     assert len(value["cases"]) == 12
+    return value
+
+
+def _holdout() -> dict[str, Any]:
+    raw = HOLDOUT_PATH.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
+    value = json.loads(raw)
+    assert value["schema_version"] == (
+        "typed_transformation_shadow_holdout.v1"
+    )
+    assert value["expected_labels_frozen_before_execution"] is True
+    assert len(value["cases"]) == 6
     return value
 
 
@@ -131,53 +149,59 @@ def _operations(fact_set: dict[str, Any]) -> list[str]:
     return result
 
 
+def _assert_case(case: dict[str, Any]) -> None:
+    fact_set, report = _build(case)
+
+    assert _operations(fact_set) == case["expected_operations"], (
+        case["case_id"]
+    )
+    assert validate_typed_semantic_fact_set(fact_set) == []
+    assert validate_session_assessment_v4(report) == []
+    assert not any(
+        item.get("semantic_family") == "transformation"
+        for item in report["behavioral_findings"]
+    )
+    assert not any(
+        item.get("semantic_family") == "transformation"
+        for item in report["hypothesis_sets"]
+    )
+    assert not any(
+        item.get("semantic_family") == "transformation"
+        for item in report["response_guidance_v3"]["findings"]
+    )
+    assert not any(
+        item.get("semantic_family") == "transformation"
+        for item in report["response_guidance_v3"][
+            "advisory_actions"
+        ]
+    )
+    with pytest.raises(
+        TypedSemanticFamilySelectionError,
+        match="not activated",
+    ):
+        select_activated_semantic_family(
+            fact_set,
+            family="transformation",
+        )
+
+    facts_two, report_two = _build(case)
+    assert facts_two == fact_set
+    assert report_two["assessment_id"] == report["assessment_id"]
+    assert (
+        report_two["behavioral_findings"]
+        == report["behavioral_findings"]
+    )
+    assert (
+        report_two["response_guidance_v3"]["guidance_id"]
+        == report["response_guidance_v3"]["guidance_id"]
+    )
+
+
 def test_frozen_transformation_shadow_evaluation() -> None:
     for case in _spec()["cases"]:
-        fact_set, report = _build(case)
+        _assert_case(case)
 
-        assert _operations(fact_set) == case["expected_operations"], (
-            case["case_id"]
-        )
-        assert validate_typed_semantic_fact_set(fact_set) == []
-        assert validate_session_assessment_v4(report) == []
-        assert not any(
-            item.get("semantic_family") == "transformation"
-            for item in report["behavioral_findings"]
-        )
-        assert not any(
-            item.get("semantic_family") == "transformation"
-            for item in report["hypothesis_sets"]
-        )
-        assert not any(
-            item.get("semantic_family") == "transformation"
-            for item in report["response_guidance_v3"]["findings"]
-        )
-        assert not any(
-            item.get("semantic_family") == "transformation"
-            for item in report["response_guidance_v3"][
-                "advisory_actions"
-            ]
-        )
-        with pytest.raises(
-            TypedSemanticFamilySelectionError,
-            match="not activated",
-        ):
-            select_activated_semantic_family(
-                fact_set,
-                family="transformation",
-            )
 
-        facts_two, report_two = _build(case)
-        assert facts_two == fact_set
-        assert (
-            report_two["assessment_id"]
-            == report["assessment_id"]
-        )
-        assert (
-            report_two["behavioral_findings"]
-            == report["behavioral_findings"]
-        )
-        assert (
-            report_two["response_guidance_v3"]["guidance_id"]
-            == report["response_guidance_v3"]["guidance_id"]
-        )
+def test_frozen_transformation_shadow_holdout() -> None:
+    for case in _holdout()["cases"]:
+        _assert_case(case)
