@@ -144,6 +144,45 @@ def test_release_manifest_rejects_mutable_feed_cache_as_immutable_config(
         )
 
 
+def test_release_manifest_binds_separate_frozen_model_bundle(tmp_path: Path) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    bundle_root = tmp_path / "frozen-model-bundle"
+    bundle_root.mkdir()
+    bundle_manifest = bundle_root / "FROZEN_MODEL_BUNDLE_MANIFEST.json"
+    bundle_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "frozen_model_bundle.v1",
+                "bundle_id": "frozen_model_bundle_test",
+                "artifact_inventory_sha256": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    bundle_package = tmp_path / "frozen-model-bundle.tar"
+    bundle_package.write_bytes(b"bundle-recovery-package")
+    manifest = build_manifest(
+        revision=REVISION,
+        release_root=release,
+        package_path=package,
+        rollback_location=rollback,
+        configuration_paths={"policy": str(policy)},
+        artifact_paths={"model": str(artifact)},
+        frozen_model_bundle_manifest_path=str(bundle_manifest),
+        frozen_model_bundle_package_path=str(bundle_package),
+    )
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+
+    assert verify_manifest(output, release)["verified"] is True
+    assert manifest["frozen_model_bundle"]["bundle_id"] == (
+        "frozen_model_bundle_test"
+    )
+    bundle_package.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="frozen model bundle"):
+        verify_manifest(output, release)
+
+
 def test_release_manifest_keeps_v2_records_readable(tmp_path: Path) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
     manifest = build_manifest(
