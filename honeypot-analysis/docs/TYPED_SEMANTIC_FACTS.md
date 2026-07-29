@@ -128,13 +128,13 @@ render it as Markdown. It contains old literal actions, typed operations,
 blocked or partial matches, abstention reasons, and the exact family-scoped
 policy impact. The diagnostic itself remains discarded.
 
-The vocabulary records `sensitive_read` as `activated`, `unknown` as
-`not_eligible`, and every other operation family as `not_activated`. A
-sensitive read requires exactly `file_read` and `credential_path_read` on the
-same resolved, linkable credential-path entity, a parsed fragment, no
-abstention, and a Cowrie-reported successful fragment outcome. Additional
-operations, failures, compound outcomes, conditional outcomes, unsupported
-syntax, unresolved identities, and ambiguity abstain.
+The vocabulary records `sensitive_read` and `transfer` as `activated`,
+`unknown` as `not_eligible`, and every other operation family as
+`not_activated`. A sensitive read requires exactly `file_read` and
+`credential_path_read` on the same resolved, linkable credential-path entity,
+a parsed fragment, no abstention, and a Cowrie-reported successful fragment
+outcome. Additional operations, failures, compound outcomes, conditional
+outcomes, unsupported syntax, unresolved identities, and ambiguity abstain.
 
 `credential_path_read` is emitted only when the general parser proves a
 same-entity `file_read`; merely mentioning a sensitive path in `echo`, delete,
@@ -158,6 +158,21 @@ select the family without a same-entity parsed read.
 
 The selected threat output is a bounded behavioral finding, not an attacker
 intent or hypothesis. The selected v3 playbook remains advisory, manually
-approved, non-executable, and incapable of alerts. ATT&CK labels, predictions,
-enrichment, correlations, and optional prose cannot create or alter a family
-match.
+approved, and non-executable.
+
+For `transfer`, only `transfer_observed` from a direct
+`cowrie.session.file_download` or `cowrie.session.file_upload` event is
+eligible. It must reference one exact linkable SHA-256, contain no unresolved
+entity, carry `event_observed` effect and outcome, and retain only its direct
+Cowrie event as supporting evidence. Downloader commands, even when Cowrie
+reports command success, remain transfer attempts and abstain. ATT&CK T1105,
+prediction, enrichment, and command-to-event relationships cannot create the
+literal operation. A supported shared-path confirmation relationship is
+contextual evidence linkage, not causality or execution proof.
+
+The transfer family produces a bounded observed-event finding and manual
+hash-correlation guidance. It produces no follow-on threat hypothesis while
+execution and cross-family relationship semantics remain non-activated.
+Both selected playbooks remain manually approved, non-executable, and
+incapable of alerts. ATT&CK labels, predictions, enrichment, correlations, and
+optional prose cannot create or alter a family match.

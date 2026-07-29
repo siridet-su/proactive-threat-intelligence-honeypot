@@ -1,8 +1,8 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.1.0",
-  "updated_at": "2026-07-29",
+  "version": "3.2.0",
+  "updated_at": "2026-07-30",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
   "automatic_execution": false,
@@ -107,23 +107,24 @@
       }
     },
     {
-      "rule_id": "observed-transfer-candidate",
+      "rule_id": "observed-cowrie-transfer-event",
+      "semantic_family": "transfer",
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1105", "cisa-small-business"],
       "severity": "medium",
-      "statement": "A trusted command mapping indicates a possible transfer attempt inside Cowrie; a real-host transfer or execution is not established.",
-      "applies_when": {"any_ttps": ["T1105"]},
+      "statement": "Cowrie recorded a direct file-transfer event for the resolved artifact SHA-256 {artifact_hashes}; execution and any real-host effect are not established.",
+      "applies_when": {"activated_semantic_families": ["transfer"]},
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
-        "basis": ["Migrated from reviewed transfer rule", "Limited to trusted ATT&CK mappings attached to observed commands"],
+        "basis": ["Migrated from reviewed transfer rule", "Requires a typed direct Cowrie transfer observation and exact artifact SHA-256", "ATT&CK candidates and transfer commands cannot select this finding"],
         "author": "honeypot-policy-maintainer",
         "reviewer": "reviewed-policy-record-preserved",
         "reviewed": true,
         "generated": false,
         "created": "2026-07-27",
-        "last_reviewed": "2026-07-27",
+        "last_reviewed": "2026-07-30",
         "review_expires_at": "2027-07-16",
-        "version": "3.0.0"
+        "version": "3.2.0"
       }
     }
   ],
@@ -218,28 +219,29 @@
       ]
     },
     {
-      "rule_id": "observed-transfer-corroboration",
+      "rule_id": "observed-transfer-event-corroboration",
+      "semantic_family": "transfer",
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1105", "cisa-small-business"],
-      "applies_when": {"any_ttps": ["T1105"]},
+      "applies_when": {"activated_semantic_families": ["transfer"]},
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
-        "basis": ["Observed transfer candidate", "No transfer success is inferred without a Cowrie transfer event"],
+        "basis": ["Direct Cowrie transfer event with a resolved artifact SHA-256", "No transfer command, prediction, enrichment, or ATT&CK mapping can select this playbook"],
         "author": "honeypot-policy-maintainer",
         "reviewer": "reviewed-policy-record-preserved",
         "reviewed": true,
         "generated": false,
         "created": "2026-07-27",
-        "last_reviewed": "2026-07-27",
+        "last_reviewed": "2026-07-30",
         "review_expires_at": "2027-07-16",
-        "version": "3.0.0"
+        "version": "3.2.0"
       },
       "actions": [
         {
           "action_id": "hunt-observed-transfer-indicators",
           "priority": 15,
-          "action": "Search authorized proxy, DNS, and host telemetry for the observed transfer indicators: {urls}; {artifact_hashes}.",
-          "rationale": "The Cowrie observation supports corroboration; it does not establish a completed transfer or real-host execution.",
+          "action": "Search authorized proxy, file, and endpoint telemetry for the exact artifact SHA-256 observed by Cowrie: {artifact_hashes}.",
+          "rationale": "A direct Cowrie transfer event supports a bounded hash-correlation review; it does not establish execution or an effect on a real host.",
           "source_type": "trusted_control_guidance",
           "references": ["mitre-t1105", "cisa-small-business"],
           "requires_manual_approval": true,
@@ -247,15 +249,15 @@
           "execution_integration": "not_implemented",
           "provenance": {
             "method": "reviewed_observed_evidence_policy_migration",
-            "basis": ["Migrated from transfer response", "No network block is automatically authorized"],
+            "basis": ["Migrated from transfer response", "Limited to an exact artifact hash from a direct Cowrie transfer event", "No network block is automatically authorized"],
             "author": "honeypot-policy-maintainer",
             "reviewer": "reviewed-policy-record-preserved",
             "reviewed": true,
             "generated": false,
             "created": "2026-07-27",
-            "last_reviewed": "2026-07-27",
+            "last_reviewed": "2026-07-30",
             "review_expires_at": "2027-07-16",
-            "version": "3.0.0"
+            "version": "3.2.0"
           }
         }
       ]

@@ -30,8 +30,16 @@ proof of credential acquisition or real-host effect. The guidance evaluator
 selects from the immutable facts independently of threat findings or
 hypotheses.
 
-Execution and every other operation family remain on the contained behavior or
-shadow-only path. The combined persistence/evasion task is intentionally
+Direct Cowrie transfer observation is the second migrated family. Transfer
+guidance requires `transfer_observed`, direct-event outcome and proof, one
+exact linkable SHA-256, no unresolved entity, and a direct transfer evidence
+reference. T1105, downloader commands, Cowrie command success, predictions,
+enrichment, and hypotheses cannot select it. The action asks only for manual
+correlation of the exact observed hash and does not claim execution or
+real-host impact.
+
+Execution and every other operation family remain on the contained behavior
+or shadow-only path. The combined persistence/evasion task is intentionally
 absent until those operations can be distinguished without relying on a broad
 tactic or command-family label.
 

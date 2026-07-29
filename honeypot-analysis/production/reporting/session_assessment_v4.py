@@ -21,7 +21,9 @@ from production.policies.threat_hypothesis_behavior_policy import (
     resolve_behavior_policy,
 )
 from production.reporting.response_guidance_v3 import (
+    CURRENT_ACTIVATED_SEMANTIC_FAMILIES,
     build_response_guidance_v3_from_paths,
+    canonical_transfer_evidence_refs,
     canonical_evidence_snapshot as guidance_evidence_snapshot,
     validate_response_guidance_v3,
 )
@@ -607,12 +609,18 @@ def build_session_assessment_v4(
             behavior_policy_document=behavior_document,
             behavior_policy_path=behavior_policy_path,
             typed_semantic_fact_set=typed_fact_set,
-            activated_semantic_families=("sensitive_read",),
+            activated_semantic_families=(
+                CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+            ),
         )
         follow_on = build_follow_on_hypothesis(
             observed,
             behavior_policy_document=behavior_document,
             behavior_policy_path=behavior_policy_path,
+            typed_semantic_fact_set=typed_fact_set,
+            activated_semantic_families=(
+                CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+            ),
         )
         findings = _deduplicated_findings(supported)
         hypothesis_sets = _hypothesis_sets(follow_on)
@@ -647,7 +655,9 @@ def build_session_assessment_v4(
                 )
                 or {}
             ),
-            "activated_families": ["sensitive_read"],
+            "activated_families": list(
+                CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+            ),
             "non_activated_families": [
                 "inspection",
                 "filesystem",
@@ -656,7 +666,6 @@ def build_session_assessment_v4(
                 "scheduled_task",
                 "service",
                 "context",
-                "transfer",
                 "execution",
                 "identity",
             ],
@@ -723,7 +732,9 @@ def build_session_assessment_v4(
         forecast_context=prediction_context or {},
         enrichment_context=enrichment_context or {},
         typed_semantic_fact_set=typed_fact_set,
-        activated_semantic_families=("sensitive_read",),
+        activated_semantic_families=(
+            CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+        ),
     )
     record["response_guidance_v3"] = guidance
     record["assessment_id"] = canonical_assessment_id(record)
@@ -774,6 +785,7 @@ def validate_session_assessment_v4(
         typed_value is None
         and response_policy_version.startswith("3.0.")
     )
+    legacy_one_family = response_policy_version.startswith("3.1.")
     typed = typed_value if isinstance(typed_value, dict) else {}
     if not legacy_pre_typed and not isinstance(typed_value, dict):
         errors.append("provenance.typed_semantics is required")
@@ -803,13 +815,21 @@ def validate_session_assessment_v4(
         errors.append("typed semantic mode is invalid")
     if (
         not legacy_pre_typed
-        and typed.get("activated_families") != ["sensitive_read"]
+        and typed.get("activated_families")
+        != (
+            ["sensitive_read"]
+            if legacy_one_family
+            else list(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+        )
     ):
-        errors.append("only sensitive_read may be activated")
-    if "sensitive_read" in set(
+        errors.append("typed semantic activated families are invalid")
+    if set(typed.get("activated_families") or []).intersection(
         typed.get("non_activated_families") or []
     ):
-        errors.append("sensitive_read cannot also be non-activated")
+        errors.append(
+            "typed semantic families cannot be both activated and "
+            "non-activated"
+        )
     if not legacy_pre_typed and typed.get("persistence") != (
         "content_addressed_rebuild_from_canonical_evidence"
     ):
@@ -917,6 +937,7 @@ def validate_session_assessment_v4(
         for item in evidence.get(key) or []
         if isinstance(item, dict) and _clean(item.get("evidence_id"))
     }
+    transfer_evidence_refs = canonical_transfer_evidence_refs(evidence)
     for finding in value.get("behavioral_findings") or []:
         if not isinstance(finding, dict):
             continue
@@ -954,7 +975,9 @@ def validate_session_assessment_v4(
             errors.append(f"finding has unknown evidence refs: {sorted(unknown_refs)}")
         if semantic_family:
             trace = finding.get("semantic_trace") or {}
-            if semantic_family != "sensitive_read":
+            if semantic_family not in set(
+                typed.get("activated_families") or []
+            ):
                 errors.append("finding uses a non-activated semantic family")
             if trace.get("schema_version") != (
                 "typed_semantic_policy_trace.v1"
@@ -990,7 +1013,11 @@ def validate_session_assessment_v4(
                     semantic_vocabulary_sha256=(
                         typed_vocabulary_hash
                     ),
-                    allowed_evidence_refs=evidence_refs,
+                    allowed_evidence_refs=(
+                        transfer_evidence_refs
+                        if semantic_family == "transfer"
+                        else evidence_refs
+                    ),
                 )
             )
             trace_refs = {

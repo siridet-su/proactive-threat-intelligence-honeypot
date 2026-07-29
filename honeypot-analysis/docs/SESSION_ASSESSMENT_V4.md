@@ -42,18 +42,23 @@ stored only under `non_authoritative_context`. They cannot change canonical
 findings, hypotheses, statuses, or IDs.
 
 The evaluator also builds and validates `typed_semantic_fact_set.v2`.
-`sensitive_read` is the only activated operation family. It replaces the
-legacy credential-pattern claim with a bounded observed finding only when a
-parsed, successful Cowrie fragment contains exact same-entity `file_read` and
-`credential_path_read` operations on a resolved path. Failure, ambiguity,
-compound outcomes, additional operations, and unresolved identity abstain.
-No speculative threat hypothesis is created for this direct observation.
+`sensitive_read` and the direct-event slice of `transfer` are the only
+activated operation families. Sensitive-read replaces the legacy
+credential-pattern claim with a bounded observed finding only when a parsed,
+successful Cowrie fragment contains exact same-entity `file_read` and
+`credential_path_read` operations on a resolved path. Transfer replaces
+command- and ATT&CK-selected transfer authority with a bounded finding only
+for a direct Cowrie transfer event carrying one resolved SHA-256 and no
+unresolved entity. Failure, ambiguity, compound outcomes, additional
+operations, transfer attempts, and unresolved identity abstain. Neither
+direct observation creates a speculative threat hypothesis.
 
 The full fact set remains unpersisted and is reproducibly bound to canonical
 evidence, derived semantic input, exact behavior, classification, and
 semantic-vocabulary policy hashes, and evaluator revision. The record retains
-the fact-set hash and a bounded content-addressed selection trace. All other
-families remain on their existing contained or shadow-only paths. See
+the fact-set hash, an integrity-bound selection-set hash, per-family selection
+hashes, and bounded content-addressed selection traces. All other families
+remain on their existing contained or shadow-only paths. See
 `docs/TYPED_SEMANTIC_FACTS.md`.
 
 ## Provenance and failure semantics

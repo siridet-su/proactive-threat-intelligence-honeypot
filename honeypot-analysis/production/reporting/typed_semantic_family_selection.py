@@ -22,7 +22,7 @@ from production.utils.serialization import stable_json
 
 
 SCHEMA_VERSION = "typed_semantic_family_selection.v1"
-ACTIVATED_FAMILY = "sensitive_read"
+ACTIVATED_FAMILIES = ("sensitive_read", "transfer")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SELECTION_KEYS = {
     "schema_version",
@@ -80,14 +80,14 @@ def _texts(values: Any) -> List[str]:
     return output
 
 
-def _candidate_fact(fact: Dict[str, Any]) -> bool:
+def _candidate_fact(fact: Dict[str, Any], family: str) -> bool:
     if any(
-        operation.get("family") == ACTIVATED_FAMILY
+        operation.get("family") == family
         for operation in fact.get("operations") or []
         if isinstance(operation, dict)
     ):
         return True
-    return bool(
+    return family == "sensitive_read" and bool(
         (fact.get("entities") or {}).get("credential_paths")
     )
 
@@ -95,6 +95,7 @@ def _candidate_fact(fact: Dict[str, Any]) -> bool:
 def _match_or_reasons(
     fact: Dict[str, Any],
     requirement: Dict[str, Any],
+    family: str,
 ) -> tuple[List[Dict[str, Any]], List[str]]:
     reasons: List[str] = []
     parse = fact.get("parse") or {}
@@ -137,6 +138,31 @@ def _match_or_reasons(
         for operation in required_operations
     ):
         reasons.append("effect_status_not_eligible")
+    if family == "transfer":
+        if fact.get("evidence_type") != "direct_cowrie_transfer_event":
+            reasons.append("direct_transfer_event_required")
+        if any(
+            operation.get("proof_scope") != "direct_cowrie_event"
+            for operation in required_operations
+        ):
+            reasons.append("direct_event_proof_required")
+        if (
+            outcome.get("proof_scope") != "direct_cowrie_event"
+            or outcome.get("source_eventid")
+            not in {
+                "cowrie.session.file_download",
+                "cowrie.session.file_upload",
+            }
+        ):
+            reasons.append("direct_transfer_outcome_required")
+        if any(
+            entity.get("uncertain") is True
+            or entity.get("linkable") is not True
+            for values in (fact.get("entities") or {}).values()
+            for entity in values or []
+            if isinstance(entity, dict)
+        ):
+            reasons.append("fact_identity_unresolved")
 
     role = requirement["required_entity_role"]
     entity_type = requirement["required_entity_type"]
@@ -146,11 +172,15 @@ def _match_or_reasons(
         if isinstance(entity, dict)
         and entity.get("entity_type") == entity_type
     ]
-    path_by_entity = {
-        _clean(item.get("entity_ref")): item
-        for item in fact.get("path_resolutions") or []
-        if isinstance(item, dict) and item.get("role") == role
-    }
+    path_by_entity = (
+        {
+            _clean(item.get("entity_ref")): item
+            for item in fact.get("path_resolutions") or []
+            if isinstance(item, dict) and item.get("role") == role
+        }
+        if entity_type == "path"
+        else {}
+    )
     operation_refs: Dict[str, set[str]] = {}
     for operation in required_operations:
         operation_refs.setdefault(
@@ -169,11 +199,16 @@ def _match_or_reasons(
             )
         ):
             continue
-        if path.get("resolution_status") not in set(
-            requirement["allowed_path_resolution_statuses"]
+        if entity_type == "path":
+            if path.get("resolution_status") not in set(
+                requirement["allowed_path_resolution_statuses"]
+            ):
+                continue
+            if not _clean(path.get("path_identity_id")):
+                continue
+        if family == "transfer" and not SHA256_RE.fullmatch(
+            _clean(entity.get("normalized_value")).lower()
         ):
-            continue
-        if not _clean(path.get("path_identity_id")):
             continue
         if (
             requirement["require_same_entity"]
@@ -184,8 +219,32 @@ def _match_or_reasons(
         ):
             continue
         eligible_entities.append((entity, path))
+    if family == "transfer" and len(entities) != 1:
+        reasons.append("single_artifact_hash_required")
     if not eligible_entities:
         reasons.append("resolved_shared_entity_missing")
+
+    authoritative_refs = sorted({
+        _clean(reference.get("evidence_ref"))
+        for reference in fact.get("evidence_references") or []
+        if isinstance(reference, dict)
+        and reference.get("reference_type") in {
+            "source_observation",
+            "direct_cowrie_event",
+        }
+        and _clean(reference.get("evidence_ref"))
+    })
+    if family == "transfer":
+        source_ref = _clean(fact.get("source_observation_ref"))
+        direct_refs = {
+            _clean(reference.get("evidence_ref"))
+            for reference in fact.get("evidence_references") or []
+            if isinstance(reference, dict)
+            and reference.get("reference_type") == "direct_cowrie_event"
+            and _clean(reference.get("evidence_ref"))
+        }
+        if not source_ref or direct_refs != {source_ref}:
+            reasons.append("direct_event_reference_unresolved")
 
     if reasons:
         return [], sorted(set(reasons))
@@ -204,16 +263,6 @@ def _match_or_reasons(
         }
     )
     effect_status = requirement["required_effect_status"]
-    authoritative_refs = sorted({
-        _clean(reference.get("evidence_ref"))
-        for reference in fact.get("evidence_references") or []
-        if isinstance(reference, dict)
-        and reference.get("reference_type") in {
-            "source_observation",
-            "direct_cowrie_event",
-        }
-        and _clean(reference.get("evidence_ref"))
-    })
     for entity, path in eligible_entities:
         matches.append({
             "fact_id": _clean(fact.get("fact_id")),
@@ -243,16 +292,21 @@ def _selection_payload(
     fact_set: Dict[str, Any],
     policy: Dict[str, Any],
     policy_sha256: str,
+    family: str,
 ) -> Dict[str, Any]:
     activation = policy["activation"]
-    state = activation["family_states"][ACTIVATED_FAMILY]
-    requirement = activation["family_requirements"][ACTIVATED_FAMILY]
+    state = activation["family_states"][family]
+    requirement = activation["family_requirements"][family]
     matches: List[Dict[str, Any]] = []
     abstentions: List[Dict[str, Any]] = []
     for fact in fact_set.get("facts") or []:
-        if not isinstance(fact, dict) or not _candidate_fact(fact):
+        if not isinstance(fact, dict) or not _candidate_fact(fact, family):
             continue
-        fact_matches, reasons = _match_or_reasons(fact, requirement)
+        fact_matches, reasons = _match_or_reasons(
+            fact,
+            requirement,
+            family,
+        )
         matches.extend(fact_matches)
         if reasons:
             abstentions.append({
@@ -278,7 +332,7 @@ def _selection_payload(
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "matched" if matches else "abstained",
-        "family": ACTIVATED_FAMILY,
+        "family": family,
         "activation_state": state,
         "fact_set_sha256": _clean(fact_set.get("fact_set_sha256")),
         "semantic_vocabulary_sha256": policy_sha256,
@@ -295,7 +349,7 @@ def select_activated_semantic_family(
 ) -> Dict[str, Any]:
     """Select one activated family, rejecting every other family."""
 
-    if family != ACTIVATED_FAMILY:
+    if family not in ACTIVATED_FAMILIES:
         raise TypedSemanticFamilySelectionError(
             f"operation family is not activated: {family}"
         )
@@ -323,6 +377,7 @@ def select_activated_semantic_family(
         fact_set,
         loaded["document"],
         _clean(loaded.get("sha256")).lower(),
+        family,
     )
     result["selection_sha256"] = _sha256_json(result)
     errors = validate_typed_semantic_family_selection(
@@ -367,17 +422,20 @@ def validate_typed_semantic_family_selection(
         or recorded != _sha256_json(digest_input)
     ):
         errors.append("selection_sha256 mismatch")
+    family = _clean(value.get("family"))
+    if family not in ACTIVATED_FAMILIES:
+        errors.append("family selection is outside the activated family")
+        return errors
     expected = _selection_payload(
         fact_set,
         loaded["document"],
         _clean(loaded.get("sha256")).lower(),
+        family,
     )
     if digest_input != expected:
         errors.append("family selection does not match immutable facts")
     if value.get("schema_version") != SCHEMA_VERSION:
         errors.append("family selection schema is invalid")
-    if value.get("family") != ACTIVATED_FAMILY:
-        errors.append("family selection is outside the activated family")
     if value.get("activation_state") != "activated":
         errors.append("family selection activation state is invalid")
     if value.get("status") not in {"matched", "abstained"}:
@@ -412,13 +470,32 @@ def validate_typed_semantic_family_selection(
             errors.append(f"matches[{index}].fact_id is unresolved")
         if match.get("entity_ref") not in entity_by_id:
             errors.append(f"matches[{index}].entity_ref is unresolved")
+        fact = fact_by_id.get(_clean(match.get("fact_id"))) or {}
+        fact_operation_ids = {
+            _clean(operation.get("operation_id"))
+            for operation in fact.get("operations") or []
+            if isinstance(operation, dict)
+        }
+        fact_entity_ids = {
+            _clean(entity.get("entity_id"))
+            for values in (fact.get("entities") or {}).values()
+            for entity in values or []
+            if isinstance(entity, dict)
+        }
+        if match.get("entity_ref") not in fact_entity_ids:
+            errors.append(
+                f"matches[{index}].entity_ref is outside its fact"
+            )
         for operation_ref in match.get("operation_refs") or []:
             if operation_ref not in operation_by_id:
                 errors.append(
                     f"matches[{index}].operation_ref is unresolved"
                 )
+            elif operation_ref not in fact_operation_ids:
+                errors.append(
+                    f"matches[{index}].operation_ref is outside its fact"
+                )
         source_ref = _clean(match.get("source_observation_ref"))
-        fact = fact_by_id.get(_clean(match.get("fact_id"))) or {}
         if source_ref != fact.get("source_observation_ref"):
             errors.append(
                 f"matches[{index}].source_observation_ref is unresolved"
@@ -506,7 +583,8 @@ def validate_policy_output_trace(
         return ["typed semantic policy trace shape is invalid"]
     if value.get("schema_version") != "typed_semantic_policy_trace.v1":
         errors.append("typed semantic policy trace schema is invalid")
-    if value.get("family") != ACTIVATED_FAMILY:
+    family = _clean(value.get("family"))
+    if family not in ACTIVATED_FAMILIES:
         errors.append("typed semantic policy trace family is invalid")
     for key, expected in (
         ("fact_set_sha256", fact_set_sha256),
@@ -532,58 +610,91 @@ def validate_policy_output_trace(
                 f"typed semantic policy trace matches[{index}] shape is invalid"
             )
             continue
-        if match.get("operation_types") != [
-            "credential_path_read",
-            "file_read",
-        ]:
+        expected_operations = {
+            "sensitive_read": [
+                "credential_path_read",
+                "file_read",
+            ],
+            "transfer": ["transfer_observed"],
+        }.get(family, [])
+        if match.get("operation_types") != expected_operations:
             errors.append(
                 f"typed semantic policy trace matches[{index}] operations "
                 "are invalid"
             )
-        expected_values = {
-            "entity_role": "credential_paths",
-            "entity_type": "path",
-            "outcome_status": "reported_success",
-            "outcome_scope": "fragment",
-            "effect_status": "reported_completed",
-        }
+        expected_values = (
+            {
+                "entity_role": "credential_paths",
+                "entity_type": "path",
+                "outcome_status": "reported_success",
+                "outcome_scope": "fragment",
+                "effect_status": "reported_completed",
+            }
+            if family == "sensitive_read"
+            else {
+                "entity_role": "artifact_hashes",
+                "entity_type": "hash",
+                "outcome_status": "event_observed",
+                "outcome_scope": "direct_cowrie_event",
+                "effect_status": "event_observed",
+            }
+        )
         for key, expected in expected_values.items():
             if match.get(key) != expected:
                 errors.append(
                     f"typed semantic policy trace matches[{index}].{key} "
                     "is invalid"
                 )
-        if match.get("path_resolution_status") not in {
-            "recorded_resolved",
-            "context_resolved",
-        }:
+        if family == "sensitive_read" and (
+            match.get("path_resolution_status")
+            not in {"recorded_resolved", "context_resolved"}
+        ):
             errors.append(
                 f"typed semantic policy trace matches[{index}] path is "
                 "unresolved"
+            )
+        if family == "transfer" and match.get(
+            "path_resolution_status"
+        ):
+            errors.append(
+                f"typed semantic policy trace matches[{index}] path status "
+                "must be empty for a hash entity"
             )
         if not _clean(match.get("entity_value")):
             errors.append(
                 f"typed semantic policy trace matches[{index}] entity is empty"
             )
         proof_scopes = frozenset(match.get("proof_scopes") or [])
-        if proof_scopes not in {
-            frozenset({
-                "general_command_semantics",
-                "literal_command",
-            }),
-            frozenset({
-                "shell_syntax",
-                "literal_command",
-            }),
-            frozenset({
-                "general_command_semantics",
-                "shell_syntax",
-                "literal_command",
-            }),
-        }:
+        allowed_proof_scopes = (
+            {
+                frozenset({
+                    "general_command_semantics",
+                    "literal_command",
+                }),
+                frozenset({
+                    "shell_syntax",
+                    "literal_command",
+                }),
+                frozenset({
+                    "general_command_semantics",
+                    "shell_syntax",
+                    "literal_command",
+                }),
+            }
+            if family == "sensitive_read"
+            else {frozenset({"direct_cowrie_event"})}
+        )
+        if proof_scopes not in allowed_proof_scopes:
             errors.append(
                 f"typed semantic policy trace matches[{index}] proof scopes "
                 "are invalid"
+            )
+        if family == "transfer" and not SHA256_RE.fullmatch(
+            _clean(match.get("entity_value")).lower()
+        ):
+            errors.append(
+                f"typed semantic policy trace matches[{index}] artifact hash "
+                "is invalid"
             )
         refs = set(_texts(match.get("supporting_evidence_refs") or []))
         if not refs or not refs.issubset(allowed_evidence_refs):

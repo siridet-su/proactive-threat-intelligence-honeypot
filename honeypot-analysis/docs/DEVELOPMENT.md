@@ -67,11 +67,14 @@ test. Never tune after Final access or silently reinterpret stored snapshots.
 Use `response_guidance.v3` and immutable canonical observed evidence. Add
 adversarial tests for prediction/enrichment-only input, policy/profile hash
 drift, malformed references, automatic-execution attempts, deterministic IDs,
-and historical read-only adapter display. `sensitive_read` is the only
-activated typed-semantic family; do not activate another family without its
-own reviewed decision, closed policy requirements, shadow comparison, and
-positive/negative/ambiguous acceptance matrix. Do not write guidance into
-prediction snapshots or derive alerting from it.
+and historical read-only adapter display. Only `sensitive_read` and the
+direct-event slice of `transfer` are activated typed-semantic families. A
+transfer command remains an attempt and cannot select specialized output; an
+eligible transfer requires a direct Cowrie event and exact SHA-256. Do not
+activate another family without its own reviewed decision, closed policy
+requirements, shadow comparison, and positive/negative/ambiguous acceptance
+matrix. Do not write guidance into prediction snapshots or derive alerting
+from it.
 
 ### Storage change
 

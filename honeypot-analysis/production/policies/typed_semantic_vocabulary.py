@@ -350,6 +350,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                 expected = {
                     "unknown": "not_eligible",
                     "sensitive_read": "activated",
+                    "transfer": "activated",
                 }.get(family, "not_activated")
                 if state != expected:
                     errors.append(
@@ -358,74 +359,108 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
         requirements = activation.get("family_requirements")
         if not isinstance(requirements, dict):
             errors.append("activation.family_requirements must be an object")
-        elif set(requirements) != {"sensitive_read"}:
+        elif set(requirements) != {"sensitive_read", "transfer"}:
             errors.append(
-                "activation.family_requirements must contain only sensitive_read"
+                "activation.family_requirements must contain only "
+                "sensitive_read and transfer"
             )
         else:
-            requirement = requirements["sensitive_read"]
-            if _exact_keys(
-                requirement,
-                _ACTIVATION_REQUIREMENT_KEYS,
-                "activation.family_requirements.sensitive_read",
-                errors,
-            ):
-                required_operations = _string_list(
-                    requirement.get("required_operation_types"),
-                    "activation.family_requirements.sensitive_read."
-                    "required_operation_types",
-                    errors,
-                )
-                allowed_operations = _string_list(
-                    requirement.get("allowed_operation_types"),
-                    "activation.family_requirements.sensitive_read."
-                    "allowed_operation_types",
-                    errors,
-                )
-                if set(required_operations) != {
-                    "file_read",
-                    "credential_path_read",
-                }:
-                    errors.append(
-                        "sensitive_read must require file_read and "
-                        "credential_path_read"
-                    )
-                if set(allowed_operations) != set(required_operations):
-                    errors.append(
-                        "sensitive_read may allow only its two required "
-                        "operations"
-                    )
-                for operation_type in required_operations:
-                    if operation_type not in operations:
-                        errors.append(
-                            "sensitive_read references an unknown operation"
-                        )
-                expected_values = {
+            expected_requirements = {
+                "sensitive_read": {
+                    "required_operation_types": {
+                        "file_read",
+                        "credential_path_read",
+                    },
                     "required_entity_role": "credential_paths",
                     "required_entity_type": "path",
                     "required_outcome_status": "reported_success",
                     "required_outcome_scope": "fragment",
                     "required_effect_status": "reported_completed",
                     "required_parse_status": "parsed",
-                }
-                for key, expected in expected_values.items():
-                    if requirement.get(key) != expected:
-                        errors.append(
-                            f"sensitive_read.{key} must be {expected}"
-                        )
-                path_statuses = _string_list(
-                    requirement.get("allowed_path_resolution_statuses"),
-                    "activation.family_requirements.sensitive_read."
-                    "allowed_path_resolution_statuses",
+                    "allowed_path_resolution_statuses": {
+                        "recorded_resolved",
+                        "context_resolved",
+                    },
+                },
+                "transfer": {
+                    "required_operation_types": {"transfer_observed"},
+                    "required_entity_role": "artifact_hashes",
+                    "required_entity_type": "hash",
+                    "required_outcome_status": "event_observed",
+                    "required_outcome_scope": "direct_cowrie_event",
+                    "required_effect_status": "event_observed",
+                    "required_parse_status": "parsed",
+                    "allowed_path_resolution_statuses": set(),
+                },
+            }
+            for family, expected in expected_requirements.items():
+                requirement = requirements[family]
+                label = f"activation.family_requirements.{family}"
+                if not _exact_keys(
+                    requirement,
+                    _ACTIVATION_REQUIREMENT_KEYS,
+                    label,
+                    errors,
+                ):
+                    continue
+                required_operations = _string_list(
+                    requirement.get("required_operation_types"),
+                    f"{label}.required_operation_types",
                     errors,
                 )
-                if set(path_statuses) != {
-                    "recorded_resolved",
-                    "context_resolved",
-                }:
+                allowed_operations = _string_list(
+                    requirement.get("allowed_operation_types"),
+                    f"{label}.allowed_operation_types",
+                    errors,
+                )
+                if set(required_operations) != expected[
+                    "required_operation_types"
+                ]:
                     errors.append(
-                        "sensitive_read path resolution must be exact or "
-                        "confirmed-context resolution"
+                        f"{family} has invalid required operations"
+                    )
+                if set(allowed_operations) != set(required_operations):
+                    errors.append(
+                        f"{family} may allow only its required operations"
+                    )
+                for operation_type in required_operations:
+                    if operation_type not in operations:
+                        errors.append(
+                            f"{family} references an unknown operation"
+                        )
+                for key in (
+                    "required_entity_role",
+                    "required_entity_type",
+                    "required_outcome_status",
+                    "required_outcome_scope",
+                    "required_effect_status",
+                    "required_parse_status",
+                ):
+                    if requirement.get(key) != expected[key]:
+                        errors.append(
+                            f"{family}.{key} must be {expected[key]}"
+                        )
+                path_statuses = requirement.get(
+                    "allowed_path_resolution_statuses"
+                )
+                if (
+                    not isinstance(path_statuses, list)
+                    or any(
+                        not isinstance(item, str) or not item.strip()
+                        for item in path_statuses
+                    )
+                    or len(path_statuses) != len(set(path_statuses))
+                ):
+                    errors.append(
+                        f"{label}.allowed_path_resolution_statuses must "
+                        "be a unique list of strings"
+                    )
+                    path_statuses = []
+                if set(path_statuses) != expected[
+                    "allowed_path_resolution_statuses"
+                ]:
+                    errors.append(
+                        f"{family} path resolution requirements are invalid"
                     )
                 for key in (
                     "require_same_entity",
@@ -433,7 +468,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "require_empty_abstention_reasons",
                 ):
                     if requirement.get(key) is not True:
-                        errors.append(f"sensitive_read.{key} must be true")
+                        errors.append(f"{family}.{key} must be true")
     return errors
 
 

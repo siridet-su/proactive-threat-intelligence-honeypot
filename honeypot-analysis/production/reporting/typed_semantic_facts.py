@@ -2767,7 +2767,9 @@ def build_typed_semantic_shadow_diff(
         "blocked_matches": blocked_matches,
         "abstentions": abstentions,
         "policy_impact": {
-            "authoritative_change": "sensitive_read_only",
+            "authoritative_change": (
+                "sensitive_read_and_direct_transfer_observation"
+            ),
             "candidate_operation_families": families,
             "activation_state": "family_scoped",
         },
@@ -2838,7 +2840,9 @@ def validate_typed_semantic_shadow_diff(value: Any) -> List[str]:
         "shadow_diff.policy_impact",
         errors,
     ):
-        if impact.get("authoritative_change") != "sensitive_read_only":
+        if impact.get("authoritative_change") != (
+            "sensitive_read_and_direct_transfer_observation"
+        ):
             errors.append("shadow_diff policy impact is invalid")
         if impact.get("activation_state") != "family_scoped":
             errors.append("shadow_diff activation state is invalid")
@@ -2885,7 +2889,10 @@ def render_typed_semantic_shadow_diff(diff: Dict[str, Any]) -> str:
         "",
         f"Session: `{_clean(diff.get('session_id'))}`",
         f"Fact set: `{_clean(diff.get('fact_set_sha256'))}`",
-        "Authority impact: `sensitive_read_only`",
+        (
+            "Authority impact: "
+            "`sensitive_read_and_direct_transfer_observation`"
+        ),
         "",
         "## Typed facts",
     ]

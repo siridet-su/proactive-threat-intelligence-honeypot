@@ -1,7 +1,7 @@
 {
   "schema_version": "typed_semantic_vocabulary_policy.v1",
   "policy_id": "honeypot-typed-semantic-vocabulary",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "semantic_extractor_version": "typed-shell-subset.v2.2",
   "authority": {
     "mode": "family_scoped_policy_input",
@@ -13,8 +13,8 @@
   "review": {
     "method": "developer-authored closed semantic vocabulary",
     "reviewed": true,
-    "last_reviewed": "2026-07-29",
-    "scope": "bounded Cowrie SSH shell evidence"
+    "last_reviewed": "2026-07-30",
+    "scope": "bounded Cowrie SSH shell evidence with direct transfer-event policy input"
   },
   "contract": {
     "fact_set_schema": "typed_semantic_fact_set.v2",
@@ -452,7 +452,7 @@
       "scheduled_task": "not_activated",
       "service": "not_activated",
       "context": "not_activated",
-      "transfer": "not_activated",
+      "transfer": "activated",
       "execution": "not_activated",
       "sensitive_read": "activated",
       "identity": "not_activated"
@@ -477,6 +477,24 @@
           "recorded_resolved",
           "context_resolved"
         ],
+        "require_same_entity": true,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "transfer": {
+        "required_operation_types": [
+          "transfer_observed"
+        ],
+        "allowed_operation_types": [
+          "transfer_observed"
+        ],
+        "required_entity_role": "artifact_hashes",
+        "required_entity_type": "hash",
+        "required_outcome_status": "event_observed",
+        "required_outcome_scope": "direct_cowrie_event",
+        "required_effect_status": "event_observed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [],
         "require_same_entity": true,
         "require_linkable_identity": true,
         "require_empty_abstention_reasons": true

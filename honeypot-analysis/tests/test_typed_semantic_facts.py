@@ -198,12 +198,15 @@ def test_vocabulary_is_closed_hash_bound_and_family_scoped() -> None:
     assert loaded["document"]["activation"]["family_states"][
         "sensitive_read"
     ] == "activated"
+    assert loaded["document"]["activation"]["family_states"][
+        "transfer"
+    ] == "activated"
     assert all(
         state == "not_activated"
         for family, state in loaded["document"]["activation"][
             "family_states"
         ].items()
-        if family not in {"unknown", "sensitive_read"}
+        if family not in {"unknown", "sensitive_read", "transfer"}
     )
     assert set(loaded["document"]["entity_role_types"]) == set(
         loaded["document"]["vocabulary"]["entity_roles"]
@@ -726,7 +729,7 @@ def test_shadow_fact_and_diff_are_deterministic_and_strictly_valid() -> None:
     assert first["authority"]["may_select_hypotheses"] is False
     assert first["authority"]["may_select_guidance"] is True
     assert first_diff["policy_impact"]["authoritative_change"] == (
-        "sensitive_read_only"
+        "sensitive_read_and_direct_transfer_observation"
     )
 
 

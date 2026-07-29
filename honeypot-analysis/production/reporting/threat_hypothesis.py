@@ -432,9 +432,12 @@ def _action_refs(items: Iterable[Dict[str, Any]]) -> List[str]:
 def _connected_behavior_claims(
     observed: Dict[str, Any],
     policy_document: Dict[str, Any],
+    *,
+    suppressed_action_types: Iterable[str] = (),
 ) -> List[Dict[str, Any]]:
     claims: List[Dict[str, Any]] = []
     definitions = _claim_policy(policy_document).get("connected") or []
+    suppressed = set(suppressed_action_types)
     for chain in observed.get("connected_behavior_chains") or []:
         if not isinstance(chain, dict):
             continue
@@ -450,6 +453,8 @@ def _connected_behavior_claims(
                 continue
             required = set(definition.get("required_action_types") or [])
             excluded = set(definition.get("excluded_action_types") or [])
+            if suppressed.intersection(required):
+                continue
             if required.issubset(action_types) and not excluded.intersection(action_types):
                 matched_rule = definition
                 break
@@ -494,7 +499,22 @@ def build_supported_assessment(
     claims_policy = _claim_policy(document)
     independent = claims_policy.get("independent") or {}
     chain = list(observed.get("ordered_behavior_chain") or [])
-    connected_claims = _connected_behavior_claims(observed, document)
+    activated_families = {
+        _clean(value) for value in activated_semantic_families if _clean(value)
+    }
+    connected_claims = _connected_behavior_claims(
+        observed,
+        document,
+        suppressed_action_types=(
+            {
+                "transfer_attempt",
+                "cowrie_file_transfer_observed",
+                "remote_content_pipe_source",
+            }
+            if "transfer" in activated_families
+            else set()
+        ),
+    )
     objectives: List[Dict[str, Any]] = list(connected_claims)
     credential_definition = independent.get("credential") or {}
     downloader_definition = independent.get("downloader") or {}
@@ -506,31 +526,34 @@ def build_supported_assessment(
         chain,
         compile_pattern(document, credential_definition.get("trusted_command_pattern")),
     )
-    activated_families = {
-        _clean(value) for value in activated_semantic_families if _clean(value)
-    }
-    sensitive_read_selection: Dict[str, Any] = {}
-    if (
-        "sensitive_read" in activated_families
-        and isinstance(typed_semantic_fact_set, dict)
-    ):
-        try:
-            sensitive_read_selection = select_activated_semantic_family(
-                typed_semantic_fact_set,
-                family="sensitive_read",
+    semantic_selections: Dict[str, Dict[str, Any]] = {}
+    if isinstance(typed_semantic_fact_set, dict):
+        for family in sorted(
+            activated_families.intersection(
+                {"sensitive_read", "transfer"}
             )
-        except ValueError:
-            sensitive_read_selection = {}
+        ):
+            try:
+                semantic_selections[family] = (
+                    select_activated_semantic_family(
+                        typed_semantic_fact_set,
+                        family=family,
+                    )
+                )
+            except ValueError:
+                semantic_selections[family] = {}
     literal_downloader = _literal_actions(
         observed,
         *(downloader_definition.get("literal_action_types") or []),
     )
-    downloader = literal_downloader or (
+    downloader = [] if "transfer" in activated_families else (
+        literal_downloader or (
         _matching_chain(
             chain,
             compile_pattern(document, downloader_definition.get("legacy_command_pattern")),
         )
         if not observed.get("ordered_command_observations") else []
+        )
     )
     literal_execution = _literal_actions(
         observed,
@@ -563,7 +586,8 @@ def build_supported_assessment(
     ))
 
     if "sensitive_read" in activated_families:
-        matches = sensitive_read_selection.get("matches") or []
+        selection = semantic_selections.get("sensitive_read") or {}
+        matches = selection.get("matches") or []
         if matches:
             typed_definition = credential_definition.get(
                 "typed_semantic"
@@ -590,7 +614,7 @@ def build_supported_assessment(
                 ),
                 "semantic_family": "sensitive_read",
                 "semantic_trace": policy_output_trace(
-                    sensitive_read_selection
+                    selection
                 ),
             })
             objectives.append(claim)
@@ -610,7 +634,38 @@ def build_supported_assessment(
             _action_refs(downloader),
             downloader_definition.get("limitations") or [],
         ))
-    if download_refs:
+    if "transfer" in activated_families:
+        selection = semantic_selections.get("transfer") or {}
+        matches = selection.get("matches") or []
+        if matches:
+            typed_definition = download_definition.get(
+                "typed_semantic"
+            ) or {}
+            refs = sorted({
+                _clean(ref)
+                for match in matches
+                if isinstance(match, dict)
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            claim = _claim(
+                _clean(typed_definition.get("claim_type")),
+                _clean(typed_definition.get("text")),
+                _clean(typed_definition.get("evidence_status"))
+                or "supported",
+                refs,
+                typed_definition.get("limitations") or [],
+            )
+            claim.update({
+                "claim_basis": "typed_semantic_fact_set.v2",
+                "behavior_policy_rule_id": _clean(
+                    typed_definition.get("rule_id")
+                ),
+                "semantic_family": "transfer",
+                "semantic_trace": policy_output_trace(selection),
+            })
+            objectives.append(claim)
+    elif download_refs:
         objectives.append(_claim(
             _clean(download_definition.get("claim_type")),
             _clean(download_definition.get("text")),
@@ -699,6 +754,9 @@ def build_follow_on_hypothesis(
     observed: Dict[str, Any],
     behavior_policy_document: Optional[Dict[str, Any]] = None,
     behavior_policy_path: str = "",
+    *,
+    typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
+    activated_semantic_families: Iterable[str] = (),
 ) -> Dict[str, Any]:
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     claims_policy = _claim_policy(document)
@@ -708,6 +766,64 @@ def build_follow_on_hypothesis(
     progress_types = set(follow_on_policy.get("progress_action_types") or [])
     completion_types = set(follow_on_policy.get("completion_action_types") or [])
     chain = list(observed.get("ordered_behavior_chain") or [])
+    activated_families = {
+        _clean(value)
+        for value in activated_semantic_families
+        if _clean(value)
+    }
+    if "transfer" in activated_families:
+        transfer_selection: Dict[str, Any] = {}
+        if isinstance(typed_semantic_fact_set, dict):
+            try:
+                transfer_selection = select_activated_semantic_family(
+                    typed_semantic_fact_set,
+                    family="transfer",
+                )
+            except ValueError:
+                transfer_selection = {}
+        refs = sorted({
+            _clean(ref)
+            for match in transfer_selection.get("matches") or []
+            if isinstance(match, dict)
+            for ref in match.get("supporting_evidence_refs") or []
+            if _clean(ref)
+        })
+        return {
+            "claims": [],
+            "abstained": True,
+            "abstention_reason": (
+                "A typed direct Cowrie transfer observation supports a "
+                "behavioral finding, but no follow-on execution hypothesis "
+                "is authorized while execution and cross-family relationship "
+                "semantics remain non-activated."
+                if refs
+                else (
+                    "No eligible typed direct Cowrie transfer observation "
+                    "supports a follow-on hypothesis."
+                )
+            ),
+            "basis_last_evidence_id": refs[-1] if refs else "",
+            "basis_session_last_trusted_evidence_id": _clean(
+                (chain[-1] if chain else {}).get("evidence_id")
+            ),
+            "basis_connected_chain_ids": [],
+            "disconfirming_observations": [],
+            "evidence_gaps": [{
+                "text": (
+                    "Execution and cross-family relationship semantics are "
+                    "not activated for typed transfer policy."
+                ),
+                "data_source": "typed_semantic_fact_set.v2",
+                "machine_evaluable": True,
+                "evidence_refs": refs,
+            }],
+            "external_validation_suggestions": [],
+            "scope": "post_session_cowrie_observable_behavior",
+            "selection_semantics": (
+                "typed_transfer_follow_on_hypothesis_abstention"
+            ),
+            "behavior_policy": policy_summary(document),
+        }
     claims: List[Dict[str, Any]] = []
     gaps: List[Dict[str, Any]] = []
     disconfirming: List[Dict[str, Any]] = []

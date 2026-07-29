@@ -35,7 +35,7 @@ ALLOWED_CONDITION_KEYS = {
 LIST_CONDITION_KEYS = ALLOWED_CONDITION_KEYS - {"min_command_count"}
 OBSERVED_CONDITION_KEYS = frozenset(ALLOWED_CONDITION_KEYS)
 ALLOWED_BEHAVIOR_FLAGS = {"has_commands", "has_cowrie_transfer_event"}
-ACTIVATED_SEMANTIC_FAMILIES = {"sensitive_read"}
+ACTIVATED_SEMANTIC_FAMILIES = {"sensitive_read", "transfer"}
 REQUIRED_PROVENANCE_FIELDS = {
     "method",
     "basis",

@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-29-sensitive-read-v1",
+  "version": "2026-07-30-direct-transfer-v1",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -9,7 +9,8 @@
       "Cowrie command, command-outcome, and file-transfer event semantics",
       "Controlled synthetic relationship benchmark",
       "Immediate semantic-containment regression review",
-      "Family-scoped typed sensitive-read migration decision"
+      "Family-scoped typed sensitive-read migration decision",
+      "Direct Cowrie transfer-event typed authority decision"
     ],
     "reviewed": true,
     "reviewer": "project developer",
@@ -279,7 +280,19 @@
           "limitations": [
             "The Cowrie transfer event does not establish artifact execution or persistence.",
             "Transfer into Cowrie does not establish transfer to a real victim system."
-          ]
+          ],
+          "typed_semantic": {
+            "rule_id": "observed-direct-cowrie-transfer-event",
+            "family": "transfer",
+            "claim_type": "observed_cowrie_transfer_event",
+            "text": "Cowrie recorded a direct file-transfer event with a resolved artifact SHA-256 in the simulated honeypot.",
+            "evidence_status": "supported",
+            "limitations": [
+              "The direct Cowrie event establishes only that the transfer was observed inside the honeypot.",
+              "Artifact execution, attacker intent, and any effect on a real host are not established.",
+              "ATT&CK mappings, command outcomes, predictions, and enrichment do not support this finding."
+            ]
+          }
         }
       },
       "follow_on": {

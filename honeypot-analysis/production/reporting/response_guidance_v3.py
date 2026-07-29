@@ -13,6 +13,7 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from production.policies.validate_response_guidance_policy import (
@@ -35,6 +36,11 @@ CANONICAL_EVIDENCE_SCOPE = "observed_behavior"
 SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POLICY_PATH = PROJECT_ROOT / "configs" / "response_guidance_policy.v3.json"
+CURRENT_ACTIVATED_SEMANTIC_FAMILIES = (
+    "sensitive_read",
+    "transfer",
+)
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _clean(value: Any) -> str:
@@ -226,6 +232,48 @@ def canonical_behavioral_evidence_refs(observed_behavior: Any) -> Set[str]:
             if isinstance(item, dict):
                 refs.update(_evidence_refs_from_item(item))
     return refs
+
+
+def canonical_transfer_evidence_refs(
+    observed_behavior: Any,
+) -> Set[str]:
+    """Return only direct Cowrie transfer-observation evidence IDs."""
+
+    snapshot = canonical_evidence_snapshot(observed_behavior)
+    return {
+        _clean(item.get("evidence_id"))
+        for item in _snapshot_values(
+            snapshot,
+            "transfer_event_observations",
+            "transfer_observations",
+        )
+        if isinstance(item, dict) and _clean(item.get("evidence_id"))
+    }
+
+
+def _selection_set_sha256(
+    *,
+    fact_set_sha256: str,
+    semantic_vocabulary_sha256: str,
+    family_selection_sha256s: Mapping[str, str],
+) -> str:
+    if (
+        not _clean(fact_set_sha256)
+        or not _clean(semantic_vocabulary_sha256)
+        or not family_selection_sha256s
+    ):
+        return ""
+    return _document_sha256({
+        "schema_version": "typed_semantic_selection_set.v1",
+        "fact_set_sha256": _clean(fact_set_sha256),
+        "semantic_vocabulary_sha256": _clean(
+            semantic_vocabulary_sha256
+        ),
+        "family_selection_sha256s": {
+            family: _clean(family_selection_sha256s[family])
+            for family in sorted(family_selection_sha256s)
+        },
+    })
 
 
 def _mapping_values(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]]]:
@@ -598,14 +646,16 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
     typed_value = (value.get("provenance") or {}).get(
         "typed_semantics"
     )
+    policy_version = _clean(policy.get("version"))
     legacy_pre_typed = (
         typed_value is None
-        and _clean(policy.get("version")).startswith("3.0.")
+        and policy_version.startswith("3.0.")
     )
+    legacy_one_family = policy_version.startswith("3.1.")
     typed = typed_value if isinstance(typed_value, dict) else {}
     if not legacy_pre_typed and not isinstance(typed_value, dict):
         errors.append("typed semantic provenance is required")
-    typed_expected_keys = {
+    typed_legacy_keys = {
         "schema_version",
         "status",
         "fact_set_sha256",
@@ -614,7 +664,16 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         "activated_families",
         "selection_authority",
     }
-    if not legacy_pre_typed and set(typed) != typed_expected_keys:
+    typed_current_keys = typed_legacy_keys | {
+        "family_selection_sha256s",
+    }
+    expected_typed_keys = (
+        typed_legacy_keys if legacy_one_family else typed_current_keys
+    )
+    if (
+        not legacy_pre_typed
+        and set(typed) != expected_typed_keys
+    ):
         errors.append("typed semantic provenance shape is invalid")
     if (
         not legacy_pre_typed
@@ -623,9 +682,14 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         errors.append("typed semantic provenance schema is invalid")
     if (
         not legacy_pre_typed
-        and typed.get("activated_families") != ["sensitive_read"]
+        and typed.get("activated_families")
+        != (
+            ["sensitive_read"]
+            if legacy_one_family
+            else list(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+        )
     ):
-        errors.append("only sensitive_read may be activated")
+        errors.append("typed semantic activated families are invalid")
     if not legacy_pre_typed and typed.get("selection_authority") != (
         "family_scoped_observed_evidence_interpretation"
     ):
@@ -638,9 +702,25 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
     typed_selection_hash = _clean(
         typed.get("selection_sha256")
     ).lower()
+    family_selection_hashes = (
+        typed.get("family_selection_sha256s") or {}
+    )
+    if not isinstance(family_selection_hashes, dict):
+        errors.append(
+            "typed semantic family selection hashes are invalid"
+        )
+        family_selection_hashes = {}
     if legacy_pre_typed:
         pass
     elif typed_status == "valid":
+        if (
+            not legacy_one_family
+            and set(family_selection_hashes)
+            != set(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+        ):
+            errors.append(
+                "typed semantic family selection hashes are invalid"
+            )
         for label, digest in (
             ("fact_set_sha256", typed_fact_hash),
             ("semantic_vocabulary_sha256", typed_vocab_hash),
@@ -650,14 +730,39 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                 char not in "0123456789abcdef" for char in digest
             ):
                 errors.append(f"typed semantic {label} is invalid")
+        if not legacy_one_family:
+            for family, digest in family_selection_hashes.items():
+                if (
+                    family not in CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+                    or not SHA256_RE.fullmatch(_clean(digest).lower())
+                ):
+                    errors.append(
+                        "typed semantic family selection hash is invalid: "
+                        f"{family}"
+                    )
+            expected_selection_set_hash = _selection_set_sha256(
+                fact_set_sha256=typed_fact_hash,
+                semantic_vocabulary_sha256=typed_vocab_hash,
+                family_selection_sha256s=family_selection_hashes,
+            )
+            if typed_selection_hash != expected_selection_set_hash:
+                errors.append(
+                    "typed semantic selection-set hash is inconsistent"
+                )
     elif typed_status == "unavailable":
-        if typed_fact_hash or typed_vocab_hash or typed_selection_hash:
+        if (
+            typed_fact_hash
+            or typed_vocab_hash
+            or typed_selection_hash
+            or family_selection_hashes
+        ):
             errors.append(
                 "unavailable typed semantics cannot retain unverified hashes"
             )
     else:
         errors.append("typed semantic provenance status is invalid")
     allowed_refs = canonical_behavioral_evidence_refs(evidence)
+    transfer_refs = canonical_transfer_evidence_refs(evidence)
     actions = value.get("advisory_actions")
     if not isinstance(actions, list):
         errors.append("advisory_actions must be an array")
@@ -694,7 +799,9 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
             errors.append(f"advisory_actions[{index}] lacks a complete matched predicate trace")
         semantic_family = _clean(action.get("semantic_family"))
         if semantic_family:
-            if semantic_family != "sensitive_read":
+            if semantic_family not in set(
+                typed.get("activated_families") or []
+            ):
                 errors.append(
                     f"advisory_actions[{index}] uses a non-activated family"
                 )
@@ -710,9 +817,14 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                 errors.append(
                     f"advisory_actions[{index}] semantic policy hash mismatch"
                 )
-            if semantic_trace.get("selection_sha256") != (
+            expected_family_hash = (
                 typed_selection_hash
-            ):
+                if legacy_one_family
+                else _clean(
+                    family_selection_hashes.get(semantic_family)
+                )
+            )
+            if semantic_trace.get("selection_sha256") != expected_family_hash:
                 errors.append(
                     f"advisory_actions[{index}] selection hash mismatch"
                 )
@@ -722,7 +834,11 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                     semantic_trace,
                     fact_set_sha256=typed_fact_hash,
                     semantic_vocabulary_sha256=typed_vocab_hash,
-                    allowed_evidence_refs=allowed_refs,
+                    allowed_evidence_refs=(
+                        transfer_refs
+                        if semantic_family == "transfer"
+                        else allowed_refs
+                    ),
                 )
             )
     findings = value.get("findings")
@@ -736,7 +852,9 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
             continue
         semantic_family = _clean(finding.get("semantic_family"))
         if semantic_family:
-            if semantic_family != "sensitive_read":
+            if semantic_family not in set(
+                typed.get("activated_families") or []
+            ):
                 errors.append(
                     f"findings[{index}] uses a non-activated family"
                 )
@@ -752,9 +870,14 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                 errors.append(
                     f"findings[{index}] semantic policy hash mismatch"
                 )
-            if semantic_trace.get("selection_sha256") != (
+            expected_family_hash = (
                 typed_selection_hash
-            ):
+                if legacy_one_family
+                else _clean(
+                    family_selection_hashes.get(semantic_family)
+                )
+            )
+            if semantic_trace.get("selection_sha256") != expected_family_hash:
                 errors.append(
                     f"findings[{index}] selection hash mismatch"
                 )
@@ -764,7 +887,11 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
                     semantic_trace,
                     fact_set_sha256=typed_fact_hash,
                     semantic_vocabulary_sha256=typed_vocab_hash,
-                    allowed_evidence_refs=allowed_refs,
+                    allowed_evidence_refs=(
+                        transfer_refs
+                        if semantic_family == "transfer"
+                        else allowed_refs
+                    ),
                 )
             )
             finding_content = {
@@ -870,58 +997,102 @@ def build_response_guidance_v3(
     status = "available" if policy_ok and profile_ok else "unavailable"
     authority = "deterministic_observed_evidence_policy" if status == "available" else "policy_unavailable"
     context_values = _context_values(snapshot, facts)
-    activated_families = {
+    requested_families = {
         _clean(value)
         for value in activated_semantic_families
         if _clean(value)
     }
-    semantic_selection: Dict[str, Any] = {}
+    activated_family_order = list(
+        CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+    )
+    semantic_selections: Dict[str, Dict[str, Any]] = {}
     if (
-        "sensitive_read" in activated_families
+        requested_families == set(activated_family_order)
         and isinstance(typed_semantic_fact_set, dict)
         and typed_semantic_fact_set
     ):
         try:
-            semantic_selection = select_activated_semantic_family(
-                typed_semantic_fact_set,
-                family="sensitive_read",
-            )
+            semantic_selections = {
+                family: select_activated_semantic_family(
+                    typed_semantic_fact_set,
+                    family=family,
+                )
+                for family in activated_family_order
+            }
         except ValueError:
-            semantic_selection = {}
-    semantic_trace = (
-        policy_output_trace(semantic_selection)
-        if semantic_selection
-        else {}
-    )
-    semantic_refs = sorted({
-        _clean(ref)
-        for match in semantic_selection.get("matches") or []
-        if isinstance(match, dict)
-        for ref in match.get("supporting_evidence_refs") or []
-        if _clean(ref)
-    })
+            semantic_selections = {}
+    semantic_traces = {
+        family: policy_output_trace(selection)
+        for family, selection in semantic_selections.items()
+    }
+    semantic_refs = {
+        family: sorted({
+            _clean(ref)
+            for match in selection.get("matches") or []
+            if isinstance(match, dict)
+            for ref in match.get("supporting_evidence_refs") or []
+            if _clean(ref)
+        })
+        for family, selection in semantic_selections.items()
+    }
     credential_values = sorted({
         _clean(match.get("entity_value"))
-        for match in semantic_selection.get("matches") or []
+        for match in (
+            semantic_selections.get("sensitive_read") or {}
+        ).get("matches") or []
         if isinstance(match, dict) and _clean(match.get("entity_value"))
     })
     if credential_values:
         context_values["credential_paths"] = ", ".join(
             credential_values
         )
+    artifact_hash_values = sorted({
+        _clean(match.get("entity_value"))
+        for match in (
+            semantic_selections.get("transfer") or {}
+        ).get("matches") or []
+        if isinstance(match, dict) and _clean(match.get("entity_value"))
+    })
+    if artifact_hash_values:
+        context_values["artifact_hashes"] = ", ".join(
+            artifact_hash_values
+        )
+    family_selection_hashes = {
+        family: _clean(selection.get("selection_sha256"))
+        for family, selection in semantic_selections.items()
+    }
+    fact_set_hash = _clean(
+        (
+            semantic_selections.get(
+                activated_family_order[0]
+            )
+            or {}
+        ).get("fact_set_sha256")
+    )
+    vocabulary_hash = _clean(
+        (
+            semantic_selections.get(
+                activated_family_order[0]
+            )
+            or {}
+        ).get("semantic_vocabulary_sha256")
+    )
     typed_provenance = {
         "schema_version": "typed_semantic_fact_set.v2",
-        "status": "valid" if semantic_selection else "unavailable",
-        "fact_set_sha256": _clean(
-            semantic_selection.get("fact_set_sha256")
+        "status": (
+            "valid"
+            if set(semantic_selections) == set(activated_family_order)
+            else "unavailable"
         ),
-        "semantic_vocabulary_sha256": _clean(
-            semantic_selection.get("semantic_vocabulary_sha256")
+        "fact_set_sha256": fact_set_hash,
+        "semantic_vocabulary_sha256": vocabulary_hash,
+        "selection_sha256": _selection_set_sha256(
+            fact_set_sha256=fact_set_hash,
+            semantic_vocabulary_sha256=vocabulary_hash,
+            family_selection_sha256s=family_selection_hashes,
         ),
-        "selection_sha256": _clean(
-            semantic_selection.get("selection_sha256")
-        ),
-        "activated_families": ["sensitive_read"],
+        "family_selection_sha256s": family_selection_hashes,
+        "activated_families": activated_family_order,
         "selection_authority": (
             "family_scoped_observed_evidence_interpretation"
         ),
@@ -932,10 +1103,8 @@ def build_response_guidance_v3(
     ) -> Tuple[bool, List[Dict[str, Any]], List[str]]:
         semantic_family = _clean(rule.get("semantic_family"))
         if semantic_family:
-            matched = (
-                semantic_family == "sensitive_read"
-                and bool(semantic_refs)
-            )
+            refs = semantic_refs.get(semantic_family) or []
+            matched = bool(refs)
             return (
                 matched,
                 [{
@@ -943,9 +1112,9 @@ def build_response_guidance_v3(
                     "expected": [semantic_family],
                     "matched": [semantic_family] if matched else [],
                     "result": matched,
-                    "evidence_refs": semantic_refs if matched else [],
+                    "evidence_refs": refs if matched else [],
                 }],
-                semantic_refs if matched else [],
+                refs if matched else [],
             )
         return _condition_match(rule.get("applies_when"), facts)
 
@@ -968,9 +1137,12 @@ def build_response_guidance_v3(
                 "provenance": deepcopy(rule.get("provenance") or {}),
             }
             if _clean(rule.get("semantic_family")):
+                semantic_family = _clean(rule.get("semantic_family"))
                 finding.update({
-                    "semantic_family": "sensitive_read",
-                    "semantic_trace": deepcopy(semantic_trace),
+                    "semantic_family": semantic_family,
+                    "semantic_trace": deepcopy(
+                        semantic_traces.get(semantic_family) or {}
+                    ),
                 })
                 finding["finding_id"] = stable_id(
                     "response_guidance_finding",
@@ -1021,9 +1193,14 @@ def build_response_guidance_v3(
                     "provenance": {"rule": deepcopy(rule.get("provenance") or {}), "action": deepcopy(action.get("provenance") or {})},
                 }
                 if _clean(rule.get("semantic_family")):
+                    semantic_family = _clean(
+                        rule.get("semantic_family")
+                    )
                     selected_action.update({
-                        "semantic_family": "sensitive_read",
-                        "semantic_trace": deepcopy(semantic_trace),
+                        "semantic_family": semantic_family,
+                        "semantic_trace": deepcopy(
+                            semantic_traces.get(semantic_family) or {}
+                        ),
                     })
                 actions.append(selected_action)
     findings.sort(key=lambda item: (-SEVERITY_ORDER.get(item["severity"], 0), item["rule_id"], item["finding_id"]))
@@ -1230,7 +1407,9 @@ def build_response_guidance_v3_from_session(
         forecast_context=forecast_context,
         enrichment_context=enrichment_context,
         typed_semantic_fact_set=typed_fact_set,
-        activated_semantic_families=("sensitive_read",),
+        activated_semantic_families=(
+            CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+        ),
     )
 
 
