@@ -82,6 +82,7 @@
   "cisa_cache_path": "data/feeds/cisa_kev_cache.json",
   "sigma_cache_path": "data/feeds/sigma_rules_cache.json",
   "mitre_attack_path": "data/feeds/mitre_attack_cache.json",
+  "runtime_feed_provenance_path": "data/feeds/runtime_feed_provenance.json",
   "enable_securebert": false,
   "securebert_model_path": "",
   "securebert_checkpoint_path": "",

@@ -303,3 +303,50 @@ def test_feed_loading_disabled_is_a_complete_offline_path(tmp_path, monkeypatch)
 
     assert result["status"] == "disabled"
     assert result["loading_enabled"] is False
+
+
+def test_refresh_records_checksums_and_importer_provenance_outside_release(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    cisa = tmp_path / "cisa_kev_cache.json"
+    sigma = tmp_path / "sigma_rules_cache.json"
+    mitre = tmp_path / "mitre_attack_cache.json"
+    provenance = tmp_path / "runtime_feed_provenance.json"
+    fetched = "2026-07-29T00:00:00+00:00"
+    atomic_write_cache(
+        str(cisa),
+        {"_schema": "1", "_fetched": fetched, "_version": "kev", "entries": {}},
+    )
+    atomic_write_cache(
+        str(sigma),
+        {"_schema": "1", "_fetched": fetched, "_version": "sigma", "rules": {}},
+    )
+    atomic_write_cache(
+        str(mitre),
+        {"_schema": "2", "_fetched": fetched, "_version": "14.1", "techniques": {}},
+    )
+    config = ProductionConfig(
+        database_url=f"sqlite:///{tmp_path / 'feeds.db'}",
+        enable_feed_loading=False,
+        cisa_cache_path=str(cisa),
+        sigma_cache_path=str(sigma),
+        mitre_attack_path=str(mitre),
+        runtime_feed_provenance_path=str(provenance),
+    )
+    monkeypatch.setenv("DEPLOYED_COMMIT", "a" * 40)
+
+    result = refresh_feeds(config)
+    document = load_cache_json(str(provenance), "runtime_feed_provenance.v1")
+
+    assert result["status"] == "disabled"
+    assert result["runtime_feed_provenance"]["recorded"] is True
+    assert document["authority"] == "non_authoritative_context_only"
+    assert document["feeds"]["mitre"]["feed_version"] == "14.1"
+    assert document["feeds"]["mitre"]["cache_file_sha256"]
+    assert document["feeds"]["mitre"]["cache_content_sha256"]
+    assert document["feeds"]["mitre"]["retrieved_at"] == fetched
+    assert document["feeds"]["mitre"]["importer"]["callable"] == (
+        "load_mitre_attack_db"
+    )
+    assert document["feeds"]["mitre"]["evaluator_git_revision"] == "a" * 40

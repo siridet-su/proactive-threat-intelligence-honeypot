@@ -306,6 +306,7 @@ class ProductionConfig:
     cisa_cache_path: str = ""
     sigma_cache_path: str = ""
     mitre_attack_path: str = ""
+    runtime_feed_provenance_path: str = ""
     enable_feed_loading: bool = True
     enable_securebert: bool = True
     securebert_model_path: str = "models/securebert_ttp"
@@ -1174,6 +1175,10 @@ class ProductionConfig:
         cfg.cisa_cache_path = os.getenv("CISA_CACHE_PATH", cfg.cisa_cache_path)
         cfg.sigma_cache_path = os.getenv("SIGMA_CACHE_PATH", cfg.sigma_cache_path)
         cfg.mitre_attack_path = os.getenv("MITRE_ATTACK_PATH", cfg.mitre_attack_path)
+        cfg.runtime_feed_provenance_path = os.getenv(
+            "RUNTIME_FEED_PROVENANCE_PATH",
+            cfg.runtime_feed_provenance_path,
+        )
         cfg.enable_feed_loading = _env_bool("ENABLE_FEED_LOADING", cfg.enable_feed_loading)
         cfg.enable_securebert = _env_bool("ENABLE_SECUREBERT", cfg.enable_securebert)
         cfg.securebert_model_path = os.getenv("SECUREBERT_PATH", cfg.securebert_model_path)

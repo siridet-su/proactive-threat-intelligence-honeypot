@@ -18,9 +18,18 @@ For revision `$REVISION`:
    Link only the preserved virtual environment and frozen model directory;
    neither may contain source overlays.
 6. Create `DEPLOYMENT_MANIFEST.json` using
-   `production.tools.release_manifest create`. Pass every effective policy and
-   configuration path and each individual model artifact file.
-7. Run `production.tools.release_manifest verify`. Only after it passes, write
+   `production.tools.release_manifest create`. Pass every immutable effective
+   policy, configuration path, and individual model artifact file. Do **not**
+   pass CISA, Sigma, or MITRE runtime cache files as immutable configurations:
+   the enabled feed-refresh timer updates them outside a release. Pass the
+   configured runtime feed-provenance location with
+   `--runtime-feed-provenance`; it is checksummed separately after each feed
+   refresh and records cache-file/content hashes, feed version, retrieval time,
+   and importer provenance as non-authoritative context.
+7. Run `production.tools.release_manifest verify`. It verifies only immutable
+   release inputs; separately validate the current
+   `runtime_feed_provenance.v1` record and feed-cache checksums. Only after both
+   checks pass, write
    `DEPLOYED_COMMIT`, verify that marker, and atomically repoint
    `/opt/honeypot`.
 8. Install reviewed unit/config changes, run `systemd-analyze verify`, restart

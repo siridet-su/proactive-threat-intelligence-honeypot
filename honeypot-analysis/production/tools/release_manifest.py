@@ -10,9 +10,17 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = "honeypot_release_manifest.v2"
+SCHEMA_VERSION = "honeypot_release_manifest.v3"
+LEGACY_SCHEMA_VERSION = "honeypot_release_manifest.v2"
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 EXCLUDED_RELEASE_FILES = frozenset({"DEPLOYED_COMMIT", "DEPLOYMENT_MANIFEST.json"})
+MUTABLE_RUNTIME_FEED_CONFIGURATION_NAMES = frozenset(
+    {"cisa_cache", "sigma_cache", "mitre_cache"}
+)
+MUTABLE_RUNTIME_FEED_BASENAMES = frozenset(
+    {"cisa_kev_cache.json", "sigma_rules_cache.json", "mitre_attack_cache.json"}
+)
+RUNTIME_FEED_PROVENANCE_SCHEMA = "runtime_feed_provenance.v1"
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -91,6 +99,37 @@ def _artifact_hashes(paths: dict[str, str]) -> dict[str, dict[str, Any]]:
     return artifacts
 
 
+def _validate_immutable_configuration_paths(paths: dict[str, str]) -> None:
+    """Reject mutable feed caches from the immutable release boundary."""
+    for name, path_text in paths.items():
+        if (
+            name in MUTABLE_RUNTIME_FEED_CONFIGURATION_NAMES
+            or Path(path_text).name in MUTABLE_RUNTIME_FEED_BASENAMES
+        ):
+            raise ValueError(
+                "mutable runtime feed caches must not be immutable release "
+                "configuration inputs; record them through runtime feed provenance"
+            )
+
+
+def _runtime_feed_provenance_contract(path_text: str) -> dict[str, Any]:
+    return {
+        "schema_version": RUNTIME_FEED_PROVENANCE_SCHEMA,
+        "path": str(Path(path_text).resolve()),
+        "integrity": {
+            "cache_file_sha256_required": True,
+            "cache_content_checksum_required": True,
+        },
+        "required_fields": [
+            "feed_version",
+            "retrieved_at",
+            "importer",
+            "evaluator_git_revision",
+        ],
+        "authority": "non_authoritative_context_only",
+    }
+
+
 def build_manifest(
     *,
     revision: str,
@@ -99,6 +138,7 @@ def build_manifest(
     rollback_location: Path,
     configuration_paths: dict[str, str],
     artifact_paths: dict[str, str],
+    runtime_feed_provenance_path: str = "",
     deployed_at: str | None = None,
 ) -> dict[str, Any]:
     if not REVISION_PATTERN.fullmatch(revision):
@@ -109,8 +149,9 @@ def build_manifest(
         raise ValueError("release package does not exist")
     if not rollback_location.exists():
         raise ValueError("rollback location does not exist")
+    _validate_immutable_configuration_paths(configuration_paths)
     inventory = release_file_inventory(release_root)
-    return {
+    manifest = {
         "schema_version": SCHEMA_VERSION,
         "git_revision": revision,
         "deployed_at": deployed_at or datetime.now(timezone.utc).isoformat(),
@@ -126,6 +167,11 @@ def build_manifest(
         "model_artifacts": _artifact_hashes(artifact_paths),
         "rollback_location": str(rollback_location),
     }
+    if runtime_feed_provenance_path.strip():
+        manifest["runtime_feed_provenance"] = _runtime_feed_provenance_contract(
+            runtime_feed_provenance_path
+        )
+    return manifest
 
 
 def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
@@ -144,7 +190,8 @@ def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
 
 def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != SCHEMA_VERSION:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in {SCHEMA_VERSION, LEGACY_SCHEMA_VERSION}:
         raise ValueError("unsupported release manifest schema")
     if not REVISION_PATTERN.fullmatch(str(manifest.get("git_revision", ""))):
         raise ValueError("manifest Git revision is invalid")
@@ -185,6 +232,23 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
             or _sha256_file(config_path) != config.get("sha256")
         ):
             raise ValueError(f"effective configuration does not match: {name}")
+    if schema_version == SCHEMA_VERSION:
+        contract = manifest.get("runtime_feed_provenance")
+        if contract is not None:
+            if not isinstance(contract, dict):
+                raise ValueError("runtime feed provenance contract is invalid")
+            if contract.get("schema_version") != RUNTIME_FEED_PROVENANCE_SCHEMA:
+                raise ValueError("runtime feed provenance contract schema is invalid")
+            if not Path(str(contract.get("path", ""))).is_absolute():
+                raise ValueError("runtime feed provenance path must be absolute")
+            if contract.get("authority") != "non_authoritative_context_only":
+                raise ValueError("runtime feed provenance authority is invalid")
+            integrity = contract.get("integrity")
+            if not isinstance(integrity, dict) or (
+                integrity.get("cache_file_sha256_required") is not True
+                or integrity.get("cache_content_checksum_required") is not True
+            ):
+                raise ValueError("runtime feed provenance integrity contract is invalid")
     if not Path(str(manifest.get("rollback_location", ""))).exists():
         raise ValueError("rollback location is missing")
     return {
@@ -208,6 +272,11 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--rollback-location", required=True, type=Path)
     create.add_argument("--configuration", action="append", default=[])
     create.add_argument("--artifact", action="append", default=[])
+    create.add_argument(
+        "--runtime-feed-provenance",
+        default="",
+        help="Mutable runtime feed-provenance file, excluded from release hashes.",
+    )
     create.add_argument("--output", required=True, type=Path)
     verify = subparsers.add_parser("verify")
     verify.add_argument("--manifest", required=True, type=Path)
@@ -225,6 +294,7 @@ def main() -> int:
             rollback_location=args.rollback_location,
             configuration_paths=_named_paths(args.configuration, "configuration"),
             artifact_paths=_named_paths(args.artifact, "artifact"),
+            runtime_feed_provenance_path=args.runtime_feed_provenance,
         )
         write_manifest(args.output, manifest)
         result = verify_manifest(args.output, args.release_root)

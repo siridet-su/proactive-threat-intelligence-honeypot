@@ -6,19 +6,34 @@ import argparse
 import json
 from typing import List, Optional
 
-from production.enrichment.feed_status import collect_feed_status
+from production.enrichment.feed_status import (
+    collect_feed_status,
+    write_runtime_feed_provenance,
+)
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 from production.enrichment.threat_feed_loader import load_cisa_kev, load_sigma_rules
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import redact_exception_for_log
 
 
 def refresh_feeds(config: ProductionConfig, *, check_only: bool = False) -> dict:
     if not config.enable_feed_loading:
-        return {
+        result = {
             "status": "disabled",
             "loading_enabled": False,
             "feeds": collect_feed_status(config),
         }
+        try:
+            result["runtime_feed_provenance"] = write_runtime_feed_provenance(
+                config, result["feeds"]
+            )
+        except Exception as exc:
+            result["status"] = "provenance_unavailable"
+            result["runtime_feed_provenance"] = {
+                "recorded": False,
+                "error": redact_exception_for_log(exc),
+            }
+        return result
     if not check_only:
         load_cisa_kev(
             force_refresh=True,
@@ -36,11 +51,22 @@ def refresh_feeds(config: ProductionConfig, *, check_only: bool = False) -> dict
     feeds = collect_feed_status(config)
     states = [feeds[name]["status"] for name in ("cisa", "sigma", "mitre")]
     usable = sum(state in {"fresh", "stale"} for state in states)
-    return {
+    result = {
         "status": "complete" if usable == 3 else "partial" if usable else "unavailable",
         "loading_enabled": True,
         "feeds": feeds,
     }
+    try:
+        result["runtime_feed_provenance"] = write_runtime_feed_provenance(
+            config, feeds
+        )
+    except Exception as exc:
+        result["status"] = "provenance_unavailable"
+        result["runtime_feed_provenance"] = {
+            "recorded": False,
+            "error": redact_exception_for_log(exc),
+        }
+    return result
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
