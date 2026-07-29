@@ -103,6 +103,29 @@ def test_release_manifest_and_marker_are_excluded_from_release_identity(
         write_manifest(output, manifest)
 
 
+def test_release_manifest_excludes_runtime_python_bytecode_only(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    manifest = build_manifest(
+        revision=REVISION,
+        release_root=release,
+        package_path=package,
+        rollback_location=rollback,
+        configuration_paths={"policy": str(policy)},
+        artifact_paths={"model": str(artifact)},
+    )
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+
+    bytecode = release / "production" / "__pycache__"
+    bytecode.mkdir(parents=True)
+    (bytecode / "runtime.cpython-311.pyc").write_bytes(b"runtime-bytecode")
+    (release / "generated.pyo").write_bytes(b"runtime-bytecode")
+
+    assert verify_manifest(output, release)["verified"] is True
+
+
 def test_release_manifest_rejects_mutable_feed_cache_as_immutable_config(
     tmp_path: Path,
 ) -> None:

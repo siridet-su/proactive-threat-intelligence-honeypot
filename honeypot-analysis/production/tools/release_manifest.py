@@ -14,6 +14,7 @@ SCHEMA_VERSION = "honeypot_release_manifest.v3"
 LEGACY_SCHEMA_VERSION = "honeypot_release_manifest.v2"
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 EXCLUDED_RELEASE_FILES = frozenset({"DEPLOYED_COMMIT", "DEPLOYMENT_MANIFEST.json"})
+RUNTIME_BYTECODE_SUFFIXES = frozenset({".pyc", ".pyo"})
 MUTABLE_RUNTIME_FEED_CONFIGURATION_NAMES = frozenset(
     {"cisa_cache", "sigma_cache", "mitre_cache"}
 )
@@ -43,6 +44,15 @@ def release_file_inventory(root: Path) -> dict[str, dict[str, Any]]:
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root).as_posix()
         if relative in EXCLUDED_RELEASE_FILES:
+            continue
+        # Python may compile imported modules in-place after a release has been
+        # verified.  Those bytecode caches are reproducible runtime byproducts,
+        # not deployed source or an undocumented overlay; retaining them in the
+        # immutable inventory would make a valid release unverifiable at runtime.
+        if (
+            "__pycache__" in Path(relative).parts
+            or path.suffix in RUNTIME_BYTECODE_SUFFIXES
+        ):
             continue
         if path.is_symlink():
             target = os.readlink(path)
