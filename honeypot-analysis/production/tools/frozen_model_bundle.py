@@ -235,11 +235,21 @@ def _bundle_manifest(
         },
     }
     inventory_sha256 = _sha256_json(inventory)
-    bundle_id = f"frozen_model_bundle_{inventory_sha256[:32]}"
+    bundle_identity_sha256 = _sha256_json(
+        {
+            "artifact_inventory_sha256": inventory_sha256,
+            "prediction_policy_sha256": policy_sha256,
+            "classifier_environment_manifest_sha256": classifier_manifest_sha256,
+            "runtime_identity": dict(runtime_identity),
+            "immutable_final_result_sha256": policy["immutable_final_result_sha256"],
+        }
+    )
+    bundle_id = f"frozen_model_bundle_{bundle_identity_sha256[:32]}"
     return {
         "schema_version": SCHEMA_VERSION,
         "bundle_id": bundle_id,
         "artifact_inventory_sha256": inventory_sha256,
+        "bundle_identity_sha256": bundle_identity_sha256,
         "source_receipt": dict(source_receipt),
         "transformer": {
             "prediction_mode": policy["prediction_mode"],
@@ -296,8 +306,30 @@ def verify_bundle(
         raise FrozenModelBundleError("bundle root must be owner-only")
     manifest_path = bundle_root / MANIFEST_NAME
     manifest = load_bundle_manifest(manifest_path)
+    transformer_manifest = manifest.get("transformer") or {}
+    expected_bundle_identity = _sha256_json(
+        {
+            "artifact_inventory_sha256": manifest.get("artifact_inventory_sha256", ""),
+            "prediction_policy_sha256": transformer_manifest.get(
+                "prediction_policy_sha256", ""
+            ),
+            "classifier_environment_manifest_sha256": (manifest.get("classifier") or {}).get(
+                "environment_manifest_sha256", ""
+            ),
+            "runtime_identity": transformer_manifest.get("runtime_identity") or {},
+            "immutable_final_result_sha256": transformer_manifest.get(
+                "immutable_final_result_sha256", ""
+            ),
+        }
+    )
+    if (
+        manifest.get("bundle_identity_sha256") != expected_bundle_identity
+        or manifest.get("bundle_id")
+        != f"frozen_model_bundle_{expected_bundle_identity[:32]}"
+    ):
+        raise FrozenModelBundleError("bundle identity receipt is invalid")
     policy, policy_sha256 = _transformer_policy(prediction_policy_path)
-    transformer = manifest.get("transformer") or {}
+    transformer = transformer_manifest
     if transformer.get("prediction_policy_sha256") != policy_sha256:
         raise FrozenModelBundleError("bundle prediction policy receipt mismatch")
     if transformer.get("prediction_mode") != policy["prediction_mode"]:

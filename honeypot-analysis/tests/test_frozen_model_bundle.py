@@ -110,6 +110,10 @@ def test_create_verify_archive_and_link_bundle_without_release_overlay(
     assert not str(root.resolve()).startswith(str(transformer_source.resolve()))
     assert (root / bundle.MANIFEST_NAME).is_file()
     assert (root / "transformer/checkpoint.pt").read_bytes() == b"transformer_checkpoint"
+    recorded = json.loads((root / bundle.MANIFEST_NAME).read_text(encoding="utf-8"))
+    assert recorded["bundle_id"] == (
+        "frozen_model_bundle_" + recorded["bundle_identity_sha256"][:32]
+    )
 
     verified = bundle.verify_bundle(
         bundle_root=root,
