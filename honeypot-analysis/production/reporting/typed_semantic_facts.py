@@ -473,7 +473,9 @@ def _typed_operations(
 ) -> List[Dict[str, Any]]:
     definitions = policy.get("operations") or {}
     output: List[Dict[str, Any]] = []
-    for sequence_index, item in enumerate(extracted.get("operations") or []):
+    for sequence_index, item in enumerate(
+        extracted.get("operations") or []
+    ):
         operation_type = _clean(item.get("operation_type"))
         definition = definitions.get(operation_type)
         if not isinstance(definition, dict):
@@ -1464,6 +1466,13 @@ def _comparison(
         )
         if isinstance(item, dict)
     ]
+    source_observations.sort(
+        key=lambda item: (
+            int(item.get("source_index") or 0),
+            int(item.get("fragment_index") or 0),
+            _clean(item.get("evidence_id")),
+        )
+    )
     source_refs = [
         _clean(item.get("evidence_id")) for item in source_observations
     ]
@@ -1592,6 +1601,18 @@ def build_typed_semantic_fact_set(
     ) + _transfer_facts(
         deepcopy(observed.get("transfer_event_observations") or []),
         policy,
+    )
+    facts.sort(
+        key=lambda fact: (
+            int(fact.get("source_index") or 0),
+            int(
+                (fact.get("shell_context") or {}).get(
+                    "fragment_index"
+                )
+                or 0
+            ),
+            _clean(fact.get("source_observation_ref")),
+        )
     )
     candidates = _attck_candidates(observed, facts)
     relationships = _relationships(facts, limits)

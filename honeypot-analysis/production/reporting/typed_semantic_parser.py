@@ -1426,6 +1426,27 @@ def extract_typed_semantics(
                         observation,
                     )
 
+    operation_types = [
+        item.get("operation_type") for item in operations
+    ]
+    if (
+        "remote_content_pipe_source" in operation_types
+        and "transfer_attempt" in operation_types
+        and operation_types.index("remote_content_pipe_source")
+        > operation_types.index("transfer_attempt")
+    ):
+        pipe_operation = operations.pop(
+            operation_types.index("remote_content_pipe_source")
+        )
+        operations.insert(
+            next(
+                index
+                for index, item in enumerate(operations)
+                if item.get("operation_type") == "transfer_attempt"
+            ),
+            pipe_operation,
+        )
+
     if parse_status != "parsed":
         entities["credential_paths"] = (
             deepcopy(source_credential_entities)

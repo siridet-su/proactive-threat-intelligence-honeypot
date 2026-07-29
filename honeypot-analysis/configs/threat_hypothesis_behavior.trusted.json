@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-30-direct-transfer-v1",
+  "version": "2026-07-30-direct-transfer-v2",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -10,11 +10,12 @@
       "Controlled synthetic relationship benchmark",
       "Immediate semantic-containment regression review",
       "Family-scoped typed sensitive-read migration decision",
-      "Direct Cowrie transfer-event typed authority decision"
+      "Direct Cowrie transfer-event typed authority decision",
+      "Observed transfer URI, working-directory, and event-order preservation review"
     ],
     "reviewed": true,
     "reviewer": "project developer",
-    "last_reviewed": "2026-07-29",
+    "last_reviewed": "2026-07-30",
     "review_status": "approved for scoped Cowrie SSH analysis"
   },
   "policy": {
@@ -102,7 +103,7 @@
         "relationship_type": "account_modified"
       },
       "patterns": {
-        "url": "https?://[^\\s'\"`|;&]+",
+        "url": "(?:https?|sftp)://[^\\s'\"`|;&]+",
         "hash": "(?<![0-9a-f])(?:[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![0-9a-f])",
         "path_token": "(?:/[^\\s'\"`|;&<>]+|\\./[^\\s'\"`|;&<>]+|~[^\\s'\"`|;&<>]*|\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?/[^\\s'\"`|;&<>]+)",
         "credential_path": "(?:/etc/(?:passwd|shadow)|(?:^|[\\s'\"])(?:~[^/\\s]*)?/?.ssh/(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)|\\.aws/credentials|application_default_credentials|\\.config/gcloud)"

@@ -108,16 +108,18 @@ def _safe_url(value: str) -> Optional[Dict[str, Any]]:
         parsed = urlsplit(raw)
     except ValueError:
         return None
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+    default_ports = {"http": 80, "https": 443, "sftp": 22}
+    scheme = parsed.scheme.lower()
+    if scheme not in default_ports or not parsed.hostname:
         return None
     host = parsed.hostname.lower()
     try:
         port = parsed.port
     except ValueError:
         return None
-    default_port = 80 if parsed.scheme.lower() == "http" else 443
+    default_port = default_ports[scheme]
     netloc = host if not port or port == default_port else f"{host}:{port}"
-    normalized = urlunsplit((parsed.scheme.lower(), netloc, parsed.path or "/", "", ""))
+    normalized = urlunsplit((scheme, netloc, parsed.path or "/", "", ""))
     redacted = bool(parsed.username or parsed.password or parsed.query or parsed.fragment)
     return {
         "normalized_value": normalized,
@@ -168,6 +170,15 @@ def _normalize_path(value: str, cwd: str = "") -> Optional[Dict[str, Any]]:
     if raw.startswith("./") and cwd.startswith("/"):
         return {
             "normalized_value": posixpath.normpath(posixpath.join(cwd, raw[2:])),
+            "original_value": raw,
+            "uncertain": False,
+            "linkable": True,
+        }
+    if cwd.startswith("/"):
+        return {
+            "normalized_value": posixpath.normpath(
+                posixpath.join(cwd, raw)
+            ),
             "original_value": raw,
             "uncertain": False,
             "linkable": True,
