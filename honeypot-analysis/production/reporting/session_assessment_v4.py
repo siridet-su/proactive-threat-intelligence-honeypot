@@ -527,12 +527,6 @@ def build_session_assessment_v4(
             behavior_policy_path=behavior_policy_path,
         )
     )
-    # Shadow facts are intentionally discarded. They cannot affect policy
-    # validity, canonical output, persistence, consumers, or identity inputs.
-    try:
-        run_typed_semantic_shadow(observed)
-    except Exception:
-        pass
     behavior = policy_summary(behavior_document, include_integrity=True)
     classification = _file_policy(
         classification_policy_path,
@@ -569,6 +563,21 @@ def build_session_assessment_v4(
         findings = _deduplicated_findings(supported)
         hypothesis_sets = _hypothesis_sets(follow_on)
     evaluator_revision = _git_revision()
+    # Shadow facts receive the exact effective provenance but are still
+    # discarded. They cannot affect policy validity, canonical output,
+    # persistence, consumers, or identity inputs.
+    try:
+        run_typed_semantic_shadow(
+            observed,
+            canonical_evidence=snapshot,
+            behavior_policy_sha256=_clean(behavior.get("sha256")),
+            classification_policy_sha256=_clean(
+                classification.get("sha256")
+            ),
+            evaluator_git_revision=evaluator_revision,
+        )
+    except Exception:
+        pass
     provenance = {
         "evidence_sha256": snapshot["evidence_sha256"],
         "behavior_policy": behavior,
