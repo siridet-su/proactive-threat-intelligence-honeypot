@@ -62,6 +62,21 @@ SERVICE_SPECS = (
         6,
     ),
 )
+COLLECTION_SPECS = (
+    (
+        ROOT
+        / "evaluation/collection_shadow_independent_frozen.v1.json",
+        "895ea455bcfb609d0b102c22925a30f5f022f4d9c1a79fd1f6d25a03cbe2c5ef",
+        "typed_collection_shadow_evaluation.v1",
+        12,
+    ),
+    (
+        ROOT / "evaluation/collection_shadow_holdout_frozen.v1.json",
+        "a5fc97a0434e45de2bf91e1240eede0b567b9ab3bc4d140895878284e5de9ec3",
+        "typed_collection_shadow_holdout.v1",
+        6,
+    ),
+)
 
 
 def _load_spec(
@@ -227,3 +242,14 @@ def test_frozen_service_shadow_sets() -> None:
             count,
         )["cases"]:
             _assert_shadow_case(case, "service")
+
+
+def test_frozen_collection_shadow_sets() -> None:
+    for path, digest, schema, count in COLLECTION_SPECS:
+        for case in _load_spec(
+            path,
+            digest,
+            schema,
+            count,
+        )["cases"]:
+            _assert_shadow_case(case, "collection")
