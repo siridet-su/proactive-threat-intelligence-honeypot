@@ -474,6 +474,8 @@ def create_bundle(
     )
     bundle_parent.mkdir(parents=True, exist_ok=True)
     os.chmod(bundle_parent, 0o700)
+    if owner_uid is not None and owner_gid is not None:
+        os.chown(bundle_parent, owner_uid, owner_gid)
     destination = bundle_parent / manifest["bundle_id"]
     if destination.exists():
         return verify_bundle(

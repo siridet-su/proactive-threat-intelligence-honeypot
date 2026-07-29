@@ -15,8 +15,10 @@ For revision `$REVISION`:
    `production.tools.sqlite_backup_restore`, verify it, and restore it to a new
    rehearsal path.
 5. Extract the archive into a new `/opt/honeypot-releases/$REVISION` directory.
-   Link only the preserved virtual environment and frozen model directory;
-   neither may contain source overlays.
+   Link the preserved virtual environment only. Build or verify the separately
+   managed immutable frozen-model bundle, then use its fail-closed link
+   installer before release-manifest creation. Do not link models from another
+   release directory; see `docs/FROZEN_MODEL_BUNDLE.md`.
 6. Create `DEPLOYMENT_MANIFEST.json` using
    `production.tools.release_manifest create`. Pass every immutable effective
    policy, configuration path, and individual model artifact file. Do **not**
@@ -25,7 +27,8 @@ For revision `$REVISION`:
    configured runtime feed-provenance location with
    `--runtime-feed-provenance`; it is checksummed separately after each feed
    refresh and records cache-file/content hashes, feed version, retrieval time,
-   and importer provenance as non-authoritative context.
+   and importer provenance as non-authoritative context. Pass the frozen model
+   bundle manifest and recovery archive so their exact hashes are release-bound.
 7. Run `production.tools.release_manifest verify`. It verifies only immutable
    release inputs; separately validate the current
    `runtime_feed_provenance.v1` record and feed-cache checksums. Only after both
