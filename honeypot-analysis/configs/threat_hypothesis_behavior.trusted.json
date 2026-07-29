@@ -1,17 +1,18 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-16",
+  "version": "2026-07-29-phase9a",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
       "Executable threat_hypothesis.v2 behavior as of commit 67b200a",
       "Cowrie command, command-outcome, and file-transfer event semantics",
-      "Controlled synthetic relationship benchmark"
+      "Controlled synthetic relationship benchmark",
+      "Phase 9A semantic-containment regression review"
     ],
     "reviewed": true,
     "reviewer": "project developer",
-    "last_reviewed": "2026-07-16",
+    "last_reviewed": "2026-07-29",
     "review_status": "approved for scoped Cowrie SSH analysis"
   },
   "policy": {
@@ -240,6 +241,9 @@
           }
         },
         "persistence": {
+          "literal_action_types": [
+            "account_modification_attempt"
+          ],
           "trusted_command_pattern": "\\b(?:useradd|adduser)\\b|authorized_keys|\\bcrontab\\b|\\bsystemctl\\s+(?:enable|start)\\b|(?:\\.bashrc|\\.profile|rc\\.local)",
           "claim_type": "possible_continued_access_preparation",
           "text": "Possible preparation for continued access within the simulated SSH environment.",

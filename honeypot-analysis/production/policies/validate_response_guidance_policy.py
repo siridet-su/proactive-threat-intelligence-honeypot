@@ -247,6 +247,16 @@ def validate_response_guidance_policy(policy: Any) -> List[str]:
             _validate_references(rule, sources, path, errors)
             _validate_provenance(rule.get("provenance"), path, errors)
             _validate_condition(rule.get("applies_when"), path, errors)
+            condition = rule.get("applies_when")
+            if (
+                isinstance(condition, dict)
+                and {"all_tactics", "any_tactics"}.intersection(condition)
+                and "any_action_types" not in condition
+            ):
+                errors.append(
+                    f"{path}: broad ATT&CK tactics cannot be the sole semantic "
+                    "support for specialized guidance"
+                )
             if group == "finding_rules":
                 if rule.get("severity") not in ALLOWED_SEVERITIES:
                     errors.append(f"{path}: severity must be one of the allowed values")

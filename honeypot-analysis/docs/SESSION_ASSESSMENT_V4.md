@@ -31,6 +31,12 @@ The canonical output has two analytical collections:
 - `hypothesis_sets`: bounded, non-exhaustive alternatives with falsification
   conditions. These are not attacker-intent or exact next-action claims.
 
+An incomplete-chain hypothesis is emitted only when the existing relationship
+layer provides a resolved artifact identity and no completion observation for
+that identity exists elsewhere in the same canonical session. Ambiguous
+artifact or relationship identity, and session-wide contradictory completion
+evidence, cause deterministic abstention.
+
 Predictions, enrichment, cross-session correlation, and optional LLM prose are
 stored only under `non_authoritative_context`. They cannot change canonical
 findings, hypotheses, statuses, or IDs.

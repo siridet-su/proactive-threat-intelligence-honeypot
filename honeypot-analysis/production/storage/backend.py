@@ -2455,7 +2455,23 @@ class SQLiteStorage:
                 "report", {"job_id": job_id, "report": report_payload}
             )
         current_time = _utc_timestamp(now)
-        session_id = report_payload.get("session_id") or report_payload.get("data_provenance", {}).get("session", {}).get("session_id", "unknown")
+        canonical_evidence = report_payload.get("canonical_evidence")
+        canonical_session_id = (
+            canonical_evidence.get("session_id")
+            if (
+                report_payload.get("schema_version") == "session_assessment.v4"
+                and isinstance(canonical_evidence, dict)
+            )
+            else ""
+        )
+        session_id = str(
+            canonical_session_id
+            or report_payload.get("session_id")
+            or report_payload.get("data_provenance", {})
+            .get("session", {})
+            .get("session_id")
+            or "unknown"
+        ).strip()
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             claim = conn.execute(

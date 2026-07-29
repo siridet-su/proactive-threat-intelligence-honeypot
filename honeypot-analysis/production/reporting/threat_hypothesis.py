@@ -268,19 +268,16 @@ def _persistence_chain(
     pattern: re.Pattern[str],
     policy_document: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Return persistence mappings only when write-sensitive evidence agrees.
-
-    The trusted policy also recognizes persistence families such as account
-    creation, cron, services, and startup files.  Only ``authorized_keys`` is
-    special here: mentioning or reading that path is not modification evidence.
-    The literal command extractor remains authoritative for that distinction.
-    """
+    """Return persistence mappings only when literal mutation evidence agrees."""
 
     matches = _matching_chain(chain, pattern)
-    account = ((policy_body(policy_document).get("extraction") or {}).get("account") or {})
-    marker = _clean(account.get("authorized_keys_marker")).lower()
-    if not marker:
-        return matches
+    persistence = (
+        ((_claim_policy(policy_document).get("independent") or {}).get("persistence"))
+        or {}
+    )
+    required_action_types = set(persistence.get("literal_action_types") or [])
+    if not required_action_types:
+        return []
     observations = [
         item
         for item in observed.get("ordered_command_observations") or []
@@ -289,19 +286,95 @@ def _persistence_chain(
     output: List[Dict[str, Any]] = []
     for item in matches:
         command = _clean(item.get("command"))
-        if marker not in command.lower():
-            output.append(item)
-            continue
         timestamp = _clean(item.get("timestamp"))
         mutating = any(
             _clean(observation.get("command")) == command
             and (not timestamp or _clean(observation.get("timestamp")) == timestamp)
-            and "account_modification_attempt" in set(observation.get("action_types") or [])
+            and required_action_types.intersection(
+                observation.get("action_types") or []
+            )
             for observation in observations
         )
         if mutating:
             output.append(item)
     return output
+
+
+def _entity_identities(
+    actions: Iterable[Dict[str, Any]],
+    roles: Iterable[str],
+) -> tuple[set[str], bool]:
+    """Return linkable entity IDs and whether identity is unresolved."""
+
+    selected_roles = set(roles)
+    identities: set[str] = set()
+    unresolved = False
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        entities = action.get("entities") or {}
+        if not isinstance(entities, dict):
+            continue
+        for role in selected_roles:
+            for entity in entities.get(role) or []:
+                if not isinstance(entity, dict):
+                    continue
+                if entity.get("uncertain") is True or entity.get("linkable") is False:
+                    unresolved = True
+                    continue
+                entity_id = _clean(entity.get("entity_id"))
+                if entity_id:
+                    identities.add(entity_id)
+    return identities, unresolved
+
+
+def _incomplete_chain_rejection(
+    observed: Dict[str, Any],
+    connected: Dict[str, Any],
+    progress_types: set[str],
+    completion_types: set[str],
+) -> tuple[str, List[str]]:
+    """Reject an incomplete-chain claim when identity is ambiguous or contradicted."""
+
+    progress_actions = [
+        action
+        for action in connected.get("ordered_actions") or []
+        if isinstance(action, dict)
+        and progress_types.intersection(action.get("action_types") or [])
+    ]
+    progress_ids, unresolved = _entity_identities(
+        progress_actions,
+        ("destination_paths", "artifact_hashes"),
+    )
+    relationship_ids = {
+        _clean(value)
+        for value in connected.get("entity_refs") or []
+        if _clean(value)
+    }
+    if unresolved or not progress_ids or not progress_ids.intersection(relationship_ids):
+        return "unresolved_artifact_or_relationship_identity", []
+
+    completion_actions = [
+        action
+        for action in observed.get("ordered_command_observations") or []
+        if isinstance(action, dict)
+        and completion_types.intersection(action.get("action_types") or [])
+    ]
+    completion_ids, _ = _entity_identities(
+        completion_actions,
+        ("executed_paths", "artifact_hashes"),
+    )
+    if progress_ids.intersection(completion_ids):
+        completion_refs = [
+            _clean(action.get("evidence_id"))
+            for action in completion_actions
+            if _clean(action.get("evidence_id"))
+            and _entity_identities(
+                [action], ("executed_paths", "artifact_hashes")
+            )[0].intersection(progress_ids)
+        ]
+        return "contradicted_by_session_completion_evidence", completion_refs
+    return "", []
 
 
 def _event_refs(observed: Dict[str, Any], eventid: str) -> List[str]:
@@ -586,6 +659,7 @@ def build_follow_on_hypothesis(
     disconfirming: List[Dict[str, Any]] = []
     external: List[Dict[str, Any]] = []
     incomplete_chains = []
+    rejected_incomplete_chains: List[Dict[str, str]] = []
     for connected in observed.get("connected_behavior_chains") or []:
         if not isinstance(connected, dict):
             continue
@@ -593,6 +667,40 @@ def build_follow_on_hypothesis(
         has_transfer = bool(progress_types & action_types)
         has_execution = bool(completion_types & action_types)
         if has_transfer and not has_execution:
+            rejection, completion_refs = _incomplete_chain_rejection(
+                observed,
+                connected,
+                progress_types,
+                completion_types,
+            )
+            if rejection:
+                chain_id = _clean(connected.get("chain_id"))
+                rejected_incomplete_chains.append({
+                    "chain_id": chain_id,
+                    "reason": rejection,
+                })
+                if rejection == "contradicted_by_session_completion_evidence":
+                    disconfirming.append({
+                        "text": (
+                            "A completion observation for the same resolved artifact "
+                            "was present elsewhere in the canonical session evidence."
+                        ),
+                        "data_source": "Cowrie command and entity relationships",
+                        "machine_evaluable": True,
+                        "evidence_refs": completion_refs,
+                        "connected_chain_id": chain_id,
+                    })
+                else:
+                    gaps.append({
+                        "text": (
+                            "Artifact or relationship identity was unresolved; no "
+                            "follow-on hypothesis was selected."
+                        ),
+                        "data_source": "Cowrie command and entity relationships",
+                        "machine_evaluable": True,
+                        "connected_chain_id": chain_id,
+                    })
+                continue
             incomplete_chains.append(connected)
     if incomplete_chains:
         for connected in incomplete_chains:
@@ -706,7 +814,16 @@ def build_follow_on_hypothesis(
         "claims": [],
         "abstained": True,
         "abstention_reason": (
-            "No coherent incomplete connected behavior chain supports a bounded follow-on hypothesis."
+            (
+                "Incomplete behavior chains were suppressed because artifact or "
+                "relationship identity was unresolved or contradicted by completion "
+                "evidence in the same session."
+            )
+            if rejected_incomplete_chains
+            else (
+                "No coherent incomplete connected behavior chain supports a bounded "
+                "follow-on hypothesis."
+            )
         ),
         "basis_last_evidence_id": ref,
         "basis_session_last_trusted_evidence_id": _clean(session_last.get("evidence_id")),
@@ -716,7 +833,9 @@ def build_follow_on_hypothesis(
         "external_validation_suggestions": external,
         "scope": "post_session_cowrie_observable_behavior",
         "selection_semantics": (
-            "no_incomplete_connected_chain_abstention"
+            "contradicted_or_unresolved_incomplete_chain_abstention"
+            if rejected_incomplete_chains
+            else "no_incomplete_connected_chain_abstention"
             if connected_chains
             else "no_connected_chain_abstention"
         ),

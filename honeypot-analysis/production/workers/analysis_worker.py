@@ -428,6 +428,11 @@ def deterministic_baseline_report(
     report["behavioral_findings"] = []
     report["hypothesis_sets"] = []
     report["assessment_id"] = canonical_assessment_id(report)
+    report["session_id"] = str(
+        (report.get("canonical_evidence") or {}).get("session_id")
+        or session_payload.get("session_id")
+        or "unknown"
+    ).strip()
     context = report["non_authoritative_context"]
     context["analysis_processing"] = {
         "status": "failed",

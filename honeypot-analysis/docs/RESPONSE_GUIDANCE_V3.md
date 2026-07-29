@@ -20,6 +20,12 @@ enrichment/reputation, regex, default-guidance, and automatic-execution action
 conditions. Every selected task records its complete predicate trace and at
 least one canonical Cowrie evidence reference.
 
+Broad ATT&CK tactics cannot be the sole semantic support for specialized
+guidance. Credential and execution tasks require an existing literal action
+observation. The combined persistence/evasion task is intentionally absent
+until those operations can be distinguished without relying on a broad tactic
+or command-family label.
+
 Every v3 task permanently has:
 
 - `requires_manual_approval: true`

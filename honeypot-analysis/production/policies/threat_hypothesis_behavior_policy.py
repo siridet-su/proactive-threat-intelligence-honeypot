@@ -257,6 +257,12 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             definition = independent.get(name) or {}
             _validate_pattern(definition.get("trusted_command_pattern"), f"policy.claims.independent.{name}.trusted_command_pattern", errors)
             _validate_claim(definition, f"policy.claims.independent.{name}", errors)
+        persistence = independent.get("persistence") or {}
+        _validate_action_types(
+            persistence.get("literal_action_types"),
+            "policy.claims.independent.persistence.literal_action_types",
+            errors,
+        )
         downloader = independent.get("downloader") or {}
         _validate_action_types(downloader.get("literal_action_types"), "policy.claims.independent.downloader.literal_action_types", errors)
         _validate_pattern(downloader.get("legacy_command_pattern"), "policy.claims.independent.downloader.legacy_command_pattern", errors)
