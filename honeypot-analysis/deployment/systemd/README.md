@@ -156,6 +156,27 @@ sessions from the production database and writes warning-level journal lines
 when the first completed session and the 30-session threshold are crossed. Its
 state file is `/var/lib/honeypot/session_count_monitor_state.json`.
 
+### Retiring archived one-shot units
+
+Phase 6 removed the calibration and prediction-retention producers. They must
+not remain enabled on a host running the archived release path: their old
+entrypoints are intentionally absent. After taking a configuration/unit backup
+as part of a reviewed deployment, retire both service/timer pairs and reload
+systemd:
+
+```bash
+sudo systemctl disable --now honeypot-calibration-worker.timer honeypot-prediction-retention.timer
+sudo rm -f /etc/systemd/system/honeypot-calibration-worker.service /etc/systemd/system/honeypot-calibration-worker.timer
+sudo rm -f /etc/systemd/system/honeypot-prediction-retention.service /etc/systemd/system/honeypot-prediction-retention.timer
+sudo systemctl daemon-reload
+sudo systemctl reset-failed honeypot-calibration-worker.service honeypot-prediction-retention.service
+```
+
+Do not restore their removed Python modules. Prediction retention remains an
+explicit, manually approved SQLite maintenance operation. The session-count
+monitor is retained and its unit fixes the state path beneath
+`/var/lib/honeypot`, the only writable location under its hardening boundary.
+
 ## Signed Webhook Delivery
 
 Webhooks are disabled when both `WEBHOOK_URL` and `WEBHOOK_TARGETS_JSON` are
