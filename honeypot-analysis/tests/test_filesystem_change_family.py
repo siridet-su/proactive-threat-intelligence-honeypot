@@ -43,6 +43,12 @@ SPEC_PATH = (
 SPEC_SHA256 = (
     "4afd707762dd80379a05228aa7cbe96d1a271a57979304be121d57f414485c24"
 )
+HOLDOUT_PATH = (
+    ROOT / "evaluation/filesystem_change_holdout_frozen.v1.json"
+)
+HOLDOUT_SHA256 = (
+    "a273e0f0aa67bdcb81004b858e8c6a7bc79e85482954e87b6771bbfeaf99afac"
+)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -61,6 +67,18 @@ def _spec() -> dict[str, Any]:
     )
     assert value["expected_labels_frozen_before_execution"] is True
     assert len(value["cases"]) == 24
+    return value
+
+
+def _holdout_spec() -> dict[str, Any]:
+    raw = HOLDOUT_PATH.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
+    value = json.loads(raw)
+    assert value["schema_version"] == (
+        "typed_filesystem_change_holdout.v1"
+    )
+    assert value["expected_labels_frozen_before_execution"] is True
+    assert len(value["cases"]) == 16
     return value
 
 
@@ -277,6 +295,21 @@ def test_frozen_filesystem_evaluation() -> None:
             )
         )
     assert counts == {"tp": 11, "fp": 0, "fn": 0, "tn": 13}
+
+
+def test_frozen_filesystem_holdout() -> None:
+    counts = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    for case in _holdout_spec()["cases"]:
+        _facts, selection, _report = _assert_case(case)
+        expected = int(case["eligible_matches"]) > 0
+        actual = bool(selection["matches"])
+        counts[
+            "tp" if actual and expected
+            else "fp" if actual
+            else "fn" if expected
+            else "tn"
+        ] += 1
+    assert counts == {"tp": 8, "fp": 0, "fn": 0, "tn": 8}
 
 
 def test_frozen_filesystem_cases_persist_and_render(
