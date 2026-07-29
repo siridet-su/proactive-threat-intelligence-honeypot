@@ -20,6 +20,12 @@ from production.reporting.session_assessment_v4 import (
     build_session_assessment_v4,
     validate_session_assessment_v4,
 )
+from production.reporting.response_guidance_v3 import (
+    build_response_guidance_v3_from_paths,
+)
+from production.reporting.threat_hypothesis import (
+    build_supported_assessment,
+)
 from production.reporting.typed_semantic_facts import (
     build_typed_semantic_fact_set,
     build_typed_semantic_provenance,
@@ -40,6 +46,7 @@ BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
 CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
+GUIDANCE_POLICY = ROOT / "configs/response_guidance_policy.v3.json"
 FIXED_REVISION = "4dc0f08da2395b07998d79683266814734ca578c"
 INSPECTION_FINDING = "observed_cowrie_inspection_command"
 INSPECTION_GUIDANCE_FINDING = "observed-cowrie-inspection-command"
@@ -409,6 +416,72 @@ def test_inspection_finding_is_bounded_and_guidance_adds_no_specialized_action(
         "execution_integration": "not_implemented",
     }
     assert validate_session_assessment_v4(report) == []
+
+
+def test_old_two_family_authority_diff_adds_only_bounded_findings() -> None:
+    payload = _payload(
+        "inspection-old-new-comparison",
+        [("uptime --since", "success", "")],
+    )
+    observed, fact_set, selection = _typed_inputs(payload)
+    old_supported = build_supported_assessment(
+        observed,
+        behavior_policy_path=str(BEHAVIOR_POLICY),
+        typed_semantic_fact_set=fact_set,
+        activated_semantic_families=(
+            "sensitive_read",
+            "transfer",
+        ),
+    )
+    old_guidance = build_response_guidance_v3_from_paths(
+        observed,
+        policy_path=str(GUIDANCE_POLICY),
+        typed_semantic_fact_set=fact_set,
+        activated_semantic_families=(
+            "sensitive_read",
+            "transfer",
+        ),
+    )
+    current = _report(payload)
+
+    assert selection["matches"]
+    assert INSPECTION_FINDING not in {
+        item["claim_type"]
+        for item in old_supported["possible_objectives"]
+    }
+    assert INSPECTION_GUIDANCE_FINDING not in {
+        item["rule_id"] for item in old_guidance["findings"]
+    }
+    assert INSPECTION_FINDING in {
+        item["finding_type"]
+        for item in current["behavioral_findings"]
+    }
+    assert INSPECTION_GUIDANCE_FINDING in {
+        item["rule_id"]
+        for item in current["response_guidance_v3"]["findings"]
+    }
+    old_generic_actions = {
+        item["action_id"]
+        for item in old_guidance["advisory_actions"]
+        if not item.get("semantic_family")
+    }
+    current_generic_actions = {
+        item["action_id"]
+        for item in current["response_guidance_v3"][
+            "advisory_actions"
+        ]
+        if not item.get("semantic_family")
+    }
+    assert old_generic_actions == current_generic_actions == {
+        "review-observed-source-in-real-auth-logs"
+    }
+    assert not any(
+        item.get("semantic_family") == "inspection"
+        for item in current["response_guidance_v3"][
+            "advisory_actions"
+        ]
+    )
+    assert current["hypothesis_sets"] == []
 
 
 def test_attck_prediction_enrichment_and_injected_prose_have_no_authority(

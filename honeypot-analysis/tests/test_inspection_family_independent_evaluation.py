@@ -53,8 +53,12 @@ FROZEN_HOLDOUT = (
 FROZEN_HOLDOUT_SHA256 = (
     "f14acf430b8449d985895d59fd494a2ad1f8deac4380f6bce67fae24592518ec"
 )
+HOLDOUT_PROVENANCE_CORRECTION = (
+    ROOT
+    / "evaluation/inspection_family_holdout_provenance_correction.v1.json"
+)
 FIXED_EVALUATOR_REVISION = (
-    "92900879779107282b3858fb66485770055867ec"
+    "92900870d036fb34157043fd129571a8c3c0f430"
 )
 INSPECTION_FINDING = "observed_cowrie_inspection_command"
 INSPECTION_GUIDANCE_FINDING = "observed-cowrie-inspection-command"
@@ -90,6 +94,45 @@ def _load_holdout() -> dict[str, Any]:
     )
     assert value["schema_version"] == "typed_inspection_holdout.v1"
     assert len(value["cases"]) == 34
+    correction = json.loads(
+        HOLDOUT_PROVENANCE_CORRECTION.read_text(encoding="utf-8")
+    )
+    assert correction == {
+        "schema_version": "evaluation_provenance_correction.v1",
+        "correction_id": (
+            "inspection-holdout-implementation-revision-20260730"
+        ),
+        "recorded_at": "2026-07-30",
+        "target_path": (
+            "evaluation/inspection_family_holdout_frozen.v1.json"
+        ),
+        "target_sha256": FROZEN_HOLDOUT_SHA256,
+        "field": "implementation_revision_before_authoring",
+        "recorded_value": value[
+            "implementation_revision_before_authoring"
+        ],
+        "correct_value": FIXED_EVALUATOR_REVISION,
+        "evidence": {
+            "git_commit_subject": (
+                "Activate bounded Cowrie inspection findings"
+            ),
+            "parent_commit": (
+                "02a96243733381015795e018f57e2cd8ff3d62cd"
+            ),
+        },
+        "classification": (
+            "ancillary_provenance_transcription_error"
+        ),
+        "frozen_target_modified": False,
+        "expected_labels_changed": False,
+        "evaluation_cases_changed": False,
+        "measured_results_changed": False,
+        "semantics": (
+            "The frozen holdout bytes and expected labels remain immutable. "
+            "Consumers must use correct_value when interpreting the "
+            "implementation revision metadata."
+        ),
+    }
     return value
 
 
