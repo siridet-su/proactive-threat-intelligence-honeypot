@@ -41,11 +41,13 @@ Predictions, enrichment, cross-session correlation, and optional LLM prose are
 stored only under `non_authoritative_context`. They cannot change canonical
 findings, hypotheses, statuses, or IDs.
 
-The evaluator also builds and validates `typed_semantic_fact_set.v1` in
+The evaluator also builds and validates `typed_semantic_fact_set.v2` in
 shadow mode. The fact set preserves richer structured semantics for comparison
 but is discarded before record construction. It is not an authority input,
-canonical field, persisted value, API value, or artifact value. See
-`docs/TYPED_SEMANTIC_FACTS.md`.
+canonical field, persisted value, API value, or artifact value. It is bound to
+the canonical evidence, derived semantic input, exact behavior,
+classification, and semantic-vocabulary policy hashes, and evaluator
+revision. See `docs/TYPED_SEMANTIC_FACTS.md`.
 
 ## Provenance and failure semantics
 

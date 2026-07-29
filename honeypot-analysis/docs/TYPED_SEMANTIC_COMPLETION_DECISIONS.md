@@ -122,3 +122,45 @@ It must not:
 - interpret unsupported shell language;
 - promote missing operands or targets; or
 - begin hypothesis or response-guidance migration.
+
+## Readiness-review dispositions verified during implementation
+
+The 24 reviewed unknowns were re-evaluated by semantic family, not by matching
+the exact fixture strings. The complete forms below are supported by general
+argument-aware extractors:
+
+| Reviewed form | Disposition | Typed operation or facets |
+|---|---|---|
+| `uptime` | `ADD_GENERAL_EXTRACTOR` | host uptime inspection |
+| `df -h /var` | `ADD_GENERAL_EXTRACTOR` | filesystem-capacity inspection |
+| `uname -a` | `ADD_GENERAL_EXTRACTOR` | system-identity inspection |
+| `id` | `ADD_GENERAL_EXTRACTOR` | account-identity inspection |
+| `ip route show` | `ADD_GENERAL_EXTRACTOR` | network-route inspection |
+| `ps aux` | `ADD_GENERAL_EXTRACTOR` | process inspection |
+| `ss -tulpn` | `ADD_GENERAL_EXTRACTOR` | network-socket inspection |
+| `getent passwd` | `ADD_GENERAL_EXTRACTOR` | account-database inspection |
+| `find /tmp -type f` | `ADD_GENERAL_EXTRACTOR` | filesystem search |
+| `cat /etc/passwd` | `ADD_GENERAL_EXTRACTOR` | file and credential-path read |
+| `sed -i s/a/b/ ./target` | `ADD_GENERAL_EXTRACTOR` | file read and in-place modify |
+| `echo value > ./target` | `ADD_GENERAL_EXTRACTOR` | literal emission and overwrite |
+| `echo value >> ./target` | `ADD_GENERAL_EXTRACTOR` | literal emission and append |
+| `base64 --decode /tmp/blob` | `ADD_GENERAL_EXTRACTOR` | decode transform |
+| `tar -czf /tmp/logs.tgz /var/log` | `ADD_GENERAL_EXTRACTOR` | file read and archive create |
+| `crontab -l` | `ADD_GENERAL_EXTRACTOR` | schedule inspection |
+| `crontab -r` | `ADD_GENERAL_EXTRACTOR` | schedule deletion |
+| `crontab /tmp/jobs` | `ADD_GENERAL_EXTRACTOR` | schedule modification |
+| `systemctl status sshd` | `ADD_GENERAL_EXTRACTOR` | service inspection |
+| `systemctl restart sshd` | `ADD_GENERAL_EXTRACTOR` | service modification |
+| `rm -f /tmp/item` | `ADD_GENERAL_EXTRACTOR` | file deletion |
+| `chmod 700 /tmp/item` | `ADD_GENERAL_EXTRACTOR` | permission modification |
+| `chmod 700` | `KEEP_UNKNOWN` | target is missing |
+| `rm` | `KEEP_UNKNOWN` | target is missing |
+
+The readiness findings were also reproduced and corrected generically:
+`sed -i` no longer treats its program as a path, malformed quoting cannot use a
+whitespace fallback, redirection creates distinct write or append facets,
+decode-to-file and decode-to-shell retain all facets, failed `cd` cannot update
+effective context, and relationships are rebuilt from typed facts over the
+complete session.
+
+No implementation special-cases the reviewed literal command strings.
