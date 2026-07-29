@@ -360,6 +360,10 @@ class SessionState:
     # Durable per-session head-of-line watermark. SessionWorker owns this
     # field; Cowrie input cannot set it.
     last_applied_event_id: str     = ""
+    # The SessionWorker derives this from the durable event ledger before a
+    # closed-session job is enqueued.  It is evidence provenance, not Cowrie
+    # input, and must survive the reporting bridge intact.
+    canonical_event_manifest: dict = field(default_factory=dict)
 
     @property
     def unique_tactics(self) -> List[str]:
@@ -1562,6 +1566,9 @@ def build_pipeline_trigger(
                     "session_evidence_graph": getattr(
                         state, "session_evidence_graph", {}
                     ),
+                    "canonical_event_manifest": getattr(
+                        state, "canonical_event_manifest", {}
+                    ),
                     "ttp_sources": getattr(state, "ttp_sources", {}),
                     "tactic_summary": tactic_summary,
                     "ttp_command_map": raw_ttp_command_map,
@@ -1667,6 +1674,9 @@ def build_pipeline_trigger(
                 self.commands_failed    = view.get('commands_failed', [])
                 self.classification_events = view.get('classification_events', [])
                 self.raw_events          = view.get('raw_events', [])
+                self.canonical_event_manifest = view.get(
+                    'canonical_event_manifest', {}
+                )
                 self.session_evidence_graph = view.get('session_evidence_graph', {})
                 self.ttp_sources        = view.get('ttp_sources', {})
                 self.login_attempts     = view.get('login_attempts', 0)
