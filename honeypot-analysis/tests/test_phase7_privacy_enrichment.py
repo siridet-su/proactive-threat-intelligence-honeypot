@@ -8,6 +8,7 @@ import pytest
 
 from production.enrichment.enrichment_providers import EnrichmentProvider, ProviderResult
 from production.enrichment.local_snapshot import load_local_enrichment_snapshot
+from production.storage import open_storage
 from production.utils.config import ProductionConfig
 from production.utils.sensitive_data import (
     REDACTION_MARKER,
@@ -46,6 +47,39 @@ def test_cowrie_credentials_are_removed_before_spool_and_sanitizer_is_idempotent
     assert "plaintext-secret" not in persisted
     assert "second-secret" not in persisted
     assert json.loads(persisted)["password"] == REDACTION_MARKER
+
+
+def test_cowrie_login_message_credentials_are_removed_before_spool_and_sqlite(
+    tmp_path,
+) -> None:
+    secret = "synthetic-login-message-secret"
+    event = {
+        "eventid": "cowrie.login.success",
+        "session": "privacy-login-message",
+        "src_ip": "203.0.113.71",
+        "message": f"login attempt [operator/{secret}] succeeded",
+    }
+    sanitized = sanitize_cowrie_event_for_persistence(event)
+    assert sanitized["message"] == REDACTION_MARKER
+    assert sanitized["_honeypot_privacy"]["credential_fields_redacted"] == [
+        "message"
+    ]
+    assert secret not in stable_json(sanitized)
+    assert sanitize_cowrie_event_for_persistence(sanitized) == sanitized
+
+    spool = DiskSpool(str(tmp_path / "spool.ndjson"))
+    assert spool.append_many([event], max_spool_bytes=4096, min_free_bytes=0) == 1
+    assert secret not in (tmp_path / "spool.ndjson").read_text(encoding="utf-8")
+
+    storage = open_storage(f"sqlite:///{tmp_path / 'privacy.db'}")
+    storage.store_event("sensor-phase8c", event)
+    with storage.connection() as connection:
+        payload = connection.execute(
+            "SELECT payload_json FROM events WHERE session_id = ?",
+            ("privacy-login-message",),
+        ).fetchone()[0]
+    assert secret not in payload
+    assert json.loads(payload)["message"] == REDACTION_MARKER
 
 
 def _snapshot_document(records: dict, *, expired: bool = False) -> dict:

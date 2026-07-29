@@ -48,6 +48,12 @@ _COWRIE_CREDENTIAL_KEYS = frozenset(
         "login_password",
     }
 )
+# Cowrie login messages are human-readable summaries, not authoritative
+# evidence.  Cowrie's stock format embeds ``[username/password]`` in this
+# field, so redact the complete login message instead of attempting to parse a
+# password format that could change between Cowrie versions.
+_COWRIE_CREDENTIAL_METADATA_FIELDS = _COWRIE_CREDENTIAL_KEYS | {"message"}
+_COWRIE_LOGIN_EVENT_PREFIX = "cowrie.login."
 
 
 _SAFE_EXCEPTION_CATEGORIES = (
@@ -253,13 +259,25 @@ def sanitize_cowrie_event_for_persistence(event: Mapping[str, Any]) -> Dict[str,
     if not isinstance(sanitized, dict):  # pragma: no cover - guarded above
         raise ValueError("sanitized Cowrie event must be an object")
 
+    # A top-level ``message`` on Cowrie login events can contain plaintext
+    # credentials even though it is not itself a credential-named key.  This
+    # boundary is deliberately fail-closed: no login summary is needed by the
+    # durable pipeline, while preserving it risks persisting a password.
+    event_id = str(sanitized.get("eventid") or "").strip().lower()
+    if event_id.startswith(_COWRIE_LOGIN_EVENT_PREFIX):
+        message = sanitized.get("message")
+        if isinstance(message, str):
+            if message:
+                redacted_fields.add("message")
+            sanitized["message"] = REDACTION_MARKER if message else message
+
     prior = event.get("_honeypot_privacy")
     prior_fields = []
     if isinstance(prior, Mapping):
         prior_fields = [
             str(item).strip().lower()
             for item in prior.get("credential_fields_redacted", []) or []
-            if str(item).strip().lower() in _COWRIE_CREDENTIAL_KEYS
+            if str(item).strip().lower() in _COWRIE_CREDENTIAL_METADATA_FIELDS
         ]
     all_fields = sorted(redacted_fields | set(prior_fields))
     if all_fields:
