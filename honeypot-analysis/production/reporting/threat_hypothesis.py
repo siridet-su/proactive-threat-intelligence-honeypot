@@ -18,6 +18,10 @@ from production.policies.threat_hypothesis_behavior_policy import (
     policy_summary,
     resolve_behavior_policy,
 )
+from production.reporting.typed_semantic_family_selection import (
+    policy_output_trace,
+    select_activated_semantic_family,
+)
 from production.utils.serialization import stable_id
 
 
@@ -482,6 +486,9 @@ def build_supported_assessment(
     observed: Dict[str, Any],
     behavior_policy_document: Optional[Dict[str, Any]] = None,
     behavior_policy_path: str = "",
+    *,
+    typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
+    activated_semantic_families: Iterable[str] = (),
 ) -> Dict[str, Any]:
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     claims_policy = _claim_policy(document)
@@ -499,6 +506,21 @@ def build_supported_assessment(
         chain,
         compile_pattern(document, credential_definition.get("trusted_command_pattern")),
     )
+    activated_families = {
+        _clean(value) for value in activated_semantic_families if _clean(value)
+    }
+    sensitive_read_selection: Dict[str, Any] = {}
+    if (
+        "sensitive_read" in activated_families
+        and isinstance(typed_semantic_fact_set, dict)
+    ):
+        try:
+            sensitive_read_selection = select_activated_semantic_family(
+                typed_semantic_fact_set,
+                family="sensitive_read",
+            )
+        except ValueError:
+            sensitive_read_selection = {}
     literal_downloader = _literal_actions(
         observed,
         *(downloader_definition.get("literal_action_types") or []),
@@ -540,7 +562,39 @@ def build_supported_assessment(
         for ref in _event_refs(observed, eventid)
     ))
 
-    if credential:
+    if "sensitive_read" in activated_families:
+        matches = sensitive_read_selection.get("matches") or []
+        if matches:
+            typed_definition = credential_definition.get(
+                "typed_semantic"
+            ) or {}
+            refs = sorted({
+                _clean(ref)
+                for match in matches
+                if isinstance(match, dict)
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            claim = _claim(
+                _clean(typed_definition.get("claim_type")),
+                _clean(typed_definition.get("text")),
+                _clean(typed_definition.get("evidence_status"))
+                or "supported",
+                refs,
+                typed_definition.get("limitations") or [],
+            )
+            claim.update({
+                "claim_basis": "typed_semantic_fact_set.v2",
+                "behavior_policy_rule_id": _clean(
+                    typed_definition.get("rule_id")
+                ),
+                "semantic_family": "sensitive_read",
+                "semantic_trace": policy_output_trace(
+                    sensitive_read_selection
+                ),
+            })
+            objectives.append(claim)
+    elif credential:
         objectives.append(_claim(
             _clean(credential_definition.get("claim_type")),
             _clean(credential_definition.get("text")),

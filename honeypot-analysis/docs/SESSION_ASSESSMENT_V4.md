@@ -41,13 +41,20 @@ Predictions, enrichment, cross-session correlation, and optional LLM prose are
 stored only under `non_authoritative_context`. They cannot change canonical
 findings, hypotheses, statuses, or IDs.
 
-The evaluator also builds and validates `typed_semantic_fact_set.v2` in
-shadow mode. The fact set preserves richer structured semantics for comparison
-but is discarded before record construction. It is not an authority input,
-canonical field, persisted value, API value, or artifact value. It is bound to
-the canonical evidence, derived semantic input, exact behavior,
-classification, and semantic-vocabulary policy hashes, and evaluator
-revision. See `docs/TYPED_SEMANTIC_FACTS.md`.
+The evaluator also builds and validates `typed_semantic_fact_set.v2`.
+`sensitive_read` is the only activated operation family. It replaces the
+legacy credential-pattern claim with a bounded observed finding only when a
+parsed, successful Cowrie fragment contains exact same-entity `file_read` and
+`credential_path_read` operations on a resolved path. Failure, ambiguity,
+compound outcomes, additional operations, and unresolved identity abstain.
+No speculative threat hypothesis is created for this direct observation.
+
+The full fact set remains unpersisted and is reproducibly bound to canonical
+evidence, derived semantic input, exact behavior, classification, and
+semantic-vocabulary policy hashes, and evaluator revision. The record retains
+the fact-set hash and a bounded content-addressed selection trace. All other
+families remain on their existing contained or shadow-only paths. See
+`docs/TYPED_SEMANTIC_FACTS.md`.
 
 ## Provenance and failure semantics
 
@@ -72,8 +79,9 @@ advisory-only sibling contract with manual approval and no execution
 integration.
 
 `validate_session_assessment_v4()` validates the whole canonical contract:
-evidence hash integrity, policy/evaluator provenance, authority flags, unique
-content IDs, evidence references, and prohibited fields.
+evidence hash integrity, policy/evaluator/typed-semantic provenance, authority
+flags, meaningful selected-finding content IDs, selection traces, evidence
+references, and prohibited fields.
 
 ## Consumers and validation
 

@@ -1,7 +1,7 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.0.1-phase9a",
+  "version": "3.1.0",
   "updated_at": "2026-07-29",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
@@ -85,14 +85,17 @@
     },
     {
       "rule_id": "observed-credential-access-candidate",
+      "semantic_family": "sensitive_read",
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1552", "cisa-small-business"],
       "severity": "high",
-      "statement": "A literal command observation referenced a credential-related path inside Cowrie; successful acquisition or real-system use is not established.",
-      "applies_when": {"any_action_types": ["credential_path_access"]},
+      "statement": "Cowrie reported success for a parsed file-read command targeting a resolved credential-related path; acquisition and real-host use are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["sensitive_read"]
+      },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
-        "basis": ["Migrated from reviewed credential-access rule", "Requires a literal credential-path access observation"],
+        "basis": ["Migrated from reviewed credential-access rule", "Requires same-entity typed file-read and credential-path-read operations with resolved identity"],
         "author": "honeypot-policy-maintainer",
         "reviewer": "reviewed-policy-record-preserved",
         "reviewed": true,
@@ -100,7 +103,7 @@
         "created": "2026-07-27",
         "last_reviewed": "2026-07-29",
         "review_expires_at": "2027-07-16",
-        "version": "3.0.1-phase9a"
+        "version": "3.1.0"
       }
     },
     {
@@ -170,12 +173,15 @@
     },
     {
       "rule_id": "observed-credential-access-corroboration",
+      "semantic_family": "sensitive_read",
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1552", "cisa-small-business"],
-      "applies_when": {"any_action_types": ["credential_path_access"]},
+      "applies_when": {
+        "activated_semantic_families": ["sensitive_read"]
+      },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
-        "basis": ["Literal credential-path access observation", "Corroboration is conditional on authorized real-system telemetry"],
+        "basis": ["Resolved successful Cowrie credential-path read observation", "Corroboration is conditional on authorized real-system telemetry"],
         "author": "honeypot-policy-maintainer",
         "reviewer": "reviewed-policy-record-preserved",
         "reviewed": true,
@@ -183,14 +189,14 @@
         "created": "2026-07-27",
         "last_reviewed": "2026-07-29",
         "review_expires_at": "2027-07-16",
-        "version": "3.0.1-phase9a"
+        "version": "3.1.0"
       },
       "actions": [
         {
           "action_id": "review-credential-exposure-and-reuse",
           "priority": 10,
-          "action": "Review authorized systems for exposure of the observed credential paths or account names: {credential_paths}; {account_names}.",
-          "rationale": "The literal path observation supports a targeted review, not a claim that credentials were acquired or reused.",
+          "action": "Review authorized deployment records and telemetry for possible exposure or reuse associated with the observed credential paths: {credential_paths}.",
+          "rationale": "The resolved Cowrie read observation supports a bounded human review, not a claim that credentials were acquired or reused.",
           "source_type": "trusted_control_guidance",
           "references": ["mitre-t1552", "cisa-small-business"],
           "requires_manual_approval": true,
@@ -198,7 +204,7 @@
           "execution_integration": "not_implemented",
           "provenance": {
             "method": "reviewed_observed_evidence_policy_migration",
-            "basis": ["Migrated from credential-access response", "No credential rotation is automatically authorized"],
+            "basis": ["Migrated from credential-access response", "Limited to resolved paths supported by typed read facts", "No credential rotation is automatically authorized"],
             "author": "honeypot-policy-maintainer",
             "reviewer": "reviewed-policy-record-preserved",
             "reviewed": true,
@@ -206,7 +212,7 @@
             "created": "2026-07-27",
             "last_reviewed": "2026-07-29",
             "review_expires_at": "2027-07-16",
-            "version": "3.0.1-phase9a"
+            "version": "3.1.0"
           }
         }
       ]

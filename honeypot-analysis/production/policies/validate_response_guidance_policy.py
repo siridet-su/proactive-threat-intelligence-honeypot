@@ -30,10 +30,12 @@ ALLOWED_CONDITION_KEYS = {
     "required_flags",
     "absent_flags",
     "min_command_count",
+    "activated_semantic_families",
 }
 LIST_CONDITION_KEYS = ALLOWED_CONDITION_KEYS - {"min_command_count"}
 OBSERVED_CONDITION_KEYS = frozenset(ALLOWED_CONDITION_KEYS)
 ALLOWED_BEHAVIOR_FLAGS = {"has_commands", "has_cowrie_transfer_event"}
+ACTIVATED_SEMANTIC_FAMILIES = {"sensitive_read"}
 REQUIRED_PROVENANCE_FIELDS = {
     "method",
     "basis",
@@ -146,6 +148,13 @@ def _validate_condition(condition: Any, path: str, errors: List[str]) -> None:
         values = condition.get(key)
         if not isinstance(values, list) or not values or not all(_nonempty_text(value) for value in values):
             errors.append(f"{path}: applies_when.{key} must be a non-empty list of text")
+    for family in _as_list(
+        condition.get("activated_semantic_families")
+    ):
+        if family not in ACTIVATED_SEMANTIC_FAMILIES:
+            errors.append(
+                f"{path}: semantic family {family!r} is not activated"
+            )
     count = condition.get("min_command_count")
     if "min_command_count" in condition and (
         isinstance(count, bool) or not isinstance(count, int) or count < 1
@@ -248,6 +257,28 @@ def validate_response_guidance_policy(policy: Any) -> List[str]:
             _validate_provenance(rule.get("provenance"), path, errors)
             _validate_condition(rule.get("applies_when"), path, errors)
             condition = rule.get("applies_when")
+            semantic_family = rule.get("semantic_family")
+            if semantic_family is not None:
+                if semantic_family not in ACTIVATED_SEMANTIC_FAMILIES:
+                    errors.append(
+                        f"{path}: semantic_family is not activated"
+                    )
+                expected_condition = {
+                    "activated_semantic_families": [semantic_family]
+                }
+                if condition != expected_condition:
+                    errors.append(
+                        f"{path}: semantic-family rules must use only their "
+                        "activated semantic family condition"
+                    )
+            elif (
+                isinstance(condition, dict)
+                and "activated_semantic_families" in condition
+            ):
+                errors.append(
+                    f"{path}: activated semantic condition requires "
+                    "semantic_family"
+                )
             if (
                 isinstance(condition, dict)
                 and {"all_tactics", "any_tactics"}.intersection(condition)

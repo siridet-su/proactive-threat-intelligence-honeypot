@@ -1,4 +1,8 @@
-"""Provenance-bound, shadow-only typed semantics for observed Cowrie evidence."""
+"""Provenance-bound typed semantics for observed Cowrie evidence.
+
+Only operation families explicitly activated by the immutable vocabulary may
+be used as policy inputs. All remaining families stay shadow-only.
+"""
 
 from __future__ import annotations
 
@@ -29,10 +33,10 @@ GIT_REVISION_RE = re.compile(r"^[0-9a-f]{7,64}$")
 
 _AUTHORITY = {
     "authoritative": False,
-    "may_select_findings": False,
+    "may_select_findings": True,
     "may_select_hypotheses": False,
-    "may_select_guidance": False,
-    "may_change_canonical_ids": False,
+    "may_select_guidance": True,
+    "may_change_canonical_ids": True,
     "may_authorize_actions": False,
 }
 _TOP_KEYS = {
@@ -331,24 +335,31 @@ def _canonical_evidence_hash(snapshot: Dict[str, Any]) -> Tuple[str, str]:
 
 
 def _semantic_input(observed: Dict[str, Any]) -> Dict[str, Any]:
-    """Select every observed-behaviour field the shadow evaluator may read."""
+    """Select only observed fields that the typed evaluator can read."""
 
     return {
         "session_id": _clean(observed.get("session_id")) or "unknown",
-        "ordered_behavior_chain": deepcopy(
-            observed.get("ordered_behavior_chain") or []
-        ),
+        "ordered_behavior_chain": [
+            {
+                key: deepcopy(item.get(key))
+                for key in (
+                    "evidence_id",
+                    "command",
+                    "timestamp",
+                    "ttp",
+                    "tactic",
+                    "source",
+                    "agreement_status",
+                )
+            }
+            for item in observed.get("ordered_behavior_chain") or []
+            if isinstance(item, dict)
+        ],
         "ordered_command_observations": deepcopy(
             observed.get("ordered_command_observations") or []
         ),
         "transfer_event_observations": deepcopy(
             observed.get("transfer_event_observations") or []
-        ),
-        "behavior_relationships": deepcopy(
-            observed.get("behavior_relationships") or []
-        ),
-        "connected_behavior_chains": deepcopy(
-            observed.get("connected_behavior_chains") or []
         ),
     }
 
@@ -1525,7 +1536,7 @@ def build_typed_semantic_fact_set(
     provenance: Dict[str, Any],
     vocabulary_path: str = "",
 ) -> Dict[str, Any]:
-    """Build deterministic facts while preserving the shadow-only boundary."""
+    """Build deterministic facts with one closed family-scoped activation."""
 
     loaded = load_typed_semantic_vocabulary(vocabulary_path)
     if loaded.get("status") != "valid":
@@ -1591,7 +1602,7 @@ def build_typed_semantic_fact_set(
         "schema_version": FACT_SET_SCHEMA,
         "status": "valid",
         "session_id": _clean(observed.get("session_id")) or "unknown",
-        "mode": "shadow_only_discarded",
+        "mode": "family_scoped_policy_input",
         "authority": deepcopy(_AUTHORITY),
         "provenance": deepcopy(provenance),
         "limits": {
@@ -1714,8 +1725,8 @@ def validate_typed_semantic_fact_set(
         errors.append("fact_set schema_version is invalid")
     if value.get("status") != "valid":
         errors.append("fact_set status must be valid")
-    if value.get("mode") != "shadow_only_discarded":
-        errors.append("fact_set mode must remain shadow_only_discarded")
+    if value.get("mode") != "family_scoped_policy_input":
+        errors.append("fact_set mode must be family_scoped_policy_input")
     if value.get("authority") != _AUTHORITY:
         errors.append("fact_set authority is invalid")
     if not _clean(value.get("session_id")):
@@ -2739,9 +2750,9 @@ def build_typed_semantic_shadow_diff(
         "blocked_matches": blocked_matches,
         "abstentions": abstentions,
         "policy_impact": {
-            "authoritative_change": "none_shadow_only",
+            "authoritative_change": "sensitive_read_only",
             "candidate_operation_families": families,
-            "activation_state": "not_activated",
+            "activation_state": "family_scoped",
         },
     }
     result["shadow_diff_sha256"] = _sha256_json(result)
@@ -2810,9 +2821,9 @@ def validate_typed_semantic_shadow_diff(value: Any) -> List[str]:
         "shadow_diff.policy_impact",
         errors,
     ):
-        if impact.get("authoritative_change") != "none_shadow_only":
-            errors.append("shadow_diff may not claim authoritative impact")
-        if impact.get("activation_state") != "not_activated":
+        if impact.get("authoritative_change") != "sensitive_read_only":
+            errors.append("shadow_diff policy impact is invalid")
+        if impact.get("activation_state") != "family_scoped":
             errors.append("shadow_diff activation state is invalid")
     return errors
 
@@ -2857,7 +2868,7 @@ def render_typed_semantic_shadow_diff(diff: Dict[str, Any]) -> str:
         "",
         f"Session: `{_clean(diff.get('session_id'))}`",
         f"Fact set: `{_clean(diff.get('fact_set_sha256'))}`",
-        "Authority impact: `none_shadow_only`",
+        "Authority impact: `sensitive_read_only`",
         "",
         "## Typed facts",
     ]

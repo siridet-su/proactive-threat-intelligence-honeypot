@@ -32,10 +32,10 @@ _ROOT_KEYS = {
     "activation",
 }
 _AUTHORITY = {
-    "mode": "shadow_only",
-    "may_select_findings": False,
+    "mode": "family_scoped_policy_input",
+    "may_select_findings": True,
     "may_select_hypotheses": False,
-    "may_select_guidance": False,
+    "may_select_guidance": True,
     "may_authorize_actions": False,
 }
 _CONTRACT_KEYS = {
@@ -84,6 +84,20 @@ _HARD_LIMITS = {
     "max_chains": 10_000,
     "max_command_length": 65_536,
     "max_total_command_bytes": 16 * 1024 * 1024,
+}
+_ACTIVATION_REQUIREMENT_KEYS = {
+    "required_operation_types",
+    "allowed_operation_types",
+    "required_entity_role",
+    "required_entity_type",
+    "required_outcome_status",
+    "required_outcome_scope",
+    "required_effect_status",
+    "required_parse_status",
+    "allowed_path_resolution_statuses",
+    "require_same_entity",
+    "require_linkable_identity",
+    "require_empty_abstention_reasons",
 }
 
 
@@ -142,7 +156,9 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
         if not _clean(value.get(key)):
             errors.append(f"{key} must be a non-empty string")
     if value.get("authority") != _AUTHORITY:
-        errors.append("authority must preserve the exact shadow-only boundary")
+        errors.append(
+            "authority must preserve the exact family-scoped boundary"
+        )
 
     review = value.get("review")
     if _exact_keys(
@@ -239,7 +255,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
     activation = value.get("activation")
     if _exact_keys(
         activation,
-        {"default", "family_states"},
+        {"default", "family_states", "family_requirements"},
         "activation",
         errors,
     ):
@@ -254,13 +270,93 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "activation.family_states must cover every operation family"
                 )
             for family, state in family_states.items():
-                expected = (
-                    "not_eligible" if family == "unknown" else "not_activated"
-                )
+                expected = {
+                    "unknown": "not_eligible",
+                    "sensitive_read": "activated",
+                }.get(family, "not_activated")
                 if state != expected:
                     errors.append(
                         f"activation.family_states.{family} must be {expected}"
                     )
+        requirements = activation.get("family_requirements")
+        if not isinstance(requirements, dict):
+            errors.append("activation.family_requirements must be an object")
+        elif set(requirements) != {"sensitive_read"}:
+            errors.append(
+                "activation.family_requirements must contain only sensitive_read"
+            )
+        else:
+            requirement = requirements["sensitive_read"]
+            if _exact_keys(
+                requirement,
+                _ACTIVATION_REQUIREMENT_KEYS,
+                "activation.family_requirements.sensitive_read",
+                errors,
+            ):
+                required_operations = _string_list(
+                    requirement.get("required_operation_types"),
+                    "activation.family_requirements.sensitive_read."
+                    "required_operation_types",
+                    errors,
+                )
+                allowed_operations = _string_list(
+                    requirement.get("allowed_operation_types"),
+                    "activation.family_requirements.sensitive_read."
+                    "allowed_operation_types",
+                    errors,
+                )
+                if set(required_operations) != {
+                    "file_read",
+                    "credential_path_read",
+                }:
+                    errors.append(
+                        "sensitive_read must require file_read and "
+                        "credential_path_read"
+                    )
+                if set(allowed_operations) != set(required_operations):
+                    errors.append(
+                        "sensitive_read may allow only its two required "
+                        "operations"
+                    )
+                for operation_type in required_operations:
+                    if operation_type not in operations:
+                        errors.append(
+                            "sensitive_read references an unknown operation"
+                        )
+                expected_values = {
+                    "required_entity_role": "credential_paths",
+                    "required_entity_type": "path",
+                    "required_outcome_status": "reported_success",
+                    "required_outcome_scope": "fragment",
+                    "required_effect_status": "reported_completed",
+                    "required_parse_status": "parsed",
+                }
+                for key, expected in expected_values.items():
+                    if requirement.get(key) != expected:
+                        errors.append(
+                            f"sensitive_read.{key} must be {expected}"
+                        )
+                path_statuses = _string_list(
+                    requirement.get("allowed_path_resolution_statuses"),
+                    "activation.family_requirements.sensitive_read."
+                    "allowed_path_resolution_statuses",
+                    errors,
+                )
+                if set(path_statuses) != {
+                    "recorded_resolved",
+                    "context_resolved",
+                }:
+                    errors.append(
+                        "sensitive_read path resolution must be exact or "
+                        "confirmed-context resolution"
+                    )
+                for key in (
+                    "require_same_entity",
+                    "require_linkable_identity",
+                    "require_empty_abstention_reasons",
+                ):
+                    if requirement.get(key) is not True:
+                        errors.append(f"sensitive_read.{key} must be true")
     return errors
 
 

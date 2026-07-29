@@ -5,9 +5,10 @@ generated reports, APIs, monitor views, and report artifacts.
 
 It is deterministic: `guidance_id` derives from the canonical evidence digest,
 the exact policy SHA-256, the optional explicitly configured asset-profile
-SHA-256, and the selected finding/action rule identities. `generated_at`,
-predictions, enrichment, scores, and source-file locations are not identity
-inputs.
+SHA-256, the complete selected findings/actions/triage/safety content, and the
+activated typed-semantic fact, vocabulary, and selection hashes.
+`generated_at`, predictions, enrichment, scores, and source-file locations are
+not identity inputs.
 
 ## Selection boundary
 
@@ -21,10 +22,18 @@ conditions. Every selected task records its complete predicate trace and at
 least one canonical Cowrie evidence reference.
 
 Broad ATT&CK tactics cannot be the sole semantic support for specialized
-guidance. Credential and execution tasks require an existing literal action
-observation. The combined persistence/evasion task is intentionally absent
-until those operations can be distinguished without relying on a broad tactic
-or command-family label.
+guidance. Credential guidance is the first family migrated to
+`typed_semantic_fact_set.v2`: it requires exact same-entity
+`credential_path_read` and `file_read` operations, resolved identity, no
+abstention, and a Cowrie-reported successful fragment. Cowrie success is not
+proof of credential acquisition or real-host effect. The guidance evaluator
+selects from the immutable facts independently of threat findings or
+hypotheses.
+
+Execution and every other operation family remain on the contained behavior or
+shadow-only path. The combined persistence/evasion task is intentionally
+absent until those operations can be distinguished without relying on a broad
+tactic or command-family label.
 
 Every v3 task permanently has:
 

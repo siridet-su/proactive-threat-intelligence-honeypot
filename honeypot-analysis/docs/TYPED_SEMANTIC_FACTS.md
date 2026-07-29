@@ -1,14 +1,17 @@
 # Typed semantic facts
 
-`typed_semantic_fact_set.v2` is a lossless, versioned, non-authoritative
-comparison contract. It is built from the same redacted observed-behaviour
-reconstruction used while creating `session_assessment.v4`, validated, compared
-with that source, and discarded.
+`typed_semantic_fact_set.v2` is a lossless, versioned interpretation contract
+built from the same redacted observed-behaviour reconstruction used while
+creating `session_assessment.v4`. The complete fact set is validated and
+content-addressed before any family-scoped policy evaluation.
 
-It is not embedded in v4 or `response_guidance.v3`, written to SQLite, exposed
-through an API, rendered in a production artifact, or used by a hypothesis or
-guidance policy. A shadow exception is contained and cannot fail or change the
-authoritative report path.
+Only `sensitive_read` is activated. The complete fact set is not embedded in
+v4 or `response_guidance.v3`, written to SQLite, exposed through an API, or
+rendered in an artifact. Instead, v4 and v3 independently evaluate the same
+validated fact set and retain a bounded content-addressed trace for a matched
+sensitive read. All other families remain shadow-only. A typed-evaluation
+error fails the selected family closed without promoting legacy credential
+matching.
 
 ## Bound inputs
 
@@ -23,7 +26,7 @@ Every fact set records:
 
 The builder rejects an observed-behaviour input that does not match the bound
 semantic-input digest. A missing, invalid, or substituted vocabulary makes the
-shadow run unavailable. There is no fallback vocabulary.
+family input unavailable. There is no fallback vocabulary.
 
 ## Contract
 
@@ -111,17 +114,31 @@ The immutable vocabulary bounds:
 - one command: 8,192 UTF-8 bytes; and
 - aggregate command input: 1 MiB.
 
-Exceeding a limit makes only the shadow run unavailable. Empty and incomplete
-sessions remain valid observation-only inputs and do not invent facts.
+Exceeding a limit makes the selected family unavailable and leaves
+non-migrated contained behavior unchanged. Empty and incomplete sessions
+remain valid observation-only inputs and do not invent facts.
 
 ## Review diagnostics and activation
 
 Direct callers may build a deterministic `typed_semantic_shadow_diff.v1` and
 render it as Markdown. It contains old literal actions, typed operations,
-blocked or partial matches, abstention reasons, and a no-authority policy-impact
-summary. The production v4 call discards this data.
+blocked or partial matches, abstention reasons, and the exact family-scoped
+policy impact. The diagnostic itself remains discarded.
 
-The vocabulary records every operation family as `not_activated` (and
-`unknown` as `not_eligible`). This metadata is only a boundary for a later,
-separately approved family-by-family migration. It grants no hypothesis,
-guidance, alert, or response authority.
+The vocabulary records `sensitive_read` as `activated`, `unknown` as
+`not_eligible`, and every other operation family as `not_activated`. A
+sensitive read requires exactly `file_read` and `credential_path_read` on the
+same resolved, linkable credential-path entity, a parsed fragment, no
+abstention, and a Cowrie-reported successful fragment outcome. Additional
+operations, failures, compound outcomes, conditional outcomes, unsupported
+syntax, unresolved identities, and ambiguity abstain.
+
+`credential_path_read` is emitted only when the general parser proves a
+same-entity `file_read`; merely mentioning a sensitive path in `echo`, delete,
+permission-change, or other non-read syntax does not create it.
+
+The selected threat output is a bounded behavioral finding, not an attacker
+intent or hypothesis. The selected v3 playbook remains advisory, manually
+approved, non-executable, and incapable of alerts. ATT&CK labels, predictions,
+enrichment, correlations, and optional prose cannot create or alter a family
+match.

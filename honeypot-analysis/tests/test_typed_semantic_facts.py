@@ -180,7 +180,7 @@ def _rehash_single_entity_free_fact(value: dict) -> None:
     ).hexdigest()
 
 
-def test_vocabulary_is_closed_hash_bound_and_shadow_only() -> None:
+def test_vocabulary_is_closed_hash_bound_and_family_scoped() -> None:
     loaded = load_typed_semantic_vocabulary()
 
     assert loaded["status"] == "valid"
@@ -189,12 +189,22 @@ def test_vocabulary_is_closed_hash_bound_and_shadow_only() -> None:
         VOCABULARY_POLICY.read_bytes()
     ).hexdigest()
     assert loaded["document"]["authority"] == {
-        "mode": "shadow_only",
-        "may_select_findings": False,
+        "mode": "family_scoped_policy_input",
+        "may_select_findings": True,
         "may_select_hypotheses": False,
-        "may_select_guidance": False,
+        "may_select_guidance": True,
         "may_authorize_actions": False,
     }
+    assert loaded["document"]["activation"]["family_states"][
+        "sensitive_read"
+    ] == "activated"
+    assert all(
+        state == "not_activated"
+        for family, state in loaded["document"]["activation"][
+            "family_states"
+        ].items()
+        if family not in {"unknown", "sensitive_read"}
+    )
     assert set(loaded["document"]["entity_role_types"]) == set(
         loaded["document"]["vocabulary"]["entity_roles"]
     )
@@ -693,9 +703,9 @@ def test_shadow_fact_and_diff_are_deterministic_and_strictly_valid() -> None:
     assert validate_typed_semantic_shadow_diff(first_diff) == []
     assert observed == original
     assert first["authority"]["may_select_hypotheses"] is False
-    assert first["authority"]["may_select_guidance"] is False
+    assert first["authority"]["may_select_guidance"] is True
     assert first_diff["policy_impact"]["authoritative_change"] == (
-        "none_shadow_only"
+        "sensitive_read_only"
     )
 
 
@@ -795,7 +805,7 @@ def test_bounded_large_session_performance_and_memory() -> None:
     assert validate_typed_semantic_fact_set(fact_set) == []
 
 
-def test_shadow_runtime_is_discarded_and_cannot_change_v4_v3_outputs(
+def test_family_input_failure_suppresses_only_activated_sensitive_outputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = _payload(
@@ -808,35 +818,13 @@ def test_shadow_runtime_is_discarded_and_cannot_change_v4_v3_outputs(
         behavior_policy_path=BEHAVIOR_POLICY,
         classification_policy_path=str(CLASSIFICATION_POLICY),
     )
-    calls: list[tuple[str, set[str]]] = []
-
-    def alternate_shadow(observed: dict, **kwargs: object) -> dict:
-        calls.append((observed["session_id"], set(kwargs)))
-        return {
-            "schema_version": "typed_semantic_shadow_result.v2",
-            "status": "valid",
-            "fact_set_sha256": "f" * 64,
-        }
+    def unavailable_facts(_: dict, **_kwargs: object) -> dict:
+        raise RuntimeError("controlled family-input failure")
 
     monkeypatch.setattr(
         assessment_module,
-        "run_typed_semantic_shadow",
-        alternate_shadow,
-    )
-    alternate = build_session_assessment_v4(
-        [payload],
-        raw_events=payload["raw_events"],
-        behavior_policy_path=BEHAVIOR_POLICY,
-        classification_policy_path=str(CLASSIFICATION_POLICY),
-    )
-
-    def unavailable_shadow(_: dict, **_kwargs: object) -> dict:
-        raise RuntimeError("controlled shadow-only failure")
-
-    monkeypatch.setattr(
-        assessment_module,
-        "run_typed_semantic_shadow",
-        unavailable_shadow,
+        "build_typed_semantic_fact_set",
+        unavailable_facts,
     )
     unavailable = build_session_assessment_v4(
         [payload],
@@ -845,28 +833,32 @@ def test_shadow_runtime_is_discarded_and_cannot_change_v4_v3_outputs(
         classification_policy_path=str(CLASSIFICATION_POLICY),
     )
 
-    assert calls == [(
-        payload["session_id"],
-        {
-            "canonical_evidence",
-            "behavior_policy_sha256",
-            "classification_policy_sha256",
-            "evaluator_git_revision",
-        },
-    )]
-    assert _without_runtime_timestamp(baseline) == (
-        _without_runtime_timestamp(alternate)
+    assert "observed_credential_path_read_command" in {
+        item["finding_type"]
+        for item in baseline["behavioral_findings"]
+    }
+    assert "observed_credential_path_read_command" not in {
+        item["finding_type"]
+        for item in unavailable["behavioral_findings"]
+    }
+    assert "review-credential-exposure-and-reuse" in {
+        item["action_id"]
+        for item in baseline["response_guidance_v3"]["advisory_actions"]
+    }
+    assert "review-credential-exposure-and-reuse" not in {
+        item["action_id"]
+        for item in unavailable["response_guidance_v3"][
+            "advisory_actions"
+        ]
+    }
+    assert unavailable["provenance"]["typed_semantics"]["status"] == (
+        "unavailable"
     )
-    assert _without_runtime_timestamp(baseline) == (
-        _without_runtime_timestamp(unavailable)
-    )
-    assert baseline["assessment_id"] == alternate["assessment_id"]
-    assert baseline["assessment_id"] == unavailable["assessment_id"]
-    assert baseline["response_guidance_v3"]["guidance_id"] == (
-        alternate["response_guidance_v3"]["guidance_id"]
-    )
-    assert "typed_semantic" not in str(baseline)
+    assert unavailable["response_guidance_v3"]["provenance"][
+        "typed_semantics"
+    ]["status"] == "unavailable"
     assert validate_session_assessment_v4(baseline) == []
+    assert validate_session_assessment_v4(unavailable) == []
 
 
 def test_shadow_runtime_result_is_small_valid_and_contains_no_facts() -> None:

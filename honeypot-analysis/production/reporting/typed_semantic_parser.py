@@ -1209,6 +1209,29 @@ def extract_typed_semantics(
                             if isinstance(item, dict)
                             and item.get("entity_id")
                         ]
+                        if operation_type == "credential_path_read":
+                            credential_refs = {
+                                item.get("entity_id")
+                                for item in entities.get(
+                                    "credential_paths", []
+                                )
+                                if isinstance(item, dict)
+                                and item.get("entity_id")
+                            }
+                            general_read_refs = {
+                                entity_ref
+                                for operation in operations
+                                if operation.get("operation_type")
+                                == "file_read"
+                                for entity_ref in (
+                                    operation.get("entity_refs") or []
+                                )
+                            }
+                            refs = sorted(
+                                credential_refs & general_read_refs
+                            )
+                            if not refs:
+                                continue
                         existing = next(
                             (
                                 item

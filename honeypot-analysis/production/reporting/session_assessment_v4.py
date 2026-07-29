@@ -30,7 +30,14 @@ from production.reporting.threat_hypothesis import (
     build_observed_behavior,
     build_supported_assessment,
 )
-from production.reporting.typed_semantic_facts import run_typed_semantic_shadow
+from production.reporting.typed_semantic_facts import (
+    build_typed_semantic_fact_set,
+    build_typed_semantic_provenance,
+    validate_typed_semantic_fact_set,
+)
+from production.reporting.typed_semantic_family_selection import (
+    validate_policy_output_trace,
+)
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.utils.sensitive_data import redact_for_artifact
 
@@ -65,27 +72,37 @@ def canonical_assessment_id(value: Dict[str, Any]) -> str:
 
     provenance = value.get("provenance") or {}
     evidence = value.get("canonical_evidence") or {}
-    return stable_id(
-        "session_assessment",
-        {
-            "evidence_sha256": evidence.get("evidence_sha256"),
-            "behavior_policy_sha256": (
-                provenance.get("behavior_policy") or {}
+    identity = {
+        "evidence_sha256": evidence.get("evidence_sha256"),
+        "behavior_policy_sha256": (
+            provenance.get("behavior_policy") or {}
+        ).get("sha256"),
+        "classification_policy_sha256": (
+            provenance.get("classification_policy") or {}
+        ).get("sha256"),
+        "evaluator_git_revision": provenance.get("evaluator_git_revision"),
+        "finding_ids": [
+            item.get("finding_id")
+            for item in value.get("behavioral_findings") or []
+        ],
+        "hypothesis_set_ids": [
+            item.get("hypothesis_set_id")
+            for item in value.get("hypothesis_sets") or []
+        ],
+    }
+    if "typed_semantics" in provenance:
+        identity.update({
+            "typed_semantic_fact_set_sha256": (
+                provenance.get("typed_semantics") or {}
+            ).get("fact_set_sha256"),
+            "typed_semantic_vocabulary_sha256": (
+                (
+                    provenance.get("typed_semantics") or {}
+                ).get("semantic_vocabulary")
+                or {}
             ).get("sha256"),
-            "classification_policy_sha256": (
-                provenance.get("classification_policy") or {}
-            ).get("sha256"),
-            "evaluator_git_revision": provenance.get("evaluator_git_revision"),
-            "finding_ids": [
-                item.get("finding_id")
-                for item in value.get("behavioral_findings") or []
-            ],
-            "hypothesis_set_ids": [
-                item.get("hypothesis_set_id")
-                for item in value.get("hypothesis_sets") or []
-            ],
-        },
-    )
+        })
+    return stable_id("session_assessment", identity)
 
 
 def _clean(value: Any) -> str:
@@ -396,6 +413,11 @@ def _verified_model_artifacts(policy_value: Any) -> List[Dict[str, Any]]:
 
 def _finding(claim: Dict[str, Any], connected: bool) -> Dict[str, Any]:
     refs = sorted({_clean(ref) for ref in claim.get("evidence_refs") or [] if _clean(ref)})
+    limitations = [
+        _clean(item.get("text") if isinstance(item, dict) else item)
+        for item in claim.get("limitations") or []
+        if _clean(item.get("text") if isinstance(item, dict) else item)
+    ]
     content = {
         "finding_type": _clean(claim.get("claim_type")) or "observed_behavior_relationship",
         "statement": _clean(claim.get("text")),
@@ -406,14 +428,17 @@ def _finding(claim: Dict[str, Any], connected: bool) -> Dict[str, Any]:
         } - {""}),
         "behavior_policy_rule_id": _clean(claim.get("behavior_policy_rule_id")),
     }
+    semantic_family = _clean(claim.get("semantic_family"))
+    if semantic_family:
+        content.update({
+            "limitations": limitations,
+            "semantic_family": semantic_family,
+            "semantic_trace": deepcopy(claim.get("semantic_trace") or {}),
+        })
     return {
         "finding_id": stable_id("finding", content),
         **content,
-        "limitations": [
-            _clean(item.get("text") if isinstance(item, dict) else item)
-            for item in claim.get("limitations") or []
-            if _clean(item.get("text") if isinstance(item, dict) else item)
-        ],
+        "limitations": limitations,
     }
 
 
@@ -547,6 +572,33 @@ def build_session_assessment_v4(
             mitre_attack.get("status") in {"not_configured", "verified"}
         )
     )
+    evaluator_revision = _git_revision()
+    typed_fact_set: Dict[str, Any] = {}
+    typed_status = "unavailable"
+    typed_error_type = ""
+    if policy_valid:
+        try:
+            typed_provenance = build_typed_semantic_provenance(
+                snapshot,
+                observed_behavior=observed,
+                behavior_policy_sha256=_clean(behavior.get("sha256")),
+                classification_policy_sha256=_clean(
+                    classification.get("sha256")
+                ),
+                evaluator_git_revision=evaluator_revision,
+            )
+            typed_fact_set = build_typed_semantic_fact_set(
+                observed,
+                provenance=typed_provenance,
+            )
+            if validate_typed_semantic_fact_set(typed_fact_set):
+                raise SessionAssessmentV4Error(
+                    "typed semantic fact set failed validation"
+                )
+            typed_status = "valid"
+        except Exception as exc:
+            typed_fact_set = {}
+            typed_error_type = exc.__class__.__name__
     findings: List[Dict[str, Any]] = []
     hypothesis_sets: List[Dict[str, Any]] = []
     if policy_valid:
@@ -554,6 +606,8 @@ def build_session_assessment_v4(
             observed,
             behavior_policy_document=behavior_document,
             behavior_policy_path=behavior_policy_path,
+            typed_semantic_fact_set=typed_fact_set,
+            activated_semantic_families=("sensitive_read",),
         )
         follow_on = build_follow_on_hypothesis(
             observed,
@@ -562,22 +616,6 @@ def build_session_assessment_v4(
         )
         findings = _deduplicated_findings(supported)
         hypothesis_sets = _hypothesis_sets(follow_on)
-    evaluator_revision = _git_revision()
-    # Shadow facts receive the exact effective provenance but are still
-    # discarded. They cannot affect policy validity, canonical output,
-    # persistence, consumers, or identity inputs.
-    try:
-        run_typed_semantic_shadow(
-            observed,
-            canonical_evidence=snapshot,
-            behavior_policy_sha256=_clean(behavior.get("sha256")),
-            classification_policy_sha256=_clean(
-                classification.get("sha256")
-            ),
-            evaluator_git_revision=evaluator_revision,
-        )
-    except Exception:
-        pass
     provenance = {
         "evidence_sha256": snapshot["evidence_sha256"],
         "behavior_policy": behavior,
@@ -591,6 +629,42 @@ def build_session_assessment_v4(
         ),
         "mitre_attack": mitre_attack,
         "evaluator_git_revision": evaluator_revision,
+        "typed_semantics": {
+            "schema_version": "typed_semantic_fact_set.v2",
+            "status": typed_status,
+            "mode": "family_scoped_policy_input",
+            "fact_set_sha256": _clean(
+                typed_fact_set.get("fact_set_sha256")
+            ),
+            "semantic_input_sha256": _clean(
+                (typed_fact_set.get("provenance") or {}).get(
+                    "semantic_input_sha256"
+                )
+            ),
+            "semantic_vocabulary": deepcopy(
+                (typed_fact_set.get("provenance") or {}).get(
+                    "semantic_vocabulary"
+                )
+                or {}
+            ),
+            "activated_families": ["sensitive_read"],
+            "non_activated_families": [
+                "inspection",
+                "filesystem",
+                "transformation",
+                "collection",
+                "scheduled_task",
+                "service",
+                "context",
+                "transfer",
+                "execution",
+                "identity",
+            ],
+            "error_type": typed_error_type,
+            "persistence": (
+                "content_addressed_rebuild_from_canonical_evidence"
+            ),
+        },
         "cached_graph": {
             "accepted": False,
             "disposition": "deterministically_rebuilt_from_canonical_snapshot",
@@ -648,6 +722,8 @@ def build_session_assessment_v4(
         session_context=source,
         forecast_context=prediction_context or {},
         enrichment_context=enrichment_context or {},
+        typed_semantic_fact_set=typed_fact_set,
+        activated_semantic_families=("sensitive_read",),
     )
     record["response_guidance_v3"] = guidance
     record["assessment_id"] = canonical_assessment_id(record)
@@ -682,6 +758,90 @@ def validate_session_assessment_v4(
         digest = _clean(policy.get("sha256")).lower()
         if value.get("status") != "observation_only_abstention" and not SHA256_RE.fullmatch(digest):
             errors.append(f"provenance.{name}.sha256 is required")
+    typed_value = provenance.get("typed_semantics")
+    response_policy_version = _clean(
+        (
+            (
+                (value.get("response_guidance_v3") or {}).get(
+                    "provenance"
+                )
+                or {}
+            ).get("policy")
+            or {}
+        ).get("version")
+    )
+    legacy_pre_typed = (
+        typed_value is None
+        and response_policy_version.startswith("3.0.")
+    )
+    typed = typed_value if isinstance(typed_value, dict) else {}
+    if not legacy_pre_typed and not isinstance(typed_value, dict):
+        errors.append("provenance.typed_semantics is required")
+    typed_expected_keys = {
+        "schema_version",
+        "status",
+        "mode",
+        "fact_set_sha256",
+        "semantic_input_sha256",
+        "semantic_vocabulary",
+        "activated_families",
+        "non_activated_families",
+        "error_type",
+        "persistence",
+    }
+    if not legacy_pre_typed and set(typed) != typed_expected_keys:
+        errors.append("provenance.typed_semantics shape is invalid")
+    if (
+        not legacy_pre_typed
+        and typed.get("schema_version") != "typed_semantic_fact_set.v2"
+    ):
+        errors.append("typed semantic schema is invalid")
+    if (
+        not legacy_pre_typed
+        and typed.get("mode") != "family_scoped_policy_input"
+    ):
+        errors.append("typed semantic mode is invalid")
+    if (
+        not legacy_pre_typed
+        and typed.get("activated_families") != ["sensitive_read"]
+    ):
+        errors.append("only sensitive_read may be activated")
+    if "sensitive_read" in set(
+        typed.get("non_activated_families") or []
+    ):
+        errors.append("sensitive_read cannot also be non-activated")
+    if not legacy_pre_typed and typed.get("persistence") != (
+        "content_addressed_rebuild_from_canonical_evidence"
+    ):
+        errors.append("typed semantic persistence semantics are invalid")
+    typed_status = _clean(typed.get("status"))
+    typed_fact_hash = _clean(typed.get("fact_set_sha256")).lower()
+    typed_input_hash = _clean(
+        typed.get("semantic_input_sha256")
+    ).lower()
+    typed_vocabulary = typed.get("semantic_vocabulary") or {}
+    typed_vocabulary_hash = _clean(
+        typed_vocabulary.get("sha256")
+    ).lower()
+    if legacy_pre_typed:
+        pass
+    elif typed_status == "valid":
+        for label, digest in (
+            ("fact_set_sha256", typed_fact_hash),
+            ("semantic_input_sha256", typed_input_hash),
+            ("semantic_vocabulary.sha256", typed_vocabulary_hash),
+        ):
+            if not SHA256_RE.fullmatch(digest):
+                errors.append(f"typed semantic {label} is invalid")
+        if _clean(typed.get("error_type")):
+            errors.append("valid typed semantics cannot retain an error")
+    elif typed_status == "unavailable":
+        if typed_fact_hash or typed_input_hash or typed_vocabulary:
+            errors.append(
+                "unavailable typed semantics cannot retain unverified hashes"
+            )
+    else:
+        errors.append("typed semantic status is invalid")
     for artifact in provenance.get("model_artifacts") or []:
         if not isinstance(artifact, dict) or not _clean(artifact.get("name")):
             errors.append("provenance.model_artifacts entries require a name")
@@ -768,6 +928,23 @@ def validate_session_assessment_v4(
             "relationship_refs": sorted({_clean(ref) for ref in finding.get("relationship_refs") or [] if _clean(ref)}),
             "behavior_policy_rule_id": _clean(finding.get("behavior_policy_rule_id")),
         }
+        semantic_family = _clean(finding.get("semantic_family"))
+        if semantic_family:
+            if legacy_pre_typed:
+                errors.append(
+                    "typed semantic finding requires typed provenance"
+                )
+            content.update({
+                "limitations": [
+                    _clean(item)
+                    for item in finding.get("limitations") or []
+                    if _clean(item)
+                ],
+                "semantic_family": semantic_family,
+                "semantic_trace": deepcopy(
+                    finding.get("semantic_trace") or {}
+                ),
+            })
         if finding.get("finding_id") != stable_id("finding", content):
             errors.append(f"finding ID mismatch: {_clean(finding.get('finding_id'))}")
         if content["status"] not in {"supported", "partially_supported", "insufficient_evidence"}:
@@ -775,6 +952,60 @@ def validate_session_assessment_v4(
         unknown_refs = set(content["evidence_refs"]) - evidence_refs
         if unknown_refs:
             errors.append(f"finding has unknown evidence refs: {sorted(unknown_refs)}")
+        if semantic_family:
+            trace = finding.get("semantic_trace") or {}
+            if semantic_family != "sensitive_read":
+                errors.append("finding uses a non-activated semantic family")
+            if trace.get("schema_version") != (
+                "typed_semantic_policy_trace.v1"
+            ):
+                errors.append("finding semantic trace schema is invalid")
+            for key in (
+                "fact_set_sha256",
+                "semantic_vocabulary_sha256",
+                "selection_sha256",
+            ):
+                if not SHA256_RE.fullmatch(
+                    _clean(trace.get(key)).lower()
+                ):
+                    errors.append(
+                        f"finding semantic trace {key} is invalid"
+                    )
+            if trace.get("fact_set_sha256") != typed_fact_hash:
+                errors.append(
+                    "finding semantic trace fact-set hash mismatch"
+                )
+            if (
+                trace.get("semantic_vocabulary_sha256")
+                != typed_vocabulary_hash
+            ):
+                errors.append(
+                    "finding semantic trace vocabulary hash mismatch"
+                )
+            errors.extend(
+                f"finding semantic trace: {error}"
+                for error in validate_policy_output_trace(
+                    trace,
+                    fact_set_sha256=typed_fact_hash,
+                    semantic_vocabulary_sha256=(
+                        typed_vocabulary_hash
+                    ),
+                    allowed_evidence_refs=evidence_refs,
+                )
+            )
+            trace_refs = {
+                _clean(ref)
+                for match in trace.get("matches") or []
+                if isinstance(match, dict)
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            }
+            if not trace_refs or trace_refs != set(
+                content["evidence_refs"]
+            ):
+                errors.append(
+                    "finding semantic trace evidence refs are unresolved"
+                )
     for hypothesis_set in value.get("hypothesis_sets") or []:
         if not isinstance(hypothesis_set, dict):
             continue

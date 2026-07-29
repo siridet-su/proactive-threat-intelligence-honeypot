@@ -205,6 +205,9 @@ def _current_decision_payload(
         behavior_policy_path=getattr(
             config, "threat_hypothesis_behavior_policy_path", ""
         ),
+        classification_policy_path=getattr(
+            config, "classification_rules_path", ""
+        ),
         forecast_context=prediction_context or {},
         enrichment_context=session_payload.get("enrichment_status") or {},
     )

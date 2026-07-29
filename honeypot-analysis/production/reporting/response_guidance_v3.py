@@ -20,6 +20,11 @@ from production.policies.validate_response_guidance_policy import (
     validate_response_guidance_asset_profile,
     validate_response_guidance_policy,
 )
+from production.reporting.typed_semantic_family_selection import (
+    policy_output_trace,
+    select_activated_semantic_family,
+    validate_policy_output_trace,
+)
 from production.utils.serialization import stable_id, stable_json, utc_now
 
 
@@ -485,6 +490,9 @@ def _guidance_identity(
     actions: List[Dict[str, Any]],
     status: str,
     guidance_state: str,
+    triage: Dict[str, Any],
+    safety: Dict[str, Any],
+    typed_semantics: Dict[str, Any],
 ) -> str:
     return stable_id("response_guidance_v3", {
         "schema_version": SCHEMA_VERSION,
@@ -492,12 +500,50 @@ def _guidance_identity(
         "canonical_evidence_sha256": evidence_sha256,
         "policy_sha256": policy_sha256,
         "profile_sha256": profile_sha256,
+        "findings": deepcopy(finding_rules),
+        "actions": deepcopy(actions),
+        "status": status,
+        "guidance_state": guidance_state,
+        "triage": deepcopy(triage),
+        "safety": deepcopy(safety),
+        "typed_semantics": deepcopy(typed_semantics),
+    })
+
+
+def _legacy_guidance_identity(
+    *,
+    session_id: str,
+    evidence_sha256: str,
+    policy_sha256: str,
+    profile_sha256: str,
+    finding_rules: List[Dict[str, Any]],
+    actions: List[Dict[str, Any]],
+    status: str,
+    guidance_state: str,
+) -> str:
+    """Reproduce the pre-typed v3 ID for read-only historical validation."""
+
+    return stable_id("response_guidance_v3", {
+        "schema_version": SCHEMA_VERSION,
+        "session_id": session_id,
+        "canonical_evidence_sha256": evidence_sha256,
+        "policy_sha256": policy_sha256,
+        "profile_sha256": profile_sha256,
         "findings": [
-            {"rule_id": item.get("rule_id"), "evidence_refs": item.get("supporting_evidence_refs")}
+            {
+                "rule_id": item.get("rule_id"),
+                "evidence_refs": item.get(
+                    "supporting_evidence_refs"
+                ),
+            }
             for item in finding_rules
         ],
         "actions": [
-            {"rule_id": item.get("rule_id"), "action_id": item.get("action_id"), "evidence_refs": item.get("evidence_refs")}
+            {
+                "rule_id": item.get("rule_id"),
+                "action_id": item.get("action_id"),
+                "evidence_refs": item.get("evidence_refs"),
+            }
             for item in actions
         ],
         "status": status,
@@ -536,10 +582,81 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
     profile_hash = _clean(profile.get("sha256"))
     if profile_hash and (len(profile_hash) != 64 or any(char not in "0123456789abcdef" for char in profile_hash)):
         errors.append("asset profile SHA-256 is malformed")
+    expected_safety = {
+        "automatic_execution": False,
+        "manual_approval_required": True,
+        "alerting_side_effect": False,
+        "response_action_side_effect": False,
+        "execution_integration": "not_implemented",
+    }
+    if value.get("safety") != expected_safety:
+        errors.append("guidance safety boundary is invalid")
     if (value.get("safety") or {}).get("automatic_execution") is not False:
         errors.append("automatic execution must be false")
     if (value.get("safety") or {}).get("alerting_side_effect") is not False:
         errors.append("guidance must not create alerts")
+    typed_value = (value.get("provenance") or {}).get(
+        "typed_semantics"
+    )
+    legacy_pre_typed = (
+        typed_value is None
+        and _clean(policy.get("version")).startswith("3.0.")
+    )
+    typed = typed_value if isinstance(typed_value, dict) else {}
+    if not legacy_pre_typed and not isinstance(typed_value, dict):
+        errors.append("typed semantic provenance is required")
+    typed_expected_keys = {
+        "schema_version",
+        "status",
+        "fact_set_sha256",
+        "semantic_vocabulary_sha256",
+        "selection_sha256",
+        "activated_families",
+        "selection_authority",
+    }
+    if not legacy_pre_typed and set(typed) != typed_expected_keys:
+        errors.append("typed semantic provenance shape is invalid")
+    if (
+        not legacy_pre_typed
+        and typed.get("schema_version") != "typed_semantic_fact_set.v2"
+    ):
+        errors.append("typed semantic provenance schema is invalid")
+    if (
+        not legacy_pre_typed
+        and typed.get("activated_families") != ["sensitive_read"]
+    ):
+        errors.append("only sensitive_read may be activated")
+    if not legacy_pre_typed and typed.get("selection_authority") != (
+        "family_scoped_observed_evidence_interpretation"
+    ):
+        errors.append("typed semantic selection authority is invalid")
+    typed_status = _clean(typed.get("status"))
+    typed_fact_hash = _clean(typed.get("fact_set_sha256")).lower()
+    typed_vocab_hash = _clean(
+        typed.get("semantic_vocabulary_sha256")
+    ).lower()
+    typed_selection_hash = _clean(
+        typed.get("selection_sha256")
+    ).lower()
+    if legacy_pre_typed:
+        pass
+    elif typed_status == "valid":
+        for label, digest in (
+            ("fact_set_sha256", typed_fact_hash),
+            ("semantic_vocabulary_sha256", typed_vocab_hash),
+            ("selection_sha256", typed_selection_hash),
+        ):
+            if len(digest) != 64 or any(
+                char not in "0123456789abcdef" for char in digest
+            ):
+                errors.append(f"typed semantic {label} is invalid")
+    elif typed_status == "unavailable":
+        if typed_fact_hash or typed_vocab_hash or typed_selection_hash:
+            errors.append(
+                "unavailable typed semantics cannot retain unverified hashes"
+            )
+    else:
+        errors.append("typed semantic provenance status is invalid")
     allowed_refs = canonical_behavioral_evidence_refs(evidence)
     actions = value.get("advisory_actions")
     if not isinstance(actions, list):
@@ -566,8 +683,48 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         if action.get("execution_integration") != "not_implemented":
             errors.append(f"advisory_actions[{index}] may not have an execution integration")
         traces = action.get("matched_predicates")
-        if not isinstance(traces, list) or not traces or not all(item.get("result") is True for item in traces if isinstance(item, dict)):
+        if (
+            not isinstance(traces, list)
+            or not traces
+            or not all(
+                isinstance(item, dict) and item.get("result") is True
+                for item in traces
+            )
+        ):
             errors.append(f"advisory_actions[{index}] lacks a complete matched predicate trace")
+        semantic_family = _clean(action.get("semantic_family"))
+        if semantic_family:
+            if semantic_family != "sensitive_read":
+                errors.append(
+                    f"advisory_actions[{index}] uses a non-activated family"
+                )
+            semantic_trace = action.get("semantic_trace") or {}
+            if semantic_trace.get("fact_set_sha256") != typed_fact_hash:
+                errors.append(
+                    f"advisory_actions[{index}] semantic fact hash mismatch"
+                )
+            if (
+                semantic_trace.get("semantic_vocabulary_sha256")
+                != typed_vocab_hash
+            ):
+                errors.append(
+                    f"advisory_actions[{index}] semantic policy hash mismatch"
+                )
+            if semantic_trace.get("selection_sha256") != (
+                typed_selection_hash
+            ):
+                errors.append(
+                    f"advisory_actions[{index}] selection hash mismatch"
+                )
+            errors.extend(
+                f"advisory_actions[{index}]: {error}"
+                for error in validate_policy_output_trace(
+                    semantic_trace,
+                    fact_set_sha256=typed_fact_hash,
+                    semantic_vocabulary_sha256=typed_vocab_hash,
+                    allowed_evidence_refs=allowed_refs,
+                )
+            )
     findings = value.get("findings")
     if not isinstance(findings, list):
         errors.append("findings must be an array")
@@ -576,15 +733,95 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         refs = _texts(finding.get("supporting_evidence_refs") if isinstance(finding, dict) else [])
         if not isinstance(finding, dict) or not refs or not set(refs).issubset(allowed_refs):
             errors.append(f"findings[{index}] lacks canonical observed-evidence grounding")
-    expected_id = _guidance_identity(
-        session_id=_clean(value.get("session_id")) or "unknown",
-        evidence_sha256=recorded_evidence_hash,
-        policy_sha256=policy_hash,
-        profile_sha256=profile_hash,
-        finding_rules=findings,
-        actions=actions,
-        status=_clean(value.get("status")),
-        guidance_state=_clean(value.get("guidance_state")),
+            continue
+        semantic_family = _clean(finding.get("semantic_family"))
+        if semantic_family:
+            if semantic_family != "sensitive_read":
+                errors.append(
+                    f"findings[{index}] uses a non-activated family"
+                )
+            semantic_trace = finding.get("semantic_trace") or {}
+            if semantic_trace.get("fact_set_sha256") != typed_fact_hash:
+                errors.append(
+                    f"findings[{index}] semantic fact hash mismatch"
+                )
+            if (
+                semantic_trace.get("semantic_vocabulary_sha256")
+                != typed_vocab_hash
+            ):
+                errors.append(
+                    f"findings[{index}] semantic policy hash mismatch"
+                )
+            if semantic_trace.get("selection_sha256") != (
+                typed_selection_hash
+            ):
+                errors.append(
+                    f"findings[{index}] selection hash mismatch"
+                )
+            errors.extend(
+                f"findings[{index}]: {error}"
+                for error in validate_policy_output_trace(
+                    semantic_trace,
+                    fact_set_sha256=typed_fact_hash,
+                    semantic_vocabulary_sha256=typed_vocab_hash,
+                    allowed_evidence_refs=allowed_refs,
+                )
+            )
+            finding_content = {
+                key: deepcopy(item)
+                for key, item in finding.items()
+                if key != "finding_id"
+            }
+            if finding.get("finding_id") != stable_id(
+                "response_guidance_finding",
+                finding_content,
+            ):
+                errors.append(
+                    f"findings[{index}] finding_id is inconsistent"
+                )
+    triage = value.get("triage")
+    if not isinstance(triage, dict):
+        errors.append("triage must be an object")
+        triage = {}
+    strongest = findings[0] if findings else {}
+    severity = _clean(strongest.get("severity")) or "info"
+    expected_triage = {
+        "review_priority": severity,
+        "urgency": (
+            "prompt_review"
+            if severity in {"high", "critical"}
+            else "routine_review"
+        ),
+        "semantics": (
+            "categorical_observed_evidence_policy_not_score_or_forecast"
+        ),
+        "finding_ids": [
+            item.get("finding_id")
+            for item in findings
+            if isinstance(item, dict)
+        ],
+    }
+    if triage != expected_triage:
+        errors.append("triage is inconsistent with grounded findings")
+    identity_arguments = {
+        "session_id": _clean(value.get("session_id")) or "unknown",
+        "evidence_sha256": recorded_evidence_hash,
+        "policy_sha256": policy_hash,
+        "profile_sha256": profile_hash,
+        "finding_rules": findings,
+        "actions": actions,
+        "status": _clean(value.get("status")),
+        "guidance_state": _clean(value.get("guidance_state")),
+    }
+    expected_id = (
+        _legacy_guidance_identity(**identity_arguments)
+        if legacy_pre_typed
+        else _guidance_identity(
+            **identity_arguments,
+            triage=triage,
+            safety=value.get("safety") or {},
+            typed_semantics=typed,
+        )
     )
     if _clean(value.get("guidance_id")) != expected_id:
         errors.append("guidance_id is inconsistent with immutable inputs")
@@ -607,6 +844,8 @@ def build_response_guidance_v3(
     session_context: Optional[Dict[str, Any]] = None,
     forecast_context: Any = None,
     enrichment_context: Any = None,
+    typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
+    activated_semantic_families: Iterable[str] = (),
 ) -> Dict[str, Any]:
     """Evaluate v3 policy directly against immutable observed Cowrie evidence."""
 
@@ -631,17 +870,95 @@ def build_response_guidance_v3(
     status = "available" if policy_ok and profile_ok else "unavailable"
     authority = "deterministic_observed_evidence_policy" if status == "available" else "policy_unavailable"
     context_values = _context_values(snapshot, facts)
+    activated_families = {
+        _clean(value)
+        for value in activated_semantic_families
+        if _clean(value)
+    }
+    semantic_selection: Dict[str, Any] = {}
+    if (
+        "sensitive_read" in activated_families
+        and isinstance(typed_semantic_fact_set, dict)
+        and typed_semantic_fact_set
+    ):
+        try:
+            semantic_selection = select_activated_semantic_family(
+                typed_semantic_fact_set,
+                family="sensitive_read",
+            )
+        except ValueError:
+            semantic_selection = {}
+    semantic_trace = (
+        policy_output_trace(semantic_selection)
+        if semantic_selection
+        else {}
+    )
+    semantic_refs = sorted({
+        _clean(ref)
+        for match in semantic_selection.get("matches") or []
+        if isinstance(match, dict)
+        for ref in match.get("supporting_evidence_refs") or []
+        if _clean(ref)
+    })
+    credential_values = sorted({
+        _clean(match.get("entity_value"))
+        for match in semantic_selection.get("matches") or []
+        if isinstance(match, dict) and _clean(match.get("entity_value"))
+    })
+    if credential_values:
+        context_values["credential_paths"] = ", ".join(
+            credential_values
+        )
+    typed_provenance = {
+        "schema_version": "typed_semantic_fact_set.v2",
+        "status": "valid" if semantic_selection else "unavailable",
+        "fact_set_sha256": _clean(
+            semantic_selection.get("fact_set_sha256")
+        ),
+        "semantic_vocabulary_sha256": _clean(
+            semantic_selection.get("semantic_vocabulary_sha256")
+        ),
+        "selection_sha256": _clean(
+            semantic_selection.get("selection_sha256")
+        ),
+        "activated_families": ["sensitive_read"],
+        "selection_authority": (
+            "family_scoped_observed_evidence_interpretation"
+        ),
+    }
+
+    def match_rule(
+        rule: Dict[str, Any],
+    ) -> Tuple[bool, List[Dict[str, Any]], List[str]]:
+        semantic_family = _clean(rule.get("semantic_family"))
+        if semantic_family:
+            matched = (
+                semantic_family == "sensitive_read"
+                and bool(semantic_refs)
+            )
+            return (
+                matched,
+                [{
+                    "predicate": "activated_semantic_families",
+                    "expected": [semantic_family],
+                    "matched": [semantic_family] if matched else [],
+                    "result": matched,
+                    "evidence_refs": semantic_refs if matched else [],
+                }],
+                semantic_refs if matched else [],
+            )
+        return _condition_match(rule.get("applies_when"), facts)
+
     findings: List[Dict[str, Any]] = []
     actions: List[Dict[str, Any]] = []
     if status == "available":
         for rule in document.get("finding_rules") or []:
             if not isinstance(rule, dict):
                 continue
-            matched, trace, refs = _condition_match(rule.get("applies_when"), facts)
+            matched, trace, refs = match_rule(rule)
             if not matched or not refs:
                 continue
-            findings.append({
-                "finding_id": stable_id("response_guidance_finding", {"rule_id": rule.get("rule_id"), "evidence_refs": refs, "evidence_sha256": evidence_sha256}),
+            finding = {
                 "rule_id": _clean(rule.get("rule_id")),
                 "severity": _clean(rule.get("severity")) or "info",
                 "statement": _safe_template(rule.get("statement"), context_values),
@@ -649,17 +966,36 @@ def build_response_guidance_v3(
                 "matched_predicates": trace,
                 "references": deepcopy(rule.get("references") or []),
                 "provenance": deepcopy(rule.get("provenance") or {}),
-            })
+            }
+            if _clean(rule.get("semantic_family")):
+                finding.update({
+                    "semantic_family": "sensitive_read",
+                    "semantic_trace": deepcopy(semantic_trace),
+                })
+                finding["finding_id"] = stable_id(
+                    "response_guidance_finding",
+                    finding,
+                )
+            else:
+                finding["finding_id"] = stable_id(
+                    "response_guidance_finding",
+                    {
+                        "rule_id": rule.get("rule_id"),
+                        "evidence_refs": refs,
+                        "evidence_sha256": evidence_sha256,
+                    },
+                )
+            findings.append(finding)
         for rule in document.get("action_playbooks") or []:
             if not isinstance(rule, dict):
                 continue
-            matched, trace, refs = _condition_match(rule.get("applies_when"), facts)
+            matched, trace, refs = match_rule(rule)
             if not matched or not refs:
                 continue
             for action in rule.get("actions") or []:
                 if not isinstance(action, dict):
                     continue
-                actions.append({
+                selected_action = {
                     "action_id": _clean(action.get("action_id")),
                     "rule_id": _clean(rule.get("rule_id")),
                     "description": _safe_template(action.get("action"), context_values),
@@ -683,7 +1019,13 @@ def build_response_guidance_v3(
                     "execution_integration": "not_implemented",
                     "references": deepcopy(action.get("references") or []),
                     "provenance": {"rule": deepcopy(rule.get("provenance") or {}), "action": deepcopy(action.get("provenance") or {})},
-                })
+                }
+                if _clean(rule.get("semantic_family")):
+                    selected_action.update({
+                        "semantic_family": "sensitive_read",
+                        "semantic_trace": deepcopy(semantic_trace),
+                    })
+                actions.append(selected_action)
     findings.sort(key=lambda item: (-SEVERITY_ORDER.get(item["severity"], 0), item["rule_id"], item["finding_id"]))
     actions.sort(key=lambda item: (int(item.get("policy_order") or 9999), item["action_id"], item["rule_id"]))
     strongest = findings[0] if findings else None
@@ -691,6 +1033,25 @@ def build_response_guidance_v3(
     if status != "available":
         guidance_state = "policy_or_profile_unavailable"
     severity = _clean((strongest or {}).get("severity")) or "info"
+    triage = {
+        "review_priority": severity,
+        "urgency": (
+            "prompt_review"
+            if severity in {"high", "critical"}
+            else "routine_review"
+        ),
+        "semantics": (
+            "categorical_observed_evidence_policy_not_score_or_forecast"
+        ),
+        "finding_ids": [item["finding_id"] for item in findings],
+    }
+    safety = {
+        "automatic_execution": False,
+        "manual_approval_required": True,
+        "alerting_side_effect": False,
+        "response_action_side_effect": False,
+        "execution_integration": "not_implemented",
+    }
     guidance_id = _guidance_identity(
         session_id=_clean(snapshot.get("session_id")) or "unknown",
         evidence_sha256=evidence_sha256,
@@ -700,6 +1061,9 @@ def build_response_guidance_v3(
         actions=actions,
         status=status,
         guidance_state=guidance_state,
+        triage=triage,
+        safety=safety,
+        typed_semantics=typed_provenance,
     )
     guidance = {
         "schema_version": SCHEMA_VERSION,
@@ -711,12 +1075,7 @@ def build_response_guidance_v3(
         "session_id": _clean(snapshot.get("session_id")) or "unknown",
         "canonical_evidence": snapshot,
         "findings": findings,
-        "triage": {
-            "review_priority": severity,
-            "urgency": "prompt_review" if severity in {"high", "critical"} else "routine_review",
-            "semantics": "categorical_observed_evidence_policy_not_score_or_forecast",
-            "finding_ids": [item["finding_id"] for item in findings],
-        },
+        "triage": triage,
         "advisory_actions": actions,
         "non_authoritative_context": {
             "semantics": "Forecast and enrichment are display context only; they do not select findings, triage, actions, or guidance IDs.",
@@ -730,14 +1089,9 @@ def build_response_guidance_v3(
             "selection_authority": "deterministic_canonical_observed_evidence_only",
             "forecast_authority": "non_authoritative_context_only",
             "enrichment_authority": "non_authoritative_context_only",
+            "typed_semantics": typed_provenance,
         },
-        "safety": {
-            "automatic_execution": False,
-            "manual_approval_required": True,
-            "alerting_side_effect": False,
-            "response_action_side_effect": False,
-            "execution_integration": "not_implemented",
-        },
+        "safety": safety,
         "compatibility": {
             "legacy_v1_v2_records_read_only": True,
             "historical_records_recomputed": False,
@@ -766,6 +1120,9 @@ def build_response_guidance_v3(
             actions=[],
             status="unavailable",
             guidance_state="validation_rejected",
+            triage=guidance["triage"],
+            safety=guidance["safety"],
+            typed_semantics=typed_provenance,
         )
     guidance["validation"] = {"status": "valid" if not validation_errors else "rejected", "errors": validation_errors}
     return guidance
@@ -779,6 +1136,8 @@ def build_response_guidance_v3_from_paths(
     session_context: Optional[Dict[str, Any]] = None,
     forecast_context: Any = None,
     enrichment_context: Any = None,
+    typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
+    activated_semantic_families: Iterable[str] = (),
 ) -> Dict[str, Any]:
     """Load exact configuration files and evaluate canonical observed evidence."""
 
@@ -799,6 +1158,8 @@ def build_response_guidance_v3_from_paths(
         session_context=session_context,
         forecast_context=forecast_context,
         enrichment_context=enrichment_context,
+        typed_semantic_fact_set=typed_semantic_fact_set,
+        activated_semantic_families=activated_semantic_families,
     )
 
 
@@ -810,22 +1171,57 @@ def build_response_guidance_v3_from_session(
     asset_profile_path: str = "",
     behavior_policy_document: Optional[Dict[str, Any]] = None,
     behavior_policy_path: str = "",
+    classification_policy_path: str = "",
     forecast_context: Any = None,
     enrichment_context: Any = None,
 ) -> Dict[str, Any]:
     """Build a current-policy reevaluation without using forecast for selection."""
 
     from production.reporting.session_assessment_v4 import (
+        _file_policy,
+        _git_revision,
         build_canonical_evidence_snapshot,
+    )
+    from production.policies.threat_hypothesis_behavior_policy import (
+        policy_summary,
+    )
+    from production.reporting.typed_semantic_facts import (
+        build_typed_semantic_fact_set,
+        build_typed_semantic_provenance,
     )
 
     session = deepcopy(session_payload) if isinstance(session_payload, dict) else {}
-    snapshot, _observed, _source, _behavior = build_canonical_evidence_snapshot(
+    snapshot, observed, _source, behavior = build_canonical_evidence_snapshot(
         session,
         list(raw_events) if raw_events is not None else session.get("raw_events") or [],
         behavior_policy_document=behavior_policy_document,
         behavior_policy_path=behavior_policy_path,
     )
+    behavior_summary = policy_summary(behavior, include_integrity=True)
+    classification = _file_policy(
+        classification_policy_path,
+        "configs/classification_rules.trusted.json",
+        None,
+    )
+    typed_fact_set: Dict[str, Any] = {}
+    try:
+        provenance = build_typed_semantic_provenance(
+            snapshot,
+            observed_behavior=observed,
+            behavior_policy_sha256=_clean(
+                behavior_summary.get("sha256")
+            ),
+            classification_policy_sha256=_clean(
+                classification.get("sha256")
+            ),
+            evaluator_git_revision=_git_revision(),
+        )
+        typed_fact_set = build_typed_semantic_fact_set(
+            observed,
+            provenance=provenance,
+        )
+    except Exception:
+        typed_fact_set = {}
     return build_response_guidance_v3_from_paths(
         snapshot,
         policy_path=policy_path,
@@ -833,6 +1229,8 @@ def build_response_guidance_v3_from_session(
         session_context=session,
         forecast_context=forecast_context,
         enrichment_context=enrichment_context,
+        typed_semantic_fact_set=typed_fact_set,
+        activated_semantic_families=("sensitive_read",),
     )
 
 

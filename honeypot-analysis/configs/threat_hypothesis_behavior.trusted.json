@@ -1,14 +1,15 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-29-phase9a",
+  "version": "2026-07-29-sensitive-read-v1",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
       "Executable threat_hypothesis.v2 behavior as of commit 67b200a",
       "Cowrie command, command-outcome, and file-transfer event semantics",
       "Controlled synthetic relationship benchmark",
-      "Phase 9A semantic-containment regression review"
+      "Immediate semantic-containment regression review",
+      "Family-scoped typed sensitive-read migration decision"
     ],
     "reviewed": true,
     "reviewer": "project developer",
@@ -215,7 +216,19 @@
           "limitations": [
             "Successful credential acquisition or use is not established.",
             "Attacker intent is not directly observable."
-          ]
+          ],
+          "typed_semantic": {
+            "rule_id": "observed-resolved-credential-path-read",
+            "family": "sensitive_read",
+            "claim_type": "observed_credential_path_read_command",
+            "text": "Cowrie reported success for a parsed file-read command targeting a resolved credential-related path in the simulated shell.",
+            "evidence_status": "supported",
+            "limitations": [
+              "Cowrie-reported success does not prove that credentials were acquired, exposed, or used.",
+              "Cowrie shell behavior does not prove an effect on a real host.",
+              "No attacker intent is inferred from the observed read command."
+            ]
+          }
         },
         "downloader": {
           "literal_action_types": [

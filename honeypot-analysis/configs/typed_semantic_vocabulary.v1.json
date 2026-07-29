@@ -1,13 +1,13 @@
 {
   "schema_version": "typed_semantic_vocabulary_policy.v1",
   "policy_id": "honeypot-typed-semantic-vocabulary",
-  "version": "1.0.0",
-  "semantic_extractor_version": "typed-shell-subset.v2",
+  "version": "1.1.0",
+  "semantic_extractor_version": "typed-shell-subset.v2.1",
   "authority": {
-    "mode": "shadow_only",
-    "may_select_findings": false,
+    "mode": "family_scoped_policy_input",
+    "may_select_findings": true,
     "may_select_hypotheses": false,
-    "may_select_guidance": false,
+    "may_select_guidance": true,
     "may_authorize_actions": false
   },
   "review": {
@@ -419,8 +419,33 @@
       "context": "not_activated",
       "transfer": "not_activated",
       "execution": "not_activated",
-      "sensitive_read": "not_activated",
+      "sensitive_read": "activated",
       "identity": "not_activated"
+    },
+    "family_requirements": {
+      "sensitive_read": {
+        "required_operation_types": [
+          "file_read",
+          "credential_path_read"
+        ],
+        "allowed_operation_types": [
+          "file_read",
+          "credential_path_read"
+        ],
+        "required_entity_role": "credential_paths",
+        "required_entity_type": "path",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [
+          "recorded_resolved",
+          "context_resolved"
+        ],
+        "require_same_entity": true,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      }
     }
   }
 }

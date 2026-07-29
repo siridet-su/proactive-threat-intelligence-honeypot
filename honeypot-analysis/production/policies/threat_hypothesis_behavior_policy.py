@@ -138,6 +138,31 @@ def _validate_claim(rule: Dict[str, Any], path: str, errors: List[str]) -> None:
     _validate_string_list(limitations, f"{path}.limitations", errors, allow_empty=True)
 
 
+def _validate_typed_credential_claim(
+    value: Any,
+    path: str,
+    errors: List[str],
+) -> None:
+    expected_keys = {
+        "rule_id",
+        "family",
+        "claim_type",
+        "text",
+        "evidence_status",
+        "limitations",
+    }
+    if not isinstance(value, dict) or set(value) != expected_keys:
+        errors.append(
+            f"{path}: keys must be exactly {sorted(expected_keys)}"
+        )
+        return
+    if value.get("family") != "sensitive_read":
+        errors.append(f"{path}.family: must be sensitive_read")
+    if not str(value.get("rule_id") or "").strip():
+        errors.append(f"{path}.rule_id: missing value")
+    _validate_claim(value, path, errors)
+
+
 def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
     if document.get("schema_version") != SCHEMA_VERSION:
@@ -257,6 +282,11 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             definition = independent.get(name) or {}
             _validate_pattern(definition.get("trusted_command_pattern"), f"policy.claims.independent.{name}.trusted_command_pattern", errors)
             _validate_claim(definition, f"policy.claims.independent.{name}", errors)
+        _validate_typed_credential_claim(
+            (independent.get("credential") or {}).get("typed_semantic"),
+            "policy.claims.independent.credential.typed_semantic",
+            errors,
+        )
         persistence = independent.get("persistence") or {}
         _validate_action_types(
             persistence.get("literal_action_types"),

@@ -67,8 +67,11 @@ test. Never tune after Final access or silently reinterpret stored snapshots.
 Use `response_guidance.v3` and immutable canonical observed evidence. Add
 adversarial tests for prediction/enrichment-only input, policy/profile hash
 drift, malformed references, automatic-execution attempts, deterministic IDs,
-and historical read-only adapter display. Do not write guidance into prediction
-snapshots or derive alerting from it.
+and historical read-only adapter display. `sensitive_read` is the only
+activated typed-semantic family; do not activate another family without its
+own reviewed decision, closed policy requirements, shadow comparison, and
+positive/negative/ambiguous acceptance matrix. Do not write guidance into
+prediction snapshots or derive alerting from it.
 
 ### Storage change
 
