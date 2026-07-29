@@ -23,8 +23,13 @@ rewritten and remain readable without this new integrity field.
 JSON, Markdown, PDF (when ReportLab is installed), and STIX exports use the
 same content-addressed `artifact_version`. Renderer-added timestamps come from
 the source report/session rather than the wall clock. STIX bundle, report, and
-note IDs use deterministic UUIDv5 identifiers. ReportLab is invoked in
-invariant mode so identical inputs produce identical PDF bytes.
+note IDs use deterministic UUIDv5 identifiers. For v4 STIX, timestamps come
+from the latest canonical evidence observation (then deterministic session
+times, if necessary), and the source-report digest excludes runtime
+`generated_at` plus non-authoritative context that STIX does not represent.
+This prevents retry-only context from producing different STIX bytes under the
+same object IDs. ReportLab is invoked in invariant mode so identical inputs
+produce identical PDF bytes.
 
 Every artifact run writes
 `report_artifact_manifest.v1`. It records:

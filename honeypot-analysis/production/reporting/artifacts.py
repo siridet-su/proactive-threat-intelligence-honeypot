@@ -371,6 +371,33 @@ def _artifact_timestamp(
 ) -> str:
     """Choose a source-bound timestamp without consulting the wall clock."""
 
+    if report.get("schema_version") == "session_assessment.v4":
+        evidence = report.get("canonical_evidence") or {}
+        source_timestamps = [
+            _stix_timestamp(str(item.get("timestamp") or ""), fallback="")
+            for collection in (
+                "observations",
+                "transfer_observations",
+                "direct_cowrie_events",
+                "trusted_attck_candidates",
+            )
+            for item in evidence.get(collection) or []
+            if isinstance(item, dict) and item.get("timestamp")
+        ]
+        source_timestamps = [
+            value for value in source_timestamps if value
+        ]
+        if source_timestamps:
+            return max(source_timestamps)
+        for value in (
+            session_payload.get("end_time"),
+            session_payload.get("updated_at"),
+            session_payload.get("start_time"),
+        ):
+            if str(value or "").strip():
+                return _stix_timestamp(str(value))
+        return "1970-01-01T00:00:00Z"
+
     for value in (
         report.get("generated_at"),
         session_payload.get("end_time"),
@@ -380,6 +407,28 @@ def _artifact_timestamp(
         if str(value or "").strip():
             return _stix_timestamp(str(value))
     return "1970-01-01T00:00:00Z"
+
+
+def _stix_source_report_sha256(report: Dict[str, Any]) -> str:
+    """Hash the retry-stable report projection represented in STIX."""
+
+    basis = deepcopy(report)
+    if basis.get("schema_version") == "session_assessment.v4":
+        for key in (
+            "artifacts",
+            "generated_at",
+            "non_authoritative_context",
+        ):
+            basis.pop(key, None)
+        guidance = basis.get("response_guidance_v3")
+        if isinstance(guidance, dict):
+            guidance = deepcopy(guidance)
+            guidance.pop("generated_at", None)
+            guidance.pop("non_authoritative_context", None)
+            basis["response_guidance_v3"] = guidance
+    return hashlib.sha256(
+        stable_json(basis).encode("utf-8")
+    ).hexdigest()
 
 
 def _ioc_items(ioc_summary: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
@@ -604,9 +653,9 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
         "report_types": ["threat-actor-activity"],
         "object_refs": [],
         "x_honeypot_artifact_version": artifact_version,
-        "x_honeypot_source_report_sha256": hashlib.sha256(
-            stable_json(report).encode("utf-8")
-        ).hexdigest(),
+        "x_honeypot_source_report_sha256": (
+            _stix_source_report_sha256(report)
+        ),
     }
 
     if report.get("schema_version") == "session_assessment.v4":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -299,6 +300,29 @@ def test_corrected_family_survives_persistence_and_artifact_validation(
         result["artifacts"]["integrity_manifest"]
     ) == []
     assert validate_session_assessment_v4(result) == []
+
+
+def test_v4_stix_identity_excludes_runtime_only_report_fields() -> None:
+    case = _load_spec(FROZEN_REPLAY, FROZEN_REPLAY_SHA256)["cases"][0]
+    payload = _payload(case)
+    _fact_set, _selection, report = _evaluate(case)
+    baseline = build_stix_bundle(report, payload)
+    changed = copy.deepcopy(report)
+    changed["generated_at"] = "2031-01-02T03:04:05Z"
+    changed["non_authoritative_context"]["prediction"] = {
+        "status": "changed",
+    }
+    changed["response_guidance_v3"]["generated_at"] = (
+        "2031-01-02T03:04:05Z"
+    )
+    changed["response_guidance_v3"]["non_authoritative_context"][
+        "forecast"
+    ] = {"status": "changed"}
+
+    rebuilt = build_stix_bundle(changed, payload)
+
+    assert rebuilt == baseline
+    assert baseline["objects"][0]["modified"] == "2026-07-29T17:00:00Z"
 
 
 @pytest.mark.parametrize(
