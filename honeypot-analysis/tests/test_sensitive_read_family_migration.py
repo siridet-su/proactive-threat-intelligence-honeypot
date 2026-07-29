@@ -618,7 +618,7 @@ def test_prediction_and_enrichment_cannot_change_selected_outputs() -> None:
 def test_pre_typed_v4_v3_record_remains_valid_without_rewriting() -> None:
     report = _report(
         _session(
-            "whoami",
+            "printf legacy-observation",
             session_id="pre-typed-read-compatibility",
             tactic="discovery",
             ttp="T1033",

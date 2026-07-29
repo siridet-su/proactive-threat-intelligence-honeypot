@@ -1,7 +1,7 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "updated_at": "2026-07-30",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
@@ -81,6 +81,29 @@
         "last_reviewed": "2026-07-27",
         "review_expires_at": "2027-07-16",
         "version": "3.0.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-inspection-command",
+      "semantic_family": "inspection",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "severity": "low",
+      "statement": "Cowrie reported success for a parsed, supported inspection command in its simulated shell; result contents, malicious intent, compromise, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["inspection"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires exactly one supported typed inspection operation with successful fragment outcome", "All referenced paths and entities must resolve", "ATT&CK candidates, predictions, enrichment, and hypotheses cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.3.0"
       }
     },
     {

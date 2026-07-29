@@ -96,8 +96,10 @@ _HARD_LIMITS = {
 _ACTIVATION_REQUIREMENT_KEYS = {
     "required_operation_types",
     "allowed_operation_types",
+    "operation_match_mode",
     "required_entity_role",
     "required_entity_type",
+    "entity_match_mode",
     "required_outcome_status",
     "required_outcome_scope",
     "required_effect_status",
@@ -351,6 +353,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "unknown": "not_eligible",
                     "sensitive_read": "activated",
                     "transfer": "activated",
+                    "inspection": "activated",
                 }.get(family, "not_activated")
                 if state != expected:
                     errors.append(
@@ -359,10 +362,14 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
         requirements = activation.get("family_requirements")
         if not isinstance(requirements, dict):
             errors.append("activation.family_requirements must be an object")
-        elif set(requirements) != {"sensitive_read", "transfer"}:
+        elif set(requirements) != {
+            "sensitive_read",
+            "transfer",
+            "inspection",
+        }:
             errors.append(
                 "activation.family_requirements must contain only "
-                "sensitive_read and transfer"
+                "sensitive_read, transfer, and inspection"
             )
         else:
             expected_requirements = {
@@ -371,8 +378,10 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                         "file_read",
                         "credential_path_read",
                     },
+                    "operation_match_mode": "all_required",
                     "required_entity_role": "credential_paths",
                     "required_entity_type": "path",
+                    "entity_match_mode": "shared_required",
                     "required_outcome_status": "reported_success",
                     "required_outcome_scope": "fragment",
                     "required_effect_status": "reported_completed",
@@ -381,16 +390,52 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                         "recorded_resolved",
                         "context_resolved",
                     },
+                    "require_same_entity": True,
+                    "require_linkable_identity": True,
+                    "require_empty_abstention_reasons": True,
                 },
                 "transfer": {
                     "required_operation_types": {"transfer_observed"},
+                    "operation_match_mode": "all_required",
                     "required_entity_role": "artifact_hashes",
                     "required_entity_type": "hash",
+                    "entity_match_mode": "shared_required",
                     "required_outcome_status": "event_observed",
                     "required_outcome_scope": "direct_cowrie_event",
                     "required_effect_status": "event_observed",
                     "required_parse_status": "parsed",
                     "allowed_path_resolution_statuses": set(),
+                    "require_same_entity": True,
+                    "require_linkable_identity": True,
+                    "require_empty_abstention_reasons": True,
+                },
+                "inspection": {
+                    "required_operation_types": {
+                        "host_uptime_inspection",
+                        "filesystem_capacity_inspection",
+                        "system_identity_inspection",
+                        "account_identity_inspection",
+                        "network_route_inspection",
+                        "process_inspection",
+                        "network_socket_inspection",
+                        "account_database_inspection",
+                        "filesystem_search",
+                    },
+                    "operation_match_mode": "exactly_one_required",
+                    "required_entity_role": None,
+                    "required_entity_type": None,
+                    "entity_match_mode": "referenced_if_present",
+                    "required_outcome_status": "reported_success",
+                    "required_outcome_scope": "fragment",
+                    "required_effect_status": "reported_completed",
+                    "required_parse_status": "parsed",
+                    "allowed_path_resolution_statuses": {
+                        "recorded_resolved",
+                        "context_resolved",
+                    },
+                    "require_same_entity": False,
+                    "require_linkable_identity": True,
+                    "require_empty_abstention_reasons": True,
                 },
             }
             for family, expected in expected_requirements.items():
@@ -429,8 +474,10 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                             f"{family} references an unknown operation"
                         )
                 for key in (
+                    "operation_match_mode",
                     "required_entity_role",
                     "required_entity_type",
+                    "entity_match_mode",
                     "required_outcome_status",
                     "required_outcome_scope",
                     "required_effect_status",
@@ -467,8 +514,10 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "require_linkable_identity",
                     "require_empty_abstention_reasons",
                 ):
-                    if requirement.get(key) is not True:
-                        errors.append(f"{family}.{key} must be true")
+                    if requirement.get(key) is not expected[key]:
+                        errors.append(
+                            f"{family}.{key} must be {expected[key]}"
+                        )
     return errors
 
 

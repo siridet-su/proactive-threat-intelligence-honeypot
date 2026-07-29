@@ -277,13 +277,27 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
     if not isinstance(independent, dict):
         errors.append("policy.claims.independent: must be an object")
     else:
-        for name in ("credential", "downloader", "execution", "persistence", "cleanup", "confirmed_download"):
+        for name in (
+            "inspection",
+            "credential",
+            "downloader",
+            "execution",
+            "persistence",
+            "cleanup",
+            "confirmed_download",
+        ):
             if not isinstance(independent.get(name), dict):
                 errors.append(f"policy.claims.independent.{name}: missing object")
         for name in ("credential", "persistence", "cleanup"):
             definition = independent.get(name) or {}
             _validate_pattern(definition.get("trusted_command_pattern"), f"policy.claims.independent.{name}.trusted_command_pattern", errors)
             _validate_claim(definition, f"policy.claims.independent.{name}", errors)
+        _validate_typed_semantic_claim(
+            (independent.get("inspection") or {}).get("typed_semantic"),
+            "policy.claims.independent.inspection.typed_semantic",
+            errors,
+            expected_family="inspection",
+        )
         _validate_typed_semantic_claim(
             (independent.get("credential") or {}).get("typed_semantic"),
             "policy.claims.independent.credential.typed_semantic",

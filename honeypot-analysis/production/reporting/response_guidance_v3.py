@@ -39,6 +39,7 @@ DEFAULT_POLICY_PATH = PROJECT_ROOT / "configs" / "response_guidance_policy.v3.js
 CURRENT_ACTIVATED_SEMANTIC_FAMILIES = (
     "sensitive_read",
     "transfer",
+    "inspection",
 )
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -652,6 +653,7 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         and policy_version.startswith("3.0.")
     )
     legacy_one_family = policy_version.startswith("3.1.")
+    legacy_two_families = policy_version.startswith("3.2.")
     typed = typed_value if isinstance(typed_value, dict) else {}
     if not legacy_pre_typed and not isinstance(typed_value, dict):
         errors.append("typed semantic provenance is required")
@@ -686,7 +688,11 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         != (
             ["sensitive_read"]
             if legacy_one_family
-            else list(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+            else (
+                ["sensitive_read", "transfer"]
+                if legacy_two_families
+                else list(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+            )
         )
     ):
         errors.append("typed semantic activated families are invalid")
@@ -716,7 +722,11 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         if (
             not legacy_one_family
             and set(family_selection_hashes)
-            != set(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+            != (
+                {"sensitive_read", "transfer"}
+                if legacy_two_families
+                else set(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+            )
         ):
             errors.append(
                 "typed semantic family selection hashes are invalid"
@@ -733,7 +743,11 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
         if not legacy_one_family:
             for family, digest in family_selection_hashes.items():
                 if (
-                    family not in CURRENT_ACTIVATED_SEMANTIC_FAMILIES
+                    family not in (
+                        {"sensitive_read", "transfer"}
+                        if legacy_two_families
+                        else set(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+                    )
                     or not SHA256_RE.fullmatch(_clean(digest).lower())
                 ):
                     errors.append(

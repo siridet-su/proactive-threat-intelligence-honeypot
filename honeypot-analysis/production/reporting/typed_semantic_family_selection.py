@@ -22,7 +22,18 @@ from production.utils.serialization import stable_json
 
 
 SCHEMA_VERSION = "typed_semantic_family_selection.v1"
-ACTIVATED_FAMILIES = ("sensitive_read", "transfer")
+ACTIVATED_FAMILIES = ("sensitive_read", "transfer", "inspection")
+INSPECTION_OPERATIONS = frozenset({
+    "host_uptime_inspection",
+    "filesystem_capacity_inspection",
+    "system_identity_inspection",
+    "account_identity_inspection",
+    "network_route_inspection",
+    "process_inspection",
+    "network_socket_inspection",
+    "account_database_inspection",
+    "filesystem_search",
+})
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SELECTION_KEYS = {
     "schema_version",
@@ -111,6 +122,7 @@ def _match_or_reasons(
     }
     required = set(requirement["required_operation_types"])
     allowed = set(requirement["allowed_operation_types"])
+    operation_match_mode = requirement["operation_match_mode"]
     if parse.get("status") != requirement["required_parse_status"]:
         reasons.append("parse_status_not_eligible")
     if (
@@ -118,8 +130,15 @@ def _match_or_reasons(
         and fact.get("abstention_reasons")
     ):
         reasons.append("fact_abstained")
-    if not required.issubset(operation_types):
-        reasons.append("required_operation_missing")
+    eligible_operation_types = operation_types.intersection(required)
+    if operation_match_mode == "all_required":
+        if not required.issubset(operation_types):
+            reasons.append("required_operation_missing")
+    elif operation_match_mode == "exactly_one_required":
+        if len(eligible_operation_types) != 1:
+            reasons.append("exactly_one_required_operation_missing")
+    else:
+        reasons.append("operation_match_mode_invalid")
     if operation_types - allowed:
         reasons.append("additional_operation_not_activated")
     if outcome.get("status") != requirement["required_outcome_status"]:
@@ -130,7 +149,7 @@ def _match_or_reasons(
     required_operations = [
         operation
         for operation in operations
-        if operation.get("operation_type") in required
+        if operation.get("operation_type") in eligible_operation_types
     ]
     if any(
         operation.get("effect_status")
@@ -166,63 +185,116 @@ def _match_or_reasons(
 
     role = requirement["required_entity_role"]
     entity_type = requirement["required_entity_type"]
+    entity_match_mode = requirement["entity_match_mode"]
+    entity_entries = [
+        (entity_role, entity)
+        for entity_role, values in (fact.get("entities") or {}).items()
+        for entity in values or []
+        if isinstance(entity, dict)
+    ]
     entities = [
         entity
-        for entity in (fact.get("entities") or {}).get(role) or []
-        if isinstance(entity, dict)
-        and entity.get("entity_type") == entity_type
+        for entity_role, entity in entity_entries
+        if entity_role == role and entity.get("entity_type") == entity_type
     ]
-    path_by_entity = (
-        {
-            _clean(item.get("entity_ref")): item
-            for item in fact.get("path_resolutions") or []
-            if isinstance(item, dict) and item.get("role") == role
-        }
-        if entity_type == "path"
-        else {}
-    )
+    path_by_entity = {
+        _clean(item.get("entity_ref")): item
+        for item in fact.get("path_resolutions") or []
+        if isinstance(item, dict)
+    }
     operation_refs: Dict[str, set[str]] = {}
     for operation in required_operations:
         operation_refs.setdefault(
             _clean(operation.get("operation_type")),
             set(),
         ).update(_texts(operation.get("entity_refs") or []))
-    eligible_entities: List[tuple[Dict[str, Any], Dict[str, Any]]] = []
-    for entity in entities:
-        entity_ref = _clean(entity.get("entity_id"))
-        path = path_by_entity.get(entity_ref) or {}
-        if (
-            requirement["require_linkable_identity"]
-            and (
-                entity.get("linkable") is not True
-                or entity.get("uncertain") is not False
-            )
-        ):
-            continue
-        if entity_type == "path":
-            if path.get("resolution_status") not in set(
-                requirement["allowed_path_resolution_statuses"]
+    eligible_entities: List[
+        tuple[Dict[str, Any], Dict[str, Any], str]
+    ] = []
+    if entity_match_mode == "shared_required":
+        for entity in entities:
+            entity_ref = _clean(entity.get("entity_id"))
+            path = path_by_entity.get(entity_ref) or {}
+            if (
+                requirement["require_linkable_identity"]
+                and (
+                    entity.get("linkable") is not True
+                    or entity.get("uncertain") is not False
+                )
             ):
                 continue
-            if not _clean(path.get("path_identity_id")):
+            if entity_type == "path":
+                if path.get("resolution_status") not in set(
+                    requirement["allowed_path_resolution_statuses"]
+                ):
+                    continue
+                if not _clean(path.get("path_identity_id")):
+                    continue
+            if family == "transfer" and not SHA256_RE.fullmatch(
+                _clean(entity.get("normalized_value")).lower()
+            ):
                 continue
-        if family == "transfer" and not SHA256_RE.fullmatch(
-            _clean(entity.get("normalized_value")).lower()
-        ):
-            continue
-        if (
-            requirement["require_same_entity"]
-            and any(
-                entity_ref not in operation_refs.get(operation_type, set())
-                for operation_type in required
-            )
-        ):
-            continue
-        eligible_entities.append((entity, path))
-    if family == "transfer" and len(entities) != 1:
-        reasons.append("single_artifact_hash_required")
-    if not eligible_entities:
-        reasons.append("resolved_shared_entity_missing")
+            if (
+                requirement["require_same_entity"]
+                and any(
+                    entity_ref not in operation_refs.get(
+                        operation_type,
+                        set(),
+                    )
+                    for operation_type in required
+                )
+            ):
+                continue
+            eligible_entities.append((entity, path, role))
+        if family == "transfer" and len(entities) != 1:
+            reasons.append("single_artifact_hash_required")
+        if not eligible_entities:
+            reasons.append("resolved_shared_entity_missing")
+    elif entity_match_mode == "referenced_if_present":
+        entity_by_id = {
+            _clean(entity.get("entity_id")): (entity_role, entity)
+            for entity_role, entity in entity_entries
+            if _clean(entity.get("entity_id"))
+        }
+        referenced_entity_ids = sorted({
+            entity_ref
+            for operation in required_operations
+            for entity_ref in _texts(operation.get("entity_refs") or [])
+        })
+        if not referenced_entity_ids:
+            eligible_entities.append(({}, {}, ""))
+        else:
+            for entity_ref in referenced_entity_ids:
+                entry = entity_by_id.get(entity_ref)
+                if entry is None:
+                    reasons.append("referenced_entity_unresolved")
+                    continue
+                entity_role, entity = entry
+                path = path_by_entity.get(entity_ref) or {}
+                if (
+                    requirement["require_linkable_identity"]
+                    and (
+                        entity.get("linkable") is not True
+                        or entity.get("uncertain") is not False
+                    )
+                ):
+                    reasons.append("fact_identity_unresolved")
+                    continue
+                if entity.get("entity_type") == "path" and (
+                    path.get("resolution_status") not in set(
+                        requirement[
+                            "allowed_path_resolution_statuses"
+                        ]
+                    )
+                    or not _clean(path.get("path_identity_id"))
+                ):
+                    reasons.append("fact_identity_unresolved")
+                    continue
+                eligible_entities.append((entity, path, entity_role))
+            if len(eligible_entities) != len(referenced_entity_ids):
+                reasons.append("all_referenced_entities_required")
+    else:
+        reasons.append("entity_match_mode_invalid")
 
     authoritative_refs = sorted({
         _clean(reference.get("evidence_ref"))
@@ -263,7 +335,8 @@ def _match_or_reasons(
         }
     )
     effect_status = requirement["required_effect_status"]
-    for entity, path in eligible_entities:
+    selected_operation_types = sorted(eligible_operation_types)
+    for entity, path, entity_role in eligible_entities:
         matches.append({
             "fact_id": _clean(fact.get("fact_id")),
             "source_observation_ref": _clean(
@@ -271,10 +344,10 @@ def _match_or_reasons(
             ),
             "supporting_evidence_refs": authoritative_refs,
             "operation_refs": operation_ids,
-            "operation_types": sorted(required),
+            "operation_types": selected_operation_types,
             "entity_ref": _clean(entity.get("entity_id")),
-            "entity_role": role,
-            "entity_type": entity_type,
+            "entity_role": entity_role,
+            "entity_type": _clean(entity.get("entity_type")),
             "entity_value": _clean(entity.get("normalized_value")),
             "path_identity_id": _clean(path.get("path_identity_id")),
             "path_resolution_status": _clean(
@@ -468,8 +541,27 @@ def validate_typed_semantic_family_selection(
             continue
         if match.get("fact_id") not in fact_by_id:
             errors.append(f"matches[{index}].fact_id is unresolved")
-        if match.get("entity_ref") not in entity_by_id:
+        entity_ref = _clean(match.get("entity_ref"))
+        if entity_ref:
+            if entity_ref not in entity_by_id:
+                errors.append(
+                    f"matches[{index}].entity_ref is unresolved"
+                )
+        elif family != "inspection":
             errors.append(f"matches[{index}].entity_ref is unresolved")
+        elif any(
+            _clean(match.get(key))
+            for key in (
+                "entity_role",
+                "entity_type",
+                "entity_value",
+                "path_identity_id",
+                "path_resolution_status",
+            )
+        ):
+            errors.append(
+                f"matches[{index}] has entity values without an entity ref"
+            )
         fact = fact_by_id.get(_clean(match.get("fact_id"))) or {}
         fact_operation_ids = {
             _clean(operation.get("operation_id"))
@@ -482,7 +574,7 @@ def validate_typed_semantic_family_selection(
             for entity in values or []
             if isinstance(entity, dict)
         }
-        if match.get("entity_ref") not in fact_entity_ids:
+        if entity_ref and entity_ref not in fact_entity_ids:
             errors.append(
                 f"matches[{index}].entity_ref is outside its fact"
             )
@@ -616,8 +708,18 @@ def validate_policy_output_trace(
                 "file_read",
             ],
             "transfer": ["transfer_observed"],
-        }.get(family, [])
-        if match.get("operation_types") != expected_operations:
+        }.get(family)
+        operation_types = match.get("operation_types")
+        operations_valid = (
+            operation_types == expected_operations
+            if expected_operations is not None
+            else (
+                isinstance(operation_types, list)
+                and len(operation_types) == 1
+                and operation_types[0] in INSPECTION_OPERATIONS
+            )
+        )
+        if not operations_valid:
             errors.append(
                 f"typed semantic policy trace matches[{index}] operations "
                 "are invalid"
@@ -631,13 +733,21 @@ def validate_policy_output_trace(
                 "effect_status": "reported_completed",
             }
             if family == "sensitive_read"
-            else {
+            else (
+                {
                 "entity_role": "artifact_hashes",
                 "entity_type": "hash",
                 "outcome_status": "event_observed",
                 "outcome_scope": "direct_cowrie_event",
                 "effect_status": "event_observed",
-            }
+                }
+                if family == "transfer"
+                else {
+                    "outcome_status": "reported_success",
+                    "outcome_scope": "fragment",
+                    "effect_status": "reported_completed",
+                }
+            )
         )
         for key, expected in expected_values.items():
             if match.get(key) != expected:
@@ -660,10 +770,50 @@ def validate_policy_output_trace(
                 f"typed semantic policy trace matches[{index}] path status "
                 "must be empty for a hash entity"
             )
-        if not _clean(match.get("entity_value")):
+        if family != "inspection" and not _clean(
+            match.get("entity_value")
+        ):
             errors.append(
                 f"typed semantic policy trace matches[{index}] entity is empty"
             )
+        if family == "inspection":
+            role = _clean(match.get("entity_role"))
+            entity_type = _clean(match.get("entity_type"))
+            entity_value = _clean(match.get("entity_value"))
+            path_status = _clean(
+                match.get("path_resolution_status")
+            )
+            if role:
+                allowed_entities = {
+                    "read_paths": "path",
+                    "account_names": "account",
+                }
+                if (
+                    allowed_entities.get(role) != entity_type
+                    or not entity_value
+                ):
+                    errors.append(
+                        f"typed semantic policy trace matches[{index}] "
+                        "inspection entity is invalid"
+                    )
+                if entity_type == "path" and path_status not in {
+                    "recorded_resolved",
+                    "context_resolved",
+                }:
+                    errors.append(
+                        f"typed semantic policy trace matches[{index}] "
+                        "inspection path is unresolved"
+                    )
+                if entity_type != "path" and path_status:
+                    errors.append(
+                        f"typed semantic policy trace matches[{index}] "
+                        "non-path inspection has path status"
+                    )
+            elif any((entity_type, entity_value, path_status)):
+                errors.append(
+                    f"typed semantic policy trace matches[{index}] "
+                    "inspection entity fields are inconsistent"
+                )
         proof_scopes = frozenset(match.get("proof_scopes") or [])
         allowed_proof_scopes = (
             {
@@ -682,7 +832,11 @@ def validate_policy_output_trace(
                 }),
             }
             if family == "sensitive_read"
-            else {frozenset({"direct_cowrie_event"})}
+            else (
+                {frozenset({"direct_cowrie_event"})}
+                if family == "transfer"
+                else {frozenset({"general_command_semantics"})}
+            )
         )
         if proof_scopes not in allowed_proof_scopes:
             errors.append(

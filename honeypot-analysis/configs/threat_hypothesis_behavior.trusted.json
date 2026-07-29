@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-30-direct-transfer-v2",
+  "version": "2026-07-30-inspection-observation-v1",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -11,7 +11,8 @@
       "Immediate semantic-containment regression review",
       "Family-scoped typed sensitive-read migration decision",
       "Direct Cowrie transfer-event typed authority decision",
-      "Observed transfer URI, working-directory, and event-order preservation review"
+      "Observed transfer URI, working-directory, and event-order preservation review",
+      "Observation-only typed inspection activation decision"
     ],
     "reviewed": true,
     "reviewer": "project developer",
@@ -210,6 +211,20 @@
         }
       ],
       "independent": {
+        "inspection": {
+          "typed_semantic": {
+            "rule_id": "observed-supported-cowrie-inspection-command",
+            "family": "inspection",
+            "claim_type": "observed_cowrie_inspection_command",
+            "text": "Cowrie reported success for a parsed, supported inspection command in its simulated shell.",
+            "evidence_status": "supported",
+            "limitations": [
+              "The observation does not establish malicious reconnaissance or attacker intent.",
+              "Cowrie-reported success does not reveal the command result or prove an effect on a real host.",
+              "ATT&CK mappings, predictions, enrichment, correlations, and guidance do not support this finding."
+            ]
+          }
+        },
         "credential": {
           "trusted_command_pattern": "/etc/(?:passwd|shadow)|(?:^|/)\\.ssh/id_(?:rsa|ed25519)|\\.aws/credentials|application_default_credentials|\\.config/gcloud",
           "claim_type": "possible_credential_access_preparation",

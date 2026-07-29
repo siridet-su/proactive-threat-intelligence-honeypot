@@ -516,6 +516,7 @@ def build_supported_assessment(
         ),
     )
     objectives: List[Dict[str, Any]] = list(connected_claims)
+    inspection_definition = independent.get("inspection") or {}
     credential_definition = independent.get("credential") or {}
     downloader_definition = independent.get("downloader") or {}
     execution_definition = independent.get("execution") or {}
@@ -530,7 +531,7 @@ def build_supported_assessment(
     if isinstance(typed_semantic_fact_set, dict):
         for family in sorted(
             activated_families.intersection(
-                {"sensitive_read", "transfer"}
+                {"sensitive_read", "transfer", "inspection"}
             )
         ):
             try:
@@ -584,6 +585,38 @@ def build_supported_assessment(
         for eventid in confirmed_eventids
         for ref in _event_refs(observed, eventid)
     ))
+
+    if "inspection" in activated_families:
+        selection = semantic_selections.get("inspection") or {}
+        matches = selection.get("matches") or []
+        if matches:
+            typed_definition = inspection_definition.get(
+                "typed_semantic"
+            ) or {}
+            refs = sorted({
+                _clean(ref)
+                for match in matches
+                if isinstance(match, dict)
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            claim = _claim(
+                _clean(typed_definition.get("claim_type")),
+                _clean(typed_definition.get("text")),
+                _clean(typed_definition.get("evidence_status"))
+                or "supported",
+                refs,
+                typed_definition.get("limitations") or [],
+            )
+            claim.update({
+                "claim_basis": "typed_semantic_fact_set.v2",
+                "behavior_policy_rule_id": _clean(
+                    typed_definition.get("rule_id")
+                ),
+                "semantic_family": "inspection",
+                "semantic_trace": policy_output_trace(selection),
+            })
+            objectives.append(claim)
 
     if "sensitive_read" in activated_families:
         selection = semantic_selections.get("sensitive_read") or {}
@@ -771,37 +804,83 @@ def build_follow_on_hypothesis(
         for value in activated_semantic_families
         if _clean(value)
     }
-    if "transfer" in activated_families:
-        transfer_selection: Dict[str, Any] = {}
+    if {"transfer", "inspection"}.intersection(activated_families):
+        family_selections: Dict[str, Dict[str, Any]] = {}
         if isinstance(typed_semantic_fact_set, dict):
-            try:
-                transfer_selection = select_activated_semantic_family(
-                    typed_semantic_fact_set,
-                    family="transfer",
-                )
-            except ValueError:
-                transfer_selection = {}
-        refs = sorted({
+            for family in ("transfer", "inspection"):
+                if family not in activated_families:
+                    continue
+                try:
+                    family_selections[family] = (
+                        select_activated_semantic_family(
+                            typed_semantic_fact_set,
+                            family=family,
+                        )
+                    )
+                except ValueError:
+                    family_selections[family] = {}
+        transfer_refs = sorted({
             _clean(ref)
-            for match in transfer_selection.get("matches") or []
+            for match in (
+                family_selections.get("transfer") or {}
+            ).get("matches") or []
             if isinstance(match, dict)
             for ref in match.get("supporting_evidence_refs") or []
             if _clean(ref)
         })
-        return {
-            "claims": [],
-            "abstained": True,
-            "abstention_reason": (
+        inspection_refs = sorted({
+            _clean(ref)
+            for match in (
+                family_selections.get("inspection") or {}
+            ).get("matches") or []
+            if isinstance(match, dict)
+            for ref in match.get("supporting_evidence_refs") or []
+            if _clean(ref)
+        })
+        refs = transfer_refs or inspection_refs
+        if transfer_refs:
+            abstention_reason = (
                 "A typed direct Cowrie transfer observation supports a "
                 "behavioral finding, but no follow-on execution hypothesis "
                 "is authorized while execution and cross-family relationship "
                 "semantics remain non-activated."
-                if refs
-                else (
-                    "No eligible typed direct Cowrie transfer observation "
-                    "supports a follow-on hypothesis."
-                )
-            ),
+            )
+            gap_text = (
+                "Execution and cross-family relationship semantics are "
+                "not activated for typed transfer policy."
+            )
+            selection_semantics = (
+                "typed_transfer_follow_on_hypothesis_abstention"
+            )
+        elif inspection_refs:
+            abstention_reason = (
+                "A typed Cowrie inspection observation supports a bounded "
+                "behavioral finding, but it does not support an attacker-"
+                "intent or follow-on hypothesis."
+            )
+            gap_text = (
+                "An inspection observation has no independently supported "
+                "future behavior, attacker intent, or real-host effect."
+            )
+            selection_semantics = (
+                "typed_inspection_follow_on_hypothesis_abstention"
+            )
+        else:
+            abstention_reason = (
+                "No eligible typed direct Cowrie transfer or inspection "
+                "observation supports a follow-on hypothesis."
+            )
+            gap_text = (
+                "No activated typed observation supplies the operation and "
+                "relationship evidence required for a follow-on hypothesis."
+            )
+            selection_semantics = (
+                "typed_activated_family_follow_on_hypothesis_abstention"
+            )
+        return {
+            "claims": [],
+            "abstained": True,
+            "abstention_reason": abstention_reason,
             "basis_last_evidence_id": refs[-1] if refs else "",
             "basis_session_last_trusted_evidence_id": _clean(
                 (chain[-1] if chain else {}).get("evidence_id")
@@ -809,19 +888,14 @@ def build_follow_on_hypothesis(
             "basis_connected_chain_ids": [],
             "disconfirming_observations": [],
             "evidence_gaps": [{
-                "text": (
-                    "Execution and cross-family relationship semantics are "
-                    "not activated for typed transfer policy."
-                ),
+                "text": gap_text,
                 "data_source": "typed_semantic_fact_set.v2",
                 "machine_evaluable": True,
                 "evidence_refs": refs,
             }],
             "external_validation_suggestions": [],
             "scope": "post_session_cowrie_observable_behavior",
-            "selection_semantics": (
-                "typed_transfer_follow_on_hypothesis_abstention"
-            ),
+            "selection_semantics": selection_semantics,
             "behavior_policy": policy_summary(document),
         }
     claims: List[Dict[str, Any]] = []

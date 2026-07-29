@@ -5,13 +5,13 @@ built from the same redacted observed-behaviour reconstruction used while
 creating `session_assessment.v4`. The complete fact set is validated and
 content-addressed before any family-scoped policy evaluation.
 
-Only `sensitive_read` is activated. The complete fact set is not embedded in
-v4 or `response_guidance.v3`, written to SQLite, exposed through an API, or
-rendered in an artifact. Instead, v4 and v3 independently evaluate the same
-validated fact set and retain a bounded content-addressed trace for a matched
-sensitive read. All other families remain shadow-only. A typed-evaluation
-error fails the selected family closed without promoting legacy credential
-matching.
+Only `sensitive_read`, direct Cowrie `transfer`, and observation-only
+`inspection` are activated. The complete fact set is not embedded in v4 or
+`response_guidance.v3`, written to SQLite, exposed through an API, or rendered
+in an artifact. Instead, v4 and v3 independently evaluate the same validated
+fact set and retain a bounded content-addressed trace for matched activated
+families. All other families remain shadow-only. A typed-evaluation error
+fails the selected families closed without promoting legacy matching.
 
 ## Bound inputs
 
@@ -128,9 +128,9 @@ render it as Markdown. It contains old literal actions, typed operations,
 blocked or partial matches, abstention reasons, and the exact family-scoped
 policy impact. The diagnostic itself remains discarded.
 
-The vocabulary records `sensitive_read` and `transfer` as `activated`,
-`unknown` as `not_eligible`, and every other operation family as
-`not_activated`. A sensitive read requires exactly `file_read` and
+The vocabulary records `sensitive_read`, direct `transfer`, and `inspection`
+as `activated`, `unknown` as `not_eligible`, and every other operation family
+as `not_activated`. A sensitive read requires exactly `file_read` and
 `credential_path_read` on the same resolved, linkable credential-path entity,
 a parsed fragment, no abstention, and a Cowrie-reported successful fragment
 outcome. Additional operations, failures, compound outcomes, conditional
@@ -176,3 +176,17 @@ execution and cross-family relationship semantics remain non-activated.
 Both selected playbooks remain manually approved, non-executable, and
 incapable of alerts. ATT&CK labels, predictions, enrichment, correlations, and
 optional prose cannot create or alter a family match.
+
+For `inspection`, exactly one reviewed inspection operation must be the only
+operation in a parsed, non-abstained fragment with a Cowrie-reported
+successful outcome. Any referenced entity must be linkable; referenced paths
+must have a resolved path identity. Entity-free observations such as supported
+`uname`, `id`, `uptime`, `ip route`, `ps`, and `ss` forms are valid because
+the literal operation is complete without inventing a target entity.
+Supported capacity and filesystem-search operands must resolve.
+
+The family emits a bounded observation finding only. It adds no specialized
+guidance action and no hypothesis. Failed, unknown, compound, conditional,
+multi-operation, malformed, unsupported, expansion-dependent, wildcard, or
+unresolved facts abstain. It does not claim reconnaissance, malicious intent,
+command result contents, compromise, or any real-host effect.

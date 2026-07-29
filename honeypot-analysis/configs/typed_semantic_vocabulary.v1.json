@@ -1,7 +1,7 @@
 {
   "schema_version": "typed_semantic_vocabulary_policy.v1",
   "policy_id": "honeypot-typed-semantic-vocabulary",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "semantic_extractor_version": "typed-shell-subset.v2.2",
   "authority": {
     "mode": "family_scoped_policy_input",
@@ -445,7 +445,7 @@
     "default": "not_activated",
     "family_states": {
       "unknown": "not_eligible",
-      "inspection": "not_activated",
+      "inspection": "activated",
       "filesystem": "not_activated",
       "transformation": "not_activated",
       "collection": "not_activated",
@@ -467,8 +467,10 @@
           "file_read",
           "credential_path_read"
         ],
+        "operation_match_mode": "all_required",
         "required_entity_role": "credential_paths",
         "required_entity_type": "path",
+        "entity_match_mode": "shared_required",
         "required_outcome_status": "reported_success",
         "required_outcome_scope": "fragment",
         "required_effect_status": "reported_completed",
@@ -488,14 +490,55 @@
         "allowed_operation_types": [
           "transfer_observed"
         ],
+        "operation_match_mode": "all_required",
         "required_entity_role": "artifact_hashes",
         "required_entity_type": "hash",
+        "entity_match_mode": "shared_required",
         "required_outcome_status": "event_observed",
         "required_outcome_scope": "direct_cowrie_event",
         "required_effect_status": "event_observed",
         "required_parse_status": "parsed",
         "allowed_path_resolution_statuses": [],
         "require_same_entity": true,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "inspection": {
+        "required_operation_types": [
+          "host_uptime_inspection",
+          "filesystem_capacity_inspection",
+          "system_identity_inspection",
+          "account_identity_inspection",
+          "network_route_inspection",
+          "process_inspection",
+          "network_socket_inspection",
+          "account_database_inspection",
+          "filesystem_search"
+        ],
+        "allowed_operation_types": [
+          "host_uptime_inspection",
+          "filesystem_capacity_inspection",
+          "system_identity_inspection",
+          "account_identity_inspection",
+          "network_route_inspection",
+          "process_inspection",
+          "network_socket_inspection",
+          "account_database_inspection",
+          "filesystem_search"
+        ],
+        "operation_match_mode": "exactly_one_required",
+        "required_entity_role": null,
+        "required_entity_type": null,
+        "entity_match_mode": "referenced_if_present",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [
+          "recorded_resolved",
+          "context_resolved"
+        ],
+        "require_same_entity": false,
         "require_linkable_identity": true,
         "require_empty_abstention_reasons": true
       }

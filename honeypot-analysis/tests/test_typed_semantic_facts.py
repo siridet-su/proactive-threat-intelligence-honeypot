@@ -201,12 +201,20 @@ def test_vocabulary_is_closed_hash_bound_and_family_scoped() -> None:
     assert loaded["document"]["activation"]["family_states"][
         "transfer"
     ] == "activated"
+    assert loaded["document"]["activation"]["family_states"][
+        "inspection"
+    ] == "activated"
     assert all(
         state == "not_activated"
         for family, state in loaded["document"]["activation"][
             "family_states"
         ].items()
-        if family not in {"unknown", "sensitive_read", "transfer"}
+        if family not in {
+            "unknown",
+            "sensitive_read",
+            "transfer",
+            "inspection",
+        }
     )
     assert set(loaded["document"]["entity_role_types"]) == set(
         loaded["document"]["vocabulary"]["entity_roles"]
@@ -682,7 +690,7 @@ def test_vocabulary_rejects_invented_values_and_incomplete_coverage() -> None:
         "effect": "not_an_effect",
     }
     forged["entity_role_types"].pop("read_paths")
-    forged["activation"]["family_states"]["inspection"] = "activated"
+    forged["activation"]["family_states"]["filesystem"] = "activated"
     forged["sensitive_path_policy"]["suffix_path_segments"].append(
         ["..", "invented"]
     )
