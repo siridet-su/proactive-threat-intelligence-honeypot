@@ -46,6 +46,12 @@ FROZEN_EVALUATION = (
 FROZEN_EVALUATION_SHA256 = (
     "3b235d4f247f7506079452c8da869c9dc21eb26fb57c5a235850aa2b2ec20cd9"
 )
+FROZEN_HOLDOUT = (
+    ROOT / "evaluation/transfer_family_holdout_frozen.v1.json"
+)
+FROZEN_HOLDOUT_SHA256 = (
+    "6050f6c0c6cf23b8cf47729cdcf94510dbf30858f2cf50d90a292237516e545a"
+)
 FIXED_EVALUATOR_REVISION = (
     "aaa0f3dac4b9c02a8ef3d09251de003504c56a2f"
 )
@@ -57,14 +63,25 @@ DIRECT_EVENT_IDS = {
 }
 
 
-def _load_spec() -> dict[str, Any]:
-    raw = FROZEN_EVALUATION.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == FROZEN_EVALUATION_SHA256
+def _load_spec_path(
+    path: Path,
+    expected_sha256: str,
+) -> dict[str, Any]:
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == expected_sha256
     value = json.loads(raw)
+    assert value["expected_labels_frozen_before_execution"] is True
+    return value
+
+
+def _load_spec() -> dict[str, Any]:
+    value = _load_spec_path(
+        FROZEN_EVALUATION,
+        FROZEN_EVALUATION_SHA256,
+    )
     assert value["schema_version"] == (
         "typed_transfer_independent_evaluation.v1"
     )
-    assert value["expected_labels_frozen_before_execution"] is True
     assert len(value["cases"]) == 34
     return value
 
@@ -267,19 +284,26 @@ def _binary_bucket(
 
 def _assert_case(
     case: dict[str, Any],
+    *,
+    check_entity_roles: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    inject_context = (
+        case["case_id"] == "TFI-033"
+        or case.get("inject_non_authoritative_context") is True
+    )
     payload, fact_set, selection, report = _evaluate(
         case,
-        inject_context=case["case_id"] == "TFI-033",
+        inject_context=inject_context,
     )
     operations = _operation_types(fact_set)
     findings, actions = _specialized(report)
     expected_eligible = int(case["eligible_matches"]) > 0
 
     assert operations == case["expected_operations"], case["case_id"]
-    assert set(case["expected_entity_roles"]).issubset(
-        _nonempty_entity_roles(fact_set)
-    ), case["case_id"]
+    if check_entity_roles:
+        assert set(case["expected_entity_roles"]).issubset(
+            _nonempty_entity_roles(fact_set)
+        ), case["case_id"]
     assert _artifact_hashes(fact_set) == case[
         "expected_artifact_hashes"
     ], case["case_id"]
@@ -335,7 +359,7 @@ def _assert_case(
     _second_payload, second_facts, second_selection, second_report = (
         _evaluate(
             case,
-            inject_context=case["case_id"] == "TFI-033",
+            inject_context=inject_context,
         )
     )
     assert second_facts == fact_set
@@ -397,6 +421,79 @@ def test_frozen_independent_evaluation_meets_semantic_acceptance() -> None:
     assert guidance == eligible
 
 
+def test_separately_frozen_holdout_authority_acceptance_records_spec_defect(
+) -> None:
+    spec = _load_spec_path(
+        FROZEN_HOLDOUT,
+        FROZEN_HOLDOUT_SHA256,
+    )
+    assert spec["schema_version"] == "typed_transfer_holdout.v1"
+    assert len(spec["cases"]) == 21
+    typed = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    eligible = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    finding = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    guidance = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    entity_role_discrepancies: list[dict[str, Any]] = []
+    for case in spec["cases"]:
+        _payload_value, inspected_facts, _selection, _report = _evaluate(
+            case,
+            inject_context=(
+                case.get("inject_non_authoritative_context") is True
+            ),
+        )
+        actual_roles = _nonempty_entity_roles(inspected_facts)
+        missing_roles = sorted(
+            set(case["expected_entity_roles"]) - actual_roles
+        )
+        if missing_roles:
+            entity_role_discrepancies.append({
+                "case_id": case["case_id"],
+                "missing_frozen_roles": missing_roles,
+                "actual_roles": sorted(actual_roles),
+                "classification": "evaluation_spec_defect",
+            })
+        fact_set, selection, report = _assert_case(
+            case,
+            check_entity_roles=False,
+        )
+        expected_typed = (
+            "transfer_observed" in case["expected_operations"]
+        )
+        expected_eligible = int(case["eligible_matches"]) > 0
+        findings, actions = _specialized(report)
+        _binary_bucket(
+            typed,
+            actual="transfer_observed" in _operation_types(fact_set),
+            expected=expected_typed,
+        )
+        _binary_bucket(
+            eligible,
+            actual=bool(selection["matches"]),
+            expected=expected_eligible,
+        )
+        _binary_bucket(
+            finding,
+            actual=bool(findings),
+            expected=case["specialized_finding"],
+        )
+        _binary_bucket(
+            guidance,
+            actual=bool(actions),
+            expected=case["specialized_guidance"],
+        )
+
+    assert typed == {"tp": 14, "fp": 0, "fn": 0, "tn": 7}
+    assert eligible == {"tp": 9, "fp": 0, "fn": 0, "tn": 12}
+    assert finding == eligible
+    assert guidance == eligible
+    assert entity_role_discrepancies == [{
+        "case_id": "TFH-013",
+        "missing_frozen_roles": ["source_paths"],
+        "actual_roles": ["created_paths", "read_paths"],
+        "classification": "evaluation_spec_defect",
+    }]
+
+
 def test_non_authoritative_context_cannot_change_transfer_authority() -> None:
     case = next(
         item
@@ -437,10 +534,21 @@ def test_all_frozen_cases_survive_sqlite_and_artifact_validation(
         enable_pdf_export=True,
     )
 
-    for case in _load_spec()["cases"]:
+    specs = [
+        _load_spec(),
+        _load_spec_path(FROZEN_HOLDOUT, FROZEN_HOLDOUT_SHA256),
+    ]
+    for case in [
+        case
+        for spec in specs
+        for case in spec["cases"]
+    ]:
         payload, _facts, _selection, report = _evaluate(
             case,
-            inject_context=case["case_id"] == "TFI-033",
+            inject_context=(
+                case["case_id"] == "TFI-033"
+                or case.get("inject_non_authoritative_context") is True
+            ),
         )
         storage.save_session(payload)
         job_id = storage.enqueue_analysis_job(payload)
