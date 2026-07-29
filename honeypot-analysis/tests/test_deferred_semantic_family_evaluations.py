@@ -48,6 +48,20 @@ SCHEDULE_SPECS = (
         6,
     ),
 )
+SERVICE_SPECS = (
+    (
+        ROOT / "evaluation/service_shadow_independent_frozen.v1.json",
+        "90620bfa3441873c01950a4b9af337fb4585070cd0509a7db5a7e4e00ee48a6c",
+        "typed_service_shadow_evaluation.v1",
+        12,
+    ),
+    (
+        ROOT / "evaluation/service_shadow_holdout_frozen.v1.json",
+        "905cb17e33fe88061973a5344b8bbbca1869096e4c3f484019925fcd4725f728",
+        "typed_service_shadow_holdout.v1",
+        6,
+    ),
+)
 
 
 def _load_spec(
@@ -203,3 +217,13 @@ def test_frozen_scheduled_task_shadow_sets() -> None:
         )["cases"]:
             _assert_shadow_case(case, "scheduled_task")
 
+
+def test_frozen_service_shadow_sets() -> None:
+    for path, digest, schema, count in SERVICE_SPECS:
+        for case in _load_spec(
+            path,
+            digest,
+            schema,
+            count,
+        )["cases"]:
+            _assert_shadow_case(case, "service")
