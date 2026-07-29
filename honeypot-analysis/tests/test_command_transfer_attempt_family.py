@@ -42,6 +42,13 @@ SPEC_PATH = (
 SPEC_SHA256 = (
     "921085c33c903338668b82d9b6479e0e6ae8adf3e60be443a8c4a57b8aaa98ab"
 )
+HOLDOUT_PATH = (
+    ROOT
+    / "evaluation/command_transfer_attempt_holdout_frozen.v1.json"
+)
+HOLDOUT_SHA256 = (
+    "b7b811aa6a4fe2bf5f08220090a7c293742996cbc158adb02eec402a5b819f5b"
+)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -60,6 +67,18 @@ def _spec() -> dict[str, Any]:
     )
     assert value["expected_labels_frozen_before_execution"] is True
     assert len(value["cases"]) == 24
+    return value
+
+
+def _holdout() -> dict[str, Any]:
+    raw = HOLDOUT_PATH.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
+    value = json.loads(raw)
+    assert value["schema_version"] == (
+        "typed_command_transfer_attempt_holdout.v1"
+    )
+    assert value["expected_labels_frozen_before_execution"] is True
+    assert len(value["cases"]) == 14
     return value
 
 
@@ -296,6 +315,23 @@ def test_frozen_command_transfer_attempt_evaluation() -> None:
         "CTA-018",
         "CTA-022",
     }
+
+
+def test_frozen_command_transfer_attempt_holdout() -> None:
+    counts = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    for case in _holdout()["cases"]:
+        _payload_value, _facts, selection, _report = _assert_case(
+            case
+        )
+        expected = int(case["eligible_matches"]) > 0
+        actual = bool(selection["matches"])
+        counts[
+            "tp" if actual and expected
+            else "fp" if actual
+            else "fn" if expected
+            else "tn"
+        ] += 1
+    assert counts == {"tp": 6, "fp": 0, "fn": 0, "tn": 8}
 
 
 def test_frozen_transfer_attempt_cases_persist_and_render(

