@@ -546,6 +546,7 @@ def build_supported_assessment(
                 {
                     "sensitive_read",
                     "transfer",
+                    "transfer_attempt",
                     "inspection",
                     "filesystem",
                     "execution",
@@ -756,7 +757,38 @@ def build_supported_assessment(
             _chain_refs(credential),
             credential_definition.get("limitations") or [],
         ))
-    if downloader:
+    if "transfer_attempt" in activated_families:
+        selection = semantic_selections.get("transfer_attempt") or {}
+        matches = selection.get("matches") or []
+        if matches:
+            typed_definition = downloader_definition.get(
+                "typed_semantic"
+            ) or {}
+            refs = sorted({
+                _clean(ref)
+                for match in matches
+                if isinstance(match, dict)
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            claim = _claim(
+                _clean(typed_definition.get("claim_type")),
+                _clean(typed_definition.get("text")),
+                _clean(typed_definition.get("evidence_status"))
+                or "supported",
+                refs,
+                typed_definition.get("limitations") or [],
+            )
+            claim.update({
+                "claim_basis": "typed_semantic_fact_set.v2",
+                "behavior_policy_rule_id": _clean(
+                    typed_definition.get("rule_id")
+                ),
+                "semantic_family": "transfer_attempt",
+                "semantic_trace": policy_output_trace(selection),
+            })
+            objectives.append(claim)
+    elif downloader:
         objectives.append(_claim(
             _clean(downloader_definition.get("claim_type")),
             _clean(downloader_definition.get("text")),

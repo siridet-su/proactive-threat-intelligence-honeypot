@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-30-execution-observation-v1",
+  "version": "2026-07-30-command-transfer-attempt-v1",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -14,7 +14,8 @@
       "Observed transfer URI, working-directory, and event-order preservation review",
       "Observation-only typed inspection activation decision",
       "Observation-only typed filesystem-change activation decision",
-      "Bounded typed Cowrie execution-attempt activation decision"
+      "Bounded typed Cowrie execution-attempt activation decision",
+      "Attempt-only typed HTTP(S) command transfer decision"
     ],
     "reviewed": true,
     "reviewer": "project developer",
@@ -274,7 +275,19 @@
           "limitations": [
             "A downloader command alone does not establish successful transfer.",
             "Real-world compromise is outside Cowrie visibility."
-          ]
+          ],
+          "typed_semantic": {
+            "rule_id": "observed-supported-cowrie-command-transfer-attempt",
+            "family": "transfer_attempt",
+            "claim_type": "observed_cowrie_command_transfer_attempt",
+            "text": "Cowrie reported success for a parsed, supported command that attempted HTTP(S) remote-content access.",
+            "evidence_status": "supported",
+            "limitations": [
+              "The command observation does not establish received bytes, a completed transfer, destination creation, or artifact identity.",
+              "Execution, attacker intent, compromise, persistence, and effects on a real host are not established.",
+              "ATT&CK mappings, predictions, enrichment, correlations, hypotheses, guidance, and optional prose do not support this finding."
+            ]
+          }
         },
         "execution": {
           "literal_action_types": [

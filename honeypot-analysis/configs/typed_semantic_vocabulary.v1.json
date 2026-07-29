@@ -1,7 +1,7 @@
 {
   "schema_version": "typed_semantic_vocabulary_policy.v1",
   "policy_id": "honeypot-typed-semantic-vocabulary",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "semantic_extractor_version": "typed-shell-subset.v2.3",
   "authority": {
     "mode": "family_scoped_policy_input",
@@ -169,15 +169,15 @@
       "effect": "change_context"
     },
     "remote_content_access": {
-      "family": "transfer",
+      "family": "transfer_attempt",
       "effect": "read_remote"
     },
     "remote_content_pipe_source": {
-      "family": "transfer",
+      "family": "transfer_attempt",
       "effect": "pipe_remote_content"
     },
     "transfer_attempt": {
-      "family": "transfer",
+      "family": "transfer_attempt",
       "effect": "attempt_transfer"
     },
     "transfer_observed": {
@@ -245,6 +245,7 @@
       "service",
       "context",
       "transfer",
+      "transfer_attempt",
       "execution",
       "sensitive_read",
       "identity"
@@ -453,6 +454,7 @@
       "service": "not_activated",
       "context": "not_activated",
       "transfer": "activated",
+      "transfer_attempt": "activated",
       "execution": "activated",
       "sensitive_read": "activated",
       "identity": "not_activated"
@@ -497,6 +499,28 @@
         "required_outcome_status": "event_observed",
         "required_outcome_scope": "direct_cowrie_event",
         "required_effect_status": "event_observed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [],
+        "require_same_entity": true,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "transfer_attempt": {
+        "required_operation_types": [
+          "remote_content_access",
+          "transfer_attempt"
+        ],
+        "allowed_operation_types": [
+          "remote_content_access",
+          "transfer_attempt"
+        ],
+        "operation_match_mode": "all_required",
+        "required_entity_role": "urls",
+        "required_entity_type": "url",
+        "entity_match_mode": "shared_required",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
         "required_parse_status": "parsed",
         "allowed_path_resolution_statuses": [],
         "require_same_entity": true,

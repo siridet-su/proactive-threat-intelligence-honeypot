@@ -213,6 +213,7 @@ def test_vocabulary_is_closed_hash_bound_and_family_scoped() -> None:
             "unknown",
             "sensitive_read",
             "transfer",
+            "transfer_attempt",
             "inspection",
             "filesystem",
             "execution",

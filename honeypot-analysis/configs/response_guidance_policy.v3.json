@@ -1,7 +1,7 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "updated_at": "2026-07-30",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
@@ -194,6 +194,29 @@
         "last_reviewed": "2026-07-30",
         "review_expires_at": "2027-07-16",
         "version": "3.2.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-command-transfer-attempt",
+      "semantic_family": "transfer_attempt",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "cisa-small-business"],
+      "severity": "medium",
+      "statement": "Cowrie reported success for a parsed, supported command that attempted HTTP(S) remote-content access; received bytes, a completed transfer, a created destination, artifact identity, execution, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["transfer_attempt"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires same-URL typed remote-content-access and transfer-attempt operations with successful fragment outcome", "Direct Cowrie transfer events remain a separate authority family", "ATT&CK candidates, predictions, enrichment, hypotheses, and generic downloader labels cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.6.0"
       }
     }
   ],

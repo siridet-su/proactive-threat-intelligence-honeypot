@@ -38,6 +38,7 @@ ALLOWED_BEHAVIOR_FLAGS = {"has_commands", "has_cowrie_transfer_event"}
 ACTIVATED_SEMANTIC_FAMILIES = {
     "sensitive_read",
     "transfer",
+    "transfer_attempt",
     "inspection",
     "filesystem",
     "execution",

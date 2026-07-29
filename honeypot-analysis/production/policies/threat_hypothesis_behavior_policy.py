@@ -329,6 +329,12 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
         _validate_action_types(downloader.get("literal_action_types"), "policy.claims.independent.downloader.literal_action_types", errors)
         _validate_pattern(downloader.get("legacy_command_pattern"), "policy.claims.independent.downloader.legacy_command_pattern", errors)
         _validate_claim(downloader, "policy.claims.independent.downloader", errors)
+        _validate_typed_semantic_claim(
+            downloader.get("typed_semantic"),
+            "policy.claims.independent.downloader.typed_semantic",
+            errors,
+            expected_family="transfer_attempt",
+        )
         execution = independent.get("execution") or {}
         _validate_action_types(execution.get("literal_action_types"), "policy.claims.independent.execution.literal_action_types", errors)
         _validate_pattern(execution.get("legacy_command_pattern"), "policy.claims.independent.execution.legacy_command_pattern", errors)

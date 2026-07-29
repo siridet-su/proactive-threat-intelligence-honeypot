@@ -353,6 +353,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "unknown": "not_eligible",
                     "sensitive_read": "activated",
                     "transfer": "activated",
+                    "transfer_attempt": "activated",
                     "inspection": "activated",
                     "filesystem": "activated",
                     "execution": "activated",
@@ -367,14 +368,15 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
         elif set(requirements) != {
             "sensitive_read",
             "transfer",
+            "transfer_attempt",
             "inspection",
             "filesystem",
             "execution",
         }:
             errors.append(
                 "activation.family_requirements must contain only "
-                "sensitive_read, transfer, inspection, filesystem, and "
-                "execution"
+                "sensitive_read, transfer, transfer_attempt, inspection, "
+                "filesystem, and execution"
             )
         else:
             expected_requirements = {
@@ -413,6 +415,28 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "required_outcome_status": "event_observed",
                     "required_outcome_scope": "direct_cowrie_event",
                     "required_effect_status": "event_observed",
+                    "required_parse_status": "parsed",
+                    "allowed_path_resolution_statuses": set(),
+                    "require_same_entity": True,
+                    "require_linkable_identity": True,
+                    "require_empty_abstention_reasons": True,
+                },
+                "transfer_attempt": {
+                    "required_operation_types": {
+                        "remote_content_access",
+                        "transfer_attempt",
+                    },
+                    "allowed_operation_types": {
+                        "remote_content_access",
+                        "transfer_attempt",
+                    },
+                    "operation_match_mode": "all_required",
+                    "required_entity_role": "urls",
+                    "required_entity_type": "url",
+                    "entity_match_mode": "shared_required",
+                    "required_outcome_status": "reported_success",
+                    "required_outcome_scope": "fragment",
+                    "required_effect_status": "reported_completed",
                     "required_parse_status": "parsed",
                     "allowed_path_resolution_statuses": set(),
                     "require_same_entity": True,

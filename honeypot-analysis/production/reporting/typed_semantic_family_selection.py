@@ -25,6 +25,7 @@ SCHEMA_VERSION = "typed_semantic_family_selection.v1"
 ACTIVATED_FAMILIES = (
     "sensitive_read",
     "transfer",
+    "transfer_attempt",
     "inspection",
     "filesystem",
     "execution",
@@ -781,6 +782,10 @@ def validate_policy_output_trace(
                 "file_read",
             ],
             "transfer": ["transfer_observed"],
+            "transfer_attempt": [
+                "remote_content_access",
+                "transfer_attempt",
+            ],
         }.get(family)
         operation_types = match.get("operation_types")
         operations_valid = (
@@ -830,11 +835,21 @@ def validate_policy_output_trace(
                 "effect_status": "event_observed",
                 }
                 if family == "transfer"
-                else {
-                    "outcome_status": "reported_success",
-                    "outcome_scope": "fragment",
-                    "effect_status": "reported_completed",
-                }
+                else (
+                    {
+                        "entity_role": "urls",
+                        "entity_type": "url",
+                        "outcome_status": "reported_success",
+                        "outcome_scope": "fragment",
+                        "effect_status": "reported_completed",
+                    }
+                    if family == "transfer_attempt"
+                    else {
+                        "outcome_status": "reported_success",
+                        "outcome_scope": "fragment",
+                        "effect_status": "reported_completed",
+                    }
+                )
             )
         )
         for key, expected in expected_values.items():
@@ -857,6 +872,13 @@ def validate_policy_output_trace(
             errors.append(
                 f"typed semantic policy trace matches[{index}] path status "
                 "must be empty for a hash entity"
+            )
+        if family == "transfer_attempt" and match.get(
+            "path_resolution_status"
+        ):
+            errors.append(
+                f"typed semantic policy trace matches[{index}] path status "
+                "must be empty for a URL entity"
             )
         if family != "inspection" and not _clean(
             match.get("entity_value")
@@ -991,12 +1013,16 @@ def validate_policy_output_trace(
                 {frozenset({"direct_cowrie_event"})}
                 if family == "transfer"
                 else (
+                    {frozenset({"general_command_semantics"})}
+                    if family == "transfer_attempt"
+                    else (
                     {
                         frozenset({"general_command_semantics"}),
                         frozenset({"shell_syntax"}),
                     }
                     if family == "filesystem"
                     else {frozenset({"general_command_semantics"})}
+                    )
                 )
             )
         )
