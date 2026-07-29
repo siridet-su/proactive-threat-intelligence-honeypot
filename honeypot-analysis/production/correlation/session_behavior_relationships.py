@@ -554,6 +554,7 @@ def _command_observation(
         "fragment_count": fragment_count,
         "operator_before": operator_before,
         "operator_after": operator_after,
+        "working_directory_observed": _clean(cwd),
         "source_index": source_index,
         "action_types": extracted["action_types"],
         "entities": extracted["entities"],
@@ -681,6 +682,7 @@ def _build_command_observations(
                 source_index=int(matching_event.get("_source_index") or 0),
                 source_refs=refs,
                 mappings=mappings,
+                cwd=_clean(matching_event.get("cwd")),
                 policy_document=policy_document,
             ))
         compound_index += 1
@@ -769,6 +771,7 @@ def _build_transfer_observations(
             "eventid": _clean(event.get("eventid")),
             "timestamp": _clean(event.get("timestamp")),
             "source_index": source_index,
+            "working_directory_observed": _clean(event.get("cwd")),
             "action_types": ["cowrie_file_transfer_observed"],
             "action_status": "reported_success",
             "entities": entities,

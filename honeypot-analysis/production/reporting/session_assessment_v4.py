@@ -30,6 +30,7 @@ from production.reporting.threat_hypothesis import (
     build_observed_behavior,
     build_supported_assessment,
 )
+from production.reporting.typed_semantic_facts import run_typed_semantic_shadow
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.utils.sensitive_data import redact_for_artifact
 
@@ -526,6 +527,12 @@ def build_session_assessment_v4(
             behavior_policy_path=behavior_policy_path,
         )
     )
+    # Shadow facts are intentionally discarded. They cannot affect policy
+    # validity, canonical output, persistence, consumers, or identity inputs.
+    try:
+        run_typed_semantic_shadow(observed)
+    except Exception:
+        pass
     behavior = policy_summary(behavior_document, include_integrity=True)
     classification = _file_policy(
         classification_policy_path,
