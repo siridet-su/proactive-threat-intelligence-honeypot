@@ -148,13 +148,18 @@ class CanonicalAssessmentCoordinator:
         _ioc_bundle: Any,
         _tactic_summary: Dict[str, List[str]],
         sessions: List[Any],
-        _bpg_list: List[Dict[str, Any]],
+        bpg_list: List[Dict[str, Any]],
         *,
         ttp_command_map: Optional[Dict[str, List[str]]] = None,
         raw_events: Optional[List[Dict[str, Any]]] = None,
         session_correlations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         del ttp_command_map
+        # ``build_pipeline_trigger`` passes this documented public keyword.
+        # The graph is context-only in v4, but accepting it here prevents a
+        # primary report from incorrectly falling through to the availability
+        # fallback before canonical assessment can run.
+        del bpg_list
         report = build_session_assessment_v4(
             sessions,
             raw_events=raw_events or [],

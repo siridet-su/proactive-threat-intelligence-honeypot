@@ -8,6 +8,7 @@ from pathlib import Path
 from production.api.monitor_web import _render_report_panel, _report_summary
 from production.reporting.artifacts import build_stix_bundle, write_markdown_report
 from production.reporting.canonical_pipeline import CanonicalAssessmentCoordinator
+from production.workers.session_monitor import SessionState, build_pipeline_trigger
 from production.reporting.session_assessment_v4 import (
     build_session_assessment_v4,
     read_legacy_session_assessment,
@@ -373,6 +374,36 @@ def test_coordinator_new_report_path_never_calls_legacy_generation(monkeypatch) 
         [],
         raw_events=payload["raw_events"],
     ))
+    assert report["schema_version"] == "session_assessment.v4"
+    assert validate_session_assessment_v4(report) == []
+
+
+def test_pipeline_trigger_invokes_canonical_coordinator_with_public_bpg_keyword() -> None:
+    """A closed live session must reach the primary v4 report path, not fallback."""
+
+    state = SessionState(
+        session_id="canonical-pipeline-session",
+        src_ip="203.0.113.14",
+        start_time="2026-07-28T01:00:00Z",
+    )
+    state.login_success = True
+    state.commands.append("whoami")
+    state.commands_success.append("whoami")
+    state.raw_events.append(
+        {
+            "eventid": "cowrie.command.input",
+            "session": state.session_id,
+            "src_ip": state.src_ip,
+            "timestamp": "2026-07-28T01:00:01Z",
+            "input": "whoami",
+        }
+    )
+    report = build_pipeline_trigger(
+        CanonicalAssessmentCoordinator,
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_rules_path=CLASSIFICATION_POLICY,
+    )(state)
+    assert report is not None
     assert report["schema_version"] == "session_assessment.v4"
     assert validate_session_assessment_v4(report) == []
 
