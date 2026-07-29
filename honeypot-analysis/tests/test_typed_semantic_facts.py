@@ -208,6 +208,23 @@ def test_vocabulary_is_closed_hash_bound_and_family_scoped() -> None:
     assert set(loaded["document"]["entity_role_types"]) == set(
         loaded["document"]["vocabulary"]["entity_roles"]
     )
+    assert loaded["document"]["sensitive_path_policy"] == {
+        "schema_version": "typed_sensitive_path_policy.v1",
+        "match_scope": "complete_parsed_path_operand",
+        "exact_absolute_paths": ["/etc/passwd", "/etc/shadow"],
+        "suffix_path_segments": [
+            [".aws", "credentials"],
+            [
+                ".config",
+                "gcloud",
+                "application_default_credentials.json",
+            ],
+            [".ssh", "id_dsa"],
+            [".ssh", "id_ecdsa"],
+            [".ssh", "id_ed25519"],
+            [".ssh", "id_rsa"],
+        ],
+    }
     assert validate_typed_semantic_vocabulary(
         loaded["document"]
     ) == []
@@ -663,12 +680,16 @@ def test_vocabulary_rejects_invented_values_and_incomplete_coverage() -> None:
     }
     forged["entity_role_types"].pop("read_paths")
     forged["activation"]["family_states"]["inspection"] = "activated"
+    forged["sensitive_path_policy"]["suffix_path_segments"].append(
+        ["..", "invented"]
+    )
 
     errors = validate_typed_semantic_vocabulary(forged)
 
     assert any("outside the vocabulary" in item for item in errors)
     assert any("cover every entity role exactly" in item for item in errors)
     assert any("must be not_activated" in item for item in errors)
+    assert any("invalid path segment" in item for item in errors)
 
 
 def test_shadow_fact_and_diff_are_deterministic_and_strictly_valid() -> None:

@@ -1,8 +1,8 @@
 {
   "schema_version": "typed_semantic_vocabulary_policy.v1",
   "policy_id": "honeypot-typed-semantic-vocabulary",
-  "version": "1.1.0",
-  "semantic_extractor_version": "typed-shell-subset.v2.1",
+  "version": "1.2.0",
+  "semantic_extractor_version": "typed-shell-subset.v2.2",
   "authority": {
     "mode": "family_scoped_policy_input",
     "may_select_findings": true,
@@ -23,6 +23,41 @@
     "chain_schema": "typed_semantic_chain.v1",
     "shadow_result_schema": "typed_semantic_shadow_result.v2",
     "shadow_diff_schema": "typed_semantic_shadow_diff.v1"
+  },
+  "sensitive_path_policy": {
+    "schema_version": "typed_sensitive_path_policy.v1",
+    "match_scope": "complete_parsed_path_operand",
+    "exact_absolute_paths": [
+      "/etc/passwd",
+      "/etc/shadow"
+    ],
+    "suffix_path_segments": [
+      [
+        ".aws",
+        "credentials"
+      ],
+      [
+        ".config",
+        "gcloud",
+        "application_default_credentials.json"
+      ],
+      [
+        ".ssh",
+        "id_dsa"
+      ],
+      [
+        ".ssh",
+        "id_ecdsa"
+      ],
+      [
+        ".ssh",
+        "id_ed25519"
+      ],
+      [
+        ".ssh",
+        "id_rsa"
+      ]
+    ]
   },
   "operations": {
     "unknown": {

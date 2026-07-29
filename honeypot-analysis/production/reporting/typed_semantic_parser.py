@@ -11,7 +11,7 @@ from production.utils.serialization import stable_id
 
 
 _WRAPPERS = {"env", "nohup", "setsid", "sudo"}
-_READ_TOOLS = {"cat", "cut", "grep", "head", "less", "more", "stat", "tail", "wc"}
+_READ_TOOLS = {"cat", "cut", "grep", "head", "less", "more", "tail", "wc"}
 _SYSTEMCTL_READ = {
     "cat",
     "get-default",
@@ -78,7 +78,7 @@ def _path_value(
     working_directory: str,
     working_directory_status: str,
 ) -> Dict[str, Any]:
-    raw = _clean(raw_value)
+    raw = str(raw_value or "")
     uncertain = False
     linkable = False
     reason = "none"
@@ -141,7 +141,11 @@ def _entity(
     working_directory: str = "",
     working_directory_status: str = "unknown",
 ) -> Dict[str, Any]:
-    raw = _clean(raw_value)
+    raw = (
+        str(raw_value or "")
+        if entity_type == "path"
+        else _clean(raw_value)
+    )
     if entity_type == "path":
         values = _path_value(
             raw,
@@ -259,6 +263,8 @@ def _shell_tokens(command: str) -> Tuple[str, str, List[str]]:
         return "empty", "missing_operand", []
     if "$(" in command or "`" in command or "<(" in command or ">(" in command:
         return "unsupported", "unsupported_shell_syntax", []
+    if _contains_file_descriptor_redirection(command):
+        return "unsupported", "unsupported_shell_syntax", []
     try:
         lexer = shlex.shlex(
             command,
@@ -275,6 +281,52 @@ def _shell_tokens(command: str) -> Tuple[str, str, List[str]]:
     if any("$" in token or "`" in token for token in tokens):
         return "unsupported", "expansion_unresolved", []
     return "parsed", "", tokens
+
+
+def _contains_file_descriptor_redirection(command: str) -> bool:
+    """Detect adjacent IO-number redirects outside quotes.
+
+    ``shlex`` intentionally does not retain whether a numeric token was
+    adjacent to a redirect.  The supported subset rejects actual fd
+    manipulation, while permitting ordinary numeric utility arguments before
+    a separately spaced redirect (for example ``head -c 20 < file``).
+    """
+
+    quote = ""
+    escaped = False
+    index = 0
+    while index < len(command):
+        character = command[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if character == "\\" and quote != "'":
+            escaped = True
+            index += 1
+            continue
+        if quote:
+            if character == quote:
+                quote = ""
+            index += 1
+            continue
+        if character in {"'", '"'}:
+            quote = character
+            index += 1
+            continue
+        if (
+            character.isdigit()
+            and (index == 0 or command[index - 1].isspace())
+        ):
+            end = index + 1
+            while end < len(command) and command[end].isdigit():
+                end += 1
+            if end < len(command) and command[end] in {"<", ">"}:
+                return True
+            index = end
+            continue
+        index += 1
+    return False
 
 
 def _unwrap(tokens: List[str]) -> Tuple[List[str], str]:
@@ -328,8 +380,6 @@ def _redirections(
             continue
         if index + 1 >= len(tokens) or tokens[index + 1] in {"<", ">", ">>"}:
             return [], [], "missing_operand"
-        if arguments and arguments[-1].isdigit():
-            return [], [], "unsupported_shell_syntax"
         target = tokens[index + 1]
         role = {
             "<": "read_paths",
@@ -463,6 +513,112 @@ def _read_path_entities(
         )
         if reference
     ]
+
+
+def _sensitive_path_match(
+    entity: Dict[str, Any],
+    policy: Dict[str, Any],
+) -> bool:
+    if entity.get("entity_type") != "path":
+        return False
+    path_policy = policy.get("sensitive_path_policy") or {}
+    values = [
+        entity.get("normalized_value"),
+        entity.get("original_value"),
+    ]
+    exact_paths = set(path_policy.get("exact_absolute_paths") or [])
+    suffixes = [
+        tuple(suffix)
+        for suffix in path_policy.get("suffix_path_segments") or []
+        if isinstance(suffix, list)
+    ]
+    for value in values:
+        path = value if isinstance(value, str) else ""
+        if not path:
+            continue
+        if path.startswith("relative:"):
+            path = path[len("relative:"):]
+        if any(character in path for character in ("$", "`", "*", "?", "[", "]")):
+            continue
+        if path in exact_paths:
+            return True
+        segments = tuple(segment for segment in path.split("/") if segment)
+        if any(
+            len(segments) >= len(suffix)
+            and segments[-len(suffix):] == suffix
+            for suffix in suffixes
+        ):
+            return True
+    return False
+
+
+def _rebuild_credential_path_entities(
+    entities: Dict[str, List[Dict[str, Any]]],
+    policy: Dict[str, Any],
+    source_credential_entities: List[Dict[str, Any]],
+) -> None:
+    """Use complete parsed path operands for authority-bearing identities."""
+
+    parsed_paths = [
+        item
+        for role, values in entities.items()
+        if role != "credential_paths"
+        for item in values
+        if isinstance(item, dict)
+        and item.get("entity_type") == "path"
+        and not _clean(item.get("source_entity_ref"))
+    ]
+    entities["credential_paths"] = []
+    if parsed_paths:
+        for item in parsed_paths:
+            if (
+                _sensitive_path_match(item, policy)
+                and not any(
+                    existing.get("entity_id") == item.get("entity_id")
+                    for existing in entities["credential_paths"]
+                )
+            ):
+                entities["credential_paths"].append(deepcopy(item))
+        return
+
+    # A non-operation path mention remains audit context when the canonical
+    # extractor found it.  It never creates ``credential_path_read``.  Parsed
+    # operands, when present, always replace these substring-derived values.
+    entities["credential_paths"] = deepcopy(source_credential_entities)
+
+
+def _add_sensitive_read_operation(
+    operations: List[Dict[str, Any]],
+    entities: Dict[str, List[Dict[str, Any]]],
+    observation: Dict[str, Any],
+) -> None:
+    credential_refs = {
+        item.get("entity_id")
+        for item in entities.get("credential_paths", [])
+        if isinstance(item, dict) and item.get("entity_id")
+    }
+    read_refs = {
+        entity_ref
+        for operation in operations
+        if operation.get("operation_type") == "file_read"
+        for entity_ref in operation.get("entity_refs") or []
+    }
+    refs = sorted(credential_refs & read_refs)
+    if not refs:
+        return
+    literal = (
+        "credential_path_access"
+        if "credential_path_access" in (
+            observation.get("action_types") or []
+        )
+        else ""
+    )
+    _add_operation(operations, _operation(
+        "credential_path_read",
+        proof_scope="literal_command",
+        entity_refs=refs,
+        source_literal_action=literal,
+    ))
 
 
 def _general_operations(
@@ -682,11 +838,14 @@ def _general_operations(
             working_directory,
             working_directory_status,
         )
-        _add_operation(operations, _operation(
-            "file_read",
-            proof_scope="general_command_semantics",
-            entity_refs=refs,
-        ))
+        if refs or not any(
+            item["operator"] == "<" for item in redirects
+        ):
+            _add_operation(operations, _operation(
+                "file_read",
+                proof_scope="general_command_semantics",
+                entity_refs=refs,
+            ))
         if in_place:
             modify_refs = [
                 _add_entity(
@@ -1142,6 +1301,10 @@ def extract_typed_semantics(
 
     entities = _empty_entities(policy)
     _merge_source_entities(entities, observation.get("entities") or {})
+    source_credential_entities = deepcopy(
+        entities.get("credential_paths") or []
+    )
+    entities["credential_paths"] = []
     parse_status, parse_reason, tokens = _shell_tokens(
         _clean(observation.get("command"))
     )
@@ -1202,6 +1365,8 @@ def extract_typed_semantics(
                         operation_type = literal_map.get(literal)
                         if not operation_type:
                             continue
+                        if operation_type == "credential_path_read":
+                            continue
                         refs = [
                             item.get("entity_id")
                             for values in entities.values()
@@ -1209,29 +1374,6 @@ def extract_typed_semantics(
                             if isinstance(item, dict)
                             and item.get("entity_id")
                         ]
-                        if operation_type == "credential_path_read":
-                            credential_refs = {
-                                item.get("entity_id")
-                                for item in entities.get(
-                                    "credential_paths", []
-                                )
-                                if isinstance(item, dict)
-                                and item.get("entity_id")
-                            }
-                            general_read_refs = {
-                                entity_ref
-                                for operation in operations
-                                if operation.get("operation_type")
-                                == "file_read"
-                                for entity_ref in (
-                                    operation.get("entity_refs") or []
-                                )
-                            }
-                            refs = sorted(
-                                credential_refs & general_read_refs
-                            )
-                            if not refs:
-                                continue
                         existing = next(
                             (
                                 item
@@ -1265,6 +1407,31 @@ def extract_typed_semantics(
                         proof_scope="shell_syntax",
                         entity_refs=[redirect["entity_ref"]],
                     ))
+                _rebuild_credential_path_entities(
+                    entities,
+                    policy,
+                    (
+                        []
+                        if parse_reason in {
+                            "unsupported_shell_syntax",
+                            "expansion_unresolved",
+                        }
+                        else source_credential_entities
+                    ),
+                )
+                if not hard_abstention:
+                    _add_sensitive_read_operation(
+                        operations,
+                        entities,
+                        observation,
+                    )
+
+    if parse_status != "parsed":
+        entities["credential_paths"] = (
+            deepcopy(source_credential_entities)
+            if parse_reason == "malformed_quoting"
+            else []
+        )
 
     abstentions = _unique(abstentions)
     if parse_status != "parsed":

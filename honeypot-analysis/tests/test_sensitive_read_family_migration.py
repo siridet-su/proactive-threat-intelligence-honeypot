@@ -168,7 +168,7 @@ def _legacy_guidance(observed: dict) -> dict:
         "cat /etc/shadow",
         "head -n 1 /etc/passwd",
         "grep root /etc/passwd",
-        "stat /etc/shadow",
+        "tail -c 8 /etc/shadow",
     ],
 )
 def test_resolved_successful_read_commands_select_the_family(
@@ -222,6 +222,7 @@ def test_resolved_successful_read_commands_select_the_family(
         ("rm /etc/shadow", "file_delete"),
         ("chmod 600 /etc/shadow", "permission_modify"),
         ("sed -i s/a/b/ /etc/shadow", "file_modify"),
+        ("stat --dereference /etc/shadow", "unknown"),
     ],
 )
 def test_non_read_mentions_do_not_select_sensitive_read(

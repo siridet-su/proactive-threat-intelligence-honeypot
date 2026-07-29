@@ -71,7 +71,10 @@ This extractor is deliberately not a shell interpreter. It supports:
 It does not interpret aliases, shell functions, variables, glob expansion,
 command or process substitution, heredocs, file-descriptor manipulation,
 unsupported options, or malformed quoting. Those forms abstain. Missing
-operands or targets remain `unknown`.
+operands or targets remain `unknown`. An adjacent numeric IO descriptor such
+as `2>` is rejected, while an ordinary numeric utility argument followed by a
+separately spaced redirect (for example `head -c 20 < file`) remains
+parseable.
 
 General extractors cover:
 
@@ -136,6 +139,22 @@ syntax, unresolved identities, and ambiguity abstain.
 `credential_path_read` is emitted only when the general parser proves a
 same-entity `file_read`; merely mentioning a sensitive path in `echo`, delete,
 permission-change, or other non-read syntax does not create it.
+
+Credential sensitivity is matched against the complete, quote-normalized
+parsed path operand, never a regex substring from the raw command. The
+hash-bound vocabulary names `/etc/passwd`, `/etc/shadow`, AWS credentials,
+gcloud application-default credentials, and the reviewed DSA/ECDSA/Ed25519/RSA
+private-key basenames. Suffix matching is segment-exact, so public-key,
+backup, and whitespace-suffixed paths do not match. A path resolved through an
+observed working directory has the same entity identity in `read_paths` and
+`credential_paths`. Input-redirection reads are recorded with
+`shell_syntax` proof before the derived sensitive-read facet.
+
+Metadata inspection such as `stat` remains outside the reviewed content-reader
+subset and therefore stays `unknown`. Unsupported nested syntax cannot create
+a credential entity or sensitive-read operation. A raw credential-path mention
+may remain audit-only context for other unsupported commands, but it cannot
+select the family without a same-entity parsed read.
 
 The selected threat output is a bounded behavioral finding, not an attacker
 intent or hypothesis. The selected v3 playbook remains advisory, manually

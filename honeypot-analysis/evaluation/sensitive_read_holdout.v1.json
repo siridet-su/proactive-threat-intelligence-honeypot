@@ -1,0 +1,31 @@
+{
+  "schema_version": "sensitive_read_holdout.v1",
+  "authored_independently_of_implementation_tests": true,
+  "expected_labels_frozen_before_execution": true,
+  "cases": [
+    {"case_id": "SH01", "command": "cat --show-tabs /opt/team/.ssh/id_ed25519", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH02", "command": "head --lines 3 /srv/ops/.aws/credentials", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH03", "command": "tail --bytes 32 \"/srv/google/.config/gcloud/application_default_credentials.json\"", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH04", "command": "wc \"/etc/passwd\"", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH05", "command": "grep service \"/etc/shadow\"", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH06", "command": "more .ssh/id_rsa", "cwd": "/home/holdout", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH07", "command": "cat</etc/shadow", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH08", "command": "head -c 7 < \"/etc/passwd\"", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH09", "command": "cat /etc//shadow", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH10", "command": "cat /etc/./shadow", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH11", "command": "nohup cat /etc/passwd", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH12", "command": "stat -L /etc/passwd", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH13", "command": "readlink /etc/shadow", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH14", "command": "cat \"/etc/shadow\\t\"", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH15", "command": "cat /etc/shadow.bak", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH16", "command": "cat /work/.aws/credentials.old", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH17", "command": "cat /home/x/.ssh/id_rsa.pub", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH18", "command": "cp /etc/passwd /tmp/holdout-copy", "outcome": "success", "credential_path_read": true, "eligible_matches": 0},
+    {"case_id": "SH19", "command": "cat <&3", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH20", "command": "cat 0</etc/passwd", "outcome": "success", "credential_path_read": false, "eligible_matches": 0},
+    {"case_id": "SH21", "command": "cat /etc/shadow > /tmp/holdout-output", "outcome": "success", "credential_path_read": true, "eligible_matches": 0},
+    {"case_id": "SH22", "command": "cat /etc/passwd", "outcome": "failure", "credential_path_read": true, "eligible_matches": 0},
+    {"case_id": "SH23", "command": "cat '/etc/shad'ow", "outcome": "success", "credential_path_read": true, "eligible_matches": 1},
+    {"case_id": "SH24", "command": "cat '/etc/ shadow'", "outcome": "success", "credential_path_read": false, "eligible_matches": 0}
+  ]
+}

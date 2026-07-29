@@ -501,7 +501,7 @@ def _typed_operations(
 
 
 def _absolute_candidate(value: str, working_directory: str) -> str:
-    raw = _clean(value)
+    raw = value if isinstance(value, str) else ""
     if (
         not raw
         or any(character in raw for character in ("$", "`", "*", "?", "[", "]"))
@@ -529,15 +529,24 @@ def _path_resolutions(
         if "path" not in role:
             continue
         for entity in values:
-            recorded = _clean(entity.get("normalized_value"))
-            original = _clean(entity.get("original_value"))
+            recorded_value = entity.get("normalized_value")
+            original_value = entity.get("original_value")
+            recorded = (
+                recorded_value if isinstance(recorded_value, str) else ""
+            )
+            original = (
+                original_value if isinstance(original_value, str) else ""
+            )
             if entity.get("linkable") is True and entity.get("uncertain") is False:
                 status = "recorded_resolved"
                 candidate = recorded
                 proof = "literal_command"
             else:
-                candidate = _clean(
-                    entity.get("candidate_normalized_value")
+                candidate_value = entity.get("candidate_normalized_value")
+                candidate = (
+                    candidate_value
+                    if isinstance(candidate_value, str)
+                    else ""
                 ) or _absolute_candidate(original, working_directory)
                 if candidate and working_directory_status in {
                     "observed",
@@ -1689,7 +1698,10 @@ def _validate_entity(
         if not isinstance(value.get("variants"), list):
             errors.append(f"{label}.variants must be a list")
     entity_type = _clean(value.get("entity_type"))
-    normalized = _clean(value.get("normalized_value"))
+    normalized_value = value.get("normalized_value")
+    normalized = (
+        normalized_value if isinstance(normalized_value, str) else ""
+    )
     identity_value = (
         normalized
         if value.get("linkable") is True
@@ -2257,8 +2269,13 @@ def validate_typed_semantic_fact_set(
                 errors.append(
                     f"{resolution_label} promotes unresolved identity"
                 )
-            candidate_value = _clean(
-                resolution.get("candidate_normalized_value")
+            raw_candidate_value = resolution.get(
+                "candidate_normalized_value"
+            )
+            candidate_value = (
+                raw_candidate_value
+                if isinstance(raw_candidate_value, str)
+                else ""
             )
             expected_path_id = (
                 stable_id("typed_path_identity", {"path": candidate_value})

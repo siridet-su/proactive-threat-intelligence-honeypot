@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
@@ -24,6 +25,7 @@ _ROOT_KEYS = {
     "authority",
     "review",
     "contract",
+    "sensitive_path_policy",
     "operations",
     "literal_action_map",
     "entity_role_types",
@@ -45,6 +47,12 @@ _CONTRACT_KEYS = {
     "chain_schema",
     "shadow_result_schema",
     "shadow_diff_schema",
+}
+_SENSITIVE_PATH_POLICY_KEYS = {
+    "schema_version",
+    "match_scope",
+    "exact_absolute_paths",
+    "suffix_path_segments",
 }
 _VOCABULARY_KEYS = {
     "operation_families",
@@ -178,6 +186,75 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
         for key in _CONTRACT_KEYS:
             if not _clean(contract.get(key)):
                 errors.append(f"contract.{key} must be a non-empty string")
+
+    sensitive_paths = value.get("sensitive_path_policy")
+    if _exact_keys(
+        sensitive_paths,
+        _SENSITIVE_PATH_POLICY_KEYS,
+        "sensitive_path_policy",
+        errors,
+    ):
+        if (
+            sensitive_paths.get("schema_version")
+            != "typed_sensitive_path_policy.v1"
+        ):
+            errors.append(
+                "sensitive_path_policy.schema_version is invalid"
+            )
+        if (
+            sensitive_paths.get("match_scope")
+            != "complete_parsed_path_operand"
+        ):
+            errors.append(
+                "sensitive_path_policy.match_scope must require complete "
+                "parsed path operands"
+            )
+        exact_paths = _string_list(
+            sensitive_paths.get("exact_absolute_paths"),
+            "sensitive_path_policy.exact_absolute_paths",
+            errors,
+        )
+        for path in exact_paths:
+            if (
+                not path.startswith("/")
+                or path != posixpath.normpath(path)
+                or path != path.strip()
+            ):
+                errors.append(
+                    "sensitive_path_policy exact paths must be canonical "
+                    "absolute paths"
+                )
+        suffixes = sensitive_paths.get("suffix_path_segments")
+        if not isinstance(suffixes, list) or not suffixes:
+            errors.append(
+                "sensitive_path_policy.suffix_path_segments must be a "
+                "non-empty list"
+            )
+        else:
+            normalized_suffixes: List[tuple[str, ...]] = []
+            for index, suffix in enumerate(suffixes):
+                label = (
+                    "sensitive_path_policy.suffix_path_segments"
+                    f"[{index}]"
+                )
+                segments = _string_list(suffix, label, errors)
+                if len(segments) < 2:
+                    errors.append(f"{label} must contain at least two segments")
+                if any(
+                    segment in {".", ".."}
+                    or "/" in segment
+                    or segment != segment.strip()
+                    for segment in segments
+                ):
+                    errors.append(
+                        f"{label} contains an invalid path segment"
+                    )
+                normalized_suffixes.append(tuple(segments))
+            if len(normalized_suffixes) != len(set(normalized_suffixes)):
+                errors.append(
+                    "sensitive_path_policy suffixes must not contain "
+                    "duplicates"
+                )
 
     vocabulary = value.get("vocabulary")
     lists: Dict[str, List[str]] = {}

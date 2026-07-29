@@ -151,12 +151,12 @@ def _match_or_reasons(
         for item in fact.get("path_resolutions") or []
         if isinstance(item, dict) and item.get("role") == role
     }
-    operation_refs = {
-        _clean(operation.get("operation_type")): set(
-            _texts(operation.get("entity_refs") or [])
-        )
-        for operation in required_operations
-    }
+    operation_refs: Dict[str, set[str]] = {}
+    for operation in required_operations:
+        operation_refs.setdefault(
+            _clean(operation.get("operation_type")),
+            set(),
+        ).update(_texts(operation.get("entity_refs") or []))
     eligible_entities: List[tuple[Dict[str, Any], Dict[str, Any]]] = []
     for entity in entities:
         entity_ref = _clean(entity.get("entity_id"))
@@ -565,9 +565,21 @@ def validate_policy_output_trace(
             errors.append(
                 f"typed semantic policy trace matches[{index}] entity is empty"
             )
-        if set(match.get("proof_scopes") or []) != {
-            "general_command_semantics",
-            "literal_command",
+        proof_scopes = frozenset(match.get("proof_scopes") or [])
+        if proof_scopes not in {
+            frozenset({
+                "general_command_semantics",
+                "literal_command",
+            }),
+            frozenset({
+                "shell_syntax",
+                "literal_command",
+            }),
+            frozenset({
+                "general_command_semantics",
+                "shell_syntax",
+                "literal_command",
+            }),
         }:
             errors.append(
                 f"typed semantic policy trace matches[{index}] proof scopes "
