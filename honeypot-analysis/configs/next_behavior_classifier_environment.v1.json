@@ -11,7 +11,7 @@
   "classifier": {
     "adapter": "production.classification.securebert_classifier.SecureBertCommandClassifier",
     "adapter_sha256": "72c7cb7a4c2a9f85f141d8eb39a12b24414e0cd861f463ac6cb9e4811cc622be",
-    "pipeline_sha256": "72b848e262c32c726c73db9031a5bec663ca2550ccb512b0d48d2c00851b66b7",
+    "pipeline_sha256": "85a5f26d9a7c481b35b8862a2322a6e048a17285ceccb4cc975b72ad9132ff92",
     "checkpoint_id": "securebert_ttp_model_v2/checkpoint-6765",
     "checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
     "parameter_count": 149755588,
