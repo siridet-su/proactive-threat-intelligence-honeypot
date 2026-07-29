@@ -1,7 +1,7 @@
 {
   "schema_version": "typed_semantic_vocabulary_policy.v1",
   "policy_id": "honeypot-typed-semantic-vocabulary",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "semantic_extractor_version": "typed-shell-subset.v2.2",
   "authority": {
     "mode": "family_scoped_policy_input",
@@ -446,7 +446,7 @@
     "family_states": {
       "unknown": "not_eligible",
       "inspection": "activated",
-      "filesystem": "not_activated",
+      "filesystem": "activated",
       "transformation": "not_activated",
       "collection": "not_activated",
       "scheduled_task": "not_activated",
@@ -530,6 +530,43 @@
         "required_entity_role": null,
         "required_entity_type": null,
         "entity_match_mode": "referenced_if_present",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [
+          "recorded_resolved",
+          "context_resolved"
+        ],
+        "require_same_entity": false,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "filesystem": {
+        "required_operation_types": [
+          "file_write",
+          "file_append",
+          "file_modify",
+          "permission_modify",
+          "directory_create",
+          "file_move",
+          "file_delete"
+        ],
+        "allowed_operation_types": [
+          "file_write",
+          "file_append",
+          "file_modify",
+          "permission_modify",
+          "directory_create",
+          "file_move",
+          "file_delete",
+          "file_read",
+          "literal_data_emission"
+        ],
+        "operation_match_mode": "exactly_one_required",
+        "required_entity_role": null,
+        "required_entity_type": null,
+        "entity_match_mode": "referenced_required",
         "required_outcome_status": "reported_success",
         "required_outcome_scope": "fragment",
         "required_effect_status": "reported_completed",

@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-30-inspection-observation-v1",
+  "version": "2026-07-30-filesystem-observation-v1",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -12,7 +12,8 @@
       "Family-scoped typed sensitive-read migration decision",
       "Direct Cowrie transfer-event typed authority decision",
       "Observed transfer URI, working-directory, and event-order preservation review",
-      "Observation-only typed inspection activation decision"
+      "Observation-only typed inspection activation decision",
+      "Observation-only typed filesystem-change activation decision"
     ],
     "reviewed": true,
     "reviewer": "project developer",
@@ -211,6 +212,20 @@
         }
       ],
       "independent": {
+        "filesystem": {
+          "typed_semantic": {
+            "rule_id": "observed-supported-cowrie-filesystem-change-command",
+            "family": "filesystem",
+            "claim_type": "observed_cowrie_filesystem_change_command",
+            "text": "Cowrie reported success for a parsed, supported filesystem-change command in its simulated shell.",
+            "evidence_status": "supported",
+            "limitations": [
+              "Cowrie-reported success does not establish the resulting filesystem state.",
+              "The observation does not establish malicious intent, persistence, cleanup, compromise, or an effect on a real host.",
+              "ATT&CK mappings, predictions, enrichment, correlations, guidance, and optional prose do not support this finding."
+            ]
+          }
+        },
         "inspection": {
           "typed_semantic": {
             "rule_id": "observed-supported-cowrie-inspection-command",

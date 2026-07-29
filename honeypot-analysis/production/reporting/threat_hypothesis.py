@@ -502,20 +502,27 @@ def build_supported_assessment(
     activated_families = {
         _clean(value) for value in activated_semantic_families if _clean(value)
     }
+    suppressed_action_types = (
+        {
+            "transfer_attempt",
+            "cowrie_file_transfer_observed",
+            "remote_content_pipe_source",
+        }
+        if "transfer" in activated_families
+        else set()
+    )
+    if "filesystem" in activated_families:
+        suppressed_action_types.update({
+            "permission_modification_attempt",
+            "deletion_attempt",
+        })
     connected_claims = _connected_behavior_claims(
         observed,
         document,
-        suppressed_action_types=(
-            {
-                "transfer_attempt",
-                "cowrie_file_transfer_observed",
-                "remote_content_pipe_source",
-            }
-            if "transfer" in activated_families
-            else set()
-        ),
+        suppressed_action_types=suppressed_action_types,
     )
     objectives: List[Dict[str, Any]] = list(connected_claims)
+    filesystem_definition = independent.get("filesystem") or {}
     inspection_definition = independent.get("inspection") or {}
     credential_definition = independent.get("credential") or {}
     downloader_definition = independent.get("downloader") or {}
@@ -531,7 +538,12 @@ def build_supported_assessment(
     if isinstance(typed_semantic_fact_set, dict):
         for family in sorted(
             activated_families.intersection(
-                {"sensitive_read", "transfer", "inspection"}
+                {
+                    "sensitive_read",
+                    "transfer",
+                    "inspection",
+                    "filesystem",
+                }
             )
         ):
             try:
@@ -573,9 +585,16 @@ def build_supported_assessment(
         compile_pattern(document, persistence_definition.get("trusted_command_pattern")),
         document,
     )
-    cleanup = _matching_chain(
-        chain,
-        compile_pattern(document, cleanup_definition.get("trusted_command_pattern")),
+    cleanup = (
+        []
+        if "filesystem" in activated_families
+        else _matching_chain(
+            chain,
+            compile_pattern(
+                document,
+                cleanup_definition.get("trusted_command_pattern"),
+            ),
+        )
     )
     confirmed_eventids = (
         (policy_body(document).get("event_types") or {}).get("confirmed_download") or []
@@ -585,6 +604,38 @@ def build_supported_assessment(
         for eventid in confirmed_eventids
         for ref in _event_refs(observed, eventid)
     ))
+
+    if "filesystem" in activated_families:
+        selection = semantic_selections.get("filesystem") or {}
+        matches = selection.get("matches") or []
+        if matches:
+            typed_definition = filesystem_definition.get(
+                "typed_semantic"
+            ) or {}
+            refs = sorted({
+                _clean(ref)
+                for match in matches
+                if isinstance(match, dict)
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            claim = _claim(
+                _clean(typed_definition.get("claim_type")),
+                _clean(typed_definition.get("text")),
+                _clean(typed_definition.get("evidence_status"))
+                or "supported",
+                refs,
+                typed_definition.get("limitations") or [],
+            )
+            claim.update({
+                "claim_basis": "typed_semantic_fact_set.v2",
+                "behavior_policy_rule_id": _clean(
+                    typed_definition.get("rule_id")
+                ),
+                "semantic_family": "filesystem",
+                "semantic_trace": policy_output_trace(selection),
+            })
+            objectives.append(claim)
 
     if "inspection" in activated_families:
         selection = semantic_selections.get("inspection") or {}

@@ -1,7 +1,7 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "updated_at": "2026-07-30",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
@@ -104,6 +104,29 @@
         "last_reviewed": "2026-07-30",
         "review_expires_at": "2027-07-16",
         "version": "3.3.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-filesystem-change-command",
+      "semantic_family": "filesystem",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "severity": "medium",
+      "statement": "Cowrie reported success for a parsed, supported filesystem-change command in its simulated shell; the resulting filesystem state, malicious intent, persistence, cleanup, compromise, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["filesystem"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires one supported typed filesystem-change operation with successful fragment outcome", "Every mutation target and path identity must resolve", "ATT&CK candidates, predictions, enrichment, hypotheses, and generic command labels cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.4.0"
       }
     },
     {

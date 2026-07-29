@@ -659,7 +659,6 @@ def build_session_assessment_v4(
                 CURRENT_ACTIVATED_SEMANTIC_FAMILIES
             ),
             "non_activated_families": [
-                "filesystem",
                 "transformation",
                 "collection",
                 "scheduled_task",
@@ -786,6 +785,7 @@ def validate_session_assessment_v4(
     )
     legacy_one_family = response_policy_version.startswith("3.1.")
     legacy_two_families = response_policy_version.startswith("3.2.")
+    legacy_three_families = response_policy_version.startswith("3.3.")
     typed = typed_value if isinstance(typed_value, dict) else {}
     if not legacy_pre_typed and not isinstance(typed_value, dict):
         errors.append("provenance.typed_semantics is required")
@@ -822,7 +822,11 @@ def validate_session_assessment_v4(
             else (
                 ["sensitive_read", "transfer"]
                 if legacy_two_families
-                else list(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+                else (
+                    ["sensitive_read", "transfer", "inspection"]
+                    if legacy_three_families
+                    else list(CURRENT_ACTIVATED_SEMANTIC_FAMILIES)
+                )
             )
         )
     ):

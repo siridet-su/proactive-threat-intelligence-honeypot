@@ -279,6 +279,7 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
     else:
         for name in (
             "inspection",
+            "filesystem",
             "credential",
             "downloader",
             "execution",
@@ -292,6 +293,12 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             definition = independent.get(name) or {}
             _validate_pattern(definition.get("trusted_command_pattern"), f"policy.claims.independent.{name}.trusted_command_pattern", errors)
             _validate_claim(definition, f"policy.claims.independent.{name}", errors)
+        _validate_typed_semantic_claim(
+            (independent.get("filesystem") or {}).get("typed_semantic"),
+            "policy.claims.independent.filesystem.typed_semantic",
+            errors,
+            expected_family="filesystem",
+        )
         _validate_typed_semantic_claim(
             (independent.get("inspection") or {}).get("typed_semantic"),
             "policy.claims.independent.inspection.typed_semantic",

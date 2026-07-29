@@ -22,7 +22,12 @@ from production.utils.serialization import stable_json
 
 
 SCHEMA_VERSION = "typed_semantic_family_selection.v1"
-ACTIVATED_FAMILIES = ("sensitive_read", "transfer", "inspection")
+ACTIVATED_FAMILIES = (
+    "sensitive_read",
+    "transfer",
+    "inspection",
+    "filesystem",
+)
 INSPECTION_OPERATIONS = frozenset({
     "host_uptime_inspection",
     "filesystem_capacity_inspection",
@@ -33,6 +38,15 @@ INSPECTION_OPERATIONS = frozenset({
     "network_socket_inspection",
     "account_database_inspection",
     "filesystem_search",
+})
+FILESYSTEM_CHANGE_OPERATIONS = frozenset({
+    "file_write",
+    "file_append",
+    "file_modify",
+    "permission_modify",
+    "directory_create",
+    "file_move",
+    "file_delete",
 })
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SELECTION_KEYS = {
@@ -202,6 +216,14 @@ def _match_or_reasons(
         for item in fact.get("path_resolutions") or []
         if isinstance(item, dict)
     }
+    path_by_entity_role = {
+        (
+            _clean(item.get("entity_ref")),
+            _clean(item.get("role")),
+        ): item
+        for item in fact.get("path_resolutions") or []
+        if isinstance(item, dict)
+    }
     operation_refs: Dict[str, set[str]] = {}
     for operation in required_operations:
         operation_refs.setdefault(
@@ -250,27 +272,70 @@ def _match_or_reasons(
             reasons.append("single_artifact_hash_required")
         if not eligible_entities:
             reasons.append("resolved_shared_entity_missing")
-    elif entity_match_mode == "referenced_if_present":
-        entity_by_id = {
-            _clean(entity.get("entity_id")): (entity_role, entity)
-            for entity_role, entity in entity_entries
-            if _clean(entity.get("entity_id"))
+    elif entity_match_mode in {
+        "referenced_if_present",
+        "referenced_required",
+    }:
+        entities_by_id: Dict[
+            str,
+            List[tuple[str, Dict[str, Any]]],
+        ] = {}
+        for entity_role, entity in entity_entries:
+            entity_ref = _clean(entity.get("entity_id"))
+            if entity_ref:
+                entities_by_id.setdefault(entity_ref, []).append(
+                    (entity_role, entity)
+                )
+        filesystem_roles = {
+            "file_write": {"created_paths"},
+            "file_append": {"appended_paths"},
+            "file_modify": {"modified_paths"},
+            "permission_modify": {"modified_paths"},
+            "directory_create": {"created_paths"},
+            "file_move": {"source_paths", "destination_paths"},
+            "file_delete": {"deleted_paths"},
+        }
+        required_roles = {
+            role_name
+            for operation_type in eligible_operation_types
+            for role_name in filesystem_roles.get(
+                operation_type,
+                set(),
+            )
         }
         referenced_entity_ids = sorted({
             entity_ref
             for operation in required_operations
             for entity_ref in _texts(operation.get("entity_refs") or [])
         })
-        if not referenced_entity_ids:
+        if (
+            not referenced_entity_ids
+            and entity_match_mode == "referenced_required"
+        ):
+            reasons.append("referenced_entity_required")
+        elif not referenced_entity_ids:
             eligible_entities.append(({}, {}, ""))
         else:
             for entity_ref in referenced_entity_ids:
-                entry = entity_by_id.get(entity_ref)
-                if entry is None:
+                entries = entities_by_id.get(entity_ref) or []
+                if family == "filesystem":
+                    entries = [
+                        entry
+                        for entry in entries
+                        if entry[0] in required_roles
+                    ]
+                if len(entries) != 1:
                     reasons.append("referenced_entity_unresolved")
                     continue
+                entry = entries[0]
                 entity_role, entity = entry
-                path = path_by_entity.get(entity_ref) or {}
+                path = (
+                    path_by_entity_role.get(
+                        (entity_ref, entity_role),
+                    )
+                    or path_by_entity.get(entity_ref)
+                    or {}
+                )
                 if (
                     requirement["require_linkable_identity"]
                     and (
@@ -716,7 +781,17 @@ def validate_policy_output_trace(
             else (
                 isinstance(operation_types, list)
                 and len(operation_types) == 1
-                and operation_types[0] in INSPECTION_OPERATIONS
+                and (
+                    (
+                        family == "inspection"
+                        and operation_types[0] in INSPECTION_OPERATIONS
+                    )
+                    or (
+                        family == "filesystem"
+                        and operation_types[0]
+                        in FILESYSTEM_CHANGE_OPERATIONS
+                    )
+                )
             )
         )
         if not operations_valid:
@@ -814,6 +889,41 @@ def validate_policy_output_trace(
                     f"typed semantic policy trace matches[{index}] "
                     "inspection entity fields are inconsistent"
                 )
+        if family == "filesystem":
+            operation_type = (
+                operation_types[0]
+                if isinstance(operation_types, list)
+                and len(operation_types) == 1
+                else ""
+            )
+            role = _clean(match.get("entity_role"))
+            entity_type = _clean(match.get("entity_type"))
+            entity_value = _clean(match.get("entity_value"))
+            path_status = _clean(
+                match.get("path_resolution_status")
+            )
+            allowed_roles = {
+                "file_write": {"created_paths"},
+                "file_append": {"appended_paths"},
+                "file_modify": {"modified_paths"},
+                "permission_modify": {"modified_paths"},
+                "directory_create": {"created_paths"},
+                "file_move": {"source_paths", "destination_paths"},
+                "file_delete": {"deleted_paths"},
+            }.get(operation_type, set())
+            if (
+                role not in allowed_roles
+                or entity_type != "path"
+                or not entity_value
+                or path_status not in {
+                    "recorded_resolved",
+                    "context_resolved",
+                }
+            ):
+                errors.append(
+                    f"typed semantic policy trace matches[{index}] "
+                    "filesystem entity is invalid"
+                )
         proof_scopes = frozenset(match.get("proof_scopes") or [])
         allowed_proof_scopes = (
             {
@@ -835,7 +945,14 @@ def validate_policy_output_trace(
             else (
                 {frozenset({"direct_cowrie_event"})}
                 if family == "transfer"
-                else {frozenset({"general_command_semantics"})}
+                else (
+                    {
+                        frozenset({"general_command_semantics"}),
+                        frozenset({"shell_syntax"}),
+                    }
+                    if family == "filesystem"
+                    else {frozenset({"general_command_semantics"})}
+                )
             )
         )
         if proof_scopes not in allowed_proof_scopes:

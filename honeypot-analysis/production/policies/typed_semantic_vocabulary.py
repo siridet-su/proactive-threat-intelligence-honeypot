@@ -354,6 +354,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     "sensitive_read": "activated",
                     "transfer": "activated",
                     "inspection": "activated",
+                    "filesystem": "activated",
                 }.get(family, "not_activated")
                 if state != expected:
                     errors.append(
@@ -366,15 +367,20 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
             "sensitive_read",
             "transfer",
             "inspection",
+            "filesystem",
         }:
             errors.append(
                 "activation.family_requirements must contain only "
-                "sensitive_read, transfer, and inspection"
+                "sensitive_read, transfer, inspection, and filesystem"
             )
         else:
             expected_requirements = {
                 "sensitive_read": {
                     "required_operation_types": {
+                        "file_read",
+                        "credential_path_read",
+                    },
+                    "allowed_operation_types": {
                         "file_read",
                         "credential_path_read",
                     },
@@ -396,6 +402,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                 },
                 "transfer": {
                     "required_operation_types": {"transfer_observed"},
+                    "allowed_operation_types": {"transfer_observed"},
                     "operation_match_mode": "all_required",
                     "required_entity_role": "artifact_hashes",
                     "required_entity_type": "hash",
@@ -421,10 +428,58 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                         "account_database_inspection",
                         "filesystem_search",
                     },
+                    "allowed_operation_types": {
+                        "host_uptime_inspection",
+                        "filesystem_capacity_inspection",
+                        "system_identity_inspection",
+                        "account_identity_inspection",
+                        "network_route_inspection",
+                        "process_inspection",
+                        "network_socket_inspection",
+                        "account_database_inspection",
+                        "filesystem_search",
+                    },
                     "operation_match_mode": "exactly_one_required",
                     "required_entity_role": None,
                     "required_entity_type": None,
                     "entity_match_mode": "referenced_if_present",
+                    "required_outcome_status": "reported_success",
+                    "required_outcome_scope": "fragment",
+                    "required_effect_status": "reported_completed",
+                    "required_parse_status": "parsed",
+                    "allowed_path_resolution_statuses": {
+                        "recorded_resolved",
+                        "context_resolved",
+                    },
+                    "require_same_entity": False,
+                    "require_linkable_identity": True,
+                    "require_empty_abstention_reasons": True,
+                },
+                "filesystem": {
+                    "required_operation_types": {
+                        "file_write",
+                        "file_append",
+                        "file_modify",
+                        "permission_modify",
+                        "directory_create",
+                        "file_move",
+                        "file_delete",
+                    },
+                    "allowed_operation_types": {
+                        "file_write",
+                        "file_append",
+                        "file_modify",
+                        "permission_modify",
+                        "directory_create",
+                        "file_move",
+                        "file_delete",
+                        "file_read",
+                        "literal_data_emission",
+                    },
+                    "operation_match_mode": "exactly_one_required",
+                    "required_entity_role": None,
+                    "required_entity_type": None,
+                    "entity_match_mode": "referenced_required",
                     "required_outcome_status": "reported_success",
                     "required_outcome_scope": "fragment",
                     "required_effect_status": "reported_completed",
@@ -464,9 +519,11 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                     errors.append(
                         f"{family} has invalid required operations"
                     )
-                if set(allowed_operations) != set(required_operations):
+                if set(allowed_operations) != expected[
+                    "allowed_operation_types"
+                ]:
                     errors.append(
-                        f"{family} may allow only its required operations"
+                        f"{family} has invalid allowed operations"
                     )
                 for operation_type in required_operations:
                     if operation_type not in operations:

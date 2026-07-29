@@ -39,6 +39,7 @@ ACTIVATED_SEMANTIC_FAMILIES = {
     "sensitive_read",
     "transfer",
     "inspection",
+    "filesystem",
 }
 REQUIRED_PROVENANCE_FIELDS = {
     "method",
