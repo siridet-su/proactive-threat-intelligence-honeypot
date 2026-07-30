@@ -65,7 +65,8 @@ record_metadata "${cowrie_root}/var/log/cowrie/cowrie_custom.json"
 record_metadata "${cowrie_root}/var/log/cowrie/cowrie.json"
 record_metadata "${cowrie_root}/var/log/cowrie/cowrie.log"
 systemctl is-active cowrie.service >"${receipt}/cowrie.service.before" || true
-git -C "${cowrie_root}" status --porcelain=v1 -uno 2>&1 \
+git -c "safe.directory=${cowrie_root}" -C "${cowrie_root}" \
+  status --porcelain=v1 -uno 2>&1 \
   | sha256sum >"${receipt}/cowrie-dirty-status.before.sha256"
 sha256sum "${package}" >"${receipt}/bundle-package.sha256"
 
