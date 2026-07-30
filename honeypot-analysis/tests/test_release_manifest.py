@@ -39,18 +39,50 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
     return release, package, policy, artifact, rollback
 
 
+def _build_manifest(
+    *,
+    release: Path,
+    package: Path,
+    policy: Path,
+    artifact: Path,
+    rollback: Path,
+    managed_unit_policy_path: str = str(MANAGED_UNIT_POLICY),
+    **overrides: object,
+) -> dict:
+    dependency_lock = release / "requirements.lock"
+    dependency_lock.write_text("dependency==1.0\n", encoding="utf-8")
+    systemd_unit = release / "honeypot-test.service"
+    systemd_unit.write_text("[Service]\nExecStart=/bin/true\n", encoding="utf-8")
+    static_asset = release / "monitor.html"
+    static_asset.write_text("<!doctype html>\n", encoding="utf-8")
+    arguments = {
+        "revision": REVISION,
+        "release_root": release,
+        "package_path": package,
+        "rollback_location": rollback,
+        "configuration_paths": {"policy": str(policy)},
+        "artifact_paths": {"model": str(artifact)},
+        "managed_unit_policy_path": managed_unit_policy_path,
+        "builder_identity": "isolated-test@test-host",
+        "database_schema_version": 3,
+        "dependency_lock_paths": {"runtime": str(dependency_lock)},
+        "systemd_unit_paths": {"test": str(systemd_unit)},
+        "static_asset_paths": {"monitor": str(static_asset)},
+    }
+    arguments.update(overrides)
+    return build_manifest(**arguments)
+
+
 def test_release_manifest_binds_package_tree_config_artifact_and_rollback(
     tmp_path: Path,
 ) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
         runtime_feed_provenance_path=str(tmp_path / "runtime-feed-provenance.json"),
         deployed_at="2026-07-28T00:00:00+00:00",
     )
@@ -60,7 +92,7 @@ def test_release_manifest_binds_package_tree_config_artifact_and_rollback(
     result = verify_manifest(output, release)
     assert result["verified"] is True
     assert result["git_revision"] == REVISION
-    assert result["release_file_count"] == 2
+    assert result["release_file_count"] == 4
     recorded = json.loads(output.read_text())
     assert recorded["model_artifacts"]["model"]["sha256"]
     assert recorded["effective_configurations"]["policy"]["sha256"]
@@ -71,20 +103,25 @@ def test_release_manifest_binds_package_tree_config_artifact_and_rollback(
     assert recorded["runtime_feed_provenance"]["authority"] == (
         "non_authoritative_context_only"
     )
+    assert recorded["build_context"]["builder_identity"] == (
+        "isolated-test@test-host"
+    )
+    assert recorded["build_context"]["database_schema_version"] == 3
+    assert recorded["build_context"]["dependency_locks"]["runtime"]["sha256"]
+    assert recorded["build_context"]["systemd_units"]["test"]["sha256"]
+    assert recorded["build_context"]["static_assets"]["monitor"]["sha256"]
 
 
 def test_release_manifest_rejects_overlay_and_artifact_changes(
     tmp_path: Path,
 ) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
@@ -97,19 +134,64 @@ def test_release_manifest_rejects_overlay_and_artifact_changes(
         verify_manifest(output, release)
 
 
+def test_release_manifest_rejects_build_context_drift(tmp_path: Path) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
+    )
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+
+    Path(
+        manifest["build_context"]["dependency_locks"]["runtime"]["path"]
+    ).write_text("dependency==2.0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="dependency_locks"):
+        verify_manifest(output, release)
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"builder_identity": "contains whitespace"}, "builder identity"),
+        ({"database_schema_version": True}, "database schema version"),
+        ({"dependency_lock_paths": {}}, "dependency lock"),
+        ({"systemd_unit_paths": {}}, "systemd unit"),
+        ({"static_asset_paths": {}}, "static asset"),
+    ],
+)
+def test_release_manifest_rejects_incomplete_build_context(
+    tmp_path: Path,
+    override: dict,
+    message: str,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    with pytest.raises(ValueError, match=message):
+        _build_manifest(
+            release=release,
+            package=package,
+            policy=policy,
+            artifact=artifact,
+            rollback=rollback,
+            **override,
+        )
+
+
 def test_release_manifest_rejects_managed_unit_policy_drift(
     tmp_path: Path,
 ) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
     managed = tmp_path / "managed_units.v1.json"
     managed.write_bytes(MANAGED_UNIT_POLICY.read_bytes())
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
         managed_unit_policy_path=str(managed),
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
@@ -127,14 +209,12 @@ def test_release_manifest_and_marker_are_excluded_from_release_identity(
     tmp_path: Path,
 ) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
@@ -174,14 +254,12 @@ def test_release_manifest_excludes_environment_derived_runtime_state(
         generated.parent.mkdir(parents=True, exist_ok=True)
         generated.write_bytes(b"environment-derived")
 
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
@@ -193,18 +271,16 @@ def test_release_manifest_excludes_environment_derived_runtime_state(
     assert verify_manifest(output, release)["verified"] is True
 
 
-def test_release_manifest_v6_rejects_identity_policy_drift(
+def test_release_manifest_v7_rejects_identity_policy_drift(
     tmp_path: Path,
 ) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
     )
     manifest["release_identity"]["policy_id"] = "invented-policy"
     output = release / "DEPLOYMENT_MANIFEST.json"
@@ -221,17 +297,16 @@ def test_excluded_classifier_snapshot_can_be_separately_hash_bound(
     frozen_mitre_snapshot = release / "data" / "feeds" / "mitre_attack_cache.json"
     frozen_mitre_snapshot.parent.mkdir(parents=True)
     frozen_mitre_snapshot.write_text('{"_schema":"2"}\n', encoding="utf-8")
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
         artifact_paths={
             "model": str(artifact),
             "classifier_mitre_snapshot": str(frozen_mitre_snapshot),
         },
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
@@ -251,14 +326,12 @@ def test_release_manifest_keeps_v5_inventory_semantics_readable(
     feed = release / "data" / "feeds" / "mitre_attack_cache.json"
     feed.parent.mkdir(parents=True)
     feed.write_text('{"_schema":"2"}\n', encoding="utf-8")
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
     )
     legacy_inventory = release_file_inventory(
         release,
@@ -268,6 +341,7 @@ def test_release_manifest_keeps_v5_inventory_semantics_readable(
     manifest["release_files"] = legacy_inventory
     manifest["release_tree_sha256"] = inventory_sha256(legacy_inventory)
     manifest.pop("release_identity")
+    manifest.pop("build_context")
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
 
@@ -283,14 +357,13 @@ def test_release_manifest_rejects_mutable_feed_cache_as_immutable_config(
     feed_cache.write_text('{"_schema":"2"}\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="mutable runtime feed caches"):
-        build_manifest(
-            revision=REVISION,
-            release_root=release,
-            package_path=package,
-            rollback_location=rollback,
+        _build_manifest(
+            release=release,
+            package=package,
+            policy=feed_cache,
+            artifact=artifact,
+            rollback=rollback,
             configuration_paths={"mitre_cache": str(feed_cache)},
-            artifact_paths={"model": str(artifact)},
-            managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
         )
 
 
@@ -311,14 +384,12 @@ def test_release_manifest_binds_separate_frozen_model_bundle(tmp_path: Path) -> 
     )
     bundle_package = tmp_path / "frozen-model-bundle.tar"
     bundle_package.write_bytes(b"bundle-recovery-package")
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
         frozen_model_bundle_manifest_path=str(bundle_manifest),
         frozen_model_bundle_package_path=str(bundle_package),
     )
@@ -336,18 +407,46 @@ def test_release_manifest_binds_separate_frozen_model_bundle(tmp_path: Path) -> 
 
 def test_release_manifest_keeps_v2_records_readable(tmp_path: Path) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
-    manifest = build_manifest(
-        revision=REVISION,
-        release_root=release,
-        package_path=package,
-        rollback_location=rollback,
-        configuration_paths={"policy": str(policy)},
-        artifact_paths={"model": str(artifact)},
-        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
     )
     manifest["schema_version"] = "honeypot_release_manifest.v2"
+    legacy_inventory = release_file_inventory(
+        release,
+        schema_version="honeypot_release_manifest.v2",
+    )
+    manifest["release_files"] = legacy_inventory
+    manifest["release_tree_sha256"] = inventory_sha256(legacy_inventory)
     manifest.pop("runtime_feed_provenance", None)
+    manifest.pop("build_context")
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
 
     assert verify_manifest(output, release)["verified"] is True
+
+
+def test_release_manifest_keeps_v6_immutable_inventory_readable(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    feed = release / "data" / "feeds" / "mitre_attack_cache.json"
+    feed.parent.mkdir(parents=True)
+    feed.write_text('{"_schema":"2"}\n', encoding="utf-8")
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
+    )
+    manifest["schema_version"] = "honeypot_release_manifest.v6"
+    manifest.pop("build_context")
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+
+    assert verify_manifest(output, release)["verified"] is True
+    assert "data/feeds/mitre_attack_cache.json" not in manifest["release_files"]

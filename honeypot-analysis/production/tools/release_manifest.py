@@ -12,8 +12,17 @@ from typing import Any, Iterable
 from production.tools.managed_systemd_units import load_managed_unit_policy
 
 
-SCHEMA_VERSION = "honeypot_release_manifest.v6"
+SCHEMA_VERSION = "honeypot_release_manifest.v7"
 LEGACY_SCHEMA_VERSIONS = frozenset(
+    {
+        "honeypot_release_manifest.v2",
+        "honeypot_release_manifest.v3",
+        "honeypot_release_manifest.v4",
+        "honeypot_release_manifest.v5",
+        "honeypot_release_manifest.v6",
+    }
+)
+LEGACY_INVENTORY_SCHEMA_VERSIONS = frozenset(
     {
         "honeypot_release_manifest.v2",
         "honeypot_release_manifest.v3",
@@ -21,8 +30,12 @@ LEGACY_SCHEMA_VERSIONS = frozenset(
         "honeypot_release_manifest.v5",
     }
 )
+IMMUTABLE_SOURCE_SCHEMA_VERSIONS = frozenset(
+    {SCHEMA_VERSION, "honeypot_release_manifest.v6"}
+)
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+BUILDER_IDENTITY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@:/-]{2,127}$")
 EXCLUDED_RELEASE_FILES = frozenset({"DEPLOYED_COMMIT", "DEPLOYMENT_MANIFEST.json"})
 RELEASE_IDENTITY_POLICY_ID = "immutable_source_release.v2"
 RUNTIME_BYTECODE_SUFFIXES = frozenset({".pyc", ".pyo"})
@@ -142,16 +155,17 @@ def release_file_inventory(
             continue
         # v2-v5 releases used the original bytecode-only exclusion. Preserve
         # that behavior so archived manifests remain independently verifiable.
-        if schema_version in LEGACY_SCHEMA_VERSIONS and (
+        if schema_version in LEGACY_INVENTORY_SCHEMA_VERSIONS and (
             "__pycache__" in Path(relative).parts
             or path.suffix in RUNTIME_BYTECODE_SUFFIXES
         ):
             continue
-        # v6 binds immutable source while keeping environment-derived state
+        # v6+ bind immutable source while keeping environment-derived state
         # outside the release identity. Mutable feeds are verified separately
         # through runtime_feed_provenance.v1.
-        if schema_version == SCHEMA_VERSION and _is_environment_derived_path(
-            relative
+        if (
+            schema_version in IMMUTABLE_SOURCE_SCHEMA_VERSIONS
+            and _is_environment_derived_path(relative)
         ):
             continue
         if path.is_symlink():
@@ -304,6 +318,11 @@ def build_manifest(
     configuration_paths: dict[str, str],
     artifact_paths: dict[str, str],
     managed_unit_policy_path: str,
+    builder_identity: str,
+    database_schema_version: int,
+    dependency_lock_paths: dict[str, str],
+    systemd_unit_paths: dict[str, str],
+    static_asset_paths: dict[str, str],
     runtime_feed_provenance_path: str = "",
     frozen_model_bundle_manifest_path: str = "",
     frozen_model_bundle_package_path: str = "",
@@ -311,6 +330,20 @@ def build_manifest(
 ) -> dict[str, Any]:
     if not REVISION_PATTERN.fullmatch(revision):
         raise ValueError("revision must be a full lowercase Git SHA-1")
+    if not BUILDER_IDENTITY_PATTERN.fullmatch(builder_identity):
+        raise ValueError("builder identity is invalid")
+    if (
+        not isinstance(database_schema_version, int)
+        or isinstance(database_schema_version, bool)
+        or database_schema_version < 0
+    ):
+        raise ValueError("database schema version must be non-negative")
+    if not dependency_lock_paths:
+        raise ValueError("at least one dependency lock is required")
+    if not systemd_unit_paths:
+        raise ValueError("at least one systemd unit is required")
+    if not static_asset_paths:
+        raise ValueError("at least one static asset is required")
     package_path = package_path.resolve()
     rollback_location = rollback_location.resolve()
     if not package_path.is_file():
@@ -330,6 +363,13 @@ def build_manifest(
         "release_files": inventory,
         "release_tree_sha256": inventory_sha256(inventory),
         "release_identity": _release_identity_contract(),
+        "build_context": {
+            "builder_identity": builder_identity,
+            "database_schema_version": database_schema_version,
+            "dependency_locks": _artifact_hashes(dependency_lock_paths),
+            "systemd_units": _artifact_hashes(systemd_unit_paths),
+            "static_assets": _artifact_hashes(static_asset_paths),
+        },
         "package": {
             "path": str(package_path),
             "bytes": package_path.stat().st_size,
@@ -415,11 +455,38 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
             or _sha256_file(config_path) != config.get("sha256")
         ):
             raise ValueError(f"effective configuration does not match: {name}")
-    if schema_version == SCHEMA_VERSION:
+    if schema_version in IMMUTABLE_SOURCE_SCHEMA_VERSIONS:
         if manifest.get("release_identity") != _release_identity_contract():
             raise ValueError("release identity policy does not match manifest")
+    if schema_version == SCHEMA_VERSION:
+        build_context = manifest.get("build_context")
+        if not isinstance(build_context, dict):
+            raise ValueError("manifest build context is required")
+        builder_identity = str(build_context.get("builder_identity") or "")
+        if not BUILDER_IDENTITY_PATTERN.fullmatch(builder_identity):
+            raise ValueError("manifest builder identity is invalid")
+        database_schema_version = build_context.get("database_schema_version")
+        if (
+            not isinstance(database_schema_version, int)
+            or isinstance(database_schema_version, bool)
+            or database_schema_version < 0
+        ):
+            raise ValueError("manifest database schema version is invalid")
+        for field in ("dependency_locks", "systemd_units", "static_assets"):
+            entries = build_context.get(field)
+            if not isinstance(entries, dict) or not entries:
+                raise ValueError(f"manifest {field} are required")
+            actual_entries = _artifact_hashes(
+                {
+                    str(name): str(receipt.get("path") or "")
+                    for name, receipt in entries.items()
+                    if isinstance(receipt, dict)
+                }
+            )
+            if actual_entries != entries:
+                raise ValueError(f"manifest {field} do not match")
     if schema_version in {
-        SCHEMA_VERSION,
+        *IMMUTABLE_SOURCE_SCHEMA_VERSIONS,
         "honeypot_release_manifest.v5",
         "honeypot_release_manifest.v4",
         "honeypot_release_manifest.v3",
@@ -441,7 +508,10 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
             ):
                 raise ValueError("runtime feed provenance integrity contract is invalid")
     managed_units = manifest.get("managed_systemd_units")
-    if schema_version in {SCHEMA_VERSION, "honeypot_release_manifest.v5"}:
+    if schema_version in {
+        *IMMUTABLE_SOURCE_SCHEMA_VERSIONS,
+        "honeypot_release_manifest.v5",
+    }:
         if not isinstance(managed_units, dict):
             raise ValueError("managed systemd-unit policy receipt is required")
         actual_managed_units = _managed_unit_policy_receipt(
@@ -483,6 +553,11 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--configuration", action="append", default=[])
     create.add_argument("--artifact", action="append", default=[])
     create.add_argument("--managed-unit-policy", required=True)
+    create.add_argument("--builder-identity", required=True)
+    create.add_argument("--database-schema-version", required=True, type=int)
+    create.add_argument("--dependency-lock", action="append", default=[])
+    create.add_argument("--systemd-unit", action="append", default=[])
+    create.add_argument("--static-asset", action="append", default=[])
     create.add_argument(
         "--runtime-feed-provenance",
         default="",
@@ -516,6 +591,13 @@ def main() -> int:
             configuration_paths=_named_paths(args.configuration, "configuration"),
             artifact_paths=_named_paths(args.artifact, "artifact"),
             managed_unit_policy_path=args.managed_unit_policy,
+            builder_identity=args.builder_identity,
+            database_schema_version=args.database_schema_version,
+            dependency_lock_paths=_named_paths(
+                args.dependency_lock, "dependency lock"
+            ),
+            systemd_unit_paths=_named_paths(args.systemd_unit, "systemd unit"),
+            static_asset_paths=_named_paths(args.static_asset, "static asset"),
             runtime_feed_provenance_path=args.runtime_feed_provenance,
             frozen_model_bundle_manifest_path=args.frozen_model_bundle_manifest,
             frozen_model_bundle_package_path=args.frozen_model_bundle_package,
