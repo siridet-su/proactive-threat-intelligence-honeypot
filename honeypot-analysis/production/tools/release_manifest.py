@@ -148,8 +148,22 @@ def release_file_inventory(
     root = root.resolve()
     if not root.is_dir():
         raise ValueError("release root must be a directory")
+    # pathlib.Path.rglob() on Python 3.11 probes directory symlink targets while
+    # recursing.  A release intentionally links to an owner-only frozen model
+    # bundle, so an unprivileged verifier can otherwise stop traversing sibling
+    # source directories and produce a partial inventory.  os.walk with
+    # followlinks=False inventories each symlink itself without entering it.
+    entries: list[Path] = []
+    for directory, dirnames, filenames in os.walk(
+        root,
+        topdown=True,
+        followlinks=False,
+    ):
+        directory_path = Path(directory)
+        entries.extend(directory_path / name for name in dirnames)
+        entries.extend(directory_path / name for name in filenames)
     inventory: dict[str, dict[str, Any]] = {}
-    for path in sorted(root.rglob("*")):
+    for path in sorted(entries):
         relative = path.relative_to(root).as_posix()
         if relative in EXCLUDED_RELEASE_FILES:
             continue

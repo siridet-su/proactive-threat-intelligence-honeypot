@@ -224,6 +224,31 @@ def test_release_manifest_and_marker_are_excluded_from_release_identity(
         write_manifest(output, manifest)
 
 
+def test_release_inventory_records_directory_symlink_without_traversing_target(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    model_bundle = tmp_path / "owner-only-model-bundle"
+    model_bundle.mkdir()
+    (model_bundle / "checkpoint.bin").write_bytes(b"frozen")
+    (release / "models").symlink_to(model_bundle, target_is_directory=True)
+    (release / "after-model-link").mkdir()
+    later_file = release / "after-model-link" / "worker.py"
+    later_file.write_text("VALUE = 1\n", encoding="utf-8")
+
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
+    )
+
+    assert manifest["release_files"]["models"]["type"] == "symlink"
+    assert "models/checkpoint.bin" not in manifest["release_files"]
+    assert manifest["release_files"]["after-model-link/worker.py"]["sha256"]
+
+
 def test_release_manifest_excludes_environment_derived_runtime_state(
     tmp_path: Path,
 ) -> None:
