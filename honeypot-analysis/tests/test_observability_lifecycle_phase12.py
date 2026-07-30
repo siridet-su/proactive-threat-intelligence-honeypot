@@ -136,11 +136,46 @@ def test_analysis_report_logs_latency_and_preserves_event_correlation(
     config.analysis_skip_empty_sessions = False
     config.analysis_batch_size = 1
     storage = open_storage(config.database_url)
+    _first_id, inserted = storage.store_event(
+        "sensor-observability",
+        {
+            "eventid": "cowrie.session.connect",
+            "session": "session-analysis",
+            "src_ip": "203.0.113.50",
+            "timestamp": "2026-07-30T09:00:00Z",
+        },
+    )
+    assert inserted is True
+    through_event_id, inserted = storage.store_event(
+        "sensor-observability",
+        {
+            "eventid": "cowrie.session.closed",
+            "session": "session-analysis",
+            "src_ip": "203.0.113.50",
+            "timestamp": "2026-07-30T09:00:01Z",
+        },
+    )
+    assert inserted is True
+    snapshot = storage.load_session_event_snapshot(
+        "session-analysis",
+        through_event_id,
+        max_events=10,
+    )
+    manifest_keys = {
+        "schema_version",
+        "session_id",
+        "through_event_id",
+        "event_count",
+        "manifest_sha256",
+    }
     storage.enqueue_analysis_job(
         {
             "session_id": "session-analysis",
             "src_ip": "203.0.113.50",
             "correlation_id": "evt-safe-correlation",
+            "canonical_event_manifest": {
+                key: snapshot[key] for key in manifest_keys
+            },
         }
     )
 
@@ -158,6 +193,45 @@ def test_analysis_report_logs_latency_and_preserves_event_correlation(
     assert report["correlation_id"] == "evt-safe-correlation"
     assert completed["correlation_id"] == "evt-safe-correlation"
     assert completed["report_generation_latency_ms"] >= 0
+
+
+def test_analysis_without_durable_events_logs_unavailable_without_report(
+    tmp_path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = ProductionConfig(
+        database_url=f"sqlite:///{tmp_path / 'missing-events.db'}",
+        reports_dir=str(tmp_path / "reports"),
+        enable_artifacts=True,
+    )
+    config.analysis_skip_empty_sessions = False
+    config.analysis_batch_size = 1
+    config.analysis_max_attempts = 1
+    storage = open_storage(config.database_url)
+    storage.enqueue_analysis_job(
+        {
+            "session_id": "missing-durable-events",
+            "src_ip": "203.0.113.50",
+            "correlation_id": "evt-missing-durable",
+        }
+    )
+
+    assert asyncio.run(AnalysisWorker(config).process_once()) == 0
+
+    assert storage.list_rows("reports", limit=1) == []
+    report_directory = tmp_path / "reports"
+    assert not report_directory.exists() or not any(
+        report_directory.iterdir()
+    )
+    lines = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+    ]
+    failed = next(item for item in lines if item["status"] == "failed")
+    assert failed["correlation_id"] == "evt-missing-durable"
+    assert failed["canonical_evidence_status"] == "unavailable"
+    assert failed["partial_report_created"] is False
+    assert "session_id" not in failed
 
 
 def test_enrichment_provider_status_includes_measured_latency() -> None:
