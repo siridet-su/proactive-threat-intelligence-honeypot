@@ -1,0 +1,114 @@
+{
+  "schema_version": "next_behavior_checkpoint_compatibility_contract.v1",
+  "target_contract_id": "next_distinct_command_behavior_phase_or_session_end.v1",
+  "purpose": "evaluate_existing_frozen_checkpoint_under_corrected_current_runtime_contract",
+  "model_changes_permitted": false,
+  "final_role_use": "single_predeclared_compatibility_evaluation",
+  "final_role": "test",
+  "development_preflight_role": "selection",
+  "deterministic_replay_sample": 1024,
+  "probability_thresholds": {
+    "tactic": 0.5,
+    "terminal": 0.5
+  },
+  "source": {
+    "zenodo_record": "21260400",
+    "experiment_directory": "experiment_20260724_v3_generation_dde7495",
+    "artifact_directory": "experiment_20260724_v3_generation_dde7495/training.selection_blocked",
+    "partition_manifest_sha256": "3c1a7cc1dbfa5bbd6d1e2179dc96cfd73f6a15527f669aad71b4976851a17fde",
+    "source_reuse": "immutable_privacy_safe_role_sessions_from_original_verified_zenodo_membership",
+    "complete_training_corpus_regeneration": false,
+    "raw_content_permitted_in_output": false
+  },
+  "roles": {
+    "selection": {
+      "safe_session_count": 35442,
+      "safe_sessions_sha256": "0dff8877697a8d61f9eebbb92adb9b0ac938a6531fee7e869a741c5117158f70",
+      "build_receipt_sha256": "7cd0860db0b2ad84ba297dcf6efc2dce9ccbc57034463c904f1f9c0dc77bbcad",
+      "source_receipts_sha256": "97791af68cc8f3364885e9c187fa5c2c595cd010aebc3692eb2648e7d563e47d",
+      "session_membership_sha256": "f4bc2d8860422f6a886705ad86f5ae753b63fd95b73295ae3b822acc80482903",
+      "example_membership_sha256": "8515ddb892ca17d17f110f845cd8b46d5ecf7140cfb2901e38f4d1578c17e231"
+    },
+    "test": {
+      "safe_session_count": 237514,
+      "safe_sessions_sha256": "8a7a3ec38a997ffbe0d79eddb19d2b4b6cdc983acecf529d4650cc11dff78ac5",
+      "build_receipt_sha256": "d21370f126fd70537bab7d2c7926f0e9afd36a0c3bdab88e3731dc94cebf0906",
+      "source_receipts_sha256": "886bc2a2ac236c4e3388dfb9769bb7106999a6a1d99af97af14b9e6f240f3909",
+      "session_membership_sha256": "08afb54330841ac0687966b7a30c5b2b469abb88b76ba42664c3a80497165ccc",
+      "example_membership_sha256": "5988983f14eb0d68e3d11e7b61d3bc57cc6d03464365a55899a94b27f21159c0"
+    }
+  },
+  "policies": {
+    "rule_policy_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "old_trust_policy_sha256": "1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd",
+    "current_trust_policy_sha256": "e4fcf976a18e079a493fcab0472bb220d42e42512a8ae78dc9ccb52799c38b39",
+    "classifier_checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+    "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
+    "preprocessing_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
+    "target_semantics_changed": false,
+    "rule_semantics_changed": false,
+    "trust_delta": "demote_model_only_securebert_without_reviewed_trusted_model_only_authority"
+  },
+  "model": {
+    "checkpoint_relative_path": "seed_runs/transformer_seed_20260721/checkpoint.pt",
+    "checkpoint_sha256": "7fbd73c4bd071336fa52a589bf41e39f5a3122a67aee398dfb8e6dd9cfdfb04a",
+    "model_spec_relative_path": "model_spec.json",
+    "model_spec_file_sha256": "2f4ea5531ce08adbd78f53832d7a6e23ba34617549c56aa50f04d069dee6ccc6",
+    "model_spec_sha256": "82b1a15ec96f5165878ee03639daa61e319f06c4376e0a9a8018f3e1a2b3e512",
+    "vocabulary_relative_path": "vocabulary.json",
+    "vocabulary_file_sha256": "1b46db302d2a92f80f1385e63fa01968cc23a9ce50cb77ef24f20ce8a9e494e9",
+    "vocabulary_sha256": "527a65c6d6cee94a3bbb0af6d5df95981a6438cf703e053484c9e7e116f0306f",
+    "calibration_relative_path": "professor_approved_poc_evaluation_73b902e/calibration.json",
+    "calibration_file_sha256": "528bbdd8f21d7e0a5f4446657639ccbc994b9d469876e8f026eb716e9a8d7cc9",
+    "calibration_mapping_sha256": "aa27813af96eaa2674b07d76f41565e71835bfa1a5bba8a3232eaa0a396a4e2d",
+    "calibration_membership_sha256": "0d209ffe4380cfb707eb714dc12ffc41a4878a5e70e62f9561c1d6d8c1c1d78f",
+    "architecture_changed": false,
+    "vocabulary_changed": false,
+    "calibration_changed": false
+  },
+  "comparisons": [
+    "immutable_historical_reference",
+    "old_training_trust_policy_replay",
+    "corrected_current_policy_real_audit",
+    "corrected_current_policy_zero_audit"
+  ],
+  "decision_rules": {
+    "retraining_required": [
+      "tensor_schema_or_target_is_incompatible",
+      "current_policy_evidence_cannot_be_represented_by_frozen_vocabulary"
+    ],
+    "retraining_recommended": [
+      "coupled_broad_metric_and_calibration_degradation_from_material_target_or_tensor_distribution_change",
+      "new_substantial_rare_or_reportable_class_failure_caused_by_current_policy"
+    ],
+    "compatibility_with_limitations": [
+      "schema_and_target_remain_compatible",
+      "corrections_change_probabilities_without_broad_unacceptable_regression",
+      "known_rare_class_weaknesses_remain_disclosed"
+    ],
+    "post_final_code_adaptation_permitted": false
+  },
+  "code_sha256": {
+    "production/tools/evaluate_frozen_checkpoint_compatibility.py": "bb00a5deab1a8f6b6ca630af05fcf9e379251a2ef8c27215f0e4f7917580d324",
+    "production/reproduction/next_behavior/compatibility_evaluation.py": "c5f3733c71d075a95d034fc45676e721bcedaac9710c4cc0eee18471ede68cbd",
+    "production/prediction/next_behavior_chronology.py": "a989cbfa2fd728ab3e6c90f08111047430fd2544f65f9ac13c11712c27f5bfca",
+    "production/prediction/next_behavior_runtime.py": "667ae73b09fdb8895027dd87c44f579ccd030fc0140e5161179f0bcd9184fa88",
+    "production/prediction/next_behavior_preprocessing.py": "d39741cdf7872f8fd1aa6a2b6fc38473fed8c2ff2d82c12897325129cf10c850",
+    "production/prediction/next_behavior_tensor.py": "bd9a53d99181dee6c3aad41763fa15e6483f5ad4de02bc99fc3ee38d823c553b",
+    "production/prediction/next_behavior_label_policy.py": "e15ebb32e5b236d26f8b8ddcd17a41a6fda614feb9ad409862c6ba86a797c279",
+    "production/classification/trust.py": "e4fcf976a18e079a493fcab0472bb220d42e42512a8ae78dc9ccb52799c38b39",
+    "configs/classification_rules.trusted.json": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "configs/next_behavior_preprocessing.v1.json": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
+    "data/feeds/mitre_attack_cache.json": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c"
+  },
+  "authority": {
+    "advisory_only": true,
+    "observed_evidence": false,
+    "may_create_findings": false,
+    "may_create_alerts": false,
+    "may_select_hypotheses": false,
+    "may_select_guidance": false,
+    "may_authorize_actions": false,
+    "automatic_execution": false
+  }
+}
