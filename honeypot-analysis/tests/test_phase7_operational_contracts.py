@@ -83,6 +83,10 @@ def test_monitor_contract_uses_advisory_wording_and_bounded_connect_csp() -> Non
     assert "Predictive Alert ·" not in html
     assert "Non-Authoritative Next-Tactic Forecast" in html
     assert "Model context only; it cannot create findings, alerts, guidance, or actions." in html
+    assert "Historical Prediction Evaluation" in html
+    assert "Historical Calibration Record" in html
+    assert "AI Validation Warnings" not in server
+    assert "Generated Narrative Validation" in server
     assert "connect-src 'self' https:" not in server
     assert "connect-src 'self'" in server
 

@@ -1337,7 +1337,7 @@ def _render_ai_validation_warnings(report_payload: Dict[str, Any], artifact_payl
             'Deterministic canonical claims were retained unchanged.</div>'
         )
     if not isinstance(warnings, list) or not warnings:
-        return '<div class="empty">No unsupported AI narrative claims were accepted.</div>'
+        return '<div class="empty">No unsupported generated-narrative claims were accepted.</div>'
     rows = []
     for warning in warnings[:20]:
         if not isinstance(warning, dict):
@@ -1356,10 +1356,10 @@ def _render_ai_validation_warnings(report_payload: Dict[str, Any], artifact_payl
             )
         )
     if not rows:
-        return '<div class="empty">AI validation warnings were present but could not be displayed.</div>'
+        return '<div class="empty">Generated-narrative validation warnings were present but could not be displayed.</div>'
     return (
         '<div class="warning-box">'
-        '<strong>AI validation guardrail activated.</strong> These claims were removed or replaced with deterministic fallback text.'
+        '<strong>Non-authoritative narrative guardrail activated.</strong> These claims were removed or replaced with deterministic fallback text.'
         '</div>'
         '<table><thead><tr><th>field</th><th>reason</th><th>removed claim</th></tr></thead><tbody>'
         + "\n".join(rows)
@@ -4055,7 +4055,7 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
         meta
         + f"<h3>Session assessment summary</h3><p>{_html(summary_text)}</p>"
         + v4_detail
-        + "<h3>AI Validation Warnings</h3>"
+        + "<h3>Generated Narrative Validation</h3>"
         + _render_ai_validation_warnings(report_payload, artifact_payload)
         + "<h3>Evidence Layers</h3>"
         + _render_report_evidence_layers(report_payload, artifact_payload)
