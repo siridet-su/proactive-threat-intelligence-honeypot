@@ -1,9 +1,8 @@
-"""Cross-session observable threat hunting worker.
+"""Cross-session observable relationship worker.
 
-This worker closes the "session silo" gap. Session processing already records
-observable sightings; the threat-hunt worker consumes jobs created from a closed
-session's observables, finds other sessions that touched the same observable,
-stores durable session links, and alerts if a related session is still active.
+The worker stores evidence-linked relationships and observational signals. A
+shared observable does not establish actor identity and has no alert, guidance,
+or response authority.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from production.classification.trust import is_trusted_classification_event
 from production.correlation.session_ttp_correlation import correlation_allows_influence
 from production.utils.config import ProductionConfig
+from production.policies.alert_authority_policy import load_alert_authority_policy
 from production.correlation.observable_sightings import extract_session_observable_sightings
 from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, utc_now
@@ -40,7 +40,7 @@ def _policy(config_or_policy: ProductionConfig | Dict[str, Any]) -> Dict[str, An
     policy = dict(raw or {})
     policy.setdefault("enabled", True)
     policy.setdefault("enqueue_on_session_close", True)
-    policy.setdefault("alert_active_sessions", True)
+    policy.setdefault("signal_active_sessions", True)
     policy.setdefault("max_jobs_per_session", 50)
     policy.setdefault("max_related_sessions_per_job", 100)
     policy.setdefault("observable_types", ["ip", "url", "domain", "hash", "hassh", "ja3"])
@@ -220,51 +220,60 @@ class ThreatHuntWorker:
         self.policy = _policy(config)
         self.storage = open_storage(config.database_url)
         self.worker_owner = new_job_owner("threat-hunt")
+        self.alert_authority_policy = load_alert_authority_policy(
+            config.alert_authority_policy_path
+        )
 
-    def _alert_payload(
+    def _correlation_signal(
         self,
         job: Dict[str, Any],
         related: Dict[str, Any],
         link_id: str,
-        severity: str,
         confidence: float,
-        source_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         observable_type = str(job.get("observable_type") or "")
         observable_value = str(job.get("observable_value") or "")
         related_session_id = str(related.get("session_id") or "unknown")
         source_session_id = str(job.get("session_id") or "unknown")
         return {
-            "alert_id": stable_id(
-                "threathuntalert",
+            "schema_version": "correlation_signal.v1",
+            "signal_id": stable_id(
+                "correlationsignal",
                 {
                     "source_session_id": source_session_id,
                     "related_session_id": related_session_id,
                     "observable_type": observable_type,
                     "observable_value": observable_value,
+                    "link_id": link_id,
+                    "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
                 },
             ),
             "session_id": related_session_id,
-            "severity": severity.upper(),
-            "reason": (
-                f"Threat hunt match: session shares {observable_type} observable "
-                f"with closed session {source_session_id}"
-            ),
-            "created_at": utc_now(),
-            "alert_type": "threat_hunt_match",
-            "payload": {
-                "alert_type": "threat_hunt_match",
-                "source_session_id": source_session_id,
-                "related_session_id": related_session_id,
-                "job_id": job.get("job_id") or "",
-                "link_id": link_id,
-                "observable_type": observable_type,
-                "observable_value": observable_value,
-                "confidence": confidence,
-                "source_tactics": _tactics(source_payload),
-                "related_sighting_count": related.get("sighting_count") or 0,
-                "related_first_seen": related.get("first_seen") or "",
-                "related_last_seen": related.get("last_seen") or "",
+            "signal_type": "shared_observable_relationship_observed",
+            "source_session_id": source_session_id,
+            "related_session_id": related_session_id,
+            "job_id": job.get("job_id") or "",
+            "link_id": link_id,
+            "observable_type": observable_type,
+            "observable_value": observable_value,
+            "relationship_confidence": confidence,
+            "related_sighting_count": related.get("sighting_count") or 0,
+            "related_first_seen": related.get("first_seen") or "",
+            "related_last_seen": related.get("last_seen") or "",
+            "authority": {
+                "semantics": "observation_only_non_authoritative",
+                "may_claim_actor_identity": False,
+                "may_create_alert": False,
+                "may_authorize_response": False,
+            },
+            "limitations": [
+                "a shared observable does not establish actor identity",
+                "the relationship may reflect shared infrastructure or common tooling",
+                "signal cannot authorize an alert, external delivery, or response",
+            ],
+            "provenance": {
+                "alert_authority_policy_id": self.alert_authority_policy.policy_id,
+                "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
             },
         }
 
@@ -272,8 +281,6 @@ class ThreatHuntWorker:
         source_session_id = str(job.get("session_id") or "unknown")
         observable_type = str(job.get("observable_type") or "").strip().lower()
         observable_value = str(job.get("observable_value") or "").strip()
-        source_row = self.storage.get_session(source_session_id) or {}
-        source_payload = source_row.get("payload") or {"session_id": source_session_id}
         max_related = int(self.policy.get("max_related_sessions_per_job") or 100)
         related_sessions = self.storage.find_sessions_by_observable(
             observable_type,
@@ -282,9 +289,8 @@ class ThreatHuntWorker:
             limit=max_related,
         )
         confidence = _confidence(self.policy, observable_type)
-        severity = _source_severity(self.policy, observable_type, source_payload)
         links: List[Dict[str, Any]] = []
-        alerts: List[str] = []
+        signals: List[Dict[str, Any]] = []
         for related in related_sessions:
             related_session_id = str(related.get("session_id") or "")
             if not related_session_id:
@@ -308,9 +314,12 @@ class ThreatHuntWorker:
             }
             link_id = self.storage.save_session_link(link_payload)
             links.append({"link_id": link_id, **link_payload})
-            if self.policy.get("alert_active_sessions", True) and not bool(related.get("ended")):
-                alert = self._alert_payload(job, related, link_id, severity, confidence, source_payload)
-                alerts.append(self.storage.store_alert(alert))
+            if self.policy.get("signal_active_sessions", True) and not bool(
+                related.get("ended")
+            ):
+                signals.append(
+                    self._correlation_signal(job, related, link_id, confidence)
+                )
         return {
             "status": "succeeded",
             "job_id": job.get("job_id") or "",
@@ -319,10 +328,17 @@ class ThreatHuntWorker:
             "observable_value": observable_value,
             "related_session_count": len(related_sessions),
             "links_created": len(links),
-            "alerts_created": len(alerts),
+            "signals_created": len(signals),
             "link_ids": [item["link_id"] for item in links],
-            "alert_ids": alerts,
-            "severity": severity,
+            "signal_ids": [item["signal_id"] for item in signals],
+            "correlation_signals": signals,
+            "alerts_created": 0,
+            "alert_ids": [],
+            "automatic_alerts": {
+                "status": "prohibited",
+                "authorized": False,
+                "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
+            },
             "confidence": confidence,
             "timestamp": utc_now(),
         }

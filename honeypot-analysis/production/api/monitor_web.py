@@ -2951,13 +2951,13 @@ def _render_cross_session_hunting(detail: Dict[str, Any]) -> str:
                 f"<td>{_html(row.get('attempts') or 0)}</td>"
                 f"<td>{_html(result.get('related_session_count') if result else '-')}</td>"
                 f"<td>{_html(result.get('links_created') if result else '-')}</td>"
-                f"<td>{_html(result.get('alerts_created') if result else '-')}</td>"
+                f"<td>{_html(result.get('signals_created') if result else '-')}</td>"
                 f"<td>{_html(row.get('updated_at') or '-')}</td>"
                 f"<td>{_html(row.get('error') or '')}</td>"
                 "</tr>"
             )
         parts.append(
-            "<table><thead><tr><th>status</th><th>type</th><th>value</th><th>attempts</th><th>related</th><th>links</th><th>alerts</th><th>updated</th><th>error</th></tr></thead><tbody>"
+            "<table><thead><tr><th>status</th><th>type</th><th>value</th><th>attempts</th><th>related</th><th>links</th><th>observational signals</th><th>updated</th><th>error</th></tr></thead><tbody>"
             + "\n".join(rows)
             + "</tbody></table>"
         )
@@ -2987,7 +2987,16 @@ def _render_campaign_panel(detail: Dict[str, Any]) -> str:
             ("prior_other_sessions", summary.get("prior_other_session_count")),
             ("max_severity", summary.get("max_confirmed_severity")),
             ("primary_fingerprint", f"{fingerprint.get('primary_fingerprint_type') or '-'}:{fingerprint.get('primary_fingerprint_value') or '-'}"),
-            ("known_actor_alert", summary.get("known_actor_return_alert_id") or "-"),
+            (
+                "correlation_signal",
+                summary.get("correlation_signal_id")
+                or (
+                    "historical legacy alert: "
+                    + str(summary.get("known_actor_return_alert_id"))
+                    if summary.get("known_actor_return_alert_id")
+                    else "-"
+                ),
+            ),
         ):
             parts.append(f'<div class="kv"><span>{_html(label)}</span><strong>{_html(value if value not in (None, "") else "-")}</strong></div>')
         parts.append("</div>")
@@ -3214,6 +3223,7 @@ def _render_alerts_panel(detail: Dict[str, Any]) -> str:
         rows.append(
             "<tr>"
             f"<td>{_html(alert.get('created_at') or payload.get('created_at') or '-')}</td>"
+            "<td>historical/legacy</td>"
             f"<td>{_html(alert_type)}</td>"
             f"<td>{_badge(str(severity).lower())}</td>"
             f"<td>{_html(predicted_tactic)}</td>"
@@ -3227,7 +3237,8 @@ def _render_alerts_panel(detail: Dict[str, Any]) -> str:
             "</details>"
         )
     return (
-        "<table><thead><tr><th>created_at</th><th>type</th><th>severity</th><th>predicted tactic</th><th>reason</th><th>snapshot</th></tr></thead><tbody>"
+        '<p class="muted">Stored alert rows are historical legacy records. Current policy prohibits automatic alert creation and external delivery.</p>'
+        "<table><thead><tr><th>created_at</th><th>authority</th><th>type</th><th>severity</th><th>predicted tactic</th><th>reason</th><th>snapshot</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table>"
         + "<h3>Alert Payloads</h3>"

@@ -430,7 +430,7 @@ def test_two_sqlite_dispatchers_cannot_claim_same_logical_delivery(tmp_path) -> 
     assert delivery["status"] == "in_progress"
 
 
-def test_dispatcher_redacts_alert_and_tracks_two_targets_independently(
+def test_dispatcher_validates_but_does_not_deliver_configured_targets_without_authority(
     tmp_path, monkeypatch
 ) -> None:
     key_a = _key_file(tmp_path, "key-a")
@@ -486,28 +486,12 @@ def test_dispatcher_redacts_alert_and_tracks_two_targets_independently(
         config, storage=storage, worker_id="webhook-test-worker"
     )
 
-    assert dispatcher.dispatch_once() == 2
-    assert "attacker-secret-password" not in json.dumps(captured_payloads)
-    assert all(payload["idempotency_key"].startswith("delivery_") for payload in captured_payloads)
-    targets = {target.target_id: target for target in dispatcher.targets}
-    delivered = storage.get_webhook_delivery(
-        webhook_dispatcher.webhook_delivery_id(
-            alert_id=alert_id, target_url_hash=targets["a"].url_hash
-        )
-    )
-    retryable = storage.get_webhook_delivery(
-        webhook_dispatcher.webhook_delivery_id(
-            alert_id=alert_id, target_url_hash=targets["b"].url_hash
-        )
-    )
-    assert delivered["status"] == "delivered"
-    assert delivered["response_status"] == 204
-    assert delivered["response_body_bytes"] == 7
-    assert delivered["response_body_truncated"] == 1
-    assert delivered["response_body_sha256"] == hashlib.sha256(b"bounded").hexdigest()
-    assert retryable["status"] == "retryable"
-    assert delivered["target_url_hash"] != retryable["target_url_hash"]
-    # The legacy global bit is no longer the authority for per-target state.
+    assert len(dispatcher.configured_targets) == 2
+    assert dispatcher.targets == []
+    assert dispatcher.dispatch_once() == 0
+    assert captured_payloads == []
+    assert storage.list_rows("webhook_deliveries") == []
+    # Historical rows stay readable, but the reviewed policy cannot deliver them.
     assert storage.list_rows("alerts", limit=1)[0]["delivered"] == 0
 
 

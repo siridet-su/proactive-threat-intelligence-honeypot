@@ -25,6 +25,7 @@ from uuid import uuid4
 
 from production.storage import open_storage
 from production.utils.config import ProductionConfig
+from production.policies.alert_authority_policy import load_alert_authority_policy
 from production.utils.sensitive_data import redact_exception_for_log, redact_for_webhook
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.utils.service_lifecycle import ServiceLifecycle
@@ -417,7 +418,15 @@ class WebhookDispatcher:
         self.config.validate_event_processing()
         self.storage = storage or open_storage(config.database_url)
         self.worker_id = worker_id or f"webhook-{os.getpid()}-{uuid4()}"
-        self.targets = load_webhook_targets(config)
+        self.alert_authority_policy = load_alert_authority_policy(
+            config.alert_authority_policy_path
+        )
+        self.configured_targets = load_webhook_targets(config)
+        self.targets = (
+            self.configured_targets
+            if self.alert_authority_policy.external_delivery_authorized
+            else []
+        )
 
     def _alert_should_send(self, alert: Dict[str, Any]) -> bool:
         policy = self.config.webhook_policy or {}

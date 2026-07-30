@@ -201,6 +201,7 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
         )
     elif table == "alerts":
         view.update(_pick(item, ("reason", "delivered")))
+        view["authority_display"] = "historical_legacy_alert"
     elif table in {"analysis_jobs", "enrichment_jobs", "threat_hunt_jobs"}:
         view.update(
             _pick(

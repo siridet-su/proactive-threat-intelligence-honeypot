@@ -18,6 +18,7 @@ from production.enrichment.threat_feed_loader import load_threat_feeds
 from production.classification.classification_pipeline import NotebookParityClassifier
 from production.utils.config import ProductionConfig
 from production.policies.data_lifecycle_policy import load_data_lifecycle_policy
+from production.policies.alert_authority_policy import load_alert_authority_policy
 from production.utils.credential_hmac import (
     load_credential_hmac_keyring,
     resolve_credential_hmac_keyring_path,
@@ -153,6 +154,12 @@ def _safe_exception_text(exc: BaseException) -> str:
 
 
 def alert_payload(alert: Any, *, triggering_event_id: str = "") -> Dict[str, Any]:
+    """Normalize a historical alert payload without granting storage authority.
+
+    Retained for deterministic historical-reader compatibility. Current workers
+    never pass this result to ``store_alert``.
+    """
+
     payload = dict(getattr(alert, "__dict__", alert))
     payload.setdefault(
         "alert_id",
@@ -172,6 +179,7 @@ def alert_payload(alert: Any, *, triggering_event_id: str = "") -> Dict[str, Any
     )
     payload.setdefault("triggering_event_id", str(triggering_event_id or ""))
     payload.setdefault("created_at", utc_now())
+    payload.setdefault("authority_display", "historical_legacy_alert")
     return payload
 
 
@@ -195,6 +203,9 @@ class SessionWorker:
         self.storage = open_storage(config.database_url)
         self.data_lifecycle_policy = load_data_lifecycle_policy(
             config.data_lifecycle_policy_path
+        )
+        self.alert_authority_policy = load_alert_authority_policy(
+            config.alert_authority_policy_path
         )
         prediction_lifecycle = self.data_lifecycle_policy.document["entities"][
             "prediction_snapshots"
@@ -674,7 +685,7 @@ class SessionWorker:
             bert_fn=self.bert_fn,
             classification_fn=self.classifier.classify if self.classifier else None,
             prediction_fn=self._predict_next_for_alert,
-            on_alert=self._on_alert,
+            on_alert=None,
             # The durable worker invokes the close stage explicitly after the
             # final close-event prediction has been persisted. SessionMonitor
             # retains callback support for standalone/legacy callers.
@@ -685,6 +696,9 @@ class SessionWorker:
             campaign_profile_cache_limit=self.config.campaign_profile_cache_limit,
             session_event_history_limit=self.config.session_event_history_limit,
             enable_legacy_campaign_tracker=False,
+            enable_alert_evaluation=(
+                self.alert_authority_policy.automatic_alerts_authorized
+            ),
         )
 
     def _refresh_enrichment_cache(self) -> None:
@@ -723,10 +737,9 @@ class SessionWorker:
         )
 
     def _on_alert(self, alert: Any) -> None:
-        self.storage.store_alert(
-            alert_payload(alert, triggering_event_id=self._processing_event_id)
-        )
-        self._record_event_effect("alerts_created", 1)
+        """Compatibility callback that deliberately has no storage authority."""
+
+        _ = alert
 
     def _prediction_trigger_for_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Return whether a Cowrie event should create a prediction snapshot.
@@ -815,6 +828,7 @@ class SessionWorker:
                 payload,
                 self.config.campaign_policy,
                 status=status,
+                alert_authority_policy=self.alert_authority_policy,
             )
         except Exception as exc:
             summary = {

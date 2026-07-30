@@ -457,6 +457,7 @@ class SessionMonitor:
         campaign_profile_cache_limit: int = 10_000,
         session_event_history_limit: int = 10_000,
         enable_legacy_campaign_tracker: bool = True,
+        enable_alert_evaluation: bool = True,
     ):
         self.feeds          = feeds
         self.mitre_db       = mitre_db
@@ -467,6 +468,7 @@ class SessionMonitor:
         self.on_alert       = on_alert or self._default_alert_handler
         self.on_session_end = on_session_end
         self.propagate_session_end_errors = bool(propagate_session_end_errors)
+        self.enable_alert_evaluation = bool(enable_alert_evaluation)
         self.thresholds     = {**self.DEFAULT_THRESHOLDS, **(thresholds or {})}
         self.classification_policy = {
             **self.DEFAULT_CLASSIFICATION_POLICY,
@@ -1298,6 +1300,8 @@ class SessionMonitor:
 
     def _check_thresholds(self, state: SessionState) -> List[AlertEvent]:
         """Check all thresholds. Return new alerts not previously fired."""
+        if not self.enable_alert_evaluation:
+            return []
         alerts = []
         t = self.thresholds
 
@@ -1388,7 +1392,11 @@ class SessionMonitor:
                 "linked_ips": [],
             }
         )
-        if campaign["is_returning_actor"] and campaign["confidence"] in ("HIGH", "MEDIUM"):
+        if (
+            self.enable_alert_evaluation
+            and campaign["is_returning_actor"]
+            and campaign["confidence"] in ("HIGH", "MEDIUM")
+        ):
             reason = (
                 f"Returning actor [{campaign['confidence']}] | "
                 f"Signals: {', '.join(campaign['match_signals'][:3])} | "

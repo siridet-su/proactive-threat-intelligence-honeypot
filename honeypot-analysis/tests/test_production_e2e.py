@@ -213,8 +213,8 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert session_payload["bpg_list"]
 
         alerts = storage.list_rows("alerts")
-        assert any(alert["severity"] == "MEDIUM" and "Brute force" in alert["reason"] for alert in alerts)
-        assert any(alert["severity"] == "HIGH" and "Dropper pattern" in alert["reason"] for alert in alerts)
+        assert alerts == []
+        assert session_payload["alerts_fired"] == []
 
         jobs = storage.list_rows("analysis_jobs")
         assert len(jobs) == 1

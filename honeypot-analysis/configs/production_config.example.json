@@ -105,6 +105,7 @@
   "threat_hypothesis_behavior_policy_path": "configs/threat_hypothesis_behavior.trusted.json",
   "prediction_policy_path": "configs/prediction_policy.transformer_poc.trusted.json",
   "data_lifecycle_policy_path": "configs/data_lifecycle_policy.v1.json",
+  "alert_authority_policy_path": "configs/alert_authority_policy.v1.json",
   "prediction_snapshot_retention_days": 90,
   "prediction_snapshot_keep_latest_per_session": true,
   "enable_session_ttp_correlation": true,

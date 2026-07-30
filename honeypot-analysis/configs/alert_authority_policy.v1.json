@@ -1,0 +1,31 @@
+{
+  "schema_version": "alert_authority_policy.v1",
+  "policy_id": "observational-signals-no-automatic-alerts",
+  "version": "2026-07-30",
+  "automatic_authority": {
+    "alert_creation_authorized": false,
+    "external_delivery_authorized": false,
+    "response_execution_authorized": false
+  },
+  "non_authoritative_sources": [
+    "session_assessment.v4",
+    "response_guidance.v3",
+    "typed_semantic_fact_set.v2",
+    "prediction",
+    "enrichment",
+    "correlation",
+    "campaign_similarity",
+    "threat_hunt"
+  ],
+  "correlation": {
+    "output_schema": "correlation_signal.v1",
+    "actor_identity_claims_authorized": false
+  },
+  "historical_alerts": {
+    "read_only": true,
+    "display_label": "historical_legacy_alert"
+  },
+  "webhook": {
+    "configured_targets_authorized": false
+  }
+}

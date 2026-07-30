@@ -330,6 +330,7 @@ class ProductionConfig:
     threat_hypothesis_behavior_policy_path: str = "configs/threat_hypothesis_behavior.trusted.json"
     prediction_policy_path: str = "configs/prediction_policy.trusted.json"
     data_lifecycle_policy_path: str = "configs/data_lifecycle_policy.v1.json"
+    alert_authority_policy_path: str = "configs/alert_authority_policy.v1.json"
     prediction_snapshot_retention_days: int = 90
     prediction_snapshot_keep_latest_per_session: bool = True
     enable_session_ttp_correlation: bool = True
@@ -353,7 +354,7 @@ class ProductionConfig:
     threat_hunt_policy: Dict[str, Any] = field(default_factory=lambda: {
         "enabled": True,
         "enqueue_on_session_close": True,
-        "alert_active_sessions": True,
+        "signal_active_sessions": True,
         "max_jobs_per_session": 50,
         "max_related_sessions_per_job": 100,
         "observable_types": ["ip", "url", "domain", "hash", "hassh", "ja3"],
@@ -401,9 +402,7 @@ class ProductionConfig:
         "max_matches": 10,
         "command_pattern_command_limit": 6,
         "command_pattern_token_limit": 3,
-        "known_actor_return_alerts": True,
-        "known_actor_min_prior_severity": "high",
-        "known_actor_alert_on_status": ["active", "closed"],
+        "emit_observational_signals": True,
         "field_weights": {
             "hassh_fingerprint": 0.45,
             "ja3_fingerprint": 0.35,
@@ -1201,6 +1200,10 @@ class ProductionConfig:
         cfg.data_lifecycle_policy_path = os.getenv(
             "DATA_LIFECYCLE_POLICY_PATH",
             cfg.data_lifecycle_policy_path,
+        )
+        cfg.alert_authority_policy_path = os.getenv(
+            "ALERT_AUTHORITY_POLICY_PATH",
+            cfg.alert_authority_policy_path,
         )
         cfg.prediction_snapshot_retention_days = _env_int(
             "PREDICTION_SNAPSHOT_RETENTION_DAYS",
