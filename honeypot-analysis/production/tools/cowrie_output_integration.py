@@ -173,13 +173,14 @@ def render_config(source: Path, destination: Path, bundle_root: Path) -> None:
 
 
 def validate_live_permissions(boundary) -> None:
-    for path in (
-        boundary.json_log_path,
-        boundary.json_log_path.with_name("cowrie.log"),
-        Path("/home/cowrie/users.txt"),
-        Path("/home/cowrie/cowrie/var/log/cowrie/cowrie_custom.json"),
-    ):
-        if path.exists() and stat.S_IMODE(path.stat().st_mode) != 0o600:
+    expected_modes = {
+        boundary.json_log_path: 0o640,
+        boundary.json_log_path.with_name("cowrie.log"): 0o600,
+        Path("/home/cowrie/users.txt"): 0o600,
+        Path("/home/cowrie/cowrie/var/log/cowrie/cowrie_custom.json"): 0o600,
+    }
+    for path, expected_mode in expected_modes.items():
+        if path.exists() and stat.S_IMODE(path.stat().st_mode) != expected_mode:
             raise CowrieOutputBoundaryError(f"unsafe persistent-file mode: {path}")
 
 

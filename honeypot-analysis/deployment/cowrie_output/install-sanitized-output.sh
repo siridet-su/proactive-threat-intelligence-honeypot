@@ -102,7 +102,6 @@ install -o root -g root -m 0644 \
 for sensitive_file in \
   /home/cowrie/users.txt \
   "${cowrie_root}/var/log/cowrie/cowrie_custom.json" \
-  "${cowrie_root}/var/log/cowrie/cowrie.json" \
   "${cowrie_root}/var/log/cowrie/cowrie.log"
 do
   if [ -f "${sensitive_file}" ]; then
@@ -110,6 +109,10 @@ do
     chmod 0600 "${sensitive_file}"
   fi
 done
+if [ -f "${cowrie_root}/var/log/cowrie/cowrie.json" ]; then
+  chown cowrie:cowrie "${cowrie_root}/var/log/cowrie/cowrie.json"
+  chmod 0640 "${cowrie_root}/var/log/cowrie/cowrie.json"
+fi
 
 sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \

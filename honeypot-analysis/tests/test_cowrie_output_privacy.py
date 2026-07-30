@@ -292,3 +292,4 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
             f'chmod 0700 "${{release}}/deployment/cowrie_output/{script_name}"'
             in installer
         )
+    assert 'chmod 0640 "${cowrie_root}/var/log/cowrie/cowrie.json"' in installer

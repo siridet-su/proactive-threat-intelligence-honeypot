@@ -26,6 +26,11 @@ integration. Every file, the policy, and the Git revision are bound by
 `COWRIE_OUTPUT_MANIFEST.json`. Directories are mode `0700`, data/code files
 are mode `0600`, and executable deployment scripts are mode `0700`.
 
+The immutable bundle and diagnostic/legacy logs are owner-only. The sanitized
+`cowrie.json` feed is `cowrie:cowrie` mode `0640` so only Cowrie and the
+existing forwarder (via its supplementary `cowrie` group) can use the required
+file boundary.
+
 ## Install
 
 Capture the current Cowrie configuration, service state, integration paths,

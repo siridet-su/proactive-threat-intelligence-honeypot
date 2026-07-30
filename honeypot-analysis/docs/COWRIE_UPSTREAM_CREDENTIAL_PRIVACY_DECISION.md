@@ -222,13 +222,22 @@ serialized.
 
 The stock writer is never used as a fallback.
 
+The sanitized JSON feed is `cowrie:cowrie` mode `0640`, not `0600`, because
+the existing dedicated `honeypot-forwarder` service has supplementary group
+`cowrie` and must read this feed. The feed contains no credential or username
+plaintext. The diagnostic log, direct legacy files, manifest, policy, and
+bundle content remain owner-only at mode `0600` (directories and executables
+`0700`). This is the narrowest permission compatible with the required
+sanitized-JSON-to-forwarder path.
+
 Post-start validation must prove:
 
 - Cowrie is active;
 - the process command line names the repository logger;
 - the safe engine reports as loaded;
 - the unsafe engine does not report as loaded;
-- newly created logs are mode `0600`;
+- the sanitized JSON feed is mode `0640` and other credential-bearing logs are
+  mode `0600`;
 - the forwarder remains active.
 
 ## Rollback boundary
@@ -241,4 +250,3 @@ delete any Cowrie event log or `users.txt`.
 
 Rollback is tested at this integration boundary before privacy acceptance is
 declared complete.
-

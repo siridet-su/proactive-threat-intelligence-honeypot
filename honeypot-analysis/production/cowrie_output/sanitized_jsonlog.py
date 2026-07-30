@@ -45,7 +45,7 @@ class Output(_CowrieOutputBase):
             directory = os.path.dirname(configured_log)
             basename = os.path.basename(configured_log)
             self.outfile = cowrie.python.logfile.CowrieDailyLogFile(
-                basename, directory, defaultMode=0o600
+                basename, directory, defaultMode=0o640
             )
         except BaseException as exc:
             raise SystemExit(
