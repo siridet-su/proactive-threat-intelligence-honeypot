@@ -9,10 +9,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from production.tools.managed_systemd_units import load_managed_unit_policy
 
-SCHEMA_VERSION = "honeypot_release_manifest.v4"
+
+SCHEMA_VERSION = "honeypot_release_manifest.v5"
 LEGACY_SCHEMA_VERSIONS = frozenset(
-    {"honeypot_release_manifest.v2", "honeypot_release_manifest.v3"}
+    {
+        "honeypot_release_manifest.v2",
+        "honeypot_release_manifest.v3",
+        "honeypot_release_manifest.v4",
+    }
 )
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -143,6 +149,21 @@ def _runtime_feed_provenance_contract(path_text: str) -> dict[str, Any]:
     }
 
 
+def _managed_unit_policy_receipt(path_text: str) -> dict[str, Any]:
+    path = Path(path_text).resolve()
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("managed unit policy must be a regular non-symlink file")
+    loaded = load_managed_unit_policy(str(path))
+    return {
+        "schema_version": "managed_systemd_units.v1",
+        "path": loaded.path,
+        "sha256": loaded.sha256,
+        "policy_id": loaded.policy_id,
+        "version": loaded.version,
+        "profiles": sorted(loaded.document["profiles"]),
+    }
+
+
 def _frozen_model_bundle_receipt(
     manifest_path_text: str,
     package_path_text: str = "",
@@ -191,6 +212,7 @@ def build_manifest(
     rollback_location: Path,
     configuration_paths: dict[str, str],
     artifact_paths: dict[str, str],
+    managed_unit_policy_path: str,
     runtime_feed_provenance_path: str = "",
     frozen_model_bundle_manifest_path: str = "",
     frozen_model_bundle_package_path: str = "",
@@ -205,6 +227,9 @@ def build_manifest(
     if not rollback_location.exists():
         raise ValueError("rollback location does not exist")
     _validate_immutable_configuration_paths(configuration_paths)
+    managed_unit_policy = _managed_unit_policy_receipt(
+        managed_unit_policy_path
+    )
     inventory = release_file_inventory(release_root)
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -220,6 +245,7 @@ def build_manifest(
         },
         "effective_configurations": _artifact_hashes(configuration_paths),
         "model_artifacts": _artifact_hashes(artifact_paths),
+        "managed_systemd_units": managed_unit_policy,
         "rollback_location": str(rollback_location),
     }
     if runtime_feed_provenance_path.strip():
@@ -294,7 +320,11 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
             or _sha256_file(config_path) != config.get("sha256")
         ):
             raise ValueError(f"effective configuration does not match: {name}")
-    if schema_version in {SCHEMA_VERSION, "honeypot_release_manifest.v3"}:
+    if schema_version in {
+        SCHEMA_VERSION,
+        "honeypot_release_manifest.v4",
+        "honeypot_release_manifest.v3",
+    }:
         contract = manifest.get("runtime_feed_provenance")
         if contract is not None:
             if not isinstance(contract, dict):
@@ -311,6 +341,15 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
                 or integrity.get("cache_content_checksum_required") is not True
             ):
                 raise ValueError("runtime feed provenance integrity contract is invalid")
+    managed_units = manifest.get("managed_systemd_units")
+    if schema_version == SCHEMA_VERSION:
+        if not isinstance(managed_units, dict):
+            raise ValueError("managed systemd-unit policy receipt is required")
+        actual_managed_units = _managed_unit_policy_receipt(
+            str(managed_units.get("path") or "")
+        )
+        if actual_managed_units != managed_units:
+            raise ValueError("managed systemd-unit policy does not match manifest")
     frozen_model_bundle = manifest.get("frozen_model_bundle")
     if frozen_model_bundle is not None:
         if not isinstance(frozen_model_bundle, dict):
@@ -344,6 +383,7 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--rollback-location", required=True, type=Path)
     create.add_argument("--configuration", action="append", default=[])
     create.add_argument("--artifact", action="append", default=[])
+    create.add_argument("--managed-unit-policy", required=True)
     create.add_argument(
         "--runtime-feed-provenance",
         default="",
@@ -376,6 +416,7 @@ def main() -> int:
             rollback_location=args.rollback_location,
             configuration_paths=_named_paths(args.configuration, "configuration"),
             artifact_paths=_named_paths(args.artifact, "artifact"),
+            managed_unit_policy_path=args.managed_unit_policy,
             runtime_feed_provenance_path=args.runtime_feed_provenance,
             frozen_model_bundle_manifest_path=args.frozen_model_bundle_manifest,
             frozen_model_bundle_package_path=args.frozen_model_bundle_package,

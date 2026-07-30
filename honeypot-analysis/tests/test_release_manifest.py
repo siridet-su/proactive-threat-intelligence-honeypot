@@ -13,6 +13,12 @@ from production.tools.release_manifest import (
 
 
 REVISION = "a" * 40
+MANAGED_UNIT_POLICY = (
+    Path(__file__).resolve().parents[1]
+    / "deployment"
+    / "systemd"
+    / "managed_units.v1.json"
+)
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
@@ -42,6 +48,7 @@ def test_release_manifest_binds_package_tree_config_artifact_and_rollback(
         rollback_location=rollback,
         configuration_paths={"policy": str(policy)},
         artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
         runtime_feed_provenance_path=str(tmp_path / "runtime-feed-provenance.json"),
         deployed_at="2026-07-28T00:00:00+00:00",
     )
@@ -55,6 +62,10 @@ def test_release_manifest_binds_package_tree_config_artifact_and_rollback(
     recorded = json.loads(output.read_text())
     assert recorded["model_artifacts"]["model"]["sha256"]
     assert recorded["effective_configurations"]["policy"]["sha256"]
+    assert recorded["managed_systemd_units"]["sha256"]
+    assert recorded["managed_systemd_units"]["policy_id"] == (
+        "honeypot-controlled-poc-units"
+    )
     assert recorded["runtime_feed_provenance"]["authority"] == (
         "non_authoritative_context_only"
     )
@@ -71,6 +82,7 @@ def test_release_manifest_rejects_overlay_and_artifact_changes(
         rollback_location=rollback,
         configuration_paths={"policy": str(policy)},
         artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
@@ -80,6 +92,32 @@ def test_release_manifest_rejects_overlay_and_artifact_changes(
     (release / "overlay.py").unlink()
     artifact.write_bytes(b"changed-model")
     with pytest.raises(ValueError, match="artifact"):
+        verify_manifest(output, release)
+
+
+def test_release_manifest_rejects_managed_unit_policy_drift(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    managed = tmp_path / "managed_units.v1.json"
+    managed.write_bytes(MANAGED_UNIT_POLICY.read_bytes())
+    manifest = build_manifest(
+        revision=REVISION,
+        release_root=release,
+        package_path=package,
+        rollback_location=rollback,
+        configuration_paths={"policy": str(policy)},
+        artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(managed),
+    )
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+    assert verify_manifest(output, release)["verified"] is True
+
+    changed = json.loads(managed.read_text(encoding="utf-8"))
+    changed["version"] = "changed-after-manifest"
+    managed.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(ValueError, match="managed systemd-unit policy"):
         verify_manifest(output, release)
 
 
@@ -94,6 +132,7 @@ def test_release_manifest_and_marker_are_excluded_from_release_identity(
         rollback_location=rollback,
         configuration_paths={"policy": str(policy)},
         artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
@@ -114,6 +153,7 @@ def test_release_manifest_excludes_runtime_python_bytecode_only(
         rollback_location=rollback,
         configuration_paths={"policy": str(policy)},
         artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
     )
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
@@ -141,6 +181,7 @@ def test_release_manifest_rejects_mutable_feed_cache_as_immutable_config(
             rollback_location=rollback,
             configuration_paths={"mitre_cache": str(feed_cache)},
             artifact_paths={"model": str(artifact)},
+            managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
         )
 
 
@@ -168,6 +209,7 @@ def test_release_manifest_binds_separate_frozen_model_bundle(tmp_path: Path) -> 
         rollback_location=rollback,
         configuration_paths={"policy": str(policy)},
         artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
         frozen_model_bundle_manifest_path=str(bundle_manifest),
         frozen_model_bundle_package_path=str(bundle_package),
     )
@@ -192,6 +234,7 @@ def test_release_manifest_keeps_v2_records_readable(tmp_path: Path) -> None:
         rollback_location=rollback,
         configuration_paths={"policy": str(policy)},
         artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
     )
     manifest["schema_version"] = "honeypot_release_manifest.v2"
     manifest.pop("runtime_feed_provenance", None)

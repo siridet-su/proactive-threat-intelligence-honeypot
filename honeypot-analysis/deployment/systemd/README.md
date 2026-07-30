@@ -113,6 +113,8 @@ sudo cp deployment/systemd/honeypot-feed-refresh.timer /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-analysis-worker.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-dashboard-api.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-webhook-dispatcher.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-monitor-web.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-threat-hunt-worker.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-session-count-monitor.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-session-count-monitor.timer /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -128,6 +130,8 @@ sudo systemctl enable --now honeypot-feed-refresh.timer
 sudo systemctl enable --now honeypot-analysis-worker
 sudo systemctl enable --now honeypot-dashboard-api
 sudo systemctl enable --now honeypot-webhook-dispatcher
+sudo systemctl enable --now honeypot-monitor-web
+sudo systemctl enable --now honeypot-threat-hunt-worker
 sudo systemctl enable --now honeypot-session-count-monitor.timer
 ```
 
@@ -143,26 +147,37 @@ curl http://127.0.0.1:8081/reports
 curl "http://127.0.0.1:8081/predictions/current?session_id=SESSION_ID"
 ```
 
-Prediction snapshots are written after every processed event. The retention
-timer audits eligible old intermediate snapshots without deleting them, while
-reporting feedback-linked and latest-per-session reference protections. Review
-the journal output, take a database backup, and run the command manually with
-`--apply` only after the eligible count and rollback path are approved. Configure retention with
-`PREDICTION_SNAPSHOT_RETENTION_DAYS` and
-`PREDICTION_SNAPSHOT_KEEP_LATEST_PER_SESSION`.
+Prediction snapshots are retained under the manual-only data-lifecycle policy.
+No calibration, backtest, or prediction-retention timer is part of the current
+deployment. Any future deletion requires a separately reviewed policy, verified
+backup, restore rehearsal, and explicit manual approval.
 
 The session-count monitor is a daily oneshot timer. It queries completed
 sessions from the production database and writes warning-level journal lines
 when the first completed session and the 30-session threshold are crossed. Its
 state file is `/var/lib/honeypot/session_count_monitor_state.json`.
 
-### Retiring archived one-shot units
+### Managed-unit validation and retiring archived one-shot units
 
-Phase 6 removed the calibration and prediction-retention producers. They must
-not remain enabled on a host running the archived release path: their old
-entrypoints are intentionally absent. After taking a configuration/unit backup
-as part of a reviewed deployment, retire both service/timer pairs and reload
-systemd:
+`deployment/systemd/managed_units.v1.json` is the exact, hash-bound allowlist
+for GCP and Pi deployment profiles. Validate GCP after unit installation:
+
+```bash
+/opt/honeypot/.venv/bin/python -m production.tools.managed_systemd_units \
+  --policy /opt/honeypot/deployment/systemd/managed_units.v1.json \
+  --profile gcp_backend
+```
+
+The command fails on missing required services, inactive required services,
+unknown enabled `honeypot-*` units, or any installed obsolete
+calibration/backtest/retention unit. The Pi profile manages only the forwarder
+and checks Cowrie as an active external dependency; other retained Pi services
+remain outside this deployment boundary.
+
+After taking a configuration/unit backup as part of a reviewed deployment,
+retire the old calibration and prediction-retention pairs if present. The
+current confirmed GCP drift is the prediction-backtest pair; archive and remove
+it with the exact non-overwriting reconciler:
 
 ```bash
 sudo systemctl disable --now honeypot-calibration-worker.timer honeypot-prediction-retention.timer
@@ -170,17 +185,24 @@ sudo rm -f /etc/systemd/system/honeypot-calibration-worker.service /etc/systemd/
 sudo rm -f /etc/systemd/system/honeypot-prediction-retention.service /etc/systemd/system/honeypot-prediction-retention.timer
 sudo systemctl daemon-reload
 sudo systemctl reset-failed honeypot-calibration-worker.service honeypot-prediction-retention.service
+
+sudo deployment/systemd/reconcile-obsolete-units.sh archive \
+  /var/backups/honeypot/systemd-units/DEPLOYMENT_TIMESTAMP
 ```
 
-Do not restore their removed Python modules. Prediction retention remains an
-explicit, manually approved SQLite maintenance operation. The session-count
-monitor is retained and its unit fixes the state path beneath
-`/var/lib/honeypot`, the only writable location under its hardening boundary.
+The archive contains the exact former unit files, before/after properties and
+SHA-256 checksums. `restore-files` verifies and restores only those files for
+forensics or rollback inspection; it deliberately does not re-enable the
+obsolete writer. Do not restore removed Python producers. The session-count
+monitor is retained and writes only beneath `/var/lib/honeypot`.
 
-## Signed Webhook Delivery
+## Signed Webhook Transport (not currently authorized)
 
-Webhooks are disabled when both `WEBHOOK_URL` and `WEBHOOK_TARGETS_JSON` are
-empty. Enabling a target also requires `WEBHOOK_SIGNING_KEY_FILE` (or a
+The reviewed `alert_authority_policy.v1` prohibits automatic alert creation and
+external delivery. Configured webhook targets are validated but are not
+dispatched. A future policy change would require a separate review and must not
+be inferred from target configuration alone. The retained transport contract
+requires `WEBHOOK_SIGNING_KEY_FILE` (or a
 per-target `signing_key_file`) naming a regular, non-symlink key file with at
 least 32 bytes and no group/other permissions. Do not put the key value in the
 environment or JSON configuration. HTTPS is the only allowed scheme by

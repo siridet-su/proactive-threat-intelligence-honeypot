@@ -29,14 +29,19 @@ For revision `$REVISION`:
    refresh and records cache-file/content hashes, feed version, retrieval time,
    and importer provenance as non-authoritative context. Pass the frozen model
    bundle manifest and recovery archive so their exact hashes are release-bound.
+   Pass `--managed-unit-policy
+   /opt/honeypot-releases/$REVISION/deployment/systemd/managed_units.v1.json`;
+   release-manifest v5 requires and hashes this exact unit allowlist.
 7. Run `production.tools.release_manifest verify`. It verifies only immutable
    release inputs; separately validate the current
    `runtime_feed_provenance.v1` record and feed-cache checksums. Only after both
    checks pass, write
    `DEPLOYED_COMMIT`, verify that marker, and atomically repoint
    `/opt/honeypot`.
-8. Install reviewed unit/config changes, run `systemd-analyze verify`, restart
-   only affected services, and verify health, policy, model hashes, queues,
+8. Install reviewed unit/config changes, archive confirmed obsolete units with
+   `reconcile-obsolete-units.sh`, run `systemd-analyze verify`, and run
+   `production.tools.managed_systemd_units --profile gcp_backend`. Restart only
+   affected services, then verify health, policy, model hashes, queues,
    inference, reports, APIs, UI, PDF/STIX, and advisory-only authority.
 9. Generate one synthetic-credential Cowrie session through the real
    Pi→forwarder→GCP route and retain its session/event/report/prediction IDs.

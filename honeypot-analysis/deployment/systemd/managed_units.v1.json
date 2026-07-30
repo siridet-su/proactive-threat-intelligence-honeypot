@@ -1,0 +1,78 @@
+{
+  "schema_version": "managed_systemd_units.v1",
+  "policy_id": "honeypot-controlled-poc-units",
+  "version": "2026-07-30",
+  "profiles": {
+    "gcp_backend": {
+      "managed_installed_units": [
+        "honeypot-analysis-worker.service",
+        "honeypot-dashboard-api.service",
+        "honeypot-enrichment-worker.service",
+        "honeypot-feed-refresh.service",
+        "honeypot-feed-refresh.timer",
+        "honeypot-ingest-api.service",
+        "honeypot-monitor-web.service",
+        "honeypot-session-count-monitor.service",
+        "honeypot-session-count-monitor.timer",
+        "honeypot-session-worker.service",
+        "honeypot-threat-hunt-worker.service",
+        "honeypot-webhook-dispatcher.service"
+      ],
+      "required_enabled_units": [
+        "honeypot-analysis-worker.service",
+        "honeypot-dashboard-api.service",
+        "honeypot-enrichment-worker.service",
+        "honeypot-feed-refresh.timer",
+        "honeypot-ingest-api.service",
+        "honeypot-monitor-web.service",
+        "honeypot-session-count-monitor.timer",
+        "honeypot-session-worker.service",
+        "honeypot-threat-hunt-worker.service",
+        "honeypot-webhook-dispatcher.service"
+      ],
+      "required_active_units": [
+        "honeypot-analysis-worker.service",
+        "honeypot-dashboard-api.service",
+        "honeypot-enrichment-worker.service",
+        "honeypot-feed-refresh.timer",
+        "honeypot-ingest-api.service",
+        "honeypot-monitor-web.service",
+        "honeypot-session-count-monitor.timer",
+        "honeypot-session-worker.service",
+        "honeypot-threat-hunt-worker.service",
+        "honeypot-webhook-dispatcher.service"
+      ],
+      "allowed_external_enabled_units": [],
+      "prohibited_units": [
+        "honeypot-calibration-worker.service",
+        "honeypot-calibration-worker.timer",
+        "honeypot-prediction-backtest.service",
+        "honeypot-prediction-backtest.timer",
+        "honeypot-prediction-retention.service",
+        "honeypot-prediction-retention.timer"
+      ],
+      "enabled_unit_prefix": "honeypot-"
+    },
+    "pi_sensor": {
+      "managed_installed_units": [
+        "honeypot-sensor-forwarder.service"
+      ],
+      "required_enabled_units": [
+        "honeypot-sensor-forwarder.service"
+      ],
+      "required_active_units": [
+        "cowrie.service",
+        "honeypot-sensor-forwarder.service"
+      ],
+      "allowed_external_enabled_units": [
+        "honeypot-collector.service",
+        "honeypot-disk-monitor.timer",
+        "honeypot-hardware.service",
+        "honeypot-local-firewall.service",
+        "honeypot-processor.service"
+      ],
+      "prohibited_units": [],
+      "enabled_unit_prefix": "honeypot-"
+    }
+  }
+}
