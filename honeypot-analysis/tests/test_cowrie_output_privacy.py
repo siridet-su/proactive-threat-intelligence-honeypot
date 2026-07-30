@@ -277,3 +277,18 @@ def test_initialization_failure_has_no_output_side_effect(tmp_path: Path) -> Non
             drop_in=dropin,
         )
     assert not output.exists()
+
+
+def test_installer_preserves_every_manifested_executable_mode() -> None:
+    installer = (
+        ROOT / "deployment/cowrie_output/install-sanitized-output.sh"
+    ).read_text(encoding="utf-8")
+    for script_name in (
+        "install-sanitized-output.sh",
+        "rollback-sanitized-output.sh",
+        "run-sanitized-cowrie.sh",
+    ):
+        assert (
+            f'chmod 0700 "${{release}}/deployment/cowrie_output/{script_name}"'
+            in installer
+        )

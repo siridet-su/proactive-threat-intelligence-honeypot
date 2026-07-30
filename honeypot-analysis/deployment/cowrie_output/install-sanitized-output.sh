@@ -77,6 +77,8 @@ chown -R cowrie:cowrie "${release}"
 find "${release}" -type d -exec chmod 0700 {} +
 find "${release}" -type f -exec chmod 0600 {} +
 chmod 0700 "${release}/deployment/cowrie_output/run-sanitized-cowrie.sh"
+chmod 0700 "${release}/deployment/cowrie_output/install-sanitized-output.sh"
+chmod 0700 "${release}/deployment/cowrie_output/rollback-sanitized-output.sh"
 
 ln -sfn "${release}" "${current}.new"
 chown -h cowrie:cowrie "${current}.new"
