@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -327,6 +328,9 @@ def _git_revision() -> str:
                 return value
         except OSError:
             pass
+    manifest_revision = _manifest_bound_git_revision(root)
+    if manifest_revision:
+        return manifest_revision
     try:
         value = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -339,6 +343,66 @@ def _git_revision() -> str:
         return value if GIT_REVISION_RE.fullmatch(value) else ""
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def _manifest_bound_git_revision(root: Path) -> str:
+    """Resolve a staged release revision from its immutable source manifest.
+
+    A pre-activation release intentionally has no ``DEPLOYED_COMMIT`` marker
+    and an extracted Git archive has no ``.git`` directory. Accept its
+    manifest revision only when the manifest binds this exact evaluator file
+    by path, byte length, and SHA-256 under the current release root.
+    """
+
+    manifest_path = root / "DEPLOYMENT_MANIFEST.json"
+    try:
+        metadata = manifest_path.lstat()
+        if (
+            manifest_path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size > 1024 * 1024
+            or metadata.st_mode & 0o022
+        ):
+            return ""
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(manifest, dict):
+        return ""
+    if manifest.get("schema_version") not in {
+        "honeypot_release_manifest.v6",
+        "honeypot_release_manifest.v7",
+    }:
+        return ""
+    revision = _clean(manifest.get("git_revision")).lower()
+    if not GIT_REVISION_RE.fullmatch(revision):
+        return ""
+    try:
+        if Path(_clean(manifest.get("release_path"))).resolve() != root.resolve():
+            return ""
+    except (OSError, RuntimeError):
+        return ""
+    if (
+        (manifest.get("release_identity") or {}).get("policy_id")
+        != "immutable_source_release.v2"
+    ):
+        return ""
+    source_path = Path(__file__).resolve()
+    try:
+        relative_source = source_path.relative_to(root.resolve()).as_posix()
+        source_bytes = source_path.read_bytes()
+    except (OSError, ValueError):
+        return ""
+    source_entry = (manifest.get("release_files") or {}).get(relative_source)
+    if not isinstance(source_entry, dict):
+        return ""
+    if source_entry.get("type") != "file":
+        return ""
+    if source_entry.get("bytes") != len(source_bytes):
+        return ""
+    if source_entry.get("sha256") != _sha256_bytes(source_bytes):
+        return ""
+    return revision
 
 
 def _artifact_hashes(*values: Any) -> List[Dict[str, str]]:
