@@ -860,6 +860,7 @@ def _private_session_result(
         groups.append(
             {
                 "group_id": f"{source_member}:{source_line}",
+                "durable_order": source_line,
                 "event_order": event_order,
                 "observed_at": str(command_row[1]),
                 "labels": occurrence_labels,

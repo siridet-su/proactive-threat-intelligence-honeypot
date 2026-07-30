@@ -13,7 +13,6 @@ import json
 import math
 import time
 from copy import deepcopy
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
@@ -26,6 +25,11 @@ from production.prediction.next_behavior_contract import (
 )
 from production.prediction.next_behavior_label_policy import normalize_classifier_outputs
 from production.prediction.evidence_cutoff import require_valid_evidence_cutoff
+from production.prediction.next_behavior_chronology import (
+    NextBehaviorChronologyError,
+    order_model_chronology,
+    relative_time_milliseconds,
+)
 from production.prediction.prediction_snapshot_contract import (
     SNAPSHOT_SCHEMA_VERSION,
     finalize_prediction_snapshot,
@@ -182,19 +186,6 @@ def _pseudonymous_id(kind: str, value: str) -> str:
     return f"nb{kind}_{digest}"
 
 
-def _event_time_ms(value: Any, start: Any) -> int:
-    try:
-        event = datetime.fromisoformat(_clean(value).replace("Z", "+00:00"))
-        origin = datetime.fromisoformat(_clean(start).replace("Z", "+00:00"))
-        if event.tzinfo is None:
-            event = event.replace(tzinfo=timezone.utc)
-        if origin.tzinfo is None:
-            origin = origin.replace(tzinfo=timezone.utc)
-        return max(0, int((event - origin).total_seconds() * 1000))
-    except (TypeError, ValueError):
-        return 0
-
-
 def _count_bucket(count: int) -> str:
     if count <= 0:
         return "0"
@@ -256,8 +247,19 @@ def build_live_next_behavior_session(
             compound_index = int(event.get("compound_command_index") or 0)
         except (TypeError, ValueError):
             compound_index = 0
+        durable_cutoff = event.get("durable_evidence_order")
+        durable_event_id = (
+            _clean(durable_cutoff.get("event_id"))
+            if isinstance(durable_cutoff, Mapping)
+            else ""
+        )
         key = (
-            _clean(event.get("cowrie_eventid") or event.get("evidence_id") or index),
+            durable_event_id
+            or _clean(
+                event.get("cowrie_eventid")
+                or event.get("evidence_id")
+                or index
+            ),
             _clean(event.get("event_timestamp")),
             compound_index,
         )
@@ -266,7 +268,6 @@ def build_live_next_behavior_session(
             grouped[key] = []
         grouped[key].append(event)
 
-    start = payload.get("start_time")
     command_count = len(payload.get("commands") or [])
     duration = payload.get("duration")
     try:
@@ -285,11 +286,38 @@ def build_live_next_behavior_session(
         "session_age_bucket": _age_bucket(age_seconds),
         "confirmed_transfer_observed": _confirmed_transfer(payload),
     }
+    chronology_records: list[Dict[str, Any]] = []
+    for durable_sequence, key in enumerate(order):
+        first_event = grouped[key][0]
+        durable_cutoff = first_event.get("durable_evidence_order")
+        durable_id = ""
+        if isinstance(durable_cutoff, Mapping):
+            durable_id = _clean(durable_cutoff.get("event_id"))
+        durable_id = durable_id or _clean(
+            first_event.get("evidence_id")
+            or first_event.get("cowrie_eventid")
+            or f"group-{durable_sequence}"
+        )
+        chronology_records.append(
+            {
+                "source_timestamp": key[1],
+                "durable_sequence": durable_sequence,
+                "durable_id": durable_id,
+                "group_key": key,
+            }
+        )
+    chronology = order_model_chronology(chronology_records)
+    relative_times = relative_time_milliseconds(chronology)
     groups: list[Dict[str, Any]] = []
-    for event_order, key in enumerate(order, start=1):
+    for model_index, (chronology_record, relative_time) in enumerate(
+        zip(chronology.records, relative_times, strict=True),
+        start=1,
+    ):
+        key = chronology_record["group_key"]
+        durable_order = int(chronology_record["durable_sequence"]) + 1
         normalized = normalize_classifier_outputs(
             grouped[key],
-            private_evidence_prefix=f"{session_id}:{event_order}",
+            private_evidence_prefix=f"{session_id}:{durable_order}",
             policy_sha256=rule_policy_sha256,
             trust_policy_sha256=trust_policy_sha256,
             checkpoint_sha256=classifier_checkpoint_sha256,
@@ -303,20 +331,22 @@ def build_live_next_behavior_session(
         ]
         if not trusted:
             continue
-        timestamp = key[1]
         safe_labels = []
         for label_index, label in enumerate(trusted):
             item = deepcopy(label)
             item["evidence_ref"] = _pseudonymous_id(
                 "evidence",
-                f"{session_id}:{event_order}:{label_index}:{item['evidence_ref']}",
+                f"{session_id}:{durable_order}:{label_index}:{item['evidence_ref']}",
             )
             safe_labels.append(item)
         groups.append(
             {
-                "group_id": _pseudonymous_id("group", f"{session_id}:{event_order}"),
-                "event_order": event_order,
-                "relative_time_ms": _event_time_ms(timestamp, start),
+                "group_id": _pseudonymous_id(
+                    "group",
+                    f"{session_id}:{durable_order}",
+                ),
+                "event_order": model_index,
+                "relative_time_ms": relative_time,
                 "tactics": sorted({item["tactic"] for item in safe_labels}),
                 "techniques": sorted({item["technique"] for item in safe_labels}),
                 "evidence_refs": sorted({item["evidence_ref"] for item in safe_labels}),
@@ -660,6 +690,18 @@ class FrozenTransformerPocPredictor:
                 "truncated": model_input["truncated"],
                 "input_evidence_refs": model_input["input_evidence_refs"],
             }
+            snapshot["runtime"]["inference_latency_ms"] = (
+                time.perf_counter() - started
+            ) * 1000.0
+            return finalize_prediction_snapshot(snapshot)
+        except NextBehaviorChronologyError as exc:
+            snapshot = self._base_snapshot(
+                payload,
+                event_id=event_id,
+                status="model_unavailable",
+                reason=f"chronology_unavailable:{exc.reason}",
+                evidence_cutoff=evidence_cutoff,
+            )
             snapshot["runtime"]["inference_latency_ms"] = (
                 time.perf_counter() - started
             ) * 1000.0

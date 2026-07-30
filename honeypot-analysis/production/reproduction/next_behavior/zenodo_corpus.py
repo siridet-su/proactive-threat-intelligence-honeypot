@@ -1198,6 +1198,7 @@ def _build_one_safe_session(
         observation_groups.append(
             {
                 "group_id": f"{source_member}:{source_line}",
+                "durable_order": source_line,
                 "event_order": command_number,
                 "observed_at": str(command_row[1]),
                 "labels": occurrence_labels,

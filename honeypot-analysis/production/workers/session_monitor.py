@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Any
@@ -530,16 +531,36 @@ class SessionMonitor:
         self.session_event_history_limit = int(session_event_history_limit)
 
 
-    def on_event(self, event: dict) -> List[AlertEvent]:
+    def on_event(
+        self,
+        event: dict,
+        *,
+        durable_evidence_order: Optional[Dict[str, Any]] = None,
+    ) -> List[AlertEvent]:
         """
         Process one Cowrie event. Returns list of alerts fired (may be empty).
         Call this for every line from cowrie.json.
         """
+        event = dict(event)
+        embedded_durable_order = event.pop(
+            "_prediction_durable_evidence_order",
+            None,
+        )
+        if durable_evidence_order is None and isinstance(
+            embedded_durable_order,
+            dict,
+        ):
+            durable_evidence_order = embedded_durable_order
         self._stats["events"] += 1
         eid        = event.get("eventid", "")
         session_id = event.get("session", "unknown")
         src_ip     = event.get("src_ip", "unknown")
-        timestamp  = event.get("timestamp", datetime.now(timezone.utc).isoformat())
+        source_timestamp = event.get("timestamp")
+        timestamp = (
+            source_timestamp
+            if str(source_timestamp or "").strip()
+            else datetime.now(timezone.utc).isoformat()
+        )
 
         # Ensure session exists
         state = self._get_or_create(session_id, src_ip, timestamp)
@@ -614,7 +635,13 @@ class SessionMonitor:
                         or safe_cmd
                     )
                     classification["cowrie_eventid"] = eid
-                    classification["event_timestamp"] = timestamp
+                    classification["event_timestamp"] = str(
+                        source_timestamp or ""
+                    ).strip()
+                    if durable_evidence_order is not None:
+                        classification["durable_evidence_order"] = deepcopy(
+                            durable_evidence_order
+                        )
                     classification["command_outcome"] = command_outcome
                     classification["compound_command_index"] = compound_command_index
                     try:
@@ -629,7 +656,7 @@ class SessionMonitor:
                         "class",
                         {
                             "session_id": session_id,
-                            "timestamp": timestamp,
+                            "timestamp": str(source_timestamp or "").strip(),
                             "eventid": eid,
                             "command": classified_command,
                             "classification_index": classification_index,

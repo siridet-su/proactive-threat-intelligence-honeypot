@@ -1331,7 +1331,11 @@ class SessionWorker:
                         else:
                             self._save_active_session(state)
                     else:
-                        self.monitor.on_event(event)
+                        monitor_event = dict(event)
+                        monitor_event[
+                            "_prediction_durable_evidence_order"
+                        ] = evidence_cutoff
+                        self.monitor.on_event(monitor_event)
                         self._record_event_effect("event_applied")
                         state = self.monitor.get_session(session_id)
                         if state is not None and not getattr(state, "is_ended", False):

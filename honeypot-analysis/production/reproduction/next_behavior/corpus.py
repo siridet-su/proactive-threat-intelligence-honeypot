@@ -24,6 +24,10 @@ from production.prediction.next_behavior_contract import (
     normalize_label_source,
     require_valid_next_behavior_session,
 )
+from production.prediction.next_behavior_chronology import (
+    NextBehaviorChronologyError,
+    order_model_chronology,
+)
 from production.utils.serialization import stable_id, stable_json
 
 SOURCE_MEMBER_RECEIPT_SCHEMA_VERSION = "next_behavior_source_member_receipt.v1"
@@ -373,13 +377,45 @@ def build_privacy_safe_session(
     private_session_id = _clean(private_session.get("session_id"))
     if not private_session_id:
         raise NextBehaviorCorpusError("private session_id is required")
-    raw_groups = private_session.get("observation_groups")
-    if not isinstance(raw_groups, list) or not raw_groups:
+    raw_groups_value = private_session.get("observation_groups")
+    if not isinstance(raw_groups_value, list) or not raw_groups_value:
         raise NextBehaviorCorpusError(
             "private observation_groups must be a non-empty array"
         )
-    if not all(isinstance(group, Mapping) for group in raw_groups):
+    if not all(isinstance(group, Mapping) for group in raw_groups_value):
         raise NextBehaviorCorpusError("every private observation group must be an object")
+    raw_groups = [dict(group) for group in raw_groups_value]
+    if all(bool(_clean(group.get("observed_at"))) for group in raw_groups):
+        try:
+            chronology = order_model_chronology(
+                [
+                    {
+                        "source_timestamp": group.get("observed_at"),
+                        "durable_sequence": int(
+                            group.get("durable_order")
+                            if group.get("durable_order") is not None
+                            else group.get("event_order")
+                            if group.get("event_order") is not None
+                            else index
+                        ),
+                        "durable_id": _clean(group.get("group_id")),
+                        "group": group,
+                    }
+                    for index, group in enumerate(raw_groups)
+                ]
+            )
+        except (NextBehaviorChronologyError, TypeError, ValueError) as exc:
+            reason = (
+                exc.reason
+                if isinstance(exc, NextBehaviorChronologyError)
+                else "invalid_durable_evidence_order"
+            )
+            raise NextBehaviorCorpusError(
+                f"model chronology is unavailable: {reason}"
+            ) from exc
+        raw_groups = [
+            dict(record["group"]) for record in chronology.records
+        ]
 
     relative_times = _relative_times(raw_groups)
     safe_groups: List[Dict[str, Any]] = []
@@ -440,7 +476,7 @@ def build_privacy_safe_session(
                 f"{private_session_id}:{private_group_id}",
                 key=key,
             ),
-            "event_order": raw_group.get("event_order"),
+            "event_order": source_index + 1,
             "relative_time_ms": relative_time,
             "tactics": sorted({label["tactic"] for label in trusted}),
             "techniques": sorted({label["technique"] for label in trusted}),

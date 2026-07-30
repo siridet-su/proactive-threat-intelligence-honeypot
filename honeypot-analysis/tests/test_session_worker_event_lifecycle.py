@@ -556,6 +556,10 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
     assert final_payload["commands"] == ["whoami", "cat /etc/passwd"]
     assert len(final_payload["raw_events"]) == 5
     assert len(final_payload["classification_events"]) >= 2
+    assert all(
+        event.get("durable_evidence_order", {}).get("event_id")
+        for event in final_payload["classification_events"]
+    )
     trusted_ttps = {
         event.get("ttp")
         for event in final_payload["classification_events"]
