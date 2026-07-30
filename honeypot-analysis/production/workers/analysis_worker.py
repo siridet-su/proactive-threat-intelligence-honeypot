@@ -499,7 +499,7 @@ def reconstruct_canonical_session_events(
     *,
     max_events: int,
 ) -> Dict[str, Any]:
-    """Replace bounded monitor history with its exact durable event prefix."""
+    """Rebuild canonical event-derived fields from the exact durable prefix."""
 
     expected = session_payload.get("canonical_event_manifest")
     if not isinstance(expected, dict):
@@ -527,8 +527,65 @@ def reconstruct_canonical_session_events(
         raise SessionAssessmentV4Error(
             "durable session evidence does not match the analysis manifest"
         )
+    selected_session_id = str(expected.get("session_id") or "")
+    events = list(actual["events"])
+    if len(events) != int(expected.get("event_count") or -1):
+        raise SessionAssessmentV4Error(
+            "durable session evidence count does not match the analysis manifest"
+        )
+    for event in events:
+        event_session_id = str(event.get("session") or "").strip()
+        if event_session_id and event_session_id != selected_session_id:
+            raise SessionAssessmentV4Error(
+                "durable session evidence contains a conflicting session identity"
+            )
+
+    commands: List[str] = []
+    commands_success: List[str] = []
+    commands_failed: List[str] = []
+    for event in events:
+        eventid = str(event.get("eventid") or "").strip()
+        if eventid not in {
+            "cowrie.command.input",
+            "cowrie.command.success",
+            "cowrie.command.failed",
+        }:
+            continue
+        command = str(event.get("input") or "").strip()
+        if not command:
+            continue
+        commands.append(command)
+        reported_success = (
+            event.get("success") == 1 or eventid == "cowrie.command.success"
+        )
+        reported_failure = (
+            event.get("success") == 0 or eventid == "cowrie.command.failed"
+        )
+        if reported_success:
+            commands_success.append(command)
+        elif reported_failure:
+            commands_failed.append(command)
+
     reconstructed = dict(session_payload)
-    reconstructed["raw_events"] = list(actual["events"])
+    reconstructed["session_id"] = selected_session_id
+    reconstructed["raw_events"] = events
+    reconstructed["commands"] = commands
+    reconstructed["commands_success"] = commands_success
+    reconstructed["commands_failed"] = commands_failed
+    reconstructed["login_success"] = any(
+        str(event.get("eventid") or "") == "cowrie.login.success"
+        for event in events
+    )
+    reconstructed["login_attempts"] = sum(
+        1
+        for event in events
+        if str(event.get("eventid") or "") == "cowrie.login.failed"
+    )
+    # Cached graphs may have been built from the bounded monitor projection.
+    # The v4 builder deterministically reconstructs them from this exact event
+    # set and the pinned behavior policy.
+    reconstructed["session_evidence_graph"] = {}
+    reconstructed["session_evidence_graph_summary"] = {}
     reconstructed["canonical_event_manifest"] = dict(expected)
     return reconstructed
 
@@ -687,36 +744,69 @@ class AnalysisWorker:
                 if isinstance(latest_prediction_row, dict)
                 else None
             )
-            skip_reason = ""
-            if self.config.analysis_skip_empty_sessions:
-                skip_reason = session_analysis_skip_reason(job["session"])
-            if skip_reason:
-                skipped = self.storage.skip_analysis_job(
-                    job["job_id"],
-                    job["claim_owner"],
-                    job["claim_token"],
-                    skip_reason,
-                )
-                processed += int(skipped)
-                print(
-                    _safe_log_json(
-                        {
-                            "service": "analysis_worker",
-                            "job_id": job["job_id"],
-                            "session_id": job.get("session_id", "unknown"),
-                            "correlation_id": correlation_id,
-                            "status": "skipped",
-                            "reason": skip_reason,
-                            "timestamp": utc_now(),
-                        },
-                    ),
-                    flush=True,
-                )
-                continue
             with JobLeaseHeartbeat(self.storage, self.config, "analysis", job) as heartbeat:
                 try:
+                    # Analysis jobs contain a bounded monitor projection. It is
+                    # never an authority input. Reconstruct and bind the exact
+                    # durable prefix before any skip decision or report path.
+                    canonical_session = reconstruct_canonical_session_events(
+                        self.storage,
+                        job["session"],
+                        max_events=self.config.canonical_evidence_max_events,
+                    )
+                except Exception as exc:
+                    retry = int(job["attempts"]) < self.config.analysis_max_attempts
+                    status = self._fail_claim(job, exc, retryable=retry)
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "job_id": job["job_id"],
+                                "correlation_id": correlation_id,
+                                "status": status,
+                                "error": _safe_exception_text(exc),
+                                "canonical_evidence_status": "unavailable",
+                                "partial_report_created": False,
+                                "timestamp": utc_now(),
+                            },
+                        ),
+                        flush=True,
+                    )
+                    continue
+
+                canonical_job = dict(job)
+                canonical_job["session"] = canonical_session
+                skip_reason = ""
+                if self.config.analysis_skip_empty_sessions:
+                    skip_reason = session_analysis_skip_reason(canonical_session)
+                if skip_reason:
+                    skipped = self.storage.skip_analysis_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                        skip_reason,
+                    )
+                    processed += int(skipped)
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "job_id": job["job_id"],
+                                "session_id": job.get("session_id", "unknown"),
+                                "correlation_id": correlation_id,
+                                "status": "skipped",
+                                "reason": skip_reason,
+                                "canonical_evidence_status": "verified",
+                                "timestamp": utc_now(),
+                            },
+                        ),
+                        flush=True,
+                    )
+                    continue
+
+                try:
                     report = await analyze_job(
-                        job,
+                        canonical_job,
                         self.config,
                         coordinator_class=coordinator_class,
                         prediction_snapshot=latest_prediction,
@@ -731,8 +821,18 @@ class AnalysisWorker:
                         status = transition
                     else:
                         try:
-                            fallback = deterministic_baseline_report(
+                            # Re-read and re-verify the immutable durable prefix
+                            # for fallback. Never reuse the bounded queued
+                            # projection or create artifacts after a mismatch.
+                            fallback_session = reconstruct_canonical_session_events(
+                                self.storage,
                                 job["session"],
+                                max_events=(
+                                    self.config.canonical_evidence_max_events
+                                ),
+                            )
+                            fallback = deterministic_baseline_report(
+                                fallback_session,
                                 safe_error,
                                 prediction_snapshot=latest_prediction,
                                 config=self.config,
@@ -743,7 +843,7 @@ class AnalysisWorker:
                             )
                             fallback = attach_report_artifacts(
                                 fallback,
-                                job["session"],
+                                fallback_session,
                                 self.config,
                             )
                             validate_session_assessment_v4(

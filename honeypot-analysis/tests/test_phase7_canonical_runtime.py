@@ -4,12 +4,16 @@ import asyncio
 import base64
 import json
 import os
+from pathlib import Path
 
 import pytest
 
-from production.reporting.artifacts import _artifact_version_id
+from production.reporting.artifacts import (
+    _artifact_version_id,
+    validate_report_artifact_manifest,
+)
 from production.reporting.session_assessment_v4 import SessionAssessmentV4Error
-from production.storage import open_storage
+from production.storage import StorageError, open_storage
 from production.utils.config import ProductionConfig
 from production.utils.serialization import stable_json
 from production.workers.analysis_worker import (
@@ -18,6 +22,14 @@ from production.workers.analysis_worker import (
 )
 from production.workers.session_monitor import SessionMonitor
 from production.workers.session_worker import SessionWorker, alert_payload
+
+
+class _FailingCoordinator:
+    def __init__(self, **_kwargs) -> None:
+        pass
+
+    async def analyze(self, *_args, **_kwargs):
+        raise RuntimeError("controlled primary analysis failure")
 
 
 def _config(tmp_path, *, history_limit: int = 3) -> ProductionConfig:
@@ -115,6 +127,265 @@ def test_large_session_report_uses_complete_durable_event_manifest(tmp_path) -> 
     assert report["provenance"]["durable_event_manifest"] == (
         job_payload["canonical_event_manifest"]
     )
+    assert len(report["canonical_evidence"]["observations"]) == 10
+
+
+def test_terminal_fallback_reconstructs_full_durable_session_before_artifacts(
+    tmp_path,
+) -> None:
+    config = _config(tmp_path, history_limit=2)
+    config.enable_artifacts = True
+    config.reports_dir = str(tmp_path / "reports")
+    storage = open_storage(config.database_url)
+    events = [_event("fallback-large", 0, "cowrie.session.connect")]
+    events.extend(
+        _event(
+            "fallback-large",
+            index,
+            "cowrie.command.input",
+            input=f"printf fallback-{index}",
+            success=1,
+        )
+        for index in range(1, 9)
+    )
+    events.append(_event("fallback-large", 9, "cowrie.session.closed"))
+    for event in events:
+        storage.store_event("sensor-phase7", event)
+    session_worker = SessionWorker(config)
+    try:
+        assert session_worker.process_unprocessed() == len(events)
+    finally:
+        session_worker.close()
+
+    queued = json.loads(storage.list_rows("analysis_jobs", limit=1)[0]["payload_json"])
+    assert len(queued["raw_events"]) == 2
+    assert len(queued["commands"]) == 2
+    assert queued["canonical_event_manifest"]["event_count"] == len(events)
+
+    assert asyncio.run(
+        AnalysisWorker(config).process_once(coordinator_class=_FailingCoordinator)
+    ) == 1
+    report = json.loads(storage.list_rows("reports", limit=1)[0]["payload_json"])
+    assert report["status"] == "observation_only_abstention"
+    assert report["behavioral_findings"] == []
+    assert report["hypothesis_sets"] == []
+    assert report["canonical_evidence"]["durable_event_manifest"] == (
+        queued["canonical_event_manifest"]
+    )
+    assert len(report["canonical_evidence"]["observations"]) == 8
+    assert report["provenance"]["durable_event_manifest"] == (
+        queued["canonical_event_manifest"]
+    )
+    assert validate_report_artifact_manifest(
+        report["artifacts"]["integrity_manifest"]
+    ) == []
+    for artifact_path in report["artifacts"].values():
+        assert Path(artifact_path).is_file()
+
+
+def test_manifest_failure_creates_no_report_or_partial_artifact(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.enable_artifacts = True
+    config.reports_dir = str(tmp_path / "reports")
+    storage = open_storage(config.database_url)
+    events = [
+        _event("fallback-mismatch", 0, "cowrie.session.connect"),
+        _event(
+            "fallback-mismatch",
+            1,
+            "cowrie.command.input",
+            input="id",
+            success=1,
+        ),
+        _event("fallback-mismatch", 2, "cowrie.session.closed"),
+    ]
+    event_ids = []
+    for event in events:
+        event_id, _ = storage.store_event("sensor-phase7", event)
+        event_ids.append(event_id)
+    session_worker = SessionWorker(config)
+    try:
+        assert session_worker.process_unprocessed() == len(events)
+    finally:
+        session_worker.close()
+
+    with storage.connection() as connection:
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            ('{"eventid":"tampered","session":"fallback-mismatch"}', event_ids[1]),
+        )
+
+    assert asyncio.run(
+        AnalysisWorker(config).process_once(coordinator_class=_FailingCoordinator)
+    ) == 0
+    assert storage.list_rows("reports") == []
+    failed = storage.list_rows("analysis_jobs", limit=1)[0]
+    assert failed["status"] == "failed"
+    assert failed["last_error_code"] == "job_invalid"
+    reports_dir = Path(config.reports_dir)
+    assert not reports_dir.exists() or list(reports_dir.iterdir()) == []
+
+
+def test_temporary_durable_storage_failure_retries_without_partial_report(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = _config(tmp_path)
+    config.analysis_max_attempts = 2
+    config.enable_artifacts = True
+    config.reports_dir = str(tmp_path / "reports")
+    storage = open_storage(config.database_url)
+    events = [
+        _event("fallback-storage", 0, "cowrie.session.connect"),
+        _event(
+            "fallback-storage",
+            1,
+            "cowrie.command.input",
+            input="whoami",
+            success=1,
+        ),
+        _event("fallback-storage", 2, "cowrie.session.closed"),
+    ]
+    for event in events:
+        storage.store_event("sensor-phase7", event)
+    session_worker = SessionWorker(config)
+    try:
+        assert session_worker.process_unprocessed() == len(events)
+    finally:
+        session_worker.close()
+
+    worker = AnalysisWorker(config)
+    monkeypatch.setattr(
+        worker.storage,
+        "load_session_event_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            StorageError("temporary database unavailable")
+        ),
+    )
+    assert asyncio.run(
+        worker.process_once(coordinator_class=_FailingCoordinator)
+    ) == 0
+    assert storage.list_rows("reports") == []
+    retry = storage.list_rows("analysis_jobs", limit=1)[0]
+    assert retry["status"] == "retry"
+    assert retry["last_error_code"] == "analysis_failed"
+    reports_dir = Path(config.reports_dir)
+    assert not reports_dir.exists() or list(reports_dir.iterdir()) == []
+
+
+def test_missing_durable_watermark_fails_without_report_or_artifacts(
+    tmp_path,
+) -> None:
+    config = _config(tmp_path)
+    config.enable_artifacts = True
+    config.reports_dir = str(tmp_path / "reports")
+    storage = open_storage(config.database_url)
+    first = _event(
+        "fallback-missing",
+        0,
+        "cowrie.command.input",
+        input="id",
+        success=1,
+    )
+    close = _event("fallback-missing", 1, "cowrie.session.closed")
+    storage.store_event("sensor-phase7", first)
+    close_id, _ = storage.store_event("sensor-phase7", close)
+    snapshot = storage.load_session_event_snapshot(
+        "fallback-missing", close_id, max_events=10
+    )
+    manifest = {
+        key: snapshot[key]
+        for key in (
+            "schema_version",
+            "session_id",
+            "through_event_id",
+            "event_count",
+            "manifest_sha256",
+        )
+    }
+    manifest["through_event_id"] = "event_missing_watermark"
+    storage.enqueue_analysis_job(
+        {
+            "session_id": "fallback-missing",
+            "commands": ["id"],
+            "commands_success": ["id"],
+            "commands_failed": [],
+            "raw_events": [close],
+            "canonical_event_manifest": manifest,
+        }
+    )
+
+    assert asyncio.run(
+        AnalysisWorker(config).process_once(coordinator_class=_FailingCoordinator)
+    ) == 0
+    assert storage.list_rows("reports") == []
+    failed = storage.list_rows("analysis_jobs", limit=1)[0]
+    assert failed["status"] == "failed"
+    assert failed["last_error_code"] == "analysis_failed"
+    reports_dir = Path(config.reports_dir)
+    assert not reports_dir.exists() or list(reports_dir.iterdir()) == []
+
+
+def test_duplicate_and_timestamp_reordered_events_reconstruct_once_in_durable_order(
+    tmp_path,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'ordered.db'}")
+    first = _event(
+        "durable-order",
+        2,
+        "cowrie.command.input",
+        input="printf received-first",
+        success=1,
+    )
+    second = _event(
+        "durable-order",
+        1,
+        "cowrie.command.input",
+        input="printf received-second",
+        success=0,
+    )
+    first_id, first_inserted = storage.store_event("sensor-phase7", first)
+    duplicate_id, duplicate_inserted = storage.store_event("sensor-phase7", first)
+    second_id, second_inserted = storage.store_event("sensor-phase7", second)
+    assert first_inserted is True
+    assert duplicate_inserted is False
+    assert duplicate_id == first_id
+    assert second_inserted is True
+
+    snapshot = storage.load_session_event_snapshot(
+        "durable-order", second_id, max_events=10
+    )
+    manifest = {
+        key: snapshot[key]
+        for key in (
+            "schema_version",
+            "session_id",
+            "through_event_id",
+            "event_count",
+            "manifest_sha256",
+        )
+    }
+    reconstructed = reconstruct_canonical_session_events(
+        storage,
+        {
+            "session_id": "durable-order",
+            "commands": ["bounded-wrong"],
+            "commands_success": [],
+            "commands_failed": [],
+            "raw_events": [second],
+            "canonical_event_manifest": manifest,
+            "session_evidence_graph": {"graph_id": "bounded-stale"},
+        },
+        max_events=10,
+    )
+    assert reconstructed["commands"] == [
+        "printf received-first",
+        "printf received-second",
+    ]
+    assert reconstructed["commands_success"] == ["printf received-first"]
+    assert reconstructed["commands_failed"] == ["printf received-second"]
+    assert reconstructed["session_evidence_graph"] == {}
+    assert len(reconstructed["raw_events"]) == 2
 
 
 def test_reconstruction_exceeds_default_ten_thousand_event_history_bound(
