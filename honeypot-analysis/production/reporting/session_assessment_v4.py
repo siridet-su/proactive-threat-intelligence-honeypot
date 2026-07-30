@@ -68,6 +68,21 @@ PROHIBITED_AUTHORITY_KEYS = {
 class SessionAssessmentV4Error(ValueError):
     """Raised when a v4 record violates the whole-contract validator."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        validation_errors: Optional[List[str]] = None,
+        source_revision: str = "",
+        producer: str = "build_session_assessment_v4",
+    ) -> None:
+        super().__init__(message)
+        self.validation_errors = tuple(validation_errors or ())
+        self.contract_name = SCHEMA_VERSION
+        self.validator_name = "validate_session_assessment_v4"
+        self.source_revision = _clean(source_revision).lower()
+        self.producer = producer
+
 
 def canonical_assessment_id(value: Dict[str, Any]) -> str:
     """Derive the v4 ID from the current canonical findings and provenance."""
@@ -1122,7 +1137,15 @@ def validate_session_assessment_v4(
 
     prohibited(canonical)
     if raise_on_error and errors:
-        raise SessionAssessmentV4Error("; ".join(errors))
+        raise SessionAssessmentV4Error(
+            "; ".join(errors),
+            validation_errors=errors,
+            source_revision=_clean(
+                (value.get("provenance") or {}).get(
+                    "evaluator_git_revision"
+                )
+            ),
+        )
     return errors
 
 

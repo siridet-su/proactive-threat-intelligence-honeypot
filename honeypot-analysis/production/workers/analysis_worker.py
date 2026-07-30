@@ -47,6 +47,7 @@ from production.utils.sensitive_data import (
 from production.utils.serialization import command_observation_provenance, utc_now
 from production.utils.service_lifecycle import ServiceLifecycle
 from production.utils.http_security import safe_correlation_id
+from production.utils.validation_diagnostics import diagnostic_from_exception
 from production.storage import open_storage
 from production.workers.job_lifecycle import (
     JobLeaseHeartbeat,
@@ -639,7 +640,15 @@ async def analyze_job(
                 "analysis pipeline returned no report",
             )
         )
-        raise RuntimeError(safe_pipeline_error) from None
+        failure = RuntimeError(safe_pipeline_error)
+        diagnostic = getattr(
+            state,
+            "pipeline_validation_diagnostic",
+            None,
+        )
+        if isinstance(diagnostic, dict):
+            failure.validation_diagnostic = diagnostic
+        raise failure from None
     if result.get("schema_version") != "session_assessment.v4":
         raise SessionAssessmentV4Error(
             "new analysis reports must use session_assessment.v4"
@@ -816,6 +825,11 @@ class AnalysisWorker:
                     )
                 except Exception as exc:
                     safe_error = _safe_exception_text(exc)
+                    validation_diagnostic = diagnostic_from_exception(
+                        exc,
+                        job_id=job["job_id"],
+                        retry_attempt=job["attempts"],
+                    )
                     retry = int(job["attempts"]) < self.config.analysis_max_attempts
                     status = "retry" if retry else "failed"
                     if retry or not self.config.analysis_fallback_on_failure:
@@ -865,26 +879,36 @@ class AnalysisWorker:
                                 status = "fallback_reported"
                         except Exception as fallback_exc:
                             safe_error = _safe_exception_text(fallback_exc)
+                            fallback_diagnostic = diagnostic_from_exception(
+                                fallback_exc,
+                                job_id=job["job_id"],
+                                retry_attempt=job["attempts"],
+                            )
+                            if fallback_diagnostic is not None:
+                                validation_diagnostic = fallback_diagnostic
                             status = self._fail_claim(
                                 job,
                                 fallback_exc,
                                 retryable=False,
                             )
-                    print(
-                        _safe_log_json(
-                            {
-                                "service": "analysis_worker",
-                                "job_id": job["job_id"],
-                                "correlation_id": correlation_id,
-                                "status": status,
-                                "error": safe_error,
-                                "report_generation_latency_ms": round(
-                                    max(time.monotonic() - started_at, 0.0) * 1000,
-                                    3,
-                                ),
-                                "timestamp": utc_now(),
-                            },
+                    log_record = {
+                        "service": "analysis_worker",
+                        "job_id": job["job_id"],
+                        "correlation_id": correlation_id,
+                        "status": status,
+                        "error": safe_error,
+                        "report_generation_latency_ms": round(
+                            max(time.monotonic() - started_at, 0.0) * 1000,
+                            3,
                         ),
+                        "timestamp": utc_now(),
+                    }
+                    if validation_diagnostic is not None:
+                        log_record["validation_diagnostic"] = (
+                            validation_diagnostic
+                        )
+                    print(
+                        _safe_log_json(log_record),
                         flush=True,
                     )
                     continue

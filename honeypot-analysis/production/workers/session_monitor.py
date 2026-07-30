@@ -41,6 +41,9 @@ from production.utils.sensitive_data import (
     redact_for_log,
 )
 from production.utils.serialization import command_observation_provenance, stable_id
+from production.utils.validation_diagnostics import (
+    build_validation_diagnostic,
+)
 
 
 def _safe_log_text(value: Any, *, max_chars: int = 1_000) -> str:
@@ -2001,6 +2004,9 @@ def build_pipeline_trigger(
             safe_error = _safe_exception_text(e)
             print(f"  [Pipeline] Failed: {safe_error}")
             state.pipeline_error = safe_error
+            diagnostic = build_validation_diagnostic(e)
+            if diagnostic is not None:
+                state.pipeline_validation_diagnostic = diagnostic
             return None
 
     return _on_session_end
