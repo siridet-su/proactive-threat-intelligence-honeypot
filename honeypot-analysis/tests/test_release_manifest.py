@@ -7,6 +7,8 @@ import pytest
 
 from production.tools.release_manifest import (
     build_manifest,
+    inventory_sha256,
+    release_file_inventory,
     verify_manifest,
     write_manifest,
 )
@@ -142,10 +144,36 @@ def test_release_manifest_and_marker_are_excluded_from_release_identity(
         write_manifest(output, manifest)
 
 
-def test_release_manifest_excludes_runtime_python_bytecode_only(
+def test_release_manifest_excludes_environment_derived_runtime_state(
     tmp_path: Path,
 ) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
+    generated_files = [
+        release / "production" / "__pycache__" / "runtime.cpython-311.pyc",
+        release / "generated.pyo",
+        release / ".pytest_cache" / "v" / "cache" / "nodeids",
+        release / ".ruff_cache" / "cache",
+        release / ".coverage",
+        release / "coverage.xml",
+        release / "scratch.tmp",
+        release / "editor.swp",
+        release / "editor.py~",
+        release / "runtime_feed_provenance.json",
+        release / "production_pilot.db",
+        release / "production_pilot.db-wal",
+        release / "production_pilot.db-shm",
+        release / "runtime.log",
+        release / "reports" / "session.json",
+        release / "spool" / "batch.jsonl",
+        release / "data" / "feeds" / "cisa_kev_cache.json",
+        release / "data" / "feeds" / "mitre_attack_cache.json",
+        release / "data" / "feeds" / "sigma_rules_cache.json",
+        release / "data" / "feeds" / "sigma_rules_cache.json.lock",
+    ]
+    for generated in generated_files:
+        generated.parent.mkdir(parents=True, exist_ok=True)
+        generated.write_bytes(b"environment-derived")
+
     manifest = build_manifest(
         revision=REVISION,
         release_root=release,
@@ -158,12 +186,63 @@ def test_release_manifest_excludes_runtime_python_bytecode_only(
     output = release / "DEPLOYMENT_MANIFEST.json"
     write_manifest(output, manifest)
 
-    bytecode = release / "production" / "__pycache__"
-    bytecode.mkdir(parents=True)
-    (bytecode / "runtime.cpython-311.pyc").write_bytes(b"runtime-bytecode")
-    (release / "generated.pyo").write_bytes(b"runtime-bytecode")
+    for generated in generated_files:
+        assert generated.relative_to(release).as_posix() not in manifest["release_files"]
+        generated.write_bytes(b"changed-runtime-state")
 
     assert verify_manifest(output, release)["verified"] is True
+
+
+def test_release_manifest_v6_rejects_identity_policy_drift(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    manifest = build_manifest(
+        revision=REVISION,
+        release_root=release,
+        package_path=package,
+        rollback_location=rollback,
+        configuration_paths={"policy": str(policy)},
+        artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    )
+    manifest["release_identity"]["policy_id"] = "invented-policy"
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+
+    with pytest.raises(ValueError, match="release identity policy"):
+        verify_manifest(output, release)
+
+
+def test_release_manifest_keeps_v5_inventory_semantics_readable(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    feed = release / "data" / "feeds" / "mitre_attack_cache.json"
+    feed.parent.mkdir(parents=True)
+    feed.write_text('{"_schema":"2"}\n', encoding="utf-8")
+    manifest = build_manifest(
+        revision=REVISION,
+        release_root=release,
+        package_path=package,
+        rollback_location=rollback,
+        configuration_paths={"policy": str(policy)},
+        artifact_paths={"model": str(artifact)},
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    )
+    legacy_inventory = release_file_inventory(
+        release,
+        schema_version="honeypot_release_manifest.v5",
+    )
+    manifest["schema_version"] = "honeypot_release_manifest.v5"
+    manifest["release_files"] = legacy_inventory
+    manifest["release_tree_sha256"] = inventory_sha256(legacy_inventory)
+    manifest.pop("release_identity")
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+
+    assert verify_manifest(output, release)["verified"] is True
+    assert "data/feeds/mitre_attack_cache.json" in legacy_inventory
 
 
 def test_release_manifest_rejects_mutable_feed_cache_as_immutable_config(

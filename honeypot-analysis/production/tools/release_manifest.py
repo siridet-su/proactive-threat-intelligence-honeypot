@@ -12,18 +12,57 @@ from typing import Any, Iterable
 from production.tools.managed_systemd_units import load_managed_unit_policy
 
 
-SCHEMA_VERSION = "honeypot_release_manifest.v5"
+SCHEMA_VERSION = "honeypot_release_manifest.v6"
 LEGACY_SCHEMA_VERSIONS = frozenset(
     {
         "honeypot_release_manifest.v2",
         "honeypot_release_manifest.v3",
         "honeypot_release_manifest.v4",
+        "honeypot_release_manifest.v5",
     }
 )
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EXCLUDED_RELEASE_FILES = frozenset({"DEPLOYED_COMMIT", "DEPLOYMENT_MANIFEST.json"})
+RELEASE_IDENTITY_POLICY_ID = "immutable_source_release.v2"
 RUNTIME_BYTECODE_SUFFIXES = frozenset({".pyc", ".pyo"})
+ENVIRONMENT_CACHE_DIRECTORIES = frozenset(
+    {
+        "__pycache__",
+        ".mypy_cache",
+        ".nox",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        "htmlcov",
+    }
+)
+HOST_GENERATED_BASENAMES = frozenset(
+    {
+        ".coverage",
+        ".DS_Store",
+        "Thumbs.db",
+        "coverage.xml",
+        "runtime_feed_provenance.json",
+    }
+)
+HOST_GENERATED_SUFFIXES = frozenset(
+    {
+        ".bak",
+        ".db",
+        ".lock",
+        ".log",
+        ".sqlite",
+        ".sqlite3",
+        ".swp",
+        ".swo",
+        ".temp",
+        ".tmp",
+    }
+)
+RUNTIME_STATE_TOP_LEVEL_DIRECTORIES = frozenset(
+    {"backups", "logs", "reports", "spool", "tmp", "var"}
+)
 MUTABLE_RUNTIME_FEED_CONFIGURATION_NAMES = frozenset(
     {"cisa_cache", "sigma_cache", "mitre_cache"}
 )
@@ -45,7 +84,54 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def release_file_inventory(root: Path) -> dict[str, dict[str, Any]]:
+def _release_identity_contract() -> dict[str, Any]:
+    return {
+        "policy_id": RELEASE_IDENTITY_POLICY_ID,
+        "excluded_environment_cache_directories": sorted(
+            ENVIRONMENT_CACHE_DIRECTORIES
+        ),
+        "excluded_host_generated_basenames": sorted(HOST_GENERATED_BASENAMES),
+        "excluded_host_generated_suffixes": sorted(HOST_GENERATED_SUFFIXES),
+        "excluded_mutable_feed_basenames": sorted(
+            MUTABLE_RUNTIME_FEED_BASENAMES
+        ),
+        "excluded_runtime_state_top_level_directories": sorted(
+            RUNTIME_STATE_TOP_LEVEL_DIRECTORIES
+        ),
+    }
+
+
+def _is_environment_derived_path(relative: str) -> bool:
+    relative_path = Path(relative)
+    parts = relative_path.parts
+    basename = relative_path.name
+    if any(part in ENVIRONMENT_CACHE_DIRECTORIES for part in parts):
+        return True
+    if parts and parts[0] in RUNTIME_STATE_TOP_LEVEL_DIRECTORIES:
+        return True
+    if basename in HOST_GENERATED_BASENAMES:
+        return True
+    if basename in MUTABLE_RUNTIME_FEED_BASENAMES:
+        return True
+    if any(
+        basename == f"{feed_basename}.lock"
+        for feed_basename in MUTABLE_RUNTIME_FEED_BASENAMES
+    ):
+        return True
+    return (
+        relative_path.suffix in RUNTIME_BYTECODE_SUFFIXES
+        or relative_path.suffix in HOST_GENERATED_SUFFIXES
+        or basename.endswith("~")
+        or basename.endswith("-wal")
+        or basename.endswith("-shm")
+    )
+
+
+def release_file_inventory(
+    root: Path,
+    *,
+    schema_version: str = SCHEMA_VERSION,
+) -> dict[str, dict[str, Any]]:
     root = root.resolve()
     if not root.is_dir():
         raise ValueError("release root must be a directory")
@@ -54,13 +140,18 @@ def release_file_inventory(root: Path) -> dict[str, dict[str, Any]]:
         relative = path.relative_to(root).as_posix()
         if relative in EXCLUDED_RELEASE_FILES:
             continue
-        # Python may compile imported modules in-place after a release has been
-        # verified.  Those bytecode caches are reproducible runtime byproducts,
-        # not deployed source or an undocumented overlay; retaining them in the
-        # immutable inventory would make a valid release unverifiable at runtime.
-        if (
+        # v2-v5 releases used the original bytecode-only exclusion. Preserve
+        # that behavior so archived manifests remain independently verifiable.
+        if schema_version in LEGACY_SCHEMA_VERSIONS and (
             "__pycache__" in Path(relative).parts
             or path.suffix in RUNTIME_BYTECODE_SUFFIXES
+        ):
+            continue
+        # v6 binds immutable source while keeping environment-derived state
+        # outside the release identity. Mutable feeds are verified separately
+        # through runtime_feed_provenance.v1.
+        if schema_version == SCHEMA_VERSION and _is_environment_derived_path(
+            relative
         ):
             continue
         if path.is_symlink():
@@ -238,6 +329,7 @@ def build_manifest(
         "release_path": str(release_root.resolve()),
         "release_files": inventory,
         "release_tree_sha256": inventory_sha256(inventory),
+        "release_identity": _release_identity_contract(),
         "package": {
             "path": str(package_path),
             "bytes": package_path.stat().st_size,
@@ -285,7 +377,10 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
         raise ValueError("manifest Git revision is invalid")
     if Path(str(manifest.get("release_path", ""))).resolve() != release_root.resolve():
         raise ValueError("manifest release path mismatch")
-    actual_inventory = release_file_inventory(release_root)
+    actual_inventory = release_file_inventory(
+        release_root,
+        schema_version=str(schema_version),
+    )
     if actual_inventory != manifest.get("release_files"):
         raise ValueError("deployed release files do not match manifest")
     if inventory_sha256(actual_inventory) != manifest.get("release_tree_sha256"):
@@ -320,8 +415,12 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
             or _sha256_file(config_path) != config.get("sha256")
         ):
             raise ValueError(f"effective configuration does not match: {name}")
+    if schema_version == SCHEMA_VERSION:
+        if manifest.get("release_identity") != _release_identity_contract():
+            raise ValueError("release identity policy does not match manifest")
     if schema_version in {
         SCHEMA_VERSION,
+        "honeypot_release_manifest.v5",
         "honeypot_release_manifest.v4",
         "honeypot_release_manifest.v3",
     }:
@@ -342,7 +441,7 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
             ):
                 raise ValueError("runtime feed provenance integrity contract is invalid")
     managed_units = manifest.get("managed_systemd_units")
-    if schema_version == SCHEMA_VERSION:
+    if schema_version in {SCHEMA_VERSION, "honeypot_release_manifest.v5"}:
         if not isinstance(managed_units, dict):
             raise ValueError("managed systemd-unit policy receipt is required")
         actual_managed_units = _managed_unit_policy_receipt(

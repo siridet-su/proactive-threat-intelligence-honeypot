@@ -10,7 +10,13 @@ For revision `$REVISION`:
 1. Require a clean worktree and verify `git rev-parse HEAD` equals the full
    requested revision.
 2. Run focused tests and `pytest tests -q`.
-3. Create `git archive --format=tar` and record its SHA-256.
+3. Create `git archive --format=tar` and record its SHA-256. The clean package
+   must omit the three Git-retained feed snapshots under `data/feeds/`
+   (`cisa_kev_cache.json`, `sigma_rules_cache.json`, and
+   `mitre_attack_cache.json`). They are reproducible seed/evaluation data, not
+   effective production feeds. Do not include bytecode, test/tool caches,
+   temporary files, databases, WAL/SHM, logs, spool, generated reports, or
+   host-created artifacts.
 4. On GCP, create an online SQLite backup with
    `production.tools.sqlite_backup_restore`, verify it, and restore it to a new
    rehearsal path.
@@ -31,11 +37,14 @@ For revision `$REVISION`:
    bundle manifest and recovery archive so their exact hashes are release-bound.
    Pass `--managed-unit-policy
    /opt/honeypot-releases/$REVISION/deployment/systemd/managed_units.v1.json`;
-   release-manifest v5 requires and hashes this exact unit allowlist.
-7. Run `production.tools.release_manifest verify`. It verifies only immutable
-   release inputs; separately validate the current
-   `runtime_feed_provenance.v1` record and feed-cache checksums. Only after both
-   checks pass, write
+   release-manifest v6 requires and hashes this exact unit allowlist.
+7. Run `production.tools.release_manifest verify`. Manifest v6 records the
+   exact immutable-identity exclusion policy and verifies only immutable
+   release inputs. It deliberately excludes mutable feed snapshots and
+   environment-derived cache/state. Historical v2-v5 manifests retain their
+   original inventory semantics and remain verifiable. Separately validate the
+   current `runtime_feed_provenance.v1` record and feed-cache checksums. Only
+   after both checks pass, write
    `DEPLOYED_COMMIT`, verify that marker, and atomically repoint
    `/opt/honeypot`.
 8. Install reviewed unit/config changes, archive confirmed obsolete units with
