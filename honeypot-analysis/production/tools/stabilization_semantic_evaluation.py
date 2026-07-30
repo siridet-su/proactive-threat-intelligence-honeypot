@@ -295,6 +295,11 @@ def _semantic_projection(
     fact_set: dict[str, Any],
     report: dict[str, Any],
 ) -> dict[str, Any]:
+    guidance = deepcopy(report["response_guidance_v3"])
+    # Wall-clock rendering metadata is intentionally excluded. Guidance IDs,
+    # evidence, actions, traces, provenance, and every safety field remain in
+    # the repeatability comparison.
+    guidance.pop("generated_at", None)
     return {
         "fact_set": fact_set,
         "assessment_id": report["assessment_id"],
@@ -307,7 +312,7 @@ def _semantic_projection(
         "non_authoritative_context": report[
             "non_authoritative_context"
         ],
-        "response_guidance_v3": report["response_guidance_v3"],
+        "response_guidance_v3": guidance,
     }
 
 

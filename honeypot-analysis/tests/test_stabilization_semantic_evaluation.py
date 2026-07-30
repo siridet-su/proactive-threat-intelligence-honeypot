@@ -13,6 +13,7 @@ from production.tools.stabilization_semantic_evaluation import (
     EvaluationContractError,
     _case_outputs,
     _git_revision,
+    _semantic_projection,
     _set_metric,
     load_frozen_spec,
 )
@@ -108,3 +109,30 @@ def test_non_authoritative_context_case_cannot_select_a_family() -> None:
     assert report["authority"]["predictions_authoritative"] is False
     assert report["authority"]["enrichment_authoritative"] is False
     assert report["authority"]["automatic_alerts_authorized"] is False
+
+
+def test_repeatability_projection_excludes_only_rendering_time() -> None:
+    report = {
+        "response_guidance_v3": {
+            "generated_at": "first",
+            "guidance_id": "guidance-stable",
+            "safety": {"automatic_execution": False},
+        },
+        "assessment_id": "assessment-stable",
+        "status": "assessed",
+        "canonical_evidence": {},
+        "behavioral_findings": [],
+        "hypothesis_sets": [],
+        "provenance": {},
+        "authority": {},
+        "non_authoritative_context": {},
+    }
+    first = _semantic_projection({}, report)
+    report["response_guidance_v3"]["generated_at"] = "second"
+    second = _semantic_projection({}, report)
+
+    assert first == second
+    assert first["response_guidance_v3"]["guidance_id"] == (
+        "guidance-stable"
+    )
+    assert "generated_at" not in first["response_guidance_v3"]
