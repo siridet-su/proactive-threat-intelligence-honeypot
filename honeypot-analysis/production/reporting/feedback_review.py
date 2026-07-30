@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from typing import Any, Dict, Iterable, List
 
