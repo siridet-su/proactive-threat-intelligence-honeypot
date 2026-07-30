@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import time
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
@@ -309,6 +310,8 @@ def build_live_next_behavior_session(
     chronology = order_model_chronology(chronology_records)
     relative_times = relative_time_milliseconds(chronology)
     groups: list[Dict[str, Any]] = []
+    audit_reasons: Counter[str] = Counter()
+    audit_total = 0
     for model_index, (chronology_record, relative_time) in enumerate(
         zip(chronology.records, relative_times, strict=True),
         start=1,
@@ -329,6 +332,17 @@ def build_live_next_behavior_session(
             for item in normalized["labels"]
             if item.get("trust_tier") == "trusted_observation"
         ]
+        audit_only = [
+            item
+            for item in normalized["labels"]
+            if item.get("trust_tier") == "audit_only_candidate"
+        ]
+        audit_total += len(audit_only)
+        audit_reasons.update(
+            _clean(item.get("exclusion_reason"))
+            for item in audit_only
+            if _clean(item.get("exclusion_reason"))
+        )
         if not trusted:
             continue
         safe_labels = []
@@ -339,6 +353,17 @@ def build_live_next_behavior_session(
                 f"{session_id}:{durable_order}:{label_index}:{item['evidence_ref']}",
             )
             safe_labels.append(item)
+        safe_audit_labels = []
+        for label_index, label in enumerate(audit_only):
+            item = deepcopy(label)
+            item["evidence_ref"] = _pseudonymous_id(
+                "evidence",
+                (
+                    f"{session_id}:{durable_order}:audit:{label_index}:"
+                    f"{item['evidence_ref']}"
+                ),
+            )
+            safe_audit_labels.append(item)
         groups.append(
             {
                 "group_id": _pseudonymous_id(
@@ -359,7 +384,15 @@ def build_live_next_behavior_session(
                         item["evidence_ref"],
                     ),
                 ),
-                "audit_only_labels": [],
+                "audit_only_labels": sorted(
+                    safe_audit_labels,
+                    key=lambda item: (
+                        item["tactic"],
+                        item["technique"],
+                        item["source"],
+                        item["evidence_ref"],
+                    ),
+                ),
                 "session_context": context,
             }
         )
@@ -373,7 +406,10 @@ def build_live_next_behavior_session(
         "protocol": _clean(payload.get("protocol") or "ssh").lower(),
         "status": "closed" if payload.get("is_ended") or payload.get("status") == "closed" else "active",
         "pseudonymization_key_id": "runtime-derived-identifiers-v1",
-        "audit_summary": {"total": 0, "by_reason": {}},
+        "audit_summary": {
+            "total": audit_total,
+            "by_reason": dict(sorted(audit_reasons.items())),
+        },
         "observation_groups": groups,
     }
     return require_valid_next_behavior_session(safe)
@@ -686,6 +722,7 @@ class FrozenTransformerPocPredictor:
             }
             snapshot["model_input"] = {
                 "input_hash": model_input["input_hash"],
+                "tensor_hash": tensor["tensor_hash"],
                 "sequence_length": len(model_input["phase_sequence"]),
                 "truncated": model_input["truncated"],
                 "input_evidence_refs": model_input["input_evidence_refs"],

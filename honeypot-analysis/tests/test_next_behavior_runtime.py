@@ -154,6 +154,7 @@ def test_exact_frozen_checkpoint_predicts_deterministically() -> None:
     assert first["prediction_status"] == "predicted"
     assert first["prediction"] == second["prediction"]
     assert first["next_behavior_output"] == second["next_behavior_output"]
+    assert first["model_input"]["tensor_hash"] == second["model_input"]["tensor_hash"]
     assert first["snapshot_id"] == second["snapshot_id"]
     assert first["snapshot_sha256"] == second["snapshot_sha256"]
     assert validate_prediction_snapshot_integrity(first) == []

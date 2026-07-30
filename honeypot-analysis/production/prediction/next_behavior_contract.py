@@ -42,6 +42,7 @@ AUDIT_REASON_CODES = frozenset(
         "opaque_model_probe",
         "malformed_label",
         "missing_provenance",
+        "model_only_not_observed_evidence",
     }
 )
 TACTIC_VOCABULARY = frozenset(
