@@ -278,6 +278,8 @@ def verify_boundary(
             "ExecStartPre=",
             "production.tools.cowrie_output_integration validate",
             "run-sanitized-cowrie.sh",
+            "Environment=PYTHONPATH=/opt/honeypot-cowrie-output/current:/home/cowrie/cowrie/src",
+            "Environment=PYTHONDONTWRITEBYTECODE=1",
             "ReadOnlyPaths=/home/cowrie/users.txt",
             "ReadOnlyPaths=/home/cowrie/cowrie/var/log/cowrie/cowrie_custom.json",
         )
