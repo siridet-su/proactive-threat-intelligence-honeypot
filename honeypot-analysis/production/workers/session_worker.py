@@ -51,6 +51,9 @@ from production.prediction.evidence_cutoff import (
     make_evidence_cutoff,
     require_valid_evidence_cutoff,
 )
+from production.prediction.prediction_snapshot_contract import (
+    PredictionSnapshotIntegrityError,
+)
 from production.prediction.external_vomm_artifact import load_external_vomm_artifact
 from production.prediction.vomm_rollback import (
     MODE as VOMM_ROLLBACK_MODE,
@@ -1013,11 +1016,16 @@ class SessionWorker:
                 self._prediction_generation_errors += 1
                 error_type = type(exc).__name__
                 retryable = not isinstance(exc, (TypeError, ValueError))
+                error_code = (
+                    "prediction_snapshot_integrity_error"
+                    if isinstance(exc, PredictionSnapshotIntegrityError)
+                    else "prediction_generation_failed"
+                )
                 self.storage.fail_prediction_outbox(
                     row["outbox_id"],
                     row["claim_owner"],
                     row["claim_token"],
-                    "prediction_generation_failed",
+                    error_code,
                     error_type,
                     retryable,
                     self.config.prediction_outbox_max_attempts,

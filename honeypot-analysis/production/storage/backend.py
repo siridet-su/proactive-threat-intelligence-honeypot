@@ -31,6 +31,13 @@ from production.prediction.evidence_cutoff import (
     evidence_cutoff_sort_key,
     require_valid_evidence_cutoff,
 )
+from production.prediction.prediction_snapshot_contract import (
+    SNAPSHOT_SCHEMA_VERSION,
+    PredictionSnapshotIntegrityError,
+    canonical_prediction_content,
+    require_valid_prediction_snapshot,
+    validate_prediction_snapshot_integrity,
+)
 from production.utils.feedback import normalize_feedback_payload
 from production.utils.sensitive_data import (
     redact_error_for_log,
@@ -150,6 +157,13 @@ def _prediction_row_order(
     """Return canonical currentness order; invalid declared cutoffs sort last."""
 
     payload = _prediction_row_payload(row)
+    if payload.get("schema_version") == SNAPSHOT_SCHEMA_VERSION:
+        if validate_prediction_snapshot_integrity(payload):
+            return (-1, "", "", str(row.get("snapshot_id") or ""))
+        if str(row.get("snapshot_id") or "") != str(
+            payload.get("snapshot_id") or ""
+        ):
+            return (-1, "", "", str(row.get("snapshot_id") or ""))
     if "evidence_cutoff" in payload:
         try:
             cutoff = require_valid_evidence_cutoff(payload["evidence_cutoff"])
@@ -3783,6 +3797,10 @@ class SQLiteStorage:
     def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str:
         snapshot_id = snapshot.get("snapshot_id") or stable_id("predsnap", snapshot)
         now = snapshot.get("generated_at") or utc_now()
+        is_v3 = snapshot.get("schema_version") == SNAPSHOT_SCHEMA_VERSION
+        if is_v3:
+            snapshot = require_valid_prediction_snapshot(snapshot)
+            snapshot_id = snapshot["snapshot_id"]
         cutoff = snapshot.get("evidence_cutoff")
         if cutoff is not None:
             cutoff = require_valid_evidence_cutoff(cutoff)
@@ -3791,19 +3809,62 @@ class SQLiteStorage:
                     "prediction event_id does not match its evidence cutoff"
                 )
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                """
+                SELECT snapshot_id, payload_json
+                FROM prediction_snapshots
+                WHERE snapshot_id = ?
+                LIMIT 1
+                """,
+                (snapshot_id,),
+            ).fetchone()
+            if existing is not None and is_v3:
+                try:
+                    existing_payload = json.loads(
+                        str(existing["payload_json"] or "{}")
+                    )
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise PredictionSnapshotIntegrityError(
+                        "stored snapshot payload is malformed"
+                    ) from exc
+                if not isinstance(existing_payload, Mapping):
+                    raise PredictionSnapshotIntegrityError(
+                        "stored snapshot payload is not an object"
+                    )
+                require_valid_prediction_snapshot(existing_payload)
+                if canonical_prediction_content(
+                    existing_payload
+                ) != canonical_prediction_content(snapshot):
+                    raise PredictionSnapshotIntegrityError(
+                        "snapshot_id already stores different canonical content"
+                    )
+                return snapshot_id
+            if existing is not None:
+                conn.execute(
+                    """
+                    UPDATE prediction_snapshots
+                    SET session_id=?, src_ip=?, session_status=?, event_id=?,
+                        features_hash=?, payload_json=?, created_at=?
+                    WHERE snapshot_id=?
+                    """,
+                    (
+                        snapshot.get("session_id", "unknown"),
+                        snapshot.get("src_ip", "unknown"),
+                        snapshot.get("session_status", "active"),
+                        snapshot.get("event_id", ""),
+                        snapshot.get("features_hash", ""),
+                        stable_json(snapshot),
+                        now,
+                        snapshot_id,
+                    ),
+                )
+                return snapshot_id
             conn.execute(
                 """
                 INSERT INTO prediction_snapshots
                 (snapshot_id, session_id, src_ip, session_status, event_id, features_hash, payload_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(snapshot_id) DO UPDATE SET
-                    session_id=excluded.session_id,
-                    src_ip=excluded.src_ip,
-                    session_status=excluded.session_status,
-                    event_id=excluded.event_id,
-                    features_hash=excluded.features_hash,
-                    payload_json=excluded.payload_json,
-                    created_at=excluded.created_at
                 """,
                 (
                     snapshot_id,
@@ -3835,6 +3896,12 @@ class SQLiteStorage:
         for row in rows:
             item = dict(row)
             item["payload"] = _prediction_row_payload(item)
+            item["integrity_errors"] = (
+                validate_prediction_snapshot_integrity(item["payload"])
+                if item["payload"].get("schema_version")
+                == SNAPSHOT_SCHEMA_VERSION
+                else []
+            )
             items.append(item)
         items.sort(key=_prediction_row_order, reverse=True)
         return items[: max(0, int(limit))]
@@ -3868,7 +3935,12 @@ class SQLiteStorage:
         if not row:
             return None
         item = dict(row)
-        item["payload"] = json.loads(item.get("payload_json") or "{}")
+        item["payload"] = _prediction_row_payload(item)
+        item["integrity_errors"] = (
+            validate_prediction_snapshot_integrity(item["payload"])
+            if item["payload"].get("schema_version") == SNAPSHOT_SCHEMA_VERSION
+            else []
+        )
         return item
 
     def prune_prediction_snapshots(

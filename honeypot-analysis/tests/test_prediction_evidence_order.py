@@ -11,7 +11,9 @@ from production.prediction.next_behavior_runtime import (
     finalize_prediction_snapshot,
 )
 from production.storage import open_storage
-from production.storage.backend import StorageError
+from production.prediction.prediction_snapshot_contract import (
+    PredictionSnapshotIntegrityError,
+)
 
 
 def _v3(
@@ -272,7 +274,7 @@ def test_cutoff_is_payload_bound_without_a_database_schema_change(
         prediction="execution",
     )
     invalid["event_id"] = "event-mismatch"
-    with pytest.raises(StorageError, match="does not match"):
+    with pytest.raises(PredictionSnapshotIntegrityError, match="does not match"):
         storage.save_prediction_snapshot(invalid)
 
 

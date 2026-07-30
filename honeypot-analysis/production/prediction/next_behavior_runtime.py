@@ -26,6 +26,12 @@ from production.prediction.next_behavior_contract import (
 )
 from production.prediction.next_behavior_label_policy import normalize_classifier_outputs
 from production.prediction.evidence_cutoff import require_valid_evidence_cutoff
+from production.prediction.prediction_snapshot_contract import (
+    SNAPSHOT_SCHEMA_VERSION,
+    finalize_prediction_snapshot,
+    prediction_snapshot_hash_input,
+    validate_prediction_snapshot_integrity,
+)
 from production.prediction.next_behavior_model import load_checkpoint, predict_next_behavior
 from production.prediction.next_behavior_preprocessing import build_live_model_input
 from production.prediction.next_behavior_tensor import (
@@ -33,11 +39,10 @@ from production.prediction.next_behavior_tensor import (
     tensorize_model_input,
     vocabulary_sha256,
 )
-from production.utils.serialization import stable_id, stable_json, utc_now
+from production.utils.serialization import utc_now
 
 
 MODE = "professor_approved_corrected_target_transformer_poc"
-SNAPSHOT_SCHEMA_VERSION = "prediction_snapshot.v3"
 RUNTIME_SCHEMA_VERSION = "next_behavior_poc_runtime.v1"
 AUTHORITY = {
     "advisory_only": True,
@@ -58,48 +63,6 @@ class NextBehaviorRuntimeError(ValueError):
 
 def _clean(value: Any) -> str:
     return str(value or "").strip()
-
-
-def prediction_snapshot_hash_input(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
-    """Return the immutable prediction content used for IDs and verification."""
-
-    value = deepcopy(dict(snapshot))
-    value.pop("snapshot_id", None)
-    value.pop("snapshot_sha256", None)
-    value.pop("generated_at", None)
-    runtime = value.get("runtime")
-    if isinstance(runtime, dict):
-        runtime.pop("model_load_time_ms", None)
-        runtime.pop("inference_latency_ms", None)
-    return value
-
-
-def finalize_prediction_snapshot(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
-    """Attach a retry-stable ID and SHA-256 after all canonical fields exist."""
-
-    value = deepcopy(dict(snapshot))
-    hash_input = prediction_snapshot_hash_input(value)
-    digest = hashlib.sha256(stable_json(hash_input).encode("utf-8")).hexdigest()
-    value["snapshot_sha256"] = digest
-    value["snapshot_id"] = stable_id(
-        "prediction",
-        {"schema_version": value.get("schema_version"), "sha256": digest},
-    )
-    return value
-
-
-def validate_prediction_snapshot_integrity(snapshot: Mapping[str, Any]) -> list[str]:
-    """Validate the content-addressed prediction envelope without inference."""
-
-    if not isinstance(snapshot, Mapping):
-        return ["prediction snapshot must be an object"]
-    errors: list[str] = []
-    expected = finalize_prediction_snapshot(snapshot)
-    if _clean(snapshot.get("snapshot_sha256")).lower() != expected["snapshot_sha256"]:
-        errors.append("snapshot_sha256 mismatch")
-    if _clean(snapshot.get("snapshot_id")) != expected["snapshot_id"]:
-        errors.append("snapshot_id mismatch")
-    return errors
 
 
 def _sha256_file(path: str | Path) -> str:
