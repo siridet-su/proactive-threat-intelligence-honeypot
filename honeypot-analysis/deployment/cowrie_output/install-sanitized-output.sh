@@ -64,6 +64,14 @@ record_metadata /home/cowrie/users.txt
 record_metadata "${cowrie_root}/var/log/cowrie/cowrie_custom.json"
 record_metadata "${cowrie_root}/var/log/cowrie/cowrie.json"
 record_metadata "${cowrie_root}/var/log/cowrie/cowrie.log"
+find "${cowrie_root}/var/log/cowrie" -xdev -type f \
+  ! -path "${cowrie_root}/var/log/cowrie/cowrie_custom.json" \
+  ! -path "${cowrie_root}/var/log/cowrie/cowrie.json" \
+  ! -path "${cowrie_root}/var/log/cowrie/cowrie.log" \
+  -exec stat -c 'metadata\t%n\t-\t%a\t%u\t%g' {} \; \
+  >>"${receipt}/managed-paths.tsv"
+find "${cowrie_root}/var/log/cowrie" -xdev -type f \
+  -exec sha256sum {} + >"${receipt}/historical-log-hashes.before.sha256"
 systemctl is-active cowrie.service >"${receipt}/cowrie.service.before" || true
 git -c "safe.directory=${cowrie_root}" -C "${cowrie_root}" \
   status --porcelain=v1 -uno 2>&1 \
@@ -113,6 +121,10 @@ if [ -f "${cowrie_root}/var/log/cowrie/cowrie.json" ]; then
   chown cowrie:cowrie "${cowrie_root}/var/log/cowrie/cowrie.json"
   chmod 0640 "${cowrie_root}/var/log/cowrie/cowrie.json"
 fi
+find "${cowrie_root}/var/log/cowrie" -xdev -type f \
+  ! -path "${cowrie_root}/var/log/cowrie/cowrie.json" \
+  -exec chown cowrie:cowrie {} + \
+  -exec chmod 0600 {} +
 
 sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \

@@ -182,6 +182,15 @@ def validate_live_permissions(boundary) -> None:
     for path, expected_mode in expected_modes.items():
         if path.exists() and stat.S_IMODE(path.stat().st_mode) != expected_mode:
             raise CowrieOutputBoundaryError(f"unsafe persistent-file mode: {path}")
+    for path in boundary.json_log_path.parent.rglob("*"):
+        if (
+            path.is_file()
+            and path != boundary.json_log_path
+            and stat.S_IMODE(path.stat().st_mode) != 0o600
+        ):
+            raise CowrieOutputBoundaryError(
+                f"unsafe historical Cowrie log mode: {path}"
+            )
 
 
 def main() -> int:

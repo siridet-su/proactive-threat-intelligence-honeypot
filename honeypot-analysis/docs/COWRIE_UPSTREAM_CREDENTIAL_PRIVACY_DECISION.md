@@ -230,6 +230,10 @@ bundle content remain owner-only at mode `0600` (directories and executables
 `0700`). This is the narrowest permission compatible with the required
 sanitized-JSON-to-forwarder path.
 
+All pre-existing rotated Cowrie logs are hash-receipted and restricted to
+`0600` without rewriting, truncating, deleting, or otherwise changing their
+contents.
+
 Post-start validation must prove:
 
 - Cowrie is active;

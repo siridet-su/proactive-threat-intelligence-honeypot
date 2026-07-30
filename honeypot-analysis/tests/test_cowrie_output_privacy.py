@@ -293,3 +293,8 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
             in installer
         )
     assert 'chmod 0640 "${cowrie_root}/var/log/cowrie/cowrie.json"' in installer
+    assert "historical-log-hashes.before.sha256" in installer
+    assert (
+        'find "${cowrie_root}/var/log/cowrie" -xdev -type f' in installer
+        and "-exec chmod 0600 {} +" in installer
+    )

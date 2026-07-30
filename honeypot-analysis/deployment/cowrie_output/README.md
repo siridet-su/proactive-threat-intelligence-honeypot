@@ -29,7 +29,8 @@ are mode `0600`, and executable deployment scripts are mode `0700`.
 The immutable bundle and diagnostic/legacy logs are owner-only. The sanitized
 `cowrie.json` feed is `cowrie:cowrie` mode `0640` so only Cowrie and the
 existing forwarder (via its supplementary `cowrie` group) can use the required
-file boundary.
+file boundary. Existing historical and rotated files are content-preserved,
+hash-receipted, and restricted to `0600`; they are never rewritten.
 
 ## Install
 
