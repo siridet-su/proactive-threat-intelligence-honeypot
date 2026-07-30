@@ -11,12 +11,15 @@ For revision `$REVISION`:
    requested revision.
 2. Run focused tests and `pytest tests -q`.
 3. Create `git archive --format=tar` and record its SHA-256. The clean package
-   must omit the three Git-retained feed snapshots under `data/feeds/`
-   (`cisa_kev_cache.json`, `sigma_rules_cache.json`, and
-   `mitre_attack_cache.json`). They are reproducible seed/evaluation data, not
-   effective production feeds. Do not include bytecode, test/tool caches,
-   temporary files, databases, WAL/SHM, logs, spool, generated reports, or
-   host-created artifacts.
+   must omit the Git-retained CISA and Sigma snapshots under `data/feeds/`;
+   they are reproducible seed/evaluation data, not effective production feeds.
+   Retain `mitre_attack_cache.json` only because the frozen classifier
+   environment requires that exact historical snapshot for independent asset
+   verification. Bind it separately as
+   `model_artifacts.classifier_mitre_snapshot`; it is not the mutable
+   production MITRE feed. Do not include bytecode, test/tool caches, temporary
+   files, databases, WAL/SHM, logs, spool, generated reports, or host-created
+   artifacts.
 4. On GCP, create an online SQLite backup with
    `production.tools.sqlite_backup_restore`, verify it, and restore it to a new
    rehearsal path.
@@ -44,7 +47,9 @@ For revision `$REVISION`:
    environment-derived cache/state. Historical v2-v5 manifests retain their
    original inventory semantics and remain verifiable. Separately validate the
    current `runtime_feed_provenance.v1` record and feed-cache checksums. Only
-   after both checks pass, write
+   the frozen classifier's separately hash-bound MITRE snapshot may remain
+   under `data/feeds/`; effective feed paths must still resolve under mutable
+   runtime state. Only after both checks pass, write
    `DEPLOYED_COMMIT`, verify that marker, and atomically repoint
    `/opt/honeypot`.
 8. Install reviewed unit/config changes, archive confirmed obsolete units with

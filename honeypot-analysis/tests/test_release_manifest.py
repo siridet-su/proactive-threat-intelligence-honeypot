@@ -214,6 +214,36 @@ def test_release_manifest_v6_rejects_identity_policy_drift(
         verify_manifest(output, release)
 
 
+def test_excluded_classifier_snapshot_can_be_separately_hash_bound(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    frozen_mitre_snapshot = release / "data" / "feeds" / "mitre_attack_cache.json"
+    frozen_mitre_snapshot.parent.mkdir(parents=True)
+    frozen_mitre_snapshot.write_text('{"_schema":"2"}\n', encoding="utf-8")
+    manifest = build_manifest(
+        revision=REVISION,
+        release_root=release,
+        package_path=package,
+        rollback_location=rollback,
+        configuration_paths={"policy": str(policy)},
+        artifact_paths={
+            "model": str(artifact),
+            "classifier_mitre_snapshot": str(frozen_mitre_snapshot),
+        },
+        managed_unit_policy_path=str(MANAGED_UNIT_POLICY),
+    )
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+
+    assert "data/feeds/mitre_attack_cache.json" not in manifest["release_files"]
+    assert verify_manifest(output, release)["verified"] is True
+
+    frozen_mitre_snapshot.write_text('{"_schema":"changed"}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="artifact"):
+        verify_manifest(output, release)
+
+
 def test_release_manifest_keeps_v5_inventory_semantics_readable(
     tmp_path: Path,
 ) -> None:
