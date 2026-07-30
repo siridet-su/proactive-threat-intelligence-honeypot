@@ -60,6 +60,7 @@ sudo -u cowrie env \
   HONEYPOT_COWRIE_OUTPUT_ROOT=/opt/honeypot-cowrie-output/current \
   HONEYPOT_COWRIE_CONFIG=/home/cowrie/cowrie/etc/cowrie.cfg \
   HONEYPOT_COWRIE_ROOT=/home/cowrie/cowrie \
+  PYTHONDONTWRITEBYTECODE=1 \
   /home/cowrie/cowrie/cowrie-env/bin/python \
   -m production.tools.cowrie_output_integration validate \
   --config /home/cowrie/cowrie/etc/cowrie.cfg \

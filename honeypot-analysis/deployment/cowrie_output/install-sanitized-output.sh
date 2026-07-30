@@ -83,7 +83,7 @@ mv -Tf "${current}.new" "${current}"
 
 temporary_config=$(mktemp "${receipt}/cowrie.cfg.rendered.XXXXXX")
 rm -f "${temporary_config}"
-env PYTHONPATH="${current}" \
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   "${python}" -m production.tools.cowrie_output_integration render-config \
   --source "${config}" --destination "${temporary_config}" --bundle-root "${current}"
 install -o cowrie -g cowrie -m 0600 "${temporary_config}" "${config}"
@@ -108,7 +108,7 @@ do
   fi
 done
 
-sudo -u cowrie env PYTHONPATH="${current}" \
+sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \
   HONEYPOT_COWRIE_CONFIG="${config}" \
   "${python}" -m production.tools.cowrie_output_integration validate \
@@ -118,7 +118,7 @@ sudo -u cowrie env PYTHONPATH="${current}" \
 systemctl daemon-reload
 systemctl restart cowrie.service
 systemctl is-active --quiet cowrie.service
-sudo -u cowrie env PYTHONPATH="${current}" \
+sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \
   HONEYPOT_COWRIE_CONFIG="${config}" \
   "${python}" -m production.tools.cowrie_output_integration validate \

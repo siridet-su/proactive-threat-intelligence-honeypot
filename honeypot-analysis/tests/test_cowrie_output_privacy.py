@@ -222,7 +222,7 @@ def test_absent_component_hash_drift_and_open_permissions_fail_closed(
     bundle = _build(tmp_path)
     target = bundle / "production/utils/cowrie_privacy.py"
     target.unlink()
-    with pytest.raises(CowrieOutputBoundaryError, match="missing bundle file"):
+    with pytest.raises(CowrieOutputBoundaryError, match="missing filesystem entries"):
         verify_bundle(bundle)
 
     bundle = _build(tmp_path / "second")
@@ -234,6 +234,14 @@ def test_absent_component_hash_drift_and_open_permissions_fail_closed(
     bundle = _build(tmp_path / "third")
     os.chmod(bundle, 0o755)
     with pytest.raises(CowrieOutputBoundaryError, match="owner-only"):
+        verify_bundle(bundle)
+
+    bundle = _build(tmp_path / "fourth")
+    extra = bundle / "production/cowrie_output/__pycache__/runtime.pyc"
+    extra.parent.mkdir(mode=0o700)
+    extra.write_bytes(b"unmanifested bytecode")
+    extra.chmod(0o600)
+    with pytest.raises(CowrieOutputBoundaryError, match="unmanifested"):
         verify_bundle(bundle)
 
 

@@ -107,6 +107,16 @@ def verify_bundle(bundle_root: str | Path) -> tuple[dict[str, Any], Path, str]:
     files = manifest.get("files")
     if not isinstance(files, Mapping) or set(files) != REQUIRED_BUNDLE_FILES:
         raise CowrieOutputBoundaryError("bundle file inventory is incomplete or unexpected")
+    observed_files = {
+        str(path.relative_to(root))
+        for path in root.rglob("*")
+        if path.is_file() or path.is_symlink()
+    }
+    expected_files = set(REQUIRED_BUNDLE_FILES) | {MANIFEST_NAME}
+    if observed_files != expected_files:
+        raise CowrieOutputBoundaryError(
+            "bundle contains unmanifested or missing filesystem entries"
+        )
     for relative_text, raw_receipt in files.items():
         relative = _safe_relative(str(relative_text))
         receipt = raw_receipt if isinstance(raw_receipt, Mapping) else {}
