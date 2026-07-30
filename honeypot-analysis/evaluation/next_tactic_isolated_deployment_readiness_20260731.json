@@ -1,0 +1,120 @@
+{
+  "schema_version": "next_tactic_isolated_deployment_readiness.v1",
+  "evaluated_at": "2026-07-30T21:10:24Z",
+  "scope": "manifest_bound_isolated_gcp_candidate",
+  "decision": "BLOCKED_BY_TEST_FAILURE",
+  "candidate": {
+    "git_revision": "27a5064ff5501310e6c2b553a773434f4fdadfe7",
+    "package_sha256": "585536256f69c75264586d2b3c0e21e76a81758a348d30a2aed2c8557f9e1666",
+    "manifest_sha256": "7beb240982d5b8b26f4cfdeece598da0180ae37bc49a9719411d4cea68e77e20",
+    "release_tree_sha256": "7065ea5091afb8da2bb3473aeef36f0a2f83f5b5328e36438bfd4d1e0185c8f8",
+    "release_file_count": 534,
+    "manifest_verified": true,
+    "files_written_after_manifest": 0,
+    "activated": false
+  },
+  "production": {
+    "revision_before": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
+    "revision_after": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
+    "services_active_after": 8,
+    "failed_units_after": 0,
+    "health_endpoints_ok_after": 3,
+    "synthetic_session_rows": 0
+  },
+  "artifacts": {
+    "checkpoint_sha256": "7fbd73c4bd071336fa52a589bf41e39f5a3122a67aee398dfb8e6dd9cfdfb04a",
+    "model_spec_semantic_sha256": "82b1a15ec96f5165878ee03639daa61e319f06c4376e0a9a8018f3e1a2b3e512",
+    "vocabulary_semantic_sha256": "527a65c6d6cee94a3bbb0af6d5df95981a6438cf703e053484c9e7e116f0306f",
+    "calibration_semantic_sha256": "aa27813af96eaa2674b07d76f41565e71835bfa1a5bba8a3232eaa0a396a4e2d",
+    "classification_rules_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "mitre_snapshot_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
+    "preprocessing_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
+    "prediction_policy_sha256": "3861d6a6edad4d15e147213cf0c4a5e8fb6c74f2a5f90142526df31492ddd90c",
+    "frozen_bundle_manifest_sha256": "609ab334bb5c75295eee2851e2b2b6ae103ce8e0dbc6e43219da8bb5221e4419",
+    "runtime_feed_provenance_sha256": "a5c005fa44f92f878621568f38e1e7ccd6e3bdafd3af1b5a120f5ed91736d8e5",
+    "runtime_smoke_status": "passed",
+    "predictive_alert_status": "prohibited"
+  },
+  "backup": {
+    "path": "/var/backups/honeypot/next-tactic-isolated-20260730T202504Z/production_pilot.db",
+    "sha256": "0a86e4ac311e5dbcb3967f8eb228c442734db0734826f18952f7707b18996b93",
+    "bytes": 3932856320,
+    "integrity": "ok",
+    "restore_integrity": "ok",
+    "retained": true
+  },
+  "capacity": {
+    "minimum_peak_bytes_estimate": 9100000000,
+    "free_bytes_before_candidate": 26218237952,
+    "free_bytes_after_cleanup": 21864648704,
+    "safety_margin_satisfied": true
+  },
+  "tests": {
+    "focused_manifest": {
+      "passed": 19,
+      "failed": 0
+    },
+    "full_local": {
+      "passed": 1053,
+      "skipped": 7,
+      "failed": 0
+    },
+    "sandbox_full_local": {
+      "passed": 1045,
+      "skipped": 7,
+      "failed_due_to_forbidden_loopback_sockets": 8
+    }
+  },
+  "isolated_e2e": {
+    "authenticated_events_accepted": 12,
+    "duplicate_events": 1,
+    "events_processed": 12,
+    "prediction_snapshots": 11,
+    "completed_prediction_outbox": 11,
+    "prediction_integrity_errors": 0,
+    "analysis_attempts": 3,
+    "analysis_status": "failed",
+    "analysis_error": "job_invalid:ValidationError",
+    "reports": 0,
+    "alerts": 0,
+    "webhook_payload_mentions": 0,
+    "plaintext_credential_marker_matches": 0,
+    "failure_stage": "session_assessment_report_generation_or_validation",
+    "specific_validation_field": "NOT_DETERMINABLE"
+  },
+  "startup": {
+    "aggregate_health_upper_bound_seconds": 34.648,
+    "session_worker_ready_seconds": 36.919,
+    "session_worker_one_shot_seconds": 26.394,
+    "analysis_worker_one_shot_seconds": 9.183,
+    "enrichment_worker_one_shot_seconds": 8.649,
+    "threat_hunt_worker_one_shot_seconds": 9.028,
+    "webhook_dispatcher_one_shot_seconds": 8.73,
+    "transient_restart_count": 0
+  },
+  "not_completed_after_stop_condition": [
+    "successful analysis report",
+    "current prediction API versus monitor snapshot comparison",
+    "response-guidance artifact validation",
+    "isolated restart and failure recovery",
+    "post-migration recovery-release compatibility rehearsal",
+    "automatic fallback rehearsal"
+  ],
+  "cleanup": {
+    "transient_units_remaining": 0,
+    "isolated_listeners_remaining": 0,
+    "isolated_processes_remaining": 0,
+    "derived_restore_state_retained": false,
+    "candidate_release_and_package_retained": true,
+    "backup_retained": true,
+    "recovery_release_retained": true
+  },
+  "authority": {
+    "predictions_authoritative": false,
+    "automatic_alerts_authorized": false,
+    "automatic_response_authorized": false,
+    "model_changed": false,
+    "production_activated": false,
+    "raspberry_pi_modified": false
+  }
+}
