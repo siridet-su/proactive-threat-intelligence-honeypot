@@ -71,6 +71,9 @@ find "${cowrie_root}/var/log/cowrie" -xdev -type f \
   -exec stat -c 'metadata\t%n\t-\t%a\t%u\t%g' {} \; \
   >>"${receipt}/managed-paths.tsv"
 find "${cowrie_root}/var/log/cowrie" -xdev -type f \
+  ! -path "${cowrie_root}/var/log/cowrie/cowrie_custom.json" \
+  ! -path "${cowrie_root}/var/log/cowrie/cowrie.json" \
+  ! -path "${cowrie_root}/var/log/cowrie/cowrie.log" \
   -exec sha256sum {} + >"${receipt}/historical-log-hashes.before.sha256"
 systemctl is-active cowrie.service >"${receipt}/cowrie.service.before" || true
 git -c "safe.directory=${cowrie_root}" -C "${cowrie_root}" \
