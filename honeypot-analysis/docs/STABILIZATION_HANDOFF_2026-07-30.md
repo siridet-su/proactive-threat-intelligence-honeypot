@@ -242,8 +242,8 @@ git branch --show-current
 git rev-parse HEAD
 git status --short
 git log -10 --oneline
-sha256sum -c evaluation/stabilization_semantic_evaluation.v1.sha256
-sha256sum -c evaluation/stabilization_semantic_evaluation_results_2026-07-30.sha256
+(cd evaluation && sha256sum -c stabilization_semantic_evaluation.v1.sha256)
+(cd evaluation && sha256sum -c stabilization_semantic_evaluation_results_2026-07-30.sha256)
 pytest -q tests/test_observability_lifecycle_phase12.py::test_analysis_report_logs_latency_and_preserves_event_correlation
 pytest -q tests/test_phase7_canonical_runtime.py tests/test_observability_lifecycle_phase12.py
 ```
