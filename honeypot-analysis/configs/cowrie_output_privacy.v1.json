@@ -1,0 +1,34 @@
+{
+  "schema_version": "cowrie_output_privacy_policy.v1",
+  "policy_id": "cowrie_pre_persistence_credentials",
+  "version": "1.0.0",
+  "redaction_marker": "[REDACTED]",
+  "redact_attacker_username": true,
+  "credential_value_keys": [
+    "auth_secret",
+    "authentication_secret",
+    "login_password",
+    "login_username",
+    "passphrase",
+    "passwd",
+    "password",
+    "pwd",
+    "user_name",
+    "username"
+  ],
+  "credential_container_keys": [
+    "credential",
+    "credentials",
+    "login_credentials"
+  ],
+  "login_event_prefixes": [
+    "cowrie.login."
+  ],
+  "login_summary_keys": [
+    "log_text",
+    "message"
+  ],
+  "max_depth": 48,
+  "max_registry_values": 256,
+  "max_registered_value_chars": 16384
+}

@@ -1,0 +1,294 @@
+"""Runtime integrity and configuration checks for the Cowrie output bundle."""
+
+from __future__ import annotations
+
+import configparser
+import hashlib
+import json
+import os
+import re
+import stat
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Mapping
+
+from production.utils.cowrie_privacy import CowriePrivacyPolicy, load_policy
+
+
+MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v1"
+VALIDATION_SCHEMA_VERSION = "cowrie_output_boundary_validation.v1"
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+REQUIRED_BUNDLE_FILES = frozenset(
+    {
+        "configs/cowrie_output_privacy.v1.json",
+        "deployment/cowrie_output/20-sanitized-output.conf",
+        "deployment/cowrie_output/README.md",
+        "deployment/cowrie_output/install-sanitized-output.sh",
+        "deployment/cowrie_output/rollback-sanitized-output.sh",
+        "deployment/cowrie_output/run-sanitized-cowrie.sh",
+        "production/__init__.py",
+        "production/cowrie_output/__init__.py",
+        "production/cowrie_output/runtime.py",
+        "production/cowrie_output/sanitized_jsonlog.py",
+        "production/cowrie_output/twisted_logger.py",
+        "production/tools/__init__.py",
+        "production/tools/cowrie_output_integration.py",
+        "production/utils/__init__.py",
+        "production/utils/cowrie_privacy.py",
+    }
+)
+MANIFEST_NAME = "COWRIE_OUTPUT_MANIFEST.json"
+
+
+class CowrieOutputBoundaryError(RuntimeError):
+    """The output boundary cannot be proven safe."""
+
+
+@dataclass(frozen=True)
+class VerifiedBoundary:
+    bundle_root: Path
+    manifest_path: Path
+    manifest_sha256: str
+    git_revision: str
+    policy_path: Path
+    policy: CowriePrivacyPolicy
+    json_log_path: Path
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _safe_relative(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute() or not path.parts or ".." in path.parts:
+        raise CowrieOutputBoundaryError("manifest contains an unsafe relative path")
+    return path
+
+
+def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
+    manifest_path = bundle_root / MANIFEST_NAME
+    try:
+        raw = manifest_path.read_bytes()
+        document = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CowrieOutputBoundaryError("bundle manifest is unavailable or invalid") from exc
+    if not isinstance(document, dict):
+        raise CowrieOutputBoundaryError("bundle manifest must be an object")
+    expected_keys = {
+        "schema_version",
+        "git_revision",
+        "component_id",
+        "files",
+        "policy",
+    }
+    if set(document) != expected_keys:
+        raise CowrieOutputBoundaryError("bundle manifest keys are invalid")
+    if document["schema_version"] != MANIFEST_SCHEMA_VERSION:
+        raise CowrieOutputBoundaryError("bundle manifest schema is invalid")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(document["git_revision"])):
+        raise CowrieOutputBoundaryError("bundle Git revision is invalid")
+    if not isinstance(document["component_id"], str) or not document["component_id"]:
+        raise CowrieOutputBoundaryError("bundle component identity is invalid")
+    return document, manifest_path, hashlib.sha256(raw).hexdigest()
+
+
+def verify_bundle(bundle_root: str | Path) -> tuple[dict[str, Any], Path, str]:
+    root = Path(bundle_root).resolve()
+    manifest, manifest_path, manifest_sha256 = _load_manifest(root)
+    if stat.S_IMODE(root.stat().st_mode) != 0o700:
+        raise CowrieOutputBoundaryError("bundle root permissions are not owner-only")
+    if stat.S_IMODE(manifest_path.stat().st_mode) != 0o600:
+        raise CowrieOutputBoundaryError("bundle manifest permissions are not owner-only")
+    files = manifest.get("files")
+    if not isinstance(files, Mapping) or set(files) != REQUIRED_BUNDLE_FILES:
+        raise CowrieOutputBoundaryError("bundle file inventory is incomplete or unexpected")
+    for relative_text, raw_receipt in files.items():
+        relative = _safe_relative(str(relative_text))
+        receipt = raw_receipt if isinstance(raw_receipt, Mapping) else {}
+        if set(receipt) != {"bytes", "sha256", "mode"}:
+            raise CowrieOutputBoundaryError(f"invalid file receipt: {relative_text}")
+        path = root / relative
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            raise CowrieOutputBoundaryError(f"missing bundle file: {relative_text}") from exc
+        if not stat.S_ISREG(metadata.st_mode):
+            raise CowrieOutputBoundaryError(f"bundle file is not regular: {relative_text}")
+        if metadata.st_size != receipt["bytes"]:
+            raise CowrieOutputBoundaryError(f"bundle file size mismatch: {relative_text}")
+        if not SHA256_PATTERN.fullmatch(str(receipt["sha256"])):
+            raise CowrieOutputBoundaryError(f"bundle SHA-256 is invalid: {relative_text}")
+        if _sha256_file(path) != receipt["sha256"]:
+            raise CowrieOutputBoundaryError(f"bundle SHA-256 mismatch: {relative_text}")
+        expected_mode = int(str(receipt["mode"]), 8)
+        if stat.S_IMODE(metadata.st_mode) != expected_mode:
+            raise CowrieOutputBoundaryError(f"bundle mode mismatch: {relative_text}")
+        parent = path.parent
+        while parent != root.parent:
+            if stat.S_IMODE(parent.stat().st_mode) != 0o700:
+                raise CowrieOutputBoundaryError(
+                    f"bundle directory permissions are not owner-only: {parent}"
+                )
+            if parent == root:
+                break
+            parent = parent.parent
+    policy_receipt = manifest.get("policy")
+    if not isinstance(policy_receipt, Mapping) or set(policy_receipt) != {
+        "relative_path",
+        "policy_id",
+        "version",
+        "sha256",
+    }:
+        raise CowrieOutputBoundaryError("policy receipt is invalid")
+    policy_path = root / _safe_relative(str(policy_receipt["relative_path"]))
+    policy = load_policy(policy_path)
+    if (
+        policy.policy_id != policy_receipt["policy_id"]
+        or policy.version != policy_receipt["version"]
+        or policy.sha256 != policy_receipt["sha256"]
+    ):
+        raise CowrieOutputBoundaryError("policy receipt does not match the effective policy")
+    return manifest, manifest_path, manifest_sha256
+
+
+def _read_config(config_path: Path) -> configparser.ConfigParser:
+    parser = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
+    cowrie_root = config_path.parent.parent
+    candidates = [
+        cowrie_root / "etc/cowrie.cfg.dist",
+        Path("/etc/cowrie/cowrie.cfg"),
+        config_path,
+        cowrie_root / "cowrie.cfg",
+    ]
+    readable = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved not in readable and candidate.is_file():
+            readable.append(resolved)
+    if not parser.read(readable):
+        raise CowrieOutputBoundaryError("Cowrie configuration is unavailable")
+    return parser
+
+
+def _enabled_output_sections(parser: configparser.ConfigParser) -> set[str]:
+    enabled: set[str] = set()
+    for section in parser.sections():
+        if section.startswith("output_") and parser.getboolean(
+            section, "enabled", fallback=False
+        ):
+            enabled.add(section)
+    for key, raw_value in os.environ.items():
+        match = re.fullmatch(r"COWRIE_(OUTPUT_.+)_ENABLED", key)
+        if not match:
+            continue
+        section = match.group(1).lower()
+        normalized = raw_value.strip().lower()
+        if normalized in {"1", "yes", "true", "on"}:
+            enabled.add(section)
+        elif normalized in {"0", "no", "false", "off"}:
+            enabled.discard(section)
+        else:
+            raise CowrieOutputBoundaryError(
+                f"invalid output enablement environment override: {key}"
+            )
+    return enabled
+
+
+def verify_config(
+    config_path: str | Path,
+    bundle_root: str | Path,
+) -> tuple[Path, Path]:
+    resolved_config_path = Path(config_path).resolve()
+    config = _read_config(resolved_config_path)
+    enabled = _enabled_output_sections(config)
+    if enabled != {"output_sanitizedjson"}:
+        raise CowrieOutputBoundaryError(
+            "exactly output_sanitizedjson must be enabled; unsafe or unknown writers are active"
+        )
+    if config.getboolean("output_jsonlog", "enabled", fallback=False):
+        raise CowrieOutputBoundaryError("unsafe output_jsonlog remains enabled")
+    root = Path(bundle_root).resolve()
+    configured_root = Path(
+        config.get("output_sanitizedjson", "bundle_root", fallback="")
+    ).resolve()
+    if configured_root != root:
+        raise CowrieOutputBoundaryError("configured bundle root does not match")
+    manifest = Path(
+        config.get("output_sanitizedjson", "manifest", fallback="")
+    ).resolve()
+    policy = Path(config.get("output_sanitizedjson", "policy", fallback="")).resolve()
+    if manifest != root / MANIFEST_NAME:
+        raise CowrieOutputBoundaryError("configured manifest path is not bundle-bound")
+    if policy != root / "configs/cowrie_output_privacy.v1.json":
+        raise CowrieOutputBoundaryError("configured policy path is not bundle-bound")
+    logfile = config.get("output_sanitizedjson", "logfile", fallback="").strip()
+    if not logfile or Path(logfile).name != "cowrie.json":
+        raise CowrieOutputBoundaryError("sanitized JSON logfile path is invalid")
+    log_path = Path(logfile)
+    if not log_path.is_absolute():
+        configured_cowrie_root = os.environ.get("HONEYPOT_COWRIE_ROOT", "").strip()
+        cowrie_root = (
+            Path(configured_cowrie_root).resolve()
+            if configured_cowrie_root
+            else resolved_config_path.parent.parent
+        )
+        log_path = cowrie_root / log_path
+    return policy, log_path.resolve()
+
+
+def verify_boundary(
+    *,
+    config_path: str | Path,
+    bundle_root: str | Path,
+    plugin_link: str | Path | None = None,
+    drop_in: str | Path | None = None,
+) -> VerifiedBoundary:
+    root = Path(bundle_root).resolve()
+    manifest, manifest_path, manifest_sha256 = verify_bundle(root)
+    policy_path, logfile = verify_config(config_path, root)
+    policy = load_policy(policy_path)
+    if plugin_link is not None:
+        link = Path(plugin_link)
+        if not link.is_symlink():
+            raise CowrieOutputBoundaryError("sanitized output plugin link is absent")
+        if link.resolve() != root / "production/cowrie_output/sanitized_jsonlog.py":
+            raise CowrieOutputBoundaryError("sanitized output plugin link target is invalid")
+    if drop_in is not None:
+        try:
+            unit_text = Path(drop_in).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise CowrieOutputBoundaryError("Cowrie systemd drop-in is unavailable") from exc
+        required_fragments = (
+            "UMask=0077",
+            "ExecStartPre=",
+            "production.tools.cowrie_output_integration validate",
+            "run-sanitized-cowrie.sh",
+            "ReadOnlyPaths=/home/cowrie/users.txt",
+            "ReadOnlyPaths=/home/cowrie/cowrie/var/log/cowrie/cowrie_custom.json",
+        )
+        if any(fragment not in unit_text for fragment in required_fragments):
+            raise CowrieOutputBoundaryError("Cowrie systemd drop-in is incomplete")
+    return VerifiedBoundary(
+        bundle_root=root,
+        manifest_path=manifest_path,
+        manifest_sha256=manifest_sha256,
+        git_revision=str(manifest["git_revision"]),
+        policy_path=policy_path,
+        policy=policy,
+        json_log_path=logfile,
+    )
+
+
+def boundary_from_environment() -> VerifiedBoundary:
+    config_path = os.environ.get(
+        "HONEYPOT_COWRIE_CONFIG", "/home/cowrie/cowrie/etc/cowrie.cfg"
+    )
+    bundle_root = os.environ.get(
+        "HONEYPOT_COWRIE_OUTPUT_ROOT", "/opt/honeypot-cowrie-output/current"
+    )
+    return verify_boundary(config_path=config_path, bundle_root=bundle_root)
