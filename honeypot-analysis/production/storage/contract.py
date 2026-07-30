@@ -780,6 +780,17 @@ class StorageBackend(Protocol):
         session_id: str,
     ) -> Optional[Dict[str, Any]]: ...
 
+    def get_current_prediction_snapshot(
+        self,
+        session_id: str,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def list_prediction_snapshots_for_session(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
     def get_prediction_snapshot(
         self,
         snapshot_id: str,

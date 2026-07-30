@@ -137,6 +137,11 @@ def test_prediction_snapshot_never_persists_response_guidance_or_creates_alert(
             state,
             {"eventid": "cowrie.command.input", "input": "whoami"},
             event_id="event-guidance-free",
+            evidence_cutoff={
+                "schema_version": "prediction_evidence_cutoff.v1",
+                "received_at": "2026-07-27T00:00:01.000000+00:00",
+                "event_id": "event-guidance-free",
+            },
         )
         saved = worker.storage.get_latest_prediction_snapshot("guidance-free-session")
         assert saved is not None
@@ -517,6 +522,17 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
     assert first_event_ids[2] in snapshot_event_ids
     assert second_command_id in snapshot_event_ids
     assert close_id in snapshot_event_ids
+    for row in snapshots:
+        snapshot_payload = json.loads(row["payload_json"])
+        cutoff = snapshot_payload["evidence_cutoff"]
+        assert cutoff["event_id"] == row["event_id"]
+
+    prediction_tasks = storage.list_rows("prediction_outbox", limit=20)
+    assert prediction_tasks
+    for row in prediction_tasks:
+        task = json.loads(row["payload_json"])
+        assert task["schema_version"] == "prediction_outbox_task.v2"
+        assert task["evidence_cutoff"]["event_id"] == task["event_id"]
 
     jobs = storage.list_rows("analysis_jobs", limit=10)
     assert len(jobs) == 1

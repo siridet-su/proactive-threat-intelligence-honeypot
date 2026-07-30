@@ -27,6 +27,10 @@ from production.storage.contract import (
 )
 from production.utils.serialization import event_id as make_event_id
 from production.utils.serialization import stable_id, stable_json, utc_now
+from production.prediction.evidence_cutoff import (
+    evidence_cutoff_sort_key,
+    require_valid_evidence_cutoff,
+)
 from production.utils.feedback import normalize_feedback_payload
 from production.utils.sensitive_data import (
     redact_error_for_log,
@@ -127,6 +131,48 @@ def _safe_event_payload(value: Any) -> tuple[Dict[str, Any], str]:
         return _decode_event_payload(value)
     except ValueError:
         return {}, "{}"
+
+
+def _prediction_row_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    raw = row.get("payload")
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    try:
+        decoded = json.loads(str(row.get("payload_json") or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return dict(decoded) if isinstance(decoded, Mapping) else {}
+
+
+def _prediction_row_order(
+    row: Mapping[str, Any],
+) -> tuple[int, str, str, str]:
+    """Return canonical currentness order; invalid declared cutoffs sort last."""
+
+    payload = _prediction_row_payload(row)
+    if "evidence_cutoff" in payload:
+        try:
+            cutoff = require_valid_evidence_cutoff(payload["evidence_cutoff"])
+            cutoff_key = evidence_cutoff_sort_key(cutoff)
+        except ValueError:
+            return (-1, "", "", str(row.get("snapshot_id") or ""))
+        if (
+            str(payload.get("event_id") or "") != cutoff["event_id"]
+            or str(row.get("event_id") or "") != cutoff["event_id"]
+        ):
+            return (-1, "", "", str(row.get("snapshot_id") or ""))
+        return (
+            1,
+            cutoff_key[0],
+            cutoff_key[1],
+            str(row.get("snapshot_id") or ""),
+        )
+    return (
+        0,
+        str(row.get("created_at") or ""),
+        str(row.get("event_id") or ""),
+        str(row.get("snapshot_id") or ""),
+    )
 
 
 def _apply_analysis_status(
@@ -1174,7 +1220,7 @@ class SQLiteStorage:
                 remaining = claim_limit - len(claimed)
                 rows = conn.execute(
                     """
-                    SELECT event_id, sensor_id, payload_json, attempts
+                    SELECT event_id, sensor_id, payload_json, received_at, attempts
                     FROM events AS candidate
                     WHERE candidate.processed = 0
                       AND candidate.attempts < ?
@@ -1278,6 +1324,7 @@ class SQLiteStorage:
                             "sensor_id": row["sensor_id"],
                             "event": event_payload,
                             "payload_json": payload_json,
+                            "received_at": row["received_at"],
                             "claim_owner": claim_owner,
                             "claim_token": token,
                             "claim_leader_scope": lease_scope,
@@ -3736,6 +3783,13 @@ class SQLiteStorage:
     def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str:
         snapshot_id = snapshot.get("snapshot_id") or stable_id("predsnap", snapshot)
         now = snapshot.get("generated_at") or utc_now()
+        cutoff = snapshot.get("evidence_cutoff")
+        if cutoff is not None:
+            cutoff = require_valid_evidence_cutoff(cutoff)
+            if str(snapshot.get("event_id") or "") != cutoff["event_id"]:
+                raise StorageError(
+                    "prediction event_id does not match its evidence cutoff"
+                )
         with self.connection() as conn:
             conn.execute(
                 """
@@ -3764,22 +3818,40 @@ class SQLiteStorage:
             )
         return snapshot_id
 
-    def get_latest_prediction_snapshot(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def list_prediction_snapshots_for_session(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
         with self.connection() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """
                 SELECT * FROM prediction_snapshots
                 WHERE session_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
                 """,
                 (session_id,),
-            ).fetchone()
-        if not row:
+            ).fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = _prediction_row_payload(item)
+            items.append(item)
+        items.sort(key=_prediction_row_order, reverse=True)
+        return items[: max(0, int(limit))]
+
+    def get_current_prediction_snapshot(
+        self,
+        session_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        rows = self.list_prediction_snapshots_for_session(session_id, limit=1)
+        if not rows or _prediction_row_order(rows[0])[0] < 0:
             return None
-        item = dict(row)
-        item["payload"] = json.loads(item.get("payload_json") or "{}")
-        return item
+        return rows[0]
+
+    def get_latest_prediction_snapshot(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Compatibility alias for the canonical evidence-current selector."""
+
+        return self.get_current_prediction_snapshot(session_id)
 
     def get_prediction_snapshot(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
         if not snapshot_id:
@@ -3832,39 +3904,43 @@ class SQLiteStorage:
             )
             latest_protected = 0
             latest_clause = ""
+            latest_params: tuple[str, ...] = ()
             if keep_latest_per_session:
-                latest_clause = """
-                    AND snapshot_id NOT IN (
-                        SELECT snapshot_id FROM (
-                            SELECT snapshot_id,
-                                   ROW_NUMBER() OVER (
-                                       PARTITION BY session_id
-                                       ORDER BY created_at DESC, snapshot_id DESC
-                                   ) AS retention_rank
-                            FROM prediction_snapshots
-                        ) AS ranked
-                        WHERE retention_rank = 1
+                current_by_session: Dict[str, Dict[str, Any]] = {}
+                for raw_row in conn.execute(
+                    "SELECT * FROM prediction_snapshots"
+                ).fetchall():
+                    candidate = dict(raw_row)
+                    candidate["payload"] = _prediction_row_payload(candidate)
+                    if _prediction_row_order(candidate)[0] < 0:
+                        continue
+                    session_identity = str(candidate.get("session_id") or "")
+                    current = current_by_session.get(session_identity)
+                    if current is None or _prediction_row_order(
+                        candidate
+                    ) > _prediction_row_order(current):
+                        current_by_session[session_identity] = candidate
+                latest_params = tuple(
+                    sorted(
+                        str(row["snapshot_id"])
+                        for row in current_by_session.values()
                     )
-                """
-                latest_protected = int(
-                    conn.execute(
-                        """
-                        SELECT COUNT(*) FROM prediction_snapshots AS ps
-                        WHERE ps.created_at < ? AND ps.snapshot_id IN (
-                            SELECT snapshot_id FROM (
-                                SELECT snapshot_id,
-                                       ROW_NUMBER() OVER (
-                                           PARTITION BY session_id
-                                           ORDER BY created_at DESC, snapshot_id DESC
-                                       ) AS retention_rank
-                                FROM prediction_snapshots
-                            ) AS ranked
-                            WHERE retention_rank = 1
-                        )
-                        """,
-                        (cutoff,),
-                    ).fetchone()[0]
                 )
+                if latest_params:
+                    placeholders = ",".join("?" for _ in latest_params)
+                    latest_clause = (
+                        f"AND snapshot_id NOT IN ({placeholders})"
+                    )
+                    latest_protected = int(
+                        conn.execute(
+                            f"""
+                            SELECT COUNT(*) FROM prediction_snapshots
+                            WHERE created_at < ?
+                              AND snapshot_id IN ({placeholders})
+                            """,
+                            (cutoff, *latest_params),
+                        ).fetchone()[0]
+                    )
             eligibility_sql = f"""
                 FROM prediction_snapshots
                 WHERE created_at < ?
@@ -3876,7 +3952,10 @@ class SQLiteStorage:
                   {latest_clause}
             """
             eligible = int(
-                conn.execute(f"SELECT COUNT(*) {eligibility_sql}", (cutoff,)).fetchone()[0]
+                conn.execute(
+                    f"SELECT COUNT(*) {eligibility_sql}",
+                    (cutoff, *latest_params),
+                ).fetchone()[0]
             )
             deleted = 0
             if not dry_run:
@@ -3886,7 +3965,7 @@ class SQLiteStorage:
                         SELECT snapshot_id {eligibility_sql}
                     )
                     """,
-                    (cutoff,),
+                    (cutoff, *latest_params),
                 )
                 deleted = int(cur.rowcount if cur.rowcount is not None else 0)
             total_after = conn.execute("SELECT COUNT(*) FROM prediction_snapshots").fetchone()[0]

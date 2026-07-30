@@ -143,6 +143,7 @@ def _current_prediction_payload(snapshot: Dict[str, Any], feedback_rows: list[Di
         "coverage": payload.get("coverage") or {},
         "confidence_damping": payload.get("confidence_damping") or {},
         "prediction_trigger": payload.get("prediction_trigger") or {},
+        "evidence_cutoff": payload.get("evidence_cutoff") or {},
         "predictive_alert": payload.get("predictive_alert") or {},
         "prediction_mode": payload.get("prediction_mode") or "",
         "external_artifact": payload.get("external_artifact") or {},
@@ -418,7 +419,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "session_id is required"})
                 return
             storage = open_storage(self.config.database_url)
-            snapshot = storage.get_latest_prediction_snapshot(session_id)
+            snapshot = storage.get_current_prediction_snapshot(session_id)
             if not snapshot:
                 self._send_json(
                     HTTPStatus.NOT_FOUND,
@@ -448,7 +449,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "session_id is required"})
                 return
             storage = open_storage(self.config.database_url)
-            snapshot = storage.get_latest_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
+            snapshot = storage.get_current_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
             self._send_json(
                 HTTPStatus.OK,
                 {

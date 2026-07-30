@@ -738,7 +738,9 @@ class AnalysisWorker:
                 session_payload.get("correlation_id"),
                 str(job["job_id"]),
             )
-            latest_prediction_row = self.storage.get_latest_prediction_snapshot(session_id)
+            latest_prediction_row = self.storage.get_current_prediction_snapshot(
+                session_id
+            )
             latest_prediction = (
                 latest_prediction_row.get("payload")
                 if isinstance(latest_prediction_row, dict)

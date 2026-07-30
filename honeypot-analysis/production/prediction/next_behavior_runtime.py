@@ -25,6 +25,7 @@ from production.prediction.next_behavior_contract import (
     require_valid_next_behavior_session,
 )
 from production.prediction.next_behavior_label_policy import normalize_classifier_outputs
+from production.prediction.evidence_cutoff import require_valid_evidence_cutoff
 from production.prediction.next_behavior_model import load_checkpoint, predict_next_behavior
 from production.prediction.next_behavior_preprocessing import build_live_model_input
 from production.prediction.next_behavior_tensor import (
@@ -497,6 +498,7 @@ class FrozenTransformerPocPredictor:
         event_id: str,
         status: str,
         reason: str,
+        evidence_cutoff: Mapping[str, Any] | None = None,
     ) -> Dict[str, Any]:
         session_id = _clean(payload.get("session_id") or "unknown")
         snapshot = {
@@ -563,6 +565,13 @@ class FrozenTransformerPocPredictor:
                 "dtype": "float32",
             },
         }
+        if evidence_cutoff is not None:
+            cutoff = require_valid_evidence_cutoff(evidence_cutoff)
+            if cutoff["event_id"] != event_id:
+                raise NextBehaviorRuntimeError(
+                    "prediction event_id does not match evidence cutoff"
+                )
+            snapshot["evidence_cutoff"] = cutoff
         return snapshot
 
     def predict_session(
@@ -570,18 +579,31 @@ class FrozenTransformerPocPredictor:
         payload: Mapping[str, Any],
         *,
         event_id: str = "",
+        evidence_cutoff: Mapping[str, Any] | None = None,
     ) -> Dict[str, Any]:
         if not self.enabled:
-            return finalize_prediction_snapshot(self._base_snapshot(
-                payload, event_id=event_id, status="model_unavailable", reason="predictor_disabled"
-            ))
+            return finalize_prediction_snapshot(
+                self._base_snapshot(
+                    payload,
+                    event_id=event_id,
+                    status="model_unavailable",
+                    reason="predictor_disabled",
+                    evidence_cutoff=evidence_cutoff,
+                )
+            )
         if self.model is None:
-            return finalize_prediction_snapshot(self._base_snapshot(
-                payload,
-                event_id=event_id,
-                status="model_unavailable",
-                reason=f"frozen_artifact_validation_failed:{self.load_error or 'unknown'}",
-            ))
+            return finalize_prediction_snapshot(
+                self._base_snapshot(
+                    payload,
+                    event_id=event_id,
+                    status="model_unavailable",
+                    reason=(
+                        "frozen_artifact_validation_failed:"
+                        f"{self.load_error or 'unknown'}"
+                    ),
+                    evidence_cutoff=evidence_cutoff,
+                )
+            )
         started = time.perf_counter()
         try:
             safe_session = build_live_next_behavior_session(
@@ -601,6 +623,7 @@ class FrozenTransformerPocPredictor:
                     event_id=event_id,
                     status="insufficient_history",
                     reason="no_trusted_behavior_phase",
+                    evidence_cutoff=evidence_cutoff,
                 ))
             model_input = build_live_model_input(
                 safe_session,
@@ -638,6 +661,7 @@ class FrozenTransformerPocPredictor:
                 event_id=event_id,
                 status="predicted",
                 reason="frozen_transformer_inference_succeeded",
+                evidence_cutoff=evidence_cutoff,
             )
             snapshot["prediction"] = prediction_set
             snapshot["final_ranking"] = [
@@ -683,6 +707,7 @@ class FrozenTransformerPocPredictor:
                 event_id=event_id,
                 status="model_unavailable",
                 reason=f"inference_failed:{exc.__class__.__name__}",
+                evidence_cutoff=evidence_cutoff,
             )
             snapshot["runtime"]["inference_latency_ms"] = (
                 time.perf_counter() - started

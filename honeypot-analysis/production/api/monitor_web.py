@@ -246,7 +246,7 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         session_id = query.get("session_id", [""])[0].strip()
         if not session_id:
             return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
-        snapshot = storage.get_latest_prediction_snapshot(session_id)
+        snapshot = storage.get_current_prediction_snapshot(session_id)
         if not snapshot:
             return HTTPStatus.NOT_FOUND, {"error": "prediction not found", "session_id": session_id, "timestamp": utc_now()}
         feedback_rows = [
@@ -265,7 +265,7 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         session_id = query.get("session_id", [""])[0].strip()
         if not session_id:
             return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
-        snapshot = storage.get_latest_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
+        snapshot = storage.get_current_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
         return HTTPStatus.OK, {
             "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
             "session_id": session_id,
@@ -373,6 +373,21 @@ def _storage_session_rows(
     session_id: str,
     limit: int,
 ) -> Tuple[List[Dict[str, Any]], str]:
+    if table == "prediction_snapshots":
+        prediction_loader = getattr(
+            storage,
+            "list_prediction_snapshots_for_session",
+            None,
+        )
+        if prediction_loader is not None:
+            try:
+                rows = prediction_loader(session_id, limit=limit)
+            except Exception as exc:
+                return [], _storage_error(
+                    "prediction_snapshots session query",
+                    exc,
+                )
+            return [dict(row) for row in rows or []], ""
     session_loader = getattr(storage, "list_rows_for_session", None)
     if session_loader is not None:
         try:

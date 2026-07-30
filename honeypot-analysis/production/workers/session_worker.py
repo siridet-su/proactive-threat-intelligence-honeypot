@@ -47,6 +47,10 @@ from production.prediction.next_behavior_runtime import (
     FrozenTransformerPocPredictor,
     finalize_prediction_snapshot,
 )
+from production.prediction.evidence_cutoff import (
+    make_evidence_cutoff,
+    require_valid_evidence_cutoff,
+)
 from production.prediction.external_vomm_artifact import load_external_vomm_artifact
 from production.prediction.vomm_rollback import (
     MODE as VOMM_ROLLBACK_MODE,
@@ -483,8 +487,7 @@ class SessionWorker:
 
     def _recover_prediction_cache(self, session_id: str) -> None:
         history_limit = 25
-        rows = self.storage.list_rows_for_session(
-            "prediction_snapshots",
+        rows = self.storage.list_prediction_snapshots_for_session(
             session_id,
             limit=history_limit,
         )
@@ -497,7 +500,13 @@ class SessionWorker:
             snapshots.append(redacted)
         if snapshots:
             self._session_prediction_snapshots[session_id] = snapshots
-            self._session_latest_snapshots[session_id] = snapshots[-1]
+            current = self.storage.get_current_prediction_snapshot(session_id)
+            if current is None:
+                self._session_latest_snapshots.pop(session_id, None)
+            else:
+                self._session_latest_snapshots[session_id] = (
+                    self._payload_from_storage_row(current)
+                )
         else:
             self._session_prediction_snapshots.pop(session_id, None)
             self._session_latest_snapshots.pop(session_id, None)
@@ -888,6 +897,7 @@ class SessionWorker:
         event: Dict[str, Any],
         event_id: str = "",
         trigger_info: Optional[Dict[str, Any]] = None,
+        evidence_cutoff: Optional[Dict[str, Any]] = None,
     ) -> bool:
         if not self.prediction_engine.enabled:
             return False
@@ -901,10 +911,16 @@ class SessionWorker:
         safe_event = redact_for_artifact(event)
         if not isinstance(safe_event, dict):
             raise WorkerError("prediction trigger event redaction failed")
+        cutoff = require_valid_evidence_cutoff(evidence_cutoff)
+        if cutoff["event_id"] != str(event_id or ""):
+            raise WorkerError(
+                "prediction trigger event does not match evidence cutoff"
+            )
         task = {
-            "schema_version": "prediction_outbox_task.v1",
+            "schema_version": "prediction_outbox_task.v2",
             "session_id": str(payload.get("session_id") or "unknown"),
             "event_id": str(event_id or ""),
+            "evidence_cutoff": cutoff,
             "prediction_mode": str(
                 self.config.prediction_policy.get("prediction_mode") or ""
             ),
@@ -945,12 +961,22 @@ class SessionWorker:
                 if not isinstance(payload, dict) or not isinstance(event, dict):
                     raise ValueError("prediction outbox task is invalid")
                 event_id = str(task.get("event_id") or "")
+                evidence_cutoff = task.get("evidence_cutoff")
+                if evidence_cutoff is not None:
+                    evidence_cutoff = require_valid_evidence_cutoff(
+                        evidence_cutoff
+                    )
+                    if evidence_cutoff["event_id"] != event_id:
+                        raise ValueError(
+                            "prediction task cutoff does not match event_id"
+                        )
                 if isinstance(
                     self.prediction_engine, FrozenTransformerPocPredictor
                 ):
                     snapshot = self.prediction_engine.predict_session(
                         payload,
                         event_id=event_id,
+                        evidence_cutoff=evidence_cutoff,
                     )
                 else:
                     features = build_session_features(
@@ -959,6 +985,8 @@ class SessionWorker:
                     snapshot = self.prediction_engine.predict(
                         features, event_id=event_id
                     )
+                    if evidence_cutoff is not None:
+                        snapshot["evidence_cutoff"] = evidence_cutoff
                 snapshot["prediction_trigger"] = task.get("trigger") or {}
                 snapshot["predictive_alert"] = {
                     "status": "prohibited",
@@ -979,13 +1007,7 @@ class SessionWorker:
                 self._record_event_effect("prediction_saved")
                 session_id = str(snapshot.get("session_id") or "")
                 if session_id:
-                    self._session_latest_snapshots[session_id] = snapshot
-                    history = self._session_prediction_snapshots.setdefault(
-                        session_id, []
-                    )
-                    history.append(snapshot)
-                    if len(history) > 25:
-                        del history[:-25]
+                    self._recover_prediction_cache(session_id)
                 completed += 1
             except Exception as exc:
                 self._prediction_generation_errors += 1
@@ -1024,6 +1046,7 @@ class SessionWorker:
         event: Dict[str, Any],
         event_id: str = "",
         trigger_info: Optional[Dict[str, Any]] = None,
+        evidence_cutoff: Optional[Dict[str, Any]] = None,
     ) -> bool:
         try:
             return self._save_prediction_snapshot_unobserved(
@@ -1031,6 +1054,7 @@ class SessionWorker:
                 event,
                 event_id=event_id,
                 trigger_info=trigger_info,
+                evidence_cutoff=evidence_cutoff,
             )
         except Exception as exc:
             self._prediction_generation_errors += 1
@@ -1150,6 +1174,7 @@ class SessionWorker:
         """
         try:
             session_id = str(payload.get("session_id") or "")
+            self._recover_prediction_cache(session_id)
             snapshots = self._session_prediction_snapshots.pop(session_id, [])
             latest_snapshot = self._session_latest_snapshots.pop(session_id, None)
             if not snapshots and latest_snapshot:
@@ -1240,6 +1265,10 @@ class SessionWorker:
                 prediction_refreshed = True
             attempted += 1
             event = row["event"]
+            evidence_cutoff = make_evidence_cutoff(
+                row.get("received_at"),
+                row["event_id"],
+            )
             checkpoint = self._event_state_checkpoint(event)
             effects: Dict[str, bool | int] = {}
             self._current_event_effects = effects
@@ -1288,6 +1317,7 @@ class SessionWorker:
                                     event,
                                     event_id=row["event_id"],
                                     trigger_info=trigger_info,
+                                    evidence_cutoff=evidence_cutoff,
                                 )
                             self._on_session_end(state)
                         else:
@@ -1305,6 +1335,7 @@ class SessionWorker:
                                 event,
                                 event_id=row["event_id"],
                                 trigger_info=trigger_info,
+                                evidence_cutoff=evidence_cutoff,
                             )
                         if state is not None:
                             if getattr(state, "is_ended", False):

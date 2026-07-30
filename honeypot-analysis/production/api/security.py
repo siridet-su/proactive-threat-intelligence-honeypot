@@ -229,6 +229,7 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                 "final_ranking": payload.get("final_ranking") or [],
                 "trust_status": payload.get("trust_status") or {},
                 "coverage": payload.get("coverage") or {},
+                "evidence_cutoff": payload.get("evidence_cutoff") or {},
             }
         )
     elif table in {"prediction_backtest_runs", "prediction_calibration_runs"}:

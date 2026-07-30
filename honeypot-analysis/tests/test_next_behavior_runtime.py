@@ -17,6 +17,7 @@ from production.prediction.next_behavior_runtime import (
     build_live_next_behavior_session,
     validate_prediction_snapshot_integrity,
 )
+from production.prediction.evidence_cutoff import make_evidence_cutoff
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -174,6 +175,32 @@ def test_corrupt_checkpoint_fails_only_the_predictor(tmp_path: Path) -> None:
     assert snapshot["prediction"] == []
     assert snapshot["final_ranking"] == []
     assert snapshot["authority"]["may_authorize_action"] is False
+
+
+def test_evidence_cutoff_is_bound_into_snapshot_identity() -> None:
+    predictor = FrozenTransformerPocPredictor(_policy())
+    first_cutoff = make_evidence_cutoff(
+        "2026-07-27T00:00:01Z",
+        "event-cutoff",
+    )
+    second_cutoff = make_evidence_cutoff(
+        "2026-07-27T00:00:02Z",
+        "event-cutoff",
+    )
+    first = predictor.predict_session(
+        _payload(),
+        event_id="event-cutoff",
+        evidence_cutoff=first_cutoff,
+    )
+    second = predictor.predict_session(
+        _payload(),
+        event_id="event-cutoff",
+        evidence_cutoff=second_cutoff,
+    )
+    assert first["evidence_cutoff"] == first_cutoff
+    assert first["snapshot_id"] != second["snapshot_id"]
+    assert validate_prediction_snapshot_integrity(first) == []
+    assert validate_prediction_snapshot_integrity(second) == []
 
 
 def test_no_trusted_phase_is_explicit_not_a_fallback() -> None:
