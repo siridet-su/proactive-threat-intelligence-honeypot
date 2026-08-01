@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import grp
 import hashlib
 import importlib
 import inspect
 import json
 import os
+import pwd
 import re
 import shutil
 import stat
+import tarfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from production.cowrie_output.runtime import (
     DEPLOYMENT_CONTRACT,
@@ -21,6 +24,9 @@ from production.cowrie_output.runtime import (
     MANIFEST_SCHEMA_VERSION,
     REQUIRED_BUNDLE_FILES,
     CowrieOutputBoundaryError,
+    expected_bundle_mode,
+    expected_file_installation,
+    load_manifest_bytes,
     verify_boundary,
     verify_bundle,
 )
@@ -52,10 +58,6 @@ def _write_exclusive(path: Path, payload: bytes, mode: int = 0o600) -> None:
         raise
 
 
-def _expected_mode(relative: str) -> int:
-    return 0o700 if relative.endswith(".sh") else 0o600
-
-
 def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[str, Any]:
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("revision must be a full lowercase Git SHA-1")
@@ -71,12 +73,12 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
             destination = bundle_root / relative
             destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             shutil.copyfile(source, destination)
-            mode = _expected_mode(relative)
+            mode = expected_bundle_mode(relative)
             destination.chmod(mode)
             inventory[relative] = {
+                **expected_file_installation(relative, revision),
                 "bytes": destination.stat().st_size,
                 "sha256": _sha256_file(destination),
-                "mode": f"{mode:04o}",
             }
         for directory in [bundle_root, *bundle_root.rglob("*")]:
             if directory.is_dir():
@@ -96,7 +98,9 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
         manifest = {
             "schema_version": MANIFEST_SCHEMA_VERSION,
             "git_revision": revision,
-            "component_id": "cowrie_output_" + hashlib.sha256(identity_payload).hexdigest()[:32],
+        "component_id": (
+            "cowrie_output_" + hashlib.sha256(identity_payload).hexdigest()[:32]
+        ),
             "deployment": json.loads(json.dumps(DEPLOYMENT_CONTRACT)),
             "files": inventory,
             "policy": {
@@ -116,6 +120,330 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
         return manifest
     except BaseException:
         shutil.rmtree(bundle_root, ignore_errors=True)
+        raise
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _safe_archive_name(value: str) -> str:
+    while value.startswith("./"):
+        value = value[2:]
+    path = Path(value)
+    if (
+        not value
+        or value == "."
+        or path.is_absolute()
+        or ".." in path.parts
+        or "\\" in value
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise CowrieOutputBoundaryError("package contains an unsafe archive path")
+    return str(path)
+
+
+def extract_verified_package(
+    package: Path,
+    staging_root: Path,
+    expected_revision: str,
+    *,
+    fault: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Safely extract and verify a closed package before runtime mutation."""
+
+    if staging_root.exists() or staging_root.is_symlink():
+        raise CowrieOutputBoundaryError("package staging destination already exists")
+    try:
+        package_metadata = package.lstat()
+    except OSError as exc:
+        raise CowrieOutputBoundaryError("package archive is unavailable") from exc
+    if not stat.S_ISREG(package_metadata.st_mode) or package.is_symlink():
+        raise CowrieOutputBoundaryError("package archive is not a regular file")
+    fault = fault or (lambda _step: None)
+    staging_root.mkdir(parents=False, mode=0o700)
+    try:
+        fault("staging_created")
+        with tarfile.open(package, mode="r:") as archive:
+            members: dict[str, tarfile.TarInfo] = {}
+            for member in archive.getmembers():
+                if member.name in {".", "./"}:
+                    if not member.isdir():
+                        raise CowrieOutputBoundaryError(
+                            "package root entry is not a directory"
+                        )
+                    continue
+                name = _safe_archive_name(member.name)
+                if name in members:
+                    raise CowrieOutputBoundaryError(
+                        "package contains duplicate archive paths"
+                    )
+                if not (member.isfile() or member.isdir()):
+                    raise CowrieOutputBoundaryError(
+                        "package contains a link or special file"
+                    )
+                members[name] = member
+            manifest_member = members.get(MANIFEST_NAME)
+            if manifest_member is None or not manifest_member.isfile():
+                raise CowrieOutputBoundaryError("package manifest is absent")
+            if manifest_member.size > 4 * 1024 * 1024:
+                raise CowrieOutputBoundaryError("package manifest exceeds its size limit")
+            manifest_handle = archive.extractfile(manifest_member)
+            if manifest_handle is None:
+                raise CowrieOutputBoundaryError("package manifest is unreadable")
+            manifest_raw = manifest_handle.read()
+            manifest = load_manifest_bytes(manifest_raw)
+            if manifest["git_revision"] != expected_revision:
+                raise CowrieOutputBoundaryError("package revision does not match installation")
+            expected_files = set(REQUIRED_BUNDLE_FILES) | {MANIFEST_NAME}
+            expected_directories: set[str] = set()
+            for name in expected_files:
+                expected_directories.update(
+                    str(parent)
+                    for parent in Path(name).parents
+                    if str(parent) != "."
+                )
+            observed_files = {
+                name for name, member in members.items() if member.isfile()
+            }
+            observed_directories = {
+                name for name, member in members.items() if member.isdir()
+            }
+            if (
+                observed_files != expected_files
+                or observed_directories != expected_directories
+            ):
+                raise CowrieOutputBoundaryError("package archive inventory is not closed")
+            for directory in sorted(
+                expected_directories, key=lambda item: len(Path(item).parts)
+            ):
+                member = members[directory]
+                if stat.S_IMODE(member.mode) != 0o700:
+                    raise CowrieOutputBoundaryError("package directory mode is invalid")
+                destination = staging_root / directory
+                destination.mkdir(mode=0o700)
+            for name in sorted(expected_files):
+                member = members[name]
+                expected_mode = (
+                    0o600
+                    if name == MANIFEST_NAME
+                    else int(manifest["files"][name]["mode"], 8)
+                )
+                if stat.S_IMODE(member.mode) != expected_mode:
+                    raise CowrieOutputBoundaryError(f"package archive mode mismatch: {name}")
+                if (
+                    name != MANIFEST_NAME
+                    and member.size != manifest["files"][name]["bytes"]
+                ):
+                    raise CowrieOutputBoundaryError(f"package archive size mismatch: {name}")
+                source = archive.extractfile(member)
+                if source is None:
+                    raise CowrieOutputBoundaryError(f"package file is unreadable: {name}")
+                destination = staging_root / name
+                descriptor = os.open(
+                    destination,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    expected_mode,
+                )
+                try:
+                    with os.fdopen(descriptor, "wb") as output:
+                        shutil.copyfileobj(source, output)
+                        output.flush()
+                        os.fsync(output.fileno())
+                finally:
+                    source.close()
+                destination.chmod(expected_mode)
+                fault(f"staged_file:{name}")
+            for directory in sorted(
+                [
+                    staging_root,
+                    *(path for path in staging_root.rglob("*") if path.is_dir()),
+                ],
+                key=lambda item: len(item.parts),
+                reverse=True,
+            ):
+                directory.chmod(0o700)
+                _fsync_directory(directory)
+        verify_bundle(staging_root)
+        fault("staged_inventory_verified")
+        return manifest
+    except BaseException:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
+
+
+def create_deterministic_package(bundle_root: Path, package: Path) -> str:
+    """Create a byte-reproducible closed tar archive from a verified bundle."""
+
+    _manifest, _manifest_path, manifest_sha256 = verify_bundle(bundle_root)
+    if package.exists() or package.is_symlink():
+        raise CowrieOutputBoundaryError("package destination already exists")
+    expected_files = sorted({*REQUIRED_BUNDLE_FILES, MANIFEST_NAME})
+    directories = sorted(
+        {
+            str(parent)
+            for name in expected_files
+            for parent in Path(name).parents
+            if str(parent) != "."
+        }
+    )
+
+    def metadata(name: str, *, mode: int, directory: bool) -> tarfile.TarInfo:
+        member = tarfile.TarInfo(name)
+        member.type = tarfile.DIRTYPE if directory else tarfile.REGTYPE
+        member.mode = mode
+        member.uid = 0
+        member.gid = 0
+        member.uname = "root"
+        member.gname = "root"
+        member.mtime = 0
+        return member
+
+    try:
+        with tarfile.open(package, mode="x:", format=tarfile.GNU_FORMAT) as archive:
+            archive.addfile(metadata(".", mode=0o700, directory=True))
+            for directory in directories:
+                archive.addfile(
+                    metadata(f"./{directory}", mode=0o700, directory=True)
+                )
+            for name in expected_files:
+                source = bundle_root / name
+                mode = stat.S_IMODE(source.stat().st_mode)
+                member = metadata(f"./{name}", mode=mode, directory=False)
+                member.size = source.stat().st_size
+                with source.open("rb") as handle:
+                    archive.addfile(member, handle)
+        descriptor = os.open(package, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        _fsync_directory(package.parent)
+        return manifest_sha256
+    except BaseException:
+        package.unlink(missing_ok=True)
+        raise
+
+
+def install_verified_bundle(
+    staging_root: Path,
+    release_root: Path,
+    expected_revision: str,
+    *,
+    enforce_canonical_destination: bool = True,
+    owner_uid: int | None = None,
+    group_gid: int | None = None,
+    fault: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Install each immutable file with manifest-declared metadata and verify it."""
+
+    manifest, manifest_path, _digest = verify_bundle(staging_root)
+    if manifest["git_revision"] != expected_revision:
+        raise CowrieOutputBoundaryError("staged bundle revision does not match")
+    canonical = Path(f"/opt/honeypot-cowrie-output/releases/{expected_revision}")
+    if enforce_canonical_destination and release_root != canonical:
+        raise CowrieOutputBoundaryError("release destination is not canonical")
+    if release_root.exists() or release_root.is_symlink():
+        raise CowrieOutputBoundaryError("release destination already exists")
+    uid = pwd.getpwnam("cowrie").pw_uid if owner_uid is None else owner_uid
+    gid = grp.getgrnam("cowrie").gr_gid if group_gid is None else group_gid
+    fault = fault or (lambda _step: None)
+    release_root.mkdir(mode=0o700)
+    os.chown(release_root, uid, gid)
+    release_root.chmod(0o700)
+    try:
+        fault("release_created")
+        for relative in sorted(REQUIRED_BUNDLE_FILES):
+            receipt = manifest["files"][relative]
+            expected_destination = canonical / relative
+            if Path(receipt["destination"]) != expected_destination:
+                raise CowrieOutputBoundaryError(
+                    f"manifest destination mismatch: {relative}"
+                )
+            source = staging_root / relative
+            destination = release_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            parent = destination.parent
+            while parent != release_root.parent:
+                os.chown(parent, uid, gid)
+                parent.chmod(0o700)
+                if parent == release_root:
+                    break
+                parent = parent.parent
+            mode = int(receipt["mode"], 8)
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0),
+                mode,
+            )
+            with os.fdopen(descriptor, "wb") as output, source.open(
+                "rb"
+            ) as input_file:
+                shutil.copyfileobj(input_file, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.chown(destination, uid, gid)
+            destination.chmod(mode)
+            if (
+                destination.stat().st_size != receipt["bytes"]
+                or _sha256_file(destination) != receipt["sha256"]
+                or stat.S_IMODE(destination.stat().st_mode) != mode
+                or bool(mode & 0o111) != receipt["executable"]
+            ):
+                raise CowrieOutputBoundaryError(
+                    f"installed bundle metadata mismatch: {relative}"
+                )
+            _fsync_directory(destination.parent)
+            fault(f"installed_file:{relative}")
+        installed_manifest = release_root / MANIFEST_NAME
+        descriptor = os.open(
+            installed_manifest,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(descriptor, "wb") as output, manifest_path.open(
+            "rb"
+        ) as input_file:
+            shutil.copyfileobj(input_file, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chown(installed_manifest, uid, gid)
+        installed_manifest.chmod(0o600)
+        _fsync_directory(release_root)
+        fault("manifest_installed")
+        verify_bundle(release_root)
+        for path in [
+            release_root,
+            *(item for item in release_root.rglob("*") if item.is_dir()),
+        ]:
+            metadata = path.stat()
+            if (
+                stat.S_IMODE(metadata.st_mode) != 0o700
+                or metadata.st_uid != uid
+                or metadata.st_gid != gid
+            ):
+                raise CowrieOutputBoundaryError("installed bundle directory metadata mismatch")
+        for relative in [*sorted(REQUIRED_BUNDLE_FILES), MANIFEST_NAME]:
+            metadata = (release_root / relative).lstat()
+            if metadata.st_uid != uid or metadata.st_gid != gid:
+                raise CowrieOutputBoundaryError("installed bundle ownership mismatch")
+        fault("installed_inventory_verified")
+        return manifest
+    except BaseException:
+        shutil.rmtree(release_root, ignore_errors=True)
         raise
 
 
@@ -441,6 +769,20 @@ def main() -> int:
     build.add_argument("--bundle-root", required=True)
     build.add_argument("--revision", required=True)
 
+    extract_package_command = commands.add_parser("extract-package")
+    extract_package_command.add_argument("--package", required=True)
+    extract_package_command.add_argument("--staging-root", required=True)
+    extract_package_command.add_argument("--expected-revision", required=True)
+
+    package_command = commands.add_parser("package")
+    package_command.add_argument("--bundle-root", required=True)
+    package_command.add_argument("--package", required=True)
+
+    install_bundle_command = commands.add_parser("install-bundle")
+    install_bundle_command.add_argument("--staging-root", required=True)
+    install_bundle_command.add_argument("--release-root", required=True)
+    install_bundle_command.add_argument("--expected-revision", required=True)
+
     verify_bundle_command = commands.add_parser("verify-bundle")
     verify_bundle_command.add_argument("--bundle-root", required=True)
     verify_bundle_command.add_argument("--expected-revision", required=True)
@@ -483,6 +825,54 @@ def main() -> int:
             Path(args.source_root), Path(args.bundle_root), args.revision
         )
         print(json.dumps(manifest, sort_keys=True))
+        return 0
+    if args.command in {"extract-package", "install-bundle", "package"}:
+        try:
+            if args.command == "extract-package":
+                manifest = extract_verified_package(
+                    Path(args.package),
+                    Path(args.staging_root),
+                    args.expected_revision,
+                )
+                operation = "package_extracted"
+            elif args.command == "install-bundle":
+                manifest = install_verified_bundle(
+                    Path(args.staging_root),
+                    Path(args.release_root),
+                    args.expected_revision,
+                )
+                operation = "bundle_installed"
+            else:
+                manifest, _path, _digest = verify_bundle(Path(args.bundle_root))
+                create_deterministic_package(
+                    Path(args.bundle_root), Path(args.package)
+                )
+                operation = "package_created"
+        except (CowrieOutputBoundaryError, OSError, ValueError, tarfile.TarError) as exc:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "cowrie_output_package_installation.v1",
+                        "status": "invalid",
+                        "operation": args.command,
+                        "error_category": type(exc).__name__,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(
+            json.dumps(
+                {
+                    "schema_version": "cowrie_output_package_installation.v1",
+                    "status": "valid",
+                    "operation": operation,
+                    "git_revision": manifest["git_revision"],
+                    "component_id": manifest["component_id"],
+                },
+                sort_keys=True,
+            )
+        )
         return 0
     if args.command == "verify-bundle":
         try:

@@ -926,12 +926,15 @@ def test_installer_and_rollback_use_versioned_receipt_tool() -> None:
     rollback = (root / "deployment/cowrie_output/rollback-sanitized-output.sh").read_text()
     assert "cowrie_rollback_receipt" in installer
     assert "capture-stopped" in installer
-    assert "receipt_tool verify-stopped" in installer
-    assert "cowrie_rollback_receipt verify" in rollback
-    assert "cowrie_rollback_receipt apply" in rollback
+    assert "receipt-verification.before-install.json\" verify-stopped" in installer
+    assert "receipt-verification.before-rollback.json\" verify" in rollback
+    assert "receipt-application.json\" apply" in rollback
+    assert "--quiet --status-file" in installer
+    assert "--quiet --status-file" in rollback
+    assert '>"${receipt}/receipt-application' not in rollback
     assert "stat -c 'metadata\\t" not in installer
     assert 'IFS="$(printf \'\\t\')"' not in rollback
-    assert rollback.index("cowrie_rollback_receipt verify") < rollback.index(
+    assert rollback.index("receipt-verification.before-rollback.json") < rollback.index(
         "systemctl stop cowrie.service"
     )
 
@@ -942,20 +945,26 @@ def test_installer_records_complete_transaction_in_required_order() -> None:
     offsets = [installer.index(f"record_step {step}") for step in INSTALL_TRANSACTION_STEPS]
     assert offsets == sorted(offsets)
     assert installer.index("systemctl stop cowrie.service", offsets[1]) < installer.index(
-        "receipt_tool capture-stopped"
+        "capture-stopped"
     )
-    assert installer.index("receipt_tool verify-stopped") < installer.index(
-        'tar --no-same-owner -xf "${package}"'
+    assert installer.index("extract-package") < installer.index(
+        "record_step receipt_directory_created"
     )
-    capture_offset = installer.index("receipt_tool capture-stopped")
+    assert installer.index("verify-stopped") < installer.index(
+        "install-bundle"
+    )
+    assert installer.index("install-bundle") < installer.index(
+        'mv -Tf "${current}.new" "${current}"'
+    )
+    capture_offset = installer.index("capture-stopped")
     assert installer.index("receipt_ready=1", capture_offset) < installer.index(
-        'chmod 0600 "${receipt}/receipt-capture.json"'
+        "record_step log_quarantined"
     )
     assert 'timeout 30 systemctl stop cowrie.service' in installer
     assert 'process_file="/sys/fs/cgroup${control_group}/cgroup.procs"' in installer
     assert '[ -z "$(cat "${process_file}")" ]' in installer
-    assert 'receipt_tool assert-stopped --active-log "${active_text_log}"' in installer
-    assert 'receipt_tool apply' in installer
+    assert 'assert-stopped --active-log "${active_text_log}"' in installer
+    assert 'receipt-application.after-failure.json" apply' in installer
     assert 'start_cowrie_bounded' in installer
     assert 'rm -rf "${release}"' in installer
     assert 'for temporary_link in "${current}.new" "${plugin}.new"' in installer
@@ -970,6 +979,60 @@ def test_installer_records_complete_transaction_in_required_order() -> None:
     assert rollback.count(
         'test "$(systemctl show "${forwarder}" -p MainPID --value)" = "${forwarder_pid}"'
     ) == 1
+
+
+def test_optional_rollback_status_cannot_block_operation_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_open = receipt_module.os.open
+    real_write = receipt_module.os.write
+    status = tmp_path / "missing/status.json"
+
+    def unavailable_open(path: object, flags: int, mode: int = 0o777) -> int:
+        if Path(path) == status:  # type: ignore[arg-type]
+            raise OSError("simulated full or missing status filesystem")
+        return real_open(path, flags, mode)
+
+    def unavailable_stdout(descriptor: int, payload: object) -> int:
+        if descriptor == 1:
+            raise BrokenPipeError("simulated unavailable stdout")
+        return real_write(descriptor, payload)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(receipt_module.os, "open", unavailable_open)
+    monkeypatch.setattr(receipt_module.os, "write", unavailable_stdout)
+    receipt_module._emit_status(
+        {"schema_version": "test.v1", "status": "valid"},
+        quiet=False,
+        status_file=str(status),
+    )
+
+
+def test_completed_receipt_application_is_idempotent(tmp_path: Path) -> None:
+    paths = _fixture(tmp_path)
+    _capture(paths)
+    receipt = paths["receipt"]
+    text = paths["text"]
+    current = paths["current"]
+    candidate = paths["candidate"]
+    assert all(isinstance(path, Path) for path in (receipt, text, current, candidate))
+    text.write_text("candidate-log", encoding="utf-8")  # type: ignore[union-attr]
+    current.unlink()  # type: ignore[union-attr]
+    current.symlink_to(candidate)  # type: ignore[union-attr]
+    first = apply_receipt(
+        receipt,  # type: ignore[arg-type]
+        expected_uid=os.geteuid(),
+        allowed_roots=paths["roots"],  # type: ignore[arg-type]
+    )
+    first_state = text.read_bytes()  # type: ignore[union-attr]
+    second = apply_receipt(
+        receipt,  # type: ignore[arg-type]
+        expected_uid=os.geteuid(),
+        allowed_roots=paths["roots"],  # type: ignore[arg-type]
+    )
+    assert second == first
+    assert text.read_bytes() == first_state  # type: ignore[union-attr]
+    assert current.resolve() == paths["prior"]  # type: ignore[union-attr]
 
 
 def test_v2_receipt_has_closed_header_and_entry_contract(tmp_path: Path) -> None:

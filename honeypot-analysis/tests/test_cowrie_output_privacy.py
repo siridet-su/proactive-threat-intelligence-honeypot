@@ -6,6 +6,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,7 +25,10 @@ from production.cowrie_output.runtime import (
 )
 from production.tools.cowrie_output_integration import (
     build_bundle,
+    create_deterministic_package,
+    extract_verified_package,
     finish_live_rotation,
+    install_verified_bundle,
     prepare_live_rotation,
     render_config,
     validate_live_permissions,
@@ -786,20 +790,14 @@ def test_initialization_failure_has_no_output_side_effect(tmp_path: Path) -> Non
     assert not output.exists()
 
 
-def test_installer_preserves_every_manifested_executable_mode() -> None:
+def test_manifest_binds_complete_installation_metadata_and_installer_uses_it() -> None:
     installer = (
         ROOT / "deployment/cowrie_output/install-sanitized-output.sh"
     ).read_text(encoding="utf-8")
-    for script_name in (
-        "check-live-readiness.sh",
-        "install-sanitized-output.sh",
-        "rollback-sanitized-output.sh",
-        "run-sanitized-cowrie.sh",
-    ):
-        assert (
-            f'chmod 0700 "${{release}}/deployment/cowrie_output/{script_name}"'
-            in installer
-        )
+    assert "cowrie_output_integration extract-package" in installer
+    assert "cowrie_output_integration install-bundle" in installer
+    assert 'find "${release}" -type f -exec chmod 0600' not in installer
+    assert 'chmod 0700 "${release}/deployment/' not in installer
     assert 'chmod 0640 "${cowrie_root}/var/log/cowrie/cowrie.json"' in installer
     assert "historical-log-hashes.before.sha256" in installer
     historical_hash_command = installer.split(
@@ -813,7 +811,7 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
         'find "${cowrie_root}/var/log/cowrie" -xdev -type f' in installer
         and "-exec chmod 0600 {} +" in installer
     )
-    assert "receipt_tool capture-stopped" in installer
+    assert 'receipt-capture.json" capture-stopped' in installer
     assert '--logrotate "${logrotate}"' in installer
     assert "cowrie_output_integration verify-start" in installer
     assert "cowrie_output_integration verify-bundle" in installer
@@ -825,6 +823,205 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
     assert 'protected_log = receipt_dir / "cowrie.log.protected.before"' in receipt_tool
     assert 'systemctl stop cowrie.service' in installer
     assert 'install -o root -g root -m 0644' in installer
+
+
+def test_bundle_manifest_binds_file_type_destination_owner_mode_and_mutability(
+    tmp_path: Path,
+) -> None:
+    bundle = _build(tmp_path)
+    manifest = json.loads((bundle / "COWRIE_OUTPUT_MANIFEST.json").read_text())
+    expected_keys = {
+        "source",
+        "destination",
+        "file_type",
+        "bytes",
+        "sha256",
+        "owner",
+        "group",
+        "mode",
+        "executable",
+        "classification",
+    }
+    for relative, receipt in manifest["files"].items():
+        assert set(receipt) == expected_keys
+        assert receipt["source"] == relative
+        assert receipt["destination"] == (
+            f"/opt/honeypot-cowrie-output/releases/{REVISION}/{relative}"
+        )
+        assert receipt["file_type"] == "regular"
+        assert receipt["owner"] == receipt["group"] == "cowrie"
+        assert receipt["classification"] == "immutable"
+        assert receipt["executable"] is relative.endswith(".sh")
+        assert receipt["mode"] == ("0700" if relative.endswith(".sh") else "0600")
+
+
+def test_safe_archive_staging_and_manifest_authoritative_installation(
+    tmp_path: Path,
+) -> None:
+    bundle = _build(tmp_path)
+    package = tmp_path / "bundle.tar"
+    with tarfile.open(package, "w") as archive:
+        archive.add(bundle, arcname=".", recursive=True)
+    staging = tmp_path / "staging"
+    manifest = extract_verified_package(package, staging, REVISION)
+    assert manifest["git_revision"] == REVISION
+    release = tmp_path / "release"
+    install_verified_bundle(
+        staging,
+        release,
+        REVISION,
+        enforce_canonical_destination=False,
+        owner_uid=os.geteuid(),
+        group_gid=os.getegid(),
+    )
+    for relative, receipt in manifest["files"].items():
+        installed = release / relative
+        assert stat.S_IMODE(installed.stat().st_mode) == int(receipt["mode"], 8)
+        assert bool(installed.stat().st_mode & 0o111) is receipt["executable"]
+    verify_bundle(release)
+
+
+def test_two_clean_package_builds_are_byte_identical_and_extractable(
+    tmp_path: Path,
+) -> None:
+    first_bundle = _build(tmp_path / "first")
+    second_bundle = _build(tmp_path / "second")
+    first_package = tmp_path / "first.tar"
+    second_package = tmp_path / "second.tar"
+    first_manifest = create_deterministic_package(first_bundle, first_package)
+    second_manifest = create_deterministic_package(second_bundle, second_package)
+    assert first_manifest == second_manifest
+    assert first_package.read_bytes() == second_package.read_bytes()
+    extracted = tmp_path / "extracted"
+    extract_verified_package(first_package, extracted, REVISION)
+    verify_bundle(extracted)
+
+
+def test_staged_mode_drift_fails_before_release_creation(tmp_path: Path) -> None:
+    bundle = _build(tmp_path)
+    package = tmp_path / "bundle.tar"
+    with tarfile.open(package, "w") as archive:
+        archive.add(bundle, arcname=".", recursive=True)
+    staging = tmp_path / "staging"
+    extract_verified_package(package, staging, REVISION)
+    (staging / "deployment/cowrie_output/check-live-readiness.sh").chmod(0o600)
+    release = tmp_path / "release"
+    with pytest.raises(CowrieOutputBoundaryError, match="mode mismatch"):
+        install_verified_bundle(
+            staging,
+            release,
+            REVISION,
+            enforce_canonical_destination=False,
+            owner_uid=os.geteuid(),
+            group_gid=os.getegid(),
+        )
+    assert not release.exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("owner", "root"),
+        ("group", "root"),
+        ("file_type", "symlink"),
+        ("mode", "0600"),
+        ("executable", False),
+        ("classification", "mutable"),
+        ("destination", "/tmp/escape"),
+    ],
+)
+def test_manifest_rejects_invented_installation_metadata(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    bundle = _build(tmp_path)
+    manifest_path = bundle / "COWRIE_OUTPUT_MANIFEST.json"
+    manifest = json.loads(manifest_path.read_text())
+    entry = manifest["files"]["deployment/cowrie_output/check-live-readiness.sh"]
+    entry[field] = value
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+    manifest_path.chmod(0o600)
+    with pytest.raises(CowrieOutputBoundaryError, match="installation metadata"):
+        verify_bundle(bundle)
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink", "extra", "wrong_mode"])
+def test_archive_preflight_rejects_links_extras_and_mode_drift(
+    tmp_path: Path, unsafe_kind: str
+) -> None:
+    bundle = _build(tmp_path)
+    if unsafe_kind == "wrong_mode":
+        (bundle / "deployment/cowrie_output/check-live-readiness.sh").chmod(0o600)
+    package = tmp_path / "bundle.tar"
+    with tarfile.open(package, "w") as archive:
+        archive.add(bundle, arcname=".", recursive=True)
+        if unsafe_kind == "symlink":
+            member = tarfile.TarInfo("./unexpected-link")
+            member.type = tarfile.SYMTYPE
+            member.linkname = "/etc/passwd"
+            archive.addfile(member)
+        elif unsafe_kind == "extra":
+            member = tarfile.TarInfo("./unexpected-file")
+            member.size = 0
+            member.mode = 0o600
+            archive.addfile(member)
+    staging = tmp_path / "staging"
+    with pytest.raises(CowrieOutputBoundaryError):
+        extract_verified_package(package, staging, REVISION)
+    assert not staging.exists()
+
+
+def test_every_staging_and_installation_fault_removes_partial_tree(tmp_path: Path) -> None:
+    bundle = _build(tmp_path)
+    package = tmp_path / "bundle.tar"
+    with tarfile.open(package, "w") as archive:
+        archive.add(bundle, arcname=".", recursive=True)
+    manifest = json.loads((bundle / "COWRIE_OUTPUT_MANIFEST.json").read_text())
+    staging_faults = [
+        "staging_created",
+        *(f"staged_file:{name}" for name in sorted({*manifest["files"], "COWRIE_OUTPUT_MANIFEST.json"})),
+        "staged_inventory_verified",
+    ]
+    for index, failure_step in enumerate(staging_faults):
+        staging = tmp_path / f"staging-fault-{index}"
+
+        def fail_staging(step: str, expected: str = failure_step) -> None:
+            if step == expected:
+                raise RuntimeError("injected staging fault")
+
+        with pytest.raises(RuntimeError, match="injected staging fault"):
+            extract_verified_package(
+                package, staging, REVISION, fault=fail_staging
+            )
+        assert not staging.exists()
+
+    staging = tmp_path / "verified-staging"
+    extract_verified_package(package, staging, REVISION)
+    install_faults = [
+        "release_created",
+        *(f"installed_file:{name}" for name in sorted(manifest["files"])),
+        "manifest_installed",
+        "installed_inventory_verified",
+    ]
+    for index, failure_step in enumerate(install_faults):
+        release = tmp_path / f"release-fault-{index}"
+
+        def fail_install(step: str, expected: str = failure_step) -> None:
+            if step == expected:
+                raise RuntimeError("injected installation fault")
+
+        with pytest.raises(RuntimeError, match="injected installation fault"):
+            install_verified_bundle(
+                staging,
+                release,
+                REVISION,
+                enforce_canonical_destination=False,
+                owner_uid=os.geteuid(),
+                group_gid=os.getegid(),
+                fault=fail_install,
+            )
+        assert not release.exists()
 
 
 def test_service_discards_untrusted_process_streams_and_binds_rotation_policy() -> None:

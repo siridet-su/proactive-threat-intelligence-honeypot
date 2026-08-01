@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from production.utils.cowrie_privacy import CowriePrivacyPolicy, load_policy
 
 
-MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v3"
+MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v4"
 VALIDATION_SCHEMA_VERSION = "cowrie_output_boundary_validation.v1"
 EXPECTED_STARTING_SANITIZER_REVISION = "7f764ab471e8dac555d06277b4613237299aee69"
 DEPLOYMENT_CONTRACT = {
@@ -113,6 +113,46 @@ REQUIRED_BUNDLE_FILES = frozenset(
     }
 )
 MANIFEST_NAME = "COWRIE_OUTPUT_MANIFEST.json"
+MAX_BUNDLE_FILE_BYTES = 16 * 1024 * 1024
+MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+FILE_RECEIPT_KEYS = frozenset(
+    {
+        "source",
+        "destination",
+        "file_type",
+        "bytes",
+        "sha256",
+        "owner",
+        "group",
+        "mode",
+        "executable",
+        "classification",
+    }
+)
+
+
+def expected_bundle_mode(relative: str) -> int:
+    """Return the reviewed immutable mode for one closed-inventory file."""
+
+    return 0o700 if relative.endswith(".sh") else 0o600
+
+
+def expected_file_installation(relative: str, revision: str) -> dict[str, Any]:
+    """Return the closed installation metadata that a manifest must bind."""
+
+    mode = expected_bundle_mode(relative)
+    return {
+        "source": relative,
+        "destination": (
+            f"/opt/honeypot-cowrie-output/releases/{revision}/{relative}"
+        ),
+        "file_type": "regular",
+        "owner": "cowrie",
+        "group": "cowrie",
+        "mode": f"{mode:04o}",
+        "executable": bool(mode & 0o111),
+        "classification": "immutable",
+    }
 
 
 class CowrieOutputBoundaryError(RuntimeError):
@@ -148,13 +188,9 @@ def _safe_relative(value: str) -> Path:
     return path
 
 
-def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
-    manifest_path = bundle_root / MANIFEST_NAME
-    try:
-        raw = manifest_path.read_bytes()
-        document = json.loads(raw)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise CowrieOutputBoundaryError("bundle manifest is unavailable or invalid") from exc
+def _validate_manifest_document(document: Any) -> dict[str, Any]:
+    """Validate the complete manifest contract independently of a filesystem."""
+
     if not isinstance(document, dict):
         raise CowrieOutputBoundaryError("bundle manifest must be an object")
     expected_keys = {
@@ -169,7 +205,8 @@ def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
         raise CowrieOutputBoundaryError("bundle manifest keys are invalid")
     if document["schema_version"] != MANIFEST_SCHEMA_VERSION:
         raise CowrieOutputBoundaryError("bundle manifest schema is invalid")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(document["git_revision"])):
+    revision = str(document["git_revision"])
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise CowrieOutputBoundaryError("bundle Git revision is invalid")
     if (
         not isinstance(document["component_id"], str)
@@ -179,7 +216,80 @@ def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
         raise CowrieOutputBoundaryError("bundle component identity is invalid")
     if document["deployment"] != DEPLOYMENT_CONTRACT:
         raise CowrieOutputBoundaryError("bundle deployment contract is invalid")
-    return document, manifest_path, hashlib.sha256(raw).hexdigest()
+    files = document.get("files")
+    if not isinstance(files, Mapping) or set(files) != REQUIRED_BUNDLE_FILES:
+        raise CowrieOutputBoundaryError("bundle file inventory is incomplete or unexpected")
+    total_bytes = 0
+    for relative_text, raw_receipt in files.items():
+        relative = str(_safe_relative(str(relative_text)))
+        receipt = raw_receipt if isinstance(raw_receipt, Mapping) else {}
+        if set(receipt) != FILE_RECEIPT_KEYS:
+            raise CowrieOutputBoundaryError(f"invalid file receipt: {relative_text}")
+        expected = expected_file_installation(relative, revision)
+        for key, value in expected.items():
+            if receipt.get(key) != value:
+                raise CowrieOutputBoundaryError(
+                    f"bundle installation metadata mismatch: {relative_text}"
+                )
+        if (
+            not isinstance(receipt.get("bytes"), int)
+            or isinstance(receipt.get("bytes"), bool)
+            or not 0 <= receipt["bytes"] <= MAX_BUNDLE_FILE_BYTES
+        ):
+            raise CowrieOutputBoundaryError(f"bundle size is invalid: {relative_text}")
+        total_bytes += receipt["bytes"]
+        if not SHA256_PATTERN.fullmatch(str(receipt.get("sha256"))):
+            raise CowrieOutputBoundaryError(
+                f"bundle SHA-256 is invalid: {relative_text}"
+            )
+    if total_bytes > MAX_BUNDLE_BYTES:
+        raise CowrieOutputBoundaryError("bundle total size exceeds its limit")
+    policy_receipt = document.get("policy")
+    if not isinstance(policy_receipt, Mapping) or set(policy_receipt) != {
+        "relative_path",
+        "policy_id",
+        "version",
+        "sha256",
+    }:
+        raise CowrieOutputBoundaryError("policy receipt is invalid")
+    if not SHA256_PATTERN.fullmatch(str(policy_receipt.get("sha256"))):
+        raise CowrieOutputBoundaryError("policy receipt SHA-256 is invalid")
+    _safe_relative(str(policy_receipt.get("relative_path")))
+    identity_payload = json.dumps(
+        {
+            "deployment": document["deployment"],
+            "git_revision": revision,
+            "files": document["files"],
+            "policy_sha256": policy_receipt["sha256"],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    expected_component = (
+        "cowrie_output_" + hashlib.sha256(identity_payload).hexdigest()[:32]
+    )
+    if document["component_id"] != expected_component:
+        raise CowrieOutputBoundaryError("bundle component identity does not match content")
+    return document
+
+
+def load_manifest_bytes(raw: bytes) -> dict[str, Any]:
+    """Load and validate manifest bytes for archive preflight."""
+
+    try:
+        document = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CowrieOutputBoundaryError("bundle manifest is unavailable or invalid") from exc
+    return _validate_manifest_document(document)
+
+
+def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
+    manifest_path = bundle_root / MANIFEST_NAME
+    try:
+        raw = manifest_path.read_bytes()
+    except OSError as exc:
+        raise CowrieOutputBoundaryError("bundle manifest is unavailable or invalid") from exc
+    return load_manifest_bytes(raw), manifest_path, hashlib.sha256(raw).hexdigest()
 
 
 def verify_bundle(bundle_root: str | Path) -> tuple[dict[str, Any], Path, str]:
@@ -189,9 +299,7 @@ def verify_bundle(bundle_root: str | Path) -> tuple[dict[str, Any], Path, str]:
         raise CowrieOutputBoundaryError("bundle root permissions are not owner-only")
     if stat.S_IMODE(manifest_path.stat().st_mode) != 0o600:
         raise CowrieOutputBoundaryError("bundle manifest permissions are not owner-only")
-    files = manifest.get("files")
-    if not isinstance(files, Mapping) or set(files) != REQUIRED_BUNDLE_FILES:
-        raise CowrieOutputBoundaryError("bundle file inventory is incomplete or unexpected")
+    files = manifest["files"]
     observed_files = {
         str(path.relative_to(root))
         for path in root.rglob("*")
@@ -205,8 +313,6 @@ def verify_bundle(bundle_root: str | Path) -> tuple[dict[str, Any], Path, str]:
     for relative_text, raw_receipt in files.items():
         relative = _safe_relative(str(relative_text))
         receipt = raw_receipt if isinstance(raw_receipt, Mapping) else {}
-        if set(receipt) != {"bytes", "sha256", "mode"}:
-            raise CowrieOutputBoundaryError(f"invalid file receipt: {relative_text}")
         path = root / relative
         try:
             metadata = path.lstat()
@@ -216,8 +322,6 @@ def verify_bundle(bundle_root: str | Path) -> tuple[dict[str, Any], Path, str]:
             raise CowrieOutputBoundaryError(f"bundle file is not regular: {relative_text}")
         if metadata.st_size != receipt["bytes"]:
             raise CowrieOutputBoundaryError(f"bundle file size mismatch: {relative_text}")
-        if not SHA256_PATTERN.fullmatch(str(receipt["sha256"])):
-            raise CowrieOutputBoundaryError(f"bundle SHA-256 is invalid: {relative_text}")
         if _sha256_file(path) != receipt["sha256"]:
             raise CowrieOutputBoundaryError(f"bundle SHA-256 mismatch: {relative_text}")
         expected_mode = int(str(receipt["mode"]), 8)
@@ -232,14 +336,7 @@ def verify_bundle(bundle_root: str | Path) -> tuple[dict[str, Any], Path, str]:
             if parent == root:
                 break
             parent = parent.parent
-    policy_receipt = manifest.get("policy")
-    if not isinstance(policy_receipt, Mapping) or set(policy_receipt) != {
-        "relative_path",
-        "policy_id",
-        "version",
-        "sha256",
-    }:
-        raise CowrieOutputBoundaryError("policy receipt is invalid")
+    policy_receipt = manifest["policy"]
     policy_path = root / _safe_relative(str(policy_receipt["relative_path"]))
     policy = load_policy(policy_path)
     if (

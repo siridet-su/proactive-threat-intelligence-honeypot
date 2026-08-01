@@ -1132,8 +1132,48 @@ def _add_boundary_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--logrotate", required=True)
 
 
+def _emit_status(
+    document: dict[str, Any], *, quiet: bool, status_file: str | None
+) -> None:
+    """Emit bounded optional evidence without becoming rollback authority."""
+
+    payload = (
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("ascii")
+    if status_file:
+        destination = Path(status_file)
+        try:
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+            try:
+                view = memoryview(payload)
+                while view:
+                    written = os.write(descriptor, view)
+                    if written <= 0:
+                        raise OSError("short optional status write")
+                    view = view[written:]
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            _fsync_directory(destination.parent)
+        except OSError:
+            # Status output is evidence only. Receipt verification/application
+            # success must never depend on its directory, capacity, or mode.
+            pass
+    if not quiet:
+        try:
+            os.write(1, payload)
+        except OSError:
+            pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manage Cowrie rollback receipts")
+    parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--status-file")
     commands = parser.add_subparsers(dest="command", required=True)
     stopped = commands.add_parser("capture-stopped")
     assert_stopped = commands.add_parser("assert-stopped")
@@ -1147,16 +1187,15 @@ def main() -> int:
     try:
         if args.command == "assert-stopped":
             device, inode = assert_stopped_log_unheld(Path(args.active_log))
-            print(
-                json.dumps(
-                    {
-                        "schema_version": "cowrie_output_stopped_log.v1",
-                        "status": "valid",
-                        "device": device,
-                        "inode": inode,
-                    },
-                    sort_keys=True,
-                )
+            _emit_status(
+                {
+                    "schema_version": "cowrie_output_stopped_log.v1",
+                    "status": "valid",
+                    "device": device,
+                    "inode": inode,
+                },
+                quiet=args.quiet,
+                status_file=args.status_file,
             )
             return 0
         receipt = Path(args.receipt)
@@ -1193,30 +1232,28 @@ def main() -> int:
             )
             records = [None] * count  # type: ignore[list-item]
     except (OSError, RollbackReceiptError, ValueError) as exc:
-        print(
-            json.dumps(
-                {
-                    "schema_version": "cowrie_output_rollback_operation.v1",
-                    "status": "invalid",
-                    "operation": args.command,
-                    "error_category": type(exc).__name__,
-                },
-                sort_keys=True,
-            )
-        )
-        return 2
-    print(
-        json.dumps(
+        _emit_status(
             {
                 "schema_version": "cowrie_output_rollback_operation.v1",
-                "status": "valid",
+                "status": "invalid",
                 "operation": args.command,
-                "receipt_schema": schema,
-                "receipt_sha256": digest,
-                "records": len(records),
+                "error_category": type(exc).__name__,
             },
-            sort_keys=True,
+            quiet=args.quiet,
+            status_file=args.status_file,
         )
+        return 2
+    _emit_status(
+        {
+            "schema_version": "cowrie_output_rollback_operation.v1",
+            "status": "valid",
+            "operation": args.command,
+            "receipt_schema": schema,
+            "receipt_sha256": digest,
+            "records": len(records),
+        },
+        quiet=args.quiet,
+        status_file=args.status_file,
     )
     return 0
 

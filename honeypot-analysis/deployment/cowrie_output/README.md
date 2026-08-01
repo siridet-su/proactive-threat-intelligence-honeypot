@@ -5,11 +5,17 @@ and binds their external rotation policy.
 It does not patch Cowrie source, mutate historical logs, or replace the
 downstream forwarder sanitizer.
 
-The v3 bundle manifest also binds the exact reviewed starting sanitizer,
+The v4 bundle manifest also binds the exact reviewed starting sanitizer,
 installed Cowrie/Python/Twisted compatibility, receipt schemas, managed
 destinations, service impact, and exact Cowrie output-loader and output-base
 hashes. The installer verifies the starting link and the fully extracted
 bundle before changing the active link.
+
+Each closed-inventory file records its source, exact release destination, file
+type, byte count, SHA-256, owner, group, mode, executable expectation, and
+immutable classification. The component identity is recomputed from those
+receipts. The installer never normalizes all files to one mode or repairs a
+known script list after extraction.
 
 The design and authority boundary are recorded in
 `docs/COWRIE_UPSTREAM_CREDENTIAL_PRIVACY_DECISION.md`.
@@ -24,14 +30,17 @@ python -m production.tools.cowrie_output_integration build \
   --source-root /path/to/clean-git-archive \
   --bundle-root /path/to/staging/bundle \
   --revision FULL_GIT_REVISION
-tar -C /path/to/staging/bundle -cf \
-  cowrie-output-FULL_GIT_REVISION.tar .
+python -m production.tools.cowrie_output_integration package \
+  --bundle-root /path/to/staging/bundle \
+  --package cowrie-output-FULL_GIT_REVISION.tar
 ```
 
 The builder includes only the closed file inventory required by the
 integration. Every file, the policy, and the Git revision are bound by
 `COWRIE_OUTPUT_MANIFEST.json`. Directories are mode `0700`, data/code files
 are mode `0600`, and executable deployment scripts are mode `0700`.
+The package writer sorts every member and fixes archive ownership and timestamps,
+so two clean builds of the same revision must be byte-identical.
 
 The immutable bundle and diagnostic/legacy logs are owner-only. The sanitized
 `cowrie.json` feed is `cowrie:cowrie` mode `0640` so only Cowrie and the
@@ -99,19 +108,25 @@ or restarted. Historical logs retain their content and receive only recorded
 owner/mode restoration. Python bytecode and other generated runtime data are
 forbidden inside immutable releases.
 
-Before any candidate extraction, the installer follows this order:
+Before any candidate activation, the installer follows this order:
 
-1. create a fresh owner-only non-overwriting receipt and record diagnostics;
-2. request a bounded Cowrie stop and require inactive state, `MainPID=0`, and
+1. safely extract the closed archive into a root-only staging directory while
+   the verified baseline remains active; reject links, special files, path
+   traversal, duplicates, extras, missing files, size drift, and mode drift;
+2. verify every staged hash and all manifest installation metadata;
+3. create a fresh owner-only non-overwriting receipt and record diagnostics;
+4. request a bounded Cowrie stop and require inactive state, `MainPID=0`, and
    an empty surviving service cgroup;
-3. reject a missing, linked, non-regular, or process-held active text log;
-4. atomically move that stable inode into the receipt as
+5. reject a missing, linked, non-regular, or process-held active text log;
+6. atomically move that stable inode into the receipt as
    `cowrie.log.protected.before`, fsync it and both directories, and only then
    calculate its final size and SHA-256;
-5. capture the remaining stopped-state metadata, seal the v2 receipt, and
+7. capture the remaining stopped-state metadata, seal the v2 receipt, and
    independently verify its digest, saved hashes, closed paths, types,
    ownership, and modes;
-6. extract and verify the candidate only after the receipt is accepted.
+8. copy each staged file to a new release using its declared owner, group, and
+   mode, fsync and independently verify the complete installed inventory;
+9. switch the active link only after the installed release passes validation.
 
 The active diagnostic log is never copied, rewritten, truncated, or deleted
 by capture. A capture or seal failure moves its exact inode back to the
@@ -160,6 +175,12 @@ the complete receipt and every saved-file hash before stopping Cowrie or
 touching a managed path. It also accepts the retained legacy actual-tab and
 literal-`\\t` receipts, after closed-field, owner/mode, path, and ambiguity
 validation.
+
+The sealed receipt and its saved-file hashes are the only rollback authority.
+Bounded JSON status files and stdout are optional evidence: a missing
+directory, existing/rotated status file, unwritable output, full filesystem, or
+closed stdout cannot prevent receipt verification or application. Receipt
+application is retryable and idempotent after interruption or prior success.
 
 Verify the receipt owner, mode, receipt digest, and saved-file hashes before
 rollback. Then restore only the managed integration boundary:

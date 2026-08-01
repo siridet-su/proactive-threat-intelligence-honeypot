@@ -15,7 +15,9 @@ package=$1
 revision=$2
 receipt=$3
 releases_root=/opt/honeypot-cowrie-output/releases
+staging_root=/opt/honeypot-cowrie-output/staging
 release="${releases_root}/${revision}"
+staging="${staging_root}/.${revision}.$$.staging"
 current=/opt/honeypot-cowrie-output/current
 cowrie_root=/home/cowrie/cowrie
 config="${cowrie_root}/etc/cowrie.cfg"
@@ -29,17 +31,23 @@ source_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 forwarder=honeypot-sensor-forwarder.service
 receipt_ready=0
 release_created=0
+staging_created=0
 completed=0
 forwarder_pid=
 
 receipt_tool() {
+  status_file=$1
+  shift
   env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
-    "${python}" -m production.tools.cowrie_rollback_receipt "$@"
+    "${python}" -m production.tools.cowrie_rollback_receipt \
+    --quiet --status-file "${status_file}" "$@"
 }
 
 record_step() {
-  printf '%s\n' "$1" >>"${receipt}/transaction-steps.log"
-  chmod 0600 "${receipt}/transaction-steps.log"
+  if [ -d "${receipt}" ]; then
+    { printf '%s\n' "$1" >>"${receipt}/transaction-steps.log" \
+      && chmod 0600 "${receipt}/transaction-steps.log"; } 2>/dev/null || :
+  fi
 }
 
 wait_cowrie_inactive() {
@@ -91,29 +99,32 @@ rollback_on_failure() {
     find "${receipt}" -type d -exec chmod 0700 {} +
     find "${receipt}" -type f -exec chmod 0600 {} +
   fi
+  if [ "${staging_created}" -eq 1 ] && [ -d "${staging}" ]; then
+    rm -rf "${staging}" || managed_recovery_status=1
+  fi
   if [ "${receipt_ready}" -eq 1 ]; then
     timeout 30 systemctl stop cowrie.service >/dev/null 2>&1
     wait_cowrie_inactive >/dev/null 2>&1
     stopped_status=$?
     if [ -e "${active_text_log}" ] || [ -L "${active_text_log}" ]; then
-      receipt_tool assert-stopped --active-log "${active_text_log}" \
-        >"${receipt}/failed-log-stopped-preflight.json"
+      receipt_tool "${receipt}/failed-log-stopped-preflight.json" \
+        assert-stopped --active-log "${active_text_log}"
       held_status=$?
-      chmod 0600 "${receipt}/failed-log-stopped-preflight.json" 2>/dev/null
     else
       held_status=0
     fi
     if [ "${stopped_status}" -ne 0 ] || [ "${held_status}" -ne 0 ]; then
       apply_status=1
     else
-      receipt_tool apply \
+      receipt_tool "${receipt}/receipt-application.after-failure.json" apply \
         --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
         --users-file "${users_file}" --current "${current}" \
-        --drop-in "${dropin}" --logrotate "${logrotate}" \
-        >"${receipt}/receipt-application.after-failure.json"
+        --drop-in "${dropin}" --logrotate "${logrotate}"
       apply_status=$?
     fi
-    chmod 0600 "${receipt}/receipt-application.after-failure.json" 2>/dev/null
+    if [ "${managed_recovery_status}" -ne 0 ]; then
+      apply_status=1
+    fi
     if [ "${apply_status}" -eq 0 ]; then
       cleanup_status=0
       for temporary_link in "${current}.new" "${plugin}.new"; do
@@ -169,6 +180,7 @@ test ! -e "${current}.new"
 test ! -L "${current}.new"
 test ! -e "${plugin}.new"
 test ! -L "${plugin}.new"
+test ! -e "${staging}"
 test "$(systemctl is-active cowrie.service)" = active
 test "$(systemctl is-active "${forwarder}")" = active
 forwarder_pid=$(systemctl show "${forwarder}" -p MainPID --value)
@@ -177,6 +189,16 @@ test "${forwarder_pid}" != 0
 env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
   "${python}" -m production.tools.cowrie_output_integration verify-start \
   --current "${current}"
+
+# The package is safely extracted and fully verified while the baseline is
+# still active. No archive member is installed directly into the release.
+install -d -o root -g root -m 0700 "${staging_root}"
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+  "${python}" -m production.tools.cowrie_output_integration extract-package \
+  --package "${package}" --staging-root "${staging}" \
+  --expected-revision "${revision}"
+staging_created=1
+test -z "$(find "${staging}" \( -type d -name __pycache__ -o -type f -name '*.pyc' \) -print -quit)"
 
 install -d -o root -g root -m 0700 "${receipt}"
 record_step receipt_directory_created
@@ -199,29 +221,24 @@ record_step cowrie_stop_requested
 timeout 30 systemctl stop cowrie.service
 wait_cowrie_inactive
 record_step cowrie_stopped
-receipt_tool assert-stopped --active-log "${active_text_log}" \
-  >"${receipt}/stopped-log-preflight.json"
-chmod 0600 "${receipt}/stopped-log-preflight.json"
+receipt_tool "${receipt}/stopped-log-preflight.json" assert-stopped \
+  --active-log "${active_text_log}"
 
-receipt_tool capture-stopped \
+receipt_tool "${receipt}/receipt-capture.json" capture-stopped \
   --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
   --users-file "${users_file}" --current "${current}" \
   --config "${config}" --plugin "${plugin}" --drop-in "${dropin}" \
-  --logrotate "${logrotate}" \
-  >"${receipt}/receipt-capture.json"
+  --logrotate "${logrotate}"
 # capture-stopped returns only after sealing and self-verifying the v2 receipt.
 # Set recovery authority before any diagnostic write can fail.
 receipt_ready=1
-chmod 0600 "${receipt}/receipt-capture.json"
 record_step log_quarantined
 record_step quarantine_hash_recorded
 record_step receipt_sealed
-receipt_tool verify-stopped \
+receipt_tool "${receipt}/receipt-verification.before-install.json" verify-stopped \
   --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
   --users-file "${users_file}" --current "${current}" \
-  --drop-in "${dropin}" --logrotate "${logrotate}" \
-  >"${receipt}/receipt-verification.before-install.json"
-chmod 0600 "${receipt}/receipt-verification.before-install.json"
+  --drop-in "${dropin}" --logrotate "${logrotate}"
 record_step receipt_verified
 
 find "${cowrie_root}/var/log/cowrie" -xdev -type f \
@@ -232,16 +249,13 @@ find "${cowrie_root}/var/log/cowrie" -xdev -type f \
 chmod 0600 "${receipt}/historical-log-hashes.before.sha256"
 
 install -d -o cowrie -g cowrie -m 0700 "${releases_root}"
-install -d -o cowrie -g cowrie -m 0700 "${release}"
 release_created=1
-tar --no-same-owner -xf "${package}" -C "${release}"
-chown -R cowrie:cowrie "${release}"
-find "${release}" -type d -exec chmod 0700 {} +
-find "${release}" -type f -exec chmod 0600 {} +
-chmod 0700 "${release}/deployment/cowrie_output/run-sanitized-cowrie.sh"
-chmod 0700 "${release}/deployment/cowrie_output/check-live-readiness.sh"
-chmod 0700 "${release}/deployment/cowrie_output/install-sanitized-output.sh"
-chmod 0700 "${release}/deployment/cowrie_output/rollback-sanitized-output.sh"
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+  "${python}" -m production.tools.cowrie_output_integration install-bundle \
+  --staging-root "${staging}" --release-root "${release}" \
+  --expected-revision "${revision}" \
+  >"${receipt}/package-installation.before-activation.json"
+chmod 0600 "${receipt}/package-installation.before-activation.json"
 test -z "$(find "${release}" \( -type d -name __pycache__ -o -type f -name '*.pyc' \) -print -quit)"
 record_step release_extracted
 
@@ -252,6 +266,8 @@ sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${release}" \
 chmod 0600 "${receipt}/package-verification.before-activation.json"
 test -z "$(find "${release}" \( -type d -name __pycache__ -o -type f -name '*.pyc' \) -print -quit)"
 record_step release_manifest_verified
+rm -rf "${staging}"
+staging_created=0
 
 ln -sfn "${release}" "${current}.new"
 chown -h cowrie:cowrie "${current}.new"
