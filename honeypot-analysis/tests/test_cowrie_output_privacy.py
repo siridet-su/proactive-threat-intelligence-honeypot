@@ -5,6 +5,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -613,6 +614,40 @@ def test_manifest_rejects_deployment_contract_drift(tmp_path: Path) -> None:
         verify_bundle(bundle)
 
 
+def test_repeated_runtime_imports_leave_immutable_release_bytecode_free(
+    tmp_path: Path,
+) -> None:
+    bundle = _build(tmp_path)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPATH": str(bundle),
+        }
+    )
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "from production.cowrie_output.runtime import verify_bundle; "
+            "verify_bundle(__import__('pathlib').Path(__import__('sys').argv[1]))"
+        ),
+        str(bundle),
+    ]
+    for _ in range(2):
+        subprocess.run(
+            command,
+            cwd=tmp_path,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    assert not list(bundle.rglob("__pycache__"))
+    assert not list(bundle.rglob("*.pyc"))
+    verify_bundle(bundle)
+
+
 def test_starting_sanitizer_link_and_manifest_are_exactly_bound(tmp_path: Path) -> None:
     revision = "2" * 40
     releases = tmp_path / "releases"
@@ -748,11 +783,14 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
         'find "${cowrie_root}/var/log/cowrie" -xdev -type f' in installer
         and "-exec chmod 0600 {} +" in installer
     )
-    assert "cowrie_rollback_receipt capture" in installer
+    assert "receipt_tool capture-stopped" in installer
     assert '--logrotate "${logrotate}"' in installer
     assert "cowrie_output_integration verify-start" in installer
     assert "cowrie_output_integration verify-bundle" in installer
-    assert 'cowrie.log.protected.before' in installer
+    receipt_tool = (
+        ROOT / "production/tools/cowrie_rollback_receipt.py"
+    ).read_text(encoding="utf-8")
+    assert 'protected_log = receipt_dir / "cowrie.log.protected.before"' in receipt_tool
     assert 'systemctl stop cowrie.service' in installer
     assert 'install -o root -g root -m 0644' in installer
 
