@@ -16,8 +16,14 @@ current=${HONEYPOT_COWRIE_CURRENT:-/opt/honeypot-cowrie-output/current}
 users_file=${HONEYPOT_COWRIE_USERS_FILE:-/home/cowrie/users.txt}
 dropin=${HONEYPOT_COWRIE_DROPIN:-/etc/systemd/system/cowrie.service.d/20-sanitized-output.conf}
 logrotate=${HONEYPOT_COWRIE_LOGROTATE:-/etc/logrotate.d/cowrie}
+active_text_log="${cowrie_root}/var/log/cowrie/cowrie.log"
 python="${cowrie_root}/cowrie-env/bin/python"
 source_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+forwarder=honeypot-sensor-forwarder.service
+test "$(systemctl is-active "${forwarder}")" = active
+forwarder_pid=$(systemctl show "${forwarder}" -p MainPID --value)
+test -n "${forwarder_pid}"
+test "${forwarder_pid}" != 0
 
 # Parse, normalize, and verify every record and saved-file digest before the
 # service or any managed path is touched.
@@ -29,7 +35,32 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
   >"${receipt}/receipt-verification.before-rollback.json"
 chmod 0600 "${receipt}/receipt-verification.before-rollback.json"
 
-systemctl stop cowrie.service
+timeout 30 systemctl stop cowrie.service
+remaining=30
+while [ "${remaining}" -gt 0 ]; do
+  state=$(systemctl show cowrie.service -p ActiveState --value)
+  main_pid=$(systemctl show cowrie.service -p MainPID --value)
+  if [ "${state}" = inactive ] && [ "${main_pid}" = 0 ]; then
+    control_group=$(systemctl show cowrie.service -p ControlGroup --value)
+    process_file="/sys/fs/cgroup${control_group}/cgroup.procs"
+    if [ -z "${control_group}" ] || [ ! -e "${process_file}" ]; then
+      break
+    fi
+    if [ -r "${process_file}" ] && [ -z "$(cat "${process_file}")" ]; then
+      break
+    fi
+  fi
+  sleep 1
+  remaining=$((remaining - 1))
+done
+test "${remaining}" -gt 0
+if [ -e "${active_text_log}" ] || [ -L "${active_text_log}" ]; then
+  env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+    "${python}" -m production.tools.cowrie_rollback_receipt assert-stopped \
+    --active-log "${active_text_log}" \
+    >"${receipt}/failed-log-stopped-preflight.json"
+  chmod 0600 "${receipt}/failed-log-stopped-preflight.json"
+fi
 env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
   "${python}" -m production.tools.cowrie_rollback_receipt apply \
   --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
@@ -38,6 +69,16 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
   >"${receipt}/receipt-application.json"
 chmod 0600 "${receipt}/receipt-application.json"
 
+for temporary_link in "${current}.new" "${cowrie_root}/src/cowrie/output/sanitizedjson.py.new"; do
+  if [ -L "${temporary_link}" ]; then
+    rm -f "${temporary_link}"
+  else
+    test ! -e "${temporary_link}"
+  fi
+done
+
 systemctl daemon-reload
-systemctl start cowrie.service
+timeout 30 systemctl start cowrie.service
 systemctl is-active --quiet cowrie.service
+test "$(systemctl is-active "${forwarder}")" = active
+test "$(systemctl show "${forwarder}" -p MainPID --value)" = "${forwarder_pid}"

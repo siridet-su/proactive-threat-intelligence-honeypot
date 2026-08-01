@@ -76,11 +76,39 @@ Only these managed integration points change:
 - `/etc/logrotate.d/cowrie`
 - owner/group/mode metadata for existing credential-bearing Cowrie files
 
-Before replacement, the installer stops Cowrie and moves the prior active
-diagnostic log into the owner-only receipt as
-`cowrie.log.protected.before`. It does not copy, rewrite, truncate, or delete
-that evidence. The protected file is intentionally outside the active Cowrie
-log tree and is restored only by the emergency rollback procedure.
+The transaction treats configuration, policy, deployment scripts, and the
+current-component symlink as immutable inputs. Pre-stop service information,
+the package hash, checkout-status hash, and preliminary managed-file hashes
+are diagnostic records only. They are not rollback authority for an active
+log. The active JSON feed and forwarder offset/state remain outside the
+installer's content-mutation boundary; the running forwarder is never stopped
+or restarted. Historical logs retain their content and receive only recorded
+owner/mode restoration. Python bytecode and other generated runtime data are
+forbidden inside immutable releases.
+
+Before any candidate extraction, the installer follows this order:
+
+1. create a fresh owner-only non-overwriting receipt and record diagnostics;
+2. request a bounded Cowrie stop and require inactive state, `MainPID=0`, and
+   an empty surviving service cgroup;
+3. reject a missing, linked, non-regular, or process-held active text log;
+4. atomically move that stable inode into the receipt as
+   `cowrie.log.protected.before`, fsync it and both directories, and only then
+   calculate its final size and SHA-256;
+5. capture the remaining stopped-state metadata, seal the v2 receipt, and
+   independently verify its digest, saved hashes, closed paths, types,
+   ownership, and modes;
+6. extract and verify the candidate only after the receipt is accepted.
+
+The active diagnostic log is never copied, rewritten, truncated, or deleted
+by capture. A capture or seal failure moves its exact inode back to the
+original destination with its original owner and mode before Cowrie is
+restarted. A later installation failure stops Cowrie, rejects a process-held
+failed log, applies the verified receipt, removes only the exact incomplete
+candidate release, reloads systemd, and restarts only Cowrie. Recovery also
+requires the prior component link, a healthy Cowrie, and the original running
+forwarder PID. Incomplete seals are renamed as owner-only evidence and cannot
+be accepted as rollback receipts.
 
 The source checkout is not reset, normalized, or overwritten. The stock
 `cowrie.output.jsonlog` remains present but must be disabled.
@@ -121,9 +149,12 @@ sudo /opt/honeypot-cowrie-output/current/deployment/cowrie_output/rollback-sanit
   /var/backups/honeypot/cowrie-output-UTC_TIMESTAMP
 ```
 
-Rollback restores prior configuration, symlinks, drop-in state, and recorded
-metadata; it reloads systemd and restarts only Cowrie. It does not delete a
-release or rewrite/delete any Cowrie event log. Because the prior observer is
-known to persist credentials, rollback is an emergency recovery boundary, not
-an acceptable steady state. Reapply the verified bundle before any credential
-acceptance replay.
+Rollback verifies the receipt before touching the service, then requires the
+bounded stop, zero main PID, an empty surviving cgroup, and no descriptor on an
+active failed text log. It restores prior configuration, symlinks, drop-in
+state, the quarantined baseline log, and recorded metadata; it reloads systemd
+and restarts only Cowrie. A failed-deployment text log, if present, is retained
+owner-only in the receipt. It does not rewrite or delete historical Cowrie
+event logs. Because the prior observer is known to persist credentials,
+rollback is an emergency recovery boundary, not an acceptable steady state.
+Reapply the verified bundle before any credential acceptance replay.

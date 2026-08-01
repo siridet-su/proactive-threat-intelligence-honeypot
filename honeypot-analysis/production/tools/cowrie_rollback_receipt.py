@@ -8,10 +8,9 @@ import json
 import os
 import shutil
 import stat
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 
 SCHEMA_VERSION = "cowrie_output_rollback_receipt.v2"
@@ -20,6 +19,13 @@ DIGEST_NAME = "managed-paths.jsonl.sha256"
 LEGACY_NAME = "managed-paths.tsv"
 MAX_RECEIPT_BYTES = 16 * 1024 * 1024
 MAX_RECORDS = 100_000
+CAPTURE_STEPS = (
+    "immutable_records_captured",
+    "log_quarantined",
+    "quarantine_hash_recorded",
+    "receipt_sealed",
+    "receipt_verified",
+)
 KINDS = frozenset({"absent", "file", "metadata", "quarantine", "symlink"})
 ENTRY_KEYS = frozenset(
     {
@@ -60,6 +66,22 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _fsync_file(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _regular_metadata(path: Path) -> os.stat_result:
@@ -194,6 +216,8 @@ def _copy_record(target: Path, saved: str, receipt_dir: Path) -> RollbackRecord:
     shutil.copyfile(target, destination)
     os.chown(destination, os.geteuid(), os.getegid())
     destination.chmod(0o600)
+    _fsync_file(destination)
+    _fsync_directory(receipt_dir)
     saved_bytes, saved_sha256 = _saved_receipt(destination)
     return RollbackRecord(
         kind="file",
@@ -265,10 +289,100 @@ def write_receipt(receipt_dir: Path, records: Sequence[RollbackRecord]) -> tuple
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+    _fsync_directory(receipt_dir)
     return target, digest
 
 
-def capture_receipt(
+def _assert_inode_unheld(
+    metadata: os.stat_result,
+    *,
+    ignored_descriptor: int | None = None,
+) -> None:
+    own_pid = os.getpid()
+    for process in Path("/proc").iterdir():
+        if not process.name.isdigit():
+            continue
+        file_descriptors = process / "fd"
+        try:
+            descriptors = list(file_descriptors.iterdir())
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+        for descriptor in descriptors:
+            if (
+                ignored_descriptor is not None
+                and process.name == str(own_pid)
+                and descriptor.name == str(ignored_descriptor)
+            ):
+                continue
+            try:
+                observed = descriptor.stat()
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+            if (observed.st_dev, observed.st_ino) == (
+                metadata.st_dev,
+                metadata.st_ino,
+            ):
+                raise RollbackReceiptError(
+                    "active Cowrie text log inode is still held by a process"
+                )
+
+
+def assert_stopped_log_unheld(path: Path) -> tuple[int, int]:
+    """Require a stable regular active text log with no process-held descriptor."""
+
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise RollbackReceiptError("active Cowrie text log is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
+        raise RollbackReceiptError("active Cowrie text log is not a regular file")
+    _assert_inode_unheld(metadata)
+    return metadata.st_dev, metadata.st_ino
+
+
+def _invalidate_incomplete_receipt(receipt_dir: Path) -> None:
+    for name in (RECEIPT_NAME, DIGEST_NAME):
+        source = receipt_dir / name
+        if not source.exists() and not source.is_symlink():
+            continue
+        destination = receipt_dir / f"{name}.incomplete"
+        if destination.exists() or destination.is_symlink():
+            raise RollbackReceiptError(
+                "incomplete rollback receipt evidence already exists"
+            )
+        os.replace(source, destination)
+        destination.chmod(0o600)
+    _fsync_directory(receipt_dir)
+
+
+def _restore_quarantined_log(
+    *,
+    target: Path,
+    saved: Path,
+    metadata: os.stat_result,
+) -> None:
+    if not saved.exists() and not saved.is_symlink():
+        return
+    if target.exists() or target.is_symlink():
+        raise RollbackReceiptError(
+            "active Cowrie text log reappeared during capture recovery"
+        )
+    try:
+        os.replace(saved, target)
+    except OSError:
+        # A transient interrupted rename is safe to retry while the target is
+        # still absent and the owner-only saved inode still exists.
+        if target.exists() or target.is_symlink() or not saved.is_file():
+            raise
+        os.replace(saved, target)
+    os.chown(target, metadata.st_uid, metadata.st_gid)
+    target.chmod(stat.S_IMODE(metadata.st_mode))
+    _fsync_file(target)
+    _fsync_directory(target.parent)
+    _fsync_directory(saved.parent)
+
+
+def capture_stopped_receipt(
     *,
     receipt_dir: Path,
     cowrie_root: Path,
@@ -278,46 +392,145 @@ def capture_receipt(
     plugin: Path,
     drop_in: Path,
     logrotate: Path,
+    fault: Callable[[str], None] | None = None,
 ) -> tuple[list[RollbackRecord], str]:
+    """Capture and seal rollback authority only from a stopped Cowrie boundary.
+
+    The active text log is opened without following symlinks, proven unheld,
+    atomically moved into the owner-only receipt, and hashed only after that
+    move. Any failure invalidates a partially sealed receipt and restores the
+    original log identity and metadata before returning an error.
+    """
+
     expected_uid = os.geteuid()
     _secure_receipt_directory(receipt_dir, expected_uid)
     log_dir = cowrie_root / "var/log/cowrie"
-    records = [
-        _copy_record(config, "cowrie.cfg.before", receipt_dir),
-        _copy_record(plugin, "sanitizedjson.py.before", receipt_dir),
-        _copy_record(drop_in, "20-sanitized-output.conf.before", receipt_dir),
-        _copy_record(logrotate, "cowrie.logrotate.before", receipt_dir),
-        _copy_record(current, "current.before", receipt_dir),
-        _metadata_record("metadata", users_file),
-        _metadata_record("metadata", log_dir / "cowrie_custom.json"),
-        _metadata_record("metadata", log_dir / "cowrie.json"),
-        _metadata_record(
-            "quarantine", log_dir / "cowrie.log", saved="cowrie.log.protected.before"
-        ),
-    ]
-    excluded = {
-        log_dir / "cowrie_custom.json",
-        log_dir / "cowrie.json",
-        log_dir / "cowrie.log",
-    }
-    if log_dir.exists():
-        for path in sorted(log_dir.rglob("*"), key=lambda item: str(item)):
-            if path in excluded:
-                continue
-            metadata = path.lstat()
-            if stat.S_ISDIR(metadata.st_mode):
-                continue
-            records.append(_metadata_record("metadata", path))
-    allowed_roots = managed_roots(
-        cowrie_root=cowrie_root,
-        users_file=users_file,
-        current=current,
-        drop_in=drop_in,
-        logrotate=logrotate,
-    )
-    _validate_records(records, allowed_roots=allowed_roots)
-    _, digest = write_receipt(receipt_dir, records)
-    return records, digest
+    text_log = log_dir / "cowrie.log"
+    protected_log = receipt_dir / "cowrie.log.protected.before"
+    if protected_log.exists() or protected_log.is_symlink():
+        raise RollbackReceiptError("rollback quarantine destination already exists")
+    fault = fault or (lambda _step: None)
+    original_metadata: os.stat_result | None = None
+    recovery_metadata: os.stat_result | None = None
+    moved = False
+    try:
+        records = [
+            _copy_record(config, "cowrie.cfg.before", receipt_dir),
+            _copy_record(plugin, "sanitizedjson.py.before", receipt_dir),
+            _copy_record(drop_in, "20-sanitized-output.conf.before", receipt_dir),
+            _copy_record(logrotate, "cowrie.logrotate.before", receipt_dir),
+            _copy_record(current, "current.before", receipt_dir),
+        ]
+        fault("immutable_records_captured")
+
+        descriptor = os.open(
+            text_log,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            original_metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(original_metadata.st_mode):
+                raise RollbackReceiptError(
+                    "active Cowrie text log is not a regular file"
+                )
+            _assert_inode_unheld(
+                original_metadata,
+                ignored_descriptor=descriptor,
+            )
+            os.replace(text_log, protected_log)
+            moved = True
+            observed = protected_log.lstat()
+            recovery_metadata = observed
+            if (observed.st_dev, observed.st_ino) != (
+                original_metadata.st_dev,
+                original_metadata.st_ino,
+            ):
+                raise RollbackReceiptError(
+                    "quarantined Cowrie text log identity changed"
+                )
+            os.fchown(descriptor, expected_uid, os.getegid())
+            os.fchmod(descriptor, 0o600)
+            os.fsync(descriptor)
+            _fsync_directory(log_dir)
+            _fsync_directory(receipt_dir)
+            fault("log_quarantined")
+            saved_bytes, saved_sha256 = _saved_receipt(protected_log)
+        finally:
+            os.close(descriptor)
+
+        records.append(
+            RollbackRecord(
+                kind="quarantine",
+                target=text_log,
+                present=True,
+                saved=protected_log.name,
+                saved_bytes=saved_bytes,
+                saved_sha256=saved_sha256,
+                mode=stat.S_IMODE(original_metadata.st_mode),
+                uid=original_metadata.st_uid,
+                gid=original_metadata.st_gid,
+            )
+        )
+        fault("quarantine_hash_recorded")
+        records.extend(
+            [
+                _metadata_record("metadata", users_file),
+                _metadata_record("metadata", log_dir / "cowrie_custom.json"),
+                _metadata_record("metadata", log_dir / "cowrie.json"),
+            ]
+        )
+        excluded = {
+            log_dir / "cowrie_custom.json",
+            log_dir / "cowrie.json",
+            text_log,
+        }
+        if log_dir.exists():
+            for path in sorted(log_dir.rglob("*"), key=lambda item: str(item)):
+                if path in excluded:
+                    continue
+                metadata = path.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
+                    continue
+                records.append(_metadata_record("metadata", path))
+        allowed_roots = managed_roots(
+            cowrie_root=cowrie_root,
+            users_file=users_file,
+            current=current,
+            drop_in=drop_in,
+            logrotate=logrotate,
+        )
+        _validate_records(records, allowed_roots=allowed_roots)
+        _, digest = write_receipt(receipt_dir, records)
+        fault("receipt_sealed")
+        verified, verified_digest, schema = verify_receipt(
+            receipt_dir,
+            expected_uid=expected_uid,
+            allowed_roots=allowed_roots,
+        )
+        if (
+            schema != SCHEMA_VERSION
+            or verified_digest != digest
+            or verified != records
+        ):
+            raise RollbackReceiptError(
+                "sealed rollback receipt differs from captured state"
+            )
+        verify_stopped_baseline(
+            verified,
+            receipt_dir=receipt_dir,
+            cowrie_root=cowrie_root,
+        )
+        fault("receipt_verified")
+        return records, digest
+    except BaseException:
+        if moved and recovery_metadata is not None:
+            _restore_quarantined_log(
+                target=text_log,
+                saved=protected_log,
+                metadata=recovery_metadata,
+            )
+        _invalidate_incomplete_receipt(receipt_dir)
+        raise
 
 
 def managed_roots(
@@ -666,6 +879,88 @@ def verify_receipt(
     return records, digest, schema
 
 
+def verify_stopped_baseline(
+    records: Sequence[RollbackRecord],
+    *,
+    receipt_dir: Path,
+    cowrie_root: Path,
+) -> None:
+    """Verify the sealed receipt still describes the complete stopped state."""
+
+    recorded_targets = {record.target for record in records}
+    log_dir = cowrie_root / "var/log/cowrie"
+    expected_log_targets = {
+        log_dir / "cowrie.log",
+        log_dir / "cowrie.json",
+        log_dir / "cowrie_custom.json",
+    }
+    if log_dir.exists():
+        expected_log_targets.update(
+            path
+            for path in log_dir.rglob("*")
+            if not stat.S_ISDIR(path.lstat().st_mode)
+        )
+    if not expected_log_targets.issubset(recorded_targets):
+        raise RollbackReceiptError(
+            "stopped Cowrie log inventory contains an unrecorded path"
+        )
+
+    for record in records:
+        target = record.target
+        if record.kind == "quarantine":
+            if target.exists() or target.is_symlink():
+                raise RollbackReceiptError(
+                    "quarantined Cowrie log unexpectedly exists at its active path"
+                )
+            continue
+        if record.kind == "absent" or (
+            record.kind == "metadata" and not record.present
+        ):
+            if target.exists() or target.is_symlink():
+                raise RollbackReceiptError(
+                    "stopped rollback absence state changed after capture"
+                )
+            continue
+        if record.kind == "symlink":
+            metadata = target.lstat()
+            if (
+                not stat.S_ISLNK(metadata.st_mode)
+                or os.readlink(target) != record.saved
+                or (record.uid is not None and metadata.st_uid != record.uid)
+                or (record.gid is not None and metadata.st_gid != record.gid)
+            ):
+                raise RollbackReceiptError(
+                    "stopped rollback symlink state changed after capture"
+                )
+            continue
+        metadata = _regular_metadata(target)
+        if (
+            (record.mode is not None and stat.S_IMODE(metadata.st_mode) != record.mode)
+            or (record.uid is not None and metadata.st_uid != record.uid)
+            or (record.gid is not None and metadata.st_gid != record.gid)
+        ):
+            raise RollbackReceiptError(
+                "stopped rollback metadata changed after capture"
+            )
+        if record.kind == "file" and not _saved_content_matches(record, target):
+            raise RollbackReceiptError(
+                "stopped rollback file content changed after capture"
+            )
+
+
+def _saved_content_matches(record: RollbackRecord, target: Path) -> bool:
+    if record.saved_bytes is None or record.saved_sha256 is None:
+        return False
+    try:
+        metadata = _regular_metadata(target)
+    except RollbackReceiptError:
+        return False
+    return (
+        metadata.st_size == record.saved_bytes
+        and _sha256(target) == record.saved_sha256
+    )
+
+
 def _preflight_target(record: RollbackRecord, receipt_dir: Path) -> None:
     target = record.target
     if record.kind == "metadata" and record.present:
@@ -678,8 +973,21 @@ def _preflight_target(record: RollbackRecord, receipt_dir: Path) -> None:
         if target.exists() or target.is_symlink():
             _regular_metadata(target)
         failed = receipt_dir / f"{target.name}.failed-deployment"
-        if (target.exists() or target.is_symlink()) and (failed.exists() or failed.is_symlink()):
-            raise RollbackReceiptError("failed-deployment preservation path exists")
+        if failed.exists() or failed.is_symlink():
+            failed_metadata = _regular_metadata(failed)
+            if (
+                stat.S_IMODE(failed_metadata.st_mode) != 0o600
+                or failed_metadata.st_uid != os.geteuid()
+            ):
+                raise RollbackReceiptError(
+                    "failed-deployment preservation boundary is invalid"
+                )
+            if (target.exists() or target.is_symlink()) and not _saved_content_matches(
+                record, target
+            ):
+                raise RollbackReceiptError(
+                    "failed-deployment preservation path exists"
+                )
     elif record.kind == "symlink" and (target.exists() or target.is_symlink()):
         metadata = target.lstat()
         if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode)):
@@ -692,16 +1000,24 @@ def _install_saved(record: RollbackRecord, receipt_dir: Path) -> None:
     source = receipt_dir / record.saved
     target = record.target
     target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.rollback.", dir=target.parent)
-    temporary = Path(temporary_name)
+    temporary = target.with_name(f".{target.name}.rollback-file")
+    if temporary.exists() or temporary.is_symlink():
+        metadata = temporary.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid():
+            raise RollbackReceiptError("temporary rollback file boundary is invalid")
+        temporary.unlink()
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
             shutil.copyfileobj(input_file, output)
             output.flush()
             os.fsync(output.fileno())
-        os.chown(temporary, record.uid, record.gid)
-        temporary.chmod(record.mode)
         os.replace(temporary, target)
+        _fsync_directory(target.parent)
+        os.chown(target, record.uid, record.gid)
+        target.chmod(record.mode)
+        _fsync_file(target)
+        _fsync_directory(target.parent)
     finally:
         if temporary.exists():
             temporary.unlink()
@@ -722,25 +1038,32 @@ def _apply_record(record: RollbackRecord, receipt_dir: Path) -> None:
     elif record.kind == "quarantine":
         failed = receipt_dir / f"{target.name}.failed-deployment"
         if target.exists() or target.is_symlink():
-            os.replace(target, failed)
-            os.chown(failed, os.geteuid(), os.getegid())
-            failed.chmod(0o600)
+            if failed.exists() or failed.is_symlink():
+                if not _saved_content_matches(record, target):
+                    raise RollbackReceiptError(
+                        "failed-deployment preservation path exists"
+                    )
+            else:
+                os.replace(target, failed)
+                os.chown(failed, os.geteuid(), os.getegid())
+                failed.chmod(0o600)
+                _fsync_file(failed)
+                _fsync_directory(receipt_dir)
+                _fsync_directory(target.parent)
         if record.present:
-            assert record.saved is not None
-            source = receipt_dir / record.saved
-            os.replace(source, target)
-            assert record.mode is not None and record.uid is not None and record.gid is not None
-            os.chown(target, record.uid, record.gid)
-            target.chmod(record.mode)
+            _install_saved(record, receipt_dir)
     elif record.kind == "symlink":
         assert record.saved is not None
         temporary = target.with_name(f".{target.name}.rollback-link")
         if temporary.exists() or temporary.is_symlink():
-            raise RollbackReceiptError("temporary rollback symlink already exists")
+            if not temporary.is_symlink() or os.readlink(temporary) != record.saved:
+                raise RollbackReceiptError("temporary rollback symlink already exists")
+            temporary.unlink()
         temporary.symlink_to(record.saved)
         if record.uid is not None and record.gid is not None:
             os.lchown(temporary, record.uid, record.gid)
         os.replace(temporary, target)
+        _fsync_directory(target.parent)
 
 
 def _verify_applied(record: RollbackRecord, receipt_dir: Path) -> None:
@@ -773,6 +1096,7 @@ def apply_receipt(
     *,
     expected_uid: int,
     allowed_roots: Sequence[Path],
+    fault: Callable[[int, RollbackRecord], None] | None = None,
 ) -> tuple[int, str, str]:
     records, digest, schema = verify_receipt(
         receipt_dir, expected_uid=expected_uid, allowed_roots=allowed_roots
@@ -780,8 +1104,10 @@ def apply_receipt(
     for record in records:
         _preflight_target(record, receipt_dir)
     ordered = sorted(records, key=lambda record: record.kind == "symlink")
-    for record in ordered:
+    fault = fault or (lambda _index, _record: None)
+    for index, record in enumerate(ordered):
         _apply_record(record, receipt_dir)
+        fault(index, record)
     for record in records:
         _verify_applied(record, receipt_dir)
     return len(records), digest, schema
@@ -809,18 +1135,34 @@ def _add_boundary_arguments(parser: argparse.ArgumentParser) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manage Cowrie rollback receipts")
     commands = parser.add_subparsers(dest="command", required=True)
-    capture = commands.add_parser("capture")
-    _add_boundary_arguments(capture)
-    capture.add_argument("--config", required=True)
-    capture.add_argument("--plugin", required=True)
-    for name in ("verify", "apply"):
+    stopped = commands.add_parser("capture-stopped")
+    assert_stopped = commands.add_parser("assert-stopped")
+    assert_stopped.add_argument("--active-log", required=True)
+    _add_boundary_arguments(stopped)
+    stopped.add_argument("--config", required=True)
+    stopped.add_argument("--plugin", required=True)
+    for name in ("verify", "verify-stopped", "apply"):
         _add_boundary_arguments(commands.add_parser(name))
     args = parser.parse_args()
-    receipt = Path(args.receipt)
-    allowed_roots = _paths_from_args(args)
     try:
-        if args.command == "capture":
-            records, digest = capture_receipt(
+        if args.command == "assert-stopped":
+            device, inode = assert_stopped_log_unheld(Path(args.active_log))
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "cowrie_output_stopped_log.v1",
+                        "status": "valid",
+                        "device": device,
+                        "inode": inode,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+        receipt = Path(args.receipt)
+        allowed_roots = _paths_from_args(args)
+        if args.command == "capture-stopped":
+            records, digest = capture_stopped_receipt(
                 receipt_dir=receipt,
                 cowrie_root=Path(args.cowrie_root),
                 users_file=Path(args.users_file),
@@ -831,12 +1173,18 @@ def main() -> int:
                 logrotate=Path(args.logrotate),
             )
             schema = SCHEMA_VERSION
-        elif args.command == "verify":
+        elif args.command in {"verify", "verify-stopped"}:
             records, digest, schema = verify_receipt(
                 receipt,
                 expected_uid=os.geteuid(),
                 allowed_roots=allowed_roots,
             )
+            if args.command == "verify-stopped":
+                verify_stopped_baseline(
+                    records,
+                    receipt_dir=receipt,
+                    cowrie_root=Path(args.cowrie_root),
+                )
         else:
             count, digest, schema = apply_receipt(
                 receipt,
