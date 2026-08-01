@@ -26,6 +26,9 @@ source_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 test -f "${package}"
 test ! -e "${release}"
 test ! -e "${receipt}"
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+  "${python}" -m production.tools.cowrie_output_integration verify-start \
+  --current "${current}"
 install -d -o root -g root -m 0700 "${receipt}"
 env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
   "${python}" -m production.tools.cowrie_rollback_receipt capture \
@@ -72,6 +75,12 @@ find "${release}" -type f -exec chmod 0600 {} +
 chmod 0700 "${release}/deployment/cowrie_output/run-sanitized-cowrie.sh"
 chmod 0700 "${release}/deployment/cowrie_output/install-sanitized-output.sh"
 chmod 0700 "${release}/deployment/cowrie_output/rollback-sanitized-output.sh"
+
+sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${release}" \
+  "${python}" -m production.tools.cowrie_output_integration verify-bundle \
+  --bundle-root "${release}" --expected-revision "${revision}" \
+  >"${receipt}/package-verification.before-activation.json"
+chmod 0600 "${receipt}/package-verification.before-activation.json"
 
 ln -sfn "${release}" "${current}.new"
 chown -h cowrie:cowrie "${current}.new"

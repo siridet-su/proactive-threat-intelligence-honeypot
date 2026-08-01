@@ -13,11 +13,14 @@ from pathlib import Path
 from typing import Any
 
 from production.cowrie_output.runtime import (
+    DEPLOYMENT_CONTRACT,
+    EXPECTED_STARTING_SANITIZER_REVISION,
     MANIFEST_NAME,
     MANIFEST_SCHEMA_VERSION,
     REQUIRED_BUNDLE_FILES,
     CowrieOutputBoundaryError,
     verify_boundary,
+    verify_bundle,
 )
 from production.utils.cowrie_privacy import load_policy
 
@@ -75,6 +78,7 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
         policy = load_policy(bundle_root / policy_relative)
         identity_payload = json.dumps(
             {
+                "deployment": DEPLOYMENT_CONTRACT,
                 "git_revision": revision,
                 "files": inventory,
                 "policy_sha256": policy.sha256,
@@ -86,6 +90,7 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
             "schema_version": MANIFEST_SCHEMA_VERSION,
             "git_revision": revision,
             "component_id": "cowrie_output_" + hashlib.sha256(identity_payload).hexdigest()[:32],
+            "deployment": json.loads(json.dumps(DEPLOYMENT_CONTRACT)),
             "files": inventory,
             "policy": {
                 "relative_path": policy_relative,
@@ -105,6 +110,41 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
     except BaseException:
         shutil.rmtree(bundle_root, ignore_errors=True)
         raise
+
+
+def verify_starting_sanitizer(
+    current: Path,
+    *,
+    releases_root: Path = Path("/opt/honeypot-cowrie-output/releases"),
+    expected_revision: str = EXPECTED_STARTING_SANITIZER_REVISION,
+) -> str:
+    """Verify the exact inactive-to-candidate starting link without loading it."""
+
+    try:
+        metadata = current.lstat()
+    except OSError as exc:
+        raise CowrieOutputBoundaryError("starting sanitizer link is unavailable") from exc
+    if not stat.S_ISLNK(metadata.st_mode):
+        raise CowrieOutputBoundaryError("starting sanitizer path is not a symlink")
+    target = current.resolve(strict=True)
+    expected = expected_revision
+    if target.name != expected or target.parent != releases_root:
+        raise CowrieOutputBoundaryError("starting sanitizer revision is unexpected")
+    manifest_path = target / MANIFEST_NAME
+    try:
+        manifest_metadata = manifest_path.lstat()
+        document = json.loads(manifest_path.read_bytes())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise CowrieOutputBoundaryError("starting sanitizer manifest is invalid") from exc
+    if (
+        not stat.S_ISREG(manifest_metadata.st_mode)
+        or manifest_path.is_symlink()
+        or stat.S_IMODE(manifest_metadata.st_mode) != 0o600
+        or not isinstance(document, dict)
+        or document.get("git_revision") != expected
+    ):
+        raise CowrieOutputBoundaryError("starting sanitizer identity is invalid")
+    return expected
 
 
 def _replace_enabled(section_lines: list[str], enabled: bool) -> list[str]:
@@ -269,6 +309,13 @@ def main() -> int:
     build.add_argument("--bundle-root", required=True)
     build.add_argument("--revision", required=True)
 
+    verify_bundle_command = commands.add_parser("verify-bundle")
+    verify_bundle_command.add_argument("--bundle-root", required=True)
+    verify_bundle_command.add_argument("--expected-revision", required=True)
+
+    verify_start = commands.add_parser("verify-start")
+    verify_start.add_argument("--current", required=True)
+
     render = commands.add_parser("render-config")
     render.add_argument("--source", required=True)
     render.add_argument("--destination", required=True)
@@ -293,6 +340,62 @@ def main() -> int:
             Path(args.source_root), Path(args.bundle_root), args.revision
         )
         print(json.dumps(manifest, sort_keys=True))
+        return 0
+    if args.command == "verify-bundle":
+        try:
+            manifest, _path, digest = verify_bundle(Path(args.bundle_root))
+            if manifest["git_revision"] != args.expected_revision:
+                raise CowrieOutputBoundaryError("bundle revision does not match installation")
+        except (CowrieOutputBoundaryError, OSError, ValueError) as exc:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "cowrie_output_package_verification.v1",
+                        "status": "invalid",
+                        "error_category": type(exc).__name__,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(
+            json.dumps(
+                {
+                    "schema_version": "cowrie_output_package_verification.v1",
+                    "status": "valid",
+                    "git_revision": manifest["git_revision"],
+                    "manifest_sha256": digest,
+                    "component_id": manifest["component_id"],
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.command == "verify-start":
+        try:
+            revision = verify_starting_sanitizer(Path(args.current))
+        except (CowrieOutputBoundaryError, OSError, ValueError) as exc:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "cowrie_output_starting_boundary.v1",
+                        "status": "invalid",
+                        "error_category": type(exc).__name__,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(
+            json.dumps(
+                {
+                    "schema_version": "cowrie_output_starting_boundary.v1",
+                    "status": "valid",
+                    "sanitizer_revision": revision,
+                },
+                sort_keys=True,
+            )
+        )
         return 0
     if args.command == "render-config":
         render_config(Path(args.source), Path(args.destination), Path(args.bundle_root))

@@ -5,6 +5,11 @@ and binds their external rotation policy.
 It does not patch Cowrie source, mutate historical logs, or replace the
 downstream forwarder sanitizer.
 
+The v2 bundle manifest also binds the exact reviewed starting sanitizer,
+installed Cowrie/Python/Twisted compatibility, receipt schemas, managed
+destinations, and service impact. The installer verifies the starting link and
+the fully extracted bundle before changing the active link.
+
 The design and authority boundary are recorded in
 `docs/COWRIE_UPSTREAM_CREDENTIAL_PRIVACY_DECISION.md`.
 

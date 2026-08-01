@@ -16,6 +16,7 @@ from production.cowrie_output.observer_diagnostics import (
 )
 from production.cowrie_output.twisted_logger import _isolated_text_observer
 from production.cowrie_output.runtime import (
+    DEPLOYMENT_CONTRACT,
     CowrieOutputBoundaryError,
     verify_boundary,
     verify_bundle,
@@ -26,6 +27,7 @@ from production.tools.cowrie_output_integration import (
     prepare_live_rotation,
     render_config,
     validate_live_permissions,
+    verify_starting_sanitizer,
 )
 from production.utils.cowrie_privacy import (
     DEFAULT_POLICY,
@@ -593,6 +595,49 @@ def test_bundle_config_plugin_and_dropin_validate_together(tmp_path: Path) -> No
     assert result.git_revision == REVISION
     assert result.policy.sha256
     assert result.manifest_sha256
+    manifest = json.loads((bundle / "COWRIE_OUTPUT_MANIFEST.json").read_text())
+    assert manifest["deployment"] == DEPLOYMENT_CONTRACT
+
+
+def test_manifest_rejects_deployment_contract_drift(tmp_path: Path) -> None:
+    bundle = _build(tmp_path)
+    manifest_path = bundle / "COWRIE_OUTPUT_MANIFEST.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["deployment"]["compatibility"]["twisted"] = "unreviewed"
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+    manifest_path.chmod(0o600)
+    with pytest.raises(CowrieOutputBoundaryError, match="deployment contract"):
+        verify_bundle(bundle)
+
+
+def test_starting_sanitizer_link_and_manifest_are_exactly_bound(tmp_path: Path) -> None:
+    revision = "2" * 40
+    releases = tmp_path / "releases"
+    release = releases / revision
+    release.mkdir(parents=True)
+    manifest = release / "COWRIE_OUTPUT_MANIFEST.json"
+    manifest.write_text(json.dumps({"git_revision": revision}) + "\n")
+    manifest.chmod(0o600)
+    current = tmp_path / "current"
+    current.symlink_to(release)
+    assert (
+        verify_starting_sanitizer(
+            current,
+            releases_root=releases,
+            expected_revision=revision,
+        )
+        == revision
+    )
+    manifest.write_text(json.dumps({"git_revision": "3" * 40}) + "\n")
+    manifest.chmod(0o600)
+    with pytest.raises(CowrieOutputBoundaryError, match="identity"):
+        verify_starting_sanitizer(
+            current,
+            releases_root=releases,
+            expected_revision=revision,
+        )
 
 
 def test_both_safe_and_unsafe_writers_fail_closed(tmp_path: Path) -> None:
@@ -704,6 +749,8 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
     )
     assert "cowrie_rollback_receipt capture" in installer
     assert '--logrotate "${logrotate}"' in installer
+    assert "cowrie_output_integration verify-start" in installer
+    assert "cowrie_output_integration verify-bundle" in installer
     assert 'cowrie.log.protected.before' in installer
     assert 'systemctl stop cowrie.service' in installer
     assert 'install -o root -g root -m 0644' in installer

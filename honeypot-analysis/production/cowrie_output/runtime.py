@@ -15,8 +15,68 @@ from typing import Any, Mapping
 from production.utils.cowrie_privacy import CowriePrivacyPolicy, load_policy
 
 
-MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v1"
+MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v2"
 VALIDATION_SCHEMA_VERSION = "cowrie_output_boundary_validation.v1"
+EXPECTED_STARTING_SANITIZER_REVISION = "7f764ab471e8dac555d06277b4613237299aee69"
+DEPLOYMENT_CONTRACT = {
+    "expected_starting_sanitizer_revision": EXPECTED_STARTING_SANITIZER_REVISION,
+    "compatibility": {
+        "cowrie_git_revision": "575146bc6b24d70082527d66cd805d9bae0e0db4",
+        "cowrie_describe": "v2.6.1-202-g575146bc-dirty",
+        "python": "3.12.3",
+        "twisted": "25.5.0",
+    },
+    "receipt_schemas": {
+        "writer": "cowrie_output_rollback_receipt.v2",
+        "read_compatibility": [
+            "cowrie_output_rollback_receipt.v2",
+            "cowrie_output_rollback_receipt.legacy_tsv_actual_tab",
+            "cowrie_output_rollback_receipt.legacy_tsv_literal_tab",
+        ],
+    },
+    "installation": {
+        "release_root_template": "/opt/honeypot-cowrie-output/releases/{git_revision}",
+        "current_symlink": "/opt/honeypot-cowrie-output/current",
+        "managed_destinations": [
+            {
+                "source": "generated:cowrie.cfg",
+                "destination": "/home/cowrie/cowrie/etc/cowrie.cfg",
+                "type": "regular",
+                "owner": "cowrie",
+                "group": "cowrie",
+                "mode": "0600",
+            },
+            {
+                "source": "production/cowrie_output/sanitized_jsonlog.py",
+                "destination": "/home/cowrie/cowrie/src/cowrie/output/sanitizedjson.py",
+                "type": "symlink",
+                "owner": "cowrie",
+                "group": "cowrie",
+                "mode": "0777",
+            },
+            {
+                "source": "deployment/cowrie_output/20-sanitized-output.conf",
+                "destination": "/etc/systemd/system/cowrie.service.d/20-sanitized-output.conf",
+                "type": "regular",
+                "owner": "root",
+                "group": "root",
+                "mode": "0644",
+            },
+            {
+                "source": "deployment/cowrie_output/cowrie.logrotate",
+                "destination": "/etc/logrotate.d/cowrie",
+                "type": "regular",
+                "owner": "root",
+                "group": "root",
+                "mode": "0644",
+            },
+        ],
+    },
+    "service_impact": {
+        "stop_then_start": ["cowrie.service"],
+        "must_remain_active": ["honeypot-sensor-forwarder.service"],
+    },
+}
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REQUIRED_BUNDLE_FILES = frozenset(
     {
@@ -86,6 +146,7 @@ def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
         "schema_version",
         "git_revision",
         "component_id",
+        "deployment",
         "files",
         "policy",
     }
@@ -97,6 +158,8 @@ def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
         raise CowrieOutputBoundaryError("bundle Git revision is invalid")
     if not isinstance(document["component_id"], str) or not document["component_id"]:
         raise CowrieOutputBoundaryError("bundle component identity is invalid")
+    if document["deployment"] != DEPLOYMENT_CONTRACT:
+        raise CowrieOutputBoundaryError("bundle deployment contract is invalid")
     return document, manifest_path, hashlib.sha256(raw).hexdigest()
 
 
