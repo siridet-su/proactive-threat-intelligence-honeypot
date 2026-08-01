@@ -12,8 +12,8 @@ export default function LoginForm() {
   const handleAuthenticate = (e: React.FormEvent) => {
   e.preventDefault();
   
-  // ตรวจสอบข้อมูลม็อกอัพ
-  if (operatorId === "OP_4725" && accessKey === "password098") {
+  // ตรวจสอบข้อมูลม็อกอัพ (เปลี่ยนเป็น admin/admin เพื่อง่ายต่อการทดสอบ)
+  if (operatorId === "admin" && accessKey === "admin") {
     setError("");
     
     // เอาคอมเมนต์ออกเพื่อให้คำสั่งทำงาน (และสามารถลบหรือปิดตัว alert ออกได้เลยเพื่อความลื่นไหล)
@@ -53,7 +53,7 @@ export default function LoginForm() {
               </div>
               <input 
                 type="text" 
-                placeholder="OP_XXXX"
+                placeholder="admin"
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
@@ -74,7 +74,7 @@ export default function LoginForm() {
               </div>
               <input 
                 type="password" 
-                placeholder="••••••••••••"
+                placeholder="admin"
                 value={accessKey}
                 onChange={(e) => setAccessKey(e.target.value)}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
