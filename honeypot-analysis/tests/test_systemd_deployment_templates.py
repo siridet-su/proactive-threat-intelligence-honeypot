@@ -105,6 +105,18 @@ def test_session_worker_has_bounded_graceful_stop_settings() -> None:
     assert "KillSignal=SIGTERM" in session_worker
 
 
+def test_ingest_service_exposes_owner_only_startup_diagnostics_path() -> None:
+    ingest_unit = (
+        SYSTEMD_DIR / "honeypot-ingest-api.service"
+    ).read_text(encoding="utf-8")
+    assert (
+        "Environment=STARTUP_DIAGNOSTICS_PATH="
+        "/var/lib/honeypot/startup/ingest-api.json"
+    ) in ingest_unit
+    assert "ReadWritePaths=/var/lib/honeypot" in ingest_unit
+    assert "UMask=0077" in ingest_unit
+
+
 def test_all_long_running_units_have_bounded_graceful_stop_settings() -> None:
     services = (
         "honeypot-analysis-worker.service",

@@ -35,6 +35,7 @@ from production.utils.sensitive_data import (
 )
 from production.utils.serialization import utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
+from production.utils.startup_diagnostics import StartupDiagnostics
 
 
 _SENSOR_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -624,22 +625,69 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    config = ProductionConfig.from_env(args.config)
-    server = build_server(config)
-    print(
-        json.dumps(
-            {
-                "service": "ingest_api",
-                "host": config.ingest_host,
-                "port": config.ingest_port,
-                "database": config.safe_database_descriptor(),
-            },
-            sort_keys=True,
-        ),
-        flush=True,
-    )
-    serve_http_until_stopped(server)
-    return 0
+    diagnostics = StartupDiagnostics("ingest_api")
+    try:
+        diagnostics.enter("PROCESS_STARTED")
+        diagnostics.complete("PROCESS_STARTED")
+        diagnostics.enter("RELEASE_IDENTITY_VERIFIED")
+        diagnostics.complete("RELEASE_IDENTITY_VERIFIED")
+
+        config = ProductionConfig.from_env(args.config)
+        diagnostics.enter("CONFIG_LOADED")
+        diagnostics.complete("CONFIG_LOADED")
+
+        # Validate credentials and policy inputs before opening the database or
+        # binding a socket.  Only the bounded success stage is persisted.
+        _validate_ingest_config(config)
+        diagnostics.enter("CREDENTIALS_RESOLVED")
+        diagnostics.complete("CREDENTIALS_RESOLVED")
+
+        diagnostics.enter("DATABASE_OPEN_STARTED")
+        storage = open_storage(config.database_settings())
+        diagnostics.complete("DATABASE_OPEN_STARTED")
+        diagnostics.enter("DATABASE_OPEN_COMPLETED")
+        diagnostics.complete("DATABASE_OPEN_COMPLETED")
+        diagnostics.enter("SCHEMA_VERIFIED")
+        diagnostics.complete("SCHEMA_VERIFIED")
+        diagnostics.enter("POLICIES_VERIFIED")
+        diagnostics.complete("POLICIES_VERIFIED")
+        diagnostics.enter("DEPENDENCIES_READY")
+        diagnostics.complete("DEPENDENCIES_READY")
+
+        diagnostics.enter("SOCKET_BIND_STARTED")
+        server = build_server(config, storage=storage)
+        diagnostics.complete("SOCKET_BIND_STARTED")
+        diagnostics.enter("SOCKET_BOUND")
+        diagnostics.complete("SOCKET_BOUND")
+        diagnostics.enter("APPLICATION_CREATED")
+        diagnostics.complete("APPLICATION_CREATED")
+        diagnostics.enter("HEALTH_ROUTE_READY")
+        diagnostics.complete("HEALTH_ROUTE_READY")
+        diagnostics.enter("SERVICE_READY")
+        diagnostics.complete("SERVICE_READY")
+        diagnostics.ready()
+        print(
+            json.dumps(
+                {
+                    "service": "ingest_api",
+                    "host": config.ingest_host,
+                    "port": config.ingest_port,
+                    "database": config.safe_database_descriptor(),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        serve_http_until_stopped(server)
+        return 0
+    except BaseException as exc:
+        try:
+            diagnostics.fail(exc)
+        except Exception:
+            # Diagnostics must never hide the original fail-closed startup
+            # exception or change its process exit behavior.
+            pass
+        raise
 
 
 if __name__ == "__main__":

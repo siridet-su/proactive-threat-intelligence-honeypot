@@ -10,6 +10,7 @@ Group=honeypot
 WorkingDirectory=/opt/honeypot
 EnvironmentFile=-/etc/honeypot/common.env
 EnvironmentFile=-/etc/honeypot/services/ingest-api.env
+Environment=STARTUP_DIAGNOSTICS_PATH=/var/lib/honeypot/startup/ingest-api.json
 ExecStart=/opt/honeypot/.venv/bin/python -m production.api.ingest_api --config /etc/honeypot/production_config.json
 Restart=always
 RestartSec=5
