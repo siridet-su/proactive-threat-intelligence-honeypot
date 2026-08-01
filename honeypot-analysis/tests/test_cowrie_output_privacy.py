@@ -702,7 +702,8 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
         'find "${cowrie_root}/var/log/cowrie" -xdev -type f' in installer
         and "-exec chmod 0600 {} +" in installer
     )
-    assert 'record_path "${logrotate}" cowrie.logrotate.before' in installer
+    assert "cowrie_rollback_receipt capture" in installer
+    assert '--logrotate "${logrotate}"' in installer
     assert 'cowrie.log.protected.before' in installer
     assert 'systemctl stop cowrie.service' in installer
     assert 'install -o root -g root -m 0644' in installer

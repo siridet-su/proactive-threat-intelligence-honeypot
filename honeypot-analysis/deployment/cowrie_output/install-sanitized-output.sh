@@ -21,73 +21,20 @@ plugin="${cowrie_root}/src/cowrie/output/sanitizedjson.py"
 dropin=/etc/systemd/system/cowrie.service.d/20-sanitized-output.conf
 logrotate=/etc/logrotate.d/cowrie
 python="${cowrie_root}/cowrie-env/bin/python"
+source_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 
 test -f "${package}"
 test ! -e "${release}"
 test ! -e "${receipt}"
 install -d -o root -g root -m 0700 "${receipt}"
-
-record_path() {
-  target=$1
-  name=$2
-  if [ -L "${target}" ]; then
-    printf 'symlink\t%s\t%s\n' "${target}" "$(readlink "${target}")" >>"${receipt}/managed-paths.tsv"
-  elif [ -f "${target}" ]; then
-    cp -a "${target}" "${receipt}/${name}"
-    printf 'file\t%s\t%s\t%s\t%s\t%s\n' \
-      "${target}" "${name}" "$(stat -c %a "${target}")" \
-      "$(stat -c %u "${target}")" "$(stat -c %g "${target}")" \
-      >>"${receipt}/managed-paths.tsv"
-  else
-    printf 'absent\t%s\n' "${target}" >>"${receipt}/managed-paths.tsv"
-  fi
-}
-
-record_metadata() {
-  target=$1
-  if [ -f "${target}" ]; then
-    printf 'metadata\t%s\t-\t%s\t%s\t%s\n' \
-      "${target}" "$(stat -c %a "${target}")" \
-      "$(stat -c %u "${target}")" "$(stat -c %g "${target}")" \
-      >>"${receipt}/managed-paths.tsv"
-  else
-    printf 'absent-metadata\t%s\n' "${target}" >>"${receipt}/managed-paths.tsv"
-  fi
-}
-
-record_quarantine() {
-  target=$1
-  name=$2
-  if [ -L "${target}" ]; then
-    echo "credential-bearing log path must not be a symlink" >&2
-    exit 2
-  elif [ -f "${target}" ]; then
-    printf 'quarantine\t%s\t%s\t%s\t%s\t%s\n' \
-      "${target}" "${name}" "$(stat -c %a "${target}")" \
-      "$(stat -c %u "${target}")" "$(stat -c %g "${target}")" \
-      >>"${receipt}/managed-paths.tsv"
-  else
-    printf 'absent-metadata\t%s\n' "${target}" >>"${receipt}/managed-paths.tsv"
-  fi
-}
-
-: >"${receipt}/managed-paths.tsv"
-chmod 0600 "${receipt}/managed-paths.tsv"
-record_path "${config}" cowrie.cfg.before
-record_path "${plugin}" sanitizedjson.py.before
-record_path "${dropin}" 20-sanitized-output.conf.before
-record_path "${logrotate}" cowrie.logrotate.before
-record_path "${current}" current.before
-record_metadata /home/cowrie/users.txt
-record_metadata "${cowrie_root}/var/log/cowrie/cowrie_custom.json"
-record_metadata "${cowrie_root}/var/log/cowrie/cowrie.json"
-record_quarantine "${cowrie_root}/var/log/cowrie/cowrie.log" cowrie.log.protected.before
-find "${cowrie_root}/var/log/cowrie" -xdev -type f \
-  ! -path "${cowrie_root}/var/log/cowrie/cowrie_custom.json" \
-  ! -path "${cowrie_root}/var/log/cowrie/cowrie.json" \
-  ! -path "${cowrie_root}/var/log/cowrie/cowrie.log" \
-  -exec stat -c 'metadata\t%n\t-\t%a\t%u\t%g' {} \; \
-  >>"${receipt}/managed-paths.tsv"
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+  "${python}" -m production.tools.cowrie_rollback_receipt capture \
+  --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
+  --users-file /home/cowrie/users.txt --current "${current}" \
+  --config "${config}" --plugin "${plugin}" --drop-in "${dropin}" \
+  --logrotate "${logrotate}" \
+  >"${receipt}/receipt-capture.json"
+chmod 0600 "${receipt}/receipt-capture.json"
 find "${cowrie_root}/var/log/cowrie" -xdev -type f \
   ! -path "${cowrie_root}/var/log/cowrie/cowrie_custom.json" \
   ! -path "${cowrie_root}/var/log/cowrie/cowrie.json" \
@@ -108,6 +55,13 @@ if [ -f "${cowrie_root}/var/log/cowrie/cowrie.log" ]; then
   sha256sum "${receipt}/cowrie.log.protected.before" \
     >"${receipt}/protected-log.sha256"
 fi
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+  "${python}" -m production.tools.cowrie_rollback_receipt verify \
+  --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
+  --users-file /home/cowrie/users.txt --current "${current}" \
+  --drop-in "${dropin}" --logrotate "${logrotate}" \
+  >"${receipt}/receipt-verification.before-install.json"
+chmod 0600 "${receipt}/receipt-verification.before-install.json"
 
 install -d -o cowrie -g cowrie -m 0700 /opt/honeypot-cowrie-output/releases
 install -d -o cowrie -g cowrie -m 0700 "${release}"

@@ -34,6 +34,7 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "production/cowrie_output/sanitized_jsonlog.py",
         "production/cowrie_output/twisted_logger.py",
         "production/tools/__init__.py",
+        "production/tools/cowrie_rollback_receipt.py",
         "production/tools/cowrie_output_integration.py",
         "production/utils/__init__.py",
         "production/utils/cowrie_privacy.py",

@@ -5,59 +5,38 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "must run as root" >&2
   exit 2
 fi
-if [ "$#" -ne 1 ] || [ ! -f "$1/managed-paths.tsv" ]; then
+if [ "$#" -ne 1 ] || { [ ! -f "$1/managed-paths.jsonl" ] && [ ! -f "$1/managed-paths.tsv" ]; }; then
   echo "usage: $0 VERIFIED_RECEIPT_DIRECTORY" >&2
   exit 2
 fi
 
 receipt=$1
+cowrie_root=${HONEYPOT_COWRIE_ROOT:-/home/cowrie/cowrie}
+current=${HONEYPOT_COWRIE_CURRENT:-/opt/honeypot-cowrie-output/current}
+users_file=${HONEYPOT_COWRIE_USERS_FILE:-/home/cowrie/users.txt}
+dropin=${HONEYPOT_COWRIE_DROPIN:-/etc/systemd/system/cowrie.service.d/20-sanitized-output.conf}
+logrotate=${HONEYPOT_COWRIE_LOGROTATE:-/etc/logrotate.d/cowrie}
+python="${cowrie_root}/cowrie-env/bin/python"
+source_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+
+# Parse, normalize, and verify every record and saved-file digest before the
+# service or any managed path is touched.
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+  "${python}" -m production.tools.cowrie_rollback_receipt verify \
+  --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
+  --users-file "${users_file}" --current "${current}" \
+  --drop-in "${dropin}" --logrotate "${logrotate}" \
+  >"${receipt}/receipt-verification.before-rollback.json"
+chmod 0600 "${receipt}/receipt-verification.before-rollback.json"
+
 systemctl stop cowrie.service
-while IFS="$(printf '\t')" read -r kind target saved mode uid gid
-do
-  case "${kind}" in
-    absent)
-      if [ -e "${target}" ] || [ -L "${target}" ]; then
-        rm -f -- "${target}"
-      fi
-      ;;
-    symlink)
-      ln -sfn "${saved}" "${target}.rollback"
-      mv -Tf "${target}.rollback" "${target}"
-      ;;
-    file)
-      install -o "${uid}" -g "${gid}" -m "${mode}" "${receipt}/${saved}" "${target}"
-      ;;
-    metadata)
-      chown "${uid}:${gid}" "${target}"
-      chmod "${mode}" "${target}"
-      ;;
-    quarantine)
-      if [ ! -f "${receipt}/${saved}" ]; then
-        echo "protected rollback log is unavailable" >&2
-        exit 2
-      fi
-      if [ -e "${target}" ] || [ -L "${target}" ]; then
-        failed_saved="${receipt}/$(basename "${target}").failed-deployment"
-        if [ -e "${failed_saved}" ] || [ -L "${failed_saved}" ]; then
-          echo "failed-deployment log preservation path already exists" >&2
-          exit 2
-        fi
-        mv "${target}" "${failed_saved}"
-        chown root:root "${failed_saved}"
-        chmod 0600 "${failed_saved}"
-      fi
-      mv "${receipt}/${saved}" "${target}"
-      chown "${uid}:${gid}" "${target}"
-      chmod "${mode}" "${target}"
-      ;;
-    absent-metadata)
-      ;;
-    *)
-      echo "invalid rollback receipt entry" >&2
-      exit 2
-      ;;
-  esac
-done <"${receipt}/managed-paths.tsv"
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${source_root}" \
+  "${python}" -m production.tools.cowrie_rollback_receipt apply \
+  --receipt "${receipt}" --cowrie-root "${cowrie_root}" \
+  --users-file "${users_file}" --current "${current}" \
+  --drop-in "${dropin}" --logrotate "${logrotate}" \
+  >"${receipt}/receipt-application.json"
+chmod 0600 "${receipt}/receipt-application.json"
 
 systemctl daemon-reload
 systemctl start cowrie.service

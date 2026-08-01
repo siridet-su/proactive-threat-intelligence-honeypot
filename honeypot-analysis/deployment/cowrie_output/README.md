@@ -98,8 +98,15 @@ sudo -u cowrie env \
 
 ## Rollback
 
-Verify the receipt owner, mode, `managed-paths.tsv`, and saved-file hashes
-before rollback. Then restore only the managed integration boundary:
+New installs write a sealed `cowrie_output_rollback_receipt.v2` JSON Lines
+receipt plus an exact SHA-256 sidecar. The rollback program parses and verifies
+the complete receipt and every saved-file hash before stopping Cowrie or
+touching a managed path. It also accepts the retained legacy actual-tab and
+literal-`\\t` receipts, after closed-field, owner/mode, path, and ambiguity
+validation.
+
+Verify the receipt owner, mode, receipt digest, and saved-file hashes before
+rollback. Then restore only the managed integration boundary:
 
 ```sh
 sudo /opt/honeypot-cowrie-output/current/deployment/cowrie_output/rollback-sanitized-output.sh \
