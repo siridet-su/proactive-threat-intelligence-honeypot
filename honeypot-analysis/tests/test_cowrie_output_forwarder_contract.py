@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import gzip
 import json
 import os
-import shutil
 import stat
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -69,8 +66,7 @@ def _config(tmp_path: Path) -> SimpleNamespace:
     )
 
 
-@pytest.mark.skipif(shutil.which("logrotate") is None, reason="logrotate unavailable")
-def test_json_writer_forwarder_restart_and_real_rotation_contract(
+def test_json_writer_forwarder_restart_and_native_rotation_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -108,41 +104,22 @@ def test_json_writer_forwarder_restart_and_real_rotation_contract(
     restarted = sensor_forwarder.forward_once(config)
     assert restarted.sent == 1
 
-    rotation_config = tmp_path / "logrotate.conf"
-    rotation_state = tmp_path / "logrotate.state"
-    rotation_config.write_text(
-        f"""{feed_path} {{
-    size 1
-    rotate 2
-    compress
-    copytruncate
-    firstaction
-        chmod 0600 {feed_path}
-    endscript
-    lastaction
-        chmod 0640 {feed_path}
-        chmod 0600 {feed_path}.1.gz
-    endscript
-}}
-""",
-        encoding="utf-8",
-    )
-    rotated = subprocess.run(
-        ["logrotate", "-f", "-s", str(rotation_state), str(rotation_config)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert rotated.returncode == 0, rotated.stderr
-    # The production forwarder poll immediately after copytruncate observes
-    # the shorter same-inode source and durably resets its checkpoint.
+    # Cowrie's JSON writer rotates by rename/reopen. The forwarder identifies
+    # the renamed inode and drains it before switching to the new feed.
+    restarted_feed.close()
+    historical = Path(f"{feed_path}.2026-08-01")
+    feed_path.chmod(0o600)
+    feed_path.rename(historical)
+    feed_path.touch(mode=0o640)
+    feed_path.chmod(0o640)
     empty_after_rotation = sensor_forwarder.forward_once(config)
-    assert empty_after_rotation.truncation_detected is True
+    assert empty_after_rotation.rotation_detected is True
     assert empty_after_rotation.sent == 0
 
-    restarted_writer.write(_event(3, secrets[2]))
+    rotated_feed = _OpenFeed(feed_path)
+    _writer(rotated_feed).write(_event(3, secrets[2]))
     after_rotation = sensor_forwarder.forward_once(config)
-    restarted_feed.close()
+    rotated_feed.close()
 
     assert after_rotation.sent == 1
     assert after_rotation.remaining == 0
@@ -158,10 +135,8 @@ def test_json_writer_forwarder_restart_and_real_rotation_contract(
     encoded = json.dumps(delivered, sort_keys=True)
     assert all(secret not in encoded for secret in secrets)
     assert stat.S_IMODE(feed_path.stat().st_mode) == 0o640
-    compressed = Path(f"{feed_path}.1.gz")
-    assert stat.S_IMODE(compressed.stat().st_mode) == 0o600
-    with gzip.open(compressed, "rt", encoding="utf-8") as handle:
-        rotated_text = handle.read()
+    assert stat.S_IMODE(historical.stat().st_mode) == 0o600
+    rotated_text = historical.read_text(encoding="utf-8")
     assert all(secret not in rotated_text for secret in secrets)
     assert not Path(config.spool_path).exists()
 

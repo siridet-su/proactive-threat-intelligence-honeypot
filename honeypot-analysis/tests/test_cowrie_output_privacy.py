@@ -534,18 +534,18 @@ def test_real_copytruncate_and_compression_never_create_group_readable_history(
     active_text.chmod(0o600)
     config = tmp_path / "logrotate.conf"
     state = tmp_path / "logrotate.state"
+    original_json = active_json.read_bytes()
     config.write_text(
-        f"""{active_text} {active_json} {{
+        f"""{active_text} {{
     size 1
     rotate 2
     compress
     copytruncate
     sharedscripts
     firstaction
-        chmod 0600 {active_text} {active_json}
+        chmod 0600 {active_text}
     endscript
     lastaction
-        chmod 0640 {active_json}
         chmod 0600 {active_text} {logs}/*.1.gz
     endscript
 }}
@@ -560,8 +560,9 @@ def test_real_copytruncate_and_compression_never_create_group_readable_history(
     )
     assert result.returncode == 0, result.stderr
     assert stat.S_IMODE(active_json.stat().st_mode) == 0o640
+    assert active_json.read_bytes() == original_json
+    assert not (logs / "cowrie.json.1.gz").exists()
     assert stat.S_IMODE(active_text.stat().st_mode) == 0o600
-    assert stat.S_IMODE((logs / "cowrie.json.1.gz").stat().st_mode) == 0o600
     assert stat.S_IMODE((logs / "cowrie.log.1.gz").stat().st_mode) == 0o600
 
 
@@ -772,4 +773,7 @@ def test_service_discards_untrusted_process_streams_and_binds_rotation_policy() 
     assert "lastaction" in rotation
     assert "finish-rotation" in rotation
     assert "copytruncate" in rotation
+    first_line = rotation.splitlines()[0]
+    assert "cowrie.log" in first_line
+    assert "cowrie.json" not in first_line
     assert "compress" in rotation

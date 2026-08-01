@@ -44,10 +44,13 @@ embed authentication values before structured credential fields exist. The
 service also discards direct stdout/stderr; systemd still retains lifecycle and
 exit state without persisting untrusted process text.
 
-Both the Cowrie daily writer and `/etc/logrotate.d/cowrie` make the active JSON
-feed owner-only before creating a historical path. The current feed returns to
-`0640` for the forwarder, while every rotated or compressed file remains
-`0600` from creation.
+Cowrie's daily writer rotates the JSON feed by rename and reopen, allowing the
+forwarder to identify and drain the old inode before reading the new feed. The
+external logrotate policy deliberately handles only the non-authoritative text
+log: applying `copytruncate` to JSON would permit a rapid-regrowth race against
+the forwarder's offset checkpoint. Before either rotation mechanism runs, the
+active file becomes owner-only; the current JSON feed returns to `0640`, while
+every historical or compressed file remains `0600`.
 
 ## Install
 

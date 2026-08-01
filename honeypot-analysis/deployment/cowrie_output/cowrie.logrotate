@@ -1,4 +1,4 @@
-/home/cowrie/cowrie/var/log/cowrie/cowrie.log /home/cowrie/cowrie/var/log/cowrie/cowrie.json {
+/home/cowrie/cowrie/var/log/cowrie/cowrie.log {
     daily
     rotate 14
     compress
