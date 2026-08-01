@@ -404,6 +404,10 @@ def verify_config(
         )
     if config.getboolean("output_jsonlog", "enabled", fallback=False):
         raise CowrieOutputBoundaryError("unsafe output_jsonlog remains enabled")
+    if config.getboolean("honeypot", "ttylog", fallback=True):
+        raise CowrieOutputBoundaryError(
+            "credential-bearing Cowrie TTY replay remains enabled"
+        )
     root = Path(bundle_root).resolve()
     configured_root = Path(
         config.get("output_sanitizedjson", "bundle_root", fallback="")

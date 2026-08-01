@@ -499,6 +499,28 @@ def _replace_enabled(section_lines: list[str], enabled: bool) -> list[str]:
     return result
 
 
+def _replace_option(
+    section_lines: list[str], option: str, value: str
+) -> list[str]:
+    replacement = f"{option} = {value}\n"
+    result: list[str] = []
+    replaced = False
+    pattern = re.compile(rf"^\s*{re.escape(option)}\s*=", re.IGNORECASE)
+    for line in section_lines:
+        if pattern.match(line):
+            if replaced:
+                raise ValueError(
+                    f"configuration section has duplicate {option} options"
+                )
+            result.append(replacement)
+            replaced = True
+        else:
+            result.append(line)
+    if not replaced:
+        result.append(replacement)
+    return result
+
+
 def render_config(source: Path, destination: Path, bundle_root: Path) -> None:
     try:
         lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -515,6 +537,8 @@ def render_config(source: Path, destination: Path, bundle_root: Path) -> None:
         sections.append((name, start, end))
     if sum(name == "output_jsonlog" for name, _, _ in sections) != 1:
         raise ValueError("configuration must contain exactly one output_jsonlog section")
+    if sum(name == "honeypot" for name, _, _ in sections) != 1:
+        raise ValueError("configuration must contain exactly one honeypot section")
     if sum(name == "output_sanitizedjson" for name, _, _ in sections) > 1:
         raise ValueError("configuration contains duplicate output_sanitizedjson sections")
     rendered: list[str] = []
@@ -525,7 +549,9 @@ def render_config(source: Path, destination: Path, bundle_root: Path) -> None:
             cursor = end
             continue
         block = lines[start:end]
-        if name == "output_jsonlog":
+        if name == "honeypot":
+            block = [block[0], *_replace_option(block[1:], "ttylog", "false")]
+        elif name == "output_jsonlog":
             block = [block[0], *_replace_enabled(block[1:], False)]
         rendered.extend(block)
         cursor = end

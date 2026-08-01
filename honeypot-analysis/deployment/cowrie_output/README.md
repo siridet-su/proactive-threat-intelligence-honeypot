@@ -54,6 +54,12 @@ embed authentication values before structured credential fields exist. The
 service also discards direct stdout/stderr; systemd still retains lifecycle and
 exit state without persisting untrusted process text.
 
+The rendered Cowrie configuration also forces `honeypot.ttylog=false`.
+Interactive TTY replay includes the post-authentication shell prompt and can
+therefore persist an attacker-supplied username outside the sanitized JSON
+observer. Canonical command/session events remain available in the JSON feed;
+the redundant credential-bearing replay is not an authority source.
+
 The sanitized plugin also writes bounded owner-only lifecycle state at
 `var/lib/cowrie/cowrie-output-lifecycle.json`. It contains only closed
 categories, counters, booleans, hashes, PID, and time. It cannot contain raw

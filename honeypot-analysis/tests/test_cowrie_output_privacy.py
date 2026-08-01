@@ -76,6 +76,7 @@ def _source_config() -> str:
 [honeypot]
 log_path = /tmp/cowrie-log
 logtype = rotating
+ttylog = true
 
 [output_jsonlog]
 enabled = true
@@ -771,7 +772,25 @@ def test_config_render_preserves_unrelated_content_and_replaces_prior_safe_secti
     assert text.count("[output_sanitizedjson]") == 1
     assert "[output_textlog]\nenabled = false" in text
     assert "[output_jsonlog]\nenabled = false" in text
+    assert "ttylog = false" in text
     assert "/wrong" not in text
+
+
+def test_tty_replay_cannot_be_reenabled_after_render(tmp_path: Path) -> None:
+    bundle, config, plugin, dropin = _configured_boundary(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "ttylog = false", "ttylog = true"
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CowrieOutputBoundaryError, match="TTY replay"):
+        verify_boundary(
+            config_path=config,
+            bundle_root=bundle,
+            plugin_link=plugin,
+            drop_in=dropin,
+        )
 
 
 def test_initialization_failure_has_no_output_side_effect(tmp_path: Path) -> None:

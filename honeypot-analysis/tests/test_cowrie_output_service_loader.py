@@ -259,10 +259,6 @@ def test_real_cowrie_loader_ssh_restart_rotation_and_forwarder_contract(
         } <= event_ids
         assert list(logs.glob("cowrie.json.*"))
         assert stat.S_IMODE(feed.stat().st_mode) == 0o640
-        assert all(
-            stat.S_IMODE(path.stat().st_mode) == 0o600
-            for path in logs.glob("cowrie.json.*")
-        )
         assert (logs / "cowrie.log").stat().st_size > 0
 
         delivered: list[dict] = []
@@ -277,6 +273,15 @@ def test_real_cowrie_loader_ssh_restart_rotation_and_forwarder_contract(
         assert first_delivery.sent == first_count
         assert first_delivery.remaining == 0
         assert sensor_forwarder.forward_once(forwarder).sent == 0
+        _wait_for(
+            lambda: all(
+                stat.S_IMODE(path.stat().st_mode) == 0o600
+                for path in logs.glob("cowrie.json.*")
+            ),
+            timeout=20.0,
+        )
+        tty_dir = state_dir / "tty"
+        assert not tty_dir.exists() or not list(tty_dir.iterdir())
 
         _stop(process)
         port = _free_port()
