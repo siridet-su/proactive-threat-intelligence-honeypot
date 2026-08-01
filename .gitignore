@@ -1,5 +1,16 @@
-# Environment Files
+# Environment Files & Secrets
 .env
+.env.local
+*.env
+*.pem
+*.key
+secrets/
+credentials.json
+
+# Large Archives and Packages
+*.tar.gz
+*.deb
+*.zip
 *.env
 /etc/honeypot-agent.env
 

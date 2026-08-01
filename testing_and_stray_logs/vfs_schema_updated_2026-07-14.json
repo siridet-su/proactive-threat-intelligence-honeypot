@@ -1,0 +1,361 @@
+{
+  "schema_version": "2.0",
+  "_changelog": "v2.0 — pivot จาก MySQL/generic e-commerce (SiamShop) เป็น Odoo ERP บน PostgreSQL ตาม persona_design_erp.md ทั้งหมด path/hostname/user เปลี่ยนใหม่ ไม่มีชื่อบริษัทอีกต่อไป",
+  "persona": {
+    "system_type": "Internal MIS (Management Information System) — Odoo ERP backend",
+    "erp_platform": "Odoo (v17/18 style deployment)",
+    "deployment_note": "Production server รวม Odoo app server + PostgreSQL ไว้เครื่องเดียว (ปกติของ SME เล็กที่ไม่แยกเครื่อง)",
+    "hostname": "erp-db-01",
+    "os": "Ubuntu 22.04 LTS",
+    "db_engine": "PostgreSQL 16",
+    "app_server": "Odoo application server (Python, listen port 8069)",
+    "role": "production_database_and_app_server"
+  },
+  "_department_module_map_reference": {
+    "_comment": "อ้างอิงจาก persona_design_erp.md ข้อ 3 — ใช้ตอน generate synthetic data ให้ department ตรงกับ Odoo module จริง ไม่ใช่ field ที่ต้องแก้ตรงนี้",
+    "Sales": "sale, crm modules",
+    "Finance": "account module (Accounting/Invoicing)",
+    "Warehouse": "stock module (Inventory)",
+    "IT": "ดูแล Odoo + PostgreSQL เอง ไม่มี Odoo module ตรงๆ",
+    "PII_cross_cutting": "res.partner — ผูกกับแทบทุก module"
+  },
+  "_cross_team_notes": {
+    "cowrie_layer_process_emulation": "ตาม checklist พาร์ท 2 — ต้องมี fake `pg_lsclusters`/`ps aux` process list โชว์ว่า postgresql กำลังรันอยู่ เพื่อ consistency กับ persona นี้ (Ubuntu 22.04 + PostgreSQL 16 + Odoo listen port 8069) เรื่องนี้เป็น command emulation ไม่ใช่ filesystem path จึงไม่มีอยู่ใน `filesystem` array ด้านล่าง ทำในฝั่ง Cowrie honeyfs/command config แยกต่างหาก (จดไว้ตรงนี้เพราะเจ้าของ vfs_schema.json คนเดียวกับที่ดูพาร์ท Cowrie)"
+  },
+  "content_policy_legend": {
+    "static": "เนื้อหาคงที่ ต้องยึดตามนี้เป๊ะ ใช้เป็น ground truth ให้โมเดลท่องตอบ ห้าม generate สด",
+    "dynamic": "โมเดล generate เนื้อหาได้ในกรอบ style ที่กำหนด ความเสี่ยงต่ำถ้าไม่ตรงกันทุกครั้ง",
+    "listing_only": "แสดงแค่ชื่อไฟล์ตอน ls / find เท่านั้น ไม่รองรับ cat (ตอบ permission denied หรือ binary file)"
+  },
+  "filesystem": [
+    {
+      "path": "/etc/os-release",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "os_release_content"
+    },
+    {
+      "path": "/etc/hostname",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "hostname_content",
+      "note": "เนื้อหาคือ 'erp-db-01' บรรทัดเดียว"
+    },
+    {
+      "path": "/etc/hosts",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "hosts_content"
+    },
+    {
+      "path": "/etc/odoo/odoo.conf",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "content_policy": "static",
+      "static_content_ref": "odoo_conf_content",
+      "note": "จุดล่อสำคัญที่สุดของฝั่ง config — มี db_password/admin_passwd แบบ Odoo จริง (INI format ไม่ใช่ .env)"
+    },
+    {
+      "path": "/etc/postgresql/16/main/postgresql.conf",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "dynamic",
+      "style_hint": "รูปแบบ GUC มาตรฐานของ PostgreSQL 16 (คอมเมนต์ # + key = value) เช่น listen_addresses, port, max_connections, shared_buffers, logging_collector — ห้าม generate ให้มี password/credential โผล่มาเด็ดขาด (ของจริง PostgreSQL core ไม่เก็บ credential ในไฟล์นี้ อยู่แค่ pg_hba.conf/.pgpass เท่านั้น)",
+      "decision_rationale": "คง dynamic/low ไว้ตามเดิม เหตุผล: (1) ไฟล์นี้ของจริงยาวหลายร้อยบรรทัด เขียน static เต็มไม่คุ้มเวลาเทียบกับคุณค่าที่ได้ (2) ไม่มีความลับจริงในไฟล์นี้แม้แต่ในของจริง ต่างจาก pg_hba.conf/.pgpass ที่เป็นจุดล่อจริง จึงปล่อยให้โมเดล generate ได้โดยความเสี่ยงต่ำ — แค่กำชับ style_hint ให้ชัดว่าห้ามหลุด credential เข้าไปเพื่อไม่ให้ตัดกับ narrative ของ pg_hba.conf/.pgpass ที่ตั้งใจให้เป็นจุดล่อหลัก ค่า listen_addresses ยังมีประโยชน์ recon เรื่อง network exposure ได้บ้างแม้เป็น dynamic content",
+      "frozen_content_ref": "postgresql_conf_frozen_content",
+      "frozen_note": "เนื้อหานี้ freeze ไว้สำหรับเฟส Cowrie (low-interaction) เท่านั้น — เฟส Qwen ยัง generate สดได้ตาม style_hint ตามปกติ"
+    },
+    {
+      "path": "/etc/postgresql/16/main/pg_hba.conf",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "content_policy": "static",
+      "static_content_ref": "pg_hba_conf_content",
+      "note": "ไฟล์กติกา auth ของ PostgreSQL — จุดล่อสำคัญตาม persona_design_erp.md ข้อ 5 (privilege escalation target)"
+    },
+    {
+      "path": "/etc/cron.d/odoo-backup",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "cron_backup_content",
+      "note": "cron entry ที่เรียก /home/sysadmin/scripts/backup_odoo.sh"
+    },
+    {
+      "path": "/var/spool/cron/crontabs/sysadmin",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "medium",
+      "content_policy": "dynamic",
+      "style_hint": "crontab ของ sysadmin มี job restart odoo service, vacuum PostgreSQL, ล้าง log เก่า",
+      "frozen_content_ref": "sysadmin_crontab_frozen_content",
+      "frozen_note": "เนื้อหานี้ freeze ไว้สำหรับเฟส Cowrie (low-interaction) เท่านั้น — เฟส Qwen ยัง generate สดได้ตาม style_hint ตามปกติ"
+    },
+    {
+      "path": "/var/log/auth.log",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "medium",
+      "content_policy": "static",
+      "static_content_ref": "auth_log_content"
+    },
+    {
+      "path": "/opt/odoo/",
+      "type": "dir",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "dynamic"
+    },
+    {
+      "path": "/opt/odoo/odoo-bin",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "listing_only",
+      "note": "entry point script — แสดงแค่ชื่อไฟล์ + permission (executable) ไม่ต้องมีเนื้อหาโปรแกรมจริง"
+    },
+    {
+      "path": "/opt/odoo/addons/",
+      "type": "dir",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "core_addons_listing",
+      "note": "รายชื่อ core module ของ Odoo เช่น base, sale, account, stock, hr, crm, web, mail — เป็นชื่อ folder มาตรฐานที่ตายตัว ควร static ไม่ generate สด เพื่อความสมจริง"
+    },
+    {
+      "path": "/opt/odoo/custom-addons/internal_reports/",
+      "type": "dir",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "listing_only",
+      "note": "ตามมติ persona_design_erp.md — เห็นแค่ชื่อไฟล์ (__manifest__.py, models/, views/) ไม่ต้องมี source code ปลอมข้างใน (คุม scope)"
+    },
+    {
+      "path": "/var/lib/odoo/filestore/production/",
+      "type": "dir",
+      "department": "Sales/Finance",
+      "sensitivity": "high",
+      "content_policy": "listing_only",
+      "note": "ไฟล์แนบ (ใบเสร็จ/เอกสารอัพโหลด) ตั้งชื่อแบบ hash ตามจริงของ Odoo — cat ไม่ได้ (binary blob), ls เห็นแค่ hash filename"
+    },
+    {
+      "path": "/var/lib/odoo/sessions/",
+      "type": "dir",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "listing_only",
+      "note": "session pickle files ชื่อสุ่ม",
+      "decision_rationale": "คง low/listing_only ไว้ตามเดิม เหตุผล: ของจริง Odoo session file เป็น binary pickle อ่านไม่ได้อยู่แล้ว (listing_only เลยไม่กระทบอะไร) และชื่อไฟล์เป็น hash/token สุ่ม ไม่ใช่ username จึงไม่มีข้อมูลรั่วแม้แต่ตอน ls — ไม่ต่างจากที่ตั้งไว้ตอนแรก แค่ไม่ใช่ assumption ที่ต้องรอ confirm อีกแล้ว"
+    },
+    {
+      "path": "/var/log/odoo/odoo.log",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "odoo_log_content"
+    },
+    {
+      "path": "/var/log/odoo/odoo.log.1",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "dynamic",
+      "style_hint": "log รอบก่อนหน้า สไตล์เดียวกับ odoo.log แต่ timestamp เก่ากว่า",
+      "frozen_content_ref": "odoo_log_1_frozen_content",
+      "frozen_note": "เนื้อหานี้ freeze ไว้สำหรับเฟส Cowrie (low-interaction) เท่านั้น — เฟส Qwen ยัง generate สดได้ตาม style_hint ตามปกติ"
+    },
+    {
+      "path": "/var/log/postgresql/postgresql-16-main.log",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "postgresql_log_content"
+    },
+    {
+      "path": "/var/log/postgresql/postgresql-16-main.log.1.gz",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "listing_only"
+    },
+    {
+      "path": "/var/backups/postgresql/odoo_production_2026-06-30.sql.gz",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "content_policy": "listing_only",
+      "note": "DB dump ล่าสุด — มูลค่าสูงสุดในระบบ ทั้งฐานข้อมูลอยู่ในนี้ แสดงแค่ชื่อ+ขนาด+วันที่ตอน ls -la"
+    },
+    {
+      "path": "/var/backups/postgresql/odoo_production_2026-06-23.sql.gz",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "content_policy": "listing_only",
+      "note": "backup รุ่นก่อนหน้า แสดงว่ามี rotation จริง"
+    },
+    {
+      "path": "/home/sysadmin/",
+      "type": "dir",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "dynamic"
+    },
+    {
+      "path": "/home/sysadmin/.bash_history",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "high",
+      "content_policy": "static",
+      "static_content_ref": "sysadmin_bash_history",
+      "note": "ต้องมีร่องรอยคำสั่ง psql -U odoo -d odoo_production, pg_dump, cat odoo.conf ฯลฯ เพื่อ hint เส้นทางให้ attacker เดินตาม"
+    },
+    {
+      "path": "/home/sysadmin/.pgpass",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "content_policy": "static",
+      "static_content_ref": "pgpass_content",
+      "note": "PostgreSQL credential file — จุดล่อสำคัญที่สุดตาม persona_design_erp.md ข้อ 5 (attacker ที่รู้จัก Postgres จะมองหาไฟล์นี้โดยเฉพาะ)"
+    },
+    {
+      "path": "/home/sysadmin/.ssh/",
+      "type": "dir",
+      "department": "IT",
+      "sensitivity": "medium",
+      "content_policy": "listing_only",
+      "note": "แสดง authorized_keys, id_rsa.pub แต่ id_rsa (private key) ไม่ยอมให้ cat"
+    },
+    {
+      "path": "/home/sysadmin/scripts/backup_odoo.sh",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "backup_odoo_sh_content",
+      "note": "ต้องมี pg_dump command ที่ output ชื่อไฟล์ตรงกับ odoo_production_*.sql.gz ใน /var/backups/postgresql/"
+    },
+    {
+      "path": "/home/accountant/",
+      "type": "dir",
+      "department": "Finance",
+      "sensitivity": "low",
+      "content_policy": "dynamic"
+    },
+    {
+      "path": "/home/accountant/documents/bank_reconciliation_Q1.csv",
+      "type": "file",
+      "department": "Finance",
+      "sensitivity": "critical",
+      "content_policy": "static",
+      "static_content_ref": "bank_reconciliation_Q1_content",
+      "note": "ยอดรวมต้อง match กับ account_move sample rows ใน db_schema.json ตาม cross_consistency_checklist"
+    },
+    {
+      "path": "/home/sales_team/",
+      "type": "dir",
+      "department": "Sales",
+      "sensitivity": "low",
+      "content_policy": "dynamic"
+    },
+    {
+      "path": "/home/sales_team/reports/sales_pipeline_export.csv",
+      "type": "file",
+      "department": "Sales",
+      "sensitivity": "medium",
+      "content_policy": "static",
+      "static_content_ref": "sales_pipeline_export_content",
+      "note": "ควรอ้างอิง sale_order sample rows ใน db_schema.json ให้สอดคล้องกัน (ชื่อลูกค้า/สถานะ order)"
+    },
+    {
+      "path": "/home/warehouse_staff/",
+      "type": "dir",
+      "department": "Warehouse",
+      "sensitivity": "low",
+      "content_policy": "dynamic"
+    },
+    {
+      "path": "/home/warehouse_staff/stock/stock_valuation_report.csv",
+      "type": "file",
+      "department": "Warehouse",
+      "sensitivity": "low",
+      "content_policy": "static",
+      "static_content_ref": "stock_valuation_report_content",
+      "note": "sensitivity ต่ำ ใกล้เคียงกับ stock_quant table ใน db_schema.json (content_policy: dynamic ฝั่งนั้น) — ปล่อยให้ generate ได้ค่อนข้างอิสระ"
+    },
+    {
+      "path": "/tmp/odoo_debug_dump.sql",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "content_policy": "static",
+      "static_content_ref": "tmp_debug_dump_content",
+      "note": "ไฟล์ debug ที่ sysadmin ลืมลบ — มีข้อมูล table สำคัญ (บางส่วนของ res_partner/account_move) หลุดออกมาเป็น partial SQL statements ต้องเช็ค cross-consistency กับ db_schema.json ตอนเติมเนื้อหาจริง จุดล่อ realistic ต่อจาก /var/backups/"
+    },
+    {
+      "path": "/tmp/session_a8f3.tmp",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "low",
+      "content_policy": "dynamic",
+      "frozen_content_ref": "session_tmp_frozen_content",
+      "frozen_note": "เนื้อหานี้ freeze ไว้สำหรับเฟส Cowrie (low-interaction) เท่านั้น — เฟส Qwen ยัง generate สดได้ตาม style_hint ตามปกติ"
+    }
+  ],
+  "static_contents": {
+    "_comment": "เนื้อหาคงที่ ต้อง finalize ก่อนใส่เข้า training data — placeholder ตอนนี้ทั้งหมด (วันนี้ scope แค่ 4-5 ไฟล์ตามที่วางแผนไว้ใน work log ไม่ใช่ทุกตัว)",
+    "os_release_content": "NAME=\"Ubuntu\"\nVERSION=\"22.04.4 LTS (Jammy Jellyfish)\"\nID=ubuntu\nID_LIKE=debian\nPRETTY_NAME=\"Ubuntu 22.04.4 LTS\"\nVERSION_ID=\"22.04\"\n",
+    "hostname_content": "erp-db-01\n",
+    "hosts_content": "127.0.0.1 localhost\n127.0.1.1 erp-db-01\n",
+    "odoo_conf_content": "[options]\n; Internal MIS - production configuration. Do not commit to VCS.\nadmin_passwd = MisAdm1n#7724\ndb_host = localhost\ndb_port = 5432\ndb_user = odoo\ndb_password = Odo0_Pr0d_2026!Kx9\ndb_name = odoo_production\naddons_path = /opt/odoo/addons,/opt/odoo/custom-addons\ndata_dir = /var/lib/odoo\nlogfile = /var/log/odoo/odoo.log\nlog_level = info\nxmlrpc = True\nxmlrpc_port = 8069\nproxy_mode = True\nworkers = 4\nmax_cron_threads = 2\n",
+    "pg_hba_conf_content": "# TYPE  DATABASE        USER            ADDRESS                 METHOD\nlocal   all             postgres                                peer\nlocal   all             all                                     peer\nhost    odoo_production odoo            127.0.0.1/32            md5\nhost    odoo_production odoo            ::1/128                 md5\nhost    all             all             0.0.0.0/0               reject\n",
+    "cron_backup_content": "# Nightly PostgreSQL backup for odoo_production\n0 2 * * * sysadmin /home/sysadmin/scripts/backup_odoo.sh >> /var/log/odoo/backup.log 2>&1\n",
+    "auth_log_content": "Jul  9 02:14:03 erp-db-01 sshd[1832]: Accepted publickey for sysadmin from 10.20.1.15 port 51422 ssh2: RSA SHA256:9fK2...\nJul  9 02:14:03 erp-db-01 sshd[1832]: pam_unix(sshd:session): session opened for user sysadmin(uid=1001) by (uid=0)\nJul  9 06:31:19 erp-db-01 sshd[2044]: Failed password for invalid user admin from 185.220.101.7 port 44210 ssh2\nJul  9 06:31:22 erp-db-01 sshd[2044]: Failed password for invalid user admin from 185.220.101.7 port 44210 ssh2\nJul  9 09:02:55 erp-db-01 sshd[2199]: Accepted publickey for sysadmin from 10.20.1.15 port 52011 ssh2: RSA SHA256:9fK2...\n",
+    "core_addons_listing": [
+      "base",
+      "web",
+      "mail",
+      "sale",
+      "sale_management",
+      "account",
+      "stock",
+      "purchase",
+      "hr",
+      "crm",
+      "point_of_sale",
+      "website",
+      "portal",
+      "base_setup",
+      "resource",
+      "product",
+      "uom"
+    ],
+    "odoo_log_content": "2026-07-09 02:00:03,112 1842 INFO odoo_production odoo.addons.base.models.ir_cron: Starting job `Scheduled Backup Check`.\n2026-07-09 08:15:41,204 1842 INFO odoo_production werkzeug: 127.0.0.1 - - [09/Jul/2026 08:15:41] \"POST /web/dataset/call_kw/res.partner/search_read HTTP/1.1\" 200 -\n2026-07-09 08:16:02,558 1842 WARNING odoo_production odoo.sql_db: Connection to the database failed, retrying in 2s\n2026-07-09 08:16:04,891 1842 INFO odoo_production odoo.sql_db: Connection to the database restored\n2026-07-09 09:44:12,003 1842 INFO odoo_production werkzeug: 10.20.1.22 - - [09/Jul/2026 09:44:12] \"GET /web/login HTTP/1.1\" 200 -\n",
+    "postgresql_log_content": "2026-07-09 02:00:01.221 UTC [1201] LOG:  checkpoint starting: time\n2026-07-09 02:00:04.887 UTC [1201] LOG:  checkpoint complete: wrote 42 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled\n2026-07-09 08:15:41.190 UTC [2033] LOG:  connection received: host=127.0.0.1 port=51244\n2026-07-09 08:15:41.203 UTC [2033] LOG:  connection authorized: user=odoo database=odoo_production\n2026-07-09 06:31:19.400 UTC [2039] FATAL:  password authentication failed for user \"admin\"\n2026-07-09 06:31:19.400 UTC [2039] DETAIL:  Connection matched pg_hba.conf line 4: \"host odoo_production odoo 127.0.0.1/32 md5\"\n",
+    "sysadmin_bash_history": "cd /opt/odoo\nsudo systemctl status odoo\nsudo systemctl status postgresql\ndf -h\ncat /etc/odoo/odoo.conf\npsql -U odoo -d odoo_production\ncd /home/sysadmin/scripts\n./backup_odoo.sh\nls -la /var/backups/postgresql/\nsudo systemctl restart odoo\ntail -f /var/log/odoo/odoo.log\nhtop\ncat .pgpass\ncrontab -l\nexit\n",
+    "pgpass_content": "# PostgreSQL password file - format: hostname:port:database:username:password\n# Permissions must be 0600 or libpq will refuse to read this file\nlocalhost:5432:odoo_production:odoo:Odo0_Pr0d_2026!Kx9\nlocalhost:5432:*:postgres:Pg_R00t_M4st3r!21\n",
+    "backup_odoo_sh_content": "#!/bin/bash\n# Nightly backup script for odoo_production database\n# Runs via /etc/cron.d/odoo-backup\n\nBACKUP_DIR=\"/var/backups/postgresql\"\nDATE=$(date +%Y-%m-%d)\nFILENAME=\"odoo_production_${DATE}.sql.gz\"\n\npg_dump -U odoo -h localhost odoo_production | gzip > \"${BACKUP_DIR}/${FILENAME}\"\n\n# keep only the last 7 days of backups\nfind \"${BACKUP_DIR}\" -name \"odoo_production_*.sql.gz\" -mtime +7 -delete\n\necho \"Backup completed: ${FILENAME}\"\n",
+    "bank_reconciliation_Q1_content": "date,description,invoice_ref,amount,status\n2026-01-10,Bank transfer received - Thanawat Trading,INV/2026/00001,45000.00,matched\n2026-01-18,Bank transfer received - Napat Suwannarat,INV/2026/00002,128500.00,matched\n2026-02-25,Partial payment received - Pacific Rim Logistics,INV/2026/00004,40000.00,partial_matched\n2026-03-01,Bank service charge,,-350.00,internal\n2026-03-20,Bank transfer received - Siriporn Boonmee,INV/2026/00006,32800.00,matched\n2026-03-31,Closing balance carried forward,,1284650.75,internal\n",
+    "sales_pipeline_export_content": "opportunity,customer,stage,expected_revenue,close_date\n\"Annual hardware refresh\",\"Krungthep Hardware Supply Co., Ltd.\",Proposal,185000.00,2026-04-15\n\"Logistics contract renewal\",\"Pacific Rim Logistics Ltd.\",Negotiation,320000.00,2026-04-30\n\"New POS rollout\",\"Golden Harvest Distribution Co., Ltd.\",Qualified,95000.00,2026-05-10\n\"Consulting retainer\",\"Napat Suwannarat\",Won,42000.00,2026-03-28\n",
+    "stock_valuation_report_content": "sku,product_name,quantity_on_hand,location,valuation_thb\nFG-1001,Steel Shelving Unit 180cm,142,WH/Stock,426000.00\nFG-1002,Industrial Pallet Wrap 500m,860,WH/Stock,103200.00\nFG-1003,Safety Helmet (Yellow),310,WH/Stock,46500.00\nFG-1004,Forklift Battery 48V,6,WH/Stock,540000.00\n",
+    "tmp_debug_dump_content": "-- odoo_debug_dump.sql (partial - debug session, 2026-06-30, process killed: out of disk space)\nINSERT INTO res_partner (id, name, email, phone, city, is_company, vat) VALUES\n(1, 'Thanawat Trading Co., Ltd.', 'accounts@thanawat-trading.example', '02-123-4567', 'Bangkok', true, '0105558112233'),\n(2, 'Napat Suwannarat', 'napat.s@mailbox.example', '081-234-5678', 'Nonthaburi', false, NULL);\n\nINSERT INTO account_move (id, name, partner_id, amount_total, state, invoice_date, payment_state) VALUES\n(1, 'INV/2026/00001', 1, 45000.00, 'posted', '2026-01-08', 'paid'),\n(2, 'INV/2026/00002', 2, 128500.00, 'posted', '2026-01-15', 'paid');\n-- dump truncated\n",
+    "postgresql_conf_frozen_content": "# -----------------------------\n# PostgreSQL configuration file\n# -----------------------------\n#\n# This file consists of lines of the form:\n#\n#   name = value\n#\n# (The \"=\" is optional.) Whitespace may be used. Comments are introduced\n# with \"#\" anywhere on a line. The complete list of parameter names and\n# allowed values can be found in the PostgreSQL documentation.\n\ndata_directory = '/var/lib/postgresql/16/main'\nhba_file = '/etc/postgresql/16/main/pg_hba.conf'\nident_file = '/etc/postgresql/16/main/pg_ident.conf'\nexternal_pid_file = '/var/run/postgresql/16-main.pid'\n\n# - Connection Settings -\n\nlisten_addresses = 'localhost'\nport = 5432\nmax_connections = 100\nunix_socket_directories = '/var/run/postgresql'\n\n# - Memory -\n\nshared_buffers = 128MB\ndynamic_shared_memory_type = posix\n\n# - Write-Ahead Log -\n\nwal_level = replica\nmax_wal_size = 1GB\nmin_wal_size = 80MB\n\n# - Reporting and Logging -\n\nlogging_collector = on\nlog_directory = 'log'\nlog_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'\nlog_min_duration_statement = -1\nlog_line_prefix = '%m [%p] %q%u@%d '\nlog_timezone = 'Asia/Bangkok'\n\n# - Locale and Formatting -\n\ndatestyle = 'iso, mdy'\ntimezone = 'Asia/Bangkok'\nlc_messages = 'en_US.UTF-8'\nlc_monetary = 'en_US.UTF-8'\nlc_numeric = 'en_US.UTF-8'\nlc_time = 'en_US.UTF-8'\ndefault_text_search_config = 'pg_catalog.english'",
+    "sysadmin_crontab_frozen_content": "# DO NOT EDIT THIS FILE - edit the master and reinstall.\n# (crontab installed on Tue Jul  7 09:12:01 2026)\n# (Cron version -- $Id: crontab.c,v 2.13 1994/01/17 03:20:37 vixie Exp $)\n30 3 * * * systemctl restart odoo >> /var/log/odoo/restart.log 2>&1\n0 4 * * 0 /usr/bin/vacuumdb --all --analyze -q\n15 4 * * * find /var/log/odoo -name \"*.log.*\" -mtime +14 -delete",
+    "odoo_log_1_frozen_content": "2026-07-08 02:00:02,884 1842 INFO odoo_production odoo.addons.base.models.ir_cron: Starting job `Scheduled Backup Check`.\n2026-07-08 07:52:33,410 1842 INFO odoo_production werkzeug: 127.0.0.1 - - [08/Jul/2026 07:52:33] \"GET /web/login HTTP/1.1\" 200 -\n2026-07-08 07:53:01,927 1842 INFO odoo_production werkzeug: 127.0.0.1 - - [08/Jul/2026 07:53:01] \"POST /web/session/authenticate HTTP/1.1\" 200 -\n2026-07-08 11:20:44,660 1842 INFO odoo_production werkzeug: 10.20.1.15 - - [08/Jul/2026 11:20:44] \"POST /web/dataset/call_kw/sale.order/search_read HTTP/1.1\" 200 -\n2026-07-08 14:05:19,203 1842 WARNING odoo_production odoo.sql_db: Connection to the database failed, retrying in 2s\n2026-07-08 14:05:21,558 1842 INFO odoo_production odoo.sql_db: Connection to the database restored\n2026-07-08 18:41:07,332 1842 INFO odoo_production werkzeug: 10.20.1.22 - - [08/Jul/2026 18:41:07] \"POST /web/dataset/call_kw/stock.quant/search_read HTTP/1.1\" 200 -",
+    "session_tmp_frozen_content": "{\"session_id\": \"a8f3c9e21b47\", \"uid\": 2, \"login\": \"admin\", \"context\": {\"lang\": \"en_US\", \"tz\": \"Asia/Bangkok\", \"uid\": 2}, \"db\": \"odoo_production\"}"
+  }
+}

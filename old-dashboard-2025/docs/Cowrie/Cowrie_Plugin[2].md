@@ -1,0 +1,89 @@
+# การสร้างสภาพแวดล้อมจำลอง 
+(Ubuntu 20.04.6 LTS)
+### (1) ติดตั้งไลบารี่ที่จำเป็น
+```
+sudo apt install debootstrap fakeroot
+sudo apt-get install qemu-user-static binfmt-support debootstrap
+sudo apt-get install acl
+sudo apt-get install python-is-python3
+```
+### (2) สร้าง honeyfs
+```
+sudo su - cowrie
+cd /home/cowrie/
+mkdir script
+cd script
+```
+```
+nano Create_honeyfs.py
+```
+* [Create_honeyfs.py](/Plugin/Cowrie/script/Create_honeyfs.py)
+#### รายละเอียด
+```
+pwd -> /home/cowrie/cowrie
+rm -rf honeyfs
+mkdir honeyfs
+fakeroot debootstrap --variant=minbase focal honeyfs http://archive.ubuntu.com/ubuntu/
+```
+หรือ
+```
+sudo debootstrap --arch=amd64 --variant=minbase focal honeyfs http://archive.ubuntu.com/ubuntu/
+sudo cp /usr/bin/qemu-x86_64-static honeyfs/usr/bin/
+```
+#### ปรับ banner ให้สมจริง
+```
+sudo setfacl -m u:cpe27:rwx /home/cowrie/cowrie/honeyfs/etc/
+sudo setfacl -m u:cpe27:rwx /home/cowrie/cowrie/honeyfs/etc/issue
+sudo setfacl -m u:cpe27:rwx /home/cowrie/cowrie/honeyfs/etc/passwd
+sudo setfacl -m u:cpe27:rwx /home/cowrie/cowrie/honeyfs/etc/shadow
+```
+แก้ข้อความก่อน login (/etc/issue) และข้อความหลัง login (/etc/motd)
+```
+echo "Ubuntu 20.04.6 LTS" > honeyfs/etc/issue
+echo "" > honeyfs/etc/motd
+```
+
+#### ปรับไม่ให้ Cowrieใช้ /etc/passwd 
+```
+echo "root:x:0:0:root:/root:/bin/bash" > honeyfs/etc/passwd
+echo "root:*:19000:0:99999:7:::" > honeyfs/etc/shadow
+```
+
+### (3) เพิ่มข้อมูลพื้นฐาน
+- เพิ่ม user ใน directory home
+- สร้าง etc พื้นฐาน
+- ปรับเปลี่ยนเวลา timestamp
+```
+pwd -> /home/cowrie/
+mkdir script
+GenUsers.py
+nano etcFile.py
+nano NewTimeStamp.py
+```
+* [GenUsers.py](/Plugin/Cowrie/script/GenUsers.py)
+* [NewTimeStamp.py](/Plugin/Cowrie/script/NewTimeStamp.py)
+* [etcFile.py](/Plugin/Cowrie/script/etcFile.py)
+```
+nano run.py
+```
+* [run.py](/Plugin/Cowrie/script/run.py)
+
+ติดตั้งไลบารี่ที่จำเป็น + Run script (sudo user) 
+```
+python3 -m venv venv
+source venv/bin/activate
+pip install Faker names
+sudo ./venv/bin/python3 run.py
+deactivate
+```
+### (4) สร้าง fs.pickle ใหม่
+ต้องให้ cowrie เป็นคนรันคำสั่ง
+```
+rm -f src/cowrie/data/fs.pickle
+./bin/createfs -l honeyfs -o src/cowrie/data/fs.pickle
+
+rm -f /home/cowrie/cowrie/src/cowrie/data/fs.pickle"
+/home/cowrie/cowrie/bin/createfs -l honeyfs -o /home/cowrie/cowrie/src/cowrie/data/fs.pickle"
+```
+
+## ผู้เขียนคู่มือ นาย รามณรงค์ พันธเดช

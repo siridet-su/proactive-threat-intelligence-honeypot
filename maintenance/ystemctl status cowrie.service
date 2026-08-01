@@ -1,0 +1,10 @@
+[0;1;31m×[0m cowrie.service - Cowrie SSH Honeypot
+     Loaded: loaded (]8;;file://ubuntu-pi-server/etc/systemd/system/cowrie.service/etc/systemd/system/cowrie.service]8;;; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+     Active: [0;1;31mfailed[0m (Result: exit-code) since Sun 2025-09-28 19:59:56 +07; 32s ago
+    Process: 2375 ExecStart=/bin/bash /home/cowrie/cowrie/start.sh [0;1;31m(code=exited, status=127)[0m
+        CPU: 3ms
+
+Sep 28 19:59:56 ubuntu-pi-server systemd[1]: cowrie.service: Scheduled restart job, restart counter is at 5.
+Sep 28 19:59:56 ubuntu-pi-server systemd[1]: [0;1;38;5;185m[0;1;39m[0;1;38;5;185mcowrie.service: Start request repeated too quickly.[0m
+Sep 28 19:59:56 ubuntu-pi-server systemd[1]: [0;1;38;5;185m[0;1;39m[0;1;38;5;185mcowrie.service: Failed with result 'exit-code'.[0m
+Sep 28 19:59:56 ubuntu-pi-server systemd[1]: [0;1;31m[0;1;39m[0;1;31mFailed to start cowrie.service - Cowrie SSH Honeypot.[0m

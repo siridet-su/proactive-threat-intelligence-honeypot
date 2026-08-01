@@ -1,0 +1,796 @@
+2025-09-20 14:15:47,584 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-20 14:16:08,062 - INFO - New connection from: 172.29.46.92
+2025-09-20 14:16:14,398 - INFO - Connection closed by 172.29.46.92
+2025-09-20 14:17:40,060 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-20 14:17:46,550 - INFO - New connection from: 172.29.46.92
+2025-09-20 14:18:07,482 - WARNING - QUERY from 172.29.46.92: book
+2025-09-20 14:18:08,914 - INFO - Connection closed by 172.29.46.92
+2025-09-20 14:21:02,543 - INFO - New connection from: 172.29.46.92
+2025-09-20 14:25:49,523 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-20 14:25:50,119 - INFO - Connection closed by 172.29.46.92
+2025-09-20 14:26:27,921 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-20 14:38:31,816 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-20 14:38:40,682 - INFO - New connection from: 172.29.46.92
+2025-09-20 14:39:28,933 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-20 14:39:29,447 - INFO - Connection closed by 172.29.46.92
+2025-09-20 16:48:06,856 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-20 16:48:23,415 - INFO - New connection from: 172.29.46.92
+2025-09-20 16:48:33,907 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-20 16:48:34,882 - INFO - Connection closed by 172.29.46.92
+2025-09-20 17:55:00,999 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-20 17:55:10,265 - INFO - New connection from: 172.29.46.92
+2025-09-20 17:56:01,916 - INFO - Connection closed by 172.29.46.92
+2025-09-20 17:58:41,256 - INFO - New connection from: 172.29.46.92
+2025-09-20 18:25:34,914 - INFO - Connection closed by 172.29.46.92
+2025-09-21 15:27:25,827 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 15:28:14,062 - INFO - New connection from: 172.29.46.92
+2025-09-21 15:30:14,652 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 15:30:14,653 - INFO - Connection closed by 172.29.46.92
+2025-09-21 15:39:48,213 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 15:39:59,115 - INFO - New connection from: 172.29.46.92
+2025-09-21 15:40:52,054 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 15:40:52,055 - INFO - Connection closed by 172.29.46.92
+2025-09-21 15:56:52,490 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 15:57:20,899 - INFO - New connection from: 172.29.46.92
+2025-09-21 15:59:38,113 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 15:59:38,113 - INFO - Connection closed by 172.29.46.92
+2025-09-21 16:00:09,191 - INFO - New connection from: 172.29.46.92
+2025-09-21 16:00:12,657 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 16:00:18,103 - WARNING - QUERY from 172.29.46.92: T @@version;
+2025-09-21 16:06:08,503 - INFO - Connection closed by 172.29.46.92
+2025-09-21 16:06:46,767 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 16:06:52,804 - INFO - New connection from: 172.29.46.92
+2025-09-21 16:07:29,527 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 16:07:29,527 - INFO - Connection closed by 172.29.46.92
+2025-09-21 16:37:45,809 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 16:37:49,864 - INFO - New connection from: 172.29.46.92
+2025-09-21 16:38:24,452 - INFO - New connection from: 172.29.46.92
+2025-09-21 16:38:27,871 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 16:38:31,133 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 16:38:34,852 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 16:38:35,569 - INFO - Received non-query packet from 172.29.46.92. Ignoring.
+2025-09-21 16:38:45,711 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 16:39:02,332 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 16:39:15,749 - INFO - Received non-query packet from 172.29.46.92. Ignoring.
+2025-09-21 16:39:17,153 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 16:39:20,788 - INFO - Received non-query packet from 172.29.46.92. Ignoring.
+2025-09-21 16:41:11,718 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 16:41:11,718 - INFO - Connection closed by 172.29.46.92
+2025-09-21 16:51:43,046 - INFO - Connection closed by 172.29.46.92
+2025-09-21 16:52:05,529 - INFO - New connection from: 172.29.46.92
+2025-09-21 16:52:08,643 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 16:52:36,483 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 16:52:40,100 - INFO - Received non-query packet from 172.29.46.92. Ignoring.
+2025-09-21 16:52:54,114 - INFO - Received non-query packet from 172.29.46.92. Ignoring.
+2025-09-21 16:52:56,698 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 16:53:00,298 - INFO - Received non-query packet from 172.29.46.92. Ignoring.
+2025-09-21 16:57:41,987 - INFO - Connection closed by 172.29.46.92
+2025-09-21 16:59:09,570 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 16:59:21,956 - INFO - New connection from: 172.29.46.92
+2025-09-21 16:59:25,095 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 16:59:42,696 - INFO - Received unhandled command 0x43 from 172.29.46.92. Sending generic OK.
+2025-09-21 17:00:12,775 - INFO - Received unhandled command 0x43 from 172.29.46.92. Sending generic OK.
+2025-09-21 17:00:51,813 - INFO - Received unhandled command 0x37 from 172.29.46.92. Sending generic OK.
+2025-09-21 17:08:19,456 - ERROR - Exception during connection with 172.29.46.92: index out of range
+2025-09-21 17:08:19,457 - INFO - Connection closed by 172.29.46.92
+2025-09-21 17:09:24,600 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:09:32,692 - INFO - New connection from: 172.29.46.92
+2025-09-21 17:09:35,289 - INFO - Received handshake packet from 172.29.46.92
+2025-09-21 17:10:02,155 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 17:10:28,403 - INFO - Received non-query setup packet from 172.29.46.92. Ignoring and sending OK.
+2025-09-21 17:10:29,117 - INFO - Received non-query setup packet from 172.29.46.92. Ignoring and sending OK.
+2025-09-21 17:10:29,117 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+FGdefresult
+!▒H▒I▒PuTTYPuTTY
+2025-09-21 17:10:33,198 - INFO - Received non-query setup packet from 172.29.46.92. Ignoring and sending OK.
+2025-09-21 17:10:33,199 - INFO - Received non-query setup packet from 172.29.46.92. Ignoring and sending OK.
+2025-09-21 17:10:40,560 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 17:10:44,417 - INFO - Received non-query setup packet from 172.29.46.92. Ignoring and sending OK.
+2025-09-21 17:14:12,391 - INFO - Connection closed by 172.29.46.92
+2025-09-21 17:14:47,727 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:15:44,936 - INFO - New connection from: 172.29.46.92
+2025-09-21 17:15:52,208 - INFO - Connection closed by 172.29.46.92
+2025-09-21 17:16:03,042 - INFO - New connection from: 172.29.46.92
+2025-09-21 17:16:15,247 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 17:16:18,864 - INFO - Connection closed by 172.29.46.92
+2025-09-21 17:16:29,770 - INFO - New connection from: 172.29.46.92
+2025-09-21 17:16:32,218 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 17:16:35,816 - INFO - Connection closed by 172.29.46.92
+2025-09-21 17:33:47,619 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:33:50,707 - INFO - New connection from: 172.29.46.92
+2025-09-21 17:44:49,076 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:44:57,690 - INFO - New connection from: 172.29.46.92
+2025-09-21 17:45:06,542 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 17:45:22,202 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 17:53:21,153 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:54:34,704 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:55:02,451 - INFO - Connection closed by 172.29.46.92
+2025-09-21 17:55:05,132 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:57:25,161 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 17:57:47,261 - INFO - New connection from: 172.29.46.92
+2025-09-21 17:58:03,522 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:05:57,299 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 18:06:00,741 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:06:12,495 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:17:48,952 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 18:17:54,802 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:18:06,680 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:18:21,445 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:18:32,626 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:22:13,508 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 18:22:17,669 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:22:25,567 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:22:33,089 - INFO - Connection closed by 172.29.46.92
+2025-09-21 18:22:40,658 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:22:42,337 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:22:49,870 - INFO - Connection closed by 172.29.46.92
+2025-09-21 18:22:58,030 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:23:01,102 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:23:17,073 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 18:23:50,671 - WARNING - QUERY from 172.29.46.92: SELECCT * FROMM userss;
+2025-09-21 18:30:53,816 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 18:30:57,546 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:31:03,410 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:31:11,005 - ERROR - Malformed AI response: '+-------------------------+| @@version               |+-------------------------+| 8.0.21               |+-------------------------+'. Sending generic error.
+2025-09-21 18:35:46,973 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 18:35:53,280 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:36:04,210 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:36:12,301 - ERROR - Malformed AI response: '+-------------------------+| @@version               |+-------------------------+| 8.0.21               |+-------------------------+'. Sending generic error.
+2025-09-21 18:41:12,074 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 18:41:15,820 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:41:29,016 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:41:37,628 - ERROR - Malformed AI response after cleaning: '+-------------------------+| @@version               |+-------------------------+| 8.0.21               |+-------------------------+'. Sending generic error.
+2025-09-21 18:46:00,387 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 18:46:03,170 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:46:10,492 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:46:32,256 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:46:50,489 - INFO - Connection closed by 172.29.46.92
+2025-09-21 18:46:52,139 - INFO - New connection from: 172.29.46.92
+2025-09-21 18:46:56,249 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 18:47:07,453 - INFO - Connection closed by 172.29.46.92
+2025-09-21 18:59:57,974 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 19:00:07,034 - INFO - New connection from: 172.29.46.92
+2025-09-21 19:00:13,695 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 19:00:46,976 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 20:02:29,899 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 20:02:54,626 - INFO - New connection from: 172.29.46.92
+2025-09-21 20:03:04,223 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 20:03:23,784 - INFO - Connection closed by 172.29.46.92
+2025-09-21 20:06:33,916 - INFO - New connection from: 172.29.46.92
+2025-09-21 20:06:42,841 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 20:07:12,311 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 20:08:00,880 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp_db;
+2025-09-21 20:09:00,943 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 21:17:09,384 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 21:17:15,351 - INFO - New connection from: 172.29.46.92
+2025-09-21 21:17:27,376 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 21:18:03,265 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 21:19:03,331 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 21:19:16,696 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 21:19:57,849 - INFO - Connection closed by 172.29.46.92
+2025-09-21 21:38:38,889 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 21:38:43,652 - INFO - New connection from: 172.29.46.92
+2025-09-21 21:38:52,876 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 21:39:49,206 - INFO - Connection closed by 172.29.46.92
+2025-09-21 21:57:09,940 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 21:57:15,307 - INFO - New connection from: 172.29.46.92
+2025-09-21 21:57:26,780 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 21:58:02,940 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 21:58:56,058 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp;
+2025-09-21 21:59:56,130 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 22:00:07,418 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 22:01:08,532 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp;
+2025-09-21 22:02:08,595 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 22:04:56,134 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp_db;
+2025-09-21 22:05:56,198 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 22:09:06,273 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 22:10:06,335 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 22:10:11,277 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 22:11:11,339 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 23:14:12,887 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 23:31:39,693 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 23:31:45,013 - INFO - New connection from: 172.29.46.92
+2025-09-21 23:31:51,698 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-21 23:32:24,011 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 23:33:24,073 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 23:33:40,553 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 23:36:18,881 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp_db;
+2025-09-21 23:37:18,945 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 23:37:28,962 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp_db;
+2025-09-21 23:38:29,026 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 23:38:49,274 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp_db;
+2025-09-21 23:39:49,338 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 23:40:34,550 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 23:42:06,100 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-21 23:43:06,162 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-21 23:57:36,779 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-21 23:59:12,003 - INFO - New connection from: 172.29.46.92
+2025-09-21 23:59:38,182 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-22 00:00:06,177 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-22 00:02:13,108 - WARNING - QUERY from 172.29.46.92: SELECT * FROM webapp_db;
+2025-09-22 00:18:57,610 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 00:19:02,565 - INFO - New connection from: 172.29.46.92
+2025-09-22 00:19:13,965 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-22 00:21:14,480 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 00:21:17,926 - INFO - New connection from: 172.29.46.92
+2025-09-22 00:21:30,942 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-22 00:24:08,075 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-22 00:25:08,137 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-22 00:25:14,380 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-22 00:46:31,933 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 00:46:49,645 - INFO - New connection from: 172.29.238.167
+2025-09-22 00:47:10,694 - WARNING - QUERY from 172.29.238.167: SELECT @@version;
+2025-09-22 00:47:39,177 - INFO - Connection closed by 172.29.238.167
+2025-09-22 01:04:13,408 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 01:05:55,193 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 01:10:16,687 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:22,690 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:10:22,792 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:22,792 - WARNING - QUERY from 172.29.46.92: GET / HTTP/1.0
+2025-09-22 01:10:27,793 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:10:27,868 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:27,868 - WARNING - QUERY from 172.29.46.92: OPTIONS / HTTP/1.0
+2025-09-22 01:10:32,923 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:10:32,990 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:32,990 - WARNING - QUERY from 172.29.46.92: OPTIONS / RTSP/1.0
+2025-09-22 01:10:37,974 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:10:38,072 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:38,072 - WARNING - QUERY from 172.29.46.92:   (r         |                    
+2025-09-22 01:10:43,108 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:10:43,147 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:43,149 - WARNING - QUERY from 172.29.46.92:           versionbind   
+2025-09-22 01:10:48,283 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:10:48,341 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:48,341 - WARNING - QUERY from 172.29.46.92:             
+2025-09-22 01:10:53,357 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:10:53,406 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:10:53,407 - WARNING - QUERY from 172.29.46.92: HELP
+2025-09-22 01:11:01,087 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:01,090 - WARNING - QUERY from 172.29.46.92:   S  O ?G,`~ {Ֆw<=on  (   
+ f   e d c b a `   	      
+2025-09-22 01:11:06,207 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:06,207 - WARNING - QUERY from 172.29.46.92:   *%     Cookie: mstshash=nmap
+     
+2025-09-22 01:11:11,371 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:11,373 - WARNING - QUERY from 172.29.46.92:   i  eUrandom1random2random3random4   / 
+  9    0  , *   
+2025-09-22 01:11:16,491 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:16,493 - WARNING - QUERY from 172.29.46.92:    qjn0k
+^0\ P NM0 0krbtgtNM19700101000000Z٨0
+2025-09-22 01:11:21,558 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:21,572 - WARNING - QUERY from 172.29.46.92:    SMBr    @              @     PC NETWORK PROGRAM 1.0 MICROSOFT NETWORKS 1.03 MICROSOFT NETWORKS 3.0 LANMAN1.0 LM1.2X002 Samba NT LANMAN 1.0 NT LM 0.12 
+2025-09-22 01:11:26,668 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:26,669 - WARNING - QUERY from 172.29.46.92: l          
+2025-09-22 01:11:31,756 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:31,757 - WARNING - QUERY from 172.29.46.92: GET /nice%20ports%2C/Tri%6Eity.txt%2ebak HTTP/1.0
+2025-09-22 01:11:36,817 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:36,821 - WARNING - QUERY from 172.29.46.92: default
+2025-09-22 01:11:42,035 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:42,035 - WARNING - QUERY from 172.29.46.92: 0   -c   $ 
+ 
+  d objectClass0    
+2025-09-22 01:11:47,154 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:47,157 - WARNING - QUERY from 172.29.46.92: 0`  
+2025-09-22 01:11:50,632 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:11:52,341 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:52,348 - WARNING - QUERY from 172.29.46.92: OPTIONS sip:nm SIP/2.0
+Via: SIP/2.0/TCP nm;branch=foo
+From: <sip:nm@nm>;tag=root
+To: <sip:nm2@nm2>
+Call-ID: 50000
+CSeq: 42 OPTIONS
+Max-Forwards: 70
+Content-Length: 0
+Contact: <sip:nm@nm>
+Accept: application/sdp
+2025-09-22 01:11:57,228 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:11:58,053 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:11:59,951 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:11:59,953 - WARNING - QUERY from 172.29.46.92: TNMP   TNME   
+2025-09-22 01:12:05,049 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:05,049 - WARNING - QUERY from 172.29.46.92:        
+2025-09-22 01:12:05,313 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:07,225 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:09,416 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:10,041 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:10,106 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:10,106 - WARNING - QUERY from 172.29.46.92: DmdT           
+2025-09-22 01:12:10,853 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:15,307 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:15,312 - WARNING - QUERY from 172.29.46.92: :   /     @  =            /         @                 
+2025-09-22 01:12:19,512 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:20,347 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:20,349 - WARNING - QUERY from 172.29.46.92: JRMI K
+2025-09-22 01:12:20,533 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:21,103 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:23,147 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:23,753 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:24,287 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:24,930 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:25,408 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:25,409 - WARNING - QUERY from 172.29.46.92:      MMS                        N S P l a y e r / 9 . 0 . 0 . 2 9 8 0 ;   { 0 0 0 0 A A 0 0 - 0 A 0 0 - 0 0 a 0 - A A 0 A - 0 0 0 0 A 0 A A 0 A A 0 }   m_
+2025-09-22 01:12:30,464 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:30,466 - WARNING - QUERY from 172.29.46.92:  Z     6,         :                4           (CONNECT_DATA=(COMMAND=version))
+2025-09-22 01:12:30,582 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:30,985 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:34,478 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:35,781 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:35,782 - WARNING - QUERY from 172.29.46.92:  4            (  U   MSSQLServer H  
+2025-09-22 01:12:40,906 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:40,907 - WARNING - QUERY from 172.29.46.92:               
+2025-09-22 01:12:44,486 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:45,598 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:45,964 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:45,966 - WARNING - QUERY from 172.29.46.92: GIOP  $                abcdef     get     
+2025-09-22 01:12:46,316 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:51,069 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:12:55,211 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:55,451 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:12:55,503 - WARNING - QUERY from 172.29.46.92:   i  eUrandom1random2random3random4   / 
+  9    0  , *   
+2025-09-22 01:12:55,671 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:13:00,926 - WARNING - Connection reset by 172.29.46.92
+2025-09-22 01:13:00,926 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:02,917 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:25,310 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:25,358 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:13:25,365 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:13:25,365 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:13:25,380 - WARNING - QUERY from 172.29.46.92:   (1y                               
+2025-09-22 01:13:27,873 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:32,667 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:32,667 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:32,710 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:13:32,727 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:13:40,019 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:40,019 - INFO - Connection closed by 172.29.46.92
+2025-09-22 01:13:40,070 - INFO - New connection from: 172.29.46.92
+2025-09-22 01:13:47,128 - INFO - Connection closed by 172.29.46.92
+2025-09-22 03:06:14,492 - INFO - New connection from: 172.29.46.92
+2025-09-22 03:06:51,563 - INFO - Connection closed by 172.29.46.92
+2025-09-22 03:06:52,770 - INFO - New connection from: 172.29.46.92
+2025-09-22 03:07:06,286 - INFO - Connection closed by 172.29.46.92
+2025-09-22 03:07:07,546 - INFO - New connection from: 172.29.46.92
+2025-09-22 03:23:55,588 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 03:24:10,587 - INFO - New connection from: 172.29.46.92
+2025-09-22 03:24:28,541 - INFO - Connection closed by 172.29.46.92
+2025-09-22 03:24:47,211 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 10:18:03,460 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-22 10:29:38,016 - INFO - New connection from: 172.29.238.167
+2025-09-22 10:36:31,285 - WARNING - QUERY from 172.29.238.167: SELECT @@version;
+2025-09-22 10:36:35,772 - INFO - Connection closed by 172.29.238.167
+2025-09-22 10:36:42,519 - INFO - New connection from: 172.29.238.167
+2025-09-22 10:37:44,907 - WARNING - QUERY from 172.29.238.167: SELECT @@version;
+2025-09-22 10:38:38,580 - WARNING - QUERY from 172.29.238.167: SHOW DATABASES;
+2025-09-22 10:39:27,228 - WARNING - QUERY from 172.29.238.167: tables;
+2025-09-22 10:41:20,231 - WARNING - QUERY from 172.29.238.167: SELECT * FROM users;
+2025-09-22 11:13:05,106 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-23 16:42:13,160 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-23 17:57:19,539 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-23 18:03:39,326 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-23 18:12:42,595 - INFO - New connection from: 172.29.46.92
+2025-09-23 18:12:52,607 - WARNING - QUERY from 172.29.46.92: SHOW DATABASES;
+2025-09-23 18:13:33,470 - WARNING - QUERY from 172.29.46.92: SHOW TABLES;
+2025-09-23 18:15:17,832 - WARNING - QUERY from 172.29.46.92: SELECT NOW();
+2025-09-23 18:16:16,356 - WARNING - QUERY from 172.29.46.92: SELECT DATABASE();
+2025-09-23 18:16:57,513 - WARNING - QUERY from 172.29.46.92: SHOW PROCESSLIST;
+2025-09-23 18:18:26,137 - WARNING - QUERY from 172.29.46.92: CREATE DATABASE dbname;
+2025-09-23 18:19:00,032 - WARNING - QUERY from 172.29.46.92: USE dbname;
+2025-09-23 18:21:37,807 - WARNING - QUERY from 172.29.46.92: SELECT USER();
+2025-09-23 18:22:18,703 - WARNING - QUERY from 172.29.46.92: STATUS;
+2025-09-23 18:22:54,354 - WARNING - QUERY from 172.29.46.92: SELECT @@version;
+2025-09-23 18:23:10,491 - WARNING - QUERY from 172.29.46.92: SELECT CURDATE();
+2025-09-23 18:23:36,004 - WARNING - QUERY from 172.29.46.92: SELECT VERSION();
+2025-09-23 18:23:45,961 - WARNING - QUERY from 172.29.46.92: SELECT VERSION();
+2025-09-23 18:24:46,380 - WARNING - QUERY from 172.29.46.92: CREATE TABLE users (
+2025-09-23 18:25:11,660 - WARNING - QUERY from 172.29.46.92: id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50),
+    email VARCHAR(100)
+);
+2025-09-23 18:26:47,427 - WARNING - QUERY from 172.29.46.92: DROP TABLE users;
+2025-09-23 18:35:24,815 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-23 19:11:56,024 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-23 19:49:32,260 - INFO - New connection from: 172.29.46.92
+2025-09-23 20:01:33,750 - INFO - Connection closed by 172.29.46.92
+2025-09-23 20:43:02,547 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-23 21:13:59,293 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-25 18:07:15,546 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-28 19:57:19,796 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-28 20:12:12,554 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-28 20:17:17,126 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-09-30 13:58:48,326 - INFO - New connection from: 172.29.238.167
+2025-09-30 14:33:54,744 - WARNING - QUERY from 172.29.238.167: SELECT DATABASE();
+2025-09-30 15:13:41,606 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:13:47,616 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:13:47,634 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:13:47,755 - WARNING - QUERY from 172.29.238.167: GET / HTTP/1.0
+2025-09-30 15:13:52,717 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:13:52,724 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:13:52,724 - WARNING - QUERY from 172.29.238.167: OPTIONS / HTTP/1.0
+2025-09-30 15:13:57,744 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:13:57,750 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:13:57,751 - WARNING - QUERY from 172.29.238.167: OPTIONS / RTSP/1.0
+2025-09-30 15:14:02,748 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:14:02,755 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:02,758 - WARNING - QUERY from 172.29.238.167:   (r         |                    
+2025-09-30 15:14:07,753 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:14:07,760 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:07,761 - WARNING - QUERY from 172.29.238.167:           versionbind   
+2025-09-30 15:14:10,498 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:12,769 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:14:12,776 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:12,777 - WARNING - QUERY from 172.29.238.167:             
+2025-09-30 15:14:16,505 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:14:16,530 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:16,642 - WARNING - QUERY from 172.29.238.167: GET / HTTP/1.0
+2025-09-30 15:14:17,780 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:14:17,812 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:17,813 - WARNING - QUERY from 172.29.238.167: HELP
+2025-09-30 15:14:21,620 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:14:21,631 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:21,632 - WARNING - QUERY from 172.29.238.167: OPTIONS / HTTP/1.0
+2025-09-30 15:14:25,324 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:25,324 - WARNING - QUERY from 172.29.238.167:   S  O ?G,`~ {Ֆw<=on  (   
+ f   e d c b a `   	      
+2025-09-30 15:14:26,636 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:26,636 - WARNING - QUERY from 172.29.238.167: OPTIONS / RTSP/1.0
+2025-09-30 15:14:30,387 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:30,387 - WARNING - QUERY from 172.29.238.167:   *%     Cookie: mstshash=nmap
+     
+2025-09-30 15:14:31,711 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:31,714 - WARNING - QUERY from 172.29.238.167:   (r         |                    
+2025-09-30 15:14:35,372 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:35,373 - WARNING - QUERY from 172.29.238.167:   i  eUrandom1random2random3random4   / 
+  9    0  , *   
+2025-09-30 15:14:36,769 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:36,771 - WARNING - QUERY from 172.29.238.167:           versionbind   
+2025-09-30 15:14:40,386 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:40,390 - WARNING - QUERY from 172.29.238.167:    qjn0k
+^0\ P NM0 0krbtgtNM19700101000000Z٨0
+2025-09-30 15:14:41,749 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:41,750 - WARNING - QUERY from 172.29.238.167:             
+2025-09-30 15:14:45,395 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:45,396 - WARNING - QUERY from 172.29.238.167:    SMBr    @              @     PC NETWORK PROGRAM 1.0 MICROSOFT NETWORKS 1.03 MICROSOFT NETWORKS 3.0 LANMAN1.0 LM1.2X002 Samba NT LANMAN 1.0 NT LM 0.12 
+2025-09-30 15:14:46,786 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:46,787 - WARNING - QUERY from 172.29.238.167: HELP
+2025-09-30 15:14:50,401 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:50,401 - WARNING - QUERY from 172.29.238.167: l          
+2025-09-30 15:14:54,291 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:54,292 - WARNING - QUERY from 172.29.238.167:   S  O ?G,`~ {Ֆw<=on  (   
+ f   e d c b a `   	      
+2025-09-30 15:14:55,414 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:55,417 - WARNING - QUERY from 172.29.238.167: GET /nice%20ports%2C/Tri%6Eity.txt%2ebak HTTP/1.0
+2025-09-30 15:14:59,299 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:14:59,302 - WARNING - QUERY from 172.29.238.167:   *%     Cookie: mstshash=nmap
+     
+2025-09-30 15:15:00,280 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:00,422 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:00,423 - WARNING - QUERY from 172.29.238.167: default
+2025-09-30 15:15:02,175 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:04,307 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:04,309 - WARNING - QUERY from 172.29.238.167:   i  eUrandom1random2random3random4   / 
+  9    0  , *   
+2025-09-30 15:15:05,438 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:05,441 - WARNING - QUERY from 172.29.238.167: 0   -c   $ 
+ 
+  d objectClass0    
+2025-09-30 15:15:09,312 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:09,315 - WARNING - QUERY from 172.29.238.167:    qjn0k
+^0\ P NM0 0krbtgtNM19700101000000Z٨0
+2025-09-30 15:15:10,475 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:10,475 - WARNING - QUERY from 172.29.238.167: 0`  
+2025-09-30 15:15:14,318 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:14,318 - WARNING - QUERY from 172.29.238.167:    SMBr    @              @     PC NETWORK PROGRAM 1.0 MICROSOFT NETWORKS 1.03 MICROSOFT NETWORKS 3.0 LANMAN1.0 LM1.2X002 Samba NT LANMAN 1.0 NT LM 0.12 
+2025-09-30 15:15:15,514 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:15,516 - WARNING - QUERY from 172.29.238.167: OPTIONS sip:nm SIP/2.0
+Via: SIP/2.0/TCP nm;branch=foo
+From: <sip:nm@nm>;tag=root
+To: <sip:nm2@nm2>
+Call-ID: 50000
+CSeq: 42 OPTIONS
+Max-Forwards: 70
+Content-Length: 0
+Contact: <sip:nm@nm>
+Accept: application/sdp
+2025-09-30 15:15:19,326 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:19,329 - WARNING - QUERY from 172.29.238.167: l          
+2025-09-30 15:15:20,695 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:22,480 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:23,018 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:23,019 - WARNING - QUERY from 172.29.238.167: TNMP   TNME   
+2025-09-30 15:15:24,374 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:24,376 - WARNING - QUERY from 172.29.238.167: GET /nice%20ports%2C/Tri%6Eity.txt%2ebak HTTP/1.0
+2025-09-30 15:15:25,548 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:28,033 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:28,033 - WARNING - QUERY from 172.29.238.167:        
+2025-09-30 15:15:29,331 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:29,421 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:29,421 - WARNING - QUERY from 172.29.238.167: default
+2025-09-30 15:15:33,051 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:33,051 - WARNING - QUERY from 172.29.238.167: DmdT           
+2025-09-30 15:15:34,424 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:34,427 - WARNING - QUERY from 172.29.238.167: 0   -c   $ 
+ 
+  d objectClass0    
+2025-09-30 15:15:35,437 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:35,438 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:36,834 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:36,834 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:38,058 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:38,062 - WARNING - QUERY from 172.29.238.167: :   /     @  =            /         @                 
+2025-09-30 15:15:39,434 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:39,435 - WARNING - QUERY from 172.29.238.167: 0`  
+2025-09-30 15:15:40,462 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:40,462 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:41,812 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:41,812 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:43,070 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:43,073 - WARNING - QUERY from 172.29.238.167: JRMI K
+2025-09-30 15:15:44,508 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:44,509 - WARNING - QUERY from 172.29.238.167: OPTIONS sip:nm SIP/2.0
+Via: SIP/2.0/TCP nm;branch=foo
+From: <sip:nm@nm>;tag=root
+To: <sip:nm2@nm2>
+Call-ID: 50000
+CSeq: 42 OPTIONS
+Max-Forwards: 70
+Content-Length: 0
+Contact: <sip:nm@nm>
+Accept: application/sdp
+2025-09-30 15:15:45,457 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:45,458 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:46,851 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:46,851 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:48,082 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:48,084 - WARNING - QUERY from 172.29.238.167:      MMS                        N S P l a y e r / 9 . 0 . 0 . 2 9 8 0 ;   { 0 0 0 0 A A 0 0 - 0 A 0 0 - 0 0 a 0 - A A 0 A - 0 0 0 0 A 0 A A 0 A A 0 }   m_
+2025-09-30 15:15:50,468 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:50,474 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:52,010 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:52,011 - WARNING - QUERY from 172.29.238.167: TNMP   TNME   
+2025-09-30 15:15:53,091 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:53,094 - WARNING - QUERY from 172.29.238.167:  Z     6,         :                4           (CONNECT_DATA=(COMMAND=version))
+2025-09-30 15:15:54,360 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:54,361 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:55,480 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:55,481 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:15:57,035 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:57,035 - WARNING - QUERY from 172.29.238.167:        
+2025-09-30 15:15:58,141 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:15:58,142 - WARNING - QUERY from 172.29.238.167:  4            (  U   MSSQLServer H  
+2025-09-30 15:15:59,363 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:15:59,363 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:00,484 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:00,484 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:02,045 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:02,049 - WARNING - QUERY from 172.29.238.167: DmdT           
+2025-09-30 15:16:03,198 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:03,199 - WARNING - QUERY from 172.29.238.167:               
+2025-09-30 15:16:04,370 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:04,370 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:05,502 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:05,502 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:07,067 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:07,067 - WARNING - QUERY from 172.29.238.167: :   /     @  =            /         @                 
+2025-09-30 15:16:08,236 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:08,237 - WARNING - QUERY from 172.29.238.167: GIOP  $                abcdef     get     
+2025-09-30 15:16:09,379 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:09,380 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:10,537 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:10,537 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:12,072 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:12,073 - WARNING - QUERY from 172.29.238.167: JRMI K
+2025-09-30 15:16:14,379 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:14,379 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:15,580 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:15,580 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:17,100 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:17,103 - WARNING - QUERY from 172.29.238.167:      MMS                        N S P l a y e r / 9 . 0 . 0 . 2 9 8 0 ;   { 0 0 0 0 A A 0 0 - 0 A 0 0 - 0 0 a 0 - A A 0 A - 0 0 0 0 A 0 A A 0 A A 0 }   m_
+2025-09-30 15:16:17,852 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:17,890 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:17,928 - WARNING - Connection reset by 172.29.238.167
+2025-09-30 15:16:17,934 - WARNING - QUERY from 172.29.238.167:   i  eUrandom1random2random3random4   / 
+  9    0  , *   
+2025-09-30 15:16:17,939 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:18,044 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:18,151 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:19,390 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:19,390 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:22,107 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:22,109 - WARNING - QUERY from 172.29.238.167:  Z     6,         :                4           (CONNECT_DATA=(COMMAND=version))
+2025-09-30 15:16:23,083 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:23,084 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:24,443 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:24,443 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:26,408 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:26,410 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:26,445 - WARNING - QUERY from 172.29.238.167:   (6                               
+2025-09-30 15:16:26,448 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:26,520 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:26,646 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:26,693 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:26,775 - WARNING - Connection reset by 172.29.238.167
+2025-09-30 15:16:26,775 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:26,930 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:27,035 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:27,177 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:27,180 - WARNING - QUERY from 172.29.238.167:  4            (  U   MSSQLServer H  
+2025-09-30 15:16:28,095 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:28,095 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:29,483 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:29,483 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:32,167 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:32,167 - WARNING - QUERY from 172.29.238.167:               
+2025-09-30 15:16:33,116 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:33,116 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:34,488 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:34,488 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:37,178 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:37,181 - WARNING - QUERY from 172.29.238.167: GIOP  $                abcdef     get     
+2025-09-30 15:16:38,124 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:38,124 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:39,499 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:39,499 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:43,136 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:43,136 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:44,571 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:44,572 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:46,911 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:46,980 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:47,013 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:47,018 - WARNING - QUERY from 172.29.238.167:   i  eUrandom1random2random3random4   / 
+  9    0  , *   
+2025-09-30 15:16:47,233 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:47,349 - WARNING - Connection reset by 172.29.238.167
+2025-09-30 15:16:47,352 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:48,146 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:48,149 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:52,072 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:52,073 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:53,159 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:53,159 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:54,462 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:54,470 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:54,470 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:54,538 - WARNING - QUERY from 172.29.238.167:   (                               
+2025-09-30 15:16:54,538 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:54,539 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:54,645 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:54,717 - WARNING - Connection reset by 172.29.238.167
+2025-09-30 15:16:54,717 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:54,874 - INFO - New connection from: 172.29.238.167
+2025-09-30 15:16:54,936 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:57,098 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:57,098 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:16:58,205 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:16:58,205 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:02,111 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:02,112 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:03,264 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:03,264 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:07,131 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:07,133 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:08,300 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:08,300 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:12,134 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:12,135 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:17,172 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:17,172 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:18,001 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:18,002 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:22,176 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:22,176 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:26,508 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:26,508 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:27,241 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:27,241 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:32,230 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:32,230 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:37,243 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:37,243 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:47,081 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:47,082 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:17:54,604 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Read timed out. (read timeout=60)
+2025-09-30 15:17:54,605 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:20:51,666 - INFO - Connection closed by 172.29.238.167
+2025-09-30 15:20:54,003 - INFO - New connection from: 172.29.238.167
+2025-09-30 16:03:47,034 - WARNING - QUERY from 172.29.238.167: SELECT @@version;
+2025-09-30 16:03:47,036 - ERROR - llama-server connection error: HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /completion (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0xffff9465f980>: Failed to establish a new connection: [Errno 111] Connection refused'))
+2025-09-30 16:53:25,718 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-10-01 14:30:01,645 - INFO - New connection from: 172.29.208.9
+2025-10-01 14:30:12,740 - WARNING - QUERY from 172.29.208.9: SELECT user();
+2025-10-01 14:34:54,912 - WARNING - QUERY from 172.29.208.9: SELECT users();
+2025-10-01 14:49:31,264 - INFO - New connection from: 172.29.208.9
+2025-10-01 14:49:45,478 - WARNING - QUERY from 172.29.208.9: SELECT users();
+2025-10-01 14:50:16,306 - WARNING - QUERY from 172.29.208.9: SELECT user();
+2025-10-01 14:50:43,470 - WARNING - QUERY from 172.29.208.9: SHOW database;
+2025-10-01 15:08:47,072 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-10-01 18:10:15,169 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-10-01 18:23:15,232 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-10-02 09:15:02,242 - INFO - New connection from: 172.29.208.9
+2025-10-02 09:15:15,783 - WARNING - QUERY from 172.29.208.9: SELECT user();
+2025-10-02 09:15:40,894 - WARNING - QUERY from 172.29.208.9: SELECT @@version;
+2025-10-02 09:16:08,035 - WARNING - QUERY from 172.29.208.9: SHOW DATABASES;
+2025-10-02 09:16:45,751 - WARNING - QUERY from 172.29.208.9: SELECT users();
+2025-10-02 09:34:46,256 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-10-02 09:42:27,365 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-10-02 09:46:30,344 - INFO - New connection from: 172.29.208.9
+2025-10-02 09:47:52,980 - WARNING - QUERY from 172.29.208.9: SELECT users();
+2025-10-02 09:48:01,804 - INFO - Connection closed by 172.29.208.9
+2025-10-02 09:48:09,174 - INFO - New connection from: 172.29.208.9
+2025-10-02 09:48:16,176 - WARNING - QUERY from 172.29.208.9: SELECT users();
+2025-10-02 09:48:42,098 - INFO - Connection closed by 172.29.208.9
+2025-10-02 09:49:03,030 - INFO - New connection from: 172.29.208.9
+2025-10-02 09:49:13,016 - WARNING - QUERY from 172.29.208.9: SELECT users();
+2025-10-02 10:16:59,633 - WARNING - QUERY from 172.29.208.9: SELECT @@version;
+2025-10-02 10:30:32,773 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2025-10-02 12:14:16,972 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-07 16:42:29,974 - INFO - New connection from: 172.20.10.3
+2026-04-07 16:42:29,975 - WARNING - Connection reset by 172.20.10.3
+2026-04-07 16:42:29,975 - INFO - Connection closed by 172.20.10.3
+2026-04-07 18:32:23,739 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-28 13:45:55,780 - INFO - New connection from: 172.20.10.2
+2026-04-28 14:07:35,365 - INFO - New connection from: 192.168.1.9
+2026-04-28 19:28:01,520 - INFO - New connection from: 192.168.1.9
+2026-04-28 20:16:15,384 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-28 22:55:35,336 - INFO - New connection from: 192.168.1.9
+2026-04-28 22:57:20,306 - INFO - New connection from: 192.168.1.9
+2026-04-29 01:58:50,631 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-29 12:31:51,544 - INFO - New connection from: 192.168.1.9
+2026-04-29 12:33:15,386 - INFO - New connection from: 192.168.1.9
+2026-04-29 12:33:15,387 - WARNING - Connection reset by 192.168.1.9
+2026-04-29 12:33:15,387 - INFO - Connection closed by 192.168.1.9
+2026-04-29 12:43:45,479 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-29 12:45:11,279 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-29 12:46:59,799 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-29 12:51:55,516 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-04-29 21:43:11,865 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-01 00:45:20,172 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-02 00:38:47,973 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-02 18:05:13,909 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-02 23:33:38,660 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-03 23:52:07,164 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-04 12:47:42,311 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-05 09:32:51,828 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-05 18:53:39,345 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-12 01:00:18,285 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-12 17:04:48,665 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-13 00:34:54,501 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-15 03:52:53,999 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-15 16:49:50,686 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-16 02:28:29,867 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-16 23:40:01,457 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-18 02:21:50,632 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-21 15:03:06,247 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-22 02:03:12,980 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-23 01:00:25,681 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-23 23:41:27,942 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-25 00:17:37,817 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-27 02:20:59,893 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-27 23:12:18,911 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-29 21:19:30,421 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-05-30 02:27:33,340 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-06-04 06:11:09,914 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-06-11 06:48:56,364 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-06-17 11:44:57,555 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-06-17 22:05:30,089 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-06-27 03:52:42,818 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-01 10:47:07,730 - INFO - New connection from: 192.168.1.9
+2026-07-01 12:19:04,130 - INFO - New connection from: 192.168.1.9
+2026-07-01 12:47:39,249 - INFO - New connection from: 192.168.1.9
+2026-07-02 07:46:01,722 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-04 08:48:42,092 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-05 14:40:16,616 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-05 16:04:34,832 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-06 21:58:39,110 - INFO - New connection from: 100.118.43.30
+2026-07-07 06:23:29,061 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-12 15:54:36,903 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-18 22:14:23,374 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-19 00:55:35,919 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-20 18:01:03,159 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-20 18:11:28,167 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-22 01:17:10,332 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-22 01:32:39,491 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-22 01:44:07,326 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-22 01:55:14,152 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-28 06:17:13,756 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...
+2026-07-31 06:05:33,947 - INFO - Starting LLM MySQL Honeypot on 0.0.0.0:3306...

@@ -1,0 +1,36 @@
+[Unit]
+Description=Honeypot Sensor Forwarder - Cowrie main log to GCP
+After=network-online.target cowrie.service
+Wants=network-online.target
+Documentation=file:///home/cpe27/dashboard-honeypot/docs/raspberry_pi_setup.md
+
+[Service]
+Type=simple
+User=honeypot-forwarder
+Group=honeypot-forwarder
+WorkingDirectory=/home/cpe27/dashboard-honeypot/server/plugin
+
+# Load configuration from file (do NOT put token in this file directly)
+EnvironmentFile=/etc/honeypot-forwarder/main.env
+
+# Set Python path for module imports
+Environment=PYTHONPATH=/home/cpe27/dashboard-honeypot/server/plugin
+
+# Run the production.sensor_forwarder in tail-mode (continuous polling)
+ExecStart=/usr/bin/python3 -m production.sensor_forwarder
+
+# Restart policy
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=honeypot-forwarder-main
+
+# Process management
+KillMode=process
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

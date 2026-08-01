@@ -1,18 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
-const markers = [
-  { name: "Node Alpha", coordinates: [-95.7129, 37.0902], status: "running" },
-  { name: "Node Beta", coordinates: [5.2913, 52.1326], status: "completed" },
-  { name: "Node Gamma", coordinates: [104.1954, 35.8617], status: "failed" },
-  { name: "Node Delta", coordinates: [10.4515, 51.1657], status: "completed" },
-];
-
 export default function RegionalMap() {
+  const [markers, setMarkers] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchThreats = async () => {
+      try {
+        const res = await fetch("/api/threats");
+        if (res.ok) {
+          const data = await res.json();
+          const newMarkers = data.map((threat: any) => ({
+            name: `${threat.src_ip} (${threat.geo.country}) - ${threat.event_type}`,
+            coordinates: [threat.geo.lon, threat.geo.lat],
+            status: threat.severity === "Critical" ? "failed" : threat.severity === "High" ? "failed" : "running"
+          })).filter((m: any) => m.coordinates[0] !== 0 && m.coordinates[1] !== 0);
+          setMarkers(newMarkers);
+        }
+      } catch (err) {
+        console.error("Failed to fetch threats for map:", err);
+      }
+    };
+    
+    fetchThreats();
+    const interval = setInterval(fetchThreats, 5000); // refresh every 5s
+    return () => clearInterval(interval);
+  }, []);
   const [position, setPosition] = useState({ coordinates: [0, 20] as [number, number], zoom: 1 });
   const [tooltip, setTooltip] = useState({ show: false, content: "", x: 0, y: 0 });
 

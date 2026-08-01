@@ -1,0 +1,472 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { createSwapy } from 'swapy';
+import type { Swapy } from 'swapy';
+
+import Chart from '../components/Chart';
+import StatCard from '../components/StatCard';
+import ChartCard from '../components/ChartCard';
+import DataTable from '../components/DataTable';
+import Loader from '../components/loader/Loader';
+import MapIP from '../components/MapIP';
+import { Marquee } from '../components/Marquee';
+
+import type { CanaryLog, CowrieLog, HttpsPacket } from '../types';
+import { useCanarySocket, useCowrieSocket, usePacketSocket } from '../service/websocket';
+
+const HomePage: React.FC = () => {
+  const { t } = useTranslation();
+  // routing
+  const navigate = useNavigate();
+  // data services
+  const [CowrieData, setCowrieData] = useState<CowrieLog[]>([]);
+  const [CowrieCount, setCowrieCount] = useState<number>(0);
+  const [CanaryData, setCanaryData] = useState<CanaryLog[]>([]);
+  const [CanaryCount, setCanaryCount] = useState<number>(0);
+  const [dataPacket, setDataPacket] = useState<HttpsPacket[]>([]);
+  const [PacketCount, setPacketCount] = useState<number>(0);
+  const [IpMap, setUniqueIPs] = useState<string[]>([]);
+  // status
+  const [isConnected, setIsConnected] = useState(false);
+  const [isLogin, setIsLogin] = useState(false);
+  const [isError, setIsError] = useState<string>('');
+  const [popupMap, setPopupMap] = useState(false);
+
+  useCowrieSocket(setCowrieData, setCowrieCount, setIsConnected, setIsLogin, setIsError);
+  useCanarySocket(setCanaryData, setCanaryCount, setIsConnected, setIsLogin, setIsError);
+  usePacketSocket(setDataPacket, setPacketCount, setIsConnected, setIsLogin);
+
+  useEffect(() => {
+    const status = localStorage.getItem("status");
+    console.log('HomePage checking status:', status);
+    if (status === 'Authenticated') {
+      setIsLogin(true);
+    }
+  }, []);
+
+  // Combine recent activities from all sources
+  const recentActivities = [
+    ...CowrieData.slice(0, 2).map(item => ({
+      source: 'Cowrie',
+      timestamp: item.timestamp ? item.timestamp.replace("Z", "") : '',
+      activity: `SSH connection from ${item.src_ip}`,
+      C: `Confidentiality (C)`,
+      I: `Integrity (I)`,
+      A: `Availability (A)`,
+      severity: 'high'
+    })),
+    ...CanaryData.slice(0, 2).map(item => ({
+      source: 'OpenCanary',
+      timestamp: item.local_time ? item.local_time.replace("Z", "") : '',
+      activity: `${item.logdata_msg_logdata}`,
+      C: `Confidentiality (C)`,
+      I: `none`,
+      A: `Availability (A)`,
+      severity: 'medium'
+    })),
+    ...dataPacket.slice(0, 2).map(item => ({
+      source: 'Wireshark',
+      timestamp: item.timestamp ? item.timestamp.replace("Z", "") : '',
+      activity: `${item.method} request to ${item.request_uri}`,
+      C: `Confidentiality (C)`,
+      I: `none`,
+      A: `none`,
+      severity: 'low'
+    }))
+  ].sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+
+  const activityColumns = [
+    { key: 'source', header: 'Source' },
+    { key: 'timestamp', header: 'Timestamp', render: (value: string) => new Date(value).toLocaleString() },
+    { key: 'activity', header: 'Activity' },
+    { key: 'C', header: 'Confidentiality', render: (value: string) => <p style={{ opacity: `${value === 'none' ? '0.4' : '1'}` }}>{value.toLocaleUpperCase()}</p> },
+    { key: 'I', header: 'Integrity', render: (value: string) => <p style={{ opacity: `${value === 'none' ? '0.4' : '1'}` }}>{value.toLocaleUpperCase()}</p> },
+    { key: 'A', header: 'Availability', render: (value: string) => <p style={{ opacity: `${value === 'none' ? '0.4' : '1'}` }}>{value.toLocaleUpperCase()}</p> },
+    {
+      key: 'severity',
+      header: 'Severity',
+      render: (value: string) => (
+        <span className={`stat-change ${value === 'high' ? 'text-danger' :
+          value === 'medium' ? 'text-warning' :
+            'text-success'
+          }`}>
+          {value.toUpperCase()}
+        </span>
+      )
+    }
+  ];
+
+
+  // =============
+  // drag and drop
+  // =============
+  const swapyStats = useRef<Swapy | null>(null);
+  const containerStats = useRef<HTMLDivElement>(null);
+
+  const swapyCharts = useRef<Swapy | null>(null);
+  const containerCharts = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Logic สำหรับ Swapy ชุดแรก (stats)
+    if (containerStats.current) {
+      swapyStats.current = createSwapy(containerStats.current);
+      // swapyStats.current.onSwap((event) => {
+      //   console.log('Stats swapped:', event);
+      // });
+    }
+
+    // Logic สำหรับ Swapy ชุดที่สอง (charts)
+    if (containerCharts.current) {
+      swapyCharts.current = createSwapy(containerCharts.current);
+      // swapyCharts.current.onSwap((event) => {
+      //   console.log('Charts swapped:', event);
+      // });
+    }
+
+    // Cleanup functions
+    return () => {
+      swapyStats.current?.destroy();
+      swapyCharts.current?.destroy();
+    };
+  }, [CowrieData, CanaryData, dataPacket]);
+
+
+
+
+
+
+
+  // ========================
+  // Top 10 usernames
+  // ========================
+  const usernameCounts: Record<string, number> = {};
+  CowrieData.forEach(item => {
+    if (item.username) {
+      usernameCounts[item.username] = (usernameCounts[item.username] || 0) + 1;
+    }
+  });
+
+  const sortedUsernames = Object.entries(usernameCounts)
+    .sort(([, countA], [, countB]) => countB - countA)
+    .slice(0, 10);
+
+  const labelsUser = sortedUsernames.map(([username]) => username);
+  const countsUser = sortedUsernames.map(([, count]) => count);
+  const usernameData = {
+    labels: labelsUser,
+    datasets: [{
+      label: 'Usage Count',
+      data: countsUser,
+      backgroundColor: (ctx: any) => {
+        const chart = ctx.chart;
+        const { ctx: canvas } = chart;
+        const gradient = canvas.createLinearGradient(0, 0, 0, 200);
+        gradient.addColorStop(0, "#b2b5b8ff");
+        gradient.addColorStop(1, "#484849ff");
+        return gradient;
+      },
+      borderRadius: 4,
+    }]
+  };
+
+  const CowrieOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'bottom' as const,
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: t('cowrie_chart_Y1')
+        }
+      },
+      x: {
+        title: {
+          display: true,
+          text: t('cowrie_chart_x1')
+        }
+      }
+    }
+  };
+
+
+
+  // ========================
+  // Chart จำนวน Packet ตามวัน
+  // ========================
+  const dailyCounts: Record<string, number> = {};
+  CanaryData.forEach(item => {
+    const localTimeAdjusted = item.local_time_adjusted || '';
+    const date = localTimeAdjusted.split(' ')[0]; // แยกวันที่จาก 'YYYY-MM-DD HH:mm:ss'
+    dailyCounts[date] = (dailyCounts[date] || 0) + 1;
+  });
+
+  const sortedDates = Object.keys(dailyCounts).sort();
+
+  const labelsDaily = sortedDates;
+  const countsDaily = sortedDates.map(date => dailyCounts[date]);
+  const dailyPacketsData = {
+    labels: labelsDaily,
+    datasets: [{
+      label: t('opencanary_chart_tooltip2'),
+      data: countsDaily,
+      borderColor: '#b2b5b8ff',
+      backgroundColor: (ctx: any) => {
+        const chart = ctx.chart;
+        const { ctx: canvas } = chart;
+        const gradient = canvas.createLinearGradient(0, 0, 0, 200);
+        gradient.addColorStop(0, "#b2b5b8ff");
+        gradient.addColorStop(1, "#484849ff");
+        return gradient;
+      },
+      borderRadius: 4,
+      fill: true,
+      tension: 0.4,
+    }]
+  };
+
+
+
+  // ========================
+  // Chart จำนวน Packet Wireshark ตามวัน
+  // ========================
+  const dailyPacketCounts: Record<string, number> = {};
+  dataPacket.forEach(item => {
+    const localTimeAdjusted = item.timestamp || '';
+    const date = localTimeAdjusted.split(' ')[0]; // แยกวันที่จาก 'YYYY-MM-DD HH:mm:ss'
+    dailyPacketCounts[date] = (dailyPacketCounts[date] || 0) + 1;
+  });
+
+  const sortedPacketDates = Object.keys(dailyPacketCounts).sort();
+
+  const labelsPacketDaily = sortedPacketDates;
+  const countsPacketDaily = sortedPacketDates.map(date => dailyPacketCounts[date]);
+  const dailyWiresharkData = {
+    labels: labelsPacketDaily,
+    datasets: [{
+      label: 'Wireshark',
+      data: countsPacketDaily,
+      borderColor: '#b2b5b8ff',
+      backgroundColor: '#b2b5b8ff',
+      fill: true,
+      tension: 0.4,
+    }]
+  };
+
+
+  const PacketsOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'bottom' as const,
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: t('opencanary_chart_Y')
+        }
+      },
+      x: {
+        title: {
+          display: true,
+          text: t('opencanary_chart_x2')
+        }
+      }
+    }
+  };
+
+
+
+  // ============================
+  // แปลง ip และเอาไปปักใน map
+  // ============================
+  const handleFetchIP = () => {
+    setPopupMap(true);
+    try {
+      if (CowrieData.length > 0) {
+        const uniqueIPSet = new Set<string>();
+        CowrieData.forEach(log => {
+          if (log.src_ip) {
+            uniqueIPSet.add(log.src_ip);
+          }
+        });
+        setUniqueIPs(Array.from(uniqueIPSet));
+      }
+    } catch (error) {
+      console.error('Error fetching IP addresses:', error);
+    }
+  }
+
+  if (!isLogin) {
+    return (
+      <div style={{ position: 'fixed', width: '90vw', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+        <h2>
+          You are not logged in. Please log in to access this page.
+        </h2>
+        <button onClick={() => navigate('/home/login')}>Go to Log in</button>
+      </div>
+    )
+  }
+
+  if (!isConnected) {
+    return (
+      <Loader />
+    )
+  }
+
+  return (
+    <div>
+      <Marquee />
+      <div className="page-header">
+        <h1 className="page-title">{t('dashboard_title')}</h1>
+        <p className="page-subtitle">{t('dashboard_overview')}</p><span style={{ color: isConnected ? 'var(--accent-primary)' : 'red' }}> {isConnected ? 'Online 🌐' : 'Offline 🔴'}</span> <span style={{ color: 'var(--accent-primary)' }}>{isError}</span>
+      </div>
+
+      <div ref={containerStats} className="stats-grid">
+        {/* Slot 1 */}
+        <div data-swapy-slot="slot-1">
+          <div data-swapy-item="item-A">
+            <StatCard
+              title={t('dashboard_total_packets')}
+              value={CowrieCount + CanaryCount + PacketCount}
+              change={(CowrieData.filter(item => item?.timestamp?.split(' ')[0] === new Date().toISOString().split('T')[0]).length + (CanaryData.filter(item => item?.local_time_adjusted?.split(' ')[0] === new Date().toISOString().split('T')[0]).length)).toString()}
+              icon="⚡"
+              variant="danger"
+            />
+          </div>
+        </div>
+
+        {/* Slot 2 */}
+        <div data-swapy-slot="slot-2">
+          <div data-swapy-item="item-B">
+            <StatCard
+              title={t('dashboard_protocols')}
+              value={CowrieCount}
+              change={(CowrieData.filter(item => item?.timestamp?.split(' ')[0] === new Date().toISOString().split('T')[0]).length).toString()}
+              changeType="positive"
+              icon="🖥️"
+              variant="primary"
+            />
+          </div>
+        </div>
+
+        {/* Slot 3 */}
+        <div data-swapy-slot="slot-3">
+          <div data-swapy-item="item-C">
+            <StatCard
+              title={t('dashboard_web_protocols')}
+              value={CanaryCount}
+              change={(CanaryData.filter(item => item?.local_time_adjusted?.split(' ')[0] === new Date().toISOString().split('T')[0]).length).toString()}
+              changeType="positive"
+              icon="🛜"
+              variant="primary"
+            />
+          </div>
+        </div>
+
+        {/* Slot 4 */}
+        <div data-swapy-slot="slot-4">
+          <div data-swapy-item="item-D">
+            <StatCard
+              title={t('dashboard_wireshark')}
+              value={PacketCount}
+              change={(dataPacket.filter(item => item?.timestamp?.split(' ')[0] === new Date().toISOString().split('T')[0]).length).toString()}
+              changeType="positive"
+              icon="📦"
+              variant="primary"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div ref={containerCharts} className="charts-grid">
+        {/* Slot 1 */}
+        <div data-swapy-slot="slot-1">
+          <div data-swapy-item="item-A">
+            <ChartCard
+              title={t('stats_top_passwords_title')}
+              subtitle={t('stats_top_passwords_desc')}
+            >
+              <Chart type="bar" data={usernameData} height={300} options={CowrieOptions} />
+            </ChartCard>
+          </div>
+        </div>
+
+        {/* Slot 2 */}
+        <div data-swapy-slot="slot-2">
+          <div data-swapy-item="item-B">
+            <ChartCard
+              title={t('stats_opencanary_title')}
+              subtitle={t('stats_opencanary_desc')}
+            >
+              <Chart type="bar" data={dailyPacketsData} height={300} options={PacketsOptions} />
+            </ChartCard>
+          </div>
+        </div>
+
+        {/* Slot 3 */}
+        <div data-swapy-slot="slot-3">
+          <div data-swapy-item="item-C">
+            <ChartCard
+              title={t('stats_wireshark_title')}
+              subtitle={t('stats_wireshark_desc')}
+            >
+              <Chart type="bar" data={dailyWiresharkData} height={300} options={PacketsOptions} />
+            </ChartCard>
+          </div>
+        </div>
+      </div>
+
+      {/* <div className="charts-grid">
+        <ChartCard
+          title={t('stats_top_passwords_title')}
+          subtitle={t('stats_top_passwords_desc')}
+        >
+          <Chart type="bar" data={usernameData} height={250} options={CowrieOptions} />
+        </ChartCard>
+        <ChartCard
+          title={t('stats_opencanary_title')}
+          subtitle={t('stats_opencanary_desc')}
+        >
+          <Chart type="line" data={dailyPacketsData} height={300} options={PacketsOptions} />
+        </ChartCard>
+        <ChartCard
+          title={t('stats_wireshark_title')}
+          subtitle={t('stats_wireshark_desc')}
+        >
+          <Chart type="bar" data={dailyWiresharkData} height={300} options={PacketsOptions} />
+        </ChartCard>
+      </div> */}
+
+      {popupMap && (
+        <div className='map-container'>
+          <button className='close-map-button' onClick={() => setPopupMap(false)}>Close Map</button>
+          <MapIP ipAddresses={IpMap} />
+        </div>
+      )}
+      <button
+        className="form-button"
+        style={{ width: 'auto', padding: '0.5rem 1rem', marginBottom: '1rem' }}
+        onClick={handleFetchIP}
+      >
+        {t('dashboard_open_map')}
+      </button>
+
+      <DataTable
+        title={t('dashboard_recent_activity')}
+        data={recentActivities}
+        columns={activityColumns}
+      />
+    </div>
+  );
+};
+
+export default HomePage;

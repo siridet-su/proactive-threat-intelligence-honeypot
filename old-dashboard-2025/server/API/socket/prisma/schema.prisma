@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model honeypot_logs {
+  id        Int     @id @default(autoincrement())
+  timestamp String?
+  eventid   String?
+  session   String?
+  message   String?
+  protocol  String?
+  src_ip    String?
+  src_port  Int?
+  dst_ip    String?
+  dst_port  Int?
+  username  String?
+  password  String?
+  input     String?
+  command   String?
+  duration  Float?
+  ttylog    String?
+  json_data String?
+}
+
+model opencanary_logs {
+  id                  Int     @id @default(autoincrement())
+  dst_host            String?
+  dst_port            Int?
+  local_time          String?
+  local_time_adjusted String?
+  logdata_raw         String?
+  logdata_msg_logdata String?
+  logtype             Int?
+  node_id             String?
+  src_host            String?
+  src_port            Int?
+  utc_time            String?
+  full_json_line      String?
+}
+
+model users {
+  UserID    Int       @id @default(autoincrement())
+  Email     String
+  UserName  String
+  Password  String
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @default(now())
+  deletedAt DateTime?
+  Status    String?
+}
+
+model HttpsPackets {
+  id          Int    @id @unique(map: "sqlite_autoindex_HttpsPackets_1") @default(autoincrement())
+  timestamp   String
+  src_ip      String
+  src_port    String
+  dst_ip      String
+  dst_port    String
+  method      String
+  request_uri String
+  userAgent   String
+}
+
+model TimeSeriesPackets {
+  id        Int     @id @default(autoincrement())
+  timestamp String?
+  count     Int?
+}
+
+model ProtocolStats {
+  id        Int     @id @default(autoincrement())
+  protocol  String?
+  timestamp String?
+  count     Int?
+}
+
+model SrcIpStats {
+  id        Int     @id @default(autoincrement())
+  src_ip    String?
+  timestamp String?
+  count     Int?
+}
+
+model DstPortStats {
+  id        Int     @id @default(autoincrement())
+  dst_port  String?
+  timestamp String?
+  count     Int?
+}
