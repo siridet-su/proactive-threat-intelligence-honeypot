@@ -1,0 +1,106 @@
+{
+  "schema_version": "pi_cowrie_plaintext_log_privacy_acceptance.v1",
+  "evaluated_at": "2026-08-01",
+  "decision": "ROLLBACK_COMPLETED_AFTER_PI_FAILURE",
+  "starting_state": {
+    "local_revision": "f0edbb940e07259b849843933586ba7267f4d5b1",
+    "pi_sanitizer_revision": "7f764ab471e8dac555d06277b4613237299aee69",
+    "gcp_recovery_revision": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
+    "gcp_retained_candidate": "1ad0e49e060843071508fc26aa48e07b2ac4d2b8"
+  },
+  "implementation": {
+    "revision": "a82f821d1e0f8280a67773429518d9f32e536d3b",
+    "package_sha256": "94e49383006f993b817766af1202faee1473808d88e0fcc1a45b500bfceaf7e3",
+    "component": "cowrie_output_11cde6d82c91dfae3c012bd809928abb",
+    "manifest_sha256": "350892c414231db40a47b7e2b4cf3d86843232d811093acd2295070bf9a62563",
+    "policy_sha256": "439c11f1f88da9873be9ab62ab7f4ae98a7b8a7c73116362a5f4c7a20d47cf76"
+  },
+  "root_causes": [
+    "UNSANITIZED_TEXT_LOGGER",
+    "SANITIZER_SCOPE_DEFECT",
+    "LOG_ROTATION_PERMISSION_DEFECT"
+  ],
+  "local_validation": {
+    "focused": "57 passed",
+    "full": "1079 passed, 7 skipped",
+    "compile": "passed",
+    "shell_syntax": "passed",
+    "git_diff_check": "passed",
+    "real_logrotate": "passed"
+  },
+  "isolated_pi_smoke": {
+    "package_hash_verified_before_extraction": true,
+    "manifest_verified": true,
+    "config_validator": "valid",
+    "marker_matches": 0,
+    "text_mode": "0600",
+    "json_live_mode": "0640",
+    "json_rotated_mode": "0600"
+  },
+  "live_deployment": {
+    "candidate_installed": true,
+    "initial_validator": "valid",
+    "cowrie_started": true,
+    "forwarder_initially_active": true,
+    "first_session_completed": true,
+    "candidate_text_log_marker_matches": 0,
+    "json_feed_advanced": false,
+    "event_forwarded": false,
+    "stop_condition": "event forwarding breaks"
+  },
+  "skipped_after_stop": [
+    "live forced rotation acceptance",
+    "post-marker controlled restart cycle",
+    "second synthetic marker",
+    "duplicate and loss accounting",
+    "final candidate validator acceptance"
+  ],
+  "rollback": {
+    "status": "completed",
+    "bundle": "/var/backups/honeypot/pi-cowrie-privacy-20260801T111119Z",
+    "bundle_archive_sha256": "c6ba4d106aa17bf7c2907413d42878ee62b80d05fb5f007e61ddc09cc67d3976",
+    "bundle_manifest_sha256": "72a228432484b1d1d922f93061e6af288eb884369cf4f2a7ee2d65338e0bb353",
+    "installer_receipt": "/var/backups/honeypot/cowrie-output-20260801T111119Z",
+    "metadata_records_restored": 160,
+    "metadata_records_invalid": 0,
+    "metadata_records_absent": 0,
+    "parser_defect": "literal-tab receipt entries were not accepted by the generated parser",
+    "final_pi_revision": "7f764ab471e8dac555d06277b4613237299aee69",
+    "cowrie_active": true,
+    "forwarder_active": true,
+    "failed_units": 0
+  },
+  "privacy_scans": {
+    "active_boundary": "NOT_DETERMINABLE",
+    "whole_pi_exact_credential": "NOT_DETERMINABLE",
+    "scoped_privacy_safe_nonce_raw_matches": 0,
+    "decoded_cowrie_rotation_nonce_matches": 0,
+    "cowrie_gzip_files": 41,
+    "cowrie_gzip_invalid": 0,
+    "live_test_interval_journal_nonce_matches": 0,
+    "later_verifier_sudo_audit_nonce_matches_present": true,
+    "gcp_persistence_nonce_matches": 0,
+    "gcp_live_test_interval_journal_nonce_matches": 0
+  },
+  "final_state": {
+    "pi_sanitizer_revision": "7f764ab471e8dac555d06277b4613237299aee69",
+    "pi_cowrie_active": true,
+    "pi_forwarder_active": true,
+    "pi_failed_units": 0,
+    "temporary_package_present": false,
+    "temporary_smoke_directory_present": false,
+    "gcp_revision": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
+    "gcp_running_application_services": 8,
+    "gcp_failed_units": 0,
+    "gcp_health_endpoints_200": 3,
+    "gcp_sqlite_user_version": 3,
+    "gcp_sqlite_quick_check": "ok",
+    "gcp_candidate_activated": false
+  },
+  "remaining_blockers": [
+    "candidate live JSON feed did not advance",
+    "rollback receipt parser does not accept its own bulk metadata encoding",
+    "restored baseline validator is invalid",
+    "required live rotation, restart, second-marker, and loss/duplicate gates were not reached"
+  ]
+}
