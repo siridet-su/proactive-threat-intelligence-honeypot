@@ -1,106 +1,104 @@
 {
-  "schema_version": "pi_cowrie_plaintext_log_privacy_acceptance.v1",
+  "schema_version": "pi_cowrie_plaintext_log_privacy_acceptance.v2",
   "evaluated_at": "2026-08-01",
   "decision": "ROLLBACK_COMPLETED_AFTER_PI_FAILURE",
+  "reviewed_candidate": {
+    "revision": "ff48d8553c116d27cb358feb6fdb2d6e6aa48423",
+    "package_sha256": "fd3034e2f61bb2a84c8a7ba07914868791a833160bfccab3cdee70c1014df665",
+    "component_id": "cowrie_output_00020b5ccd65366db35bcf8f2de1aedc",
+    "manifest_sha256": "94a603d640c7216cbae5aacd61a665b508a07a8c197384453a6114df64fb26f7",
+    "policy_sha256": "439c11f1f88da9873be9ab62ab7f4ae98a7b8a7c73116362a5f4c7a20d47cf76"
+  },
   "starting_state": {
-    "local_revision": "f0edbb940e07259b849843933586ba7267f4d5b1",
     "pi_sanitizer_revision": "7f764ab471e8dac555d06277b4613237299aee69",
+    "cowrie_revision": "575146bc6b24d70082527d66cd805d9bae0e0db4",
+    "python": "3.12.3",
+    "twisted": "25.5.0",
+    "forwarder_pid": 282926,
     "gcp_recovery_revision": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
     "gcp_retained_candidate": "1ad0e49e060843071508fc26aa48e07b2ac4d2b8"
   },
-  "implementation": {
-    "revision": "a82f821d1e0f8280a67773429518d9f32e536d3b",
-    "package_sha256": "94e49383006f993b817766af1202faee1473808d88e0fcc1a45b500bfceaf7e3",
-    "component": "cowrie_output_11cde6d82c91dfae3c012bd809928abb",
-    "manifest_sha256": "350892c414231db40a47b7e2b4cf3d86843232d811093acd2295070bf9a62563",
-    "policy_sha256": "439c11f1f88da9873be9ab62ab7f4ae98a7b8a7c73116362a5f4c7a20d47cf76"
-  },
-  "root_causes": [
-    "UNSANITIZED_TEXT_LOGGER",
-    "SANITIZER_SCOPE_DEFECT",
-    "LOG_ROTATION_PERMISSION_DEFECT"
-  ],
   "local_validation": {
-    "focused": "57 passed",
-    "full": "1079 passed, 7 skipped",
+    "focused": "80 passed",
+    "full": "1102 passed, 7 skipped",
     "compile": "passed",
     "shell_syntax": "passed",
-    "git_diff_check": "passed",
-    "real_logrotate": "passed"
+    "json": "passed",
+    "manifest": "passed",
+    "archive_safety": "passed",
+    "deterministic_rebuild": "byte-identical",
+    "git_diff_check": "passed"
   },
-  "isolated_pi_smoke": {
+  "pi_preflight": {
     "package_hash_verified_before_extraction": true,
-    "manifest_verified": true,
-    "config_validator": "valid",
-    "marker_matches": 0,
-    "text_mode": "0600",
-    "json_live_mode": "0640",
-    "json_rotated_mode": "0600"
+    "closed_inventory": "valid",
+    "manifest": "valid",
+    "destination_mapping": "valid",
+    "expected_starting_sanitizer": "valid",
+    "compatibility": "exact",
+    "isolated_json_records": 10,
+    "isolated_native_rotations": 1,
+    "isolated_restart_cycles": 1,
+    "isolated_marker_matches": 0,
+    "isolated_modes": "valid"
+  },
+  "rollback_receipt": {
+    "path": "/var/backups/honeypot/cowrie-output-20260801T125934Z",
+    "schema": "cowrie_output_rollback_receipt.v2",
+    "records": 166,
+    "receipt_sha256": "9a62cd57413589290eed7c6abc6b7281b370fdb2a807d6b375eb41c4f228219b",
+    "owner": "root:root",
+    "directory_mode": "0700",
+    "file_mode": "0600",
+    "self_verification": "invalid",
+    "stop_condition": "rollback evidence is incomplete",
+    "failure": {
+      "category": "ROLLBACK_RECEIPT_CAPTURE_RACE",
+      "captured_log_bytes": 127696,
+      "captured_log_sha256": "3b1081e5883c2f16f11b189ac66689abd677e495c7bdf6fcb34e3343987ae3e2",
+      "moved_log_bytes": 128725,
+      "moved_log_sha256": "2166a254cec3651b0684dbaa8e733a05d43e6642f8a9230420ac9a991b86d618"
+    }
   },
   "live_deployment": {
-    "candidate_installed": true,
-    "initial_validator": "valid",
-    "cowrie_started": true,
-    "forwarder_initially_active": true,
-    "first_session_completed": true,
-    "candidate_text_log_marker_matches": 0,
-    "json_feed_advanced": false,
-    "event_forwarded": false,
-    "stop_condition": "event forwarding breaks"
+    "candidate_release_extracted": false,
+    "candidate_link_activated": false,
+    "managed_configuration_changed": false,
+    "live_marker_test_run": false,
+    "live_rotation_run": false,
+    "live_forwarding_test_run": false
   },
-  "skipped_after_stop": [
-    "live forced rotation acceptance",
-    "post-marker controlled restart cycle",
-    "second synthetic marker",
-    "duplicate and loss accounting",
-    "final candidate validator acceptance"
-  ],
-  "rollback": {
-    "status": "completed",
-    "bundle": "/var/backups/honeypot/pi-cowrie-privacy-20260801T111119Z",
-    "bundle_archive_sha256": "c6ba4d106aa17bf7c2907413d42878ee62b80d05fb5f007e61ddc09cc67d3976",
-    "bundle_manifest_sha256": "72a228432484b1d1d922f93061e6af288eb884369cf4f2a7ee2d65338e0bb353",
-    "installer_receipt": "/var/backups/honeypot/cowrie-output-20260801T111119Z",
-    "metadata_records_restored": 160,
-    "metadata_records_invalid": 0,
-    "metadata_records_absent": 0,
-    "parser_defect": "literal-tab receipt entries were not accepted by the generated parser",
-    "final_pi_revision": "7f764ab471e8dac555d06277b4613237299aee69",
+  "recovery": {
+    "status": "complete",
+    "protected_log_hash_verified": true,
+    "protected_log_restored": true,
+    "previous_link_restored": true,
+    "previous_managed_hashes_match": true,
+    "old_release_extra_bytecode_files": 7,
+    "old_release_bytecode_quarantined_then_removed": true,
+    "final_previous_validator": "valid",
     "cowrie_active": true,
     "forwarder_active": true,
-    "failed_units": 0
+    "forwarder_pid_unchanged": true,
+    "failed_pi_units": 0,
+    "firewall_hash_matches_baseline": true,
+    "candidate_package_present": false,
+    "candidate_release_present": false
   },
-  "privacy_scans": {
-    "active_boundary": "NOT_DETERMINABLE",
-    "whole_pi_exact_credential": "NOT_DETERMINABLE",
-    "scoped_privacy_safe_nonce_raw_matches": 0,
-    "decoded_cowrie_rotation_nonce_matches": 0,
-    "cowrie_gzip_files": 41,
-    "cowrie_gzip_invalid": 0,
-    "live_test_interval_journal_nonce_matches": 0,
-    "later_verifier_sudo_audit_nonce_matches_present": true,
-    "gcp_persistence_nonce_matches": 0,
-    "gcp_live_test_interval_journal_nonce_matches": 0
+  "privacy_acceptance": {
+    "candidate_active_boundary": "NOT_DETERMINABLE",
+    "candidate_whole_pi": "NOT_DETERMINABLE",
+    "candidate_downstream": "NOT_RUN_AFTER_ROLLBACK_GATE",
+    "protected_historical_evidence": "retained_owner_only"
   },
-  "final_state": {
-    "pi_sanitizer_revision": "7f764ab471e8dac555d06277b4613237299aee69",
-    "pi_cowrie_active": true,
-    "pi_forwarder_active": true,
-    "pi_failed_units": 0,
-    "temporary_package_present": false,
-    "temporary_smoke_directory_present": false,
-    "gcp_revision": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
-    "gcp_running_application_services": 8,
-    "gcp_failed_units": 0,
-    "gcp_health_endpoints_200": 3,
-    "gcp_sqlite_user_version": 3,
-    "gcp_sqlite_quick_check": "ok",
-    "gcp_candidate_activated": false
+  "gcp_final_state": {
+    "revision": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
+    "running_application_services": 8,
+    "failed_units": 0,
+    "health_endpoints_200": 3,
+    "candidate_activated": false,
+    "application_code_changed": false,
+    "production_data_changed_by_this_attempt": false
   },
-  "remaining_blockers": [
-    "candidate live JSON feed did not advance",
-    "rollback receipt parser does not accept its own bulk metadata encoding",
-    "restored baseline validator is invalid",
-    "required live rotation, restart, second-marker, and loss/duplicate gates were not reached"
-  ]
+  "next_action": "Stop Cowrie before binding the final quarantined log identity, or atomically quarantine then seal and verify the receipt; add concurrent-append and failure-point recovery tests; rebuild and request approval for a new exact package hash."
 }
