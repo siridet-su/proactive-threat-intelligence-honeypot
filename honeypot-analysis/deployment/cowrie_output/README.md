@@ -5,10 +5,11 @@ and binds their external rotation policy.
 It does not patch Cowrie source, mutate historical logs, or replace the
 downstream forwarder sanitizer.
 
-The v2 bundle manifest also binds the exact reviewed starting sanitizer,
+The v3 bundle manifest also binds the exact reviewed starting sanitizer,
 installed Cowrie/Python/Twisted compatibility, receipt schemas, managed
-destinations, and service impact. The installer verifies the starting link and
-the fully extracted bundle before changing the active link.
+destinations, service impact, and exact Cowrie output-loader and output-base
+hashes. The installer verifies the starting link and the fully extracted
+bundle before changing the active link.
 
 The design and authority boundary are recorded in
 `docs/COWRIE_UPSTREAM_CREDENTIAL_PRIVACY_DECISION.md`.
@@ -43,6 +44,18 @@ Cowrie's arbitrary preformatted text, because local Cowrie extensions can
 embed authentication values before structured credential fields exist. The
 service also discards direct stdout/stderr; systemd still retains lifecycle and
 exit state without persisting untrusted process text.
+
+The sanitized plugin also writes bounded owner-only lifecycle state at
+`var/lib/cowrie/cowrie-output-lifecycle.json`. It contains only closed
+categories, counters, booleans, hashes, PID, and time. It cannot contain raw
+events, credentials, commands, addresses, session identifiers, exception
+text, or unrestricted paths, and it is diagnostic rather than event
+authority. A structural pre-start check binds Cowrie's effective output
+section, imported module, concrete `Output` class, loader/base hashes, and
+writable destinations without creating a fake attacker event. A post-start
+check requires constructor, `start()`, and observer registration from the
+actual service PID. Real event delivery is still a mandatory acceptance test;
+structural readiness alone is never sufficient.
 
 Cowrie's daily writer rotates the JSON feed by rename and reopen, allowing the
 forwarder to identify and drain the old inode before reading the new feed. The
@@ -131,6 +144,13 @@ sudo -u cowrie env \
   --logrotate /etc/logrotate.d/cowrie \
   --live-permissions
 ```
+
+The drop-in runs that boundary validation plus `plugin-readiness` before
+startup and the bounded `check-live-readiness.sh` after startup. A missing,
+abstract, mis-hashed, unregistered, or wrong-path plugin prevents service
+acceptance. Serialization, write, short-write, and flush failures request a
+reactor stop and fail closed; lifecycle-diagnostic failure cannot suppress the
+sanitized JSON persistence path.
 
 ## Rollback
 

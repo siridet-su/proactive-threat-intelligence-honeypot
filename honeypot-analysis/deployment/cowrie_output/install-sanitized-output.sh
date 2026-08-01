@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "must run as root" >&2
@@ -238,6 +239,7 @@ chown -R cowrie:cowrie "${release}"
 find "${release}" -type d -exec chmod 0700 {} +
 find "${release}" -type f -exec chmod 0600 {} +
 chmod 0700 "${release}/deployment/cowrie_output/run-sanitized-cowrie.sh"
+chmod 0700 "${release}/deployment/cowrie_output/check-live-readiness.sh"
 chmod 0700 "${release}/deployment/cowrie_output/install-sanitized-output.sh"
 chmod 0700 "${release}/deployment/cowrie_output/rollback-sanitized-output.sh"
 test -z "$(find "${release}" \( -type d -name __pycache__ -o -type f -name '*.pyc' \) -print -quit)"
@@ -263,6 +265,8 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   --source "${config}" --destination "${temporary_config}" --bundle-root "${current}"
 install -o cowrie -g cowrie -m 0600 "${temporary_config}" "${config}"
 rm -f "${temporary_config}"
+install -d -o cowrie -g cowrie -m 0700 \
+  "${cowrie_root}/var/lib/cowrie"
 record_step configuration_installed
 
 ln -sfn "${current}/production/cowrie_output/sanitized_jsonlog.py" "${plugin}.new"
@@ -300,6 +304,15 @@ sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   "${python}" -m production.tools.cowrie_output_integration validate \
   --config "${config}" --bundle-root "${current}" --plugin-link "${plugin}" \
   --drop-in "${dropin}" --logrotate "${logrotate}" --live-permissions
+sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONPATH="${current}:${cowrie_root}/src" \
+  HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \
+  HONEYPOT_COWRIE_CONFIG="${config}" \
+  HONEYPOT_COWRIE_ROOT="${cowrie_root}" \
+  "${python}" -m production.tools.cowrie_output_integration plugin-readiness \
+  --config "${config}" --bundle-root "${current}" --plugin-link "${plugin}" \
+  --write-state >"${receipt}/plugin-readiness.before-start.json"
+chmod 0600 "${receipt}/plugin-readiness.before-start.json"
 
 systemctl daemon-reload
 record_step cowrie_restart_requested
@@ -307,6 +320,16 @@ start_cowrie_bounded
 test "$(systemctl is-active "${forwarder}")" = active
 test "$(systemctl show "${forwarder}" -p MainPID --value)" = "${forwarder_pid}"
 test -z "$(find "${release}" \( -type d -name __pycache__ -o -type f -name '*.pyc' \) -print -quit)"
+main_pid=$(systemctl show cowrie.service -p MainPID --value)
+sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONPATH="${current}:${cowrie_root}/src" \
+  HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \
+  HONEYPOT_COWRIE_CONFIG="${config}" \
+  HONEYPOT_COWRIE_ROOT="${cowrie_root}" \
+  "${python}" -m production.tools.cowrie_output_integration live-readiness \
+  --config "${config}" --bundle-root "${current}" \
+  --expected-pid "${main_pid}" >"${receipt}/live-readiness.after-start.json"
+chmod 0600 "${receipt}/live-readiness.after-start.json"
 sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \
   HONEYPOT_COWRIE_CONFIG="${config}" \

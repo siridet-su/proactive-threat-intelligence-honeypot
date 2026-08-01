@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
+import inspect
 import json
 import os
 import re
@@ -21,6 +23,11 @@ from production.cowrie_output.runtime import (
     CowrieOutputBoundaryError,
     verify_boundary,
     verify_bundle,
+)
+from production.cowrie_output.lifecycle import (
+    LifecycleStateError,
+    load_lifecycle_state,
+    update_lifecycle_state,
 )
 from production.utils.cowrie_privacy import load_policy
 
@@ -204,12 +211,137 @@ def render_config(source: Path, destination: Path, bundle_root: Path) -> None:
             "enabled = true\n",
             "epoch_timestamp = false\n",
             "logfile = ${honeypot:log_path}/cowrie.json\n",
+            "lifecycle_state = var/lib/cowrie/cowrie-output-lifecycle.json\n",
             f"bundle_root = {root}\n",
             f"manifest = {root}/{MANIFEST_NAME}\n",
             f"policy = {root}/configs/cowrie_output_privacy.v1.json\n",
         ]
     )
     _write_exclusive(destination, "".join(rendered).encode("utf-8"))
+
+
+def inspect_plugin_readiness(boundary, *, write_state: bool = False) -> dict[str, Any]:
+    """Inspect Cowrie's effective plugin contract without creating an event."""
+
+    try:
+        import cowrie.core.output as output_base
+        from cowrie.core.config import CowrieConfig
+
+        enabled = sorted(
+            section
+            for section in CowrieConfig.sections()
+            if section.startswith("output_")
+            and CowrieConfig.getboolean(section, "enabled", fallback=False)
+        )
+        if enabled != ["output_sanitizedjson"]:
+            raise CowrieOutputBoundaryError(
+                "effective Cowrie output enablement differs from the validated config"
+            )
+        module = importlib.import_module("cowrie.output.sanitizedjson")
+        module_path = Path(module.__file__).resolve(strict=True)
+        expected_module = (
+            boundary.bundle_root
+            / "production/cowrie_output/sanitized_jsonlog.py"
+        )
+        if module_path != expected_module or _sha256_file(module_path) != boundary.module_sha256:
+            raise CowrieOutputBoundaryError("effective Cowrie output module is not manifest-bound")
+        output_class = getattr(module, "Output", None)
+        if (
+            not inspect.isclass(output_class)
+            or output_class.__name__ != "Output"
+            or output_class.__module__ != "cowrie.output.sanitizedjson"
+            or inspect.isabstract(output_class)
+            or not issubclass(output_class, output_base.Output)
+        ):
+            raise CowrieOutputBoundaryError("effective Cowrie output class is invalid")
+        output_base_path = Path(output_base.__file__).resolve(strict=True)
+        loader_path = output_base_path.parents[2] / "twisted/plugins/cowrie_plugin.py"
+        compatibility = DEPLOYMENT_CONTRACT["compatibility"]
+        if _sha256_file(output_base_path) != compatibility["cowrie_output_base_sha256"]:
+            raise CowrieOutputBoundaryError("Cowrie output base compatibility hash differs")
+        if _sha256_file(loader_path) != compatibility["cowrie_output_loader_sha256"]:
+            raise CowrieOutputBoundaryError("Cowrie output loader compatibility hash differs")
+        cowrie_root = Path(os.environ.get("HONEYPOT_COWRIE_ROOT", ".")).resolve()
+        configured_log = CowrieConfig.get(
+            "output_sanitizedjson", "logfile", fallback=""
+        )
+        configured_log_path = Path(configured_log)
+        if not configured_log_path.is_absolute():
+            configured_log_path = cowrie_root / configured_log_path
+        if configured_log_path.resolve() != boundary.json_log_path:
+            raise CowrieOutputBoundaryError("effective Cowrie JSON destination differs")
+        configured_state = CowrieConfig.get(
+            "output_sanitizedjson", "lifecycle_state", fallback=""
+        )
+        configured_state_path = Path(configured_state)
+        if not configured_state_path.is_absolute():
+            configured_state_path = cowrie_root / configured_state_path
+        if configured_state_path.resolve() != boundary.lifecycle_state_path:
+            raise CowrieOutputBoundaryError("effective lifecycle destination differs")
+        for directory in (
+            boundary.json_log_path.parent,
+            boundary.lifecycle_state_path.parent,
+        ):
+            metadata = directory.lstat()
+            if not stat.S_ISDIR(metadata.st_mode) or directory.is_symlink():
+                raise CowrieOutputBoundaryError("Cowrie output directory is unsafe")
+            if not os.access(directory, os.W_OK | os.X_OK):
+                raise CowrieOutputBoundaryError("Cowrie output directory is not writable")
+        if write_state:
+            update_lifecycle_state(
+                boundary.lifecycle_state_path,
+                component_id=boundary.component_id,
+                source_revision=boundary.git_revision,
+                module_sha256=boundary.module_sha256,
+                phase="class_discovery",
+                result="succeeded",
+                flags={"class_discovered": True},
+            )
+    except (ImportError, AttributeError, OSError, LifecycleStateError) as exc:
+        raise CowrieOutputBoundaryError("Cowrie output plugin discovery failed") from exc
+    return {
+        "schema_version": "cowrie_output_plugin_readiness.v1",
+        "status": "ready",
+        "component_id": boundary.component_id,
+        "source_revision": boundary.git_revision,
+        "module_path_category": "manifest_bound_release",
+        "module_sha256": boundary.module_sha256,
+        "class_name": "Output",
+        "class_discovered": True,
+        "class_abstract": False,
+        "output_section": "output_sanitizedjson",
+        "output_directory_writable": True,
+        "lifecycle_directory_writable": True,
+        "fake_event_created": False,
+    }
+
+
+def validate_live_readiness(boundary, *, expected_pid: int) -> dict[str, Any]:
+    state = load_lifecycle_state(boundary.lifecycle_state_path)
+    if (
+        state["component_id"] != boundary.component_id
+        or state["source_revision"] != boundary.git_revision
+        or state["module_sha256"] != boundary.module_sha256
+        or state["process_pid"] != expected_pid
+        or not state["class_discovered"]
+        or not state["constructor_entered"]
+        or not state["constructor_completed"]
+        or not state["start_entered"]
+        or not state["start_completed"]
+        or not state["observer_registered"]
+    ):
+        raise CowrieOutputBoundaryError("live Cowrie output lifecycle is not ready")
+    return {
+        "schema_version": "cowrie_output_live_readiness.v1",
+        "status": "ready",
+        "component_id": boundary.component_id,
+        "source_revision": boundary.git_revision,
+        "module_sha256": boundary.module_sha256,
+        "process_pid": expected_pid,
+        "observer_registered": True,
+        "write_invocations": state["write_invocations"],
+        "state_sha256": state["state_sha256"],
+    }
 
 
 def validate_live_permissions(boundary) -> None:
@@ -329,6 +461,17 @@ def main() -> int:
     validate.add_argument("--logrotate")
     validate.add_argument("--live-permissions", action="store_true")
 
+    plugin_readiness = commands.add_parser("plugin-readiness")
+    plugin_readiness.add_argument("--config", required=True)
+    plugin_readiness.add_argument("--bundle-root", required=True)
+    plugin_readiness.add_argument("--plugin-link", required=True)
+    plugin_readiness.add_argument("--write-state", action="store_true")
+
+    live_readiness = commands.add_parser("live-readiness")
+    live_readiness.add_argument("--config", required=True)
+    live_readiness.add_argument("--bundle-root", required=True)
+    live_readiness.add_argument("--expected-pid", required=True, type=int)
+
     for name in ("prepare-rotation", "finish-rotation"):
         rotation = commands.add_parser(name)
         rotation.add_argument("--config", required=True)
@@ -433,6 +576,46 @@ def main() -> int:
                 sort_keys=True,
             )
         )
+        return 0
+    if args.command in {"plugin-readiness", "live-readiness"}:
+        try:
+            result = verify_boundary(
+                config_path=args.config,
+                bundle_root=args.bundle_root,
+                plugin_link=(
+                    args.plugin_link if args.command == "plugin-readiness" else None
+                ),
+            )
+            if args.command == "plugin-readiness":
+                receipt = inspect_plugin_readiness(
+                    result, write_state=args.write_state
+                )
+            else:
+                receipt = validate_live_readiness(
+                    result, expected_pid=args.expected_pid
+                )
+        except (
+            CowrieOutputBoundaryError,
+            LifecycleStateError,
+            OSError,
+            ValueError,
+        ) as exc:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": (
+                            "cowrie_output_plugin_readiness.v1"
+                            if args.command == "plugin-readiness"
+                            else "cowrie_output_live_readiness.v1"
+                        ),
+                        "status": "not_ready",
+                        "error_category": type(exc).__name__,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(json.dumps(receipt, sort_keys=True))
         return 0
     try:
         result = verify_boundary(

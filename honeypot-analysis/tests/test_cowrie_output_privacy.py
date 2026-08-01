@@ -129,6 +129,12 @@ class _MemoryOutput:
         self.flushes += 1
 
 
+class _ShortOutput(_MemoryOutput):
+    def write(self, value: str) -> int:
+        self.values.append(value[:-1])
+        return len(value) - 1
+
+
 def _json_observer(output: _MemoryOutput):
     observer = object.__new__(sanitized_jsonlog.Output)
     observer.outfile = output
@@ -411,6 +417,29 @@ def test_json_persistence_failures_stop_with_bounded_diagnostics(
     assert diagnostics[-1]["exception_category"] == category
     assert "persistence-failure-secret" not in json.dumps(diagnostics)
     assert "untrusted" not in json.dumps(diagnostics)
+
+
+def test_short_json_write_fails_closed_before_flush() -> None:
+    target = _ShortOutput()
+    with pytest.raises(SystemExit, match="failed closed"):
+        _json_observer(target).write(_login("short-write-secret"))
+    assert target.flushes == 0
+
+
+def test_optional_diagnostic_sink_failure_cannot_suppress_json() -> None:
+    target = _MemoryOutput()
+
+    def failed_sink(_record: dict) -> None:
+        raise RuntimeError("diagnostic sink detail must remain isolated")
+
+    previous = set_isolated_diagnostic_sink(failed_sink)
+    try:
+        _json_observer(target).write(_login("diagnostic-failure-secret"))
+    finally:
+        set_isolated_diagnostic_sink(previous)
+    assert len(target.values) == 1
+    assert target.flushes == 1
+    assert "diagnostic-failure-secret" not in target.values[0]
 
 
 def test_json_serialization_failure_is_visible_and_writes_no_partial_record() -> None:
@@ -762,6 +791,7 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
         ROOT / "deployment/cowrie_output/install-sanitized-output.sh"
     ).read_text(encoding="utf-8")
     for script_name in (
+        "check-live-readiness.sh",
         "install-sanitized-output.sh",
         "rollback-sanitized-output.sh",
         "run-sanitized-cowrie.sh",
@@ -787,6 +817,8 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
     assert '--logrotate "${logrotate}"' in installer
     assert "cowrie_output_integration verify-start" in installer
     assert "cowrie_output_integration verify-bundle" in installer
+    assert "cowrie_output_integration plugin-readiness" in installer
+    assert "cowrie_output_integration live-readiness" in installer
     receipt_tool = (
         ROOT / "production/tools/cowrie_rollback_receipt.py"
     ).read_text(encoding="utf-8")
@@ -803,6 +835,8 @@ def test_service_discards_untrusted_process_streams_and_binds_rotation_policy() 
     assert "StandardError=null" in dropin
     assert "--live-permissions" in dropin
     assert "--logrotate /etc/logrotate.d/cowrie" in dropin
+    assert "plugin-readiness" in dropin
+    assert "check-live-readiness.sh" in dropin
     rotation = (
         ROOT / "deployment/cowrie_output/cowrie.logrotate"
     ).read_text(encoding="utf-8")

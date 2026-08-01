@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from production.utils.cowrie_privacy import CowriePrivacyPolicy, load_policy
 
 
-MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v2"
+MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v3"
 VALIDATION_SCHEMA_VERSION = "cowrie_output_boundary_validation.v1"
 EXPECTED_STARTING_SANITIZER_REVISION = "7f764ab471e8dac555d06277b4613237299aee69"
 DEPLOYMENT_CONTRACT = {
@@ -25,6 +25,8 @@ DEPLOYMENT_CONTRACT = {
         "cowrie_describe": "v2.6.1-202-g575146bc-dirty",
         "python": "3.12.3",
         "twisted": "25.5.0",
+        "cowrie_output_loader_sha256": "b6fc9e6c90a519404724b1a0d6cbd40281858fdfcd61af9a5fe7411c8d241b37",
+        "cowrie_output_base_sha256": "0ccf8afde9797efc2a9a94569e37ab68f6727b563f09d09d96449b102868b0e3",
     },
     "receipt_schemas": {
         "writer": "cowrie_output_rollback_receipt.v2",
@@ -76,6 +78,14 @@ DEPLOYMENT_CONTRACT = {
         "stop_then_start": ["cowrie.service"],
         "must_remain_active": ["honeypot-sensor-forwarder.service"],
     },
+    "runtime_state": {
+        "lifecycle_state": "/home/cowrie/cowrie/var/lib/cowrie/cowrie-output-lifecycle.json",
+        "owner": "cowrie",
+        "group": "cowrie",
+        "directory_mode": "0700",
+        "file_mode": "0600",
+        "authority": "diagnostic_only",
+    },
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REQUIRED_BUNDLE_FILES = frozenset(
@@ -83,12 +93,14 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "configs/cowrie_output_privacy.v1.json",
         "deployment/cowrie_output/20-sanitized-output.conf",
         "deployment/cowrie_output/cowrie.logrotate",
+        "deployment/cowrie_output/check-live-readiness.sh",
         "deployment/cowrie_output/README.md",
         "deployment/cowrie_output/install-sanitized-output.sh",
         "deployment/cowrie_output/rollback-sanitized-output.sh",
         "deployment/cowrie_output/run-sanitized-cowrie.sh",
         "production/__init__.py",
         "production/cowrie_output/__init__.py",
+        "production/cowrie_output/lifecycle.py",
         "production/cowrie_output/observer_diagnostics.py",
         "production/cowrie_output/runtime.py",
         "production/cowrie_output/sanitized_jsonlog.py",
@@ -113,9 +125,12 @@ class VerifiedBoundary:
     manifest_path: Path
     manifest_sha256: str
     git_revision: str
+    component_id: str
     policy_path: Path
     policy: CowriePrivacyPolicy
     json_log_path: Path
+    lifecycle_state_path: Path
+    module_sha256: str
 
 
 def _sha256_file(path: Path) -> str:
@@ -156,7 +171,11 @@ def _load_manifest(bundle_root: Path) -> tuple[dict[str, Any], Path, str]:
         raise CowrieOutputBoundaryError("bundle manifest schema is invalid")
     if not re.fullmatch(r"[0-9a-f]{40}", str(document["git_revision"])):
         raise CowrieOutputBoundaryError("bundle Git revision is invalid")
-    if not isinstance(document["component_id"], str) or not document["component_id"]:
+    if (
+        not isinstance(document["component_id"], str)
+        or re.fullmatch(r"cowrie_output_[0-9a-f]{32}", document["component_id"])
+        is None
+    ):
         raise CowrieOutputBoundaryError("bundle component identity is invalid")
     if document["deployment"] != DEPLOYMENT_CONTRACT:
         raise CowrieOutputBoundaryError("bundle deployment contract is invalid")
@@ -278,7 +297,7 @@ def _enabled_output_sections(parser: configparser.ConfigParser) -> set[str]:
 def verify_config(
     config_path: str | Path,
     bundle_root: str | Path,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path]:
     resolved_config_path = Path(config_path).resolve()
     config = _read_config(resolved_config_path)
     enabled = _enabled_output_sections(config)
@@ -314,7 +333,29 @@ def verify_config(
             else resolved_config_path.parent.parent
         )
         log_path = cowrie_root / log_path
-    return policy, log_path.resolve()
+    lifecycle = config.get(
+        "output_sanitizedjson", "lifecycle_state", fallback=""
+    ).strip()
+    if not lifecycle or Path(lifecycle).name != "cowrie-output-lifecycle.json":
+        raise CowrieOutputBoundaryError("lifecycle state path is invalid")
+    lifecycle_path = Path(lifecycle)
+    if not lifecycle_path.is_absolute():
+        configured_cowrie_root = os.environ.get("HONEYPOT_COWRIE_ROOT", "").strip()
+        cowrie_root = (
+            Path(configured_cowrie_root).resolve()
+            if configured_cowrie_root
+            else resolved_config_path.parent.parent
+        )
+        lifecycle_path = cowrie_root / lifecycle_path
+    expected_lifecycle = Path(
+        DEPLOYMENT_CONTRACT["runtime_state"]["lifecycle_state"]
+    )
+    if str(resolved_config_path).startswith("/home/cowrie/cowrie/"):
+        if lifecycle_path.resolve() != expected_lifecycle:
+            raise CowrieOutputBoundaryError("lifecycle state path is not canonical")
+    elif lifecycle_path.name != expected_lifecycle.name:
+        raise CowrieOutputBoundaryError("lifecycle state filename is not canonical")
+    return policy, log_path.resolve(), lifecycle_path.resolve()
 
 
 def verify_boundary(
@@ -327,7 +368,7 @@ def verify_boundary(
 ) -> VerifiedBoundary:
     root = Path(bundle_root).resolve()
     manifest, manifest_path, manifest_sha256 = verify_bundle(root)
-    policy_path, logfile = verify_config(config_path, root)
+    policy_path, logfile, lifecycle_state = verify_config(config_path, root)
     policy = load_policy(policy_path)
     if plugin_link is not None:
         link = Path(plugin_link)
@@ -344,7 +385,10 @@ def verify_boundary(
             "UMask=0077",
             "ExecStartPre=",
             "production.tools.cowrie_output_integration validate",
+            "production.tools.cowrie_output_integration plugin-readiness",
+            "--write-state",
             "run-sanitized-cowrie.sh",
+            "check-live-readiness.sh",
             "StandardOutput=null",
             "StandardError=null",
             "--live-permissions",
@@ -378,9 +422,16 @@ def verify_boundary(
         manifest_path=manifest_path,
         manifest_sha256=manifest_sha256,
         git_revision=str(manifest["git_revision"]),
+        component_id=str(manifest["component_id"]),
         policy_path=policy_path,
         policy=policy,
         json_log_path=logfile,
+        lifecycle_state_path=lifecycle_state,
+        module_sha256=str(
+            manifest["files"]["production/cowrie_output/sanitized_jsonlog.py"][
+                "sha256"
+            ]
+        ),
     )
 
 
