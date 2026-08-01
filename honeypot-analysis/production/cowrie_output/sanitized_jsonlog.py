@@ -16,6 +16,54 @@ from production.cowrie_output.lifecycle import update_lifecycle_state
 from production.cowrie_output.runtime import boundary_from_environment
 from production.utils.cowrie_privacy import serialize_cowrie_event_for_persistence
 
+
+ROTATED_FEED_HANDOFF_SECONDS = 15.0
+
+
+def _seal_rotated_feed(path: str, device: int, inode: int) -> None:
+    """Seal only the exact inode exposed for the forwarder's handoff."""
+
+    try:
+        metadata = os.lstat(path)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or (metadata.st_dev, metadata.st_ino) != (device, inode)
+        ):
+            raise OSError("sanitized Cowrie rotation identity changed")
+        os.chmod(path, 0o600)
+        sealed = os.lstat(path)
+        if (
+            not stat.S_ISREG(sealed.st_mode)
+            or (sealed.st_dev, sealed.st_ino) != (device, inode)
+            or stat.S_IMODE(sealed.st_mode) != 0o600
+        ):
+            raise OSError("sanitized Cowrie rotation could not be sealed")
+    except BaseException:
+        if reactor is not None:
+            try:
+                reactor.callLater(0, reactor.stop)
+            except BaseException:
+                pass
+
+
+def _schedule_rotated_feed_seal(path: str, device: int, inode: int) -> None:
+    """Schedule the bounded handoff or immediately restore owner-only mode."""
+
+    if reactor is None:
+        os.chmod(path, 0o600)
+        raise RuntimeError("Cowrie reactor is unavailable for rotation sealing")
+    try:
+        reactor.callLater(
+            ROTATED_FEED_HANDOFF_SECONDS,
+            _seal_rotated_feed,
+            path,
+            device,
+            inode,
+        )
+    except BaseException:
+        os.chmod(path, 0o600)
+        raise
+
 try:
     from twisted.python import log
     from twisted.internet import reactor
@@ -406,11 +454,17 @@ if cowrie is not None:
             if not stat.S_ISREG(metadata.st_mode):
                 raise OSError("sanitized Cowrie feed is not a regular file")
             self._file.close()
-            os.chmod(self.path, 0o600)
+            # The forwarder runs as a separate user in the ``cowrie`` group.
+            # Keep the renamed inode group-readable for one bounded poll
+            # window so its existing checkpoint can be recovered without
+            # weakening the final historical-file mode.
+            os.chmod(self.path, 0o640)
             os.rename(self.path, rotated)
             self._openFile()
             os.chmod(self.path, 0o640)
-            os.chmod(rotated, 0o600)
+            _schedule_rotated_feed_seal(
+                rotated, metadata.st_dev, metadata.st_ino
+            )
 
 else:  # pragma: no cover - import safety outside the Cowrie runtime
     _PrivateFeedDailyLogFile = object

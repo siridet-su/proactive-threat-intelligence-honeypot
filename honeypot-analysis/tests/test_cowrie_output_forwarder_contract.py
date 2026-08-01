@@ -141,6 +141,68 @@ def test_json_writer_forwarder_restart_and_native_rotation_contract(
     assert not Path(config.spool_path).exists()
 
 
+def test_native_rotation_gives_forwarder_a_bounded_read_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feed = tmp_path / "cowrie.json"
+    feed.write_text('{"eventid":"cowrie.session.connect"}\n', encoding="utf-8")
+    feed.chmod(0o640)
+    scheduled: list[tuple[float, object, tuple[object, ...]]] = []
+
+    class _Reactor:
+        @staticmethod
+        def callLater(delay: float, callback: object, *args: object) -> None:
+            scheduled.append((delay, callback, args))
+
+        @staticmethod
+        def stop() -> None:
+            raise AssertionError("valid rotation must not stop the reactor")
+
+    rotated = Path(f"{feed}.2026-08-01")
+    feed.rename(rotated)
+    rotated.chmod(0o640)
+    metadata = rotated.stat()
+    monkeypatch.setattr(sanitized_jsonlog, "reactor", _Reactor())
+
+    sanitized_jsonlog._schedule_rotated_feed_seal(
+        str(rotated), metadata.st_dev, metadata.st_ino
+    )
+
+    assert stat.S_IMODE(rotated.stat().st_mode) == 0o640
+    assert len(scheduled) == 1
+    delay, callback, args = scheduled[0]
+    assert delay == sanitized_jsonlog.ROTATED_FEED_HANDOFF_SECONDS
+    callback(*args)  # type: ignore[operator]
+    assert stat.S_IMODE(rotated.stat().st_mode) == 0o600
+
+
+def test_native_rotation_sealer_rejects_replaced_inode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rotated = tmp_path / "cowrie.json.2026-08-01"
+    rotated.write_text("replacement", encoding="utf-8")
+    stopped: list[bool] = []
+
+    class _Reactor:
+        @staticmethod
+        def callLater(_delay: float, callback: object, *args: object) -> None:
+            callback(*args)  # type: ignore[operator]
+
+        @staticmethod
+        def stop() -> None:
+            stopped.append(True)
+
+    monkeypatch.setattr(sanitized_jsonlog, "reactor", _Reactor())
+    sanitized_jsonlog._seal_rotated_feed(
+        str(rotated), rotated.stat().st_dev, rotated.stat().st_ino + 1
+    )
+
+    assert stopped == [True]
+    assert stat.S_IMODE(rotated.stat().st_mode) != 0o600
+
+
 def test_partial_writer_record_is_not_forwarded_until_newline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

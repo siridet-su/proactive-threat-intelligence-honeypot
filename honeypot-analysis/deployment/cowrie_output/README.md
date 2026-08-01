@@ -66,8 +66,12 @@ check requires constructor, `start()`, and observer registration from the
 actual service PID. Real event delivery is still a mandatory acceptance test;
 structural readiness alone is never sufficient.
 
-Cowrie's daily writer rotates the JSON feed by rename and reopen, allowing the
-forwarder to identify and drain the old inode before reading the new feed. The
+Cowrie's daily writer rotates the JSON feed by rename and reopen. The renamed
+inode remains mode `0640` for a fixed 15-second forwarder handoff window, then
+an identity-bound callback seals it to `0600`. This lets the separately owned
+forwarder reopen and drain the exact old inode before reading the new feed
+without leaving historical logs group-readable. A missing, replaced, or
+unsealable inode stops Cowrie fail-closed. The
 external logrotate policy deliberately handles only the non-authoritative text
 log: applying `copytruncate` to JSON would permit a rapid-regrowth race against
 the forwarder's offset checkpoint. Before either rotation mechanism runs, the
