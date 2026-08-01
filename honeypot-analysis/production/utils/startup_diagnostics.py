@@ -207,7 +207,15 @@ class StartupDiagnostics:
     def _write(self) -> None:
         parent = self.path.parent
         parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(parent, 0o700)
+        # The service normally creates its private startup directory, but a
+        # deployment may pre-create it as root-owned beneath the shared
+        # runtime state directory.  The diagnostic record itself is always
+        # owner-only; inability to tighten an already-existing parent must
+        # not turn a bounded observability aid into a service startup gate.
+        try:
+            os.chmod(parent, 0o700)
+        except PermissionError:
+            pass
         payload = json.dumps(
             self._payload(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
         ).encode("utf-8")

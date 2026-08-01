@@ -57,6 +57,27 @@ def test_startup_diagnostics_rejects_out_of_order_and_unknown_stages(tmp_path: P
         diagnostics.complete("DATABASE_OPEN_COMPLETED")
 
 
+def test_startup_diagnostics_tolerates_precreated_shared_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = tmp_path / "shared"
+    parent.mkdir(mode=0o770)
+    path = parent / "ingest.json"
+    chmod = os.chmod
+
+    def deny_parent(path_value: str | os.PathLike[str], mode: int) -> None:
+        if Path(path_value) == parent:
+            raise PermissionError("shared runtime directory is root-owned")
+        chmod(path_value, mode)
+
+    monkeypatch.setattr(os, "chmod", deny_parent)
+    diagnostics = StartupDiagnostics("ingest", path=path)
+    diagnostics.enter("PROCESS_STARTED")
+    diagnostics.complete("PROCESS_STARTED")
+    assert json.loads(path.read_text(encoding="utf-8"))["status"] == "running"
+    assert os.stat(path).st_mode & 0o777 == 0o600
+
+
 def test_startup_failure_is_closed_and_does_not_retain_exception_text(tmp_path: Path) -> None:
     diagnostics = StartupDiagnostics("ingest", path=tmp_path / "state.json")
     diagnostics.enter("DATABASE_OPEN_STARTED")
