@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import replace
@@ -199,6 +200,59 @@ class CredentialValueRegistry:
 PROCESS_CREDENTIAL_REGISTRY = CredentialValueRegistry()
 
 
+_DIAGNOSTIC_EVENT_CATEGORIES = {
+    "cowrie.login.success": ("authentication", "success"),
+    "cowrie.login.failed": ("authentication", "failed"),
+    "cowrie.session.connect": ("session", "started"),
+    "cowrie.session.closed": ("session", "closed"),
+    "cowrie.session.file_download": ("transfer", "observed"),
+    "cowrie.session.file_upload": ("transfer", "observed"),
+    "cowrie.command.input": ("command", "observed"),
+    "cowrie.command.failed": ("command", "failed"),
+    "cowrie.log.closed": ("lifecycle", "closed"),
+}
+_DIAGNOSTIC_EVENT_PREFIXES = (
+    ("cowrie.client.", "client"),
+    ("cowrie.direct-tcpip.", "network"),
+    ("cowrie.session.", "session"),
+    ("cowrie.command.", "command"),
+    ("cowrie.login.", "authentication"),
+)
+
+
+def _diagnostic_category(event: Mapping[str, Any]) -> tuple[str, str]:
+    """Return closed diagnostic categories without retaining attacker text."""
+
+    if "log_failure" in event or "failure" in event:
+        return "operation", "failed"
+    event_id = event.get("eventid")
+    if not isinstance(event_id, str):
+        return "diagnostic", "observed"
+    normalized = event_id.strip().lower()
+    exact = _DIAGNOSTIC_EVENT_CATEGORIES.get(normalized)
+    if exact is not None:
+        return exact
+    for prefix, category in _DIAGNOSTIC_EVENT_PREFIXES:
+        if normalized.startswith(prefix):
+            return category, "observed"
+    return "diagnostic", "observed"
+
+
+def _diagnostic_session_reference(event: Mapping[str, Any]) -> str:
+    """Pseudonymize a bounded canonical session value or explicitly abstain."""
+
+    value = event.get("session")
+    if isinstance(value, bytes):
+        raw = value[:256]
+    elif isinstance(value, str):
+        raw = value.encode("utf-8", errors="replace")[:256]
+    else:
+        return "session_unavailable"
+    if not raw:
+        return "session_unavailable"
+    return "session_" + hashlib.sha256(raw).hexdigest()[:16]
+
+
 def sanitize_cowrie_event_for_persistence(
     event: Mapping[str, Any],
     *,
@@ -304,25 +358,41 @@ def sanitize_twisted_event(
     policy: CowriePrivacyPolicy = DEFAULT_POLICY,
     registry: CredentialValueRegistry | None = None,
 ) -> dict[str, Any]:
-    """Sanitize a Twisted event before its text observer formats or writes it."""
+    """Project a Twisted event to closed, non-secret operational diagnostics.
+
+    Cowrie and local extensions may send already-formatted authentication text
+    without structured credential fields.  Replacement-based scrubbing cannot
+    prove those strings safe, regardless of observer ordering.  The diagnostic
+    sink therefore emits only categorical fields and a one-way session
+    reference.  The lossless, sanitized JSON observer remains the evidence
+    source.
+    """
 
     registry = registry or PROCESS_CREDENTIAL_REGISTRY
-    sanitized = sanitize_cowrie_event_for_persistence(
+    # Register structured credential values for defense in depth, but never
+    # reuse arbitrary strings from this result in the diagnostic projection.
+    sanitize_cowrie_event_for_persistence(
         event, policy=policy, registry=registry
     )
-    if "log_failure" in sanitized or "failure" in sanitized:
-        sanitized.pop("log_failure", None)
-        sanitized.pop("failure", None)
-        sanitized["log_format"] = "operation_failed"
-        sanitized["message"] = "operation_failed"
-    for key, value in list(sanitized.items()):
-        if isinstance(value, str):
-            sanitized[key] = registry.scrub(value)
-        elif isinstance(value, tuple):
-            sanitized[key] = tuple(
-                registry.scrub(item) if isinstance(item, str) else item for item in value
-            )
-    return sanitized
+    category, outcome = _diagnostic_category(event)
+    raw_time = event.get("log_time", 0.0)
+    log_time = (
+        float(raw_time)
+        if isinstance(raw_time, (int, float))
+        and not isinstance(raw_time, bool)
+        and math.isfinite(float(raw_time))
+        else 0.0
+    )
+    return {
+        "log_format": (
+            "cowrie_diagnostic category={diagnostic_category} "
+            "outcome={diagnostic_outcome} session_ref={session_ref}"
+        ),
+        "diagnostic_category": category,
+        "diagnostic_outcome": outcome,
+        "session_ref": _diagnostic_session_reference(event),
+        "log_time": log_time,
+    }
 
 
 def serialize_cowrie_event_for_persistence(

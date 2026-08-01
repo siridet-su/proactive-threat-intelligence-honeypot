@@ -19,6 +19,7 @@ cowrie_root=/home/cowrie/cowrie
 config="${cowrie_root}/etc/cowrie.cfg"
 plugin="${cowrie_root}/src/cowrie/output/sanitizedjson.py"
 dropin=/etc/systemd/system/cowrie.service.d/20-sanitized-output.conf
+logrotate=/etc/logrotate.d/cowrie
 python="${cowrie_root}/cowrie-env/bin/python"
 
 test -f "${package}"
@@ -54,16 +55,33 @@ record_metadata() {
   fi
 }
 
+record_quarantine() {
+  target=$1
+  name=$2
+  if [ -L "${target}" ]; then
+    echo "credential-bearing log path must not be a symlink" >&2
+    exit 2
+  elif [ -f "${target}" ]; then
+    printf 'quarantine\t%s\t%s\t%s\t%s\t%s\n' \
+      "${target}" "${name}" "$(stat -c %a "${target}")" \
+      "$(stat -c %u "${target}")" "$(stat -c %g "${target}")" \
+      >>"${receipt}/managed-paths.tsv"
+  else
+    printf 'absent-metadata\t%s\n' "${target}" >>"${receipt}/managed-paths.tsv"
+  fi
+}
+
 : >"${receipt}/managed-paths.tsv"
 chmod 0600 "${receipt}/managed-paths.tsv"
 record_path "${config}" cowrie.cfg.before
 record_path "${plugin}" sanitizedjson.py.before
 record_path "${dropin}" 20-sanitized-output.conf.before
+record_path "${logrotate}" cowrie.logrotate.before
 record_path "${current}" current.before
 record_metadata /home/cowrie/users.txt
 record_metadata "${cowrie_root}/var/log/cowrie/cowrie_custom.json"
 record_metadata "${cowrie_root}/var/log/cowrie/cowrie.json"
-record_metadata "${cowrie_root}/var/log/cowrie/cowrie.log"
+record_quarantine "${cowrie_root}/var/log/cowrie/cowrie.log" cowrie.log.protected.before
 find "${cowrie_root}/var/log/cowrie" -xdev -type f \
   ! -path "${cowrie_root}/var/log/cowrie/cowrie_custom.json" \
   ! -path "${cowrie_root}/var/log/cowrie/cowrie.json" \
@@ -80,6 +98,16 @@ git -c "safe.directory=${cowrie_root}" -C "${cowrie_root}" \
   status --porcelain=v1 -uno 2>&1 \
   | sha256sum >"${receipt}/cowrie-dirty-status.before.sha256"
 sha256sum "${package}" >"${receipt}/bundle-package.sha256"
+
+systemctl stop cowrie.service
+if [ -f "${cowrie_root}/var/log/cowrie/cowrie.log" ]; then
+  mv "${cowrie_root}/var/log/cowrie/cowrie.log" \
+    "${receipt}/cowrie.log.protected.before"
+  chown root:root "${receipt}/cowrie.log.protected.before"
+  chmod 0600 "${receipt}/cowrie.log.protected.before"
+  sha256sum "${receipt}/cowrie.log.protected.before" \
+    >"${receipt}/protected-log.sha256"
+fi
 
 install -d -o cowrie -g cowrie -m 0700 /opt/honeypot-cowrie-output/releases
 install -d -o cowrie -g cowrie -m 0700 "${release}"
@@ -109,6 +137,8 @@ mv -Tf "${plugin}.new" "${plugin}"
 install -d -o root -g root -m 0755 "$(dirname "${dropin}")"
 install -o root -g root -m 0644 \
   "${current}/deployment/cowrie_output/20-sanitized-output.conf" "${dropin}"
+install -o root -g root -m 0644 \
+  "${current}/deployment/cowrie_output/cowrie.logrotate" "${logrotate}"
 
 for sensitive_file in \
   /home/cowrie/users.txt \
@@ -134,20 +164,21 @@ sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   HONEYPOT_COWRIE_CONFIG="${config}" \
   "${python}" -m production.tools.cowrie_output_integration validate \
   --config "${config}" --bundle-root "${current}" --plugin-link "${plugin}" \
-  --drop-in "${dropin}" --live-permissions
+  --drop-in "${dropin}" --logrotate "${logrotate}" --live-permissions
 
 systemctl daemon-reload
-systemctl restart cowrie.service
+systemctl start cowrie.service
 systemctl is-active --quiet cowrie.service
 sudo -u cowrie env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="${current}" \
   HONEYPOT_COWRIE_OUTPUT_ROOT="${current}" \
   HONEYPOT_COWRIE_CONFIG="${config}" \
   "${python}" -m production.tools.cowrie_output_integration validate \
   --config "${config}" --bundle-root "${current}" --plugin-link "${plugin}" \
-  --drop-in "${dropin}" --live-permissions \
+  --drop-in "${dropin}" --logrotate "${logrotate}" --live-permissions \
   >"${receipt}/validation.after.json"
 
-sha256sum "${config}" "${dropin}" "${release}/COWRIE_OUTPUT_MANIFEST.json" \
+sha256sum "${config}" "${dropin}" "${logrotate}" \
+  "${release}/COWRIE_OUTPUT_MANIFEST.json" \
   >"${receipt}/managed-hashes.after.sha256"
 systemctl show cowrie.service \
   -p ActiveState -p SubState -p MainPID -p ExecMainStartTimestamp \

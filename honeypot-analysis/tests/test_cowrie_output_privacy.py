@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,7 +14,13 @@ from production.cowrie_output.runtime import (
     verify_boundary,
     verify_bundle,
 )
-from production.tools.cowrie_output_integration import build_bundle, render_config
+from production.tools.cowrie_output_integration import (
+    build_bundle,
+    finish_live_rotation,
+    prepare_live_rotation,
+    render_config,
+    validate_live_permissions,
+)
 from production.utils.cowrie_privacy import (
     DEFAULT_POLICY,
     CredentialValueRegistry,
@@ -79,6 +88,20 @@ def _configured_boundary(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return bundle, config, plugin, dropin
 
 
+def _live_boundary(tmp_path: Path):
+    bundle = _build(tmp_path)
+    logs = tmp_path / "logs"
+    logs.mkdir(mode=0o750)
+    source = tmp_path / "cowrie.before.cfg"
+    source.write_text(
+        _source_config().replace("/tmp/cowrie-log", str(logs)),
+        encoding="utf-8",
+    )
+    config = tmp_path / "cowrie.cfg"
+    render_config(source, config, bundle)
+    return verify_boundary(config_path=config, bundle_root=bundle), logs
+
+
 @pytest.mark.parametrize("success", [True, False])
 def test_login_credentials_are_removed_before_serialization(success: bool) -> None:
     secret = "unicode-密碼-🔐" if success else "failed-password"
@@ -131,7 +154,8 @@ def test_repeated_events_are_idempotent_and_registry_scrubs_diagnostics() -> Non
         registry=registry,
     )
     assert "registry-secret" not in json.dumps(diagnostic)
-    assert diagnostic["message"] == "[REDACTED]"
+    assert diagnostic["diagnostic_category"] == "diagnostic"
+    assert diagnostic["diagnostic_outcome"] == "observed"
 
 
 def test_failures_have_bounded_diagnostics_without_exception_values() -> None:
@@ -144,9 +168,100 @@ def test_failures_have_bounded_diagnostics_without_exception_values() -> None:
         },
         registry=registry,
     )
-    assert event["log_format"] == "operation_failed"
-    assert event["message"] == "operation_failed"
+    assert event["diagnostic_category"] == "operation"
+    assert event["diagnostic_outcome"] == "failed"
     assert "log_failure" not in event
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "space containing credential",
+        "quotes-'\"-and-\\escapes",
+        "unicode-密碼-🔐",
+        "control\ncharacters\tremain-private",
+        "x" * 16_384,
+    ],
+)
+def test_unstructured_diagnostics_are_projected_without_attacker_text(
+    secret: str,
+) -> None:
+    event = {
+        "log_format": f"unstructured authentication registry {secret}",
+        "message": (f"unstructured authentication registry {secret}",),
+        "log_namespace": f"attacker.{secret}",
+        "log_system": secret,
+        "session": "0123456789abcdef",
+        "log_time": 42.0,
+    }
+    projected = sanitize_twisted_event(
+        event,
+        registry=CredentialValueRegistry(DEFAULT_POLICY),
+    )
+    encoded = json.dumps(projected, ensure_ascii=False, sort_keys=True)
+    assert secret not in encoded
+    assert set(projected) == {
+        "log_format",
+        "diagnostic_category",
+        "diagnostic_outcome",
+        "session_ref",
+        "log_time",
+    }
+    assert projected["session_ref"].startswith("session_")
+
+
+@pytest.mark.parametrize(
+    ("eventid", "category", "outcome"),
+    [
+        ("cowrie.login.success", "authentication", "success"),
+        ("cowrie.login.failed", "authentication", "failed"),
+        ("cowrie.session.connect", "session", "started"),
+        ("cowrie.session.closed", "session", "closed"),
+        ("cowrie.command.input", "command", "observed"),
+        ("cowrie.command.failed", "command", "failed"),
+        ("cowrie.session.file_upload", "transfer", "observed"),
+        ("cowrie.client.version", "client", "observed"),
+        ("cowrie.direct-tcpip.request", "network", "observed"),
+    ],
+)
+def test_diagnostic_projection_preserves_only_closed_operational_categories(
+    eventid: str,
+    category: str,
+    outcome: str,
+) -> None:
+    projected = sanitize_twisted_event(
+        {
+            "eventid": eventid,
+            "username": "arbitrary-user",
+            "password": "arbitrary-password",
+            "message": "arbitrary-user arbitrary-password",
+            "session": "0123456789abcdef",
+            "log_time": 1.0,
+        },
+        registry=CredentialValueRegistry(DEFAULT_POLICY),
+    )
+    assert projected["diagnostic_category"] == category
+    assert projected["diagnostic_outcome"] == outcome
+    assert "arbitrary-user" not in json.dumps(projected)
+    assert "arbitrary-password" not in json.dumps(projected)
+
+
+def test_diagnostic_projection_rejects_attacker_controlled_event_identity_and_time() -> None:
+    secret = "event-identity-secret"
+    projected = sanitize_twisted_event(
+        {
+            "eventid": secret,
+            "session": {"credential": secret},
+            "log_time": float("nan"),
+            "message": secret,
+        },
+        registry=CredentialValueRegistry(DEFAULT_POLICY),
+    )
+    assert projected["diagnostic_category"] == "diagnostic"
+    assert projected["diagnostic_outcome"] == "observed"
+    assert projected["session_ref"] == "session_unavailable"
+    assert projected["log_time"] == 0.0
+    assert secret not in json.dumps(projected)
 
 
 def test_malformed_or_unserializable_events_are_rejected_without_partial_bytes() -> None:
@@ -172,6 +287,101 @@ def test_rotation_and_restart_files_never_receive_plaintext(tmp_path: Path) -> N
         assert all(secret.encode() not in content for secret in secrets)
 
 
+def test_rotation_boundary_closes_modes_before_copy_and_after_rotation(
+    tmp_path: Path,
+) -> None:
+    boundary, logs = _live_boundary(tmp_path)
+    active_json = logs / "cowrie.json"
+    active_text = logs / "cowrie.log"
+    historical = logs / "cowrie.json.2026-08-01"
+    active_json.write_bytes(b"sanitized-json\n")
+    active_text.write_bytes(b"categorical-diagnostic\n")
+    historical.write_bytes(b"sanitized-history\n")
+    active_json.chmod(0o640)
+    active_text.chmod(0o600)
+    historical.chmod(0o600)
+
+    validate_live_permissions(boundary)
+    prepare_live_rotation(boundary)
+    assert stat.S_IMODE(active_json.stat().st_mode) == 0o600
+    assert stat.S_IMODE(active_text.stat().st_mode) == 0o600
+
+    compressed = logs / "cowrie.json.1.gz"
+    compressed.write_bytes(active_json.read_bytes())
+    compressed.chmod(stat.S_IMODE(active_json.stat().st_mode))
+    active_json.write_bytes(b"")
+    finish_live_rotation(boundary)
+    assert stat.S_IMODE(active_json.stat().st_mode) == 0o640
+    assert stat.S_IMODE(active_text.stat().st_mode) == 0o600
+    assert stat.S_IMODE(historical.stat().st_mode) == 0o600
+    assert stat.S_IMODE(compressed.stat().st_mode) == 0o600
+    validate_live_permissions(boundary)
+
+
+def test_live_permission_validation_rejects_open_rotations_and_symlinks(
+    tmp_path: Path,
+) -> None:
+    boundary, logs = _live_boundary(tmp_path)
+    active_json = logs / "cowrie.json"
+    active_json.write_bytes(b"sanitized\n")
+    active_json.chmod(0o640)
+    unsafe = logs / "cowrie.json.1.gz"
+    unsafe.write_bytes(b"sanitized\n")
+    unsafe.chmod(0o640)
+    with pytest.raises(CowrieOutputBoundaryError, match="historical Cowrie log mode"):
+        validate_live_permissions(boundary)
+    unsafe.chmod(0o600)
+    link = logs / "unexpected.log"
+    link.symlink_to(unsafe)
+    with pytest.raises(CowrieOutputBoundaryError, match="historical Cowrie log type"):
+        validate_live_permissions(boundary)
+
+
+@pytest.mark.skipif(shutil.which("logrotate") is None, reason="logrotate unavailable")
+def test_real_copytruncate_and_compression_never_create_group_readable_history(
+    tmp_path: Path,
+) -> None:
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    active_json = logs / "cowrie.json"
+    active_text = logs / "cowrie.log"
+    active_json.write_bytes(b"sanitized-json\n")
+    active_text.write_bytes(b"categorical-diagnostic\n")
+    active_json.chmod(0o640)
+    active_text.chmod(0o600)
+    config = tmp_path / "logrotate.conf"
+    state = tmp_path / "logrotate.state"
+    config.write_text(
+        f"""{active_text} {active_json} {{
+    size 1
+    rotate 2
+    compress
+    copytruncate
+    sharedscripts
+    firstaction
+        chmod 0600 {active_text} {active_json}
+    endscript
+    lastaction
+        chmod 0640 {active_json}
+        chmod 0600 {active_text} {logs}/*.1.gz
+    endscript
+}}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["logrotate", "-f", "-s", str(state), str(config)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(active_json.stat().st_mode) == 0o640
+    assert stat.S_IMODE(active_text.stat().st_mode) == 0o600
+    assert stat.S_IMODE((logs / "cowrie.json.1.gz").stat().st_mode) == 0o600
+    assert stat.S_IMODE((logs / "cowrie.log.1.gz").stat().st_mode) == 0o600
+
+
 def test_policy_is_strict_and_hash_bound(tmp_path: Path) -> None:
     policy = load_policy(ROOT / "configs/cowrie_output_privacy.v1.json")
     assert policy.policy_id == "cowrie_pre_persistence_credentials"
@@ -187,11 +397,17 @@ def test_policy_is_strict_and_hash_bound(tmp_path: Path) -> None:
 
 def test_bundle_config_plugin_and_dropin_validate_together(tmp_path: Path) -> None:
     bundle, config, plugin, dropin = _configured_boundary(tmp_path)
+    logrotate = tmp_path / "cowrie.logrotate"
+    logrotate.write_bytes(
+        (bundle / "deployment/cowrie_output/cowrie.logrotate").read_bytes()
+    )
+    logrotate.chmod(0o644)
     result = verify_boundary(
         config_path=config,
         bundle_root=bundle,
         plugin_link=plugin,
         drop_in=dropin,
+        logrotate=logrotate,
     )
     assert result.git_revision == REVISION
     assert result.policy.sha256
@@ -305,3 +521,26 @@ def test_installer_preserves_every_manifested_executable_mode() -> None:
         'find "${cowrie_root}/var/log/cowrie" -xdev -type f' in installer
         and "-exec chmod 0600 {} +" in installer
     )
+    assert 'record_path "${logrotate}" cowrie.logrotate.before' in installer
+    assert 'cowrie.log.protected.before' in installer
+    assert 'systemctl stop cowrie.service' in installer
+    assert 'install -o root -g root -m 0644' in installer
+
+
+def test_service_discards_untrusted_process_streams_and_binds_rotation_policy() -> None:
+    dropin = (
+        ROOT / "deployment/cowrie_output/20-sanitized-output.conf"
+    ).read_text(encoding="utf-8")
+    assert "StandardOutput=null" in dropin
+    assert "StandardError=null" in dropin
+    assert "--live-permissions" in dropin
+    assert "--logrotate /etc/logrotate.d/cowrie" in dropin
+    rotation = (
+        ROOT / "deployment/cowrie_output/cowrie.logrotate"
+    ).read_text(encoding="utf-8")
+    assert "firstaction" in rotation
+    assert "prepare-rotation" in rotation
+    assert "lastaction" in rotation
+    assert "finish-rotation" in rotation
+    assert "copytruncate" in rotation
+    assert "compress" in rotation

@@ -1,0 +1,17 @@
+/home/cowrie/cowrie/var/log/cowrie/cowrie.log /home/cowrie/cowrie/var/log/cowrie/cowrie.json {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+    copytruncate
+    maxsize 100M
+    su cowrie cowrie
+    sharedscripts
+    firstaction
+        /usr/bin/env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/opt/honeypot-cowrie-output/current:/home/cowrie/cowrie/src HONEYPOT_COWRIE_OUTPUT_ROOT=/opt/honeypot-cowrie-output/current HONEYPOT_COWRIE_CONFIG=/home/cowrie/cowrie/etc/cowrie.cfg HONEYPOT_COWRIE_ROOT=/home/cowrie/cowrie /home/cowrie/cowrie/cowrie-env/bin/python -m production.tools.cowrie_output_integration prepare-rotation --config /home/cowrie/cowrie/etc/cowrie.cfg --bundle-root /opt/honeypot-cowrie-output/current
+    endscript
+    lastaction
+        /usr/bin/env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/opt/honeypot-cowrie-output/current:/home/cowrie/cowrie/src HONEYPOT_COWRIE_OUTPUT_ROOT=/opt/honeypot-cowrie-output/current HONEYPOT_COWRIE_CONFIG=/home/cowrie/cowrie/etc/cowrie.cfg HONEYPOT_COWRIE_ROOT=/home/cowrie/cowrie /home/cowrie/cowrie/cowrie-env/bin/python -m production.tools.cowrie_output_integration finish-rotation --config /home/cowrie/cowrie/etc/cowrie.cfg --bundle-root /opt/honeypot-cowrie-output/current
+    endscript
+}

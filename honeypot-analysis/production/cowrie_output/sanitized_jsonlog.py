@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from typing import Any
 
 from production.cowrie_output.runtime import boundary_from_environment
@@ -44,13 +45,38 @@ class Output(_CowrieOutputBase):
             )
             directory = os.path.dirname(configured_log)
             basename = os.path.basename(configured_log)
-            self.outfile = cowrie.python.logfile.CowrieDailyLogFile(
+            self.outfile = _PrivateFeedDailyLogFile(
                 basename, directory, defaultMode=0o640
             )
         except BaseException as exc:
             raise SystemExit(
                 "sanitized Cowrie JSON output failed closed during initialization"
             ) from exc
+
+
+if cowrie is not None:
+
+    class _PrivateFeedDailyLogFile(cowrie.python.logfile.CowrieDailyLogFile):
+        """Rotate the group-readable feed into an owner-only historical file."""
+
+        def rotate(self) -> None:
+            if not (os.access(self.directory, os.W_OK) and os.access(self.path, os.W_OK)):
+                raise OSError("sanitized Cowrie feed cannot be rotated safely")
+            rotated = f"{self.path}.{self.suffix(self.lastDate)}"
+            if os.path.lexists(rotated):
+                raise FileExistsError("sanitized Cowrie rotation target already exists")
+            metadata = os.lstat(self.path)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise OSError("sanitized Cowrie feed is not a regular file")
+            self._file.close()
+            os.chmod(self.path, 0o600)
+            os.rename(self.path, rotated)
+            self._openFile()
+            os.chmod(self.path, 0o640)
+            os.chmod(rotated, 0o600)
+
+else:  # pragma: no cover - import safety outside the Cowrie runtime
+    _PrivateFeedDailyLogFile = object
 
     def stop(self) -> None:
         if getattr(self, "outfile", None):

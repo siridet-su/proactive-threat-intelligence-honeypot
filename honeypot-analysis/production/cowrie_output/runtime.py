@@ -22,6 +22,7 @@ REQUIRED_BUNDLE_FILES = frozenset(
     {
         "configs/cowrie_output_privacy.v1.json",
         "deployment/cowrie_output/20-sanitized-output.conf",
+        "deployment/cowrie_output/cowrie.logrotate",
         "deployment/cowrie_output/README.md",
         "deployment/cowrie_output/install-sanitized-output.sh",
         "deployment/cowrie_output/rollback-sanitized-output.sh",
@@ -257,6 +258,7 @@ def verify_boundary(
     bundle_root: str | Path,
     plugin_link: str | Path | None = None,
     drop_in: str | Path | None = None,
+    logrotate: str | Path | None = None,
 ) -> VerifiedBoundary:
     root = Path(bundle_root).resolve()
     manifest, manifest_path, manifest_sha256 = verify_bundle(root)
@@ -278,6 +280,10 @@ def verify_boundary(
             "ExecStartPre=",
             "production.tools.cowrie_output_integration validate",
             "run-sanitized-cowrie.sh",
+            "StandardOutput=null",
+            "StandardError=null",
+            "--live-permissions",
+            "--logrotate /etc/logrotate.d/cowrie",
             "Environment=PYTHONPATH=/opt/honeypot-cowrie-output/current:/home/cowrie/cowrie/src",
             "Environment=PYTHONDONTWRITEBYTECODE=1",
             "ReadOnlyPaths=/home/cowrie/users.txt",
@@ -285,6 +291,23 @@ def verify_boundary(
         )
         if any(fragment not in unit_text for fragment in required_fragments):
             raise CowrieOutputBoundaryError("Cowrie systemd drop-in is incomplete")
+    if logrotate is not None:
+        installed_logrotate = Path(logrotate)
+        expected_logrotate = root / "deployment/cowrie_output/cowrie.logrotate"
+        try:
+            metadata = installed_logrotate.lstat()
+        except OSError as exc:
+            raise CowrieOutputBoundaryError("Cowrie logrotate policy is unavailable") from exc
+        if not stat.S_ISREG(metadata.st_mode) or installed_logrotate.is_symlink():
+            raise CowrieOutputBoundaryError("Cowrie logrotate policy is not a regular file")
+        if stat.S_IMODE(metadata.st_mode) != 0o644:
+            raise CowrieOutputBoundaryError("Cowrie logrotate policy mode is invalid")
+        if str(installed_logrotate).startswith("/etc/") and (
+            metadata.st_uid != 0 or metadata.st_gid != 0
+        ):
+            raise CowrieOutputBoundaryError("Cowrie logrotate policy ownership is invalid")
+        if _sha256_file(installed_logrotate) != _sha256_file(expected_logrotate):
+            raise CowrieOutputBoundaryError("Cowrie logrotate policy differs from the bundle")
     return VerifiedBoundary(
         bundle_root=root,
         manifest_path=manifest_path,

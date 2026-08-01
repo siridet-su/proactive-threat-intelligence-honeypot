@@ -179,18 +179,83 @@ def validate_live_permissions(boundary) -> None:
         Path("/home/cowrie/users.txt"): 0o600,
         Path("/home/cowrie/cowrie/var/log/cowrie/cowrie_custom.json"): 0o600,
     }
+    expected_owner = boundary.json_log_path.parent.stat()
     for path, expected_mode in expected_modes.items():
-        if path.exists() and stat.S_IMODE(path.stat().st_mode) != expected_mode:
-            raise CowrieOutputBoundaryError(f"unsafe persistent-file mode: {path}")
+        if path.exists() or path.is_symlink():
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise CowrieOutputBoundaryError(
+                    f"unsafe persistent-file type: {path}"
+                )
+            if stat.S_IMODE(metadata.st_mode) != expected_mode:
+                raise CowrieOutputBoundaryError(f"unsafe persistent-file mode: {path}")
+            if (
+                metadata.st_uid != expected_owner.st_uid
+                or metadata.st_gid != expected_owner.st_gid
+            ):
+                raise CowrieOutputBoundaryError(
+                    f"unsafe persistent-file ownership: {path}"
+                )
     for path in boundary.json_log_path.parent.rglob("*"):
-        if (
-            path.is_file()
-            and path != boundary.json_log_path
-            and stat.S_IMODE(path.stat().st_mode) != 0o600
-        ):
+        metadata = path.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
             raise CowrieOutputBoundaryError(
-                f"unsafe historical Cowrie log mode: {path}"
+                f"unsafe historical Cowrie log type: {path}"
             )
+        if path != boundary.json_log_path and stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise CowrieOutputBoundaryError(f"unsafe historical Cowrie log mode: {path}")
+        if metadata.st_uid != expected_owner.st_uid or metadata.st_gid != expected_owner.st_gid:
+            raise CowrieOutputBoundaryError(
+                f"unsafe historical Cowrie log ownership: {path}"
+            )
+
+
+def _rotation_paths(boundary) -> tuple[Path, Path]:
+    return boundary.json_log_path, boundary.json_log_path.with_name("cowrie.log")
+
+
+def _require_private_regular(path: Path) -> os.stat_result:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise CowrieOutputBoundaryError(f"rotation path is unavailable: {path}") from exc
+    if not stat.S_ISREG(metadata.st_mode):
+        raise CowrieOutputBoundaryError(f"rotation path is not a regular file: {path}")
+    return metadata
+
+
+def prepare_live_rotation(boundary) -> None:
+    """Make active logs owner-only before logrotate creates any copy."""
+
+    expected_owner = boundary.json_log_path.parent.stat()
+    for path in _rotation_paths(boundary):
+        if not path.exists() and not path.is_symlink():
+            continue
+        metadata = _require_private_regular(path)
+        if metadata.st_uid != expected_owner.st_uid or metadata.st_gid != expected_owner.st_gid:
+            raise CowrieOutputBoundaryError(f"rotation path ownership is invalid: {path}")
+        path.chmod(0o600)
+
+
+def finish_live_rotation(boundary) -> None:
+    """Restore the active feed mode and close all historical file modes."""
+
+    json_log, text_log = _rotation_paths(boundary)
+    expected_owner = json_log.parent.stat()
+    for path in json_log.parent.rglob("*"):
+        metadata = path.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise CowrieOutputBoundaryError(f"rotation produced an unsafe file type: {path}")
+        if metadata.st_uid != expected_owner.st_uid or metadata.st_gid != expected_owner.st_gid:
+            raise CowrieOutputBoundaryError(f"rotation produced unsafe ownership: {path}")
+        path.chmod(0o640 if path == json_log else 0o600)
+    if text_log.exists() or text_log.is_symlink():
+        _require_private_regular(text_log)
+        text_log.chmod(0o600)
 
 
 def main() -> int:
@@ -214,7 +279,13 @@ def main() -> int:
     validate.add_argument("--bundle-root", required=True)
     validate.add_argument("--plugin-link")
     validate.add_argument("--drop-in")
+    validate.add_argument("--logrotate")
     validate.add_argument("--live-permissions", action="store_true")
+
+    for name in ("prepare-rotation", "finish-rotation"):
+        rotation = commands.add_parser(name)
+        rotation.add_argument("--config", required=True)
+        rotation.add_argument("--bundle-root", required=True)
 
     args = parser.parse_args()
     if args.command == "build":
@@ -226,12 +297,47 @@ def main() -> int:
     if args.command == "render-config":
         render_config(Path(args.source), Path(args.destination), Path(args.bundle_root))
         return 0
+    if args.command in {"prepare-rotation", "finish-rotation"}:
+        try:
+            result = verify_boundary(
+                config_path=args.config,
+                bundle_root=args.bundle_root,
+            )
+            if args.command == "prepare-rotation":
+                prepare_live_rotation(result)
+            else:
+                finish_live_rotation(result)
+        except (CowrieOutputBoundaryError, ValueError, OSError) as exc:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "cowrie_output_rotation.v1",
+                        "status": "invalid",
+                        "operation": args.command,
+                        "error": str(exc),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(
+            json.dumps(
+                {
+                    "schema_version": "cowrie_output_rotation.v1",
+                    "status": "valid",
+                    "operation": args.command,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
     try:
         result = verify_boundary(
             config_path=args.config,
             bundle_root=args.bundle_root,
             plugin_link=args.plugin_link,
             drop_in=args.drop_in,
+            logrotate=args.logrotate,
         )
         if args.live_permissions:
             validate_live_permissions(result)

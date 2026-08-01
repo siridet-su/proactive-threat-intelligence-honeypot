@@ -1,6 +1,7 @@
 # Cowrie pre-persistence credential output boundary
 
-This bundle replaces only Cowrie's persistent JSON and diagnostic observers.
+This bundle replaces only Cowrie's persistent JSON and diagnostic observers
+and binds their external rotation policy.
 It does not patch Cowrie source, mutate historical logs, or replace the
 downstream forwarder sanitizer.
 
@@ -32,6 +33,17 @@ existing forwarder (via its supplementary `cowrie` group) can use the required
 file boundary. Existing historical and rotated files are content-preserved,
 hash-receipted, and restricted to `0600`; they are never rewritten.
 
+The diagnostic observer is a closed categorical projection. It never persists
+Cowrie's arbitrary preformatted text, because local Cowrie extensions can
+embed authentication values before structured credential fields exist. The
+service also discards direct stdout/stderr; systemd still retains lifecycle and
+exit state without persisting untrusted process text.
+
+Both the Cowrie daily writer and `/etc/logrotate.d/cowrie` make the active JSON
+feed owner-only before creating a historical path. The current feed returns to
+`0640` for the forwarder, while every rotated or compressed file remains
+`0600` from creation.
+
 ## Install
 
 Capture the current Cowrie configuration, service state, integration paths,
@@ -53,7 +65,14 @@ Only these managed integration points change:
 - `/home/cowrie/cowrie/etc/cowrie.cfg` output sections
 - `/home/cowrie/cowrie/src/cowrie/output/sanitizedjson.py`
 - `/etc/systemd/system/cowrie.service.d/20-sanitized-output.conf`
+- `/etc/logrotate.d/cowrie`
 - owner/group/mode metadata for existing credential-bearing Cowrie files
+
+Before replacement, the installer stops Cowrie and moves the prior active
+diagnostic log into the owner-only receipt as
+`cowrie.log.protected.before`. It does not copy, rewrite, truncate, or delete
+that evidence. The protected file is intentionally outside the active Cowrie
+log tree and is restored only by the emergency rollback procedure.
 
 The source checkout is not reset, normalized, or overwritten. The stock
 `cowrie.output.jsonlog` remains present but must be disabled.
@@ -73,6 +92,7 @@ sudo -u cowrie env \
   --bundle-root /opt/honeypot-cowrie-output/current \
   --plugin-link /home/cowrie/cowrie/src/cowrie/output/sanitizedjson.py \
   --drop-in /etc/systemd/system/cowrie.service.d/20-sanitized-output.conf \
+  --logrotate /etc/logrotate.d/cowrie \
   --live-permissions
 ```
 
