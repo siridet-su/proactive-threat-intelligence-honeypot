@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Mapping
 from typing import Any
 
+from production.cowrie_output.observer_diagnostics import (
+    emit_observer_diagnostic,
+    observer_event_category,
+)
 from production.cowrie_output.runtime import boundary_from_environment
 from production.utils.cowrie_privacy import serialize_cowrie_event_for_persistence
 
@@ -48,10 +53,119 @@ class Output(_CowrieOutputBase):
             self.outfile = _PrivateFeedDailyLogFile(
                 basename, directory, defaultMode=0o640
             )
+            self._observer_sequence = 0
+            emit_observer_diagnostic(
+                observer="sanitized_json",
+                phase="registration",
+                sequence=0,
+            )
         except BaseException as exc:
             raise SystemExit(
                 "sanitized Cowrie JSON output failed closed during initialization"
             ) from exc
+
+    def stop(self) -> None:
+        if not getattr(self, "outfile", None):
+            return
+        sequence = int(getattr(self, "_observer_sequence", 0))
+        try:
+            self.outfile.flush()
+        except BaseException as exc:
+            emit_observer_diagnostic(
+                observer="sanitized_json",
+                phase="stop",
+                sequence=sequence,
+                exception_category="flush",
+            )
+            raise SystemExit("sanitized Cowrie JSON flush failed closed") from exc
+        emit_observer_diagnostic(
+            observer="sanitized_json",
+            phase="stop",
+            sequence=sequence,
+            flush_succeeded=True,
+        )
+
+    def write(self, event: dict[str, Any]) -> None:
+        sequence = int(getattr(self, "_observer_sequence", 0)) + 1
+        self._observer_sequence = sequence
+        event_copy: Mapping[str, Any] | None = (
+            dict(event) if isinstance(event, Mapping) else None
+        )
+        category = observer_event_category(event_copy)
+        emit_observer_diagnostic(
+            observer="sanitized_json",
+            phase="invocation",
+            sequence=sequence,
+            event=event_copy,
+            event_category=category,
+        )
+        try:
+            serialized = serialize_cowrie_event_for_persistence(
+                event_copy,  # type: ignore[arg-type]
+                policy=self._boundary.policy,
+                epoch_timestamp=self.epoch_timestamp,
+            )
+        except (TypeError, ValueError) as exc:
+            emit_observer_diagnostic(
+                observer="sanitized_json",
+                phase="write",
+                sequence=sequence,
+                event=event_copy,
+                event_category=category,
+                write_attempted=True,
+                exception_category="serialization",
+            )
+            raise SystemExit("sanitized Cowrie JSON event rejected") from exc
+        try:
+            self.outfile.write(serialized.decode("utf-8"))
+        except BaseException as exc:
+            emit_observer_diagnostic(
+                observer="sanitized_json",
+                phase="write",
+                sequence=sequence,
+                event=event_copy,
+                event_category=category,
+                write_attempted=True,
+                exception_category="write",
+            )
+            raise SystemExit(
+                "sanitized Cowrie JSON persistence failed closed"
+            ) from exc
+        emit_observer_diagnostic(
+            observer="sanitized_json",
+            phase="write",
+            sequence=sequence,
+            event=event_copy,
+            event_category=category,
+            write_attempted=True,
+            write_succeeded=True,
+        )
+        try:
+            self.outfile.flush()
+        except BaseException as exc:
+            emit_observer_diagnostic(
+                observer="sanitized_json",
+                phase="flush",
+                sequence=sequence,
+                event=event_copy,
+                event_category=category,
+                write_attempted=True,
+                write_succeeded=True,
+                exception_category="flush",
+            )
+            raise SystemExit(
+                "sanitized Cowrie JSON persistence failed closed"
+            ) from exc
+        emit_observer_diagnostic(
+            observer="sanitized_json",
+            phase="flush",
+            sequence=sequence,
+            event=event_copy,
+            event_category=category,
+            write_attempted=True,
+            write_succeeded=True,
+            flush_succeeded=True,
+        )
 
 
 if cowrie is not None:
@@ -77,26 +191,3 @@ if cowrie is not None:
 
 else:  # pragma: no cover - import safety outside the Cowrie runtime
     _PrivateFeedDailyLogFile = object
-
-    def stop(self) -> None:
-        if getattr(self, "outfile", None):
-            self.outfile.flush()
-
-    def write(self, event: dict[str, Any]) -> None:
-        try:
-            serialized = serialize_cowrie_event_for_persistence(
-                event,
-                policy=self._boundary.policy,
-                epoch_timestamp=self.epoch_timestamp,
-            )
-        except ValueError:
-            if log is not None:
-                log.msg("sanitizedjson: event rejected before persistence")
-            return
-        try:
-            self.outfile.write(serialized.decode("utf-8"))
-            self.outfile.flush()
-        except BaseException as exc:
-            raise SystemExit(
-                "sanitized Cowrie JSON persistence failed closed"
-            ) from exc

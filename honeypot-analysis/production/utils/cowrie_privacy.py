@@ -420,6 +420,7 @@ def serialize_cowrie_event_for_persistence(
             json.dumps(
                 sanitized,
                 ensure_ascii=False,
+                sort_keys=True,
                 separators=(",", ":"),
             )
             + "\n"

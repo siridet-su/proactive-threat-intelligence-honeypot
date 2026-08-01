@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
+from production.cowrie_output.observer_diagnostics import emit_observer_diagnostic
 from production.cowrie_output.runtime import boundary_from_environment
 from production.utils.cowrie_privacy import sanitize_twisted_event
 
@@ -13,6 +15,84 @@ def _private_plain_file(path: Path):
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(descriptor, 0o600)
     return os.fdopen(descriptor, "w", encoding="utf-8")
+
+
+def _isolated_text_observer(observer, output, boundary):
+    """Keep categorical diagnostics isolated from authoritative JSON output."""
+
+    sequence = 0
+    emit_observer_diagnostic(
+        observer="categorical_text",
+        phase="registration",
+        sequence=sequence,
+    )
+
+    def sanitized_observer(event):
+        nonlocal sequence
+        sequence += 1
+        event_copy = dict(event) if isinstance(event, Mapping) else {}
+        try:
+            safe_event = sanitize_twisted_event(event_copy, policy=boundary.policy)
+            category = str(safe_event.get("diagnostic_category", "unavailable"))
+        except BaseException:
+            safe_event = {
+                "log_format": "sanitized diagnostic event rejected",
+                "log_time": 0.0,
+            }
+            category = "unavailable"
+            emit_observer_diagnostic(
+                observer="categorical_text",
+                phase="invocation",
+                sequence=sequence,
+                event=event_copy,
+                event_category=category,
+                exception_category="projection",
+            )
+        else:
+            emit_observer_diagnostic(
+                observer="categorical_text",
+                phase="invocation",
+                sequence=sequence,
+                event=event_copy,
+                event_category=category,
+            )
+        try:
+            observer(safe_event)
+            emit_observer_diagnostic(
+                observer="categorical_text",
+                phase="write",
+                sequence=sequence,
+                event=event_copy,
+                event_category=category,
+                write_attempted=True,
+                write_succeeded=True,
+            )
+            output.flush()
+        except BaseException:
+            # The categorical sink is non-authoritative. Its failure must not
+            # suppress the sanitized JSON observer that follows it.
+            emit_observer_diagnostic(
+                observer="categorical_text",
+                phase="flush",
+                sequence=sequence,
+                event=event_copy,
+                event_category=category,
+                write_attempted=True,
+                exception_category="flush",
+            )
+            return
+        emit_observer_diagnostic(
+            observer="categorical_text",
+            phase="flush",
+            sequence=sequence,
+            event=event_copy,
+            event_category=category,
+            write_attempted=True,
+            write_succeeded=True,
+            flush_succeeded=True,
+        )
+
+    return sanitized_observer
 
 
 def logger():
@@ -46,19 +126,4 @@ def logger():
             "sanitized Cowrie diagnostic output failed closed during initialization"
         ) from exc
 
-    def sanitized_observer(event):
-        try:
-            safe_event = sanitize_twisted_event(event, policy=boundary.policy)
-        except BaseException:
-            safe_event = {
-                "log_format": "sanitized diagnostic event rejected",
-                "log_time": event.get("log_time", 0),
-            }
-        try:
-            observer(safe_event)
-        except BaseException as exc:
-            raise SystemExit(
-                "sanitized Cowrie diagnostic persistence failed closed"
-            ) from exc
-
-    return sanitized_observer
+    return _isolated_text_observer(observer, output, boundary)

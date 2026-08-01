@@ -6,9 +6,15 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from production.cowrie_output import sanitized_jsonlog
+from production.cowrie_output.observer_diagnostics import (
+    set_isolated_diagnostic_sink,
+)
+from production.cowrie_output.twisted_logger import _isolated_text_observer
 from production.cowrie_output.runtime import (
     CowrieOutputBoundaryError,
     verify_boundary,
@@ -100,6 +106,33 @@ def _live_boundary(tmp_path: Path):
     config = tmp_path / "cowrie.cfg"
     render_config(source, config, bundle)
     return verify_boundary(config_path=config, bundle_root=bundle), logs
+
+
+class _MemoryOutput:
+    def __init__(self, *, fail_write: bool = False, fail_flush: bool = False) -> None:
+        self.values: list[str] = []
+        self.flushes = 0
+        self.fail_write = fail_write
+        self.fail_flush = fail_flush
+
+    def write(self, value: str) -> None:
+        if self.fail_write:
+            raise OSError("untrusted write failure detail")
+        self.values.append(value)
+
+    def flush(self) -> None:
+        if self.fail_flush:
+            raise OSError("untrusted flush failure detail")
+        self.flushes += 1
+
+
+def _json_observer(output: _MemoryOutput):
+    observer = object.__new__(sanitized_jsonlog.Output)
+    observer.outfile = output
+    observer._boundary = SimpleNamespace(policy=DEFAULT_POLICY)
+    observer.epoch_timestamp = False
+    observer._observer_sequence = 0
+    return observer
 
 
 @pytest.mark.parametrize("success", [True, False])
@@ -271,6 +304,154 @@ def test_malformed_or_unserializable_events_are_rejected_without_partial_bytes()
         serialize_cowrie_event_for_persistence(
             {"eventid": "cowrie.command.input", "input": object()}
         )
+
+
+def test_json_output_implements_cowrie_abstract_contract_and_writes_once() -> None:
+    assert {"start", "stop", "write"} <= set(sanitized_jsonlog.Output.__dict__)
+    secret = "generated-observer-secret"
+    original = _login(secret)
+    snapshot = json.loads(json.dumps(original))
+    target = _MemoryOutput()
+    observer = _json_observer(target)
+
+    observer.write(original)
+
+    assert original == snapshot
+    assert len(target.values) == 1
+    assert target.flushes == 1
+    assert target.values[0].endswith("\n")
+    assert target.values[0].count("\n") == 1
+    decoded = json.loads(target.values[0])
+    assert decoded["eventid"] == "cowrie.login.success"
+    assert decoded["timestamp"] == original["timestamp"]
+    assert decoded["username"] == "[REDACTED]"
+    assert decoded["password"] == "[REDACTED]"
+    assert secret not in target.values[0]
+    assert list(decoded) == sorted(decoded)
+
+
+@pytest.mark.parametrize("text_first", [True, False])
+def test_observer_order_does_not_change_json_or_mutate_shared_event(
+    text_first: bool,
+) -> None:
+    secret = "order-independent-secret"
+    event = _login(secret)
+    snapshot = json.loads(json.dumps(event))
+    text_target = _MemoryOutput()
+    text_events: list[dict] = []
+
+    def text_writer(safe_event: dict) -> None:
+        text_events.append(dict(safe_event))
+        safe_event["diagnostic_category"] = "mutated-by-test-sink"
+
+    text_observer = _isolated_text_observer(
+        text_writer,
+        text_target,
+        SimpleNamespace(policy=DEFAULT_POLICY),
+    )
+    json_target = _MemoryOutput()
+    json_observer = _json_observer(json_target)
+    ordered = (
+        (text_observer, json_observer.write)
+        if text_first
+        else (json_observer.write, text_observer)
+    )
+    for observer in ordered:
+        observer(event)
+
+    assert event == snapshot
+    assert len(text_events) == 1
+    assert len(json_target.values) == 1
+    assert secret not in json_target.values[0]
+    assert secret not in json.dumps(text_events)
+
+
+def test_text_observer_failure_cannot_suppress_json_output() -> None:
+    event = _login("text-failure-secret")
+
+    def failed_text_writer(_safe_event: dict) -> None:
+        raise RuntimeError("attacker-controlled exception detail")
+
+    text_observer = _isolated_text_observer(
+        failed_text_writer,
+        _MemoryOutput(),
+        SimpleNamespace(policy=DEFAULT_POLICY),
+    )
+    target = _MemoryOutput()
+    json_observer = _json_observer(target)
+    text_observer(event)
+    json_observer.write(event)
+
+    assert len(target.values) == 1
+    assert "text-failure-secret" not in target.values[0]
+
+
+@pytest.mark.parametrize(
+    ("target", "category"),
+    [
+        (_MemoryOutput(fail_write=True), "write"),
+        (_MemoryOutput(fail_flush=True), "flush"),
+    ],
+)
+def test_json_persistence_failures_stop_with_bounded_diagnostics(
+    target: _MemoryOutput,
+    category: str,
+) -> None:
+    diagnostics: list[dict] = []
+    previous = set_isolated_diagnostic_sink(diagnostics.append)
+    try:
+        with pytest.raises(SystemExit, match="failed closed"):
+            _json_observer(target).write(_login("persistence-failure-secret"))
+    finally:
+        set_isolated_diagnostic_sink(previous)
+
+    assert diagnostics[-1]["exception_category"] == category
+    assert "persistence-failure-secret" not in json.dumps(diagnostics)
+    assert "untrusted" not in json.dumps(diagnostics)
+
+
+def test_json_serialization_failure_is_visible_and_writes_no_partial_record() -> None:
+    target = _MemoryOutput()
+    event = _login("serialization-secret")
+    event["unsupported"] = object()
+    with pytest.raises(SystemExit, match="event rejected"):
+        _json_observer(target).write(event)
+    assert target.values == []
+    assert target.flushes == 0
+
+
+def test_isolated_observer_diagnostics_are_closed_and_privacy_safe() -> None:
+    diagnostics: list[dict] = []
+    secret = "diagnostic-sink-secret"
+    previous = set_isolated_diagnostic_sink(diagnostics.append)
+    try:
+        event = _login(secret)
+        text_target = _MemoryOutput()
+        _isolated_text_observer(
+            lambda safe: text_target.write(json.dumps(safe, sort_keys=True)),
+            text_target,
+            SimpleNamespace(policy=DEFAULT_POLICY),
+        )(event)
+        _json_observer(_MemoryOutput()).write(event)
+    finally:
+        set_isolated_diagnostic_sink(previous)
+
+    assert diagnostics
+    assert secret not in json.dumps(diagnostics)
+    for item in diagnostics:
+        assert set(item) == {
+            "schema_version",
+            "observer",
+            "phase",
+            "sequence",
+            "event_category",
+            "event_id_sha256",
+            "output_path_category",
+            "write_attempted",
+            "write_succeeded",
+            "flush_succeeded",
+            "exception_category",
+        }
 
 
 def test_rotation_and_restart_files_never_receive_plaintext(tmp_path: Path) -> None:

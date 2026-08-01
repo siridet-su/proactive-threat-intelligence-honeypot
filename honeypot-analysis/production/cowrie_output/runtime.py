@@ -29,6 +29,7 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "deployment/cowrie_output/run-sanitized-cowrie.sh",
         "production/__init__.py",
         "production/cowrie_output/__init__.py",
+        "production/cowrie_output/observer_diagnostics.py",
         "production/cowrie_output/runtime.py",
         "production/cowrie_output/sanitized_jsonlog.py",
         "production/cowrie_output/twisted_logger.py",
