@@ -21,7 +21,7 @@ class FakeMonitorHealthStorage:
     def health_check(self) -> dict:
         return {
             "ok": self.ready,
-            "backend": "mongodb",
+            "backend": "sqlite",
             "database": "must-not-leak",
         }
 
@@ -41,7 +41,7 @@ def _config(
     )
     return monitor_web.MonitorConfig(
         db_path="",
-        database_url="mongodb://database.internal/honeypot",
+        database_url="sqlite:///:memory:",
         reports_dir=str(tmp_path / "reports"),
         bind_host=host,
         production_config=production_config,

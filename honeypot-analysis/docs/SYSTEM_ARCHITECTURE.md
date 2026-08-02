@@ -141,6 +141,14 @@ Only these family slices are activated:
   valid entity-free operations need no invented target. It creates only a
   bounded observation finding and makes no reconnaissance, intent, compromise,
   result-content, or real-host claim.
+- `transfer_attempt` records a bounded command transfer attempt without
+  promoting it to a direct transfer observation or a completed effect.
+- `filesystem` requires a reviewed, successful filesystem-change operation
+  with resolved mutation identity; it does not establish resulting state,
+  persistence, cleanup, compromise, or real-host effect.
+- `execution` requires a reviewed, successful execution-attempt operation with
+  resolved script or inline-program identity; it does not establish program
+  existence, completed execution, or any effect.
 
 All other operation families remain contained or shadow-only. Sensitive-read
 and direct-transfer may select specialized v3 guidance; inspection adds no

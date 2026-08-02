@@ -20,7 +20,7 @@ class FakeDashboardStorage:
     def health_check(self) -> dict:
         return {
             "ok": self.ready,
-            "backend": "mongodb",
+            "backend": "sqlite",
             "database": "must-not-leak",
         }
 

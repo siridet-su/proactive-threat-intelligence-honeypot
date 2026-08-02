@@ -27,8 +27,8 @@ and link only the preserved virtual environment before installing verified
 model-bundle links. `production.tools.release_manifest create` must receive
 every effective immutable policy/configuration, every individual model
 artifact, dependency identity, frozen-bundle manifest/archive, and the exact
-managed-unit allowlist. Manifest v6 records its immutable-identity exclusion
-policy; historical v2-v5 manifests retain their original semantics.
+managed-unit allowlist. Manifest v7 records its immutable-identity exclusion
+policy; historical v2-v6 manifests retain their original semantics.
 
 Run `production.tools.release_manifest verify`, then independently verify the
 current runtime-feed provenance and cache hashes. Only after both pass may the
@@ -82,7 +82,8 @@ systemctl --no-pager --type=timer 'honeypot-*'
 journalctl --no-pager -u honeypot-session-worker.service -n 100
 ```
 
-Use authenticated `/healthz` and `/readyz` endpoints. Review artifact checks,
+Use the authenticated `/health` endpoint and its `/health/live` and
+`/health/ready` probes. Review artifact checks,
 leases, redaction, forecast availability, and report failures without printing
 secrets. Before a change, record revision, units, configuration/model/policy
 hashes, ports, health, queues, and capacity. A SQLite copy is rollback evidence

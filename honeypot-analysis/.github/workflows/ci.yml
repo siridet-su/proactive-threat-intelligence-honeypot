@@ -24,9 +24,10 @@ jobs:
       - name: Validate trusted policies
         run: |
           python -m production.policies.validate_prediction_policy --policy configs/prediction_policy.trusted.json
+          python -m production.policies.validate_prediction_policy --policy configs/prediction_policy.transformer_poc.trusted.json
           python -m production.policies.validate_classification_rules --policy configs/classification_rules.trusted.json
           python -m production.policies.validate_session_ttp_correlation_policy --policy configs/session_ttp_correlation.trusted.json
-          python -m production.policies.validate_smb_policy --action-policy configs/smb_action_playbooks.trusted.json --asset-profile configs/smb_asset_profile.example.json
+          python -m production.policies.validate_response_guidance_policy --policy configs/response_guidance_policy.v3.json
           python -m production.policies.validate_threat_hypothesis_behavior_policy --policy configs/threat_hypothesis_behavior.trusted.json
       - name: Run complete suite
         run: pytest -q
