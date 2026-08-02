@@ -1,0 +1,65 @@
+{
+  "schema_version": "next_tactic_final_production_activation.v1",
+  "decision": "PRODUCTION_ACTIVATION_SUCCEEDED",
+  "repository": {
+    "revision": "3c79ae155021ca4cf0ab6d744211d884c4ee039e",
+    "worktree_clean": true
+  },
+  "gcp": {
+    "active_revision": "3c79ae155021ca4cf0ab6d744211d884c4ee039e",
+    "recovery_revision": "19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
+    "package_sha256": "c30c4984a161385210c9fe5559c40c0c4f304351c611f18ec1130ff9d8940068",
+    "manifest_sha256": "c92e4a9e8e837392226c0a633ce067d1de6af718e523ea671567f1fc3314989c",
+    "release_tree_sha256": "de42745d53548390af08315432cdab2d7420dff281708ff22db14b300d47ca31",
+    "guard_state": "ACTIVATION_COMPLETED",
+    "public_ip": "34.124.181.196"
+  },
+  "backup": {
+    "path": "/var/backups/honeypot/cowrie-connectivity-20260801T231500Z/production_pilot.db",
+    "sha256": "00ed27d31c32f9b7116514a31d05c77ae91843c4924a866ecfbc973e571ee04b",
+    "schema": 3,
+    "quick_check": "ok",
+    "integrity_check": "ok",
+    "isolated_restore_verified": true
+  },
+  "connectivity": {
+    "decision": "PUBLIC_COWRIE_CONNECTIVITY_RESTORED",
+    "firewall_rule": "allow-cowrie-relay-2222",
+    "firewall_before_disabled": true,
+    "firewall_after_disabled": false,
+    "ha_proxy_backend": "UP",
+    "proxy_protocol": "send-proxy",
+    "pi_release": "5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02",
+    "pi_modified": false,
+    "packet_payloads_retained": false
+  },
+  "pipeline": {
+    "final_sessions_processed": 2,
+    "final_reports_validated": 2,
+    "v4_validation_errors": 0,
+    "v3_validation_errors": 0,
+    "stix_validation_errors": 0,
+    "artifact_manifest_errors": 0,
+    "prediction_snapshots_without_recommendations": 11,
+    "prohibited_predictive_alerts": 11,
+    "new_alerts": 0,
+    "new_webhook_deliveries": 0,
+    "credential_marker_count": 0,
+    "dashboard_monitor_snapshot_equivalent": true
+  },
+  "observation": {
+    "samples": 30,
+    "healthy_samples": 30,
+    "failed_units": 0,
+    "service_restart_increments": 0,
+    "queued_outbox": 0,
+    "queued_analysis_jobs": 0,
+    "sqlite_quick_check": "ok",
+    "ha_proxy_backend": "UP",
+    "free_space_kib_min": 4939764
+  },
+  "rollback": {
+    "application": "activation_guard rollback to 19afabd0bb7ed82ac93767301bb0cb1024d0b92e",
+    "firewall": "gcloud compute firewall-rules update allow-cowrie-relay-2222 --disabled"
+  }
+}
