@@ -34,6 +34,11 @@ from production.reporting.typed_semantic_family_selection import (
 )
 from production.storage.backend import open_storage
 from production.utils.config import ProductionConfig
+from tests.semantic_fixture_loader import (
+    load_fixture,
+    load_provenance_correction,
+    source_member_sha256,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,22 +46,6 @@ BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
 CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
-FROZEN_EVALUATION = (
-    ROOT / "evaluation/inspection_family_independent_frozen.v1.json"
-)
-FROZEN_EVALUATION_SHA256 = (
-    "ef6254418ba8971eb591f424e9cbd9dd1a123b90692d65bd9da1b8424dcf9cf9"
-)
-FROZEN_HOLDOUT = (
-    ROOT / "evaluation/inspection_family_holdout_frozen.v1.json"
-)
-FROZEN_HOLDOUT_SHA256 = (
-    "f14acf430b8449d985895d59fd494a2ad1f8deac4380f6bce67fae24592518ec"
-)
-HOLDOUT_PROVENANCE_CORRECTION = (
-    ROOT
-    / "evaluation/inspection_family_holdout_provenance_correction.v1.json"
-)
 FIXED_EVALUATOR_REVISION = (
     "92900870d036fb34157043fd129571a8c3c0f430"
 )
@@ -65,21 +54,15 @@ INSPECTION_GUIDANCE_FINDING = "observed-cowrie-inspection-command"
 
 
 def _load_spec_path(
-    path: Path,
-    expected_sha256: str,
+    role: str,
 ) -> dict[str, Any]:
-    raw = path.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == expected_sha256
-    value = json.loads(raw)
+    value = load_fixture("inspection", role)
     assert value["expected_labels_frozen_before_execution"] is True
     return value
 
 
 def _load_spec() -> dict[str, Any]:
-    value = _load_spec_path(
-        FROZEN_EVALUATION,
-        FROZEN_EVALUATION_SHA256,
-    )
+    value = _load_spec_path("independent")
     assert value["schema_version"] == (
         "typed_inspection_independent_evaluation.v1"
     )
@@ -88,15 +71,10 @@ def _load_spec() -> dict[str, Any]:
 
 
 def _load_holdout() -> dict[str, Any]:
-    value = _load_spec_path(
-        FROZEN_HOLDOUT,
-        FROZEN_HOLDOUT_SHA256,
-    )
+    value = _load_spec_path("holdout")
     assert value["schema_version"] == "typed_inspection_holdout.v1"
     assert len(value["cases"]) == 34
-    correction = json.loads(
-        HOLDOUT_PROVENANCE_CORRECTION.read_text(encoding="utf-8")
-    )
+    correction = load_provenance_correction("inspection_holdout")
     assert correction == {
         "schema_version": "evaluation_provenance_correction.v1",
         "correction_id": (
@@ -106,7 +84,9 @@ def _load_holdout() -> dict[str, Any]:
         "target_path": (
             "evaluation/inspection_family_holdout_frozen.v1.json"
         ),
-        "target_sha256": FROZEN_HOLDOUT_SHA256,
+        "target_sha256": source_member_sha256(
+            "evaluation/inspection_family_holdout_frozen.v1.json"
+        ),
         "field": "implementation_revision_before_authoring",
         "recorded_value": value[
             "implementation_revision_before_authoring"

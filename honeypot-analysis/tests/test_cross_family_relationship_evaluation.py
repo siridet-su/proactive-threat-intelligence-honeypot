@@ -19,6 +19,7 @@ from production.reporting.typed_semantic_facts import (
     build_typed_semantic_provenance,
     validate_typed_semantic_fact_set,
 )
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,32 +29,17 @@ BEHAVIOR_POLICY = (
 CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
 EVALUATOR_REVISION = "c5554e944587b1148548a0bc02bb8ff0016c8006"
 SPECS = (
-    (
-        ROOT
-        / "evaluation/cross_family_relationship_independent_frozen.v1.json",
-        "943a96e0dd1f796c90ed625e952905b40fc1199050312429dedea3fe7ab79822",
-        "typed_cross_family_relationship_evaluation.v1",
-        8,
-    ),
-    (
-        ROOT
-        / "evaluation/cross_family_relationship_holdout_frozen.v1.json",
-        "bf681044edffb5c663b7b85702f19dc8e632e0df0b1d03c4d0a7ed38cb9ef161",
-        "typed_cross_family_relationship_holdout.v1",
-        4,
-    ),
+    ("independent", "typed_cross_family_relationship_evaluation.v1", 8),
+    ("holdout", "typed_cross_family_relationship_holdout.v1", 4),
 )
 
 
 def _load(
-    path: Path,
-    digest: str,
+    role: str,
     schema: str,
     count: int,
 ) -> dict[str, Any]:
-    raw = path.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == digest
-    value = json.loads(raw)
+    value = load_fixture("cross_family_relationship", role)
     assert value["schema_version"] == schema
     assert value["expected_labels_frozen_before_execution"] is True
     assert len(value["cases"]) == count
@@ -212,7 +198,6 @@ def _assert_case(case: dict[str, Any]) -> None:
 
 
 def test_frozen_cross_family_relationship_sets() -> None:
-    for path, digest, schema, count in SPECS:
-        for case in _load(path, digest, schema, count)["cases"]:
+    for role, schema, count in SPECS:
+        for case in _load(role, schema, count)["cases"]:
             _assert_case(case)
-

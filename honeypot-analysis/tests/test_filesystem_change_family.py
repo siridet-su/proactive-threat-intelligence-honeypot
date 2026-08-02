@@ -34,21 +34,10 @@ from production.reporting.typed_semantic_family_selection import (
 )
 from production.storage.backend import open_storage
 from production.utils.config import ProductionConfig
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = (
-    ROOT / "evaluation/filesystem_change_independent_frozen.v1.json"
-)
-SPEC_SHA256 = (
-    "4afd707762dd80379a05228aa7cbe96d1a271a57979304be121d57f414485c24"
-)
-HOLDOUT_PATH = (
-    ROOT / "evaluation/filesystem_change_holdout_frozen.v1.json"
-)
-HOLDOUT_SHA256 = (
-    "a273e0f0aa67bdcb81004b858e8c6a7bc79e85482954e87b6771bbfeaf99afac"
-)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -59,9 +48,7 @@ V3_FINDING = "observed-cowrie-filesystem-change-command"
 
 
 def _spec() -> dict[str, Any]:
-    raw = SPEC_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == SPEC_SHA256
-    value = json.loads(raw)
+    value = load_fixture("filesystem_change", "independent")
     assert value["schema_version"] == (
         "typed_filesystem_change_evaluation.v1"
     )
@@ -71,9 +58,7 @@ def _spec() -> dict[str, Any]:
 
 
 def _holdout_spec() -> dict[str, Any]:
-    raw = HOLDOUT_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
-    value = json.loads(raw)
+    value = load_fixture("filesystem_change", "holdout")
     assert value["schema_version"] == (
         "typed_filesystem_change_holdout.v1"
     )

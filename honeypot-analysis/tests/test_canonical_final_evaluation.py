@@ -57,6 +57,22 @@ def test_canonical_final_evaluation_is_complete_and_content_addressed() -> None:
         assert target.is_file(), path
         assert _sha256(target) == artifact["sha256"], path
 
+    bundle = json.loads(
+        (ROOT / "evaluation/typed_semantic_fixtures.v2.json")
+        .read_text(encoding="utf-8")
+    )
+    typed_claim = next(
+        claim for claim in claims
+        if claim["claim_id"] == "typed_semantic_authority.v2"
+    )
+    assert typed_claim["source_artifacts"][0]["path"] == (
+        "evaluation/typed_semantic_fixtures.v2.json"
+    )
+    assert typed_claim["consolidated_source_members"] == (
+        bundle["provenance"]["source_members"]
+    )
+    assert bundle["provenance"]["source_member_count"] == 24
+
     superseded = document["superseded_artifacts"]
     assert len(superseded) >= 5
     assert len({item["path"] for item in superseded}) == len(superseded)

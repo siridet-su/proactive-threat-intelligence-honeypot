@@ -397,6 +397,224 @@
     },
     {
       "claim_id": "typed_semantic_authority.v2",
+      "consolidated_source_members": [
+        {
+          "case_count": 12,
+          "family": "collection",
+          "path": "evaluation/collection_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_collection_shadow_evaluation.v1",
+          "sha256": "895ea455bcfb609d0b102c22925a30f5f022f4d9c1a79fd1f6d25a03cbe2c5ef",
+          "size_bytes": 2010
+        },
+        {
+          "case_count": 6,
+          "family": "collection",
+          "path": "evaluation/collection_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_collection_shadow_holdout.v1",
+          "sha256": "a5fc97a0434e45de2bf91e1240eede0b567b9ab3bc4d140895878284e5de9ec3",
+          "size_bytes": 1202
+        },
+        {
+          "case_count": 24,
+          "family": "command_transfer_attempt",
+          "path": "evaluation/command_transfer_attempt_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_command_transfer_attempt_evaluation.v1",
+          "sha256": "921085c33c903338668b82d9b6479e0e6ae8adf3e60be443a8c4a57b8aaa98ab",
+          "size_bytes": 5579
+        },
+        {
+          "case_count": 14,
+          "family": "command_transfer_attempt",
+          "path": "evaluation/command_transfer_attempt_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_command_transfer_attempt_holdout.v1",
+          "sha256": "b7b811aa6a4fe2bf5f08220090a7c293742996cbc158adb02eec402a5b819f5b",
+          "size_bytes": 3929
+        },
+        {
+          "case_count": 8,
+          "family": "cross_family_relationship",
+          "path": "evaluation/cross_family_relationship_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_cross_family_relationship_evaluation.v1",
+          "sha256": "943a96e0dd1f796c90ed625e952905b40fc1199050312429dedea3fe7ab79822",
+          "size_bytes": 3581
+        },
+        {
+          "case_count": 4,
+          "family": "cross_family_relationship",
+          "path": "evaluation/cross_family_relationship_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_cross_family_relationship_holdout.v1",
+          "sha256": "bf681044edffb5c663b7b85702f19dc8e632e0df0b1d03c4d0a7ed38cb9ef161",
+          "size_bytes": 1881
+        },
+        {
+          "case_count": 24,
+          "family": "execution_attempt",
+          "path": "evaluation/execution_attempt_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_execution_attempt_evaluation.v1",
+          "sha256": "d3a4df7312b455cc1cae93d930102012368a2632d7cf28eeac503707c576bcfc",
+          "size_bytes": 6494
+        },
+        {
+          "case_count": 12,
+          "family": "execution_attempt",
+          "path": "evaluation/execution_attempt_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_execution_attempt_holdout.v1",
+          "sha256": "930561045adb67f8943c0ddca1a74647ce4ffc4572feaf0daf55b2e9c56c2e8a",
+          "size_bytes": 3559
+        },
+        {
+          "case_count": 24,
+          "family": "filesystem_change",
+          "path": "evaluation/filesystem_change_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_filesystem_change_evaluation.v1",
+          "sha256": "4afd707762dd80379a05228aa7cbe96d1a271a57979304be121d57f414485c24",
+          "size_bytes": 6873
+        },
+        {
+          "case_count": 16,
+          "family": "filesystem_change",
+          "path": "evaluation/filesystem_change_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_filesystem_change_holdout.v1",
+          "sha256": "a273e0f0aa67bdcb81004b858e8c6a7bc79e85482954e87b6771bbfeaf99afac",
+          "size_bytes": 4723
+        },
+        {
+          "case_count": 45,
+          "family": "inspection",
+          "path": "evaluation/inspection_family_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_inspection_independent_evaluation.v1",
+          "sha256": "ef6254418ba8971eb591f424e9cbd9dd1a123b90692d65bd9da1b8424dcf9cf9",
+          "size_bytes": 17927
+        },
+        {
+          "case_count": 34,
+          "family": "inspection",
+          "path": "evaluation/inspection_family_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_inspection_holdout.v1",
+          "sha256": "f14acf430b8449d985895d59fd494a2ad1f8deac4380f6bce67fae24592518ec",
+          "size_bytes": 13944
+        },
+        {
+          "case_count": 12,
+          "family": "scheduled_task",
+          "path": "evaluation/scheduled_task_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_scheduled_task_shadow_evaluation.v1",
+          "sha256": "58ee45986f455fa9273511094033e602bfffce927a95650cdbdcbdd74e782fbf",
+          "size_bytes": 1705
+        },
+        {
+          "case_count": 6,
+          "family": "scheduled_task",
+          "path": "evaluation/scheduled_task_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_scheduled_task_shadow_holdout.v1",
+          "sha256": "f96dc470e6547d6fa63639d18f2626c8a83c94d2573a9530f3ba9a7b696dba0a",
+          "size_bytes": 944
+        },
+        {
+          "case_count": 50,
+          "family": "sensitive_read",
+          "path": "evaluation/sensitive_read_frozen_50_replay.v1.json",
+          "role": "replay",
+          "schema_version": "sensitive_read_frozen_replay.v1",
+          "sha256": "0a838aa30016e985202c0ca0327861bb7b5cd6b788a24b38dadb3ae35f0598f1",
+          "size_bytes": 7581
+        },
+        {
+          "case_count": 24,
+          "family": "sensitive_read",
+          "path": "evaluation/sensitive_read_holdout.v1.json",
+          "role": "holdout",
+          "schema_version": "sensitive_read_holdout.v1",
+          "sha256": "be7aed354c18e8174e419e47bccbd8c84a8e2a4a1a37129beec73c9501d805d5",
+          "size_bytes": 3573
+        },
+        {
+          "case_count": 12,
+          "family": "service",
+          "path": "evaluation/service_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_service_shadow_evaluation.v1",
+          "sha256": "90620bfa3441873c01950a4b9af337fb4585070cd0509a7db5a7e4e00ee48a6c",
+          "size_bytes": 1839
+        },
+        {
+          "case_count": 6,
+          "family": "service",
+          "path": "evaluation/service_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_service_shadow_holdout.v1",
+          "sha256": "905cb17e33fe88061973a5344b8bbbca1869096e4c3f484019925fcd4725f728",
+          "size_bytes": 974
+        },
+        {
+          "case_count": 34,
+          "family": "transfer",
+          "path": "evaluation/transfer_family_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_transfer_independent_evaluation.v1",
+          "sha256": "3b235d4f247f7506079452c8da869c9dc21eb26fb57c5a235850aa2b2ec20cd9",
+          "size_bytes": 24455
+        },
+        {
+          "case_count": 21,
+          "family": "transfer",
+          "path": "evaluation/transfer_family_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_transfer_holdout.v1",
+          "sha256": "6050f6c0c6cf23b8cf47729cdcf94510dbf30858f2cf50d90a292237516e545a",
+          "size_bytes": 16050
+        },
+        {
+          "case_count": 12,
+          "family": "transformation",
+          "path": "evaluation/transformation_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_transformation_shadow_evaluation.v1",
+          "sha256": "759b485fd471bad75abef787ec747ff9e2369c76fcfe9ccbfc69d722024c8518",
+          "size_bytes": 2870
+        },
+        {
+          "case_count": 6,
+          "family": "transformation",
+          "path": "evaluation/transformation_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_transformation_shadow_holdout.v1",
+          "sha256": "8dc32288c153c29d711b3e3091ca9be49086ed26deb099f1e2a5873391baf7fa",
+          "size_bytes": 1714
+        },
+        {
+          "case_count": 18,
+          "family": "typed_semantic_poc_combined",
+          "path": "evaluation/typed_semantic_poc_combined_frozen.v1.json",
+          "role": "combined",
+          "schema_version": "typed_semantic_poc_combined_evaluation.v1",
+          "sha256": "c619e3ba294a567115e50b85cc6207cbb2aedcf0e691db2868c5ab0268430ca1",
+          "size_bytes": 8167
+        },
+        {
+          "case_count": null,
+          "family": "inspection",
+          "path": "evaluation/inspection_family_holdout_provenance_correction.v1.json",
+          "role": "provenance_correction",
+          "schema_version": "evaluation_provenance_correction.v1",
+          "sha256": "8c98c07686f70bf394e12399d43efdbdef5060d9664ec2e3b9eb114000ac001f",
+          "size_bytes": 1045
+        }
+      ],
       "current_consumers": [
         "tests/test_sensitive_read_evaluation_replay.py",
         "tests/test_transfer_family_independent_evaluation.py",
@@ -414,147 +632,10 @@
       ],
       "source_artifacts": [
         {
-          "path": "evaluation/collection_shadow_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "a5fc97a0434e45de2bf91e1240eede0b567b9ab3bc4d140895878284e5de9ec3",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/collection_shadow_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "895ea455bcfb609d0b102c22925a30f5f022f4d9c1a79fd1f6d25a03cbe2c5ef",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/command_transfer_attempt_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "b7b811aa6a4fe2bf5f08220090a7c293742996cbc158adb02eec402a5b819f5b",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/command_transfer_attempt_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "921085c33c903338668b82d9b6479e0e6ae8adf3e60be443a8c4a57b8aaa98ab",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/cross_family_relationship_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "bf681044edffb5c663b7b85702f19dc8e632e0df0b1d03c4d0a7ed38cb9ef161",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/cross_family_relationship_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "943a96e0dd1f796c90ed625e952905b40fc1199050312429dedea3fe7ab79822",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/execution_attempt_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "930561045adb67f8943c0ddca1a74647ce4ffc4572feaf0daf55b2e9c56c2e8a",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/execution_attempt_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "d3a4df7312b455cc1cae93d930102012368a2632d7cf28eeac503707c576bcfc",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/filesystem_change_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "a273e0f0aa67bdcb81004b858e8c6a7bc79e85482954e87b6771bbfeaf99afac",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/filesystem_change_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "4afd707762dd80379a05228aa7cbe96d1a271a57979304be121d57f414485c24",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/inspection_family_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "f14acf430b8449d985895d59fd494a2ad1f8deac4380f6bce67fae24592518ec",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/inspection_family_holdout_provenance_correction.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "8c98c07686f70bf394e12399d43efdbdef5060d9664ec2e3b9eb114000ac001f",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/inspection_family_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "ef6254418ba8971eb591f424e9cbd9dd1a123b90692d65bd9da1b8424dcf9cf9",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/scheduled_task_shadow_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "f96dc470e6547d6fa63639d18f2626c8a83c94d2573a9530f3ba9a7b696dba0a",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/scheduled_task_shadow_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "58ee45986f455fa9273511094033e602bfffce927a95650cdbdcbdd74e782fbf",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/sensitive_read_frozen_50_replay.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "0a838aa30016e985202c0ca0327861bb7b5cd6b788a24b38dadb3ae35f0598f1",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/sensitive_read_holdout.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "be7aed354c18e8174e419e47bccbd8c84a8e2a4a1a37129beec73c9501d805d5",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/service_shadow_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "905cb17e33fe88061973a5344b8bbbca1869096e4c3f484019925fcd4725f728",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/service_shadow_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "90620bfa3441873c01950a4b9af337fb4585070cd0509a7db5a7e4e00ee48a6c",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/transfer_family_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "6050f6c0c6cf23b8cf47729cdcf94510dbf30858f2cf50d90a292237516e545a",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/transfer_family_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "3b235d4f247f7506079452c8da869c9dc21eb26fb57c5a235850aa2b2ec20cd9",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/transformation_shadow_holdout_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "8dc32288c153c29d711b3e3091ca9be49086ed26deb099f1e2a5873391baf7fa",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/transformation_shadow_independent_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "759b485fd471bad75abef787ec747ff9e2369c76fcfe9ccbfc69d722024c8518",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/typed_semantic_poc_combined_frozen.v1.json",
-          "role": "active semantic-family test fixture",
-          "sha256": "c619e3ba294a567115e50b85cc6207cbb2aedcf0e691db2868c5ab0268430ca1",
+          "path": "evaluation/typed_semantic_fixtures.v2.json",
+          "role": "canonical lossless family/role fixture bundle",
+          "sha256": "b62a6062a91c31dd3cb7310e926d7d700c9f420f6863b676ec63f66dd7866b7a",
+          "size_bytes": 214048,
           "status": "retained"
         }
       ],
@@ -571,29 +652,25 @@
         "runtime_benchmark_status": "NOT_DETERMINABLE_NO_SELECTED_CHECKPOINT",
         "selected_checkpoint": null
       },
+      "removed_presentation_derivatives": [
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_STATUS.md",
+          "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json"
+        },
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_TABLE.md",
+          "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json"
+        },
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_gate.svg",
+          "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json"
+        }
+      ],
       "source_artifacts": [
         {
           "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
           "role": "compact blocked-selection summary",
           "sha256": "b74a23434f6f64c059de3e288fd0f366b0b7aed189897d2a7d3e197269b1efd3",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_STATUS.md",
-          "role": "final selection status presentation",
-          "sha256": "5241f2de65b6e9962c637192f8730116f0f7a6f18eb83f5d71ebe29851821a78",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_TABLE.md",
-          "role": "final selection table",
-          "sha256": "05d1d1c8b1797b34fa36ea0750f041a302d02dba1cbb0a177bbf1652f62cf47e",
-          "status": "retained"
-        },
-        {
-          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_gate.svg",
-          "role": "final selection gate figure",
-          "sha256": "99e17b4d984e6aa567122feab2e7d346daa56f3e51bee5c1cacac39b797d15ca",
           "status": "retained"
         }
       ],
@@ -647,6 +724,13 @@
   "provenance": {
     "created_at": "2026-08-02",
     "deterministic": true,
+    "evaluation_structure": {
+      "canonical_fixture_bundle": "evaluation/typed_semantic_fixtures.v2.json",
+      "canonical_fixture_bundle_sha256": "b62a6062a91c31dd3cb7310e926d7d700c9f420f6863b676ec63f66dd7866b7a",
+      "large_reproduction_input_preserved": true,
+      "removed_presentation_outputs": "No repository thesis or presentation source cites the removed PDFs or selection derivatives.",
+      "schema_version": "final_evaluation_structure.v1"
+    },
     "generated_by": "evidence-minimization audit",
     "generation_command": "python -m production.tools.evaluate_frozen_transformer_candidate (historical recorded command; no evaluation was rerun)",
     "source_repository_head": "c9f37faff1fcf4e7d2d2dee3476c7d5038f426c9"
@@ -662,6 +746,97 @@
   "schema_version": "canonical_final_evaluation.v1",
   "status": "complete_with_disclosed_limitations",
   "superseded_artifacts": [
+    {
+      "path": "evaluation/collection_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "a5fc97a0434e45de2bf91e1240eede0b567b9ab3bc4d140895878284e5de9ec3",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/collection_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "895ea455bcfb609d0b102c22925a30f5f022f4d9c1a79fd1f6d25a03cbe2c5ef",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/command_transfer_attempt_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "b7b811aa6a4fe2bf5f08220090a7c293742996cbc158adb02eec402a5b819f5b",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/command_transfer_attempt_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "921085c33c903338668b82d9b6479e0e6ae8adf3e60be443a8c4a57b8aaa98ab",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/cross_family_relationship_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "bf681044edffb5c663b7b85702f19dc8e632e0df0b1d03c4d0a7ed38cb9ef161",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/cross_family_relationship_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "943a96e0dd1f796c90ed625e952905b40fc1199050312429dedea3fe7ab79822",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/execution_attempt_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "930561045adb67f8943c0ddca1a74647ce4ffc4572feaf0daf55b2e9c56c2e8a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/execution_attempt_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "d3a4df7312b455cc1cae93d930102012368a2632d7cf28eeac503707c576bcfc",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/filesystem_change_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "a273e0f0aa67bdcb81004b858e8c6a7bc79e85482954e87b6771bbfeaf99afac",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/filesystem_change_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "4afd707762dd80379a05228aa7cbe96d1a271a57979304be121d57f414485c24",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/inspection_family_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "f14acf430b8449d985895d59fd494a2ad1f8deac4380f6bce67fae24592518ec",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/inspection_family_holdout_provenance_correction.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "8c98c07686f70bf394e12399d43efdbdef5060d9664ec2e3b9eb114000ac001f",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/inspection_family_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "ef6254418ba8971eb591f424e9cbd9dd1a123b90692d65bd9da1b8424dcf9cf9",
+      "status": "superseded"
+    },
     {
       "path": "evaluation/next_tactic_benchmark_evidence/ARTIFACT_POLICY.md",
       "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
@@ -695,6 +870,146 @@
       "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
       "replacement": "evaluation/canonical_final_evaluation.json",
       "sha256": "b207b50a0ebf7db1ff195dfe4ee8f0527ee0c25efbfa0a177a8baf55bdff6183",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/01_overall_metrics.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "166446c41e1d2fda57388b01ae8678fc1abe8805bb605e0524ac7426f156b6ce",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/02_paired_outcomes.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "0fd334045302f2aa960db0c840a1a2fd916f446c146183fc9fa1a08487a0b0f0",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/03_promotion_gate.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "57abd792df2e8a78c5a2d4aafc59ef8f063cba0c5c117515262f2c2b82f2adf1",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/04_per_tactic_metrics.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "a03c0015ffb6ccd5075404727e8178b526d5187012b469647bff727a5363e86c",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/05_persistence_execution_tradeoff.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "07ccfde9fc0fba2dea661d467564df9c9f0cbe1d00e9160af4910f9a03ed4ef9",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/06_execution_persistence_confusion.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "035a7168267a2b364944894584c4aaf3bca9f4f3ae1b1433523abd59161ae240",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/07_why_not_promoted.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "6f4808f7d89d2b30dc1ec8921c1528cbf6a3cb412a6a172874540b6ee2dbe47d",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/08_chronological_stability.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "fcb3961586020511a810de1cde512ca283454ade947428182ed805ce4306b55e",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/09_repeated_pattern_warning.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "ad20f064e98641bec72bd6541339d2ad3ff81d82041e625a8ccbad60d135d177",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/10_executive_summary.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "a3f8feb573eb6a290f10e2dd5504fdb9a75927c871820ec5fd3b5c8787d0d9ab",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/FIGURE_SUMMARY.md",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "c62b8c9e82ee20a033c2bd1952d41e9e3701e44b9282e899b3fa808145e44d7c",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/figures_manifest.json",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "64d4b200c9178da2e545bea64602c308a9ec3892fb1cbed4690e3d79ad768914",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_decision.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "93959f1c48480659e06bf349dd7c41b2f6e039d46508f00864a5adeda5f1aca3",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_STATUS.md",
+      "reason": "Presentation derivative of the blocked selection conclusion; compact machine-readable status is retained.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
+      "sha256": "5241f2de65b6e9962c637192f8730116f0f7a6f18eb83f5d71ebe29851821a78",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_TABLE.md",
+      "reason": "Presentation derivative of the blocked selection conclusion; compact machine-readable status is retained.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
+      "sha256": "05d1d1c8b1797b34fa36ea0750f041a302d02dba1cbb0a177bbf1652f62cf47e",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/build_receipt.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "55b938d30a5fbe86982bcc0867c0fb04bf693b047a4850da1e1d567bb825d528",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/corpus_inventory_summary.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "bd5997ea1737b181b266f88c7a550915c71f5fa1f13c973386e88360904bd09a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/corpus_receipt.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "08ebb176fa8076866f1e9ecd86606d229a8ed9f9772bfd3139d72365aab25f16",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/source_member_receipts.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "156850596682febb6a4a84944fcc47685992f01a6f4055ee88e37728588b144d",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_gate.svg",
+      "reason": "Presentation derivative of the blocked selection conclusion; compact machine-readable status is retained.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
+      "sha256": "99e17b4d984e6aa567122feab2e7d346daa56f3e51bee5c1cacac39b797d15ca",
       "status": "superseded"
     },
     {
@@ -740,45 +1055,52 @@
       "status": "superseded"
     },
     {
-      "path": "evaluation/next_tactic_benchmark_evidence/final_decision.json",
-      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
-      "replacement": "evaluation/canonical_final_evaluation.json",
-      "sha256": "93959f1c48480659e06bf349dd7c41b2f6e039d46508f00864a5adeda5f1aca3",
-      "status": "superseded"
-    },
-    {
-      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/build_receipt.json",
-      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
-      "replacement": "evaluation/canonical_final_evaluation.json",
-      "sha256": "55b938d30a5fbe86982bcc0867c0fb04bf693b047a4850da1e1d567bb825d528",
-      "status": "superseded"
-    },
-    {
-      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/corpus_inventory_summary.json",
-      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
-      "replacement": "evaluation/canonical_final_evaluation.json",
-      "sha256": "bd5997ea1737b181b266f88c7a550915c71f5fa1f13c973386e88360904bd09a",
-      "status": "superseded"
-    },
-    {
-      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/corpus_receipt.json",
-      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
-      "replacement": "evaluation/canonical_final_evaluation.json",
-      "sha256": "08ebb176fa8076866f1e9ecd86606d229a8ed9f9772bfd3139d72365aab25f16",
-      "status": "superseded"
-    },
-    {
-      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/source_member_receipts.json",
-      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
-      "replacement": "evaluation/canonical_final_evaluation.json",
-      "sha256": "156850596682febb6a4a84944fcc47685992f01a6f4055ee88e37728588b144d",
-      "status": "superseded"
-    },
-    {
       "path": "evaluation/next_tactic_zenodo_7day_model_comparison.json",
       "reason": "Superseded by the authoritative external-VOMM evaluation and the single-checkpoint result; no active consumer.",
       "replacement": "evaluation/canonical_final_evaluation.json",
       "sha256": "1fb00d46d60997c2cef1117603ab92afdc0c3bb79d785db643d69b54e8deec59",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/scheduled_task_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "f96dc470e6547d6fa63639d18f2626c8a83c94d2573a9530f3ba9a7b696dba0a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/scheduled_task_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "58ee45986f455fa9273511094033e602bfffce927a95650cdbdcbdd74e782fbf",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/sensitive_read_frozen_50_replay.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "0a838aa30016e985202c0ca0327861bb7b5cd6b788a24b38dadb3ae35f0598f1",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/sensitive_read_holdout.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "be7aed354c18e8174e419e47bccbd8c84a8e2a4a1a37129beec73c9501d805d5",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/service_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "905cb17e33fe88061973a5344b8bbbca1869096e4c3f484019925fcd4725f728",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/service_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "90620bfa3441873c01950a4b9af337fb4585070cd0509a7db5a7e4e00ee48a6c",
       "status": "superseded"
     },
     {
@@ -793,6 +1115,41 @@
       "reason": "Historical developer-authored evaluation; active semantic tests are self-contained and no current claim consumes this file.",
       "replacement": "evaluation/canonical_final_evaluation.json",
       "sha256": "785e4b3cc633f4b69838724a0d4f824dfe4974bf268b109963332b9b8355ca49",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transfer_family_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "6050f6c0c6cf23b8cf47729cdcf94510dbf30858f2cf50d90a292237516e545a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transfer_family_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "3b235d4f247f7506079452c8da869c9dc21eb26fb57c5a235850aa2b2ec20cd9",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transformation_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "8dc32288c153c29d711b3e3091ca9be49086ed26deb099f1e2a5873391baf7fa",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transformation_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "759b485fd471bad75abef787ec747ff9e2369c76fcfe9ccbfc69d722024c8518",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/typed_semantic_poc_combined_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "c619e3ba294a567115e50b85cc6207cbb2aedcf0e691db2868c5ab0268430ca1",
       "status": "superseded"
     }
   ]

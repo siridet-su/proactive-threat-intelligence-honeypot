@@ -85,3 +85,16 @@ replacement inventory inside the active documentation set.
 
 To inspect a deleted report without restoring it to the worktree, use
 `git show f2137ba86aa17c1da914112660ddfe469cc95e1c:honeypot-analysis/<old-path>`.
+
+The final evaluation-structure audit started from repository commit
+`0b072fd8ebfcc67d6bec071bcd6e94327c32f35b` and reduced the tracked evaluation
+inventory from 53 files (89,507,555 bytes) to 14 files (89,352,478 bytes).
+The 24 frozen semantic-family members remain lossless and hash-recorded inside
+`evaluation/typed_semantic_fixtures.v2.json`; independent, holdout, replay,
+correction, and combined roles remain explicit and all case counts are
+validated. Twelve unreferenced PDF/figure presentation outputs and three
+blocked-selection presentation derivatives were removed. The seven-day
+219,336-record reproduction input, split manifest, raw single-checkpoint
+result, external VOMM evidence, current compatibility/acceptance receipts,
+and the unique 40-case stabilization contract were retained. No production
+source, policy, model, database, deployment, or authority boundary changed.

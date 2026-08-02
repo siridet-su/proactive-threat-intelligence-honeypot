@@ -23,15 +23,10 @@ from production.reporting.typed_semantic_facts import (
 )
 from production.storage.backend import open_storage
 from production.utils.config import ProductionConfig
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = (
-    ROOT / "evaluation/typed_semantic_poc_combined_frozen.v1.json"
-)
-SPEC_SHA256 = (
-    "c619e3ba294a567115e50b85cc6207cbb2aedcf0e691db2868c5ab0268430ca1"
-)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -39,9 +34,7 @@ CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
 
 
 def _spec() -> dict[str, Any]:
-    raw = SPEC_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == SPEC_SHA256
-    value = json.loads(raw)
+    value = load_fixture("typed_semantic_poc_combined", "combined")
     assert value["schema_version"] == (
         "typed_semantic_poc_combined_evaluation.v1"
     )
@@ -344,4 +337,3 @@ def test_frozen_combined_persistence_and_artifacts(
             rendered["artifacts"]["integrity_manifest"]
         ) == []
         assert validate_session_assessment_v4(rendered) == []
-

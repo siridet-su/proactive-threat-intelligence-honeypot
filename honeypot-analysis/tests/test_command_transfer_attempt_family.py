@@ -32,23 +32,10 @@ from production.reporting.typed_semantic_family_selection import (
 )
 from production.storage.backend import open_storage
 from production.utils.config import ProductionConfig
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = (
-    ROOT
-    / "evaluation/command_transfer_attempt_independent_frozen.v1.json"
-)
-SPEC_SHA256 = (
-    "921085c33c903338668b82d9b6479e0e6ae8adf3e60be443a8c4a57b8aaa98ab"
-)
-HOLDOUT_PATH = (
-    ROOT
-    / "evaluation/command_transfer_attempt_holdout_frozen.v1.json"
-)
-HOLDOUT_SHA256 = (
-    "b7b811aa6a4fe2bf5f08220090a7c293742996cbc158adb02eec402a5b819f5b"
-)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -59,9 +46,7 @@ V3_FINDING = "observed-cowrie-command-transfer-attempt"
 
 
 def _spec() -> dict[str, Any]:
-    raw = SPEC_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == SPEC_SHA256
-    value = json.loads(raw)
+    value = load_fixture("command_transfer_attempt", "independent")
     assert value["schema_version"] == (
         "typed_command_transfer_attempt_evaluation.v1"
     )
@@ -71,9 +56,7 @@ def _spec() -> dict[str, Any]:
 
 
 def _holdout() -> dict[str, Any]:
-    raw = HOLDOUT_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
-    value = json.loads(raw)
+    value = load_fixture("command_transfer_attempt", "holdout")
     assert value["schema_version"] == (
         "typed_command_transfer_attempt_holdout.v1"
     )

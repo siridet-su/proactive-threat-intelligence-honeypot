@@ -33,6 +33,7 @@ from production.reporting.typed_semantic_family_selection import (
 )
 from production.storage.backend import open_storage
 from production.utils.config import ProductionConfig
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,18 +41,6 @@ BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
 CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
-FROZEN_EVALUATION = (
-    ROOT / "evaluation/transfer_family_independent_frozen.v1.json"
-)
-FROZEN_EVALUATION_SHA256 = (
-    "3b235d4f247f7506079452c8da869c9dc21eb26fb57c5a235850aa2b2ec20cd9"
-)
-FROZEN_HOLDOUT = (
-    ROOT / "evaluation/transfer_family_holdout_frozen.v1.json"
-)
-FROZEN_HOLDOUT_SHA256 = (
-    "6050f6c0c6cf23b8cf47729cdcf94510dbf30858f2cf50d90a292237516e545a"
-)
 FIXED_EVALUATOR_REVISION = (
     "aaa0f3dac4b9c02a8ef3d09251de003504c56a2f"
 )
@@ -64,21 +53,15 @@ DIRECT_EVENT_IDS = {
 
 
 def _load_spec_path(
-    path: Path,
-    expected_sha256: str,
+    role: str,
 ) -> dict[str, Any]:
-    raw = path.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == expected_sha256
-    value = json.loads(raw)
+    value = load_fixture("transfer", role)
     assert value["expected_labels_frozen_before_execution"] is True
     return value
 
 
 def _load_spec() -> dict[str, Any]:
-    value = _load_spec_path(
-        FROZEN_EVALUATION,
-        FROZEN_EVALUATION_SHA256,
-    )
+    value = _load_spec_path("independent")
     assert value["schema_version"] == (
         "typed_transfer_independent_evaluation.v1"
     )
@@ -423,10 +406,7 @@ def test_frozen_independent_evaluation_meets_semantic_acceptance() -> None:
 
 def test_separately_frozen_holdout_authority_acceptance_records_spec_defect(
 ) -> None:
-    spec = _load_spec_path(
-        FROZEN_HOLDOUT,
-        FROZEN_HOLDOUT_SHA256,
-    )
+    spec = _load_spec_path("holdout")
     assert spec["schema_version"] == "typed_transfer_holdout.v1"
     assert len(spec["cases"]) == 21
     typed = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
@@ -536,7 +516,7 @@ def test_all_frozen_cases_survive_sqlite_and_artifact_validation(
 
     specs = [
         _load_spec(),
-        _load_spec_path(FROZEN_HOLDOUT, FROZEN_HOLDOUT_SHA256),
+        _load_spec_path("holdout"),
     ]
     for case in [
         case

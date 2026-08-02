@@ -24,6 +24,7 @@ from production.reporting.typed_semantic_family_selection import (
     TypedSemanticFamilySelectionError,
     select_activated_semantic_family,
 )
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,61 +34,26 @@ BEHAVIOR_POLICY = (
 CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
 EVALUATOR_REVISION = "8db3744fd7544d3045d4273a82c8d3173443b69d"
 SCHEDULE_SPECS = (
-    (
-        ROOT
-        / "evaluation/scheduled_task_shadow_independent_frozen.v1.json",
-        "58ee45986f455fa9273511094033e602bfffce927a95650cdbdcbdd74e782fbf",
-        "typed_scheduled_task_shadow_evaluation.v1",
-        12,
-    ),
-    (
-        ROOT
-        / "evaluation/scheduled_task_shadow_holdout_frozen.v1.json",
-        "f96dc470e6547d6fa63639d18f2626c8a83c94d2573a9530f3ba9a7b696dba0a",
-        "typed_scheduled_task_shadow_holdout.v1",
-        6,
-    ),
+    ("independent", "typed_scheduled_task_shadow_evaluation.v1", 12),
+    ("holdout", "typed_scheduled_task_shadow_holdout.v1", 6),
 )
 SERVICE_SPECS = (
-    (
-        ROOT / "evaluation/service_shadow_independent_frozen.v1.json",
-        "90620bfa3441873c01950a4b9af337fb4585070cd0509a7db5a7e4e00ee48a6c",
-        "typed_service_shadow_evaluation.v1",
-        12,
-    ),
-    (
-        ROOT / "evaluation/service_shadow_holdout_frozen.v1.json",
-        "905cb17e33fe88061973a5344b8bbbca1869096e4c3f484019925fcd4725f728",
-        "typed_service_shadow_holdout.v1",
-        6,
-    ),
+    ("independent", "typed_service_shadow_evaluation.v1", 12),
+    ("holdout", "typed_service_shadow_holdout.v1", 6),
 )
 COLLECTION_SPECS = (
-    (
-        ROOT
-        / "evaluation/collection_shadow_independent_frozen.v1.json",
-        "895ea455bcfb609d0b102c22925a30f5f022f4d9c1a79fd1f6d25a03cbe2c5ef",
-        "typed_collection_shadow_evaluation.v1",
-        12,
-    ),
-    (
-        ROOT / "evaluation/collection_shadow_holdout_frozen.v1.json",
-        "a5fc97a0434e45de2bf91e1240eede0b567b9ab3bc4d140895878284e5de9ec3",
-        "typed_collection_shadow_holdout.v1",
-        6,
-    ),
+    ("independent", "typed_collection_shadow_evaluation.v1", 12),
+    ("holdout", "typed_collection_shadow_holdout.v1", 6),
 )
 
 
 def _load_spec(
-    path: Path,
-    digest: str,
+    family: str,
+    role: str,
     schema: str,
     count: int,
 ) -> dict[str, Any]:
-    raw = path.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == digest
-    value = json.loads(raw)
+    value = load_fixture(family, role)
     assert value["schema_version"] == schema
     assert value["expected_labels_frozen_before_execution"] is True
     assert len(value["cases"]) == count
@@ -223,10 +189,10 @@ def _assert_shadow_case(
 
 
 def test_frozen_scheduled_task_shadow_sets() -> None:
-    for path, digest, schema, count in SCHEDULE_SPECS:
+    for role, schema, count in SCHEDULE_SPECS:
         for case in _load_spec(
-            path,
-            digest,
+            "scheduled_task",
+            role,
             schema,
             count,
         )["cases"]:
@@ -234,10 +200,10 @@ def test_frozen_scheduled_task_shadow_sets() -> None:
 
 
 def test_frozen_service_shadow_sets() -> None:
-    for path, digest, schema, count in SERVICE_SPECS:
+    for role, schema, count in SERVICE_SPECS:
         for case in _load_spec(
-            path,
-            digest,
+            "service",
+            role,
             schema,
             count,
         )["cases"]:
@@ -245,10 +211,10 @@ def test_frozen_service_shadow_sets() -> None:
 
 
 def test_frozen_collection_shadow_sets() -> None:
-    for path, digest, schema, count in COLLECTION_SPECS:
+    for role, schema, count in COLLECTION_SPECS:
         for case in _load_spec(
-            path,
-            digest,
+            "collection",
+            role,
             schema,
             count,
         )["cases"]:

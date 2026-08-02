@@ -32,21 +32,10 @@ from production.reporting.typed_semantic_family_selection import (
 )
 from production.storage.backend import open_storage
 from production.utils.config import ProductionConfig
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = (
-    ROOT / "evaluation/execution_attempt_independent_frozen.v1.json"
-)
-SPEC_SHA256 = (
-    "d3a4df7312b455cc1cae93d930102012368a2632d7cf28eeac503707c576bcfc"
-)
-HOLDOUT_PATH = (
-    ROOT / "evaluation/execution_attempt_holdout_frozen.v1.json"
-)
-HOLDOUT_SHA256 = (
-    "930561045adb67f8943c0ddca1a74647ce4ffc4572feaf0daf55b2e9c56c2e8a"
-)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -58,9 +47,7 @@ V3_ACTION = "correlate-observed-execution-attempt"
 
 
 def _spec() -> dict[str, Any]:
-    raw = SPEC_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == SPEC_SHA256
-    value = json.loads(raw)
+    value = load_fixture("execution_attempt", "independent")
     assert value["schema_version"] == (
         "typed_execution_attempt_evaluation.v1"
     )
@@ -70,9 +57,7 @@ def _spec() -> dict[str, Any]:
 
 
 def _holdout() -> dict[str, Any]:
-    raw = HOLDOUT_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
-    value = json.loads(raw)
+    value = load_fixture("execution_attempt", "holdout")
     assert value["schema_version"] == (
         "typed_execution_attempt_holdout.v1"
     )

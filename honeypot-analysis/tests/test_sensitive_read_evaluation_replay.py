@@ -36,21 +36,12 @@ from production.reporting.typed_semantic_family_selection import (
 )
 from production.storage.backend import open_storage
 from production.utils.config import ProductionConfig
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BEHAVIOR_POLICY = ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
-FROZEN_REPLAY = (
-    ROOT / "evaluation/sensitive_read_frozen_50_replay.v1.json"
-)
-HOLDOUT = ROOT / "evaluation/sensitive_read_holdout.v1.json"
-FROZEN_REPLAY_SHA256 = (
-    "0a838aa30016e985202c0ca0327861bb7b5cd6b788a24b38dadb3ae35f0598f1"
-)
-HOLDOUT_SHA256 = (
-    "be7aed354c18e8174e419e47bccbd8c84a8e2a4a1a37129beec73c9501d805d5"
-)
 SOURCE_SPEC_SHA256 = (
     "4a9d5826253109f93c05f82fc671d0be57979d8e717458d3553ea387dbae78a9"
 )
@@ -59,10 +50,8 @@ SPECIAL_FINDING = "observed_credential_path_read_command"
 SPECIAL_ACTION = "review-credential-exposure-and-reuse"
 
 
-def _load_spec(path: Path, expected_sha256: str) -> dict[str, Any]:
-    raw = path.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == expected_sha256
-    value = json.loads(raw)
+def _load_spec(role: str) -> dict[str, Any]:
+    value = load_fixture("sensitive_read", role)
     assert isinstance(value, dict)
     assert isinstance(value.get("cases"), list)
     return value
@@ -240,7 +229,7 @@ def _metrics(
 
 
 def test_exact_frozen_50_case_replay_has_no_semantic_discrepancies() -> None:
-    spec = _load_spec(FROZEN_REPLAY, FROZEN_REPLAY_SHA256)
+    spec = _load_spec("replay")
     assert spec["source_evaluation_spec_sha256"] == SOURCE_SPEC_SHA256
     assert len(spec["cases"]) == 50
 
@@ -251,7 +240,7 @@ def test_exact_frozen_50_case_replay_has_no_semantic_discrepancies() -> None:
 
 
 def test_independently_authored_holdout_has_no_semantic_discrepancies() -> None:
-    spec = _load_spec(HOLDOUT, HOLDOUT_SHA256)
+    spec = _load_spec("holdout")
     assert spec["authored_independently_of_implementation_tests"] is True
     assert spec["expected_labels_frozen_before_execution"] is True
     assert len(spec["cases"]) == 24
@@ -265,7 +254,7 @@ def test_independently_authored_holdout_has_no_semantic_discrepancies() -> None:
 def test_corrected_family_survives_persistence_and_artifact_validation(
     tmp_path: Path,
 ) -> None:
-    case = _load_spec(FROZEN_REPLAY, FROZEN_REPLAY_SHA256)["cases"][11]
+    case = _load_spec("replay")["cases"][11]
     payload = _payload(case)
     _fact_set, _selection, report = _evaluate(case)
     storage = open_storage(f"sqlite:///{tmp_path / 'evaluation.db'}")
@@ -303,7 +292,7 @@ def test_corrected_family_survives_persistence_and_artifact_validation(
 
 
 def test_v4_stix_identity_excludes_runtime_only_report_fields() -> None:
-    case = _load_spec(FROZEN_REPLAY, FROZEN_REPLAY_SHA256)["cases"][0]
+    case = _load_spec("replay")["cases"][0]
     payload = _payload(case)
     _fact_set, _selection, report = _evaluate(case)
     baseline = build_stix_bundle(report, payload)

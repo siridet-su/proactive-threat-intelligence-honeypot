@@ -24,7 +24,8 @@ commands, limitations, and superseded-artifact decisions. The authoritative
 historical comparison remains
 `evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json`;
 its source record contains the full aggregate, per-tactic, paired, confidence,
-confusion, efficiency, and promotion-gate values used by the final figures.
+confusion, efficiency, and promotion-gate values formerly used by
+reproducible presentation figures.
 Raw per-case predictions, stage dumps, logs, caches, seed duplicates, and
 intermediate candidate-selection receipts are not evidence authorities and are
 not retained in this checkout.
@@ -77,27 +78,33 @@ promotion gate. Any future benchmark must use a newly reviewed, versioned
 evaluation procedure rather than the superseded 20260721 run whose VOMM adapter
 omitted required manifest validation and consequently abstained on every case.
 
-The compact blocked-selection summary and its final status/table/gate
-derivatives preserve the original `BLOCKED_AT_SELECTION` claim without keeping
-the private corpus-build receipt chain. The checkpoint compatibility receipt
-remains because it is current model-identity evidence. The retained seven-day
-session payload and authoritative external-VOMM evaluation support the explicit
-rollback/reference claim. The superseded seven-day comparison projection,
-intermediate calibration/configuration projections, and duplicate checksum
-wrappers are indexed as superseded in the canonical aggregate. CSV and
-image-format duplicates are not evidence authorities.
+The compact blocked-selection summary preserves the original
+`BLOCKED_AT_SELECTION` claim without keeping the private corpus-build receipt
+chain. Its status, table, and SVG presentation derivatives are not retained
+because no thesis or presentation source in this checkout cites them. The
+checkpoint compatibility receipt remains because it is current model-identity
+evidence. The retained seven-day session payload and authoritative
+external-VOMM evaluation support the explicit rollback/reference claim. The
+superseded seven-day comparison projection, intermediate
+calibration/configuration projections, and duplicate checksum wrappers are
+indexed as superseded in the canonical aggregate. CSV, image, and unused PDF
+presentation derivatives are not evidence authorities.
 
 ## Typed-semantic evaluation
 
-Current generalized regression fixtures are retained because tests load their
-exact paths. They cover sensitive reads, inspection, direct transfers,
+Current generalized regression fixtures are consolidated in
+`evaluation/typed_semantic_fixtures.v2.json`. The lossless bundle preserves
+each family and role (independent, holdout, replay, and combined), original
+schema, case count, and source SHA-256 while keeping test-facing family
+boundaries explicit. It covers sensitive reads, inspection, direct transfers,
 filesystem changes, transfer and execution attempts, deferred transformation,
 scheduled-task, service and collection families, and cross-family relations.
 Only the activation states defined in
 [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md) can affect v4/v3 evaluation.
 Frozen shadow or holdout data does not activate a family. The combined PoC
-fixture and stabilization result preserve prediction, enrichment, ATT&CK-only,
-reference-resolution, contradiction, and abstention checks.
+fixture and separately hash-bound stabilization result preserve prediction,
+enrichment, ATT&CK-only, reference-resolution, contradiction, and abstention
+checks.
 
 ## Authority and reproducibility
 
@@ -139,5 +146,6 @@ Frozen-bundle installation and recovery are specified in
 guidance, and typed-semantic authority are specified in
 [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md). Machine-readable benchmark
 evidence remains under `evaluation/next_tactic_benchmark_evidence/`. The core
-figure package retains PDF as its single export format; source metrics and
-hashes remain machine-readable.
+result is the retained machine-readable source; presentation PDFs and figure
+indexes are reproducible outputs and are not retained without a repository
+thesis/presentation consumer.

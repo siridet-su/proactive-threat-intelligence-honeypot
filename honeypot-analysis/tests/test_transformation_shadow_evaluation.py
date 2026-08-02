@@ -24,22 +24,10 @@ from production.reporting.typed_semantic_family_selection import (
     TypedSemanticFamilySelectionError,
     select_activated_semantic_family,
 )
+from tests.semantic_fixture_loader import load_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = (
-    ROOT
-    / "evaluation/transformation_shadow_independent_frozen.v1.json"
-)
-SPEC_SHA256 = (
-    "759b485fd471bad75abef787ec747ff9e2369c76fcfe9ccbfc69d722024c8518"
-)
-HOLDOUT_PATH = (
-    ROOT / "evaluation/transformation_shadow_holdout_frozen.v1.json"
-)
-HOLDOUT_SHA256 = (
-    "8dc32288c153c29d711b3e3091ca9be49086ed26deb099f1e2a5873391baf7fa"
-)
 BEHAVIOR_POLICY = (
     ROOT / "configs/threat_hypothesis_behavior.trusted.json"
 )
@@ -48,9 +36,7 @@ EVALUATOR_REVISION = "574df6c140a5fec186fbdc2d8f9aa4411d392723"
 
 
 def _spec() -> dict[str, Any]:
-    raw = SPEC_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == SPEC_SHA256
-    value = json.loads(raw)
+    value = load_fixture("transformation", "independent")
     assert value["schema_version"] == (
         "typed_transformation_shadow_evaluation.v1"
     )
@@ -60,9 +46,7 @@ def _spec() -> dict[str, Any]:
 
 
 def _holdout() -> dict[str, Any]:
-    raw = HOLDOUT_PATH.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == HOLDOUT_SHA256
-    value = json.loads(raw)
+    value = load_fixture("transformation", "holdout")
     assert value["schema_version"] == (
         "typed_transformation_shadow_holdout.v1"
     )
