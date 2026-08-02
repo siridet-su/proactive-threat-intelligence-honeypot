@@ -39,8 +39,9 @@ manifest, refuses overwrite, checks SQLite integrity and table counts, and
 restores only to a new path. A copied database that has not passed both
 `verify` and an isolated restore is not rollback evidence.
 
-The exact most recent deployment and rollback rehearsal, including commands and
-hashes, is [GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md](GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md).
+The last repository-recorded deployment and rollback evidence is indexed in
+[DEPLOYMENT_AND_RECOVERY.md](DEPLOYMENT_AND_RECOVERY.md) and its retained
+machine-readable activation receipt.
 Do not infer current host state solely from repository templates.
 
 ## Transformer rollback

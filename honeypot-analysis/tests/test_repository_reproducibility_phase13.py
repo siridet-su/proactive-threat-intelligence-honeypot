@@ -144,14 +144,15 @@ def test_generated_and_sensitive_artifact_classes_are_ignored() -> None:
     ).returncode == 1
 
 
-def test_current_handoff_docs_cover_runtime_storage_and_artifacts() -> None:
+def test_canonical_docs_cover_runtime_storage_and_artifacts() -> None:
     inventory = "\n".join(
         (ROOT / path).read_text(encoding="utf-8")
         for path in (
             "README.md",
-            "docs/ARCHITECTURE_CURRENT.md",
+            "docs/SYSTEM_ARCHITECTURE.md",
             "docs/DEVELOPMENT.md",
-            "docs/HANDOFF_NEXT_COHORT.md",
+            "docs/HISTORICAL_IMPLEMENTATION_RECORD.md",
+            "docs/MODEL_AND_EVALUATION.md",
         )
     )
     for required in (

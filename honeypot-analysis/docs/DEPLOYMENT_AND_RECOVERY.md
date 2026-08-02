@@ -21,7 +21,10 @@ The machine-readable receipt
 - guard state `ACTIVATION_COMPLETED` and application rollback to the recovery
   revision.
 
-The final narrative is [`NEXT_TACTIC_FINAL_PRODUCTION_ACTIVATION_2026-08-02.md`](NEXT_TACTIC_FINAL_PRODUCTION_ACTIVATION_2026-08-02.md).
+The same receipt records two processed final sessions, two validated reports,
+zero v4/v3/STIX/artifact errors, eleven advisory snapshots without
+recommendations, zero new alerts or webhooks, thirty healthy observation
+samples, and a minimum recorded free-space value of 4,939,764 KiB.
 
 ## Safe procedure
 
@@ -37,8 +40,9 @@ The final narrative is [`NEXT_TACTIC_FINAL_PRODUCTION_ACTIVATION_2026-08-02.md`]
    verify services and SQLite, and stop.
 
 The public connectivity correction is independently reversible by disabling the
-existing `allow-cowrie-relay-2222` rule; the exact before/after receipt hashes
-are in [`COWRIE_PUBLIC_CONNECTIVITY_ROOT_CAUSE_2026-08-02.md`](COWRIE_PUBLIC_CONNECTIVITY_ROOT_CAUSE_2026-08-02.md).
+existing `allow-cowrie-relay-2222` rule; its exact before/after receipt hashes
+and backend state are in
+`evaluation/cowrie_public_connectivity_root_cause_20260802.json`.
 Do not patch an active release in place and do not reuse a failed package.
 
 ## Verification boundary

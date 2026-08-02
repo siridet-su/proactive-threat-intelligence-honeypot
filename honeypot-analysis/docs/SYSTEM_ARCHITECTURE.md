@@ -18,11 +18,14 @@ Pi Cowrie (sanitized JSON)
   -> JSON/Markdown/PDF/STIX reports, dashboard API, monitor UI
 ```
 
-The deployed public Cowrie route is TCP/2222. The application ingest route is
-private (Tailscale), while the dashboard and monitor health routes are loopback
-services. The exact final connectivity evidence is in
-[`COWRIE_PUBLIC_CONNECTIVITY_ROOT_CAUSE_2026-08-02.md`](COWRIE_PUBLIC_CONNECTIVITY_ROOT_CAUSE_2026-08-02.md)
-and `evaluation/cowrie_public_connectivity_root_cause_20260802.json`.
+The last repository-recorded public Cowrie route is TCP/2222. The application
+ingest route is private (Tailscale), while the dashboard and monitor health
+routes are loopback services. The exact final connectivity evidence is
+`evaluation/cowrie_public_connectivity_root_cause_20260802.json`: HAProxy was
+already bound correctly and its Pi backend was healthy; the existing scoped
+GCP firewall rule was disabled and was re-enabled without adding a listener or
+widening its declared source range. Live state is not inferred from that
+receipt.
 
 ## Component boundaries
 
@@ -56,4 +59,14 @@ and `evaluation/cowrie_public_connectivity_root_cause_20260802.json`.
 
 See [`SESSION_ASSESSMENT_V4.md`](SESSION_ASSESSMENT_V4.md),
 [`RESPONSE_GUIDANCE_V3.md`](RESPONSE_GUIDANCE_V3.md), and
-[`ARCHITECTURE_CURRENT.md`](ARCHITECTURE_CURRENT.md) for the normative details.
+[`TYPED_SEMANTIC_FACTS.md`](TYPED_SEMANTIC_FACTS.md) for normative details.
+
+## Deliberate simplifications
+
+SQLite is the only active runtime backend. MongoDB, PostgreSQL, SMB, Vertex,
+legacy report generators, duplicate monitor renderers, prediction-only
+recommendations, and automatic response paths were removed or archived. The
+application remains a modular monolith with separately managed systemd
+processes, not a microservice or SOAR platform. Historical records use
+read-only compatibility adapters; they are not rewritten into current v4/v3
+authority.

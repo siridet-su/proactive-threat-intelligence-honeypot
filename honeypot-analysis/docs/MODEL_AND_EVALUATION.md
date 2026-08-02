@@ -32,6 +32,26 @@ The exact Transformer policy still records the original selection status
 scientific result. Do not train, recalibrate, relabel, or promote the model from
 these artifacts without a new frozen evaluation and promotion gate.
 
+The retained corrected-target receipts bind source-member inventory, safe
+corpus construction, partition membership, and the blocked selection decision.
+The full selection and test compatibility receipts record exact target-change,
+trust-policy, replay, artifact, and authority checks; the bounded 100-session
+preflight was only an intermediate duplicate and is not canonical evidence.
+The retained seven-day session payload and JSON comparison support the external
+VOMM analysis. CSV and image-format duplicates are not evidence authorities.
+
+## Typed-semantic evaluation
+
+Current generalized regression fixtures are retained because tests load their
+exact paths. They cover sensitive reads, inspection, direct transfers,
+filesystem changes, transfer and execution attempts, deferred transformation,
+scheduled-task, service and collection families, and cross-family relations.
+Only the activation states defined in [`TYPED_SEMANTIC_FACTS.md`](TYPED_SEMANTIC_FACTS.md)
+can affect v4/v3 evaluation. Frozen shadow or holdout data does not activate a
+family. The combined PoC fixture and stabilization result preserve prediction,
+enrichment, ATT&CK-only, reference-resolution, contradiction, and abstention
+checks.
+
 ## Authority and reproducibility
 
 Prediction snapshots are content-addressed, provenance-bound, and contain no
@@ -42,7 +62,8 @@ artifact hashes, and evaluator Git revision. Deterministic replay and artifact
 validators are part of the focused and full test suites.
 
 See [`FROZEN_MODEL_BUNDLE.md`](FROZEN_MODEL_BUNDLE.md),
-[`GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md`](GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md),
 [`SESSION_ASSESSMENT_V4.md`](SESSION_ASSESSMENT_V4.md),
 [`RESPONSE_GUIDANCE_V3.md`](RESPONSE_GUIDANCE_V3.md), and the machine-readable
-files under `evaluation/next_tactic_benchmark_evidence/`.
+files under `evaluation/next_tactic_benchmark_evidence/`. The retained core
+figure package uses PDF as its single committed export format; source metrics
+and hashes remain machine-readable.

@@ -3,22 +3,10 @@
   "checkpoint_sha256": "d9b316d76e63b15b175668aa0bf69cfe4172bbd812d6b19743a628cd0ec8073d",
   "figures": [
     {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/01_overall_metrics.png",
-      "sha256": "d99249dde9b3fa043dfdfd97ec2ecba1642298ad588a4c5a9ebdda3c6532b808",
-      "size_bytes": 103525
-    },
-    {
       "format": "pdf",
       "path": "evaluation/next_tactic_benchmark_evidence/figures/01_overall_metrics.pdf",
       "sha256": "166446c41e1d2fda57388b01ae8678fc1abe8805bb605e0524ac7426f156b6ce",
       "size_bytes": 20654
-    },
-    {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/02_paired_outcomes.png",
-      "sha256": "6d3e845d7ddd3d061c87609910937fc511bd78a65a89135061e9f79884f1f076",
-      "size_bytes": 84771
     },
     {
       "format": "pdf",
@@ -27,22 +15,10 @@
       "size_bytes": 18884
     },
     {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/03_promotion_gate.png",
-      "sha256": "4ecf9f2037fb0c4086a6445cee11bac34ebc0fbe43ef324cb5e807142c4e628a",
-      "size_bytes": 117225
-    },
-    {
       "format": "pdf",
       "path": "evaluation/next_tactic_benchmark_evidence/figures/03_promotion_gate.pdf",
       "sha256": "57abd792df2e8a78c5a2d4aafc59ef8f063cba0c5c117515262f2c2b82f2adf1",
       "size_bytes": 19736
-    },
-    {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/04_per_tactic_metrics.png",
-      "sha256": "a3e394055d1b803f9a4c516dfd9d040e1903bd36c629be33986541e46009fc71",
-      "size_bytes": 170145
     },
     {
       "format": "pdf",
@@ -51,22 +27,10 @@
       "size_bytes": 21606
     },
     {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/05_persistence_execution_tradeoff.png",
-      "sha256": "f120dcfc65b5f1abe340ce22bdd22240e63b464685c39ddd2b0a747f72b0e9d5",
-      "size_bytes": 120300
-    },
-    {
       "format": "pdf",
       "path": "evaluation/next_tactic_benchmark_evidence/figures/05_persistence_execution_tradeoff.pdf",
       "sha256": "07ccfde9fc0fba2dea661d467564df9c9f0cbe1d00e9160af4910f9a03ed4ef9",
       "size_bytes": 19967
-    },
-    {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/06_execution_persistence_confusion.png",
-      "sha256": "1b21a48cfb522b9d5f05b051692531c5ff3b68391595e8adf44f08371a368df2",
-      "size_bytes": 143905
     },
     {
       "format": "pdf",
@@ -75,22 +39,10 @@
       "size_bytes": 30901
     },
     {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/07_why_not_promoted.png",
-      "sha256": "29ac1b7bc378df39b35530739c56370b0f2e2e5d1c5107324f40a351270d022e",
-      "size_bytes": 122868
-    },
-    {
       "format": "pdf",
       "path": "evaluation/next_tactic_benchmark_evidence/figures/07_why_not_promoted.pdf",
       "sha256": "6f4808f7d89d2b30dc1ec8921c1528cbf6a3cb412a6a172874540b6ee2dbe47d",
       "size_bytes": 27296
-    },
-    {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/08_chronological_stability.png",
-      "sha256": "224faa624549fc5cab318942f4837cde3690f35244f7675dca53e4efa4b4bdc2",
-      "size_bytes": 166922
     },
     {
       "format": "pdf",
@@ -99,22 +51,10 @@
       "size_bytes": 21665
     },
     {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/09_repeated_pattern_warning.png",
-      "sha256": "b68f31c39a5d8cc796b1fbf9984ea3ae72ccf68fe08355f9ac016cadff592b9e",
-      "size_bytes": 137327
-    },
-    {
       "format": "pdf",
       "path": "evaluation/next_tactic_benchmark_evidence/figures/09_repeated_pattern_warning.pdf",
       "sha256": "ad20f064e98641bec72bd6541339d2ad3ff81d82041e625a8ccbad60d135d177",
       "size_bytes": 21581
-    },
-    {
-      "format": "png",
-      "path": "evaluation/next_tactic_benchmark_evidence/figures/10_executive_summary.png",
-      "sha256": "229f5d741e45b07f628cf279ada093c34e812e102911360883e2afe74830bd17",
-      "size_bytes": 152637
     },
     {
       "format": "pdf",
@@ -141,5 +81,12 @@
       "role": "authoritative final single-checkpoint evaluation",
       "sha256": "3e2b5a55ed7f8f52dbbaf6c6a2834f38173fd3f425a9c8f3a00c5173751c2c4d"
     }
-  ]
+  ],
+  "repository_retention_projection": {
+    "source_manifest_sha256": "5cdbd453aa872c74872669bdf0e6e7eddefa8874f42eb6dcf3f70ba8aa796cff",
+    "source_head": "f2137ba86aa17c1da914112660ddfe469cc95e1c",
+    "retained_figure_format": "pdf",
+    "removed_duplicate_format": "png",
+    "benchmark_values_modified": false
+  }
 }

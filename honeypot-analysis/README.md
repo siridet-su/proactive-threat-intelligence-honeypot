@@ -40,9 +40,9 @@ Cowrie sensor
 See the [documentation index](docs/README.md), including the canonical
 [architecture](docs/SYSTEM_ARCHITECTURE.md), [security and privacy](docs/SECURITY_AND_PRIVACY.md),
 [model/evaluation](docs/MODEL_AND_EVALUATION.md), and
-[deployment/recovery](docs/DEPLOYMENT_AND_RECOVERY.md) summaries. The older
-architecture, operations, development, and cohort handoff paths remain as
-backward-compatible detailed records.
+[deployment/recovery](docs/DEPLOYMENT_AND_RECOVERY.md) summaries. Current
+normative contracts remain linked from the documentation index; superseded
+implementation reports remain recoverable from Git history.
 
 ## Scope and safety boundary
 
@@ -112,9 +112,9 @@ python -m production.api.dashboard_api --help
 | `configs/` | Trusted policies and safe configuration templates |
 | `deployment/` | Generic systemd units and deployment templates |
 | `tests/` | Unit, integration, security, compatibility, and evidence tests |
-| `evaluation/` | Intentionally retained reviewed research evidence |
+| `evaluation/` | Current fixtures and final reproducibility/acceptance evidence |
 | `data/` | Public feeds, synthetic fixtures, and VOMM rollback model |
-| `docs/` | Current operations, architecture, handoff, and immutable deployment evidence |
+| `docs/` | Canonical summaries and current operational/authority contracts |
 
 Reviewed offline bootstrap feeds live under `data/feeds/`; runtime refreshes
 must use configured writable deployment paths.
@@ -134,7 +134,7 @@ post-analysis are retained.
 The exact validated GCP deployment and rollback rehearsal are indexed by
 [DEPLOYMENT_AND_RECOVERY.md](docs/DEPLOYMENT_AND_RECOVERY.md) and the
 machine-readable `evaluation/next_tactic_final_production_activation_20260802.json`;
-the dated deployment record remains available for full evidence.
+superseded activation narratives remain available in Git history.
 
 ## Optional components
 

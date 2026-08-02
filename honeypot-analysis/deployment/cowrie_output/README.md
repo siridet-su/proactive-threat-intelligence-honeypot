@@ -17,8 +17,9 @@ immutable classification. The component identity is recomputed from those
 receipts. The installer never normalizes all files to one mode or repairs a
 known script list after extraction.
 
-The design and authority boundary are recorded in
-`docs/COWRIE_UPSTREAM_CREDENTIAL_PRIVACY_DECISION.md`.
+The design and authority boundary are summarized in
+`docs/SECURITY_AND_PRIVACY.md`; the installer, validator, manifest, and sealed
+rollback receipt remain the executable contracts.
 
 ## Clean package
 
