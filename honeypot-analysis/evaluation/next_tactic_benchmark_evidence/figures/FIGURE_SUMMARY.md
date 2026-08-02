@@ -29,5 +29,6 @@ classifier-derived weak-label held-out corpus.
 10. **Executive summary.** Distinguishes the best aggregate held-out model
     from the selected authoritative PoC model and states the failed gate.
 
-The previously accepted aggregate benchmark files remain unchanged. This
-package neither recomputes metrics nor modifies production behavior.
+The canonical aggregate indexes these figures and the original source hashes;
+the single-checkpoint source record remains unchanged. This package neither
+recomputes metrics nor modifies production behavior.

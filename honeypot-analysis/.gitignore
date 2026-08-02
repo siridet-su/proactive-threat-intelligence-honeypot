@@ -66,6 +66,7 @@ data/models/external_seed_minimal_events*
 data/classification_review_queue*.json
 evaluation/generated/
 evaluation/*.json
+!evaluation/canonical_final_evaluation.json
 evaluation/*.jsonl
 evaluation/*.csv
 configs/*generated*.json

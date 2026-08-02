@@ -1,9 +1,0 @@
-{
-  "decision": "offline comparison only; production external hard-backoff VOMM remains unchanged",
-  "production_model_changed": false,
-  "replacement_evidence_required": [
-    "independent labels",
-    "deployment-local chronological holdout",
-    "reviewed promotion gate"
-  ]
-}

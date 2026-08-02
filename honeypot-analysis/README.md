@@ -175,7 +175,8 @@ the known defense-evasion limitation without rewriting that blocker. The Final
 partition was opened once under its ledger, and its immutable result and
 post-analysis are retained.
 
-The exact validated GCP deployment and rollback rehearsal are indexed by
+The canonical evaluation claim index is
+`evaluation/canonical_final_evaluation.json`. The exact validated GCP deployment and rollback rehearsal are indexed by
 [DEPLOYMENT_AND_RECOVERY.md](docs/DEPLOYMENT_AND_RECOVERY.md) and the
 machine-readable `evaluation/next_tactic_final_production_activation_20260802.json`;
 superseded activation narratives remain available in Git history.

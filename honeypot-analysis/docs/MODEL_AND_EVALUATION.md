@@ -17,13 +17,17 @@ selected implicitly.
 
 ## Retained benchmark evidence
 
-`evaluation/next_tactic_benchmark_evidence/` is the reproducibility bundle. Its
-compact tracked contents preserve machine-readable aggregate/per-tactic
-metrics, paired comparisons, bootstrap intervals, confusion matrices,
-split/manifest hashes, configuration, calibration/efficiency results, and the
-validation-only Transformer selection record. Raw per-case predictions, stage
-dumps, logs, caches, seed duplicates, and duplicate figures belong to ignored
-bulk-run directories and are not evidence authorities.
+`evaluation/canonical_final_evaluation.json` is the claim-to-artifact index for
+the retained evidence set. It records stable claim IDs, exact source hashes,
+dataset and policy identities, metric definitions and values, generation
+commands, limitations, and superseded-artifact decisions. The authoritative
+historical comparison remains
+`evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json`;
+its source record contains the full aggregate, per-tactic, paired, confidence,
+confusion, efficiency, and promotion-gate values used by the final figures.
+Raw per-case predictions, stage dumps, logs, caches, seed duplicates, and
+intermediate candidate-selection receipts are not evidence authorities and are
+not retained in this checkout.
 
 The current PoC policy instead identifies the externally managed
 `data/models/corrected_target_transformer_seed_20260721.pt` checkpoint with
@@ -73,13 +77,15 @@ promotion gate. Any future benchmark must use a newly reviewed, versioned
 evaluation procedure rather than the superseded 20260721 run whose VOMM adapter
 omitted required manifest validation and consequently abstained on every case.
 
-The retained corrected-target receipts bind source-member inventory, safe
-corpus construction, partition membership, and the blocked selection decision.
-The full selection and test compatibility receipts record exact target-change,
-trust-policy, replay, artifact, and authority checks; the bounded 100-session
-preflight was only an intermediate duplicate and is not canonical evidence.
-The retained seven-day session payload and JSON comparison support the external
-VOMM analysis. CSV and image-format duplicates are not evidence authorities.
+The compact blocked-selection summary and its final status/table/gate
+derivatives preserve the original `BLOCKED_AT_SELECTION` claim without keeping
+the private corpus-build receipt chain. The checkpoint compatibility receipt
+remains because it is current model-identity evidence. The retained seven-day
+session payload and authoritative external-VOMM evaluation support the explicit
+rollback/reference claim. The superseded seven-day comparison projection,
+intermediate calibration/configuration projections, and duplicate checksum
+wrappers are indexed as superseded in the canonical aggregate. CSV and
+image-format duplicates are not evidence authorities.
 
 ## Typed-semantic evaluation
 
