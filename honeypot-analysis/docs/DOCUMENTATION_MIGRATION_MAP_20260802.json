@@ -1,0 +1,67 @@
+{
+  "schema_version": "repository_cleanup_migration_map.v1",
+  "source_head": "48cd3cccf3a38fc38c557614cd999f1cb1f982d9",
+  "scope": ["docs", "evaluation"],
+  "before": {"file_count": 261, "bytes": 2240796368},
+  "after": {"file_count": 264, "bytes": 98236690, "deleted_file_count": 6, "deleted_bytes": 2142707349},
+  "canonical_documents": [
+    "docs/SYSTEM_ARCHITECTURE.md",
+    "docs/SECURITY_AND_PRIVACY.md",
+    "docs/MODEL_AND_EVALUATION.md",
+    "docs/DEPLOYMENT_AND_RECOVERY.md",
+    "docs/CURRENT_PRODUCTION_STATE.md",
+    "docs/HISTORICAL_IMPLEMENTATION_RECORD.md",
+    "docs/README.md"
+  ],
+  "deleted": [
+    {
+      "old_path": "evaluation/generated/next_behavior_compatibility_selection_full/current_policy_examples.jsonl",
+      "decision": "DELETE_INCOMPLETE_OR_TEMPORARY",
+      "replacement": "evaluation/generated/next_behavior_compatibility_selection_full/evaluation.json plus production/tools/evaluate_frozen_checkpoint_compatibility.py",
+      "old_size_bytes": 137205633,
+      "old_sha256": "a686d0527e3fc0b23324bf25abe645e0b37e710200b17ffc2c8d8e3acb0259c4",
+      "reason": "Ignored generated examples; exact JSONL path is not loaded by runtime, tests, schemas, manifests, or CI. It is reproducible from retained source inputs and the tracked evaluation contract."
+    },
+    {
+      "old_path": "evaluation/generated/next_behavior_compatibility_selection_full/current_policy_safe_sessions.jsonl",
+      "decision": "DELETE_INCOMPLETE_OR_TEMPORARY",
+      "replacement": "evaluation/generated/next_behavior_compatibility_selection_full/evaluation.json plus production/tools/evaluate_frozen_checkpoint_compatibility.py",
+      "old_size_bytes": 213471035,
+      "old_sha256": "a227d6a0518e1a103a0e66bef833593843a5b1e0e757977d5f8d282ad203ccf8",
+      "reason": "Ignored generated safe-session projection; no exact path consumer exists and it is reproducible from retained inputs."
+    },
+    {
+      "old_path": "evaluation/generated/next_behavior_compatibility_selection_preflight_100/current_policy_examples.jsonl",
+      "decision": "DELETE_INCOMPLETE_OR_TEMPORARY",
+      "replacement": "evaluation/generated/next_behavior_compatibility_selection_preflight_100/evaluation.json plus production/tools/evaluate_frozen_checkpoint_compatibility.py",
+      "old_size_bytes": 363250,
+      "old_sha256": "828c546cfd8a4a03c6c39b8de7ba9fdf52a679efccd2bb5eddddbf294f672b9a",
+      "reason": "Bounded preflight output; no exact path consumer exists."
+    },
+    {
+      "old_path": "evaluation/generated/next_behavior_compatibility_selection_preflight_100/current_policy_safe_sessions.jsonl",
+      "decision": "DELETE_INCOMPLETE_OR_TEMPORARY",
+      "replacement": "evaluation/generated/next_behavior_compatibility_selection_preflight_100/evaluation.json plus production/tools/evaluate_frozen_checkpoint_compatibility.py",
+      "old_size_bytes": 593125,
+      "old_sha256": "ab6d9c5eee9e50a3a257ef374773b4ae5d0bb952b04114de30b6a27e26b23217",
+      "reason": "Bounded preflight output; no exact path consumer exists."
+    },
+    {
+      "old_path": "evaluation/generated/next_behavior_compatibility_test_final/current_policy_examples.jsonl",
+      "decision": "DELETE_INCOMPLETE_OR_TEMPORARY",
+      "replacement": "evaluation/generated/next_behavior_compatibility_test_final/evaluation.json plus production/tools/evaluate_frozen_checkpoint_compatibility.py",
+      "old_size_bytes": 720990082,
+      "old_sha256": "4b81000e29e3e382815ed37c660a27e94a6464a841cff18135f174fdaf28ae53",
+      "reason": "Ignored bulk final-evaluation projection. The tracked evaluation receipt and input contracts remain; this derived JSONL is reproducible and has no exact consumer."
+    },
+    {
+      "old_path": "evaluation/generated/next_behavior_compatibility_test_final/current_policy_safe_sessions.jsonl",
+      "decision": "DELETE_INCOMPLETE_OR_TEMPORARY",
+      "replacement": "evaluation/generated/next_behavior_compatibility_test_final/evaluation.json plus production/tools/evaluate_frozen_checkpoint_compatibility.py",
+      "old_size_bytes": 1070084224,
+      "old_sha256": "c2c1b66c67eeca5b9649142b3743e017025ce727f7f747f440e45b9033a11d3e",
+      "reason": "Ignored bulk final-evaluation projection. The tracked evaluation receipt, policy, model, and source provenance remain."
+    }
+  ],
+  "retention_rule": "No NOT_DETERMINABLE path was deleted. All tracked historical documents, schemas, policies, benchmark evidence, figures, manifests, fixtures, and test/tool dependencies remain unchanged. The after count includes the nine canonical/index/manifest/inventory files added by this cleanup; the after byte total is docs plus evaluation."
+}

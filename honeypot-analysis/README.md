@@ -37,8 +37,12 @@ Cowrie sensor
 - SQLite is the only active runtime backend. Removed MongoDB/PostgreSQL
   implementations remain recoverable from Git history, not selectable code.
 
-See [current architecture](docs/ARCHITECTURE_CURRENT.md), [operations](docs/OPERATIONS.md),
-[development](docs/DEVELOPMENT.md), and [next-cohort handoff](docs/HANDOFF_NEXT_COHORT.md).
+See the [documentation index](docs/README.md), including the canonical
+[architecture](docs/SYSTEM_ARCHITECTURE.md), [security and privacy](docs/SECURITY_AND_PRIVACY.md),
+[model/evaluation](docs/MODEL_AND_EVALUATION.md), and
+[deployment/recovery](docs/DEPLOYMENT_AND_RECOVERY.md) summaries. The older
+architecture, operations, development, and cohort handoff paths remain as
+backward-compatible detailed records.
 
 ## Scope and safety boundary
 
@@ -127,10 +131,10 @@ the known defense-evasion limitation without rewriting that blocker. The Final
 partition was opened once under its ledger, and its immutable result and
 post-analysis are retained.
 
-The exact validated GCP deployment and rollback rehearsal are documented in
-[GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md](docs/GCP_TRANSFORMER_POC_DEPLOYMENT_20260727.md).
-That document records deployed revision, hashes, backups, service checks, and
-rollback evidence; this README does not duplicate those operational facts.
+The exact validated GCP deployment and rollback rehearsal are indexed by
+[DEPLOYMENT_AND_RECOVERY.md](docs/DEPLOYMENT_AND_RECOVERY.md) and the
+machine-readable `evaluation/next_tactic_final_production_activation_20260802.json`;
+the dated deployment record remains available for full evidence.
 
 ## Optional components
 
