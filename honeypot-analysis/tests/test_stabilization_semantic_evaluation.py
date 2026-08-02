@@ -36,18 +36,6 @@ def test_frozen_stabilization_spec_has_exact_recorded_hash() -> None:
     )
 
 
-def test_recorded_stabilization_result_is_immutable() -> None:
-    root = Path(__file__).resolve().parents[1]
-    path = (
-        root
-        / "evaluation"
-        / "stabilization_semantic_evaluation_results_2026-07-30.json"
-    )
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == (
-        "3ab19759ba6d0facc5c683a6e1db03197290cd0454302c0c0bee60c5165c1639"
-    )
-
-
 def test_frozen_stabilization_spec_rejects_hash_mismatch(
     tmp_path: Path,
 ) -> None:

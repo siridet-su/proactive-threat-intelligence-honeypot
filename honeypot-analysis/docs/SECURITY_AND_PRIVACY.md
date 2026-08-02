@@ -48,6 +48,48 @@ alerts, or actions. New guidance always requires manual approval, is never safe
 to auto-execute, and has no response or alert side effects. Historical v1/v2/v3
 records remain readable through adapters without rewriting them.
 
+## Lifecycle and deletion safety
+
+`configs/data_lifecycle_policy.v1.json` is the machine-validated authority. Its
+exact SHA-256 is recorded in `data_lifecycle_policy_ledger` when the session
+worker starts. A missing, invalid, or runtime-inconsistent policy prevents that
+writer from starting. The policy binds processing to honeypot security
+research, prohibits credential-plaintext storage, requires artifact redaction,
+and prohibits both automatic deletion and unauthorized external sharing of
+source-IP data.
+
+Retention commands are dry-run unless an operator supplies `--apply`. The
+installed prediction-retention timer is audit-only: it reports counts and
+never deletes. Adding `--apply` requires a separately approved lifecycle
+policy, backend-consistent backup, maintenance window, and verified restore.
+There is no supported scheduled deletion entrypoint.
+
+Only SQLite prediction-snapshot selection is implemented. A dry run reports
+the cutoff, age candidates, feedback and latest-per-session protections,
+eligible rows, and zero deletions. Analyst-feedback references are always
+preserved; by default, the latest snapshot per session is preserved using the
+deterministic `(created_at, snapshot_id)` order. An apply run requires all
+prediction and feedback writers to be stopped so new feedback cannot race the
+deletion transaction. Deleted snapshots are recoverable only by restoring the
+pre-change backup, not from the retention report.
+
+Age-based deletion is affirmatively deferred for events, sessions, alerts,
+reports, job and webhook history, observables/sightings, campaign and session
+links, model-evaluation runs, human labels, and all other reference-coupled
+durable records. Expired enrichment is stale for reads but remains provenance;
+feed status is a replaced singleton; worker leases are owned by runtime lease
+semantics. Databases, reports/exports, feeds, spools, models, evaluation
+outputs, and backups are also outside automatic deletion until ownership,
+reference tracking, and restore behavior receive separate approval.
+
+Before any explicitly approved apply operation, retain the dry-run JSON, take
+and verify a non-overwriting SQLite backup, rehearse restore to a new path,
+stop writers, re-run the identical selection with `--apply`, verify protected
+IDs, restart writers, and monitor health. The
+`production.tools.sqlite_backup_restore` commands enforce mode `0600`, hashes,
+byte counts, SQLite quick/integrity checks, schema version, and table counts;
+backup and restore refuse to overwrite an existing target.
+
 ## Residual limitations
 
 Earlier observer, rollback-receipt, rotation, and marker-scan failures are

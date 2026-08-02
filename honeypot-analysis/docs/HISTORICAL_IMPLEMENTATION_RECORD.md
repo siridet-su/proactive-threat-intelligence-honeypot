@@ -1,9 +1,8 @@
 # Historical implementation record (canonical summary)
 
 Completed work is summarized here rather than retained as an active second
-documentation system. Deleted source reports remain byte-for-byte recoverable
-from Git history; the cleanup migration map binds every old path and SHA-256 to
-this record or another canonical contract.
+documentation system. Deleted source reports and former machine-readable
+cleanup inventories remain byte-for-byte recoverable from Git history.
 
 ## Major transitions
 
@@ -52,9 +51,37 @@ current evidence files.
 SQLite remains the only active runtime backend. MongoDB/PostgreSQL adapters,
 legacy SMB/Vertex paths, prediction-only authority, automatic response, and
 unreviewed semantic families are archived or fail-closed. Frozen VOMM remains a
-rollback/reference artifact, not a hidden runtime fallback. Exact documentation
-and evaluation removals are listed in
-[`DOCUMENTATION_MIGRATION_MAP_20260802.json`](DOCUMENTATION_MIGRATION_MAP_20260802.json).
+rollback/reference artifact, not a hidden runtime fallback.
+
+## Repository cleanup record
+
+The first cleanup pass at source revision
+`48cd3cccf3a38fc38c557614cd999f1cb1f982d9` removed six ignored,
+reproducible, incomplete bulk JSONL projections totaling 2,142,707,349 bytes.
+Their retained evaluation receipts, policies, inputs, and reproduction tools
+remained authoritative; the deleted projections had no exact runtime, test,
+schema, manifest, or CI consumer.
+
+The next audited pass used source revision
+`f2137ba86aa17c1da914112660ddfe469cc95e1c` and reviewed 264 tracked paths
+under documentation and evaluation (98,236,690 bytes). It retained 98 paths,
+deleted 166 paths totaling 7,993,592 bytes, merged 53 documents, and recorded
+no deletion whose status was `NOT_DETERMINABLE`. The decisions comprised 91
+duplicate exports, 11 failed attempts, 31 obsolete designs, and 33 superseded
+records; retained paths comprised 18 current contracts, 11 code/test
+dependencies, 42 final-evidence records, and 27 schemas/fixtures. Net tracked
+reduction was 7,821,626 bytes after growth in the retained summaries.
+
+The current consolidation folds the eleven remaining split authority,
+integrity, lifecycle, development, release, model-bundle, and operating
+references into the root README and six subject summaries. Together with this
+record, `docs/` now has only the seven documents indexed by its README. This is
+a documentation-layout change, not a change to runtime authority, evaluation
+status, retention approval, or the last repository-recorded production state.
+
+The prior decision tables and every deleted tracked original remain available
+at the recorded source revisions. They were intentionally not retained as a
+replacement inventory inside the active documentation set.
 
 To inspect a deleted report without restoring it to the worktree, use
 `git show f2137ba86aa17c1da914112660ddfe469cc95e1c:honeypot-analysis/<old-path>`.

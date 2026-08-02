@@ -114,8 +114,8 @@ def test_all_packaged_service_modules_have_working_help() -> None:
 
 def test_generated_and_sensitive_artifact_classes_are_ignored() -> None:
     generated = (
-        "evaluation/next_tactic_model_comparison.json",
-        "evaluation/future-output.csv",
+        "evaluation/transient-output.json",
+        "evaluation/transient-output.csv",
         "data/feeds/cisa_kev_cache.json",
         "data/feeds/cisa_kev_cache.json.lock",
         "configs/example.generated.json",
@@ -142,15 +142,14 @@ def test_generated_and_sensitive_artifact_classes_are_ignored() -> None:
         capture_output=True,
         timeout=10,
     ).returncode == 1
-
-
 def test_canonical_docs_cover_runtime_storage_and_artifacts() -> None:
     inventory = "\n".join(
         (ROOT / path).read_text(encoding="utf-8")
         for path in (
             "README.md",
             "docs/SYSTEM_ARCHITECTURE.md",
-            "docs/DEVELOPMENT.md",
+            "docs/SECURITY_AND_PRIVACY.md",
+            "docs/DEPLOYMENT_AND_RECOVERY.md",
             "docs/HISTORICAL_IMPLEMENTATION_RECORD.md",
             "docs/MODEL_AND_EVALUATION.md",
         )

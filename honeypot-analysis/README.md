@@ -37,12 +37,11 @@ Cowrie sensor
 - SQLite is the only active runtime backend. Removed MongoDB/PostgreSQL
   implementations remain recoverable from Git history, not selectable code.
 
-See the [documentation index](docs/README.md), including the canonical
-[architecture](docs/SYSTEM_ARCHITECTURE.md), [security and privacy](docs/SECURITY_AND_PRIVACY.md),
-[model/evaluation](docs/MODEL_AND_EVALUATION.md), and
-[deployment/recovery](docs/DEPLOYMENT_AND_RECOVERY.md) summaries. Current
-normative contracts remain linked from the documentation index; superseded
-implementation reports remain recoverable from Git history.
+See the [documentation index](docs/README.md). The retained documentation is a
+single canonical set covering architecture, security/privacy, model/evaluation,
+deployment/recovery, current repository-recorded production state, and the
+historical implementation record. Superseded implementation reports remain
+recoverable from Git history.
 
 ## Scope and safety boundary
 
@@ -68,7 +67,8 @@ New threat assessments use `session_assessment.v4`. They are constructed
 directly from one content-addressed Cowrie evidence snapshot, fail closed when
 an explicitly selected behavior or classification policy is unavailable, and
 keep predictions, enrichment, correlations, and LLM prose outside canonical
-authority. See [the v4 contract](docs/SESSION_ASSESSMENT_V4.md).
+authority. The canonical v4, v3, and typed-semantic contracts are consolidated
+in [SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md).
 
 Never expose Cowrie or administrative services without explicit authorization,
 isolation, monitoring, egress controls, and tested recovery. No live secrets,
@@ -83,6 +83,7 @@ Python 3.11 or newer:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp configs/production_config.example.json /tmp/honeypot-config.json
 ```
 
@@ -95,6 +96,28 @@ Validate the core package:
 python -m compileall -q production
 pytest -q
 ```
+
+For development tooling, also install `requirements-dev.txt`. Use focused
+suites first for storage, ingest security, prediction runtime, reporting,
+guidance, and authority boundaries; then run the full suite. A loopback-socket
+failure in a restricted sandbox must be distinguished from a test assertion
+failure.
+
+Validate policy changes explicitly:
+
+```bash
+python -m production.policies.validate_prediction_policy \
+  --policy configs/prediction_policy.transformer_poc.trusted.json
+python -m production.policies.validate_classification_rules \
+  --policy configs/classification_rules.trusted.json
+python -m production.policies.validate_response_guidance_policy \
+  --policy configs/response_guidance_policy.v3.json
+python -m production.tools.reproduce_next_behavior_experiment --help
+```
+
+That experiment entrypoint is the only supported prediction experiment CLI;
+modules below `production.reproduction.next_behavior` are libraries, not
+independent command-line interfaces.
 
 Run individual entrypoints with `--help`, for example:
 
@@ -123,6 +146,27 @@ Retained evaluators under `production/tools` support current reproducibility or
 review workflows. Superseded hypothesis evaluators remain only as immutable
 results under `evaluation/` and in Git history.
 
+## Development safety
+
+- Classifier changes require reviewed provenance, bounded conditions,
+  whole-policy validation, and positive, negative, compound-command,
+  audit-only, and secret-containment tests. A label is not proof of success or
+  impact.
+- Model changes require a new immutable artifact and manifest with frozen
+  preprocessing, vocabulary, policies, partition membership, selection,
+  calibration, metrics, and authority restrictions. Never tune after Final
+  access or reinterpret stored snapshots.
+- Guidance changes must preserve deterministic v3 identity, immutable observed
+  evidence, manual approval, non-executability, and adversarial tests for
+  non-authoritative input and policy/hash drift.
+- Storage changes must preserve SQLite transactions, migrations, leases,
+  backups, and restore semantics. Another backend is a new reviewed design,
+  not a compatibility switch.
+
+Caches, databases, checkpoints, logs, benchmark runs, generated reports, local
+keys, and environments are not source artifacts. Commit evaluation evidence
+only after privacy, provenance, claim, size, and reproducibility review.
+
 ## Evidence and deployment status
 
 The original corrected-target experiment remains truthfully recorded as
@@ -143,5 +187,5 @@ Optional dependency groups are separated in `pyproject.toml` and
 training are not part of the minimal runtime. Optional imports must remain lazy
 and fail closed. MongoDB, PostgreSQL, and Vertex dependencies are archived.
 
-For retention rules and generated output policy, see
-[RETENTION_POLICY.md](docs/RETENTION_POLICY.md).
+Lifecycle and generated-output rules are consolidated in
+[SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md).
