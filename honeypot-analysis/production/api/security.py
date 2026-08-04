@@ -421,6 +421,45 @@ def count_command_events(rows: Iterable[Mapping[str, Any]]) -> int:
     return count
 
 
+_PUBLIC_COMMAND_TEXT_KEYS = frozenset(
+    {
+        "command",
+        "commands",
+        "input",
+        "raw_command",
+        "command_text",
+        "command_line",
+        "ttp_command_map",
+        "command_map",
+    }
+)
+
+
+def _redact_public_command_text(value: Any, key: str = "") -> Any:
+    """Keep public command-shaped fields bounded without exposing input text."""
+    if key in _PUBLIC_COMMAND_TEXT_KEYS:
+        if isinstance(value, list):
+            return ["[REDACTED]" for _ in value]
+        if isinstance(value, tuple):
+            return ["[REDACTED]" for _ in value]
+        if isinstance(value, Mapping):
+            return {
+                str(name): _redact_public_command_text(item, "commands")
+                for name, item in value.items()
+            }
+        return "[REDACTED]" if value not in (None, "") else value
+    if isinstance(value, Mapping):
+        return {
+            str(name): _redact_public_command_text(item, str(name))
+            for name, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_public_command_text(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_public_command_text(item) for item in value]
+    return value
+
+
 def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     """Return useful session analysis without raw events or storage documents."""
     if not detail.get("ok"):
@@ -433,8 +472,11 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         source_event_rows = detail.get("events") or []
     command_count = count_command_events(source_event_rows)
     event_rows = event_views(source_event_rows)
-    overview = dict(detail.get("overview") or {})
+    overview = _redact_public_command_text(dict(detail.get("overview") or {}))
     overview["command_count"] = command_count
+    public_commands = _redact_public_command_text(
+        {"commands": detail.get("commands") or []}
+    )["commands"]
     output: Dict[str, Any] = {
         "ok": True,
         "timestamp": detail.get("timestamp"),
@@ -443,13 +485,17 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "source_geo": detail.get("source_geo") or {},
         "source_geo_context": detail.get("source_geo_context") or {},
         "observables": detail.get("observables") or [],
-        "commands": detail.get("commands") or [],
-        "classification_events": detail.get("classification_events") or [],
+        "commands": public_commands,
+        "classification_events": _redact_public_command_text(
+            detail.get("classification_events") or []
+        ),
         "session_ttp_correlations": detail.get("session_ttp_correlations") or [],
         "session_ttp_correlation_summary": detail.get("session_ttp_correlation_summary") or {},
         "tactics": detail.get("tactics") or [],
         "ttps": detail.get("ttps") or [],
-        "ttp_command_map": detail.get("ttp_command_map") or {},
+        "ttp_command_map": _redact_public_command_text(
+            detail.get("ttp_command_map") or {}
+        ),
         "enrichment_status": detail.get("enrichment_status") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
@@ -516,7 +562,10 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "response_guidance": detail.get("response_guidance") or {},
         "errors": detail.get("errors") or {},
     }
-    return public_payload(output)
+    # Apply the command-specific boundary after assembling every consumer
+    # field.  Correlations and legacy compatibility structures can carry a
+    # command-shaped value even when the primary fields are empty.
+    return public_payload(_redact_public_command_text(output))
 
 
 def sanitize_request_target(target: str) -> str:

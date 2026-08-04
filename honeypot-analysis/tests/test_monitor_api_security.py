@@ -446,6 +446,52 @@ def test_monitor_session_api_view_omits_raw_events_and_redacts_commands() -> Non
     assert "user:pass" not in serialized
 
 
+def test_public_session_projection_never_returns_benign_command_text() -> None:
+    view = session_detail_view(
+        {
+            "ok": True,
+            "timestamp": "2026-07-17T00:00:00Z",
+            "session_id": "session-command-boundary",
+            "overview": {
+                "session_id": "session-command-boundary",
+                "commands": ["printf benign_public_boundary_check"],
+            },
+            "commands": ["printf benign_public_boundary_check"],
+            "classification_events": [
+                {
+                    "command": "printf benign_public_boundary_check",
+                    "input": "printf benign_public_boundary_check",
+                    "ttp": "T1082",
+                }
+            ],
+            "ttp_command_map": {
+                "T1082": ["printf benign_public_boundary_check"],
+            },
+            "session_payload": {"session_id": "session-command-boundary"},
+            "events_table_rows": [
+                {
+                    "event_id": "event-command-boundary",
+                    "eventid": "cowrie.command.input",
+                    "payload_json": json.dumps(
+                        {
+                            "eventid": "cowrie.command.input",
+                            "input": "printf benign_public_boundary_check",
+                        }
+                    ),
+                }
+            ],
+        }
+    )
+
+    serialized = json.dumps(view, sort_keys=True)
+    assert "benign_public_boundary_check" not in serialized
+    assert view["commands"] == ["[REDACTED]"]
+    assert view["overview"]["commands"] == ["[REDACTED]"]
+    assert view["classification_events"][0]["command"] == "[REDACTED]"
+    assert view["classification_events"][0]["input"] == "[REDACTED]"
+    assert view["ttp_command_map"]["T1082"] == ["[REDACTED]"]
+
+
 def test_internal_command_projection_is_bounded_and_classified_without_public_reuse() -> None:
     class RawStorage:
         def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
