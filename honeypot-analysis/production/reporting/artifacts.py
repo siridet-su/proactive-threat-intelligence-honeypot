@@ -23,6 +23,7 @@ from production.utils.sensitive_data import (
 )
 from production.utils.serialization import stable_id, stable_json
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
+from production.reporting.artifact_privacy import sanitize_artifact_boundary
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
@@ -52,11 +53,15 @@ def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
         )
 
         validate_session_assessment_v4(value, raise_on_error=True)
-        return deepcopy(value)
+        # Canonical evidence and its content IDs are already safe.  The
+        # non-authoritative compatibility/audit context is still an artifact
+        # input and must pass the shared command-text boundary sanitizer.
+        return sanitize_artifact_boundary(value)
     try:
         redacted = redact_for_artifact(value)
     except Exception:
         raise ValueError(f"{label} redaction failed") from None
+    redacted = sanitize_artifact_boundary(redacted)
     if not isinstance(redacted, dict):
         raise TypeError(f"{label} must redact to an object")
     return redacted
