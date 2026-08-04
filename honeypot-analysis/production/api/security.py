@@ -387,27 +387,37 @@ def count_command_events(rows: Iterable[Mapping[str, Any]]) -> int:
 
     Session payloads can legitimately omit ``commands`` when the durable event
     rows are the only source of command evidence. Keep the monitor count tied
-    to the canonical Cowrie event identifier rather than treating arbitrary
-    event names or stored command lists as commands.
+    to the Cowrie event shape rather than treating arbitrary event names or
+    stored command lists as commands. Some historical records were persisted
+    after a privacy boundary redacted the middle of ``cowrie.command.input``.
+    Those records retain the ``*.input`` event shape and a non-empty ``input``
+    field, so they remain countable without restoring or exposing command text.
     """
 
     count = 0
     for row in rows:
         if not isinstance(row, Mapping):
             continue
+        payload = row.get("payload")
+        if not isinstance(payload, Mapping) and row.get("payload_json"):
+            try:
+                payload = json.loads(str(row.get("payload_json")))
+            except (TypeError, ValueError):
+                payload = {}
+        if not isinstance(payload, Mapping):
+            payload = {}
         event_id = row.get("eventid")
         if not event_id:
-            payload = row.get("payload")
-            if isinstance(payload, Mapping):
-                event_id = payload.get("eventid")
-            if not event_id and row.get("payload_json"):
-                try:
-                    decoded = json.loads(str(row.get("payload_json")))
-                except (TypeError, ValueError):
-                    decoded = {}
-                if isinstance(decoded, Mapping):
-                    event_id = decoded.get("eventid")
-        if str(event_id or "").strip().lower() == "cowrie.command.input":
+            event_id = payload.get("eventid")
+        normalized_event_id = str(event_id or "").strip().lower()
+        is_exact_command_event = normalized_event_id == "cowrie.command.input"
+        is_privacy_redacted_input_event = (
+            normalized_event_id.startswith("cowrie.")
+            and normalized_event_id.endswith(".input")
+            and "[redacted]" in normalized_event_id
+            and bool(str(payload.get("input") or "").strip())
+        )
+        if is_exact_command_event or is_privacy_redacted_input_event:
             count += 1
     return count
 
@@ -422,8 +432,8 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     source_event_rows = detail.get("events_table_rows")
     if source_event_rows is None:
         source_event_rows = detail.get("events") or []
+    command_count = count_command_events(source_event_rows)
     event_rows = event_views(source_event_rows)
-    command_count = count_command_events(event_rows)
     overview = dict(detail.get("overview") or {})
     overview["command_count"] = command_count
     output: Dict[str, Any] = {

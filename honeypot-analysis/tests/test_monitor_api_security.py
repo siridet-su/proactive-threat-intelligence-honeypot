@@ -427,6 +427,64 @@ def test_monitor_session_detail_uses_canonical_events_and_event_command_count() 
     assert view["session"]["command_count"] == 3
 
 
+def test_monitor_command_count_accepts_privacy_redacted_historical_input_events() -> None:
+    rows = [
+        {
+            "event_id": f"event-redacted-{index}",
+            "eventid": eventid,
+            "session_id": "session-redacted-events",
+            "payload_json": json.dumps(payload),
+        }
+        for index, (eventid, payload) in enumerate(
+            [
+                ("cowrie.session.connect", {"eventid": "cowrie.session.connect"}),
+                (
+                    "cowrie.comm[REDACTED]nd.input",
+                    {
+                        "eventid": "cowrie.comm[REDACTED]nd.input",
+                        "input": "id",
+                    },
+                ),
+                (
+                    "cowrie.comm[REDACTED]nd.input",
+                    {
+                        "eventid": "cowrie.comm[REDACTED]nd.input",
+                        "input": "uname -a",
+                    },
+                ),
+                (
+                    "cowrie.comm[REDACTED]nd.input",
+                    {
+                        "eventid": "cowrie.comm[REDACTED]nd.input",
+                        "input": "pwd",
+                    },
+                ),
+                # A different input-shaped event is not a command, even when
+                # it carries an input field. The compatibility path is bound
+                # to the privacy-redaction marker and the Cowrie shape.
+                (
+                    "cowrie.terminal.input",
+                    {"eventid": "cowrie.terminal.input", "input": "terminal data"},
+                ),
+            ]
+        )
+    ]
+
+    view = session_detail_view(
+        {
+            "ok": True,
+            "session_id": "session-redacted-events",
+            "overview": {"session_id": "session-redacted-events", "command_count": 0},
+            "session_payload": {"session_id": "session-redacted-events", "commands": []},
+            "events_table_rows": rows,
+        }
+    )
+
+    assert len(view["events"]) == 5
+    assert view["overview"]["command_count"] == 3
+    assert view["session"]["command_count"] == 3
+
+
 def test_monitor_request_log_sanitizes_sensitive_query_values(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
