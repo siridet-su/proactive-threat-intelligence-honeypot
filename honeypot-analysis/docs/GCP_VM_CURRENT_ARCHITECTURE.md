@@ -23,6 +23,15 @@ behavior.  The deployment decision is therefore:
 No release was rebuilt or activated merely to make the Git revision strings
 equal.  The active and recovery releases remain the rollback boundary.
 
+The comparison baseline was recorded before this rebuild record was committed.
+The repository-safe record is now carried by commits
+`d1ea27c8c43939878ac3095221d5c1c8ffaf4b57`,
+`c4e4dfcbb2047d605e1c778f0615b68785cf0da8`, and
+`3d81c14045a164046cfbb11525b84c0991add257`.  Those commits add only
+documentation, a redacted inventory collector, a manifest verifier, and
+tests; none is imported by the active application services and no application
+redeploy is required for them.
+
 The exact live comparison, resource inventory, database backup, integrity
 receipt, and isolated restore result are in the private owner-only migration
 directory recorded at execution time.  Nothing in that directory contains
@@ -128,4 +137,3 @@ resource bindings in an owner-only receipt, and pass the runbook and verifier
 before any public cutover.  Secrets are provisioned separately through the
 approved secret mechanism and are never included in a release, manifest
 example, inventory, or backup bundle.
-
