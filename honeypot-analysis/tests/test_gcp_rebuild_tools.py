@@ -137,6 +137,15 @@ def test_manifest_rejects_hash_mismatch(tmp_path: Path) -> None:
         verify_manifest(document, root=root)
 
 
+def test_manifest_rejects_unlisted_release_file(tmp_path: Path) -> None:
+    root, _, document = _concrete_manifest(tmp_path)
+    release_root = Path(document["release"]["root"])
+    _write(release_root / "unlisted.py", b"unexpected\n")
+
+    with pytest.raises(ManifestError, match="inventory is not closed"):
+        verify_manifest(document, root=root)
+
+
 def test_manifest_rejects_unresolved_placeholders(tmp_path: Path) -> None:
     root, _, document = _concrete_manifest(tmp_path)
     document["source_commit"] = "<40-HEX-GIT-COMMIT>"
@@ -164,4 +173,3 @@ def test_redacted_inventory_is_owner_only_and_contains_no_addresses(tmp_path: Pa
     assert "100." not in encoded
     assert "34." not in encoded
     assert "PRIVATE_KEY" not in encoded
-

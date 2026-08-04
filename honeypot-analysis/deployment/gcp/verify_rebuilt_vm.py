@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -333,8 +334,26 @@ def verify_manifest(
             raise ManifestError(f"cannot parse declared manifest file: {supplied_manifest}") from exc
 
     verified_files: list[dict[str, Any]] = []
+    declared_file_paths: set[Path] = set()
     for index, entry in enumerate(release["files"]):
+        declared_path = _resolve_path(root, entry["path"], f"release.files[{index}].path")
+        if declared_path == declared_manifest:
+            raise ManifestError("release.files must not include the manifest itself")
         verified_files.append(_verify_file(root, entry, f"release.files[{index}]", within=release_root))
+        if not declared_path.is_symlink():
+            declared_file_paths.add(declared_path)
+    observed_file_paths: set[Path] = set()
+    for directory, _, filenames in os.walk(release_root, followlinks=False):
+        for filename in filenames:
+            path = Path(directory) / filename
+            if path == declared_manifest or path.is_symlink():
+                continue
+            if path.is_file():
+                observed_file_paths.add(path.resolve())
+    if observed_file_paths != declared_file_paths:
+        missing = sorted(str(path) for path in declared_file_paths - observed_file_paths)
+        extra = sorted(str(path) for path in observed_file_paths - declared_file_paths)
+        raise ManifestError(f"release file inventory is not closed; missing={missing}, extra={extra}")
     if release_tree_sha256(release["files"]) != release["release_tree_sha256"]:
         raise ManifestError("release.release_tree_sha256 does not match its declared file inventory")
 
