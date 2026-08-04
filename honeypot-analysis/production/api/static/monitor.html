@@ -359,6 +359,7 @@
         intelCache: {},       // keyed by session_id
         miniMap: null,        // Leaflet mini-map for session detail
         detailSessionId: '',  // current detail page, never persisted
+        detailEvents: [],     // current public/redacted event rows only
         globalAlerts: [],     // predictive_alert objects surfaced across sessions
         feedbackData: null,
         classificationData: null,
@@ -494,12 +495,89 @@
             if (!response.ok || payload?.ok !== true) {
                 throw new Error(payload?.error || `request failed (${response.status})`);
             }
-            if (panel) panel.innerHTML = renderSensitiveCommandChain(payload);
+            const mapping = mapSensitiveCommands(state.detailEvents, payload.commands);
+            const mappedCommands = mapping.matches.map(item => item.command);
+            const updated = applySensitiveCommandsToExecutionChain(mapping.matches);
+            if (payload.commands?.length && (!mappedCommands.length || updated !== mappedCommands.length)) {
+                if (panel) panel.innerHTML = '<p class="text-xs text-amber-200">Sensitive command text was not mapped to a stable public event reference; privacy placeholders were retained.</p>';
+                return;
+            }
+            if (panel) panel.innerHTML = renderSensitiveCommandChain({...payload, commands: mappedCommands});
         } catch (error) {
             if (panel) panel.innerHTML = `<p class="text-xs text-red-300">Sensitive command view unavailable: ${escapeHtmlString(error?.message || 'authorization failed')}</p>`;
         }
     }
     window.revealRawCommands = revealRawCommands;
+
+    function normalizedEventType(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function stableEventReference(value) {
+        const item = value || {};
+        return {
+            eventId: String(item.event_id || '').trim(),
+            timestamp: String(item.timestamp || item.payload?.timestamp || '').trim(),
+            eventType: normalizedEventType(item.eventid || item.payload?.eventid),
+        };
+    }
+
+    function sensitiveCommandMatchesEvent(event, command) {
+        const left = stableEventReference(event);
+        const right = stableEventReference(command);
+        if (left.eventId && right.eventId) {
+            return left.eventId === right.eventId
+                && (!left.timestamp || !right.timestamp || left.timestamp === right.timestamp);
+        }
+        if (!left.timestamp || !right.timestamp || left.timestamp !== right.timestamp) return false;
+        return !left.eventType || !right.eventType || left.eventType === right.eventType;
+    }
+
+    function mapSensitiveCommands(events, commands) {
+        const publicEvents = arrayMaybe(events);
+        const sensitiveCommands = arrayMaybe(commands);
+        const matches = [];
+        const unmatched = [];
+        const usedEventKeys = new Set();
+        for (const command of sensitiveCommands) {
+            const commandRef = stableEventReference(command);
+            const candidates = publicEvents.filter(candidate => sensitiveCommandMatchesEvent(candidate, command));
+            // Event IDs are the durable identity. Timestamp/type fallback is
+            // accepted only when it is unambiguous; never guess between rows.
+            const event = commandRef.eventId
+                ? candidates.find(candidate => stableEventReference(candidate).eventId === commandRef.eventId)
+                : candidates.length === 1 ? candidates[0] : null;
+            const eventRef = event ? stableEventReference(event) : null;
+            const eventKey = eventRef?.eventId || `${eventRef?.timestamp || ''}\u0000${eventRef?.eventType || ''}`;
+            if (event && !usedEventKeys.has(eventKey)) {
+                usedEventKeys.add(eventKey);
+                matches.push({event, command});
+            }
+            else unmatched.push(command);
+        }
+        return {matches, unmatched};
+    }
+
+    function applySensitiveCommandsToExecutionChain(matches, root = document) {
+        let updated = 0;
+        for (const match of arrayMaybe(matches)) {
+            const reference = stableEventReference(match.event);
+            const nodes = Array.from(root.querySelectorAll('.execution-command-text'));
+            const node = nodes.find(candidate => (
+                String(candidate.dataset.commandEventId || '') === reference.eventId
+                && (!reference.timestamp || String(candidate.dataset.commandTimestamp || '') === reference.timestamp)
+            )) || nodes.find(candidate => (
+                !reference.eventId
+                && String(candidate.dataset.commandTimestamp || '') === reference.timestamp
+                && (!reference.eventType || String(candidate.dataset.commandEventType || '').toLowerCase() === reference.eventType)
+            ));
+            if (!node) continue;
+            node.textContent = String(match.command?.input ?? '');
+            node.dataset.sensitive = 'true';
+            updated += 1;
+        }
+        return updated;
+    }
 
     function renderSensitiveCommandChain(payload) {
         const commands = arrayMaybe(payload?.commands);
@@ -2054,6 +2132,7 @@
         const canonicalEvents = arrayMaybe(detail?.events);
         const legacyEvents = arrayMaybe(detail?.events_table_rows);
         const events = canonicalEvents.length ? canonicalEvents : legacyEvents;
+        state.detailEvents = events;
         const snapshots = (detail && detail.prediction_snapshots) || [];
         const ranking = snapshots[0]?.payload?.final_ranking || [];
         const cp = predResult?.current_prediction || {};
@@ -2192,7 +2271,7 @@
                                             ${dt?`<span class="chip text-[10px]" style="${isSlow?'color:#f59e0b;background:rgba(245,158,11,0.1)':''}">${isSlow?'⚠ ':''}+${dt}s</span>`:''}
                                             ${isRunning&&isLast?`<span class="pulse-dot" style="width:5px;height:5px"></span>`:''}
                                         </div>
-                                        <div style="background:#09090b;border:1px solid #1f1f23;border-radius:8px;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:${isFailed&&isLast?'#f87171':'#a1a1aa'};word-break:break-all">
+                                        <div class="execution-command-text" data-command-event-id="${escapeHtmlString(e.event_id || '')}" data-command-timestamp="${escapeHtmlString(e.timestamp || e.payload?.timestamp || '')}" data-command-event-type="${escapeHtmlString(e.eventid || e.payload?.eventid || '')}" style="background:#09090b;border:1px solid #1f1f23;border-radius:8px;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:${isFailed&&isLast?'#f87171':'#a1a1aa'};word-break:break-all">
                                             ${e.payload?.input||'<span style="color:#3f3f46;font-style:italic">command content withheld by privacy policy</span>'}
                                         </div>
                                     </div>
