@@ -215,6 +215,9 @@ class ProductionConfig:
     dashboard_port: int = 8081
     dashboard_read_token: str = ""
     dashboard_write_token: str = ""
+    # Separate administrator credential for the private monitor command view.
+    # It is intentionally not shared with public/read or feedback credentials.
+    monitor_raw_commands_token: str = ""
     monitor_allow_feedback: bool = False
 
     cowrie_log_path: str = "data/samples/demo_cowrie_realistic.json"
@@ -963,6 +966,10 @@ class ProductionConfig:
         cfg.dashboard_write_token = _env_secret(
             "DASHBOARD_WRITE_TOKEN",
             cfg.dashboard_write_token,
+        )
+        cfg.monitor_raw_commands_token = _env_secret(
+            "MONITOR_RAW_COMMANDS_TOKEN",
+            cfg.monitor_raw_commands_token,
         )
         cfg.monitor_allow_feedback = _env_bool(
             "MONITOR_ALLOW_FEEDBACK",

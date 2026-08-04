@@ -29,12 +29,14 @@ def validate_configured_bearer_tokens(
     *,
     read_token: str,
     write_token: str,
+    admin_token: str = "",
     service_name: str,
 ) -> None:
     """Reject configured credentials that strict Bearer parsing cannot present."""
     for field_name, configured in (
         ("read token", str(read_token or "")),
         ("write token", str(write_token or "")),
+        ("admin token", str(admin_token or "")),
     ):
         if not configured:
             continue
@@ -126,6 +128,19 @@ def _row_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _is_command_event_row(row: Mapping[str, Any]) -> bool:
+    """Identify Cowrie command-input rows before privacy projection."""
+    payload = _row_payload(row)
+    event_id = row.get("eventid") or payload.get("eventid")
+    normalized_event_id = str(event_id or "").strip().lower()
+    return normalized_event_id == "cowrie.command.input" or (
+        normalized_event_id.startswith("cowrie.")
+        and normalized_event_id.endswith(".input")
+        and "[redacted]" in normalized_event_id
+        and bool(str(payload.get("input") or "").strip())
+    )
+
+
 def _pick(source: Mapping[str, Any], names: Iterable[str]) -> Dict[str, Any]:
     return {
         name: source.get(name)
@@ -174,6 +189,7 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                     "timestamp",
                     "received_at",
                     "processed",
+                    "command_event",
                 ),
             )
         )
@@ -378,6 +394,8 @@ def event_views(rows: Iterable[Mapping[str, Any]]) -> list[Dict[str, Any]]:
         normalized = dict(row)
         normalized.setdefault("session_id", row.get("session"))
         normalized.setdefault("sensor_id", row.get("sensor"))
+        # Expose only event-type metadata; command text stays redacted.
+        normalized["command_event"] = _is_command_event_row(row)
         output.append(api_row_view("events", normalized))
     return output
 
@@ -398,26 +416,7 @@ def count_command_events(rows: Iterable[Mapping[str, Any]]) -> int:
     for row in rows:
         if not isinstance(row, Mapping):
             continue
-        payload = row.get("payload")
-        if not isinstance(payload, Mapping) and row.get("payload_json"):
-            try:
-                payload = json.loads(str(row.get("payload_json")))
-            except (TypeError, ValueError):
-                payload = {}
-        if not isinstance(payload, Mapping):
-            payload = {}
-        event_id = row.get("eventid")
-        if not event_id:
-            event_id = payload.get("eventid")
-        normalized_event_id = str(event_id or "").strip().lower()
-        is_exact_command_event = normalized_event_id == "cowrie.command.input"
-        is_privacy_redacted_input_event = (
-            normalized_event_id.startswith("cowrie.")
-            and normalized_event_id.endswith(".input")
-            and "[redacted]" in normalized_event_id
-            and bool(str(payload.get("input") or "").strip())
-        )
-        if is_exact_command_event or is_privacy_redacted_input_event:
+        if _is_command_event_row(row):
             count += 1
     return count
 

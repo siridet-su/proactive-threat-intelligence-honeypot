@@ -268,3 +268,14 @@ ssh -L 8090:127.0.0.1:8090 ADMIN_USER@VM_PRIVATE_ADDRESS
 
 Then open `http://127.0.0.1:8090`. The page shows session state, classification
 evidence, stored prediction snapshots, job/report status, and recent events.
+
+The monitor's sensitive command view is a separate administrator-only route:
+`/api/internal/session-commands?session_id=...`. Provision
+`MONITOR_RAW_COMMANDS_TOKEN_FILE` in the monitor service environment with an
+owner-only credential, and present it as a Bearer token from the private
+localhost/Tailscale management path. The route returns only the persisted
+Cowrie command input, timestamp, event ID, and bounded classification metadata;
+it is marked sensitive and is never used by public APIs, reports, exports,
+STIX, webhooks, logs, or prediction snapshots. The value is the command text
+remaining after the sensor privacy boundary, so text scrubbed before
+persistence cannot be recovered.

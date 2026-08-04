@@ -212,6 +212,160 @@ def _monitor_write_token(config: MonitorConfig) -> str:
     )
 
 
+def _monitor_raw_commands_token(config: MonitorConfig) -> str:
+    return str(
+        getattr(config.production_config, "monitor_raw_commands_token", "") or ""
+    )
+
+
+def _is_private_management_address(value: Any) -> bool:
+    """Accept only loopback, RFC-private, or Tailscale CGNAT addresses."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if is_loopback_host(text):
+        return True
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return any(
+        address in network
+        for network in (
+            ipaddress.ip_network("10.0.0.0/8"),
+            ipaddress.ip_network("172.16.0.0/12"),
+            ipaddress.ip_network("192.168.0.0/16"),
+            ipaddress.ip_network("100.64.0.0/10"),
+            ipaddress.ip_network("fc00::/7"),
+        )
+    )
+
+
+def _is_persisted_command_event(event_id: Any) -> bool:
+    normalized = str(event_id or "").strip().lower()
+    return normalized in {
+        "cowrie.command.input",
+        "cowrie.command.success",
+        "cowrie.command.failed",
+    } or (
+        normalized.startswith("cowrie.")
+        and normalized.endswith(".input")
+        and "[redacted]" in normalized
+    )
+
+
+def load_internal_command_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Return only persisted command fields for the authenticated admin view.
+
+    This function intentionally bypasses the public detail projection.  Its
+    result must only be sent by the private, separately authenticated route.
+    It never returns the event payload, source IP, separate credential fields,
+    or report data; command text itself is intentionally sensitive.
+    """
+    selected_session_id = str(session_id or "").strip()
+    if not selected_session_id or len(selected_session_id) > 256:
+        return {"ok": False, "error": "session_id is required"}
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        session_rows, session_error = _storage_session_rows(
+            storage, "sessions", selected_session_id, 1
+        )
+        if not session_rows:
+            return {
+                "ok": False,
+                "error": session_error or "session not found",
+                "session_id": selected_session_id,
+            }
+        event_rows, event_error = _storage_session_rows(
+            storage, "events", selected_session_id, MAX_SESSION_EVENTS
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": _storage_error("sensitive command query", exc),
+            "session_id": selected_session_id,
+        }
+
+    session_payload = _payload_from_row(session_rows[0])
+    classifications = [
+        item
+        for item in session_payload.get("classification_events") or []
+        if isinstance(item, dict)
+    ]
+    ordered_rows = sorted(
+        (dict(row) for row in event_rows or []),
+        key=lambda row: (
+            str(row.get("timestamp") or ""),
+            str(row.get("received_at") or ""),
+            str(row.get("event_id") or ""),
+        ),
+    )
+    commands: List[Dict[str, Any]] = []
+    for row in ordered_rows:
+        payload = _payload_from_row(row)
+        event_id = row.get("eventid") or payload.get("eventid")
+        if not _is_persisted_command_event(event_id):
+            continue
+        timestamp = str(row.get("timestamp") or payload.get("timestamp") or "")
+        matching_classifications = []
+        for item in classifications:
+            item_timestamp = str(item.get("event_timestamp") or "")
+            item_event_id = str(item.get("cowrie_eventid") or "").strip().lower()
+            event_id_text = str(event_id or "").strip().lower()
+            durable_order = item.get("durable_evidence_order")
+            durable_event_id = (
+                str(durable_order.get("event_id") or "")
+                if isinstance(durable_order, dict)
+                else ""
+            )
+            row_event_id = str(row.get("event_id") or "")
+            if durable_event_id:
+                if durable_event_id != row_event_id:
+                    continue
+            elif item_timestamp != timestamp:
+                continue
+            if item_event_id and item_event_id != event_id_text:
+                # A privacy-redacted event id can still be matched to the
+                # canonical command classification by its timestamp.
+                if not ("[redacted]" in event_id_text and item_event_id.endswith(".input")):
+                    continue
+            matching_classifications.append(
+                {
+                    "evidence_id": str(item.get("evidence_id") or ""),
+                    "ttp": str(item.get("ttp") or ""),
+                    "tactic": str(item.get("tactic") or ""),
+                    "source": str(item.get("source") or ""),
+                    "command_outcome": str(item.get("command_outcome") or ""),
+                    "evidence_tier": str(item.get("evidence_tier") or ""),
+                }
+            )
+        raw_input = payload.get("input")
+        commands.append(
+            {
+                "event_id": str(row.get("event_id") or ""),
+                "eventid": str(event_id or ""),
+                "timestamp": timestamp,
+                "input": str(raw_input) if raw_input is not None else "",
+                "classification": matching_classifications,
+            }
+        )
+    return {
+        "ok": True,
+        "schema_version": "monitor.internal_command_view.v1",
+        "session_id": selected_session_id,
+        "sensitive": True,
+        "content_scope": "persisted_cowrie_input_after_sensor_privacy",
+        "historical_originals": "unrecoverable_after_pre_persistence_redaction",
+        "commands": commands,
+        "event_error": event_error,
+    }
+
+
 def _monitor_feedback_enabled(config: MonitorConfig) -> bool:
     return bool(
         getattr(config.production_config, "monitor_allow_feedback", False)
@@ -4154,6 +4308,14 @@ class MonitorHandler(BaseHTTPRequestHandler):
             "application/json",
         )
 
+    def _send_sensitive_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
+        """Send the private admin projection without the public redactor."""
+        self._send(
+            status,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            "application/json",
+        )
+
     def _require_read(self) -> bool:
         read_token = _monitor_read_token(self.monitor_config)
         decision = authorize_read(
@@ -4163,6 +4325,33 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 not read_token
                 and is_loopback_host(self.monitor_config.bind_host)
             ),
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
+
+    def _require_raw_command_admin(self) -> bool:
+        """Require a dedicated token and a private management connection."""
+        bind_private = _is_private_management_address(self.monitor_config.bind_host)
+        client_host = self.client_address[0] if self.client_address else ""
+        client_private = _is_private_management_address(client_host)
+        if not bind_private or not client_private:
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "sensitive command view requires private management access",
+                    "request_id": self._request_id(),
+                },
+            )
+            return False
+        decision = authorize_read(
+            single_header_value(self.headers, "Authorization"),
+            _monitor_raw_commands_token(self.monitor_config),
+            allow_anonymous=False,
         )
         if decision.allowed:
             return True
@@ -4354,6 +4543,20 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if parsed.path == "/api/internal/session-commands":
+            if not self._require_raw_command_admin():
+                return
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_internal_command_detail(
+                self.monitor_config,
+                session_id,
+            )
+            self._send_sensitive_json(
+                HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
+                detail,
+            )
+            return
         if not self._require_read():
             return
         if parsed.path == "/api/session":
@@ -4498,6 +4701,7 @@ def build_server(host: str, port: int, config: MonitorConfig) -> BoundedThreadin
     validate_configured_bearer_tokens(
         read_token=_monitor_read_token(config),
         write_token=_monitor_write_token(config),
+        admin_token=_monitor_raw_commands_token(config),
         service_name="monitor_web",
     )
     validate_bind_auth(

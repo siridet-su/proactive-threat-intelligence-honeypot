@@ -32,11 +32,13 @@ def _config(
     host: str = "127.0.0.1",
     read_token: str = "",
     write_token: str = "",
+    raw_commands_token: str = "",
     allow_feedback: bool = False,
 ) -> monitor_web.MonitorConfig:
     production_config = SimpleNamespace(
         dashboard_read_token=read_token,
         dashboard_write_token=write_token,
+        monitor_raw_commands_token=raw_commands_token,
         monitor_allow_feedback=allow_feedback,
     )
     return monitor_web.MonitorConfig(
@@ -151,6 +153,60 @@ def test_monitor_sensitive_reads_require_bearer_when_configured(
     session = allowed_responses[0][1]["sessions"][0]
     assert "payload" not in session
     assert session["command_count"] == 1
+
+
+def test_internal_command_view_requires_private_boundary_and_separate_admin_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sensitive_payload = {
+        "ok": True,
+        "schema_version": "monitor.internal_command_view.v1",
+        "sensitive": True,
+        "session_id": "session-safe",
+        "commands": [
+            {
+                "event_id": "event-command",
+                "eventid": "cowrie.command.input",
+                "timestamp": "2026-07-17T00:00:00Z",
+                "input": "cat /tmp/admin-secret",
+                "classification": [{"ttp": "T1005", "tactic": "collection"}],
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        monitor_web,
+        "load_internal_command_detail",
+        lambda *_args, **_kwargs: sensitive_payload,
+    )
+    config = _config(tmp_path, raw_commands_token="raw-admin-token")
+
+    denied, denied_responses, _ = _handler(
+        config,
+        "/api/internal/session-commands?session_id=session-safe",
+    )
+    monitor_web.MonitorHandler.do_GET(denied)
+    assert denied_responses[0][0] == HTTPStatus.UNAUTHORIZED
+
+    allowed, allowed_responses, _ = _handler(
+        config,
+        "/api/internal/session-commands?session_id=session-safe",
+        authorization="Bearer raw-admin-token",
+    )
+    monitor_web.MonitorHandler.do_GET(allowed)
+    assert allowed_responses[0][0] == HTTPStatus.OK
+    body = json.loads(allowed_responses[0][1]["body"])
+    assert body["sensitive"] is True
+    assert body["commands"][0]["input"] == "cat /tmp/admin-secret"
+
+    remote, remote_responses, _ = _handler(
+        _config(tmp_path, host="8.8.8.8", raw_commands_token="raw-admin-token"),
+        "/api/internal/session-commands?session_id=session-safe",
+        authorization="Bearer raw-admin-token",
+    )
+    remote.client_address = ("198.51.100.20", 4242)
+    monitor_web.MonitorHandler.do_GET(remote)
+    assert remote_responses[0][0] == HTTPStatus.FORBIDDEN
 
 
 def test_monitor_rejects_ambiguous_authorization_headers(tmp_path: Path) -> None:
@@ -390,6 +446,95 @@ def test_monitor_session_api_view_omits_raw_events_and_redacts_commands() -> Non
     assert "user:pass" not in serialized
 
 
+def test_internal_command_projection_is_bounded_and_classified_without_public_reuse() -> None:
+    class RawStorage:
+        def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
+            if table == "sessions":
+                return [
+                    {
+                        "session_id": session_id,
+                        "payload_json": json.dumps(
+                            {
+                                "session_id": session_id,
+                                "classification_events": [
+                                    {
+                                        "evidence_id": "class-1",
+                                        "event_timestamp": "2026-07-17T00:00:01Z",
+                                        "cowrie_eventid": "cowrie.command.input",
+                                        "ttp": "T1005",
+                                        "tactic": "collection",
+                                        "source": "rule",
+                                        "command_outcome": "outcome_unknown",
+                                        "evidence_tier": "trusted_observation",
+                                        "command": "cat /tmp/admin-secret",
+                                    }
+                                ],
+                            }
+                        ),
+                    }
+                ]
+            if table == "events":
+                return [
+                    {
+                        "event_id": "event-1",
+                        "eventid": "cowrie.command.input",
+                        "timestamp": "2026-07-17T00:00:01Z",
+                        "received_at": "2026-07-17T00:00:02Z",
+                        "payload_json": json.dumps(
+                            {
+                                "eventid": "cowrie.command.input",
+                                "input": "cat /tmp/admin-secret",
+                            }
+                        ),
+                    },
+                    {
+                        "event_id": "event-2",
+                        "eventid": "cowrie.session.closed",
+                        "timestamp": "2026-07-17T00:00:03Z",
+                        "payload_json": json.dumps(
+                            {"eventid": "cowrie.session.closed"}
+                        ),
+                    },
+                ]
+            return []
+
+    result = monitor_web.load_internal_command_detail(
+        _config(Path(".")),
+        "session-safe",
+        _storage=RawStorage(),
+    )
+    assert result["ok"] is True
+    assert result["sensitive"] is True
+    assert result["commands"][0]["input"] == "cat /tmp/admin-secret"
+    assert result["commands"][0]["classification"] == [
+        {
+            "evidence_id": "class-1",
+            "ttp": "T1005",
+            "tactic": "collection",
+            "source": "rule",
+            "command_outcome": "outcome_unknown",
+            "evidence_tier": "trusted_observation",
+        }
+    ]
+    assert "command" not in result["commands"][0]["classification"][0]
+    public = session_detail_view(
+        {
+            "ok": True,
+            "session_id": "session-safe",
+            "overview": {},
+            "session_payload": {"session_id": "session-safe"},
+            "events_table_rows": [
+                {
+                    "event_id": "event-1",
+                    "eventid": "cowrie.command.input",
+                    "payload_json": '{"input":"cat /tmp/admin-secret"}',
+                }
+            ],
+        }
+    )
+    assert "admin-secret" not in json.dumps(public, sort_keys=True)
+
+
 def test_monitor_session_detail_uses_canonical_events_and_event_command_count() -> None:
     rows = [
         {
@@ -425,6 +570,16 @@ def test_monitor_session_detail_uses_canonical_events_and_event_command_count() 
     assert view["events_table_rows"] == view["events"]
     assert view["overview"]["command_count"] == 3
     assert view["session"]["command_count"] == 3
+    assert [row["command_event"] for row in view["events"]] == [
+        False,
+        True,
+        False,
+        True,
+        True,
+        False,
+        False,
+        False,
+    ]
 
 
 def test_monitor_command_count_accepts_privacy_redacted_historical_input_events() -> None:
@@ -483,6 +638,14 @@ def test_monitor_command_count_accepts_privacy_redacted_historical_input_events(
     assert len(view["events"]) == 5
     assert view["overview"]["command_count"] == 3
     assert view["session"]["command_count"] == 3
+    assert [row["command_event"] for row in view["events"]] == [
+        False,
+        True,
+        True,
+        True,
+        False,
+    ]
+    assert '"input"' not in json.dumps(view, sort_keys=True)
 
 
 def test_monitor_request_log_sanitizes_sensitive_query_values(
@@ -560,8 +723,12 @@ def test_monitor_detail_prefers_canonical_event_contract_with_legacy_fallback() 
     assert "const canonicalEvents = arrayMaybe(detail?.events);" in static_html
     assert "const legacyEvents = arrayMaybe(detail?.events_table_rows);" in static_html
     assert "const events = canonicalEvents.length ? canonicalEvents : legacyEvents;" in static_html
-    assert "String(e.eventid||'').toLowerCase()==='cowrie.command.input'" in static_html
+    assert "const isCommandEvent = e => e?.command_event === true" in static_html
     assert "const commandCount = cmdEvents.length || Number(ov.command_count) || 0;" in static_html
+    assert "command content withheld by privacy policy" in static_html
+    assert "/api/internal/session-commands?session_id=" in static_html
+    assert "cache: 'no-store'" in static_html
+    assert "Sensitive: text is the persisted Cowrie input" in static_html
 
 
 def test_monitor_unexpected_error_and_storage_error_do_not_echo_secrets(

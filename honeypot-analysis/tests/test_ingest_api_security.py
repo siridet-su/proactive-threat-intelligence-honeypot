@@ -173,6 +173,7 @@ def test_config_parses_http_security_environment(
     monkeypatch.setenv("INGEST_REQUEST_TIMEOUT_SECONDS", "2.5")
     monkeypatch.setenv("DASHBOARD_READ_TOKEN", "read-token")
     monkeypatch.setenv("DASHBOARD_WRITE_TOKEN", "write-token")
+    monkeypatch.setenv("MONITOR_RAW_COMMANDS_TOKEN", "raw-admin-token")
     monkeypatch.setenv("MONITOR_ALLOW_FEEDBACK", "true")
 
     config = ProductionConfig.from_env()
@@ -187,6 +188,7 @@ def test_config_parses_http_security_environment(
     assert config.ingest_request_timeout_seconds == 2.5
     assert config.dashboard_read_token == "read-token"
     assert config.dashboard_write_token == "write-token"
+    assert config.monitor_raw_commands_token == "raw-admin-token"
     assert config.monitor_allow_feedback is True
     assert ProductionConfig().dashboard_host == "127.0.0.1"
 
