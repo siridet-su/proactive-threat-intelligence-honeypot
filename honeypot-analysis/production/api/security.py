@@ -382,6 +382,36 @@ def event_views(rows: Iterable[Mapping[str, Any]]) -> list[Dict[str, Any]]:
     return output
 
 
+def count_command_events(rows: Iterable[Mapping[str, Any]]) -> int:
+    """Count command-input events without relying on denormalized payloads.
+
+    Session payloads can legitimately omit ``commands`` when the durable event
+    rows are the only source of command evidence. Keep the monitor count tied
+    to the canonical Cowrie event identifier rather than treating arbitrary
+    event names or stored command lists as commands.
+    """
+
+    count = 0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        event_id = row.get("eventid")
+        if not event_id:
+            payload = row.get("payload")
+            if isinstance(payload, Mapping):
+                event_id = payload.get("eventid")
+            if not event_id and row.get("payload_json"):
+                try:
+                    decoded = json.loads(str(row.get("payload_json")))
+                except (TypeError, ValueError):
+                    decoded = {}
+                if isinstance(decoded, Mapping):
+                    event_id = decoded.get("eventid")
+        if str(event_id or "").strip().lower() == "cowrie.command.input":
+            count += 1
+    return count
+
+
 def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     """Return useful session analysis without raw events or storage documents."""
     if not detail.get("ok"):
@@ -389,11 +419,18 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     session_payload = detail.get("session_payload")
     if not isinstance(session_payload, Mapping):
         session_payload = {}
+    source_event_rows = detail.get("events_table_rows")
+    if source_event_rows is None:
+        source_event_rows = detail.get("events") or []
+    event_rows = event_views(source_event_rows)
+    command_count = count_command_events(event_rows)
+    overview = dict(detail.get("overview") or {})
+    overview["command_count"] = command_count
     output: Dict[str, Any] = {
         "ok": True,
         "timestamp": detail.get("timestamp"),
         "session_id": detail.get("session_id"),
-        "overview": detail.get("overview") or {},
+        "overview": overview,
         "source_geo": detail.get("source_geo") or {},
         "source_geo_context": detail.get("source_geo_context") or {},
         "observables": detail.get("observables") or [],
@@ -412,10 +449,13 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
             "start_time": session_payload.get("start_time"),
             "duration": session_payload.get("duration"),
             "is_ended": session_payload.get("is_ended"),
-            "command_count": len(session_payload.get("commands") or []),
+            "command_count": command_count,
             "analysis_status": session_payload.get("analysis_status") or session_payload.get("status"),
         },
-        "events": event_views(detail.get("events_table_rows") or []),
+        # ``events`` is the canonical session-detail contract. Keep the
+        # historical name as a read-only alias for older monitor consumers.
+        "events": event_rows,
+        "events_table_rows": event_rows,
         "alerts": [
             api_row_view("alerts", row) for row in detail.get("alerts") or []
         ],

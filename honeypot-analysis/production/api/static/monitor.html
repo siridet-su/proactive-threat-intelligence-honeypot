@@ -1998,7 +1998,11 @@
             payload: { ...(session.payload || {}), ...(detail?.session_payload || {}) },
             overview: ov,
         };
-        const events = (detail && detail.events_table_rows) || [];
+        // ``events`` is canonical; retain the legacy alias for older API
+        // responses while the deployment rolls forward.
+        const canonicalEvents = arrayMaybe(detail?.events);
+        const legacyEvents = arrayMaybe(detail?.events_table_rows);
+        const events = canonicalEvents.length ? canonicalEvents : legacyEvents;
         const snapshots = (detail && detail.prediction_snapshots) || [];
         const ranking = snapshots[0]?.payload?.final_ranking || [];
         const cp = predResult?.current_prediction || {};
@@ -2026,7 +2030,8 @@
 
         const finalRanking = cp.final_ranking?.length ? cp.final_ranking : ranking;
 
-        const cmdEvents = events.filter(e=>(e.eventid||'').includes('command'));
+        const cmdEvents = events.filter(e=>String(e.eventid||'').toLowerCase()==='cowrie.command.input');
+        const commandCount = cmdEvents.length || Number(ov.command_count) || 0;
         const eventTypeCounts = {};
         for (const e of events) {
             const type = (e.eventid||'unknown').split('.').slice(-1)[0];
@@ -2083,7 +2088,7 @@
             <!-- Stat pills -->
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 ${statPill('Duration',ov.duration||'—','clock')}
-                ${statPill('Commands',ov.command_count??cmdEvents.length,'terminal')}
+                ${statPill('Commands',commandCount,'terminal')}
                 ${statPill('Events',events.length,'activity')}
                 ${statPill('Username',ov.login_username||'—','user')}
                 ${statPill('Avg Interval',avgDelta?`${avgDelta}s`:'—','timer')}
@@ -2299,7 +2304,7 @@
                             ${metaRow('Username',`<span class="font-mono">${ov.login_username||'—'}</span>`)}
                             ${metaRow('Client',`<span class="font-mono text-[11px] truncate max-w-[120px] block">${ov.client_version||'Unknown'}</span>`)}
                             ${metaRow('Duration',ov.duration||'—')}
-                            ${metaRow('Commands',`<span class="font-mono">${ov.command_count ?? cmdEvents.length}</span>`)}
+                            ${metaRow('Commands',`<span class="font-mono">${commandCount}</span>`)}
                             ${metaRow('Events',`<span class="font-mono">${events.length}</span>`)}
                             ${metaRow('Avg Interval',avgDelta?`<span class="font-mono">${avgDelta}s</span>`:'—')}
                             ${metaRow('Started',ov.start_time?relativeTime(ov.start_time):'—')}

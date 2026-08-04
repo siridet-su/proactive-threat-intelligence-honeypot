@@ -390,6 +390,43 @@ def test_monitor_session_api_view_omits_raw_events_and_redacts_commands() -> Non
     assert "user:pass" not in serialized
 
 
+def test_monitor_session_detail_uses_canonical_events_and_event_command_count() -> None:
+    rows = [
+        {
+            "event_id": f"event-{index}",
+            "eventid": eventid,
+            "session_id": "session-events",
+            "timestamp": f"2026-07-17T00:00:0{index}Z",
+        }
+        for index, eventid in enumerate(
+            [
+                "cowrie.session.connect",
+                "cowrie.command.input",
+                "cowrie.login.success",
+                "cowrie.command.input",
+                "cowrie.command.input",
+                "cowrie.client.kex",
+                "cowrie.session.closed",
+                "cowrie.login.success",
+            ]
+        )
+    ]
+    view = session_detail_view(
+        {
+            "ok": True,
+            "session_id": "session-events",
+            "overview": {"session_id": "session-events", "command_count": 0},
+            "session_payload": {"session_id": "session-events", "commands": []},
+            "events_table_rows": rows,
+        }
+    )
+
+    assert len(view["events"]) == 8
+    assert view["events_table_rows"] == view["events"]
+    assert view["overview"]["command_count"] == 3
+    assert view["session"]["command_count"] == 3
+
+
 def test_monitor_request_log_sanitizes_sensitive_query_values(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -458,6 +495,15 @@ def test_monitor_uses_central_redaction_and_one_static_ui(
     static_html = monitor_web.STATIC_MONITOR_HTML.read_text(encoding="utf-8")
     assert "onclick=\"openSession(" not in static_html
     assert "data-open-session=" in static_html
+
+
+def test_monitor_detail_prefers_canonical_event_contract_with_legacy_fallback() -> None:
+    static_html = monitor_web.STATIC_MONITOR_HTML.read_text(encoding="utf-8")
+    assert "const canonicalEvents = arrayMaybe(detail?.events);" in static_html
+    assert "const legacyEvents = arrayMaybe(detail?.events_table_rows);" in static_html
+    assert "const events = canonicalEvents.length ? canonicalEvents : legacyEvents;" in static_html
+    assert "String(e.eventid||'').toLowerCase()==='cowrie.command.input'" in static_html
+    assert "const commandCount = cmdEvents.length || Number(ov.command_count) || 0;" in static_html
 
 
 def test_monitor_unexpected_error_and_storage_error_do_not_echo_secrets(

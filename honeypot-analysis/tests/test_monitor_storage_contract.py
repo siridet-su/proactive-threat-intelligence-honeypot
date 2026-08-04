@@ -166,3 +166,49 @@ def test_explicit_legacy_db_path_remains_supported_through_storage_contract(
     assert snapshot["selected"]["session_id"] == "legacy-sqlite-session"
     assert detail["ok"] is True
     assert detail["commands"] == ["id"]
+
+
+def test_session_detail_command_count_comes_from_durable_event_rows(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "event-backed-monitor.db"
+    storage = open_storage(f"sqlite:///{database_path}")
+    storage.save_session(
+        {
+            "session_id": "event-backed-session",
+            "src_ip": "203.0.113.20",
+            "commands": [],
+            "is_ended": True,
+        }
+    )
+    event_ids = [
+        "cowrie.session.connect",
+        "cowrie.command.input",
+        "cowrie.login.success",
+        "cowrie.command.input",
+        "cowrie.client.kex",
+        "cowrie.command.input",
+        "cowrie.login.success",
+        "cowrie.session.closed",
+    ]
+    for index, eventid in enumerate(event_ids):
+        storage.store_event(
+            "sensor-monitor",
+            {
+                "eventid": eventid,
+                "session": "event-backed-session",
+                "src_ip": "203.0.113.20",
+                "timestamp": f"2026-07-17T00:00:0{index}Z",
+                "input": "id" if eventid == "cowrie.command.input" else "",
+            },
+        )
+
+    config = monitor_web.MonitorConfig(
+        db_path=str(database_path),
+        reports_dir=str(tmp_path / "reports"),
+    )
+    detail = monitor_web.load_session_detail(config, "event-backed-session")
+
+    assert detail["ok"] is True
+    assert len(detail["events_table_rows"]) == 8
+    assert detail["overview"]["command_count"] == 3

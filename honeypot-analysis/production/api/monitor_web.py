@@ -25,6 +25,7 @@ from production.api.security import (
     api_row_view,
     authorize_read,
     authorize_write,
+    count_command_events,
     event_views,
     log_payload,
     public_payload,
@@ -1729,7 +1730,11 @@ def _session_overview(session: Dict[str, Any]) -> Dict[str, Any]:
         "client_version": payload.get("client_version") or "",
         "hassh": payload.get("hassh") or "",
         "ja3": payload.get("ja3") or "",
-        "command_count": len(payload.get("commands") or []),
+        "command_count": (
+            session.get("command_count")
+            if isinstance(session.get("command_count"), int)
+            else len(payload.get("commands") or [])
+        ),
         "commands": payload.get("commands") or [],
         "tactics": payload.get("tactics") or [],
         "ttps": payload.get("ttps") or [],
@@ -1869,6 +1874,9 @@ def load_session_detail(
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
+    # Event rows are the durable source of command evidence. The session
+    # payload may have no denormalized ``commands`` list after ingestion.
+    selected["command_count"] = count_command_events(event_rows)
     payload = selected["payload"]
     decoded_enrichment_records = [_row_with_payload(row) for row in enrichment_record_rows]
     src_ip = payload.get("src_ip") or selected.get("src_ip")
