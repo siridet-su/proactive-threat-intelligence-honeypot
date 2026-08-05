@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import replace
@@ -22,6 +23,152 @@ SCHEMA_VERSION = "cowrie_credential_sanitizer.v1"
 POLICY_SCHEMA_VERSION = "cowrie_output_privacy_policy.v1"
 REDACTION_MARKER = "[REDACTED]"
 OVERSIZED_JSON_MARKER = "[REDACTED: OVERSIZED JSON]"
+
+_IDENTITY_KEYS = frozenset(
+    {
+        "eventid",
+        "event_id",
+        "schema",
+        "schema_id",
+        "schema_version",
+    }
+)
+_PRIVATE_KEY_BLOCK_PATTERN = re.compile(
+    r"-----BEGIN (?P<label>PRIVATE KEY|"
+    r"[A-Z0-9][A-Z0-9 -]{0,72} PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----.*?"
+    r"(?:-----END (?P=label)-----|\Z)",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_URL_USERINFO_PATTERN = re.compile(
+    r"(?i)\b([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@"
+)
+_AUTHORIZATION_PATTERN = re.compile(
+    r"(?i)\b(authorization|proxy[_-]?authorization)"
+    r"(\s*[:=]\s*)(?:(?:bearer|basic)\s+)?[^\s,;'\"]+"
+)
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"""(?ix)
+    (?<![a-z0-9_-])
+    (
+        password|passwd|passphrase|login[_-]?password|
+        api[_-]?key|apikey|x[_-]?api[_-]?key|
+        access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?token|
+        auth[_-]?token|bearer[_-]?token|platform[_-]?token|session[_-]?token|
+        csrf[_-]?token|token|
+        client[_-]?secret|api[_-]?secret|secret|
+        private[_-]?key|hmac[_-]?key|signing[_-]?key|encryption[_-]?key
+    )
+    (?![a-z0-9_-])
+    (\s*[:=]\s*)
+    (
+        "(?:\\.|[^"\\])*" |
+        '(?:\\.|[^'\\])*' |
+        [^\s,;&|]+
+    )
+    """
+)
+_SECRET_LONG_OPTION_PATTERN = re.compile(
+    r"""(?ix)
+    (?<![a-z0-9_-])
+    (
+        --(?:[a-z0-9_-]+[-_])?
+        (?:
+            password|passphrase|token|secret|credentials?|
+            api[-_]?key|private[-_]?key|access[-_]?key|secret[-_]?key
+        )
+    )
+    (
+        \s*=\s* |
+        \s+
+    )
+    (
+        "(?:\\.|[^"\\])*" |
+        '(?:\\.|[^'\\])*' |
+        [^\s;&|]+
+    )
+    """
+)
+_COMMAND_SECRET_OPTION_PATTERNS = (
+    re.compile(
+        r"""(?ix)
+        \b(sshpass)(\s+)(-p(?:=|\s+)?)
+        (
+            "(?:\\.|[^"\\])*" |
+            '(?:\\.|[^'\\])*' |
+            [^\s;&|]+
+        )
+        """
+    ),
+    re.compile(
+        r"""(?ix)
+        \b(redis-cli)(\s+)(-a(?:=|\s+)?)
+        (
+            "(?:\\.|[^"\\])*" |
+            '(?:\\.|[^'\\])*' |
+            [^\s;&|]+
+        )
+        """
+    ),
+    re.compile(
+        r"""(?ix)
+        \b(curl)(\s+)(-[uU](?:=|\s+)?)
+        (
+            "(?:\\.|[^"\\])*:[^"\\]*" |
+            '(?:\\.|[^'\\])*:[^'\\]*' |
+            [^\s;&|]*:[^\s;&|]+
+        )
+        """
+    ),
+)
+
+
+def _redacted_value(value: str, marker: str) -> str:
+    if len(value) >= 2 and value[0] in {"'", '"'} and value[-1] == value[0]:
+        return f"{value[0]}{marker}{value[0]}"
+    return marker
+
+
+def _scrub_secret_structures(text: str, marker: str) -> str:
+    """Redact only syntactically identified secret-bearing text.
+
+    Attacker credential values are deliberately not used as unrestricted
+    substring patterns: a short password such as ``a`` is not evidence that
+    every later ``a`` character is secret.
+    """
+
+    sanitized = _PRIVATE_KEY_BLOCK_PATTERN.sub(marker, text)
+    sanitized = _URL_USERINFO_PATTERN.sub(
+        lambda match: (
+            f"{match.group(1)}{marker}:{marker}@"
+        ),
+        sanitized,
+    )
+    sanitized = _AUTHORIZATION_PATTERN.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}{marker}",
+        sanitized,
+    )
+    sanitized = _SECRET_LONG_OPTION_PATTERN.sub(
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}"
+            f"{_redacted_value(match.group(3), marker)}"
+        ),
+        sanitized,
+    )
+    for pattern in _COMMAND_SECRET_OPTION_PATTERNS:
+        sanitized = pattern.sub(
+            lambda match: (
+                f"{match.group(1)}{match.group(2)}{match.group(3)}"
+                f"{_redacted_value(match.group(4), marker)}"
+            ),
+            sanitized,
+        )
+    return _SECRET_ASSIGNMENT_PATTERN.sub(
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}"
+            f"{_redacted_value(match.group(3), marker)}"
+        ),
+        sanitized,
+    )
 
 _POLICY_KEYS = {
     "schema_version",
@@ -41,18 +188,30 @@ _POLICY_KEYS = {
 DEFAULT_POLICY_DOCUMENT: dict[str, Any] = {
     "schema_version": POLICY_SCHEMA_VERSION,
     "policy_id": "cowrie_pre_persistence_credentials",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "redaction_marker": REDACTION_MARKER,
     "redact_attacker_username": True,
     "credential_value_keys": [
+        "access_token",
+        "api_key",
+        "api_secret",
         "auth_secret",
+        "auth_token",
         "authentication_secret",
+        "authorization",
+        "bearer_token",
+        "client_secret",
         "login_password",
         "login_username",
         "passphrase",
         "passwd",
         "password",
+        "private_key",
+        "proxy_authorization",
         "pwd",
+        "refresh_token",
+        "secret",
+        "token",
         "user_name",
         "username",
     ],
@@ -173,7 +332,10 @@ DEFAULT_POLICY = validate_policy_document(DEFAULT_POLICY_DOCUMENT)
 
 
 class CredentialValueRegistry:
-    """Bounded registry used to scrub credentials from later diagnostics."""
+    """Bounded registry retained for observer compatibility and accounting.
+
+    Registered values are never used as unrestricted substring patterns.
+    """
 
     def __init__(self, policy: CowriePrivacyPolicy = DEFAULT_POLICY) -> None:
         self.policy = policy
@@ -191,10 +353,7 @@ class CredentialValueRegistry:
             self._membership.discard(self._values.popleft())
 
     def scrub(self, text: str) -> str:
-        sanitized = text
-        for value in sorted(self._membership, key=len, reverse=True):
-            sanitized = sanitized.replace(value, self.policy.redaction_marker)
-        return sanitized
+        return _scrub_secret_structures(text, self.policy.redaction_marker)
 
 
 PROCESS_CREDENTIAL_REGISTRY = CredentialValueRegistry()
@@ -308,6 +467,10 @@ def sanitize_cowrie_event_for_persistence(
                         depth + 1,
                         credential_container=normalized,
                     )
+                elif normalized in _IDENTITY_KEYS and isinstance(item, str):
+                    # Protocol and schema identities are structural data, not
+                    # attacker-controlled free text. Preserve them byte-for-byte.
+                    output[key] = item
                 else:
                     output[key] = sanitize(item, depth + 1)
             return output

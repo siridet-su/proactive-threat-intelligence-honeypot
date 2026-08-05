@@ -12,6 +12,11 @@ import pytest
 
 import production.api.monitor_web as monitor_web
 from production.api.security import session_detail_view
+from production.utils.cowrie_privacy import (
+    DEFAULT_POLICY,
+    CredentialValueRegistry,
+    sanitize_cowrie_event_for_persistence,
+)
 
 
 class FakeMonitorHealthStorage:
@@ -593,6 +598,69 @@ def test_internal_command_projection_is_bounded_and_classified_without_public_re
         }
     )
     assert "admin-secret" not in json.dumps(public, sort_keys=True)
+
+
+def test_internal_view_preserves_benign_command_after_short_login_credentials() -> None:
+    registry = CredentialValueRegistry(DEFAULT_POLICY)
+    sanitize_cowrie_event_for_persistence(
+        {
+            "eventid": "cowrie.login.success",
+            "username": "a",
+            "password": "l",
+        },
+        registry=registry,
+    )
+    retained = sanitize_cowrie_event_for_persistence(
+        {
+            "eventid": "cowrie.command.input",
+            "session": "session-benign-command",
+            "timestamp": "2026-08-05T00:00:01Z",
+            "input": "ls -al",
+        },
+        registry=registry,
+    )
+
+    class RawStorage:
+        def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
+            if table == "sessions":
+                return [{"session_id": session_id, "payload_json": "{}"}]
+            if table == "events":
+                return [
+                    {
+                        "event_id": "event-benign-command",
+                        "eventid": retained["eventid"],
+                        "timestamp": retained["timestamp"],
+                        "payload_json": json.dumps(retained),
+                    }
+                ]
+            return []
+
+    internal = monitor_web.load_internal_command_detail(
+        _config(Path(".")),
+        "session-benign-command",
+        _storage=RawStorage(),
+    )
+    assert internal["commands"][0]["eventid"] == "cowrie.command.input"
+    assert internal["commands"][0]["input"] == "ls -al"
+
+    public = session_detail_view(
+        {
+            "ok": True,
+            "session_id": "session-benign-command",
+            "overview": {},
+            "session_payload": {"session_id": "session-benign-command"},
+            "events_table_rows": [
+                {
+                    "event_id": "event-benign-command",
+                    "eventid": retained["eventid"],
+                    "timestamp": retained["timestamp"],
+                    "payload_json": json.dumps(retained),
+                }
+            ],
+        }
+    )
+    assert public["events"][0]["eventid"] == "cowrie.command.input"
+    assert "ls -al" not in json.dumps(public, sort_keys=True)
 
 
 def test_monitor_session_detail_uses_canonical_events_and_event_command_count() -> None:

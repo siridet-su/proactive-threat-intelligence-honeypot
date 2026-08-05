@@ -23,6 +23,7 @@ from production.cowrie_output.runtime import (
     verify_boundary,
     verify_bundle,
 )
+from production.classification.classification_pipeline import NotebookParityClassifier
 from production.tools.cowrie_output_integration import (
     build_bundle,
     create_deterministic_package,
@@ -203,6 +204,136 @@ def test_repeated_events_are_idempotent_and_registry_scrubs_diagnostics() -> Non
     assert "registry-secret" not in json.dumps(diagnostic)
     assert diagnostic["diagnostic_category"] == "diagnostic"
     assert diagnostic["diagnostic_outcome"] == "observed"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls -al",
+        "uname -a",
+        "whoami",
+        "id",
+        "pwd",
+        "ps aux",
+        "ip addr",
+        "cat /etc/os-release",
+    ],
+)
+def test_short_credentials_do_not_corrupt_event_identity_or_benign_commands(
+    command: str,
+) -> None:
+    registry = CredentialValueRegistry(DEFAULT_POLICY)
+    sanitize_cowrie_event_for_persistence(
+        {
+            "eventid": "cowrie.login.success",
+            "username": "a",
+            "password": "l",
+            "message": "login accepted",
+        },
+        registry=registry,
+    )
+
+    event = sanitize_cowrie_event_for_persistence(
+        {
+            "eventid": "cowrie.command.input",
+            "event_id": "event-a-l",
+            "schema_id": "cowrie.command.schema",
+            "schema_version": "schema-value-a",
+            "input": command,
+        },
+        registry=registry,
+    )
+
+    assert event["eventid"] == "cowrie.command.input"
+    assert event["event_id"] == "event-a-l"
+    assert event["schema_id"] == "cowrie.command.schema"
+    assert event["schema_version"] == "schema-value-a"
+    assert event["input"] == command
+
+
+@pytest.mark.parametrize(
+    ("text", "safe_fragment"),
+    [
+        ("PASSWORD=marker-password", "PASSWORD=[REDACTED]"),
+        ("token: marker-token", "token: [REDACTED]"),
+        (
+            "Authorization: Bearer marker-authorization",
+            "Authorization: [REDACTED]",
+        ),
+        (
+            "https://marker-user:marker-password@example.invalid/path",
+            "https://[REDACTED]:[REDACTED]@example.invalid/path",
+        ),
+        (
+            "client --api-key marker-api-key --verbose",
+            "client --api-key [REDACTED] --verbose",
+        ),
+        (
+            "client --password='marker password'",
+            "client --password='[REDACTED]'",
+        ),
+        ("sshpass -p marker-ssh ssh host", "sshpass -p [REDACTED] ssh host"),
+        ("redis-cli -amarker-redis ping", "redis-cli -a[REDACTED] ping"),
+        (
+            "curl -u marker-user:marker-curl https://example.invalid/",
+            "curl -u [REDACTED] https://example.invalid/",
+        ),
+    ],
+)
+def test_unstructured_secret_syntax_is_redacted_without_substring_matching(
+    text: str,
+    safe_fragment: str,
+) -> None:
+    event = sanitize_cowrie_event_for_persistence(
+        {
+            "eventid": "cowrie.command.input",
+            "input": text,
+            "nested": {"message": text},
+        },
+        registry=CredentialValueRegistry(DEFAULT_POLICY),
+    )
+    encoded = json.dumps(event, ensure_ascii=False)
+    assert "marker-" not in encoded
+    assert event["input"] == safe_fragment
+    assert event["nested"]["message"] == safe_fragment
+
+
+def test_nested_structured_credentials_remain_fail_closed() -> None:
+    event = sanitize_cowrie_event_for_persistence(
+        {
+            "eventid": "cowrie.command.input",
+            "input": "ls -al",
+            "nested": {
+                "authorization": "Bearer marker-header",
+                "password": "marker-password",
+                "credentials": {
+                    "arbitrary": "marker-container",
+                },
+            },
+        },
+        registry=CredentialValueRegistry(DEFAULT_POLICY),
+    )
+    assert event["eventid"] == "cowrie.command.input"
+    assert event["input"] == "ls -al"
+    assert event["nested"]["authorization"] == "[REDACTED]"
+    assert event["nested"]["password"] == "[REDACTED]"
+    assert event["nested"]["credentials"]["arbitrary"] == "[REDACTED]"
+    assert "marker-" not in json.dumps(event)
+
+
+def test_sanitized_ls_long_listing_reaches_existing_trusted_rule_unchanged() -> None:
+    event = sanitize_cowrie_event_for_persistence(
+        {"eventid": "cowrie.command.input", "input": "ls -al"},
+        registry=CredentialValueRegistry(DEFAULT_POLICY),
+    )
+    matches = NotebookParityClassifier(bert_fn=None).classify(event["input"])
+    assert event["input"] == "ls -al"
+    assert any(
+        match["ttp"] == "T1083"
+        and match["source"] == "rule"
+        and match["high_confidence"] is True
+        for match in matches
+    )
 
 
 def test_failures_have_bounded_diagnostics_without_exception_values() -> None:
