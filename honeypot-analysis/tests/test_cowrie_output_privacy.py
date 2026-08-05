@@ -19,6 +19,7 @@ from production.cowrie_output.observer_diagnostics import (
 from production.cowrie_output.twisted_logger import _isolated_text_observer
 from production.cowrie_output.runtime import (
     DEPLOYMENT_CONTRACT,
+    EXPECTED_STARTING_SANITIZER_REVISION,
     CowrieOutputBoundaryError,
     verify_boundary,
     verify_bundle,
@@ -839,6 +840,17 @@ def test_starting_sanitizer_link_and_manifest_are_exactly_bound(tmp_path: Path) 
             releases_root=releases,
             expected_revision=revision,
         )
+
+
+def test_deployment_is_bound_to_current_accepted_sanitizer_release() -> None:
+    assert (
+        EXPECTED_STARTING_SANITIZER_REVISION
+        == "5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02"
+    )
+    assert (
+        DEPLOYMENT_CONTRACT["expected_starting_sanitizer_revision"]
+        == EXPECTED_STARTING_SANITIZER_REVISION
+    )
 
 
 def test_both_safe_and_unsafe_writers_fail_closed(tmp_path: Path) -> None:
