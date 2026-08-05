@@ -24,9 +24,9 @@ export async function GET() {
       let country = 'Unknown';
       let city = 'Unknown';
       
-      const ip = event.src_ip || event.source_ip || event.ip;
+      const ip = event.network?.src_ip || event.src_ip || event.raw?.payload?.src_ip || 'Unknown IP';
       
-      if (ip) {
+      if (ip && ip !== 'Unknown IP') {
         const geo = geoip.lookup(ip);
         if (geo) {
           lat = geo.ll[0];
@@ -39,13 +39,15 @@ export async function GET() {
       return {
         id: event._id.toString(),
         timestamp: event.timestamp || new Date().toISOString(),
-        sensor: event.sensor || 'Unknown',
+        sensor: event.source || (typeof event.sensor === 'object' ? event.sensor.name : event.sensor) || 'Unknown',
         event_type: event.event_type || event.event || 'Unknown',
         src_ip: ip,
-        src_port: event.src_port || null,
-        dest_port: event.dest_port || null,
-        protocol: event.protocol || 'TCP',
+        sourceIp: ip,
+        src_port: event.network?.src_port || event.src_port || null,
+        dest_port: event.network?.dst_port || event.dest_port || null,
+        protocol: event.network?.protocol || event.protocol || 'TCP',
         payload: event.payload || '',
+        payloadPreview: event.payload || event.event_type || 'Unknown Event',
         severity: event.severity || (event.sensor === 'cowrie' ? 'High' : 'Medium'),
         geo: {
           lat,
