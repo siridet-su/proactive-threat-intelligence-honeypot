@@ -155,7 +155,7 @@ def test_monitor_sensitive_reads_require_bearer_when_configured(
     assert session["command_count"] == 1
 
 
-def test_internal_command_view_requires_private_boundary_and_separate_admin_token(
+def test_internal_command_view_is_loopback_only_without_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -181,17 +181,9 @@ def test_internal_command_view_requires_private_boundary_and_separate_admin_toke
     )
     config = _config(tmp_path, raw_commands_token="raw-admin-token")
 
-    denied, denied_responses, _ = _handler(
-        config,
-        "/api/internal/session-commands?session_id=session-safe",
-    )
-    monitor_web.MonitorHandler.do_GET(denied)
-    assert denied_responses[0][0] == HTTPStatus.UNAUTHORIZED
-
     allowed, allowed_responses, _ = _handler(
         config,
         "/api/internal/session-commands?session_id=session-safe",
-        authorization="Bearer raw-admin-token",
     )
     monitor_web.MonitorHandler.do_GET(allowed)
     assert allowed_responses[0][0] == HTTPStatus.OK
@@ -200,13 +192,24 @@ def test_internal_command_view_requires_private_boundary_and_separate_admin_toke
     assert body["commands"][0]["input"] == "cat /tmp/admin-secret"
 
     remote, remote_responses, _ = _handler(
-        _config(tmp_path, host="8.8.8.8", raw_commands_token="raw-admin-token"),
+        config,
         "/api/internal/session-commands?session_id=session-safe",
-        authorization="Bearer raw-admin-token",
     )
     remote.client_address = ("198.51.100.20", 4242)
     monitor_web.MonitorHandler.do_GET(remote)
     assert remote_responses[0][0] == HTTPStatus.FORBIDDEN
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "100.122.213.37", "192.168.1.10", "::1", "localhost"],
+)
+def test_monitor_startup_rejects_noncanonical_loopback_bind(
+    tmp_path: Path,
+    host: str,
+) -> None:
+    with pytest.raises(ValueError, match="must bind to 127.0.0.1"):
+        monitor_web.build_server(host, 8090, _config(tmp_path, host=host))
 
 
 def test_monitor_rejects_ambiguous_authorization_headers(tmp_path: Path) -> None:
@@ -374,15 +377,26 @@ def test_monitor_feedback_rejects_oversized_and_negative_lengths(
     assert negative_responses[0][1]["error_code"] == "invalid_content_length"
 
 
-def test_monitor_rejects_non_loopback_bind_without_read_auth(
+def test_monitor_rejects_non_loopback_bind_even_with_read_auth(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with pytest.raises(ValueError, match="without authentication"):
+    with pytest.raises(ValueError, match="must bind to 127.0.0.1"):
         monitor_web.build_server(
             "0.0.0.0",
             8090,
             _config(tmp_path, host="0.0.0.0"),
+        )
+
+    with pytest.raises(ValueError, match="must bind to 127.0.0.1"):
+        monitor_web.build_server(
+            "0.0.0.0",
+            8090,
+            _config(
+                tmp_path,
+                host="0.0.0.0",
+                read_token="read-secret",
+            ),
         )
 
     sentinel = object()
@@ -393,11 +407,11 @@ def test_monitor_rejects_non_loopback_bind_without_read_auth(
     )
     assert (
         monitor_web.build_server(
-            "0.0.0.0",
+            "127.0.0.1",
             8090,
             _config(
                 tmp_path,
-                host="0.0.0.0",
+                host="127.0.0.1",
                 read_token="read-secret",
             ),
         )
@@ -774,6 +788,10 @@ def test_monitor_detail_prefers_canonical_event_contract_with_legacy_fallback() 
     assert "command content withheld by privacy policy" in static_html
     assert "/api/internal/session-commands?session_id=" in static_html
     assert "cache: 'no-store'" in static_html
+    assert "async function loadInternalCommands" in static_html
+    assert "void loadInternalCommands(state.detailSessionId);" in static_html
+    assert "Reveal with admin token" not in static_html
+    assert "window.prompt" not in static_html
     assert "Sensitive: text is the persisted Cowrie input" in static_html
 
 

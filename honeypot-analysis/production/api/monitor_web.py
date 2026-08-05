@@ -218,27 +218,15 @@ def _monitor_raw_commands_token(config: MonitorConfig) -> str:
     )
 
 
-def _is_private_management_address(value: Any) -> bool:
-    """Accept only loopback, RFC-private, or Tailscale CGNAT addresses."""
+def _is_loopback_management_address(value: Any) -> bool:
+    """Accept only numeric loopback request sources."""
     text = str(value or "").strip()
     if not text:
         return False
-    if is_loopback_host(text):
-        return True
     try:
-        address = ipaddress.ip_address(text)
+        return bool(ipaddress.ip_address(text).is_loopback)
     except ValueError:
         return False
-    return any(
-        address in network
-        for network in (
-            ipaddress.ip_network("10.0.0.0/8"),
-            ipaddress.ip_network("172.16.0.0/12"),
-            ipaddress.ip_network("192.168.0.0/16"),
-            ipaddress.ip_network("100.64.0.0/10"),
-            ipaddress.ip_network("fc00::/7"),
-        )
-    )
 
 
 def _is_persisted_command_event(event_id: Any) -> bool:
@@ -4335,31 +4323,20 @@ class MonitorHandler(BaseHTTPRequestHandler):
         return False
 
     def _require_raw_command_admin(self) -> bool:
-        """Require a dedicated token and a private management connection."""
-        bind_private = _is_private_management_address(self.monitor_config.bind_host)
+        """Allow the temporary raw-command view only across loopback."""
+        bind_loopback = self.monitor_config.bind_host == "127.0.0.1"
         client_host = self.client_address[0] if self.client_address else ""
-        client_private = _is_private_management_address(client_host)
-        if not bind_private or not client_private:
+        client_loopback = _is_loopback_management_address(client_host)
+        if not bind_loopback or not client_loopback:
             self._send_json(
                 HTTPStatus.FORBIDDEN,
                 {
-                    "error": "sensitive command view requires private management access",
+                    "error": "sensitive command view requires loopback access",
                     "request_id": self._request_id(),
                 },
             )
             return False
-        decision = authorize_read(
-            single_header_value(self.headers, "Authorization"),
-            _monitor_raw_commands_token(self.monitor_config),
-            allow_anonymous=False,
-        )
-        if decision.allowed:
-            return True
-        self._send_json(
-            decision.status,
-            {"error": decision.error, "request_id": self._request_id()},
-        )
-        return False
+        return True
 
     def _require_feedback_write(self) -> bool:
         if not _monitor_feedback_enabled(self.monitor_config):
@@ -4698,6 +4675,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
 
 def build_server(host: str, port: int, config: MonitorConfig) -> BoundedThreadingHTTPServer:
+    if host != "127.0.0.1":
+        raise ValueError(
+            "monitor_web must bind to 127.0.0.1 for loopback-only command access"
+        )
     validate_configured_bearer_tokens(
         read_token=_monitor_read_token(config),
         write_token=_monitor_write_token(config),
