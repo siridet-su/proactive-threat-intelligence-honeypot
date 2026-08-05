@@ -33,7 +33,7 @@ export function HardwareMonitor() {
 
     fetchMetrics();
     // Poll every 10 seconds (matches hardware-agent interval)
-    const interval = setInterval(fetchMetrics, 10000);
+    const interval = setInterval(fetchMetrics, 1000);
     return () => clearInterval(interval);
   }, []);
 
