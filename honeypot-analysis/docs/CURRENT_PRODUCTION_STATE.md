@@ -1,39 +1,66 @@
 # Current production state (repository-recorded)
 
-This file is a last-known-state index, not a live probe. It must be read with
-the machine-readable receipt and the final activation narrative; no local
-cleanup operation contacts GCP or the Raspberry Pi.
+This file identifies the canonical operational target. It is not a substitute
+for release manifests, owner-only migration receipts, or live health checks.
+The values below were re-read from the local repository and from a read-only
+SSH probe on 2026-08-10.
 
-## Last verified records in this checkout
+## Active production target
 
 | Boundary | Recorded value |
 | --- | --- |
-| Repository revision | `3c79ae155021ca4cf0ab6d744211d884c4ee039e` |
-| GCP active revision | `3c79ae155021ca4cf0ab6d744211d884c4ee039e` |
-| GCP recovery revision | `19afabd0bb7ed82ac93767301bb0cb1024d0b92e` |
-| Accepted Pi release | `5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02` (recorded unchanged) |
-| GCP package / manifest / tree | `c30c4984…` / `c92e4a9…` / `de42745…` |
-| Guard state | `ACTIVATION_COMPLETED` |
-| Backup | `/var/backups/honeypot/cowrie-connectivity-20260801T231500Z/production_pilot.db` |
-| Backup checks | schema 3, quick check `ok`, integrity check `ok`, isolated restore verified |
-| Public route | intended TCP/2222 via `allow-cowrie-relay-2222` and HAProxy PROXY protocol |
-| Observation | 30/30 healthy samples; zero failed units; SQLite quick check `ok` |
+| VM name / hostname | `capstone` |
+| Public management address | `34.142.229.209` |
+| Private application address | `100.85.50.74` (Tailscale IPv4) |
+| Production ingest endpoint | `http://100.85.50.74:8080/events` |
+| SSH alias | `honeypot-gcp` |
+| SSH user | `siridet_s_dev` |
+| SSH identity | `/home/rubchek/.ssh/honeypot_gcp_ed25519` |
+| Repository revision | `c3bd2456e6e4693f669c9e48385a62242209afbc` |
+| Active release | `c3bd2456e6e4693f669c9e48385a62242209afbc` |
+| Active release link | `/opt/honeypot-releases/c3bd2456e6e4693f669c9e48385a62242209afbc` |
 
-The full values and hashes are in
-`evaluation/next_tactic_final_production_activation_20260802.json`.
+The canonical management command is:
+
+```bash
+ssh -i /home/rubchek/.ssh/honeypot_gcp_ed25519 \
+  -o IdentitiesOnly=yes \
+  siridet_s_dev@34.142.229.209
+```
+
+The local operator alias `honeypot-gcp` resolves to that identity. Deployment,
+validation, monitoring, database, backup, and service-management work must use
+capstone unless a change request explicitly invokes a rollback procedure.
+
+## Preserved rollback/reference VM
+
+The host at Tailscale IPv4 `100.122.213.37` is retained only as a rollback and
+historical reference VM. It is not the active deployment, management,
+validation, monitoring, database, or default SSH target. The local alias
+`honeypot-gcp-old` makes that exceptional role explicit. Do not modify or
+decommission it without a separately approved procedure.
+
+The earlier activation receipt
+`evaluation/next_tactic_final_production_activation_20260802.json` and the
+connectivity receipt
+`evaluation/cowrie_public_connectivity_root_cause_20260802.json` remain
+immutable historical evidence. Their old addresses and revisions must not be
+interpreted as the current operational target.
 
 ## Authority and safety state
 
-The recorded final sessions passed v4, v3, STIX, and artifact-integrity
-validation; prediction snapshots had no recommendations, predictive alerts were
-prohibited, no new alerts/webhooks were produced, and new credential-marker
-count was zero. Guidance retained manual approval, automatic execution false,
-and no response/alert side effects. Historical v1/v2/v3 records remain
-readable and unchanged.
+The VM migration did not change analytical authority. Cowrie evidence and the
+canonical evidence snapshot remain authoritative. Predictions and enrichment
+remain non-authoritative; `session_assessment.v4` and
+`response_guidance.v3` retain their existing contracts; guidance remains
+manual-only and non-executable. Hybrid AI advisory remains disabled unless a
+separate reviewed activation explicitly enables it.
 
-## What this checkout cannot prove
+## Verification boundary
 
-The live GCP marker, current service processes, current disk free space, current
-Pi files, and current backup availability are
-`NOT_DETERMINABLE_FROM_CURRENT_REPOSITORY`. Re-verify them through the approved
-read-only/guarded operational procedure before any future deployment.
+The 2026-08-10 read-only probe verified hostname `capstone`, Tailscale IPv4
+`100.85.50.74`, `/opt/honeypot` resolving to the release shown above, and an
+exactly matching `DEPLOYED_COMMIT`. Service health, current disk capacity,
+backup availability, Raspberry Pi state, and database integrity were not
+re-probed for this SSH/reference-only update and are
+`NOT_DETERMINABLE_FROM_THIS_REFERENCE_UPDATE`.

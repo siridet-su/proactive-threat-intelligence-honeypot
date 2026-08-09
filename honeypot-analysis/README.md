@@ -176,10 +176,15 @@ partition was opened once under its ledger, and its immutable result and
 post-analysis are retained.
 
 The canonical evaluation claim index is
-`evaluation/canonical_final_evaluation.json`. The exact validated GCP deployment and rollback rehearsal are indexed by
-[DEPLOYMENT_AND_RECOVERY.md](docs/DEPLOYMENT_AND_RECOVERY.md) and the
-machine-readable `evaluation/next_tactic_final_production_activation_20260802.json`;
-superseded activation narratives remain available in Git history.
+`evaluation/canonical_final_evaluation.json`. The current capstone target and
+active release are indexed by
+[CURRENT_PRODUCTION_STATE.md](docs/CURRENT_PRODUCTION_STATE.md), while the
+deployment and rollback procedure is indexed by
+[DEPLOYMENT_AND_RECOVERY.md](docs/DEPLOYMENT_AND_RECOVERY.md). The
+machine-readable `evaluation/next_tactic_final_production_activation_20260802.json`
+is retained as historical evidence for the former VM, not as the current
+target selector; superseded activation narratives remain available in Git
+history.
 
 ## Optional components
 

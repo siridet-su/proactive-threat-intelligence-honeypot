@@ -97,25 +97,27 @@ HMAC keys, bearer tokens, identity-bearing private paths, or unredacted commands
 to shared logs. Unrelated failed units are outside scope. Only `sqlite:///`
 database URLs are supported; other backends fail closed.
 
-## Last repository-recorded activation
+## Current repository-recorded production target
+
+The canonical active VM is `capstone`, with public management address
+`34.142.229.209`, Tailscale application address `100.85.50.74`, and active
+release `c3bd2456e6e4693f669c9e48385a62242209afbc`. The production ingest
+endpoint is `http://100.85.50.74:8080/events`. See
+[CURRENT_PRODUCTION_STATE.md](CURRENT_PRODUCTION_STATE.md) for the verified
+SSH identity and verification boundary.
+
+The former VM at `100.122.213.37` is preserved only for rollback/reference.
+Normal deployment, management, validation, monitoring, database, backup, and
+service workflows must not target it.
 
 The machine-readable receipt
-`evaluation/next_tactic_final_production_activation_20260802.json` records:
-
-- active GCP revision `3c79ae155021ca4cf0ab6d744211d884c4ee039e`;
-- recovery revision `19afabd0bb7ed82ac93767301bb0cb1024d0b92e`;
-- package SHA-256 `c30c4984a161385210c9fe5559c40c0c4f304351c611f18ec1130ff9d8940068`;
-- manifest SHA-256 `c92e4a9e8e837392226c0a633ce067d1de6af718e523ea671567f1fc3314989c`;
-- release-tree SHA-256 `de42745d53548390af08315432cdab2d7420dff281708ff22db14b300d47ca31`;
-- backup `/var/backups/honeypot/cowrie-connectivity-20260801T231500Z/production_pilot.db`
-  with SHA-256 `00ed27d31c32f9b7116514a31d05c77ae91843c4924a866ecfbc973e571ee04b`;
-- guard state `ACTIVATION_COMPLETED` and application rollback to the recovery
-  revision.
-
-The same receipt records two processed final sessions, two validated reports,
-zero v4/v3/STIX/artifact errors, eleven advisory snapshots without
-recommendations, zero new alerts or webhooks, thirty healthy observation
-samples, and a minimum recorded free-space value of 4,939,764 KiB.
+`evaluation/next_tactic_final_production_activation_20260802.json` records the
+earlier VM's activation and rollback rehearsal. Its revisions, addresses,
+package/manifest/tree hashes, database backup, E2E results, and observation
+samples remain immutable historical evidence; they are not the current target
+selector. Current release manifests, backup receipts, and restore evidence are
+owner-only operational records and must be verified live before the next
+change.
 
 ## Safe procedure
 
@@ -130,11 +132,11 @@ samples, and a minimum recorded free-space value of 4,939,764 KiB.
 5. On any mandatory failure, invoke the guard to restore the retained release,
    verify services and SQLite, and stop.
 
-The public connectivity correction is independently reversible by disabling the
-existing `allow-cowrie-relay-2222` rule; its exact before/after receipt hashes
-and backend state are in
-`evaluation/cowrie_public_connectivity_root_cause_20260802.json`.
-Do not patch an active release in place and do not reuse a failed package.
+The earlier public-connectivity correction and its before/after hashes remain
+historically recorded in
+`evaluation/cowrie_public_connectivity_root_cause_20260802.json`. Do not use
+that old-VM receipt as a current firewall or backend inventory. Do not patch an
+active release in place and do not reuse a failed package.
 
 ## Rollback boundaries
 

@@ -44,7 +44,8 @@ current evidence files.
 | Phase 8 | Capacity repair, mutable-feed boundary, frozen model bundle, backup/restore and rollback rehearsal |
 | Semantic migration | Typed fact v2 introduced in shadow mode; sensitive-read, direct-transfer and inspection slices activated only after frozen/holdout evaluation |
 | Stabilization | Pi privacy boundary and GCP startup/activation defects corrected through rollback-guarded attempts |
-| Final activation | GCP revision `3c79ae155021ca4cf0ab6d744211d884c4ee039e`, recovery `19afabd…`, accepted Pi `5bb3b97…`, public Cowrie route restored, E2E and observation passed |
+| 2026-08-02 activation | GCP revision `3c79ae155021ca4cf0ab6d744211d884c4ee039e`, recovery `19afabd…`, accepted Pi `5bb3b97…`, public Cowrie route restored, E2E and observation passed |
+| Capstone migration | Production moved to `capstone` at release `c3bd2456e6e4693f669c9e48385a62242209afbc`; the former VM was retained as rollback/reference-only |
 
 ## Archived alternatives
 

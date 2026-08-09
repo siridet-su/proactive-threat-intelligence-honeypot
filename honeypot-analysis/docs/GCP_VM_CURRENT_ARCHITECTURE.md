@@ -1,41 +1,30 @@
 # Current GCP VM architecture and rebuild boundary
 
-This document is the repository-safe description of the GCP backend.  Exact
-resource identifiers, addresses, firewall source ranges, service-account
-details, secret paths, and database receipts are kept in the owner-only
-migration inventory outside Git.  A replacement host must be populated from a
-new private inventory; placeholders in this document are intentional.
+This document is the repository-safe description of the GCP backend. The
+canonical active backend is `capstone`: public management address
+`34.142.229.209`, Tailscale application address `100.85.50.74`, and production
+ingest endpoint `http://100.85.50.74:8080/events`. Exact firewall source
+ranges, service-account details, secret paths, and database receipts remain in
+the owner-only migration inventory outside Git.
 
 ## Evidence and decision
 
-The audit was performed on 2026-08-04 against the clean checkout on branch
-`professor-approved-poc-evaluation` at commit
-`7ceb2171898b4d2d9a61d03144d44915f850722f`.
+The current target was verified read-only on 2026-08-10 against the clean
+checkout on branch `professor-approved-poc-evaluation`. The live hostname,
+Tailscale address, active link, and `DEPLOYED_COMMIT` all identify revision
+`c3bd2456e6e4693f669c9e48385a62242209afbc`. The deployment decision is:
 
-The active release is an earlier immutable release whose release-relevant
-files, effective policies, model references, and managed-unit policy match the
-current checkout.  The later checkout commits contain documentation, tests,
-evaluation material, CI, and ignore-rule changes, but no packaged runtime
-behavior.  The deployment decision is therefore:
+`CAPSTONE_IS_ACTIVE_PRODUCTION`
 
-`RUNTIME_EQUIVALENT_TO_CURRENT_HEAD`
+The former VM at Tailscale IPv4 `100.122.213.37` is preserved solely as a
+rollback/reference host. It must not be selected by normal deployment,
+management, validation, monitoring, database, or SSH workflows. Historical
+receipts retain its identity as evidence and are not rewritten.
 
-No release was rebuilt or activated merely to make the Git revision strings
-equal.  The active and recovery releases remain the rollback boundary.
-
-The comparison baseline was recorded before this rebuild record was committed.
-The repository-safe record is now carried by commits
-`d1ea27c8c43939878ac3095221d5c1c8ffaf4b57`,
-`c4e4dfcbb2047d605e1c778f0615b68785cf0da8`, and
-`3d81c14045a164046cfbb11525b84c0991add257`.  Those commits add only
-documentation, a redacted inventory collector, a manifest verifier, and
-tests; none is imported by the active application services and no application
-redeploy is required for them.
-
-The exact live comparison, resource inventory, database backup, integrity
-receipt, and isolated restore result are in the private owner-only migration
-directory recorded at execution time.  Nothing in that directory contains
-credential values, tokens, private keys, or secret environment contents.
+The exact resource inventory, database backups, integrity receipts, and
+isolated restore results remain in owner-only migration directories. Those
+records do not belong in the source release and must not contain credential
+values, tokens, private keys, or secret environment contents.
 
 ## Data flow and authority
 
@@ -117,16 +106,13 @@ is the only GCP-to-Pi TCP relay; no additional public listener is introduced
 by a rebuild.  The replacement inventory must record the exact firewall rule,
 target tag, route, Tailscale peer, and backend port privately.
 
-## Capacity and current risk
+## Capacity boundary
 
-The migration backup and restore rehearsal are mandatory before a VM change.
-The audit observed a near-full root filesystem after preserving the backup,
-with large retained backups, old release trees, journals, and an older shared
-virtual-environment target.  This is an operational blocker for creating a
-second large release on the current disk, not a reason to delete production
-data or rollback material.  A replacement must pass its capacity calculation
-before package extraction and must retain both the active and recovery release
-until post-cutover acceptance completes.
+A backup and isolated restore rehearsal remain mandatory before a VM change.
+Every future deployment must recalculate capacity from the live database and
+retain the active release, rollback release, verified backup, WAL/temporary
+margin, and operating safety margin. Current free space is a live operational
+fact and is not inferred from the completed migration or from this document.
 
 ## Replacement requirements
 

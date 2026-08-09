@@ -6,6 +6,13 @@ exact project, zone, instance, addresses, firewall identifiers, Tailscale
 peer, secret locations, and current backup paths must come from the private
 owner-only inventory for the change window.
 
+At the time of this repository record, the active production VM is `capstone`
+as identified in [CURRENT_PRODUCTION_STATE.md](CURRENT_PRODUCTION_STATE.md).
+In this procedure, "current VM" means that active target at execution time;
+"old VM" means a host deliberately retained as rollback/reference after a
+successful cutover. A rollback/reference host is never the default source for
+deployment, monitoring, validation, database, or service operations.
+
 ## Invariants and stop conditions
 
 - Cowrie evidence remains authoritative; prediction and enrichment remain
@@ -185,4 +192,3 @@ The private receipt must mark each item `PASS` or `NOT_DETERMINABLE`:
 10. canonical v4/v3 outputs and JSON/Markdown/PDF/STIX validation;
 11. zero prediction-created alerts/webhooks and no automatic response;
 12. clean restart, 15-minute observation, and tested rollback.
-
