@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from production.utils import credential_hmac as credential_hmac_module
 from production.utils.config import ProductionConfig
 from production.utils.credential_hmac import (
     CREDENTIAL_HMAC_SCHEME,
@@ -305,7 +306,11 @@ def test_secure_keyring_file_loads_and_resolver_prefers_explicit_path(
     )
 
 
-def test_keyring_loader_rejects_symlinks_and_broad_permissions(tmp_path: Path) -> None:
+def test_keyring_loader_rejects_symlinks_and_broad_permissions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
     target = _write_keyring(tmp_path / "target.json", _keyring_document())
     symlink = tmp_path / "keyring-link.json"
     symlink.symlink_to(target)
@@ -323,6 +328,67 @@ def test_keyring_loader_rejects_symlinks_and_broad_permissions(tmp_path: Path) -
     os.mkfifo(fifo, mode=0o600)
     with pytest.raises(CredentialHMACError, match="regular file"):
         load_credential_hmac_keyring(str(fifo))
+
+
+def test_keyring_loader_accepts_only_exact_protected_systemd_257_credential(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credentials_root = tmp_path / "run" / "credentials"
+    credentials_directory = credentials_root / "session-worker.service"
+    credentials_directory.mkdir(parents=True)
+    keyring = _write_keyring(
+        credentials_directory / "credential-hmac-keyring.json",
+        _keyring_document(),
+        mode=0o440,
+    )
+    os.chmod(credentials_directory, 0o550)
+    monkeypatch.setattr(
+        credential_hmac_module,
+        "_SYSTEMD_CREDENTIALS_ROOT",
+        credentials_root,
+    )
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(credentials_directory))
+
+    assert load_credential_hmac_keyring(str(keyring)).active_key_id == (
+        "unit-2026-07"
+    )
+
+
+@pytest.mark.parametrize(
+    "file_mode,directory_mode,filename",
+    [
+        (0o460, 0o550, "credential-hmac-keyring.json"),
+        (0o444, 0o550, "credential-hmac-keyring.json"),
+        (0o440, 0o750, "credential-hmac-keyring.json"),
+        (0o440, 0o550, "different-name.json"),
+    ],
+)
+def test_keyring_loader_rejects_unsafe_or_unbound_systemd_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    file_mode: int,
+    directory_mode: int,
+    filename: str,
+) -> None:
+    credentials_root = tmp_path / "run" / "credentials"
+    credentials_directory = credentials_root / "session-worker.service"
+    credentials_directory.mkdir(parents=True)
+    keyring = _write_keyring(
+        credentials_directory / filename,
+        _keyring_document(),
+        mode=file_mode,
+    )
+    os.chmod(credentials_directory, directory_mode)
+    monkeypatch.setattr(
+        credential_hmac_module,
+        "_SYSTEMD_CREDENTIALS_ROOT",
+        credentials_root,
+    )
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(credentials_directory))
+
+    with pytest.raises(CredentialHMACError, match="group or other"):
+        load_credential_hmac_keyring(str(keyring))
 
 
 def test_keyring_loader_rejects_duplicate_json_keys(tmp_path: Path) -> None:

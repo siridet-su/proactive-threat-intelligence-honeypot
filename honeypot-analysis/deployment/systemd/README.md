@@ -91,6 +91,15 @@ directory. No other backend service and no Raspberry Pi service receives the
 keyring. Set `credential_policy.hash_algorithm` to `hmac-sha256-v1`; the worker
 fails before opening storage if the policy or keyring is unsafe.
 
+The loader keeps ordinary keyring files owner-only. It also recognizes the
+exact read-only systemd 257 credential representation: the configured file
+must be the expected name in the current process's direct
+`/run/credentials/<unit>` directory, the directory must be mode `0550`, and
+the file must be a regular, readable, non-writable mode-`0440` file. This
+exception does not apply to persistent files or arbitrary group-readable
+paths. Older systemd releases may expose the private copy as mode `0400`,
+which continues to satisfy the ordinary owner-only rule.
+
 For routine rotation, install a replacement file atomically with a new active
 key and retain at most two prior key IDs in `correlation_key_ids` for the
 defined correlation-retention window, then restart only the session worker.

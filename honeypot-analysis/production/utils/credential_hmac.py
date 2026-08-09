@@ -35,6 +35,7 @@ _MIN_KEY_BYTES = 32
 _MAX_KEY_BYTES = 128
 _MAX_CORRELATION_KEYS = 2
 _SYSTEMD_CREDENTIAL_NAME = "credential-hmac-keyring.json"
+_SYSTEMD_CREDENTIALS_ROOT = Path("/run/credentials")
 
 
 class CredentialHMACError(ValueError):
@@ -220,8 +221,40 @@ def _reject_duplicate_json_keys(pairs: Sequence[tuple[str, Any]]) -> Dict[str, A
     return document
 
 
+def _is_protected_systemd_credential(
+    path: Path,
+    metadata: os.stat_result,
+) -> bool:
+    """Recognize systemd 257's read-only group-readable credential mount."""
+
+    credentials_directory_value = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
+    if not credentials_directory_value:
+        return False
+    credentials_directory = Path(credentials_directory_value)
+    if (
+        not credentials_directory.is_absolute()
+        or credentials_directory.parent != _SYSTEMD_CREDENTIALS_ROOT
+        or path != credentials_directory / _SYSTEMD_CREDENTIAL_NAME
+        or stat.S_IMODE(metadata.st_mode) != 0o440
+    ):
+        return False
+
+    try:
+        directory_metadata = os.lstat(credentials_directory)
+    except OSError:
+        return False
+    if (
+        not stat.S_ISDIR(directory_metadata.st_mode)
+        or stat.S_ISLNK(directory_metadata.st_mode)
+        or stat.S_IMODE(directory_metadata.st_mode) != 0o550
+    ):
+        return False
+
+    return os.access(path, os.R_OK) and not os.access(path, os.W_OK)
+
+
 def load_credential_hmac_keyring(path_value: str) -> CredentialHasher:
-    """Load a small, non-symlinked, owner-only JSON keyring from disk."""
+    """Load a small, non-symlinked, protected JSON keyring from disk."""
 
     if not isinstance(path_value, str) or not path_value.strip():
         raise CredentialHMACError("credential HMAC keyring file is required")
@@ -243,7 +276,9 @@ def load_credential_hmac_keyring(path_value: str) -> CredentialHasher:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise CredentialHMACError("credential HMAC keyring must be a regular file")
-        if metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        if metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO) and not (
+            _is_protected_systemd_credential(path, metadata)
+        ):
             raise CredentialHMACError(
                 "credential HMAC keyring must not grant group or other permissions"
             )
