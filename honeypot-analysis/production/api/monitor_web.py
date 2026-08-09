@@ -2121,6 +2121,66 @@ def load_session_detail(
     return _sanitize_public(detail)
 
 
+def load_ai_advisory_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Load the separate non-authoritative AI record, never the v4 report."""
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {
+            "ok": False,
+            "error": "session_id is required",
+            "timestamp": utc_now(),
+        }
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        row = storage.get_ai_advisory_for_session(clean_session_id)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "error": _storage_error("AI advisory read", exc),
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+    if not row:
+        return {
+            "ok": True,
+            "status": "not_available",
+            "session_id": clean_session_id,
+            "advisory": {},
+            "timestamp": utc_now(),
+        }
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    return {
+        "ok": True,
+        "status": str(row.get("status") or "unavailable"),
+        "session_id": clean_session_id,
+        "advisory_id": str(row.get("advisory_id") or ""),
+        "report_id": str(row.get("report_id") or ""),
+        "assessment_id": str(row.get("assessment_id") or ""),
+        "advisory": {
+            "schema_version": payload.get("schema_version"),
+            "status": payload.get("status"),
+            "authority": payload.get("authority"),
+            "validation": payload.get("validation") or {},
+            "rendered_advisory": payload.get("rendered_advisory") or {},
+            "shadow_candidates": payload.get("shadow_candidates") or {
+                "schema_version": "ai_shadow_candidate_set.v1",
+                "candidates": [],
+            },
+            "safety": payload.get("safety") or {},
+            "provenance": payload.get("provenance") or {},
+        },
+        "metrics": row.get("metrics") or {},
+        "timestamp": utc_now(),
+    }
+
+
 def load_snapshot(
     config: MonitorConfig,
     selected_session_id: str = "",
@@ -4535,6 +4595,18 @@ class MonitorHandler(BaseHTTPRequestHandler):
             )
             return
         if not self._require_read():
+            return
+        if parsed.path == "/api/ai-advisory":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_ai_advisory_detail(
+                self.monitor_config,
+                session_id,
+            )
+            self._send_json(
+                HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
+                detail,
+            )
             return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)

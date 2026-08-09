@@ -67,9 +67,15 @@ class JobLeaseHeartbeat:
         self._thread.start()
         return self
 
+    def _setting(self, suffix: str) -> float:
+        queue_name = self.queue.replace("-", "_")
+        specific = f"{queue_name}_{suffix}"
+        common = f"job_{suffix}"
+        return float(getattr(self.config, specific, getattr(self.config, common)))
+
     def __exit__(self, *_args: Any) -> None:
         self._stop.set()
-        self._thread.join(timeout=max(1.0, self.config.job_lease_heartbeat_seconds))
+        self._thread.join(timeout=max(1.0, self._setting("lease_heartbeat_seconds")))
 
     def _renew(self) -> None:
         renewed = self.storage.renew_job_claim(
@@ -77,13 +83,13 @@ class JobLeaseHeartbeat:
             self.job["job_id"],
             self.job["claim_owner"],
             self.job["claim_token"],
-            self.config.job_lease_seconds,
+            self._setting("lease_seconds"),
         )
         if not renewed:
             raise JobLeaseLost("durable job lease was lost")
 
     def _run(self) -> None:
-        interval = float(self.config.job_lease_heartbeat_seconds)
+        interval = self._setting("lease_heartbeat_seconds")
         while not self._stop.wait(interval):
             try:
                 self._renew()

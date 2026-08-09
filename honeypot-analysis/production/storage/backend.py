@@ -19,6 +19,7 @@ from production.storage.contract import (
     StorageBackend,
     JOB_QUEUE_TABLES,
     OPERATIONAL_COUNT_TABLES,
+    OPERATIONAL_QUEUE_NAMES,
     SESSION_ANALYSIS_FIELDS,
     validate_event_effect_summary,
     validate_event_failure_fields,
@@ -56,6 +57,88 @@ class StorageError(RuntimeError):
 
 
 SQLITE_SCHEMA_VERSION = 3
+AI_ADVISORY_SCHEMA_EXTENSION_ID = "non_authoritative_ai_advisory.v1"
+AI_ADVISORY_SCHEMA_OBJECTS = frozenset(
+    {
+        "ai_advisory_outbox",
+        "ai_advisories",
+        "idx_ai_advisory_outbox_claimable",
+        "idx_ai_advisory_outbox_session",
+        "idx_ai_advisories_session",
+        "idx_ai_advisories_report",
+    }
+)
+
+
+def _ai_advisory_schema_statements() -> tuple[str, ...]:
+    """Return the additive AI schema kept outside the rollback-sensitive version."""
+
+    return (
+        """
+        CREATE TABLE IF NOT EXISTS ai_advisory_outbox (
+            job_id TEXT PRIMARY KEY,
+            report_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            assessment_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            payload_json TEXT NOT NULL,
+            advisory_id TEXT,
+            error TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_retry_at TEXT,
+            claim_owner TEXT,
+            claim_token TEXT,
+            claim_expires_at TEXT,
+            completion_code TEXT,
+            last_error_code TEXT,
+            last_error_type TEXT,
+            last_error_at TEXT,
+            completed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (report_id, assessment_id)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_ai_advisory_outbox_claimable
+        ON ai_advisory_outbox(
+            status, next_retry_at, claim_expires_at, created_at, job_id
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_ai_advisory_outbox_session
+        ON ai_advisory_outbox(session_id, created_at, job_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS ai_advisories (
+            advisory_id TEXT PRIMARY KEY,
+            cache_key TEXT NOT NULL UNIQUE,
+            report_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            assessment_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            projection_sha256 TEXT NOT NULL,
+            request_sha256 TEXT NOT NULL,
+            response_sha256 TEXT NOT NULL,
+            provider_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            prompt_sha256 TEXT NOT NULL,
+            schema_sha256 TEXT NOT NULL,
+            policy_sha256 TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            metrics_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_ai_advisories_session
+        ON ai_advisories(session_id, created_at, advisory_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_ai_advisories_report
+        ON ai_advisories(report_id, created_at, advisory_id)
+        """,
+    )
 
 
 def _sqlite_migration_definitions() -> tuple[tuple[int, str, tuple[str, ...]], ...]:
@@ -303,6 +386,8 @@ SESSION_SCOPED_TABLE_ORDER = {
     "alerts": "created_at",
     "analysis_jobs": "updated_at",
     "reports": "created_at",
+    "ai_advisory_outbox": "updated_at",
+    "ai_advisories": "created_at",
     "enrichment_jobs": "updated_at",
     "prediction_snapshots": "created_at",
     "prediction_outbox": "updated_at",
@@ -726,6 +811,7 @@ class SQLiteStorage:
             self._ensure_sqlite_enrichment_priority_columns(conn)
             self._ensure_sqlite_webhook_delivery_columns(conn)
             self._run_sqlite_migrations(conn)
+            self._ensure_ai_advisory_schema(conn)
 
     def _run_sqlite_migrations(self, conn: sqlite3.Connection) -> None:
         """Apply additive, checksummed migrations in one transaction each."""
@@ -798,6 +884,79 @@ class SQLiteStorage:
         if not final_check or str(final_check[0]).lower() != "ok":
             raise StorageError("SQLite quick_check failed after migration")
 
+    def _ensure_ai_advisory_schema(self, conn: sqlite3.Connection) -> None:
+        """Install a checksummed optional extension without breaking old releases.
+
+        The previous verified runtime rejects a higher ``PRAGMA user_version``.
+        Keeping this additive schema in a separate ledger means rollback code can
+        continue to open the database and safely ignore the new tables.
+        """
+
+        statements = _ai_advisory_schema_statements()
+        checksum = hashlib.sha256(
+            stable_json(
+                {
+                    "extension_id": AI_ADVISORY_SCHEMA_EXTENSION_ID,
+                    "statements": statements,
+                }
+            ).encode("utf-8")
+        ).hexdigest()
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_extensions (
+                extension_id TEXT PRIMARY KEY,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        existing = conn.execute(
+            """
+            SELECT checksum FROM schema_extensions WHERE extension_id = ?
+            """,
+            (AI_ADVISORY_SCHEMA_EXTENSION_ID,),
+        ).fetchone()
+        if existing:
+            if str(existing["checksum"]) != checksum:
+                raise StorageError("AI advisory schema extension checksum mismatch")
+            self._verify_ai_advisory_schema_objects(conn)
+            return
+
+        conn.execute("SAVEPOINT ai_advisory_schema_extension")
+        try:
+            for statement in statements:
+                conn.execute(statement)
+            conn.execute(
+                """
+                INSERT INTO schema_extensions (extension_id, checksum, applied_at)
+                VALUES (?, ?, ?)
+                """,
+                (AI_ADVISORY_SCHEMA_EXTENSION_ID, checksum, utc_now()),
+            )
+            conn.execute("RELEASE SAVEPOINT ai_advisory_schema_extension")
+        except Exception:
+            conn.execute("ROLLBACK TO SAVEPOINT ai_advisory_schema_extension")
+            conn.execute("RELEASE SAVEPOINT ai_advisory_schema_extension")
+            raise
+        self._verify_ai_advisory_schema_objects(conn)
+        final_check = conn.execute("PRAGMA quick_check").fetchone()
+        if not final_check or str(final_check[0]).lower() != "ok":
+            raise StorageError("SQLite quick_check failed after AI schema extension")
+
+    @staticmethod
+    def _verify_ai_advisory_schema_objects(conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type IN ('table', 'index')
+              AND name IN (?, ?, ?, ?, ?, ?)
+            """,
+            tuple(sorted(AI_ADVISORY_SCHEMA_OBJECTS)),
+        ).fetchall()
+        present = {str(row["name"]) for row in rows}
+        if present != set(AI_ADVISORY_SCHEMA_OBJECTS):
+            raise StorageError("AI advisory schema extension is incomplete")
+
     def health_check(self) -> Dict[str, Any]:
         with self.connection() as conn:
             row = conn.execute("SELECT 1 AS ready").fetchone()
@@ -857,7 +1016,7 @@ class SQLiteStorage:
             "active_sessions": active_sessions,
             "queues": {
                 queue: self.job_queue_metrics(queue, now=checked_at)
-                for queue in JOB_QUEUE_TABLES
+                for queue in OPERATIONAL_QUEUE_NAMES
             },
             "webhook_delivery_status": webhook_status,
             "checked_at": checked_at,
@@ -2494,6 +2653,7 @@ class SQLiteStorage:
         owner: str,
         token: str,
         report_payload: Dict[str, Any],
+        enqueue_ai_advisory: bool = False,
         *,
         now: Any = None,
     ) -> Optional[str]:
@@ -2552,6 +2712,45 @@ class SQLiteStorage:
                 """,
                 (report_id, session_id, stable_json(report_payload), current_time),
             )
+            if enqueue_ai_advisory:
+                if (
+                    report_payload.get("schema_version")
+                    != "session_assessment.v4"
+                    or not assessment_id
+                ):
+                    raise StorageError(
+                        "AI advisory may be enqueued only for session_assessment.v4"
+                    )
+                ai_job_id = stable_id(
+                    "ai_advisory_job",
+                    {
+                        "report_id": report_id,
+                        "assessment_id": assessment_id,
+                    },
+                )
+                ai_task = {
+                    "schema_version": "ai_advisory_task.v1",
+                    "report_id": report_id,
+                    "session_id": session_id,
+                    "assessment_id": assessment_id,
+                }
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO ai_advisory_outbox
+                    (job_id, report_id, session_id, assessment_id, status,
+                     payload_json, attempts, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?)
+                    """,
+                    (
+                        ai_job_id,
+                        report_id,
+                        session_id,
+                        assessment_id,
+                        stable_json(ai_task),
+                        current_time,
+                        current_time,
+                    ),
+                )
             cursor = conn.execute(
                 """
                 UPDATE analysis_jobs
@@ -2593,6 +2792,309 @@ class SQLiteStorage:
                     (stable_json(payload), current_time, session_id),
                 )
         return report_id
+
+    def claim_ai_advisory_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]:
+        rows = self.claim_jobs(
+            "ai_advisory",
+            owner,
+            limit,
+            lease_seconds,
+            max_attempts,
+            now=now,
+        )
+        output: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                task = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                task = None
+            output.append(
+                {
+                    "job_id": row["job_id"],
+                    "report_id": row["report_id"],
+                    "session_id": row["session_id"],
+                    "assessment_id": row["assessment_id"],
+                    "task": task,
+                    "attempts": row["attempts"],
+                    "claim_owner": row["claim_owner"],
+                    "claim_token": row["claim_token"],
+                    "claim_expires_at": row["claim_expires_at"],
+                }
+            )
+        return output
+
+    def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM reports WHERE report_id=? LIMIT 1",
+                (_required_identity(report_id, "report_id"),),
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        try:
+            item["payload"] = json.loads(item.get("payload_json") or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise StorageError("stored report is not valid JSON") from exc
+        return item
+
+    def _decode_ai_advisory_row(self, row: Any) -> Optional[Dict[str, Any]]:
+        if row is None:
+            return None
+        item = dict(row)
+        try:
+            item["payload"] = json.loads(item.get("payload_json") or "{}")
+            item["metrics"] = json.loads(item.get("metrics_json") or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise StorageError("stored AI advisory is not valid JSON") from exc
+        return item
+
+    def get_ai_advisory_by_cache_key(
+        self, cache_key: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM ai_advisories WHERE cache_key=? LIMIT 1",
+                (_required_identity(cache_key, "cache_key"),),
+            ).fetchone()
+        return self._decode_ai_advisory_row(row)
+
+    def get_ai_advisory_for_session(
+        self, session_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM ai_advisories
+                WHERE session_id=?
+                ORDER BY created_at DESC, advisory_id DESC
+                LIMIT 1
+                """,
+                (_required_identity(session_id, "session_id"),),
+            ).fetchone()
+        return self._decode_ai_advisory_row(row)
+
+    def prune_ai_advisories(
+        self,
+        retention_days: int = 30,
+        keep_latest_per_session: bool = True,
+        *,
+        now: Any = None,
+    ) -> Dict[str, Any]:
+        """Apply the bounded, non-authoritative advisory retention policy.
+
+        Only completed advisory records and terminal outbox rows are eligible.
+        Canonical reports, sessions, events, and historical compatibility data
+        are never touched.  Keeping the newest advisory per session makes a
+        short PoC TTL safe for repeated review without retaining an unbounded
+        cache.
+        """
+        if (
+            isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or not 1 <= retention_days <= 3650
+        ):
+            raise ValueError("retention_days must be between 1 and 3650")
+        current_time = _utc_timestamp(now)
+        reference = _parse_dt(current_time)
+        if reference is None:  # pragma: no cover - _utc_timestamp validates
+            raise ValueError("retention reference is invalid")
+        cutoff = (reference - timedelta(days=retention_days)).isoformat()
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            old_rows = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT advisory_id, session_id, created_at
+                    FROM ai_advisories
+                    WHERE created_at < ?
+                    ORDER BY session_id, created_at, advisory_id
+                    """,
+                    (cutoff,),
+                ).fetchall()
+            ]
+            keep_ids: set[str] = set()
+            if keep_latest_per_session:
+                latest: Dict[str, Dict[str, Any]] = {}
+                for row in old_rows + [
+                    dict(row)
+                    for row in conn.execute(
+                        """
+                        SELECT advisory_id, session_id, created_at
+                        FROM ai_advisories
+                        WHERE created_at >= ?
+                        """,
+                        (cutoff,),
+                    ).fetchall()
+                ]:
+                    session_id = str(row.get("session_id") or "")
+                    current = latest.get(session_id)
+                    candidate_key = (str(row.get("created_at") or ""), str(row["advisory_id"]))
+                    current_key = (
+                        (str(current.get("created_at") or ""), str(current["advisory_id"]))
+                        if current
+                        else ("", "")
+                    )
+                    if current is None or candidate_key > current_key:
+                        latest[session_id] = row
+                keep_ids = {
+                    str(row["advisory_id"])
+                    for row in latest.values()
+                    if row.get("advisory_id")
+                }
+            delete_ids = [
+                str(row["advisory_id"])
+                for row in old_rows
+                if not keep_latest_per_session
+                or str(row["advisory_id"]) not in keep_ids
+            ]
+            deleted_advisories = 0
+            if delete_ids:
+                placeholders = ",".join("?" for _ in delete_ids)
+                cursor = conn.execute(
+                    f"DELETE FROM ai_advisories WHERE advisory_id IN ({placeholders})",
+                    tuple(delete_ids),
+                )
+                deleted_advisories = int(cursor.rowcount or 0)
+            cursor = conn.execute(
+                """
+                DELETE FROM ai_advisory_outbox
+                WHERE status IN ('succeeded', 'failed')
+                  AND updated_at < ?
+                """,
+                (cutoff,),
+            )
+            deleted_outbox = int(cursor.rowcount or 0)
+        return {
+            "retention_days": retention_days,
+            "cutoff": cutoff,
+            "keep_latest_per_session": bool(keep_latest_per_session),
+            "advisories_deleted": deleted_advisories,
+            "outbox_deleted": deleted_outbox,
+        }
+
+    def complete_ai_advisory_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        advisory_record: Dict[str, Any],
+        completion_code: str = "accepted",
+        *,
+        now: Any = None,
+    ) -> Optional[str]:
+        required = {
+            "advisory_id",
+            "cache_key",
+            "report_id",
+            "session_id",
+            "assessment_id",
+            "status",
+            "projection_sha256",
+            "request_sha256",
+            "response_sha256",
+            "provider_id",
+            "model_id",
+            "prompt_sha256",
+            "schema_sha256",
+            "policy_sha256",
+            "payload",
+            "metrics",
+        }
+        if set(advisory_record) != required:
+            raise ValueError("AI advisory storage record has invalid keys")
+        current_time = _utc_timestamp(now)
+        advisory_id = _required_identity(
+            advisory_record["advisory_id"], "advisory_id"
+        )
+        if completion_code not in {"accepted", "rejected", "cache_replayed"}:
+            raise ValueError("AI advisory completion_code is invalid")
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            claim = conn.execute(
+                """
+                SELECT report_id, session_id, assessment_id
+                FROM ai_advisory_outbox
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
+                """,
+                (job_id, owner, token, current_time),
+            ).fetchone()
+            if claim is None:
+                return None
+            for field in ("report_id", "session_id", "assessment_id"):
+                if str(claim[field]) != str(advisory_record[field]):
+                    raise StorageError("AI advisory record does not match its outbox claim")
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO ai_advisories
+                (advisory_id, cache_key, report_id, session_id, assessment_id,
+                 status, projection_sha256, request_sha256, response_sha256,
+                 provider_id, model_id, prompt_sha256, schema_sha256,
+                 policy_sha256, payload_json, metrics_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    advisory_id,
+                    _required_identity(advisory_record["cache_key"], "cache_key"),
+                    claim["report_id"],
+                    claim["session_id"],
+                    claim["assessment_id"],
+                    _required_identity(advisory_record["status"], "status"),
+                    _required_identity(advisory_record["projection_sha256"], "projection_sha256"),
+                    _required_identity(advisory_record["request_sha256"], "request_sha256"),
+                    _required_identity(advisory_record["response_sha256"], "response_sha256"),
+                    _required_identity(advisory_record["provider_id"], "provider_id"),
+                    str(advisory_record["model_id"] or ""),
+                    _required_identity(advisory_record["prompt_sha256"], "prompt_sha256"),
+                    _required_identity(advisory_record["schema_sha256"], "schema_sha256"),
+                    _required_identity(advisory_record["policy_sha256"], "policy_sha256"),
+                    stable_json(advisory_record["payload"]),
+                    stable_json(advisory_record["metrics"]),
+                    current_time,
+                ),
+            )
+            existing = conn.execute(
+                "SELECT advisory_id FROM ai_advisories WHERE cache_key=? LIMIT 1",
+                (advisory_record["cache_key"],),
+            ).fetchone()
+            if existing is None:  # pragma: no cover - same transaction
+                raise StorageError("AI advisory insert was not durable")
+            persisted_id = str(existing["advisory_id"])
+            cursor = conn.execute(
+                """
+                UPDATE ai_advisory_outbox
+                SET status='succeeded', advisory_id=?, error=NULL,
+                    next_retry_at=NULL, claim_owner=NULL, claim_token=NULL,
+                    claim_expires_at=NULL, last_error_code=NULL,
+                    last_error_type=NULL, last_error_at=NULL,
+                    completion_code=?, completed_at=?, updated_at=?
+                WHERE job_id=? AND status='running' AND claim_owner=?
+                  AND claim_token=? AND claim_expires_at > ?
+                """,
+                (
+                    persisted_id,
+                    completion_code,
+                    current_time,
+                    current_time,
+                    job_id,
+                    owner,
+                    token,
+                    current_time,
+                ),
+            )
+            if cursor.rowcount != 1:  # pragma: no cover - same transaction
+                raise StorageError("AI advisory claim changed during completion")
+        return persisted_id
 
     def fail_analysis_job(
         self,
@@ -4265,7 +4767,7 @@ class SQLiteStorage:
         return output
 
     def list_rows(self, table: str, limit: int = 100) -> List[Dict[str, Any]]:
-        allowed = {"events", "sessions", "alerts", "analysis_jobs", "reports", "feed_status", "webhook_deliveries", "enrichment_records", "enrichment_jobs", "prediction_snapshots", "prediction_outbox", "prediction_backtest_runs", "prediction_calibration_runs", "analyst_feedback", "classification_review_labels", "observables", "observable_sightings", "threat_hunt_jobs", "session_links", "campaigns", "campaign_sessions"}
+        allowed = {"events", "sessions", "alerts", "analysis_jobs", "reports", "ai_advisory_outbox", "ai_advisories", "feed_status", "webhook_deliveries", "enrichment_records", "enrichment_jobs", "prediction_snapshots", "prediction_outbox", "prediction_backtest_runs", "prediction_calibration_runs", "analyst_feedback", "classification_review_labels", "observables", "observable_sightings", "threat_hunt_jobs", "session_links", "campaigns", "campaign_sessions"}
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
         with self.connection() as conn:

@@ -42,6 +42,7 @@ honeypot-dashboard-api = "production.api.dashboard_api:main"
 honeypot-monitor-web = "production.api.monitor_web:main"
 honeypot-session-worker = "production.workers.session_worker:main"
 honeypot-analysis-worker = "production.workers.analysis_worker:main"
+honeypot-ai-advisory-worker = "production.workers.ai_advisory_worker:main"
 honeypot-enrichment-worker = "production.workers.enrichment_worker:main"
 honeypot-sensor-forwarder = "production.workers.sensor_forwarder:main"
 honeypot-threat-hunt-worker = "production.workers.threat_hunt_worker:main"
@@ -49,6 +50,7 @@ honeypot-webhook-dispatcher = "production.workers.webhook_dispatcher:main"
 honeypot-feed-refresh = "production.enrichment.refresh_feeds:main"
 honeypot-sqlite-recovery = "production.tools.sqlite_backup_restore:main"
 honeypot-release-manifest = "production.tools.release_manifest:main"
+honeypot-ai-advisory-metrics = "production.tools.ai_advisory_metrics:main"
 
 [tool.setuptools.packages.find]
 include = ["production*"]

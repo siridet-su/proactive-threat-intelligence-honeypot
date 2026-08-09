@@ -478,6 +478,78 @@
         return d || { ok: false, session_id: id, overview: { session_id: id }, events_table_rows: [], prediction_snapshots: [], errors: { api: 'Session detail unavailable' } };
     }
 
+    async function fetchAIAdvisory(id) {
+        const d = await apiFetch(
+            `/api/ai-advisory?session_id=${encodeURIComponent(id)}`,
+            { sanitize: false },
+        );
+        return d || { ok: false, status: 'unavailable', advisory: {} };
+    }
+
+    function renderAIAdvisoryPanel(result) {
+        const panel = document.getElementById('ai-advisory-panel');
+        if (!panel) return;
+        panel.replaceChildren();
+
+        const heading = document.createElement('h3');
+        heading.className = 'text-xs font-semibold text-violet-300 uppercase tracking-wide';
+        heading.textContent = 'AI-generated advisory — non-authoritative';
+        panel.appendChild(heading);
+
+        const note = document.createElement('p');
+        note.className = 'text-[11px] text-zinc-500 mt-1 mb-3';
+        note.textContent = 'Separate post-persistence research output. It cannot change findings, hypotheses, guidance, alerts, or actions.';
+        panel.appendChild(note);
+
+        if (!result?.ok || result?.status === 'unavailable') {
+            const unavailable = document.createElement('p');
+            unavailable.className = 'text-xs text-zinc-600 italic';
+            unavailable.textContent = 'AI advisory unavailable; deterministic analysis is unaffected.';
+            panel.appendChild(unavailable);
+            return;
+        }
+        if (result?.status === 'not_available') {
+            const absent = document.createElement('p');
+            absent.className = 'text-xs text-zinc-600 italic';
+            absent.textContent = 'No AI advisory was requested or accepted for this report.';
+            panel.appendChild(absent);
+            return;
+        }
+
+        const advisory = result.advisory || {};
+        const rendered = advisory.rendered_advisory || {};
+        const validation = advisory.validation || {};
+        const status = document.createElement('p');
+        status.className = 'text-xs text-zinc-400 mb-3';
+        status.textContent = `Status: ${String(advisory.status || result.status || 'unknown')} · validation: ${String(validation.status || 'unknown')}`;
+        panel.appendChild(status);
+
+        for (const paragraph of arrayMaybe(rendered.paragraphs)) {
+            const item = document.createElement('p');
+            item.className = 'text-xs text-zinc-300 leading-relaxed mb-2';
+            item.textContent = String(paragraph?.text || '');
+            panel.appendChild(item);
+        }
+        if (rendered.status === 'abstained') {
+            const abstained = document.createElement('p');
+            abstained.className = 'text-xs text-zinc-500 italic';
+            abstained.textContent = `AI abstained: ${String(rendered.abstention_reason_code || 'unspecified')}`;
+            panel.appendChild(abstained);
+        }
+
+        const candidates = arrayMaybe(advisory.shadow_candidates?.candidates);
+        const shadowHeading = document.createElement('h4');
+        shadowHeading.className = 'text-[11px] font-semibold text-amber-300 uppercase tracking-wide mt-4 mb-2';
+        shadowHeading.textContent = `Unverified AI candidates (${candidates.length})`;
+        panel.appendChild(shadowHeading);
+        for (const candidate of candidates) {
+            const item = document.createElement('p');
+            item.className = 'text-[11px] text-zinc-500 font-mono mb-1';
+            item.textContent = `${String(candidate?.candidate_type || 'unknown')} · ${String(candidate?.status || 'unverified_ai_candidate')} · ${String(candidate?.candidate_id || '')}`;
+            panel.appendChild(item);
+        }
+    }
+
     async function loadInternalCommands(requestedSessionId = state.detailSessionId) {
         const sessionId = String(requestedSessionId || '').trim();
         if (!sessionId) return;
@@ -2110,9 +2182,10 @@
         lucide.createIcons();
 
         // Parallel fetch of all detail data
-        const [detail, predResult] = await Promise.all([
+        const [detail, predResult, aiResult] = await Promise.all([
             fetchSessionDetail(session.session_id),
             fetchPredictionCurrent(session.session_id),
+            fetchAIAdvisory(session.session_id),
         ]);
 
         const ov = (detail && detail.overview) || {};
@@ -2334,6 +2407,10 @@
                     <!-- Response guidance v3 card -->
                     ${smbDecisionCard(smb)}
 
+                    <div id="ai-advisory-panel" class="card p-5" style="background:rgba(139,92,246,0.03);border-color:rgba(139,92,246,0.18)">
+                        <p class="text-xs text-zinc-600 italic">Loading separate non-authoritative AI advisory…</p>
+                    </div>
+
 
                     <!-- Predictive alert inline (if not shown top) -->
                     ${!predictiveAlert.active&&cp.prediction_trigger?.trigger_type?`
@@ -2461,6 +2538,7 @@
 
 
         lucide.createIcons();
+        renderAIAdvisoryPanel(aiResult);
         void loadInternalCommands(state.detailSessionId);
         setTimeout(() => {
             // Animate score bars

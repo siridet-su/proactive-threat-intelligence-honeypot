@@ -55,9 +55,15 @@ EVENT_FAILURE_TYPES = frozenset(
 
 JOB_QUEUE_TABLES = {
     "analysis": "analysis_jobs",
+    "ai_advisory": "ai_advisory_outbox",
     "enrichment": "enrichment_jobs",
     "threat_hunt": "threat_hunt_jobs",
 }
+
+# Preserve the existing operational-metrics API shape. The optional AI queue
+# has a separate research metrics endpoint and must not alter canonical health
+# responses merely because its durable extension is installed.
+OPERATIONAL_QUEUE_NAMES = ("analysis", "enrichment", "threat_hunt")
 
 OPERATIONAL_COUNT_TABLES = (
     "events",
@@ -75,6 +81,10 @@ OPERATIONAL_COUNT_TABLES = (
 JOB_FAILURE_CODES = frozenset(
     {
         "analysis_failed",
+        "ai_advisory_failed",
+        "ai_job_invalid",
+        "ai_output_invalid",
+        "ai_provider_unavailable",
         "enrichment_failed",
         "job_attempts_exhausted",
         "job_dependency_unavailable",
@@ -574,6 +584,46 @@ class StorageBackend(Protocol):
         owner: str,
         token: str,
         report_payload: Dict[str, Any],
+        enqueue_ai_advisory: bool = False,
+        *,
+        now: Any = None,
+    ) -> Optional[str]: ...
+
+    def claim_ai_advisory_jobs(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]: ...
+
+    def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]: ...
+
+    def get_ai_advisory_by_cache_key(
+        self, cache_key: str
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def get_ai_advisory_for_session(
+        self, session_id: str
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def prune_ai_advisories(
+        self,
+        retention_days: int = 30,
+        keep_latest_per_session: bool = True,
+        *,
+        now: Any = None,
+    ) -> Dict[str, Any]: ...
+
+    def complete_ai_advisory_job(
+        self,
+        job_id: str,
+        owner: str,
+        token: str,
+        advisory_record: Dict[str, Any],
+        completion_code: str = "accepted",
         *,
         now: Any = None,
     ) -> Optional[str]: ...

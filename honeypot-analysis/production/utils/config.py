@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -16,6 +17,107 @@ from production.storage.session_provenance import (
     normalize_session_source,
 )
 from production.utils.http_security import parse_bearer_token
+
+
+_AI_OPTION_DENY_TOKENS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "credential",
+        "password",
+        "secret",
+        "token",
+    }
+)
+
+
+def _validate_ai_request_options(value: Any) -> Dict[str, Any]:
+    """Validate provider request options without accepting secret material."""
+    if not isinstance(value, Mapping):
+        raise ValueError("ai_advisory_request_options must be a JSON object")
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ai_advisory_request_options must be JSON-safe") from exc
+    if len(encoded.encode("utf-8")) > 8192:
+        raise ValueError("ai_advisory_request_options exceeds 8192 bytes")
+
+    def walk(item: Any) -> None:
+        if isinstance(item, Mapping):
+            for key, child in item.items():
+                text = str(key).strip().lower().replace("-", "_")
+                if any(token in text for token in _AI_OPTION_DENY_TOKENS):
+                    raise ValueError(
+                        "ai_advisory_request_options must not contain secret or credential keys"
+                    )
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return dict(value)
+
+
+def _apply_ai_environment_overrides(values: Mapping[str, Any]) -> Dict[str, Any]:
+    """Apply AI environment overrides before dataclass validation.
+
+    ``ProductionConfig.__post_init__`` validates direct construction.  The
+    environment-aware constructor must therefore merge AI overrides before
+    constructing the dataclass, otherwise an enabled file configuration cannot
+    supply its provider/model/key through the environment.
+    """
+    result = dict(values)
+    result["enable_ai_advisory"] = _env_bool(
+        "ENABLE_AI_ADVISORY", bool(result.get("enable_ai_advisory", False))
+    )
+    result["ai_advisory_provider"] = os.getenv(
+        "AI_ADVISORY_PROVIDER", str(result.get("ai_advisory_provider") or "disabled")
+    ).strip().lower()
+    for env_name, field_name in (
+        ("AI_ADVISORY_MODEL", "ai_advisory_model"),
+        ("AI_ADVISORY_POLICY_PATH", "ai_advisory_policy_path"),
+        ("AI_ADVISORY_API_KEY_FILE", "ai_advisory_api_key_file"),
+        ("AI_ADVISORY_FIXTURE_RESPONSE_PATH", "ai_advisory_fixture_response_path"),
+        ("AI_ADVISORY_ENDPOINT", "ai_advisory_endpoint"),
+        ("AI_ADVISORY_API_VERSION", "ai_advisory_api_version"),
+        ("AI_ADVISORY_ADAPTER_REVISION", "ai_advisory_adapter_revision"),
+    ):
+        if env_name in os.environ:
+            result[field_name] = os.environ[env_name]
+    for env_name, field_name in (
+        ("AI_ADVISORY_BATCH_SIZE", "ai_advisory_batch_size"),
+        ("AI_ADVISORY_MAX_ATTEMPTS", "ai_advisory_max_attempts"),
+        ("AI_ADVISORY_MAX_RESPONSE_BYTES", "ai_advisory_max_response_bytes"),
+        ("AI_ADVISORY_MAX_REQUEST_BYTES", "ai_advisory_max_request_bytes"),
+        ("AI_ADVISORY_MAX_REQUEST_TOKENS", "ai_advisory_max_request_tokens"),
+        ("AI_ADVISORY_RETENTION_DAYS", "ai_advisory_retention_days"),
+    ):
+        if env_name in os.environ:
+            result[field_name] = int(os.environ[env_name])
+    for env_name, field_name in (
+        ("AI_ADVISORY_POLL_SECONDS", "ai_advisory_poll_seconds"),
+        ("AI_ADVISORY_LEASE_SECONDS", "ai_advisory_lease_seconds"),
+        ("AI_ADVISORY_LEASE_HEARTBEAT_SECONDS", "ai_advisory_lease_heartbeat_seconds"),
+        ("AI_ADVISORY_TIMEOUT_SECONDS", "ai_advisory_timeout_seconds"),
+        ("AI_ADVISORY_RETRY_BASE_SECONDS", "ai_advisory_retry_base_seconds"),
+        ("AI_ADVISORY_RETRY_MAX_SECONDS", "ai_advisory_retry_max_seconds"),
+    ):
+        if env_name in os.environ:
+            result[field_name] = float(os.environ[env_name])
+    if "AI_ADVISORY_REQUEST_OPTIONS_JSON" in os.environ:
+        result["ai_advisory_request_options"] = _env_json(
+            "AI_ADVISORY_REQUEST_OPTIONS_JSON",
+            result.get("ai_advisory_request_options") or {},
+        )
+    return result
 
 
 def _read_secret_file(path_text: str, name: str) -> str:
@@ -261,6 +363,31 @@ class ProductionConfig:
     analysis_fallback_on_failure: bool = True
     analysis_skip_empty_sessions: bool = True
     analysis_suppress_stdout: bool = True
+
+    # Optional post-persistence AI advisory.  No provider is selected by
+    # default and this path never participates in canonical analysis.
+    enable_ai_advisory: bool = False
+    ai_advisory_provider: str = "disabled"
+    ai_advisory_model: str = ""
+    ai_advisory_policy_path: str = "configs/ai_advisory_policy.v1.json"
+    ai_advisory_api_key_file: str = ""
+    ai_advisory_fixture_response_path: str = ""
+    ai_advisory_endpoint: str = ""
+    ai_advisory_api_version: str = ""
+    ai_advisory_adapter_revision: str = "provider-neutral.v1"
+    ai_advisory_request_options: Dict[str, Any] = field(default_factory=dict)
+    ai_advisory_batch_size: int = 5
+    ai_advisory_poll_seconds: float = 5.0
+    ai_advisory_lease_seconds: float = 60.0
+    ai_advisory_lease_heartbeat_seconds: float = 20.0
+    ai_advisory_max_attempts: int = 3
+    ai_advisory_timeout_seconds: float = 20.0
+    ai_advisory_retry_base_seconds: float = 30.0
+    ai_advisory_retry_max_seconds: float = 900.0
+    ai_advisory_max_response_bytes: int = 65536
+    ai_advisory_max_request_bytes: int = 65536
+    ai_advisory_max_request_tokens: int = 16384
+    ai_advisory_retention_days: int = 30
 
     webhook_url: str = ""
     webhook_targets: List[Dict[str, Any]] = field(default_factory=list)
@@ -627,6 +754,12 @@ class ProductionConfig:
             "prediction_outbox_retry_base_seconds": self.prediction_outbox_retry_base_seconds,
             "prediction_outbox_retry_max_seconds": self.prediction_outbox_retry_max_seconds,
             "enrichment_provider_timeout_seconds": self.enrichment_provider_timeout_seconds,
+            "ai_advisory_poll_seconds": self.ai_advisory_poll_seconds,
+            "ai_advisory_lease_seconds": self.ai_advisory_lease_seconds,
+            "ai_advisory_lease_heartbeat_seconds": self.ai_advisory_lease_heartbeat_seconds,
+            "ai_advisory_timeout_seconds": self.ai_advisory_timeout_seconds,
+            "ai_advisory_retry_base_seconds": self.ai_advisory_retry_base_seconds,
+            "ai_advisory_retry_max_seconds": self.ai_advisory_retry_max_seconds,
         }
         for name, value in positive_durations.items():
             if (
@@ -825,6 +958,89 @@ class ProductionConfig:
                 "prediction_outbox_retry_max_seconds must be greater than or "
                 "equal to prediction_outbox_retry_base_seconds"
             )
+        if self.ai_advisory_lease_heartbeat_seconds >= self.ai_advisory_lease_seconds:
+            raise ValueError(
+                "ai_advisory_lease_heartbeat_seconds must be less than "
+                "ai_advisory_lease_seconds"
+            )
+        if self.ai_advisory_timeout_seconds >= self.ai_advisory_lease_seconds:
+            raise ValueError(
+                "ai_advisory_timeout_seconds must be less than ai_advisory_lease_seconds"
+            )
+        if self.ai_advisory_retry_max_seconds < self.ai_advisory_retry_base_seconds:
+            raise ValueError(
+                "ai_advisory_retry_max_seconds must be greater than or equal to "
+                "ai_advisory_retry_base_seconds"
+            )
+        for name, value in {
+            "ai_advisory_batch_size": self.ai_advisory_batch_size,
+            "ai_advisory_max_attempts": self.ai_advisory_max_attempts,
+            "ai_advisory_max_response_bytes": self.ai_advisory_max_response_bytes,
+            "ai_advisory_max_request_bytes": self.ai_advisory_max_request_bytes,
+            "ai_advisory_max_request_tokens": self.ai_advisory_max_request_tokens,
+        }.items():
+            if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.ai_advisory_max_response_bytes > 1024 * 1024:
+            raise ValueError("ai_advisory_max_response_bytes must not exceed 1048576")
+        if self.ai_advisory_max_request_bytes > 1024 * 1024:
+            raise ValueError("ai_advisory_max_request_bytes must not exceed 1048576")
+        if self.ai_advisory_max_request_tokens > 262_144:
+            raise ValueError("ai_advisory_max_request_tokens must not exceed 262144")
+        if isinstance(self.ai_advisory_retention_days, bool) or not isinstance(
+            self.ai_advisory_retention_days, Integral
+        ) or not 1 <= self.ai_advisory_retention_days <= 3650:
+            raise ValueError(
+                "ai_advisory_retention_days must be between 1 and 3650"
+            )
+        _validate_ai_request_options(self.ai_advisory_request_options)
+        if self.ai_advisory_api_version and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}",
+            str(self.ai_advisory_api_version),
+        ):
+            raise ValueError("ai_advisory_api_version must be a safe identifier")
+        if not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}",
+            str(self.ai_advisory_adapter_revision or ""),
+        ):
+            raise ValueError("ai_advisory_adapter_revision must be a safe identifier")
+        endpoint = str(self.ai_advisory_endpoint or "").strip()
+        if len(endpoint) > 2048 or any(ord(char) < 0x20 for char in endpoint):
+            raise ValueError("ai_advisory_endpoint is invalid")
+        if endpoint and not endpoint.lower().startswith("https://"):
+            raise ValueError("ai_advisory_endpoint must use HTTPS when configured")
+        ai_provider = str(self.ai_advisory_provider or "").strip().lower()
+        if not re.fullmatch(
+            r"[a-z][a-z0-9_-]{0,63}",
+            ai_provider,
+        ):
+            raise ValueError("ai_advisory_provider must be a safe provider identifier")
+        if self.enable_ai_advisory:
+            if ai_provider == "disabled":
+                raise ValueError(
+                    "enable_ai_advisory requires an explicitly configured provider"
+                )
+            if not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}",
+                str(self.ai_advisory_model or "").strip(),
+            ):
+                raise ValueError(
+                    "enabled AI advisory requires a safe explicit model identifier"
+                )
+            if not str(self.ai_advisory_policy_path or "").strip():
+                raise ValueError("enabled AI advisory requires an explicit policy path")
+            if ai_provider == "fixture":
+                if not str(self.ai_advisory_fixture_response_path or "").strip():
+                    raise ValueError(
+                        "fixture AI advisory provider requires a response path"
+                    )
+            else:
+                secret_path = str(self.ai_advisory_api_key_file or "").strip()
+                if not secret_path:
+                    raise ValueError(
+                        "hosted AI advisory provider requires an API key file"
+                    )
+                _read_secret_file(secret_path, "AI_ADVISORY_API_KEY")
         for name, value in {
             "prediction_outbox_batch_size": self.prediction_outbox_batch_size,
             "prediction_outbox_max_attempts": self.prediction_outbox_max_attempts,
@@ -924,6 +1140,7 @@ class ProductionConfig:
                 "sqlite_database_path": database_settings.sqlite_database_path,
             }
         )
+        config_values = _apply_ai_environment_overrides(config_values)
         cfg = cls(**config_values)
         cfg.environment = os.getenv("HONEYPOT_ENV", cfg.environment)
         cfg.sensor_id = os.getenv("SENSOR_ID", cfg.sensor_id)
@@ -1084,6 +1301,80 @@ class ProductionConfig:
         cfg.analysis_fallback_on_failure = _env_bool("ANALYSIS_FALLBACK_ON_FAILURE", cfg.analysis_fallback_on_failure)
         cfg.analysis_skip_empty_sessions = _env_bool("ANALYSIS_SKIP_EMPTY_SESSIONS", cfg.analysis_skip_empty_sessions)
         cfg.analysis_suppress_stdout = _env_bool("ANALYSIS_SUPPRESS_STDOUT", cfg.analysis_suppress_stdout)
+        cfg.enable_ai_advisory = _env_bool(
+            "ENABLE_AI_ADVISORY", cfg.enable_ai_advisory
+        )
+        cfg.ai_advisory_provider = os.getenv(
+            "AI_ADVISORY_PROVIDER", cfg.ai_advisory_provider
+        ).strip().lower()
+        cfg.ai_advisory_model = os.getenv(
+            "AI_ADVISORY_MODEL", cfg.ai_advisory_model
+        )
+        cfg.ai_advisory_policy_path = os.getenv(
+            "AI_ADVISORY_POLICY_PATH", cfg.ai_advisory_policy_path
+        )
+        cfg.ai_advisory_api_key_file = os.getenv(
+            "AI_ADVISORY_API_KEY_FILE", cfg.ai_advisory_api_key_file
+        )
+        cfg.ai_advisory_fixture_response_path = os.getenv(
+            "AI_ADVISORY_FIXTURE_RESPONSE_PATH",
+            cfg.ai_advisory_fixture_response_path,
+        )
+        cfg.ai_advisory_endpoint = os.getenv(
+            "AI_ADVISORY_ENDPOINT", cfg.ai_advisory_endpoint
+        )
+        cfg.ai_advisory_api_version = os.getenv(
+            "AI_ADVISORY_API_VERSION", cfg.ai_advisory_api_version
+        )
+        cfg.ai_advisory_adapter_revision = os.getenv(
+            "AI_ADVISORY_ADAPTER_REVISION", cfg.ai_advisory_adapter_revision
+        )
+        cfg.ai_advisory_request_options = _env_json(
+            "AI_ADVISORY_REQUEST_OPTIONS_JSON", cfg.ai_advisory_request_options
+        )
+        cfg.ai_advisory_batch_size = _env_int(
+            "AI_ADVISORY_BATCH_SIZE", cfg.ai_advisory_batch_size
+        )
+        cfg.ai_advisory_poll_seconds = _env_float(
+            "AI_ADVISORY_POLL_SECONDS", cfg.ai_advisory_poll_seconds
+        )
+        cfg.ai_advisory_lease_seconds = _env_float(
+            "AI_ADVISORY_LEASE_SECONDS", cfg.ai_advisory_lease_seconds
+        )
+        cfg.ai_advisory_lease_heartbeat_seconds = _env_float(
+            "AI_ADVISORY_LEASE_HEARTBEAT_SECONDS",
+            cfg.ai_advisory_lease_heartbeat_seconds,
+        )
+        cfg.ai_advisory_max_attempts = _env_int(
+            "AI_ADVISORY_MAX_ATTEMPTS", cfg.ai_advisory_max_attempts
+        )
+        cfg.ai_advisory_timeout_seconds = _env_float(
+            "AI_ADVISORY_TIMEOUT_SECONDS", cfg.ai_advisory_timeout_seconds
+        )
+        cfg.ai_advisory_retry_base_seconds = _env_float(
+            "AI_ADVISORY_RETRY_BASE_SECONDS",
+            cfg.ai_advisory_retry_base_seconds,
+        )
+        cfg.ai_advisory_retry_max_seconds = _env_float(
+            "AI_ADVISORY_RETRY_MAX_SECONDS",
+            cfg.ai_advisory_retry_max_seconds,
+        )
+        cfg.ai_advisory_max_response_bytes = _env_int(
+            "AI_ADVISORY_MAX_RESPONSE_BYTES",
+            cfg.ai_advisory_max_response_bytes,
+        )
+        cfg.ai_advisory_max_request_bytes = _env_int(
+            "AI_ADVISORY_MAX_REQUEST_BYTES",
+            cfg.ai_advisory_max_request_bytes,
+        )
+        cfg.ai_advisory_max_request_tokens = _env_int(
+            "AI_ADVISORY_MAX_REQUEST_TOKENS",
+            cfg.ai_advisory_max_request_tokens,
+        )
+        cfg.ai_advisory_retention_days = _env_int(
+            "AI_ADVISORY_RETENTION_DAYS",
+            cfg.ai_advisory_retention_days,
+        )
         cfg.webhook_url = os.getenv("WEBHOOK_URL", cfg.webhook_url)
         cfg.webhook_targets = _env_json_list(
             "WEBHOOK_TARGETS_JSON", cfg.webhook_targets

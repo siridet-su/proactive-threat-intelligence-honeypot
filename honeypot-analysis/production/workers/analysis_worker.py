@@ -871,6 +871,9 @@ class AnalysisWorker:
                                 job["claim_owner"],
                                 job["claim_token"],
                                 fallback,
+                                enqueue_ai_advisory=(
+                                    self.config.enable_ai_advisory
+                                ),
                             )
                             if report_id is None:
                                 status = "stale_claim"
@@ -920,6 +923,9 @@ class AnalysisWorker:
                         job["claim_owner"],
                         job["claim_token"],
                         report,
+                        enqueue_ai_advisory=(
+                            self.config.enable_ai_advisory
+                        ),
                     )
                 except Exception as exc:
                     self._fail_claim(job, exc, retryable=True)
