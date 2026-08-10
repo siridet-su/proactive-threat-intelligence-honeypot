@@ -3,13 +3,17 @@ from __future__ import annotations
 import copy
 import json
 import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from production.ai_advisory.contracts import load_ai_advisory_policy
+from production.ai_advisory.contracts import AIAdvisoryContractError, load_ai_advisory_policy
 from production.ai_advisory.projection import build_ai_advisory_projection
-from production.ai_advisory.provider import AIProviderUnavailable
+from production.ai_advisory.contracts import sha256_json
+from production.ai_advisory.provider import AIProviderResponse, AIProviderUnavailable
+from production.ai_advisory.security import ProviderAliasScope
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
 from production.storage.backend import SQLITE_SCHEMA_VERSION, SQLiteStorage, StorageError
 from production.utils.config import ProductionConfig
@@ -19,6 +23,11 @@ from production.workers.ai_advisory_worker import AIAdvisoryWorker
 ROOT = Path(__file__).resolve().parents[1]
 BEHAVIOR_POLICY = ROOT / "configs" / "threat_hypothesis_behavior.trusted.json"
 CLASSIFICATION_POLICY = ROOT / "configs" / "classification_rules.trusted.json"
+RECONCILIATION_CUTOFF = {
+    "schema_version": "prediction_evidence_cutoff.v1",
+    "received_at": "2026-08-08T10:59:59.000000+00:00",
+    "event_id": "event-cutoff",
+}
 
 
 def _report(session_id: str = "ai-worker-session") -> dict:
@@ -53,6 +62,14 @@ def _storage_with_report(tmp_path: Path, *, enqueue: bool = True):
     storage.save_session(
         {"session_id": "ai-worker-session", "src_ip": "192.0.2.220"}
     )
+    if enqueue:
+        storage.store_event(
+            "sensor-test",
+            {
+                "eventid": "cowrie.session.connect",
+                "session": "ai-worker-session",
+            },
+        )
     job_id = storage.enqueue_analysis_job({"session_id": "ai-worker-session"})
     job = storage.claim_analysis_jobs("analysis-owner", 1, 60, 3)[0]
     report_id = storage.complete_analysis_job(
@@ -61,15 +78,38 @@ def _storage_with_report(tmp_path: Path, *, enqueue: bool = True):
         job["claim_token"],
         report,
         enqueue_ai_advisory=enqueue,
+        ai_advisory_reconciliation_cutoff=RECONCILIATION_CUTOFF,
     )
     return storage, report, report_id
+
+
+def _fixture_alias_scope() -> ProviderAliasScope:
+    from production.ai_advisory.contracts import sha256_json
+
+    scope = sha256_json(
+        {
+            "provider_id": "fixture",
+            "model_id": "fixture-model",
+            "adapter_revision": "fixture.v1",
+            "endpoint": "",
+            "api_version": "",
+        }
+    )
+    return ProviderAliasScope(b"a" * 32, scope)
 
 
 def _response(report: dict) -> dict:
     policy, digest, _ = load_ai_advisory_policy()
     projection = build_ai_advisory_projection(
-        report, policy=policy, policy_sha256=digest
+        report,
+        policy=policy,
+        policy_sha256=digest,
+        alias_scope=_fixture_alias_scope(),
     )
+    return _response_for_projection(projection)
+
+
+def _response_for_projection(projection: dict) -> dict:
     finding_id = next(
         item["finding_id"]
         for item in projection["findings"]
@@ -78,7 +118,7 @@ def _response(report: dict) -> dict:
     return {
         "schema_version": "ai_provider_output.v1",
         "projection_sha256": projection["projection_sha256"],
-        "policy_sha256": digest,
+        "policy_sha256": projection["provenance"]["ai_policy_sha256"],
         "validated_advisory": {
             "schema_version": "ai_validated_advisory_selection.v1",
             "abstained": False,
@@ -105,13 +145,44 @@ def _response(report: dict) -> dict:
 
 
 def _config(tmp_path: Path, fixture: Path, *, enabled: bool = True) -> ProductionConfig:
+    key_path = tmp_path / "ai-alias.key"
+    key_path.write_bytes(b"a" * 32)
+    key_path.chmod(0o600)
+    checked = datetime.now(timezone.utc) - timedelta(minutes=1)
+    receipt_path = tmp_path / "ai-activation.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "ai_advisory_activation_receipt.v1",
+                "status": "ready",
+                "provider_id": "fixture",
+                "model_id": "fixture-model",
+                "adapter_revision": "fixture.v1",
+                "endpoint_sha256": "",
+                "provider_adapter_reviewed": True,
+                "managed_worker_unit": "honeypot-ai-advisory-worker.service",
+                "worker_status": "ready",
+                "credentials_status": "not_required",
+                "reconciliation_mode": "new_sessions_only",
+                "reconciliation_cutoff": RECONCILIATION_CUTOFF,
+                "health_checked_at": checked.isoformat(),
+                "expires_at": (checked + timedelta(minutes=30)).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipt_path.chmod(0o600)
     return ProductionConfig(
         database_backend="sqlite",
         sqlite_database_path=str(tmp_path / "state.db"),
         enable_ai_advisory=enabled,
         ai_advisory_provider="fixture",
         ai_advisory_model="fixture-model",
+        ai_advisory_adapter_revision="fixture.v1",
         ai_advisory_fixture_response_path=str(fixture),
+        ai_advisory_alias_key_file=str(key_path.resolve()),
+        ai_advisory_activation_receipt_path=str(receipt_path.resolve()),
+        ai_advisory_reconciliation_cutoff=RECONCILIATION_CUTOFF,
     )
 
 
@@ -138,6 +209,7 @@ def test_schema_extension_and_optional_atomic_outbox(tmp_path: Path) -> None:
 
 def test_schema_extension_checksum_tampering_fails_closed(tmp_path: Path) -> None:
     storage, _report, _report_id = _storage_with_report(tmp_path, enqueue=False)
+    storage.initialize_ai_advisory_extension()
     with storage.connection() as conn:
         conn.execute(
             """
@@ -146,7 +218,7 @@ def test_schema_extension_checksum_tampering_fails_closed(tmp_path: Path) -> Non
             ("f" * 64, "non_authoritative_ai_advisory.v1"),
         )
     with pytest.raises(StorageError, match="checksum mismatch"):
-        storage.initialize()
+        storage.initialize_ai_advisory_extension()
 
 
 def test_ai_disabled_does_not_process_or_change_canonical_report(tmp_path: Path) -> None:
@@ -210,6 +282,7 @@ class _UnavailableProvider:
         policy_sha256,
         timeout_seconds,
         max_response_bytes,
+        idempotency_key,
     ):
         del (
             projection,
@@ -219,6 +292,7 @@ class _UnavailableProvider:
             policy_sha256,
             timeout_seconds,
             max_response_bytes,
+            idempotency_key,
         )
         raise AIProviderUnavailable("synthetic timeout")
 
@@ -313,6 +387,103 @@ class _NeverCalledProvider:
         raise AssertionError("the deterministic cache should prevent a provider call")
 
 
+class _RecordingProvider:
+    provider_id = "fixture"
+    model_id = "fixture-model"
+    adapter_revision = "fixture.v1"
+    endpoint_sha256 = ""
+    api_version = ""
+    request_options_sha256 = ""
+
+    def __init__(
+        self,
+        *,
+        delay: float = 0.0,
+        response_hash: str | None = None,
+        usage_metadata: dict | None = None,
+    ):
+        self.delay = delay
+        self.response_hash = response_hash
+        self.usage_metadata = usage_metadata or {}
+        self.idempotency_keys: list[str] = []
+
+    def generate(self, projection, **kwargs):
+        self.idempotency_keys.append(kwargs["idempotency_key"])
+        if self.delay:
+            time.sleep(self.delay)
+        output = _response_for_projection(dict(projection))
+        return AIProviderResponse(
+            provider_id=self.provider_id,
+            model_id=self.model_id,
+            structured_output=output,
+            response_sha256=(
+                self.response_hash
+                if self.response_hash is not None
+                else sha256_json(output)
+            ),
+            adapter_revision=self.adapter_revision,
+            usage_metadata=self.usage_metadata,
+        )
+
+
+class _AuthenticationFailureProvider(_RecordingProvider):
+    def generate(self, projection, **kwargs):
+        del projection, kwargs
+        raise AIAdvisoryContractError(
+            "synthetic redacted authentication failure",
+            code="provider_authentication_failed",
+        )
+
+
+def test_authentication_failure_cannot_change_committed_deterministic_report(
+    tmp_path: Path,
+) -> None:
+    storage, report, report_id = _storage_with_report(tmp_path, enqueue=True)
+    before_json = storage.get_report_by_id(report_id)["payload_json"]
+    fixture = tmp_path / "unused.json"
+    worker = AIAdvisoryWorker(
+        _config(tmp_path, fixture),
+        provider=_AuthenticationFailureProvider(),
+        storage=storage,
+    )
+
+    assert worker.process_once() == 0
+    assert storage.get_report_by_id(report_id)["payload_json"] == before_json
+    assert storage.get_report_by_id(report_id)["payload"] == report
+    outbox = storage.list_rows("ai_advisory_outbox")[0]
+    assert outbox["status"] == "failed"
+    assert outbox["last_error_code"] == "ai_job_invalid"
+    assert storage.get_ai_advisory_for_session("ai-worker-session") is None
+
+
+def test_accepted_provider_usage_is_bounded_to_aggregate_metrics(tmp_path: Path) -> None:
+    storage, report, _report_id = _storage_with_report(tmp_path, enqueue=True)
+    fixture = tmp_path / "unused.json"
+    provider = _RecordingProvider(
+        usage_metadata={
+            "prompt_token_count": 100,
+            "candidates_token_count": 20,
+            "thoughts_token_count": 5,
+            "total_token_count": 125,
+            "traffic_type": "ON_DEMAND",
+            "unexpected": "must-not-persist",
+        }
+    )
+    worker = AIAdvisoryWorker(
+        _config(tmp_path, fixture), provider=provider, storage=storage
+    )
+
+    assert worker.process_once() == 1
+    metrics = storage.get_ai_advisory_for_session("ai-worker-session")["metrics"]
+    assert metrics["provider_prompt_token_count"] == 100
+    assert metrics["provider_candidates_token_count"] == 20
+    assert metrics["provider_thoughts_token_count"] == 5
+    assert metrics["provider_total_token_count"] == 125
+    assert metrics["provider_traffic_type"] == "ON_DEMAND"
+    assert "unexpected" not in metrics
+    assert storage.get_report_by_id(_report_id)["payload"] == report
+
+
 def test_identical_request_replays_content_addressed_cache(tmp_path: Path) -> None:
     storage, report, _report_id = _storage_with_report(tmp_path, enqueue=True)
     fixture = tmp_path / "response.json"
@@ -384,7 +555,7 @@ def test_provider_options_are_part_of_cache_provenance_identity(tmp_path: Path) 
     assert first["cache_key"] != second["cache_key"]
 
 
-def test_advisory_retention_keeps_latest_per_session_and_only_extension_rows(
+def test_advisory_retention_strictly_expires_all_old_extension_rows(
     tmp_path: Path,
 ) -> None:
     storage, report, _report_id = _storage_with_report(tmp_path, enqueue=True)
@@ -434,14 +605,12 @@ def test_advisory_retention_keeps_latest_per_session_and_only_extension_rows(
 
     result = storage.prune_ai_advisories(
         30,
-        keep_latest_per_session=True,
+        keep_latest_per_session=False,
         now="2026-08-08T00:00:00+00:00",
     )
-    assert result["advisories_deleted"] == 1
+    assert result["advisories_deleted"] == 2
     assert result["outbox_deleted"] == 1
-    remaining = storage.list_rows("ai_advisories")
-    assert len(remaining) == 1
-    assert remaining[0]["advisory_id"] == first["advisory_id"]
+    assert storage.list_rows("ai_advisories") == []
     assert storage.list_rows("ai_advisory_outbox") == []
 
 
@@ -463,3 +632,132 @@ def test_previous_release_reader_can_use_database_with_additive_extension(
         assert legacy.execute(
             "SELECT COUNT(*) FROM events"
         ).fetchone()[0] == 0
+
+
+def test_canonical_initialize_ignores_broken_optional_ai_storage(tmp_path: Path) -> None:
+    database = tmp_path / "state.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE ai_advisories (wrong_column TEXT)")
+    storage = SQLiteStorage(f"sqlite:///{database}")
+    storage.initialize()
+    assert storage.list_rows("reports") == []
+
+
+def test_canonical_report_commit_survives_ai_enqueue_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    storage = SQLiteStorage(f"sqlite:///{tmp_path / 'state.db'}")
+    storage.initialize()
+    report = _report()
+    storage.save_session({"session_id": "ai-worker-session"})
+    job_id = storage.enqueue_analysis_job({"session_id": "ai-worker-session"})
+    job = storage.claim_analysis_jobs("owner", 1, 60, 3)[0]
+
+    def fail_extension():
+        raise StorageError("synthetic optional extension failure")
+
+    monkeypatch.setattr(storage, "initialize_ai_advisory_extension", fail_extension)
+    report_id = storage.complete_analysis_job(
+        job_id,
+        "owner",
+        job["claim_token"],
+        report,
+        enqueue_ai_advisory=True,
+    )
+    assert report_id
+    assert storage.get_report_by_id(report_id)["payload"]["assessment_id"] == report[
+        "assessment_id"
+    ]
+
+
+def test_non_sha_provider_hash_is_rejected_with_only_local_digest(
+    tmp_path: Path,
+) -> None:
+    storage, _report_value, _report_id = _storage_with_report(tmp_path, enqueue=True)
+    fixture = tmp_path / "unused.json"
+    provider = _RecordingProvider(response_hash="attacker-controlled-not-a-sha")
+    worker = AIAdvisoryWorker(
+        _config(tmp_path, fixture), provider=provider, storage=storage
+    )
+    assert worker.process_once() == 1
+    row = storage.get_ai_advisory_for_session("ai-worker-session")
+    assert row["status"] == "rejected"
+    assert row["payload"]["validation"]["reason_code"] == "hash_mismatch"
+    assert row["response_sha256"] != "attacker-controlled-not-a-sha"
+    assert len(row["response_sha256"]) == 64
+
+
+def test_adapter_that_ignores_timeout_cannot_block_worker(tmp_path: Path) -> None:
+    storage, _report_value, _report_id = _storage_with_report(tmp_path, enqueue=True)
+    fixture = tmp_path / "unused.json"
+    config = _config(tmp_path, fixture)
+    config.ai_advisory_timeout_seconds = 0.02
+    provider = _RecordingProvider(delay=0.5)
+    started = time.monotonic()
+    worker = AIAdvisoryWorker(config, provider=provider, storage=storage)
+    assert worker.process_once() == 0
+    assert time.monotonic() - started < 0.3
+    assert storage.list_rows("ai_advisory_outbox")[0]["status"] == "retry"
+
+
+def test_retry_after_post_provider_crash_reuses_idempotency_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    storage, _report_value, _report_id = _storage_with_report(tmp_path, enqueue=True)
+    fixture = tmp_path / "unused.json"
+    provider = _RecordingProvider()
+    worker = AIAdvisoryWorker(
+        _config(tmp_path, fixture), provider=provider, storage=storage
+    )
+    original = storage.complete_ai_advisory_job
+    calls = 0
+
+    def crash_before_completion(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise StorageError("synthetic crash after provider response")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(storage, "complete_ai_advisory_job", crash_before_completion)
+    assert worker.process_once() == 0
+    with storage.connection() as connection:
+        connection.execute(
+            "UPDATE ai_advisory_outbox SET next_retry_at=NULL WHERE status='retry'"
+        )
+    assert worker.process_once() == 1
+    assert len(provider.idempotency_keys) == 2
+    assert provider.idempotency_keys[0] == provider.idempotency_keys[1]
+    assert len(storage.list_rows("ai_advisories")) == 1
+
+
+def test_global_retention_bound_applies_across_unique_sessions(tmp_path: Path) -> None:
+    storage, report, _report_id = _storage_with_report(tmp_path, enqueue=True)
+    fixture = tmp_path / "response.json"
+    fixture.write_text(json.dumps(_response(report)), encoding="utf-8")
+    worker = AIAdvisoryWorker(_config(tmp_path, fixture), storage=storage)
+    assert worker.process_once() == 1
+    source = storage.list_rows("ai_advisories")[0]
+    with storage.connection() as connection:
+        for index in range(20):
+            values = dict(source)
+            values.update(
+                advisory_id=f"ai_advisory_bound_{index:032d}",
+                cache_key=f"ai_cache_bound_{index:032d}",
+                session_id=f"unique-session-{index}",
+                created_at=f"2026-08-09T00:00:{index:02d}+00:00",
+            )
+            columns = list(values)
+            connection.execute(
+                f"INSERT INTO ai_advisories ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                tuple(values[column] for column in columns),
+            )
+    result = storage.prune_ai_advisories(
+        30,
+        max_records=5,
+        max_storage_bytes=10_000_000,
+        now="2026-08-10T00:00:00+00:00",
+    )
+    assert result["records_retained"] == 5
+    assert len(storage.list_rows("ai_advisories")) == 5
+    assert len({row["session_id"] for row in storage.list_rows("ai_advisories")}) == 5

@@ -239,6 +239,17 @@ def _external_seed_health_payload(config: ProductionConfig) -> Dict[str, Any]:
 class DashboardHandler(BaseHTTPRequestHandler):
     config: ProductionConfig
 
+    def _storage(self):
+        """Reuse the process-initialized adapter without rerunning migrations."""
+
+        server = getattr(self, "server", None)
+        storage = getattr(server, "storage", None)
+        if storage is not None:
+            return storage
+        # Direct unit-test handlers have no server. Keep that narrow testing
+        # seam while production always receives the initialized adapter.
+        return open_storage(self.config.database_url)
+
     def _request_id(self) -> str:
         current = getattr(self, "_dashboard_request_id", "")
         if current:
@@ -349,7 +360,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 {"error": exc.public_message, "error_code": exc.code},
             )
             return
-        storage = open_storage(self.config.database_url)
+        storage = self._storage()
         try:
             feedback_id = storage.record_analyst_feedback(
                 normalize_submitted_feedback_payload(
@@ -382,7 +393,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path in {"/health/ready", "/ready"}:
             try:
-                ready = bool(open_storage(self.config.database_url).health_check().get("ok"))
+                ready = bool(self._storage().health_check().get("ok"))
             except Exception:
                 ready = False
             self._send_json(
@@ -397,7 +408,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not self._require_read():
             return
         if parsed.path == "/operational/metrics":
-            storage = open_storage(self.config.database_url)
+            storage = self._storage()
             metrics = storage.operational_metrics()
             self._send_json(
                 HTTPStatus.OK,
@@ -418,7 +429,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not session_id:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "session_id is required"})
                 return
-            storage = open_storage(self.config.database_url)
+            storage = self._storage()
             snapshot = storage.get_current_prediction_snapshot(session_id)
             if not snapshot:
                 self._send_json(
@@ -448,7 +459,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not session_id:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "session_id is required"})
                 return
-            storage = open_storage(self.config.database_url)
+            storage = self._storage()
             snapshot = storage.get_current_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
             self._send_json(
                 HTTPStatus.OK,
@@ -468,7 +479,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             feedback_filter = str(query.get("filter", ["all"])[0] or "all").strip().lower()
             if feedback_filter not in FEEDBACK_FILTERS:
                 feedback_filter = "all"
-            storage = open_storage(self.config.database_url)
+            storage = self._storage()
             rows = storage.list_rows("analyst_feedback", limit=limit)
             filtered_rows = filter_feedback_rows(rows, feedback_filter)[:100]
             self._send_json(
@@ -490,7 +501,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 limit = min(max(int(query.get("limit", ["1000"])[0]), 1), 5000)
             except ValueError:
                 limit = 1000
-            storage = open_storage(self.config.database_url)
+            storage = self._storage()
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -517,7 +528,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             limit = min(max(int(query.get("limit", ["100"])[0]), 1), 1000)
         except ValueError:
             limit = 100
-        storage = open_storage(self.config.database_url)
+        storage = self._storage()
         self._send_json(
             HTTPStatus.OK,
             {
@@ -592,14 +603,21 @@ def _validate_dashboard_runtime(config: ProductionConfig) -> None:
     )
 
 
-def build_server(config: ProductionConfig) -> BoundedThreadingHTTPServer:
+def build_server(
+    config: ProductionConfig,
+    *,
+    storage: Any = None,
+) -> BoundedThreadingHTTPServer:
     _validate_dashboard_runtime(config)
     DashboardHandler.config = config
-    return BoundedThreadingHTTPServer(
+    server = BoundedThreadingHTTPServer(
         (config.dashboard_host, config.dashboard_port),
         DashboardHandler,
         request_timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
     )
+    if storage is not None:
+        server.storage = storage
+    return server
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -613,8 +631,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     config = ProductionConfig.from_env(args.config)
     _validate_dashboard_runtime(config)
     storage = open_storage(config.database_url)
-    storage.initialize()
-    server = build_server(config)
+    server = build_server(config, storage=storage)
     print(
         json.dumps(
             {

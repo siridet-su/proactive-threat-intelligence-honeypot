@@ -5,9 +5,12 @@ This is the canonical architecture and analytical-authority contract.
 ## End-to-end flow
 
 ```text
-Pi Cowrie (sanitized JSON)
-  -> sensor_forwarder (bounded durable batches, sensor authentication)
-  -> HAProxy/PROXY protocol and ingest_api
+Internet attacker
+  -> capstone HAProxy/PROXY protocol
+  -> Pi Cowrie
+  -> sanitized JSON and sensor_forwarder (bounded durable batches)
+  -> private Tailscale HTTP with sensor authentication
+  -> capstone ingest_api
   -> SQLite (transactions, deduplication, leases, outbox)
   -> session_worker/session_monitor
   -> reviewed classification and canonical evidence reconstruction

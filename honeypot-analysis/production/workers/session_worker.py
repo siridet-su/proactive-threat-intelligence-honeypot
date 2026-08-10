@@ -1272,7 +1272,21 @@ class SessionWorker:
                 self._refresh_prediction_engine()
                 prediction_refreshed = True
             attempted += 1
-            event = row["event"]
+            event = dict(row["event"])
+            # The durable row is populated from authenticated ingest state.
+            # Never allow a payload-provided sensor value to become session
+            # provenance, including for legacy rows predating identity v1.
+            authenticated_sensor_id = str(
+                row.get("sensor_id") or self.config.sensor_id
+            )
+            event["sensor"] = authenticated_sensor_id
+            event["sensor_id"] = authenticated_sensor_id
+            identity = event.get("_honeypot_identity")
+            if isinstance(identity, dict):
+                identity = dict(identity)
+                identity["sensor_id"] = authenticated_sensor_id
+                identity["canonical_session_id"] = event.get("session")
+                event["_honeypot_identity"] = identity
             evidence_cutoff = make_evidence_cutoff(
                 row.get("received_at"),
                 row["event_id"],

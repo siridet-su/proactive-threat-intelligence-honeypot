@@ -811,7 +811,9 @@ class SQLiteStorage:
             self._ensure_sqlite_enrichment_priority_columns(conn)
             self._ensure_sqlite_webhook_delivery_columns(conn)
             self._run_sqlite_migrations(conn)
-            self._ensure_ai_advisory_schema(conn)
+            # The AI advisory extension is optional and must never participate
+            # in canonical storage readiness.  It is initialized explicitly by
+            # the AI worker/activation preflight instead.
 
     def _run_sqlite_migrations(self, conn: sqlite3.Connection) -> None:
         """Apply additive, checksummed migrations in one transaction each."""
@@ -943,6 +945,12 @@ class SQLiteStorage:
         if not final_check or str(final_check[0]).lower() != "ok":
             raise StorageError("SQLite quick_check failed after AI schema extension")
 
+    def initialize_ai_advisory_extension(self) -> None:
+        """Initialize the optional AI-only schema without coupling canonical startup."""
+
+        with self.connection() as conn:
+            self._ensure_ai_advisory_schema(conn)
+
     @staticmethod
     def _verify_ai_advisory_schema_objects(conn: sqlite3.Connection) -> None:
         rows = conn.execute(
@@ -958,10 +966,44 @@ class SQLiteStorage:
             raise StorageError("AI advisory schema extension is incomplete")
 
     def health_check(self) -> Dict[str, Any]:
-        with self.connection() as conn:
+        # Readiness must never acquire a schema-write transaction or repeat
+        # migration work.  In particular, do not call ``self.connection()``
+        # here: that normal operational path enforces file mode and write-side
+        # PRAGMAs before yielding a connection.
+        database_uri = f"{self.path.resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(database_uri, uri=True, timeout=5.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            required_tables = {
+                "events",
+                "sessions",
+                "analysis_jobs",
+                "reports",
+                "schema_migrations",
+            }
+            present_tables = {
+                str(item["name"])
+                for item in conn.execute(
+                    """
+                    SELECT name FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name IN (?, ?, ?, ?, ?)
+                    """,
+                    tuple(sorted(required_tables)),
+                ).fetchall()
+            }
             row = conn.execute("SELECT 1 AS ready").fetchone()
+        finally:
+            conn.close()
         return {
-            "ok": bool(row and int(row["ready"]) == 1),
+            "ok": bool(
+                row
+                and int(row["ready"]) == 1
+                and user_version == SQLITE_SCHEMA_VERSION
+                and present_tables == required_tables
+            ),
             "backend": SQLITE_BACKEND,
         }
 
@@ -2654,6 +2696,8 @@ class SQLiteStorage:
         token: str,
         report_payload: Dict[str, Any],
         enqueue_ai_advisory: bool = False,
+        ai_advisory_max_queue_records: int = 10_000,
+        ai_advisory_reconciliation_cutoff: Optional[Dict[str, str]] = None,
         *,
         now: Any = None,
     ) -> Optional[str]:
@@ -2712,45 +2756,6 @@ class SQLiteStorage:
                 """,
                 (report_id, session_id, stable_json(report_payload), current_time),
             )
-            if enqueue_ai_advisory:
-                if (
-                    report_payload.get("schema_version")
-                    != "session_assessment.v4"
-                    or not assessment_id
-                ):
-                    raise StorageError(
-                        "AI advisory may be enqueued only for session_assessment.v4"
-                    )
-                ai_job_id = stable_id(
-                    "ai_advisory_job",
-                    {
-                        "report_id": report_id,
-                        "assessment_id": assessment_id,
-                    },
-                )
-                ai_task = {
-                    "schema_version": "ai_advisory_task.v1",
-                    "report_id": report_id,
-                    "session_id": session_id,
-                    "assessment_id": assessment_id,
-                }
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO ai_advisory_outbox
-                    (job_id, report_id, session_id, assessment_id, status,
-                     payload_json, attempts, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?)
-                    """,
-                    (
-                        ai_job_id,
-                        report_id,
-                        session_id,
-                        assessment_id,
-                        stable_json(ai_task),
-                        current_time,
-                        current_time,
-                    ),
-                )
             cursor = conn.execute(
                 """
                 UPDATE analysis_jobs
@@ -2791,7 +2796,200 @@ class SQLiteStorage:
                     """,
                     (stable_json(payload), current_time, session_id),
                 )
+        # Canonical completion is committed before optional AI work is touched.
+        # This compatibility flag is best-effort; the AI worker also reconciles
+        # committed reports so a crash or extension failure cannot lose work.
+        if enqueue_ai_advisory:
+            try:
+                self.initialize_ai_advisory_extension()
+                self.enqueue_ai_advisory_job(
+                    report_id,
+                    session_id,
+                    assessment_id,
+                    reconciliation_cutoff=(
+                        ai_advisory_reconciliation_cutoff or {}
+                    ),
+                    max_queue_records=ai_advisory_max_queue_records,
+                )
+            except Exception:
+                pass
         return report_id
+
+    def enqueue_ai_advisory_job(
+        self,
+        report_id: str,
+        session_id: str,
+        assessment_id: str,
+        *,
+        reconciliation_cutoff: Dict[str, str],
+        max_queue_records: int = 10_000,
+        now: Any = None,
+    ) -> Optional[str]:
+        """Idempotently enqueue one committed report under a hard queue bound."""
+
+        report_key = _required_identity(report_id, "report_id")
+        session_key = _required_identity(session_id, "session_id")
+        assessment_key = _required_identity(assessment_id, "assessment_id")
+        cutoff = require_valid_evidence_cutoff(reconciliation_cutoff)
+        cutoff_key = evidence_cutoff_sort_key(cutoff)
+        queue_limit = int(max_queue_records)
+        if queue_limit < 1:
+            raise ValueError("max_queue_records must be positive")
+        current_time = _utc_timestamp(now)
+        ai_job_id = stable_id(
+            "ai_advisory_job",
+            {"report_id": report_key, "assessment_id": assessment_key},
+        )
+        task = {
+            "schema_version": "ai_advisory_task.v1",
+            "report_id": report_key,
+            "session_id": session_key,
+            "assessment_id": assessment_key,
+        }
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            report = conn.execute(
+                "SELECT session_id, payload_json FROM reports WHERE report_id=? LIMIT 1",
+                (report_key,),
+            ).fetchone()
+            if report is None or str(report["session_id"]) != session_key:
+                raise StorageError("AI advisory enqueue requires a committed report")
+            try:
+                payload = json.loads(report["payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise StorageError("committed report is not valid JSON") from exc
+            if (
+                payload.get("schema_version") != "session_assessment.v4"
+                or str(payload.get("assessment_id") or "") != assessment_key
+            ):
+                raise StorageError("AI advisory enqueue report identity is invalid")
+            existing = conn.execute(
+                "SELECT job_id FROM ai_advisory_outbox WHERE job_id=? LIMIT 1",
+                (ai_job_id,),
+            ).fetchone()
+            if existing:
+                return ai_job_id
+            first_event = conn.execute(
+                """
+                SELECT received_at, event_id
+                FROM events
+                WHERE session_id=?
+                ORDER BY received_at, event_id
+                LIMIT 1
+                """,
+                (session_key,),
+            ).fetchone()
+            if first_event is None:
+                return None
+            first_event_key = evidence_cutoff_sort_key(
+                {
+                    "schema_version": cutoff["schema_version"],
+                    "received_at": first_event["received_at"],
+                    "event_id": first_event["event_id"],
+                }
+            )
+            if first_event_key <= cutoff_key:
+                return None
+            queued = conn.execute(
+                """
+                SELECT COUNT(*) AS count FROM ai_advisory_outbox
+                WHERE status IN ('queued', 'retry', 'running')
+                """
+            ).fetchone()
+            if int(queued["count"] if queued else 0) >= queue_limit:
+                return None
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO ai_advisory_outbox
+                (job_id, report_id, session_id, assessment_id, status,
+                 payload_json, attempts, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?)
+                """,
+                (
+                    ai_job_id,
+                    report_key,
+                    session_key,
+                    assessment_key,
+                    stable_json(task),
+                    current_time,
+                    current_time,
+                ),
+            )
+        return ai_job_id
+
+    def reconcile_ai_advisory_outbox(
+        self,
+        *,
+        reconciliation_cutoff: Dict[str, str],
+        limit: int = 100,
+        max_queue_records: int = 10_000,
+    ) -> Dict[str, int]:
+        """Recover post-commit enqueue gaps without touching canonical rows."""
+
+        cutoff = require_valid_evidence_cutoff(reconciliation_cutoff)
+        scan_limit = min(max(int(limit), 1), 10_000)
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.report_id, r.session_id, r.payload_json
+                FROM reports AS r
+                LEFT JOIN ai_advisory_outbox AS o
+                  ON o.report_id = r.report_id
+                WHERE o.job_id IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM events AS present_event
+                      WHERE present_event.session_id = r.session_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM events AS prior_event
+                      WHERE prior_event.session_id = r.session_id
+                        AND (
+                            prior_event.received_at < ?
+                            OR (
+                                prior_event.received_at = ?
+                                AND prior_event.event_id <= ?
+                            )
+                        )
+                  )
+                  AND json_valid(r.payload_json)
+                  AND json_extract(r.payload_json, '$.schema_version') =
+                      'session_assessment.v4'
+                  AND typeof(json_extract(r.payload_json, '$.assessment_id')) =
+                      'text'
+                ORDER BY r.created_at, r.report_id
+                LIMIT ?
+                """,
+                (
+                    cutoff["received_at"],
+                    cutoff["received_at"],
+                    cutoff["event_id"],
+                    scan_limit,
+                ),
+            ).fetchall()
+        enqueued = 0
+        bounded = 0
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if payload.get("schema_version") != "session_assessment.v4":
+                continue
+            assessment_id = str(payload.get("assessment_id") or "").strip()
+            if not assessment_id:
+                continue
+            result = self.enqueue_ai_advisory_job(
+                str(row["report_id"]),
+                str(row["session_id"]),
+                assessment_id,
+                reconciliation_cutoff=cutoff,
+                max_queue_records=max_queue_records,
+            )
+            if result is None:
+                bounded += 1
+                break
+            enqueued += 1
+        return {"scanned": len(rows), "enqueued": enqueued, "bounded": bounded}
 
     def claim_ai_advisory_jobs(
         self,
@@ -2846,6 +3044,54 @@ class SQLiteStorage:
             raise StorageError("stored report is not valid JSON") from exc
         return item
 
+    def get_current_report_for_session(
+        self, session_id: str
+    ) -> Optional[Dict[str, Any]]:
+        session_key = _required_identity(session_id, "session_id")
+        with self.connection() as conn:
+            session = conn.execute(
+                "SELECT payload_json FROM sessions WHERE session_id=? LIMIT 1",
+                (session_key,),
+            ).fetchone()
+            current_report_id = ""
+            if session is not None:
+                try:
+                    session_payload = json.loads(session["payload_json"] or "{}")
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise StorageError("stored session is not valid JSON") from exc
+                current_report_id = str(
+                    session_payload.get("report_id") or ""
+                ).strip()
+            if current_report_id:
+                row = conn.execute(
+                    """
+                    SELECT * FROM reports
+                    WHERE report_id=? AND session_id=?
+                    LIMIT 1
+                    """,
+                    (current_report_id, session_key),
+                ).fetchone()
+            else:
+                # Compatibility for historical session rows created before the
+                # report pointer was recorded.
+                row = conn.execute(
+                    """
+                    SELECT * FROM reports
+                    WHERE session_id=?
+                    ORDER BY created_at DESC, report_id DESC
+                    LIMIT 1
+                    """,
+                    (session_key,),
+                ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        try:
+            item["payload"] = json.loads(item.get("payload_json") or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise StorageError("stored report is not valid JSON") from exc
+        return item
+
     def _decode_ai_advisory_row(self, row: Any) -> Optional[Dict[str, Any]]:
         if row is None:
             return None
@@ -2882,27 +3128,63 @@ class SQLiteStorage:
             ).fetchone()
         return self._decode_ai_advisory_row(row)
 
+    def get_ai_advisory_for_report(
+        self, report_id: str, assessment_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM ai_advisories
+                WHERE report_id=? AND assessment_id=?
+                ORDER BY created_at DESC, advisory_id DESC
+                LIMIT 1
+                """,
+                (
+                    _required_identity(report_id, "report_id"),
+                    _required_identity(assessment_id, "assessment_id"),
+                ),
+            ).fetchone()
+        return self._decode_ai_advisory_row(row)
+
+    def get_ai_advisory_outbox_for_report(
+        self, report_id: str, assessment_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM ai_advisory_outbox
+                WHERE report_id=? AND assessment_id=?
+                LIMIT 1
+                """,
+                (
+                    _required_identity(report_id, "report_id"),
+                    _required_identity(assessment_id, "assessment_id"),
+                ),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def prune_ai_advisories(
         self,
         retention_days: int = 30,
-        keep_latest_per_session: bool = True,
+        keep_latest_per_session: bool = False,
         *,
+        max_records: int = 50_000,
+        max_storage_bytes: int = 256 * 1024 * 1024,
         now: Any = None,
     ) -> Dict[str, Any]:
-        """Apply the bounded, non-authoritative advisory retention policy.
-
-        Only completed advisory records and terminal outbox rows are eligible.
-        Canonical reports, sessions, events, and historical compatibility data
-        are never touched.  Keeping the newest advisory per session makes a
-        short PoC TTL safe for repeated review without retaining an unbounded
-        cache.
-        """
+        """Strictly bound optional advisory rows by age, count, and bytes."""
         if (
             isinstance(retention_days, bool)
             or not isinstance(retention_days, int)
             or not 1 <= retention_days <= 3650
         ):
             raise ValueError("retention_days must be between 1 and 3650")
+        if keep_latest_per_session:
+            raise ValueError("keep_latest_per_session is incompatible with bounded retention")
+        if isinstance(max_records, bool) or int(max_records) < 1:
+            raise ValueError("max_records must be positive")
+        if isinstance(max_storage_bytes, bool) or int(max_storage_bytes) < 1:
+            raise ValueError("max_storage_bytes must be positive")
         current_time = _utc_timestamp(now)
         reference = _parse_dt(current_time)
         if reference is None:  # pragma: no cover - _utc_timestamp validates
@@ -2910,61 +3192,44 @@ class SQLiteStorage:
         cutoff = (reference - timedelta(days=retention_days)).isoformat()
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            old_rows = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    SELECT advisory_id, session_id, created_at
-                    FROM ai_advisories
-                    WHERE created_at < ?
-                    ORDER BY session_id, created_at, advisory_id
-                    """,
-                    (cutoff,),
-                ).fetchall()
-            ]
-            keep_ids: set[str] = set()
-            if keep_latest_per_session:
-                latest: Dict[str, Dict[str, Any]] = {}
-                for row in old_rows + [
-                    dict(row)
-                    for row in conn.execute(
-                        """
-                        SELECT advisory_id, session_id, created_at
-                        FROM ai_advisories
-                        WHERE created_at >= ?
-                        """,
-                        (cutoff,),
-                    ).fetchall()
-                ]:
-                    session_id = str(row.get("session_id") or "")
-                    current = latest.get(session_id)
-                    candidate_key = (str(row.get("created_at") or ""), str(row["advisory_id"]))
-                    current_key = (
-                        (str(current.get("created_at") or ""), str(current["advisory_id"]))
-                        if current
-                        else ("", "")
-                    )
-                    if current is None or candidate_key > current_key:
-                        latest[session_id] = row
-                keep_ids = {
-                    str(row["advisory_id"])
-                    for row in latest.values()
-                    if row.get("advisory_id")
-                }
-            delete_ids = [
-                str(row["advisory_id"])
-                for row in old_rows
-                if not keep_latest_per_session
-                or str(row["advisory_id"]) not in keep_ids
-            ]
-            deleted_advisories = 0
-            if delete_ids:
-                placeholders = ",".join("?" for _ in delete_ids)
-                cursor = conn.execute(
-                    f"DELETE FROM ai_advisories WHERE advisory_id IN ({placeholders})",
-                    tuple(delete_ids),
+            cursor = conn.execute(
+                "DELETE FROM ai_advisories WHERE created_at < ?",
+                (cutoff,),
+            )
+            deleted_advisories = int(cursor.rowcount or 0)
+            retained_rows = conn.execute(
+                """
+                SELECT advisory_id,
+                       LENGTH(advisory_id) + LENGTH(cache_key) + LENGTH(report_id)
+                       + LENGTH(session_id) + LENGTH(assessment_id) + LENGTH(status)
+                       + LENGTH(projection_sha256) + LENGTH(request_sha256)
+                       + LENGTH(response_sha256) + LENGTH(provider_id) + LENGTH(model_id)
+                       + LENGTH(prompt_sha256) + LENGTH(schema_sha256)
+                       + LENGTH(policy_sha256) + LENGTH(payload_json)
+                       + LENGTH(metrics_json) + LENGTH(created_at) AS record_bytes
+                FROM ai_advisories
+                ORDER BY created_at DESC, advisory_id DESC
+                """
+            ).fetchall()
+            used_records = 0
+            used_bytes = 0
+            overflow_ids: list[tuple[str]] = []
+            for row in retained_rows:
+                row_bytes = int(row["record_bytes"] or 0)
+                if (
+                    used_records >= int(max_records)
+                    or used_bytes + row_bytes > int(max_storage_bytes)
+                ):
+                    overflow_ids.append((str(row["advisory_id"]),))
+                    continue
+                used_records += 1
+                used_bytes += row_bytes
+            if overflow_ids:
+                conn.executemany(
+                    "DELETE FROM ai_advisories WHERE advisory_id=?",
+                    overflow_ids,
                 )
-                deleted_advisories = int(cursor.rowcount or 0)
+                deleted_advisories += len(overflow_ids)
             cursor = conn.execute(
                 """
                 DELETE FROM ai_advisory_outbox
@@ -2977,7 +3242,11 @@ class SQLiteStorage:
         return {
             "retention_days": retention_days,
             "cutoff": cutoff,
-            "keep_latest_per_session": bool(keep_latest_per_session),
+            "keep_latest_per_session": False,
+            "max_records": int(max_records),
+            "max_storage_bytes": int(max_storage_bytes),
+            "records_retained": used_records,
+            "storage_bytes_retained": used_bytes,
             "advisories_deleted": deleted_advisories,
             "outbox_deleted": deleted_outbox,
         }

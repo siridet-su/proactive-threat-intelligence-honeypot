@@ -120,6 +120,7 @@ sudo cp deployment/systemd/honeypot-enrichment-worker.service /etc/systemd/syste
 sudo cp deployment/systemd/honeypot-feed-refresh.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-feed-refresh.timer /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-analysis-worker.service /etc/systemd/system/
+sudo cp deployment/systemd/honeypot-ai-advisory-worker.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-dashboard-api.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-webhook-dispatcher.service /etc/systemd/system/
 sudo cp deployment/systemd/honeypot-monitor-web.service /etc/systemd/system/
@@ -143,6 +144,46 @@ sudo systemctl enable --now honeypot-monitor-web
 sudo systemctl enable --now honeypot-threat-hunt-worker
 sudo systemctl enable --now honeypot-session-count-monitor.timer
 ```
+
+The AI advisory worker is a managed, static, disabled-by-default unit. Do not
+enable it or add an install target. Installing the unit alone does not activate
+AI, and `ENABLE_AI_ADVISORY=false` remains the common default. A reviewed
+research activation must explicitly start the static unit only after all of the
+following exist and pass validation:
+
+- an installed and reviewed provider adapter (`google_vertex_gemini` is the
+  only reviewed hosted adapter and requires the optional `google-genai`
+  dependency);
+- an owner-only provider-alias HMAC key and standard Google Application Default
+  Credentials with the configured quota project; the Vertex adapter rejects
+  API-key-file configuration;
+- an exact HTTPS endpoint host allowlist and reviewed provider/model/config;
+- a successful readiness check and a short-lived owner-only
+  `ai_advisory_activation_receipt.v1` naming
+  `honeypot-ai-advisory-worker.service` with status `ready`;
+- a reviewed canonical `prediction_evidence_cutoff.v1` value in
+  `AI_ADVISORY_RECONCILIATION_CUTOFF_JSON`, with the exact same object and
+  `reconciliation_mode=new_sessions_only` in the activation receipt.
+
+The activation receipt is valid for at most one hour. Configuration fails
+closed if it is missing, stale, has unexpected fields, names a different
+provider/model/adapter/endpoint, or does not attest the managed worker and
+credential state, or names a different reconciliation cutoff. The cutoff is
+the maximum durable `(events.received_at, events.event_id)` tuple captured only
+after source forwarding is paused and accepted ingest plus canonical queues are
+drained. Timestamp text is canonical UTC at microsecond precision; equality is
+excluded. Install the exact config and matching receipt, start the static worker,
+then resume forwarding. Queue, retry, retention-age, record-count, and stored-byte
+limits must be reviewed before activation. The static unit is intentionally not
+part of the normal `enable --now` sequence, and no production activation is
+authorized by these templates.
+
+For a GCE runtime, use metadata-server ADC from the VM's attached service
+account. Do not install user ADC or a service-account key file. Before creating
+the short-lived activation receipt, verify that metadata reports the configured
+project and that both the VM OAuth scopes and service-account IAM authorize
+Vertex AI. Metadata credentials without an explicit quota project are accepted
+only when the metadata-detected project exactly matches configuration.
 
 7. Verify operation.
 
@@ -248,10 +289,18 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now honeypot-sensor-forwarder
 ```
 
-The Pi environment needs `HONEYPOT_API_TOKEN`, `SENSOR_ID`,
-`COWRIE_LOG_PATH`, `FORWARDER_SPOOL_PATH`, and `INGEST_URL`. It does not need
-database credentials, SecureBERT, or enrichment provider
-API keys.
+The Pi environment needs `HONEYPOT_API_TOKEN_FILE`, `SENSOR_ID`,
+`COWRIE_LOG_PATH`, `FORWARDER_SPOOL_PATH`, `FORWARDER_QUARANTINE_PATH`, and
+`INGEST_URL`. It does not need database credentials, SecureBERT, or enrichment
+provider API keys.
+
+Indexed permanent ingest rejects are written to the owner-only quarantine
+before being removed from the primary spool. Bound it with
+`FORWARDER_MAX_QUARANTINE_BYTES` and `FORWARDER_MAX_QUARANTINE_EVENTS`.
+Oldest quarantine rows are evicted when a bound is reached; the result metrics
+report quarantine and eviction counts. If quarantine persistence fails, the
+primary spool remains unchanged so acknowledged valid rows replay only as
+idempotent duplicates.
 
 ## Read-Only Web Monitor
 

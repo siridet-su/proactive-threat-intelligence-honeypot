@@ -11,19 +11,19 @@ MONITOR_HTML = Path(__file__).parents[1] / "production" / "api" / "static" / "mo
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for the rendered-DOM regression")
-def test_loopback_commands_load_automatically_and_replace_only_matching_cells() -> None:
+def test_admin_authorized_commands_replace_only_matching_cells() -> None:
     html = MONITOR_HTML.read_text(encoding="utf-8")
     assert "UNIQUE_RENDERED_DOM_RAW_COMMAND" not in html
-    assert "Reveal with admin token" not in html
-    assert "window.prompt" not in html
-    assert "void loadInternalCommands(state.detailSessionId);" in html
+    assert "Reveal with admin token" in html
+    assert "window.prompt" in html
+    assert "void loadInternalCommands(adminToken, state.detailSessionId);" in html
     loader_start = html.index("    async function loadInternalCommands")
     loader_end = html.index("    function normalizedEventType", loader_start)
     assert loader_start >= 0 and loader_end > loader_start
     loader = html[loader_start:loader_end]
     assert "/api/internal/session-commands?session_id=" in loader
     assert "cache: 'no-store'" in loader
-    assert "Authorization" not in loader
+    assert "'Authorization': `Bearer ${token}`" in loader
     node_script = r'''
 const fs = require("fs");
 const vm = require("vm");

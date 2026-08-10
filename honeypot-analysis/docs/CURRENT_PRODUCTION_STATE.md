@@ -58,9 +58,43 @@ separate reviewed activation explicitly enables it.
 
 ## Verification boundary
 
-The 2026-08-10 read-only probe verified hostname `capstone`, Tailscale IPv4
+The 2026-08-10 verification confirmed hostname `capstone`, Tailscale IPv4
 `100.85.50.74`, `/opt/honeypot` resolving to the release shown above, and an
-exactly matching `DEPLOYED_COMMIT`. Service health, current disk capacity,
-backup availability, Raspberry Pi state, and database integrity were not
-re-probed for this SSH/reference-only update and are
-`NOT_DETERMINABLE_FROM_THIS_REFERENCE_UPDATE`.
+exactly matching `DEPLOYED_COMMIT`. The eight managed application daemons are
+active and enabled under `multi-user.target`; enabling them did not restart the
+running processes. Both managed timers are active/enabled, and the repository
+managed-unit validator reports `status=valid` for `gcp_backend`.
+
+The same maintenance pass confirmed healthy ingest/dashboard/monitor liveness
+responses and left application configuration, SQLite, models, and services
+otherwise unchanged. A later read-only pre-activation audit found dashboard
+readiness exceeding 15 seconds because the deployed handler repeats SQLite
+schema initialization. The repository candidate contains a read-only readiness
+fix, but it has not been deployed and no production service was restarted.
+
+Immediately before the approved backup cleanup, the root filesystem was
+105,427,566,592 bytes total, 89,255,714,816 bytes used, and 11,759,644,672
+bytes available. `/var/backups/honeypot` accounted for 74,753,236,992 bytes.
+Only the three superseded full database/WAL/SHM payload sets from the failed
+2026-08-09 16:22 cutover were removed; their manifests and diagnostic receipts
+were retained. The successful 17:36 incoming/final/pre-promotion rollback chain
+was retained and its three database hashes were reverified against the
+migration receipts. The latest final backup also passed a fresh read-only
+`quick_check`.
+
+After `sync`, `/var/backups/honeypot` was 55,931,482,112 bytes and the root
+filesystem had 30,578,216,960 bytes available (28.48 GiB). The cleanup reclaimed
+18,821,754,880 bytes (17.53 GiB) from the backup directory and met the 25 GiB
+minimum, but not the preferred 30 GiB target. The retained final backup predates
+subsequent live writes, so a separately authorized fresh current-state backup
+is still required before deployment. No live database/WAL/SHM, release,
+runtime/model evidence, application service, or production configuration was
+changed.
+
+The Pi was audited read-only. The canonical sanitized sensor forwarder is
+active/enabled, but the legacy Redis collector and hardware agents are also
+active/enabled. The legacy processor is enabled and repeatedly failing with
+automatic restarts; Redis is loopback-only and active, while no local
+`mongod.service` is installed. Those services were not stopped or changed.
+Their ownership and data-retention purpose must be resolved before any legacy
+path is retired or any MongoDB environment is reused.

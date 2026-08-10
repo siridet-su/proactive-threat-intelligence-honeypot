@@ -34,6 +34,10 @@ from production.utils.sensitive_data import (
     sanitize_cowrie_event_for_persistence,
 )
 from production.utils.serialization import utc_now
+from production.utils.sensor_identity import (
+    bind_authenticated_sensor_identity,
+    validate_sensor_session_id,
+)
 from production.utils.service_lifecycle import serve_http_until_stopped
 from production.utils.startup_diagnostics import StartupDiagnostics
 
@@ -57,6 +61,10 @@ def validate_event(event: Dict[str, Any]) -> Tuple[bool, str]:
     event_id = event.get("eventid")
     if not isinstance(event_id, str) or not event_id.strip():
         return False, "eventid is required"
+    try:
+        validate_sensor_session_id(event.get("session"))
+    except ValueError as exc:
+        return False, str(exc)
     return True, ""
 
 
@@ -526,9 +534,13 @@ class IngestHandler(BaseHTTPRequestHandler):
                 )
                 continue
             sanitized_event = sanitize_cowrie_event_for_persistence(event)
+            canonical_event = bind_authenticated_sensor_identity(
+                sanitized_event,
+                sensor_id,
+            )
             try:
                 stored_event_id, inserted = self.server.storage.store_event(
-                    sensor_id, sanitized_event
+                    sensor_id, canonical_event
                 )
             except Exception as exc:
                 self._log_event(

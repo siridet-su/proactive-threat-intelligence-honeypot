@@ -10,6 +10,8 @@ from production.ai_advisory.contracts import (
     AIAdvisoryContractError,
     sha256_json,
 )
+from production.ai_advisory.security import ProviderAliasScope
+from production.utils.serialization import stable_id
 from production.reporting.session_assessment_v4 import validate_session_assessment_v4
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
 
@@ -123,6 +125,112 @@ ALLOWED_OUTPUT_KEYS = {
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 SAFE_ATOM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
+EVIDENCE_KINDS = {
+    "command_observation",
+    "direct_transfer_observation",
+    "cowrie_event_observation",
+    "trusted_attck_candidate",
+}
+EVIDENCE_STATUSES = {
+    "observed",
+    "supported",
+    "partially_supported",
+    "trusted",
+}
+FINDING_ORIGINS = {"session_assessment.v4", "response_guidance.v3"}
+FINDING_STATUSES = {"supported", "partially_supported", "insufficient_evidence"}
+FINDING_TYPES = {
+    "connected_artifact_activity",
+    "connected_transfer_execution",
+    "connected_transfer_permission_change",
+    "connected_transfer_permission_execution",
+    "observed_cowrie_command_transfer_attempt",
+    "observed_cowrie_execution_attempt_command",
+    "observed_cowrie_file_transfer",
+    "observed_cowrie_filesystem_change_command",
+    "observed_cowrie_inspection_command",
+    "observed_cowrie_transfer_event",
+    "observed_credential_path_read_command",
+    "observed_transfer_without_linked_execution",
+    "piped_remote_content_execution_attempt",
+    "possible_continued_access_preparation",
+    "possible_credential_access_preparation",
+    "possible_follow_on_execution",
+    "possible_tool_transfer_or_staging",
+    "possible_trace_removal",
+    "observed-command-corroboration",
+    "observed-cowrie-command-transfer-attempt",
+    "observed-cowrie-execution-attempt-command",
+    "observed-cowrie-filesystem-change-command",
+    "observed-cowrie-inspection-command",
+    "observed-cowrie-transfer-event",
+    "observed-credential-access-candidate",
+    "observed-credential-access-corroboration",
+    "observed-execution-corroboration",
+    "observed-interactive-command",
+    "observed-transfer-event-corroboration",
+}
+POLICY_RULE_IDS = {
+    "observed-command-corroboration",
+    "observed-cowrie-command-transfer-attempt",
+    "observed-cowrie-execution-attempt-command",
+    "observed-cowrie-filesystem-change-command",
+    "observed-cowrie-inspection-command",
+    "observed-cowrie-transfer-event",
+    "observed-credential-access-candidate",
+    "observed-credential-access-corroboration",
+    "observed-direct-cowrie-transfer-event",
+    "observed-execution-corroboration",
+    "observed-interactive-command",
+    "observed-resolved-credential-path-read",
+    "observed-supported-cowrie-command-transfer-attempt",
+    "observed-supported-cowrie-execution-attempt",
+    "observed-supported-cowrie-filesystem-change-command",
+    "observed-supported-cowrie-inspection-command",
+    "observed-transfer-event-corroboration",
+    "observed-transfer-without-execution",
+    "remote-content-piped-to-shell",
+    "transfer-execution",
+    "transfer-permission-change",
+    "transfer-permission-execution",
+    "transfer-permission-execution-deletion",
+}
+SEVERITIES = {"not_applicable", "info", "low", "medium", "high", "critical"}
+SEMANTIC_FAMILIES = {
+    "",
+    "sensitive_read",
+    "transfer",
+    "inspection",
+    "filesystem",
+    "execution",
+    "command_transfer_attempt",
+}
+RELATIONSHIP_TYPES = {
+    "observed_relationship",
+    "account_modified",
+    "conditional_failure_successor",
+    "conditional_successor",
+    "explicit_sequence",
+    "piped_to",
+    "same_path_transition",
+    "transfer_observation_confirmation",
+}
+RELATIONSHIP_STATUSES = {
+    "observed",
+    "supported",
+    "partially_supported",
+    "condition_satisfied",
+    "condition_not_satisfied",
+    "condition_unknown",
+}
+HYPOTHESIS_STATUSES = {"active"}
+GUIDANCE_STATUSES = {"available", "unavailable", "validation_rejected"}
+GUIDANCE_STATES = {
+    "actions_available",
+    "no_applicable_grounded_action",
+    "policy_or_profile_unavailable",
+    "validation_rejected",
+}
 
 
 def _clean(value: Any) -> str:
@@ -253,8 +361,10 @@ def validate_ai_advisory_projection(
     for index, raw in enumerate(evidence_items):
         item = _exact(raw, EVIDENCE_ITEM_KEYS, f"evidence_index[{index}]")
         evidence_id = _atom(item.get("evidence_id"), "evidence_id")
-        _atom(item.get("evidence_kind"), "evidence_kind")
-        _atom(item.get("status"), "evidence status")
+        if _atom(item.get("evidence_kind"), "evidence_kind") not in EVIDENCE_KINDS:
+            raise AIAdvisoryContractError("evidence kind is not allowlisted")
+        if _atom(item.get("status"), "evidence status") not in EVIDENCE_STATUSES:
+            raise AIAdvisoryContractError("evidence status is not allowlisted")
         if type(item.get("ordinal")) is not int or item["ordinal"] != index:
             raise AIAdvisoryContractError("evidence ordinals are invalid")
         if evidence_id in evidence_ids:
@@ -268,8 +378,10 @@ def validate_ai_advisory_projection(
     for index, raw in enumerate(relationship_items):
         item = _exact(raw, RELATIONSHIP_KEYS, f"relationships[{index}]")
         relationship_id = _atom(item.get("relationship_id"), "relationship_id")
-        for key in ("relationship_type", "status"):
-            _atom(item.get(key), key)
+        if _atom(item.get("relationship_type"), "relationship_type") not in RELATIONSHIP_TYPES:
+            raise AIAdvisoryContractError("relationship type is not allowlisted")
+        if _atom(item.get("status"), "status") not in RELATIONSHIP_STATUSES:
+            raise AIAdvisoryContractError("relationship status is not allowlisted")
         for key in ("source_evidence_ref", "target_evidence_ref"):
             ref = _atom(item.get(key), key, allow_empty=True)
             if ref and ref not in evidence_ids:
@@ -288,9 +400,18 @@ def validate_ai_advisory_projection(
     for index, raw in enumerate(finding_items):
         item = _exact(raw, FINDING_KEYS, f"findings[{index}]")
         finding_id = _atom(item.get("finding_id"), "finding_id")
-        for key in ("origin", "finding_type", "policy_rule_id", "severity", "status"):
-            _atom(item.get(key), key)
-        _atom(item.get("semantic_family"), "semantic_family", allow_empty=True)
+        if _atom(item.get("origin"), "origin") not in FINDING_ORIGINS:
+            raise AIAdvisoryContractError("finding origin is not allowlisted")
+        if _atom(item.get("finding_type"), "finding_type") not in FINDING_TYPES:
+            raise AIAdvisoryContractError("finding type is not allowlisted")
+        if _atom(item.get("policy_rule_id"), "policy_rule_id") not in POLICY_RULE_IDS:
+            raise AIAdvisoryContractError("finding policy rule is not allowlisted")
+        if _atom(item.get("severity"), "severity") not in SEVERITIES:
+            raise AIAdvisoryContractError("finding severity is not allowlisted")
+        if _atom(item.get("status"), "status") not in FINDING_STATUSES:
+            raise AIAdvisoryContractError("finding status is not allowlisted")
+        if _atom(item.get("semantic_family"), "semantic_family", allow_empty=True) not in SEMANTIC_FAMILIES:
+            raise AIAdvisoryContractError("semantic family is not allowlisted")
         refs = set(_atoms(item.get("evidence_refs"), "finding evidence_refs"))
         rel_refs = set(_atoms(item.get("relationship_refs"), "finding relationship_refs"))
         if refs - evidence_ids or rel_refs - relationship_ids:
@@ -307,8 +428,10 @@ def validate_ai_advisory_projection(
         raise AIAdvisoryContractError("hypotheses must be bounded")
     for index, raw in enumerate(hypothesis_items):
         item = _exact(raw, HYPOTHESIS_KEYS, f"hypotheses[{index}]")
-        for key in ("hypothesis_id", "hypothesis_set_id", "status"):
+        for key in ("hypothesis_id", "hypothesis_set_id"):
             _atom(item.get(key), key)
+        if _atom(item.get("status"), "status") not in HYPOTHESIS_STATUSES:
+            raise AIAdvisoryContractError("hypothesis status is not allowlisted")
         if set(_atoms(item.get("evidence_refs"), "hypothesis evidence_refs")) - evidence_ids:
             raise AIAdvisoryContractError("hypothesis evidence reference is unresolved")
         if set(_atoms(item.get("relationship_refs"), "hypothesis relationship_refs")) - relationship_ids:
@@ -319,8 +442,11 @@ def validate_ai_advisory_projection(
             raise AIAdvisoryContractError("hypothesis code is unknown")
 
     guidance = _exact(root.get("guidance"), GUIDANCE_KEYS, "guidance")
-    for key in ("guidance_id", "status", "guidance_state"):
-        _atom(guidance.get(key), key)
+    _atom(guidance.get("guidance_id"), "guidance_id")
+    if _atom(guidance.get("status"), "status") not in GUIDANCE_STATUSES:
+        raise AIAdvisoryContractError("guidance status is not allowlisted")
+    if _atom(guidance.get("guidance_state"), "guidance_state") not in GUIDANCE_STATES:
+        raise AIAdvisoryContractError("guidance state is not allowlisted")
     actions = guidance.get("actions")
     if not isinstance(actions, list) or len(actions) > policy["limits"]["max_actions"]:
         raise AIAdvisoryContractError("guidance actions must be bounded")
@@ -328,7 +454,8 @@ def validate_ai_advisory_projection(
     for index, raw in enumerate(actions):
         item = _exact(raw, ACTION_KEYS, f"actions[{index}]")
         action_id = _atom(item.get("action_id"), "action_id")
-        _atom(item.get("rule_id"), "rule_id")
+        if _atom(item.get("rule_id"), "rule_id") not in POLICY_RULE_IDS:
+            raise AIAdvisoryContractError("action rule is not allowlisted")
         if type(item.get("policy_order")) is not int or item["policy_order"] < 0:
             raise AIAdvisoryContractError("action policy_order is invalid")
         if set(_atoms(item.get("finding_ids"), "action finding_ids")) - finding_ids:
@@ -344,7 +471,11 @@ def validate_ai_advisory_projection(
     abstention = _exact(root.get("abstention"), ABSTENTION_KEYS, "abstention")
     if type(abstention.get("abstained")) is not bool:
         raise AIAdvisoryContractError("abstained must be boolean")
-    _atom(abstention.get("reason_code"), "reason_code", allow_empty=True)
+    abstention_reason = _atom(
+        abstention.get("reason_code"), "reason_code", allow_empty=True
+    )
+    if abstention_reason not in {"", *policy["reason_codes"]}:
+        raise AIAdvisoryContractError("abstention reason is not allowlisted")
     allowed_output = _exact(root.get("allowed_output"), ALLOWED_OUTPUT_KEYS, "allowed_output")
     expected_output = _available_output_codes(
         policy=policy,
@@ -487,6 +618,7 @@ def build_ai_advisory_projection(
     *,
     policy: Mapping[str, Any],
     policy_sha256: str,
+    alias_scope: ProviderAliasScope | None = None,
 ) -> Dict[str, Any]:
     """Build the only data object allowed to cross the external AI boundary."""
 
@@ -677,6 +809,12 @@ def build_ai_advisory_projection(
             abstained=report_abstained,
         ),
     }
+    validation_policy_sha256 = policy_sha256
+    if alias_scope is not None:
+        base = _provider_alias_projection(base, alias_scope)
+        validation_policy_sha256 = str(
+            base["provenance"]["ai_policy_sha256"]
+        )
     prohibited = set(_walk_keys(base)) & PROHIBITED_PROJECTION_KEYS
     if prohibited:
         raise AIAdvisoryContractError(
@@ -687,5 +825,122 @@ def build_ai_advisory_projection(
     return validate_ai_advisory_projection(
         projection,
         policy=policy,
-        policy_sha256=policy_sha256,
+        policy_sha256=validation_policy_sha256,
     )
+
+
+def _provider_alias_projection(
+    base: Mapping[str, Any], alias_scope: ProviderAliasScope
+) -> Dict[str, Any]:
+    """Replace every provider-visible canonical identity with a scoped alias."""
+
+    result = deepcopy(dict(base))
+    result["assessment_id"] = alias_scope.alias(
+        "assessment", result["assessment_id"]
+    )
+    result["evidence_sha256"] = alias_scope.digest(
+        "evidence_digest", result["evidence_sha256"]
+    )
+    provenance = result["provenance"]
+    provenance["evaluator_git_revision"] = alias_scope.digest(
+        "evaluator_revision", provenance["evaluator_git_revision"], length=40
+    )
+    for key in PROVENANCE_KEYS - {
+        "evaluator_git_revision",
+        "guidance_profile_status",
+    }:
+        if provenance.get(key):
+            provenance[key] = alias_scope.digest(
+                f"provenance_{key}", provenance[key]
+            )
+
+    for item in result["evidence_index"]:
+        item["evidence_id"] = alias_scope.alias("evidence", item["evidence_id"])
+    for item in result["relationships"]:
+        item["relationship_id"] = alias_scope.alias(
+            "relationship", item["relationship_id"]
+        )
+        for key in ("source_evidence_ref", "target_evidence_ref"):
+            if item[key]:
+                item[key] = alias_scope.alias("evidence", item[key])
+        if item["entity_ref"]:
+            item["entity_ref"] = alias_scope.alias("entity", item["entity_ref"])
+        if item["chain_ref"]:
+            item["chain_ref"] = alias_scope.alias("chain", item["chain_ref"])
+    for item in result["findings"]:
+        item["finding_id"] = alias_scope.alias("finding", item["finding_id"])
+        item["evidence_refs"] = [
+            alias_scope.alias("evidence", value) for value in item["evidence_refs"]
+        ]
+        item["relationship_refs"] = [
+            alias_scope.alias("relationship", value)
+            for value in item["relationship_refs"]
+        ]
+    for item in result["hypotheses"]:
+        item["hypothesis_id"] = alias_scope.alias(
+            "hypothesis", item["hypothesis_id"]
+        )
+        item["hypothesis_set_id"] = alias_scope.alias(
+            "hypothesis_set", item["hypothesis_set_id"]
+        )
+        item["evidence_refs"] = [
+            alias_scope.alias("evidence", value) for value in item["evidence_refs"]
+        ]
+        item["relationship_refs"] = [
+            alias_scope.alias("relationship", value)
+            for value in item["relationship_refs"]
+        ]
+    guidance = result["guidance"]
+    guidance["guidance_id"] = alias_scope.alias("guidance", guidance["guidance_id"])
+    for item in guidance["actions"]:
+        item["action_id"] = alias_scope.alias("action", item["action_id"])
+        item["finding_ids"] = [
+            alias_scope.alias("finding", value) for value in item["finding_ids"]
+        ]
+        item["evidence_refs"] = [
+            alias_scope.alias("evidence", value) for value in item["evidence_refs"]
+        ]
+    return result
+
+
+def restore_validated_output_aliases(
+    value: Mapping[str, Any], alias_scope: ProviderAliasScope
+) -> Dict[str, Any]:
+    """Restore accepted provider aliases to exact local canonical identities."""
+
+    result = deepcopy(dict(value))
+    advisory = result["validated_advisory"]
+    mappings = {
+        "selected_finding_ids": "finding",
+        "selected_relationship_ids": "relationship",
+        "ranked_action_ids": "action",
+    }
+    for key, kind in mappings.items():
+        advisory[key] = [alias_scope.restore(kind, item) for item in advisory[key]]
+    for selection in advisory["template_selections"]:
+        for key, kind in (
+            ("finding_ids", "finding"),
+            ("relationship_ids", "relationship"),
+            ("action_ids", "action"),
+        ):
+            selection[key] = [
+                alias_scope.restore(kind, item) for item in selection[key]
+            ]
+    for candidate in result["shadow_candidates"]["candidates"]:
+        candidate.pop("candidate_id", None)
+        for key, kind in (
+            ("premise_finding_ids", "finding"),
+            ("premise_relationship_ids", "relationship"),
+            ("premise_evidence_refs", "evidence"),
+        ):
+            candidate[key] = [
+                alias_scope.restore(kind, item) for item in candidate[key]
+            ]
+        candidate["candidate_id"] = stable_id(
+            "ai_candidate",
+            {
+                "provider_scope": alias_scope.scope,
+                **{key: item for key, item in candidate.items() if key != "candidate_id"},
+            },
+        )
+    return result

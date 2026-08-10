@@ -874,6 +874,12 @@ class AnalysisWorker:
                                 enqueue_ai_advisory=(
                                     self.config.enable_ai_advisory
                                 ),
+                                ai_advisory_max_queue_records=(
+                                    self.config.ai_advisory_max_queue_records
+                                ),
+                                ai_advisory_reconciliation_cutoff=(
+                                    self.config.ai_advisory_reconciliation_cutoff
+                                ),
                             )
                             if report_id is None:
                                 status = "stale_claim"
@@ -925,6 +931,12 @@ class AnalysisWorker:
                         report,
                         enqueue_ai_advisory=(
                             self.config.enable_ai_advisory
+                        ),
+                        ai_advisory_max_queue_records=(
+                            self.config.ai_advisory_max_queue_records
+                        ),
+                        ai_advisory_reconciliation_cutoff=(
+                            self.config.ai_advisory_reconciliation_cutoff
                         ),
                     )
                 except Exception as exc:

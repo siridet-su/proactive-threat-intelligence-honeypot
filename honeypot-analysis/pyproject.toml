@@ -13,16 +13,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ai-advisory = [
+  "google-genai>=2.13,<3",
+]
 securebert = [
   "torch>=2.2,<3",
-  "transformers>=4.40,<5",
+  "transformers>=5.3,<5.4",
 ]
 training = [
   "numpy>=1.26,<3",
   "pandas>=2.2,<4",
   "scikit-learn>=1.4,<2",
   "torch>=2.2,<3",
-  "transformers>=4.40,<5",
+  "transformers>=5.3,<5.4",
 ]
 artifacts = [
   "reportlab>=4,<5",

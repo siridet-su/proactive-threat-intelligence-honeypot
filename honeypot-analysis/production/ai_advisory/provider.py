@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Protocol, Sequence
 
@@ -27,6 +27,9 @@ class AIProviderResponse:
     endpoint_sha256: str = ""
     api_version: str = ""
     request_options_sha256: str = ""
+    # Only aggregate provider counters and routing class are allowed here.
+    # Request/response content and provider identifiers remain elsewhere.
+    usage_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class AIAdvisoryProvider(Protocol):
@@ -47,6 +50,7 @@ class AIAdvisoryProvider(Protocol):
         policy_sha256: str,
         timeout_seconds: float,
         max_response_bytes: int,
+        idempotency_key: str,
     ) -> AIProviderResponse: ...
 
 
@@ -68,7 +72,9 @@ class DisabledAIAdvisoryProvider:
         policy_sha256: str,
         timeout_seconds: float,
         max_response_bytes: int,
+        idempotency_key: str,
     ) -> AIProviderResponse:
+        del idempotency_key
         raise AIProviderUnavailable("AI advisory provider is disabled")
 
 
@@ -95,6 +101,7 @@ class FixtureAIAdvisoryProvider:
         policy_sha256: str,
         timeout_seconds: float,
         max_response_bytes: int,
+        idempotency_key: str,
     ) -> AIProviderResponse:
         del (
             projection,
@@ -103,6 +110,7 @@ class FixtureAIAdvisoryProvider:
             schema_sha256,
             policy_sha256,
             timeout_seconds,
+            idempotency_key,
         )
         try:
             raw = self.path.read_bytes()
@@ -139,6 +147,20 @@ def build_ai_advisory_provider(config: Any) -> AIAdvisoryProvider:
         return FixtureAIAdvisoryProvider(
             path,
             model_id=str(getattr(config, "ai_advisory_model", "fixture-model") or "fixture-model"),
+        )
+    if provider == "google_vertex_gemini":
+        from production.ai_advisory.google_vertex_provider import (
+            GoogleVertexGeminiProvider,
+        )
+
+        return GoogleVertexGeminiProvider(
+            project=str(getattr(config, "ai_advisory_project", "") or ""),
+            location=str(getattr(config, "ai_advisory_location", "") or ""),
+            model_id=str(getattr(config, "ai_advisory_model", "") or ""),
+            endpoint=str(getattr(config, "ai_advisory_endpoint", "") or ""),
+            request_options=dict(
+                getattr(config, "ai_advisory_request_options", {}) or {}
+            ),
         )
     raise AIProviderUnavailable(
         "configured hosted AI provider adapter is not installed"

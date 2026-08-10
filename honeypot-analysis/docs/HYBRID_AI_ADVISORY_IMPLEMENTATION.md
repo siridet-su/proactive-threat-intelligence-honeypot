@@ -1,14 +1,18 @@
 # Hybrid AI Advisory Implementation
 
-Status: local, disabled-by-default provider-neutral PoC boundary, 2026-08-08
+Status: local, disabled-by-default constrained Vertex/ADC adapter, 2026-08-10
 
 Baseline revision: `f1b9dabe4c98cac3363bf04b877437d770f90c39`
 
-This implementation adds a separate post-persistence AI advisory path. It does
-not add a hosted-provider adapter because this repository contains no hosted
-generative-AI provider, model selection, endpoint, SDK, or credential. The
-offline fixture adapter exists only for deterministic contract and evaluation
-tests. Enabling an unknown hosted provider fails at worker startup.
+This implementation adds a separate post-persistence AI advisory path. The
+reviewed hosted adapter is `google_vertex_gemini`, implemented with the current
+`google-genai` SDK in Vertex AI mode and standard Application Default
+Credentials (ADC). Its reviewed runtime identity is model
+`gemini-2.5-flash`, location `global`, API `v1`, endpoint
+`https://aiplatform.googleapis.com`, and adapter revision
+`google-genai.vertex-adc.v1`. The offline fixture remains available for
+deterministic contract tests. Enabling any other hosted provider fails at
+startup.
 
 ## Implemented flow and authority boundary
 
@@ -16,7 +20,8 @@ tests. Enabling an unknown hosted provider fails at worker startup.
 durable Cowrie events
   -> existing trusted classification / canonical analysis
   -> validated session_assessment.v4 + response_guidance.v3
-  -> atomic canonical report commit + optional reference-only outbox row
+  -> atomic canonical report commit
+  -> cutoff-gated best-effort reference-only enqueue + worker reconciliation
   -> separate AI advisory worker
   -> revalidate persisted v4/v3
   -> positive allowlist projection
@@ -37,16 +42,20 @@ The following remain the only canonical authority:
 - `typed_semantic_fact_set.v2` and `session_assessment.v4`;
 - deterministic threat hypotheses;
 - `response_guidance.v3`, including manual approval and no-execution fields;
-- the existing advisory Transformer/VOMM prediction boundary.
+- the existing Transformer-only production prediction boundary, with no
+  automatic VOMM fallback.
 
 AI has no authority over findings, hypotheses, ATT&CK mappings, severity,
 guidance eligibility, alerts, webhooks, predictions, or response execution.
 
 ## Provider request
 
-`ai_advisory_projection.v1` is built only after full v4/v3 validation. It
-contains opaque IDs, categorical policy fields, ordinal evidence references,
-fixed-false AI authority flags, and provenance hashes. The projection omits raw
+`ai_advisory_projection.v1` is built only after full v4/v3 validation. Every
+canonical ID and provenance/evidence digest is replaced with a keyed-HMAC,
+provider-scoped alias before leaving the process. The exact reverse membership
+map exists only in worker memory and accepted selections are restored to local
+canonical IDs after validation. The projection otherwise contains categorical
+policy fields, ordinal evidence references, and fixed-false AI authority flags. It omits raw
 commands, credentials, usernames, source IPs, URLs, payloads, raw events,
 entity values, enrichment prose, prediction prose, and canonical free text.
 Cowrie input can therefore never become provider instructions.
@@ -74,7 +83,10 @@ The executable validator additionally proves dynamic ID membership, reference
 resolution, hash echoes, closed-vocabulary membership, bounded cardinality,
 abstention consistency, falsifiability, and existing action safety. The worker
 independently recomputes the structured response SHA-256 and enforces the
-response byte limit.
+response byte limit. An adapter hash echo must be an exact lowercase SHA-256
+matching that local digest; the echo itself is never trusted or persisted.
+Duplicate template selections and duplicate generated candidate identities are
+rejected.
 
 Rejected provider content is not persisted. The record retains its hash and a
 stable rejection code. Accepted output stores only normalized selections,
@@ -94,43 +106,100 @@ selections and policy bytes produce identical text and a stable render hash.
 
 ## Storage and rollback
 
-Canonical report persistence and optional outbox enqueue share the existing
-`BEGIN IMMEDIATE` completion transaction. The outbox contains only report,
-session, and assessment IDs.
+Canonical report persistence completes in its existing `BEGIN IMMEDIATE`
+transaction before any optional AI schema or outbox operation. Best-effort
+enqueue then verifies the committed `session_assessment.v4` identity and inserts
+a stable job under a hard queue limit. The worker reconciles missing post-commit
+jobs, so extension failure or a crash cannot roll back or lose the canonical
+report. The outbox contains only report, session, and assessment IDs and is
+never initialized by canonical storage startup when AI is disabled.
 
 The new tables use a checksummed `schema_extensions` ledger while leaving
 `PRAGMA user_version` at version 3. This is deliberate: the previous verified
 runtime rejects a higher version. It can therefore open the database during
 rollback and ignore the additive tables. The extension validates its checksum
-and required tables/indexes at every initialization.
+and required tables/indexes whenever the AI worker explicitly initializes the
+extension.
 
 Records are content addressed by the complete request identity. An identical
 request always replays the stored accepted or rejected result without another
-provider call. Cache replay is recorded on the outbox row. A 30-day advisory
-TTL runs independently of canonical retention and keeps the newest advisory
-per session; it never deletes reports, events, sessions, or predictions.
+provider call. Cache replay is recorded on the outbox row. The provider receives
+the stable request SHA-256 as its idempotency key; a crash before local
+completion may repeat a provider call, while fenced local completion and cache
+identity remain idempotent. A strict advisory TTL runs independently of
+canonical retention. Global record and stored-byte caps prevent accumulation
+across unique sessions; there is no “latest per session forever” exemption. It
+never deletes reports, events, sessions, or predictions.
 
 Historical reports and database rows are not rewritten.
+
+New-session-only activation reuses the canonical durable event-prefix identity
+`prediction_evidence_cutoff.v1`: the pair `(received_at, event_id)`, ordered
+lexicographically after normalizing `received_at` to UTC with exactly six
+fractional-second digits. A session is eligible only when its earliest durable
+event is strictly greater than the approved pair. An event equal to the pair is
+on the historical side of the boundary, and any session with even one event at
+or before the pair remains excluded if later events arrive. Sessions without a
+durable event are excluded. This definition prevents a late close or analysis
+retry for a historical session from being treated as a new session.
+
+The exact cutoff is persisted in normal runtime configuration and duplicated in
+the owner-only activation receipt under `reconciliation_mode=new_sessions_only`.
+Enabled configuration, direct enqueue, and reconciliation all reject a missing
+or malformed cutoff; configuration also rejects any receipt/cutoff mismatch.
+The cutoff therefore survives process and VM restart and cannot silently move
+within an approved activation. It adds no SQLite schema and does not modify or
+delete canonical reports.
 
 ## Configuration and secrets
 
 The default is `enable_ai_advisory=false` and provider `disabled`. An enabled
-configuration requires an explicit safe provider ID, model ID, and policy path.
-The fixture provider requires a response-file path. Any hosted provider requires
-an API-key file that is a regular non-symlink file with no group/other access.
+configuration requires an installed/reviewed adapter, model and policy, an
+exact canonical reconciliation cutoff, an owner-only provider-alias key, and a
+short-lived owner-only activation receipt attesting that same cutoff, the
+managed worker, credential state, and readiness check. The fixture
+provider requires a response-file path. Secure files are opened by absolute,
+component-wise no-follow descriptors and verified for exact owner,
+regular-file type, size, and owner-only permissions before descriptor reads.
 The secret value is not retained in `ProductionConfig`.
 
-No API key, endpoint, provider SDK, systemd unit, or deployment setting is
-included. A later provider adapter must enforce its timeout and rate limit,
-consume the supplied prompt contract and strict response schema, read the
-owner-only secret at call time, and return the provider/model identities and
-recomputed structured response hash.
+The optional `google-genai` dependency is isolated in the `ai-advisory` extra
+and `requirements-ai-advisory.txt`. Production resolution is constrained by
+the exact `requirements-runtime.lock.txt`; the Transformer evidence lock remains
+separate and unchanged. The Vertex adapter accepts no API key. It
+uses `google.auth.default` with the cloud-platform scope, requires the ADC quota
+project to equal the configured project for user ADC, and permits quota-less
+GCE metadata credentials only when metadata detects that same configured
+project. It passes explicit Vertex project, location, endpoint, and API version
+to the SDK. Missing/unreadable ADC,
+authentication failure, timeout, rate limiting, empty output, malformed JSON,
+and local response-hash mismatch all fail closed. No credential JSON, OAuth
+token, or credential path belongs in repository configuration.
+
+A static managed systemd worker template is included but is disabled by default
+and has no install target. It has explicit memory, CPU, task, and relative I/O
+weights so optional work cannot take unbounded resources from deterministic
+ingest/session processing. The provider-neutral HTTPS transport retained for
+future adapters enforces
+an allowlisted HTTPS host/port, verified TLS, no userinfo/query/fragment, no
+redirects or compression, JSON content type, request/response byte limits,
+transport deadlines, safe status handling, and an idempotency header.
+The Google SDK adapter retains the same provider-neutral contract and local
+validation boundary. Its provider-facing JSON Schema keeps closed object shapes,
+required fields, and fixed schema/status values, while omitting combinatorial
+array/string bounds and multi-value enums that Vertex cannot serve at this
+contract size. Those exact bounds, vocabularies, references, and hashes remain
+mandatory in the unchanged executable local validator; provider output never
+becomes authoritative merely because the provider-facing schema is structural.
 
 ## API and monitor
 
 The existing canonical session API and generated artifacts are unchanged. The
 private monitor uses a separate `/api/ai-advisory` read endpoint and labels the
-result as non-authoritative. It loads asynchronously after the canonical page,
+result as non-authoritative. It requires an exact match to the current canonical
+`report_id` and `assessment_id`; older rows are reported as `superseded` and are
+never displayed as current. Pending, failed, unavailable, and superseded are
+explicit states. It loads asynchronously after the canonical page,
 uses the existing read boundary and `Cache-Control: no-store`, and inserts
 values using DOM `textContent`. AI is not included in reports, JSON/Markdown,
 PDF, STIX, exports, alerts, webhooks, logs, or prediction snapshots.
@@ -155,19 +224,97 @@ trials.
 
 ## Remaining activation gates
 
+Activation material is deliberately split by authority:
+
+| Material | Class | Current meaning |
+| --- | --- | --- |
+| Reviewed adapter evidence | A | The exact provider/model/location/endpoint/revision constants and focused tests are reviewable now. There is no separate adapter-receipt schema, so no receipt should be invented. |
+| Static managed-worker evidence | A | The unit and managed-unit policy are reviewable and may be installed inactive. The short-lived activation receipt is the only current contract that attests `managed_worker_unit` and `worker_status`; no separate managed-worker receipt should be fabricated. |
+| Runtime/dependency receipt | A, prerequisite blocked | The exact 52-package lock and wheel manifest can be generated and verified now. A replacement full receipt requires a reviewed committed application archive plus immutable runtime and wheel archives, so it cannot truthfully be issued from an uncommitted working tree. The previous receipt remains valid only for the application/runtime/dependencies it names. |
+| Provider alias/HMAC key | B | Secret provider-scoped alias material. It requires separate authorization and must remain absent during preparation. |
+| AI worker database credential | B | Service credential/state for the existing SQLite production path. It requires separate authorization and must remain absent during preparation. |
+| Readiness/activation receipt | C | The owner-only, at-most-one-hour `ai_advisory_activation_receipt.v1` jointly attests reviewed adapter identity, the exact `new_sessions_only` cutoff, managed worker readiness, credentials readiness, and a recent health check. It is production activation state and must remain absent until the activation window. |
+| AI schema/reconciliation/outbox state | C | The additive `non_authoritative_ai_advisory.v1` SQLite extension was already present on `capstone` before this preparation pass. Its outbox and advisory tables contain zero rows. This task does not modify the extension; reconciliation and production queue/advisory rows must remain absent during preparation. |
+| `ENABLE_AI_ADVISORY=true` or worker start | C | Explicit production activation. Both remain prohibited during preparation. |
+
+Classes are: A = non-secret deterministic evidence safe to review or generate
+when its inputs exist; B = secret material requiring explicit authorization;
+C = production activation state that must remain absent.
+
 Before any hosted-provider or production activation:
 
-1. select and review an exact provider/model and data-processing terms;
-2. implement and test one adapter without changing the provider-neutral
-   contracts;
-3. provision an owner-only API key and provider egress allowlist;
+1. re-approve the exact Google project, model, region, data-processing terms,
+   quota/cost bounds, and Vertex egress policy;
+2. install and receipt the optional `google-genai` dependency without changing
+   the provider-neutral contracts;
+3. provision ADC without API keys or service-account key files and verify its
+   quota project plus the provider egress allowlist;
 4. freeze offline provider fixtures and an independent privacy/injection set;
 5. independently verify zero prohibited projection data and zero canonical
    mutations under success, rejection, timeout, and outage;
 6. evaluate whether advisory usefulness justifies privacy, cost, and operational
    complexity;
-7. separately approve service, manifest, backup, rollback, and deployment
-   changes.
+7. while AI remains disabled, stop new ingest at the source, drain the
+   forwarder/ingest path and canonical analysis queues, capture the maximum
+   durable `(events.received_at, events.event_id)` tuple, canonicalize it with
+   `make_evidence_cutoff`, and review the resulting immutable boundary;
+8. write that exact cutoff to configuration and to the short-lived activation
+   receipt only after the installed static worker, credentials, configuration,
+   and readiness probe are verified;
+9. separately approve manifest, backup, rollback, network egress, and
+   deployment changes.
 
 The repository remains fully deterministic when the feature is disabled or the
 AI worker is absent.
+
+## Pre-activation operational blockers
+
+The 2026-08-10 read-only production audit found 5,887 existing
+`session_assessment.v4` reports with no AI outbox row. The candidate now
+implements the durable new-session-only boundary described above. A simulated
+boundary at the current maximum durable event tuple makes all sessions already
+represented in that prefix ineligible, so those historical reports are not
+queued. The simulation does not persist a cutoff, create an activation receipt,
+enqueue work, or send a session to a provider.
+
+There is an activation race if producers can persist an event after the maximum
+tuple is read but before the intended activation boundary is installed. The
+safe activation order is: keep AI disabled; pause source forwarding; allow any
+accepted ingest batch to commit; drain ingest/event/session/analysis work;
+capture and review the maximum durable event tuple in a read-only transaction;
+install the exact config and matching receipt; start the static AI worker; then
+resume forwarding. This produces a durable-ingest boundary with no ambiguous
+session. If pausing/draining is not approved, activation must remain blocked or
+the operator must explicitly accept durable-ingest-time semantics. Full
+historical reconciliation remains a separately approved privacy, cost, quota,
+storage, and research action.
+
+The same pass isolated the slow dashboard readiness path. The deployed endpoint
+reopens SQLite and repeats schema/migration initialization, including integrity
+checks, against a 6.28 GB database and exceeded 15 seconds. The candidate code
+reuses the process-initialized storage adapter and its health check opens SQLite
+read-only, verifies schema version 3 and the required canonical tables, and runs
+`SELECT 1` without migration or schema writes. The equivalent read-only query
+steps took approximately 1.2 ms against production. The live endpoint remains
+unchanged until an approved release is deployed and restarted.
+
+## GCE metadata-ADC readiness audit
+
+A controlled audit on 2026-08-10 confirmed that `capstone` uses the attached
+Compute Engine service account
+`97738468999-compute@developer.gserviceaccount.com`, metadata-server ADC detects
+project `project-dff4b23a-3010-4936-a02`, and the VM has the `cloud-platform`
+OAuth scope. The identity has the direct project-level role
+`roles/aiplatform.user`. Metadata-ADC Vertex requests to location `global` and
+model `gemini-2.5-flash` returned visible content with `ON_DEMAND` routing.
+
+The deployed venv contains `google-genai==2.13.0` and
+`google-auth==2.56.3`. The `honeypot` runtime user has no user ADC file;
+`CLOUDSDK_CONFIG` and `GOOGLE_APPLICATION_CREDENTIALS` are not required or set
+for the runtime. No API key, service-account key, user ADC, or credential JSON
+is installed. The reviewed worker unit is installed as a static unit but is
+inactive with no main process. These runtime prerequisites do not activate
+Hybrid AI: `ENABLE_AI_ADVISORY=false`, the worker is not enabled or running, and the
+alias key, activation receipt, and AI database credential intentionally remain
+absent. The previously initialized additive AI extension remains empty: both
+`ai_advisory_outbox` and `ai_advisories` contain zero rows.

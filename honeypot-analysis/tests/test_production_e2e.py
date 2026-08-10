@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 
 from production.workers.analysis_worker import AnalysisWorker
 from production.utils.config import ProductionConfig
+from production.utils.sensor_identity import canonical_session_id
 from production.api.ingest_api import build_server
 from production.workers.sensor_forwarder import forward_once, post_events
 from production.workers.session_worker import SessionWorker
@@ -226,7 +227,10 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         reports = storage.list_rows("reports")
         assert len(reports) == 1
         report = json.loads(reports[0]["payload_json"])
-        assert report["session_id"] == "e2e-session-1"
+        assert report["session_id"] == canonical_session_id(
+            cfg.sensor_id,
+            "e2e-session-1",
+        )
         assert report["schema_version"] == "session_assessment.v4"
         assert validate_session_assessment_v4(report) == []
         assert report["canonical_evidence"]["source_evidence_sha256"]
@@ -250,7 +254,7 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert refreshed_session["analysis_updated_at"]
 
 
-def test_forwarder_removes_acknowledged_events_and_retains_only_rejected_events() -> None:
+def test_forwarder_removes_acknowledged_events_and_quarantines_rejected_events() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _config(tmp)
         valid = {
@@ -281,18 +285,22 @@ def test_forwarder_removes_acknowledged_events_and_retains_only_rejected_events(
         assert result.sent == 1
         assert result.duplicates == 0
         assert result.rejected == 1
-        assert result.remaining == 1
-        assert "rejected by ingest" in result.error
+        assert result.quarantined == 1
+        assert result.remaining == 0
+        assert "quarantined" in result.error
+        assert not Path(cfg.spool_path).exists()
 
-        retained = [
+        quarantine_path = Path(f"{cfg.spool_path}.quarantine.ndjson")
+        quarantined = [
             json.loads(line)
-            for line in Path(cfg.spool_path).read_text(encoding="utf-8").splitlines()
+            for line in quarantine_path.read_text(encoding="utf-8").splitlines()
         ]
-        assert retained == [invalid]
+        assert len(quarantined) == 1
+        assert quarantined[0]["event"] == invalid
         assert len(open_storage(cfg.database_url).list_rows("events", limit=10)) == 1
 
 
 if __name__ == "__main__":
     test_forwarder_spool_replay_to_analysis_report()
-    test_forwarder_removes_acknowledged_events_and_retains_only_rejected_events()
+    test_forwarder_removes_acknowledged_events_and_quarantines_rejected_events()
     print("production e2e tests passed")

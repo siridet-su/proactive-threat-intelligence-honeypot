@@ -5,6 +5,7 @@
   "profiles": {
     "gcp_backend": {
       "managed_installed_units": [
+        "honeypot-ai-advisory-worker.service",
         "honeypot-analysis-worker.service",
         "honeypot-dashboard-api.service",
         "honeypot-enrichment-worker.service",

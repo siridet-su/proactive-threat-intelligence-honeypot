@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -139,6 +140,18 @@ def test_sqlite_adapter_implements_contract_and_health_check(
     assert isinstance(storage, SQLiteStorage)
     assert isinstance(storage, StorageBackend)
     assert storage.health_check() == {"ok": True, "backend": "sqlite"}
+
+
+def test_sqlite_health_check_is_read_only_and_does_not_reinitialize_schema(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "readiness.db"
+    storage = open_storage(f"sqlite:///{database_path}")
+    before_hash = hashlib.sha256(database_path.read_bytes()).hexdigest()
+
+    assert storage.health_check() == {"ok": True, "backend": "sqlite"}
+
+    assert hashlib.sha256(database_path.read_bytes()).hexdigest() == before_hash
 
 
 def test_safe_database_label_is_canonical_sqlite_path(tmp_path: Path) -> None:

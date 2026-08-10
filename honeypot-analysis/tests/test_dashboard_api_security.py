@@ -16,8 +16,10 @@ class FakeDashboardStorage:
     def __init__(self, *, ready: bool = True) -> None:
         self.ready = ready
         self.feedback: list[dict] = []
+        self.health_checks = 0
 
     def health_check(self) -> dict:
+        self.health_checks += 1
         return {
             "ok": self.ready,
             "backend": "sqlite",
@@ -108,6 +110,60 @@ def test_dashboard_liveness_and_minimal_readiness_are_public(
     assert ready_responses[0][0] == HTTPStatus.OK
     assert set(ready_responses[0][1]) == {"ok", "service", "timestamp"}
     assert "database" not in ready_responses[0][1]
+
+
+def test_dashboard_readiness_reuses_initialized_storage_without_schema_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = FakeDashboardStorage()
+    monkeypatch.setattr(
+        dashboard_api,
+        "open_storage",
+        lambda _url: pytest.fail("readiness must not reopen or initialize storage"),
+    )
+    handler, responses = _handler(_config(), "/health/ready")
+    handler.server = SimpleNamespace(storage=storage)
+
+    dashboard_api.DashboardHandler.do_GET(handler)
+
+    assert responses[0][0] == HTTPStatus.OK
+    assert storage.health_checks == 1
+
+
+def test_dashboard_main_does_not_repeat_open_storage_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = dashboard_api.ProductionConfig(
+        database_url="sqlite:///:memory:",
+        dashboard_host="127.0.0.1",
+        dashboard_port=0,
+    )
+    storage = SimpleNamespace(
+        initialize=lambda: pytest.fail(
+            "open_storage already initializes the storage adapter"
+        )
+    )
+    server = object()
+    monkeypatch.setattr(
+        dashboard_api.ProductionConfig,
+        "from_env",
+        classmethod(lambda _cls, _path=None: config),
+    )
+    monkeypatch.setattr(dashboard_api, "open_storage", lambda _url: storage)
+    monkeypatch.setattr(
+        dashboard_api,
+        "build_server",
+        lambda _config, *, storage: server,
+    )
+    served = []
+    monkeypatch.setattr(
+        dashboard_api,
+        "serve_http_until_stopped",
+        lambda selected: served.append(selected),
+    )
+
+    assert dashboard_api.main([]) == 0
+    assert served == [server]
 
 
 def test_dashboard_sensitive_reads_require_configured_bearer_and_return_views(

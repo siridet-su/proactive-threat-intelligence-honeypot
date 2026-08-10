@@ -12,24 +12,29 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from production.storage.contract import DatabaseSettings
+from production.ai_advisory.security import (
+    load_provider_alias_key,
+    read_secure_utf8,
+    validate_activation_receipt,
+    validate_https_endpoint,
+)
+from production.ai_advisory.google_vertex_provider import (
+    ADAPTER_REVISION as GOOGLE_VERTEX_ADAPTER_REVISION,
+    PROVIDER_ID as GOOGLE_VERTEX_PROVIDER_ID,
+    REVIEWED_API_VERSION as GOOGLE_VERTEX_API_VERSION,
+    REVIEWED_ENDPOINT as GOOGLE_VERTEX_ENDPOINT,
+    REVIEWED_LOCATION as GOOGLE_VERTEX_LOCATION,
+    REVIEWED_MODEL_ID as GOOGLE_VERTEX_MODEL_ID,
+    load_google_adc_credentials,
+    normalize_vertex_request_options,
+    validate_vertex_project,
+)
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     normalize_session_source,
 )
+from production.prediction.evidence_cutoff import require_valid_evidence_cutoff
 from production.utils.http_security import parse_bearer_token
-
-
-_AI_OPTION_DENY_TOKENS = frozenset(
-    {
-        "api_key",
-        "apikey",
-        "authorization",
-        "credential",
-        "password",
-        "secret",
-        "token",
-    }
-)
 
 
 def _validate_ai_request_options(value: Any) -> Dict[str, Any]:
@@ -53,7 +58,13 @@ def _validate_ai_request_options(value: Any) -> Dict[str, Any]:
         if isinstance(item, Mapping):
             for key, child in item.items():
                 text = str(key).strip().lower().replace("-", "_")
-                if any(token in text for token in _AI_OPTION_DENY_TOKENS):
+                parts = set(text.split("_"))
+                if (
+                    "api_key" in text
+                    or "apikey" in text
+                    or parts
+                    & {"authorization", "credential", "password", "secret", "token"}
+                ):
                     raise ValueError(
                         "ai_advisory_request_options must not contain secret or credential keys"
                     )
@@ -83,12 +94,16 @@ def _apply_ai_environment_overrides(values: Mapping[str, Any]) -> Dict[str, Any]
     ).strip().lower()
     for env_name, field_name in (
         ("AI_ADVISORY_MODEL", "ai_advisory_model"),
+        ("AI_ADVISORY_PROJECT", "ai_advisory_project"),
+        ("AI_ADVISORY_LOCATION", "ai_advisory_location"),
         ("AI_ADVISORY_POLICY_PATH", "ai_advisory_policy_path"),
         ("AI_ADVISORY_API_KEY_FILE", "ai_advisory_api_key_file"),
         ("AI_ADVISORY_FIXTURE_RESPONSE_PATH", "ai_advisory_fixture_response_path"),
         ("AI_ADVISORY_ENDPOINT", "ai_advisory_endpoint"),
         ("AI_ADVISORY_API_VERSION", "ai_advisory_api_version"),
         ("AI_ADVISORY_ADAPTER_REVISION", "ai_advisory_adapter_revision"),
+        ("AI_ADVISORY_ACTIVATION_RECEIPT_PATH", "ai_advisory_activation_receipt_path"),
+        ("AI_ADVISORY_ALIAS_KEY_FILE", "ai_advisory_alias_key_file"),
     ):
         if env_name in os.environ:
             result[field_name] = os.environ[env_name]
@@ -99,6 +114,10 @@ def _apply_ai_environment_overrides(values: Mapping[str, Any]) -> Dict[str, Any]
         ("AI_ADVISORY_MAX_REQUEST_BYTES", "ai_advisory_max_request_bytes"),
         ("AI_ADVISORY_MAX_REQUEST_TOKENS", "ai_advisory_max_request_tokens"),
         ("AI_ADVISORY_RETENTION_DAYS", "ai_advisory_retention_days"),
+        ("AI_ADVISORY_MAX_QUEUE_RECORDS", "ai_advisory_max_queue_records"),
+        ("AI_ADVISORY_MAX_RECORDS", "ai_advisory_max_records"),
+        ("AI_ADVISORY_MAX_STORAGE_BYTES", "ai_advisory_max_storage_bytes"),
+        ("AI_ADVISORY_RECONCILE_BATCH_SIZE", "ai_advisory_reconcile_batch_size"),
     ):
         if env_name in os.environ:
             result[field_name] = int(os.environ[env_name])
@@ -116,6 +135,16 @@ def _apply_ai_environment_overrides(values: Mapping[str, Any]) -> Dict[str, Any]
         result["ai_advisory_request_options"] = _env_json(
             "AI_ADVISORY_REQUEST_OPTIONS_JSON",
             result.get("ai_advisory_request_options") or {},
+        )
+    if "AI_ADVISORY_ALLOWED_HOSTS_JSON" in os.environ:
+        result["ai_advisory_allowed_hosts"] = _env_json_string_list(
+            "AI_ADVISORY_ALLOWED_HOSTS_JSON",
+            result.get("ai_advisory_allowed_hosts") or [],
+        )
+    if "AI_ADVISORY_RECONCILIATION_CUTOFF_JSON" in os.environ:
+        result["ai_advisory_reconciliation_cutoff"] = _env_json(
+            "AI_ADVISORY_RECONCILIATION_CUTOFF_JSON",
+            result.get("ai_advisory_reconciliation_cutoff") or {},
         )
     return result
 
@@ -207,6 +236,16 @@ def _env_json_list(name: str, default: List[Dict[str, Any]]) -> List[Dict[str, A
     if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
         raise ValueError(f"{name} must be a JSON list of objects")
     return [dict(item) for item in parsed]
+
+
+def _env_json_string_list(name: str, default: List[str]) -> List[str]:
+    raw = os.getenv(name)
+    if not raw:
+        return [str(item) for item in default]
+    parsed = json.loads(raw)
+    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+        raise ValueError(f"{name} must be a JSON list of strings")
+    return list(parsed)
 
 
 def _token_mapping(value: Dict[str, Any], name: str) -> Dict[str, str]:
@@ -331,6 +370,9 @@ class ProductionConfig:
     forwarder_max_spool_bytes: int = 64 * 1024 * 1024
     forwarder_min_free_bytes: int = 32 * 1024 * 1024
     forwarder_max_line_bytes: int = 256 * 1024
+    forwarder_quarantine_path: str = ""
+    forwarder_max_quarantine_bytes: int = 16 * 1024 * 1024
+    forwarder_max_quarantine_events: int = 1_000
 
     worker_batch_size: int = 100
     worker_poll_seconds: float = 2.0
@@ -369,12 +411,17 @@ class ProductionConfig:
     enable_ai_advisory: bool = False
     ai_advisory_provider: str = "disabled"
     ai_advisory_model: str = ""
+    ai_advisory_project: str = ""
+    ai_advisory_location: str = ""
     ai_advisory_policy_path: str = "configs/ai_advisory_policy.v1.json"
     ai_advisory_api_key_file: str = ""
     ai_advisory_fixture_response_path: str = ""
     ai_advisory_endpoint: str = ""
     ai_advisory_api_version: str = ""
     ai_advisory_adapter_revision: str = "provider-neutral.v1"
+    ai_advisory_activation_receipt_path: str = ""
+    ai_advisory_alias_key_file: str = ""
+    ai_advisory_allowed_hosts: List[str] = field(default_factory=list)
     ai_advisory_request_options: Dict[str, Any] = field(default_factory=dict)
     ai_advisory_batch_size: int = 5
     ai_advisory_poll_seconds: float = 5.0
@@ -388,6 +435,11 @@ class ProductionConfig:
     ai_advisory_max_request_bytes: int = 65536
     ai_advisory_max_request_tokens: int = 16384
     ai_advisory_retention_days: int = 30
+    ai_advisory_max_queue_records: int = 10_000
+    ai_advisory_max_records: int = 50_000
+    ai_advisory_max_storage_bytes: int = 256 * 1024 * 1024
+    ai_advisory_reconcile_batch_size: int = 100
+    ai_advisory_reconciliation_cutoff: Dict[str, str] = field(default_factory=dict)
 
     webhook_url: str = ""
     webhook_targets: List[Dict[str, Any]] = field(default_factory=list)
@@ -774,12 +826,27 @@ class ProductionConfig:
             "forwarder_batch_size": self.forwarder_batch_size,
             "forwarder_max_spool_bytes": self.forwarder_max_spool_bytes,
             "forwarder_max_line_bytes": self.forwarder_max_line_bytes,
+            "forwarder_max_quarantine_bytes": self.forwarder_max_quarantine_bytes,
+            "forwarder_max_quarantine_events": self.forwarder_max_quarantine_events,
         }
         for name, value in positive_forwarder_integers.items():
             if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         if self.forwarder_max_line_bytes > 1024 * 1024:
             raise ValueError("forwarder_max_line_bytes must not exceed 1048576 bytes")
+        if self.forwarder_max_quarantine_bytes < 1024:
+            raise ValueError(
+                "forwarder_max_quarantine_bytes must be at least 1024 bytes"
+            )
+        if self.forwarder_max_quarantine_events > 100_000:
+            raise ValueError(
+                "forwarder_max_quarantine_events must not exceed 100000"
+            )
+        if self.forwarder_quarantine_path and (
+            os.path.abspath(os.path.expanduser(self.forwarder_quarantine_path))
+            == os.path.abspath(os.path.expanduser(self.spool_path))
+        ):
+            raise ValueError("forwarder quarantine path must differ from spool path")
         if (
             isinstance(self.forwarder_min_free_bytes, bool)
             or not isinstance(self.forwarder_min_free_bytes, Integral)
@@ -978,6 +1045,10 @@ class ProductionConfig:
             "ai_advisory_max_response_bytes": self.ai_advisory_max_response_bytes,
             "ai_advisory_max_request_bytes": self.ai_advisory_max_request_bytes,
             "ai_advisory_max_request_tokens": self.ai_advisory_max_request_tokens,
+            "ai_advisory_max_queue_records": self.ai_advisory_max_queue_records,
+            "ai_advisory_max_records": self.ai_advisory_max_records,
+            "ai_advisory_max_storage_bytes": self.ai_advisory_max_storage_bytes,
+            "ai_advisory_reconcile_batch_size": self.ai_advisory_reconcile_batch_size,
         }.items():
             if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
@@ -1005,16 +1076,20 @@ class ProductionConfig:
         ):
             raise ValueError("ai_advisory_adapter_revision must be a safe identifier")
         endpoint = str(self.ai_advisory_endpoint or "").strip()
-        if len(endpoint) > 2048 or any(ord(char) < 0x20 for char in endpoint):
-            raise ValueError("ai_advisory_endpoint is invalid")
-        if endpoint and not endpoint.lower().startswith("https://"):
-            raise ValueError("ai_advisory_endpoint must use HTTPS when configured")
+        if endpoint:
+            validate_https_endpoint(endpoint, self.ai_advisory_allowed_hosts)
         ai_provider = str(self.ai_advisory_provider or "").strip().lower()
         if not re.fullmatch(
             r"[a-z][a-z0-9_-]{0,63}",
             ai_provider,
         ):
             raise ValueError("ai_advisory_provider must be a safe provider identifier")
+        reconciliation_cutoff: Dict[str, str] | None = None
+        if self.ai_advisory_reconciliation_cutoff:
+            reconciliation_cutoff = require_valid_evidence_cutoff(
+                self.ai_advisory_reconciliation_cutoff
+            )
+            self.ai_advisory_reconciliation_cutoff = reconciliation_cutoff
         if self.enable_ai_advisory:
             if ai_provider == "disabled":
                 raise ValueError(
@@ -1029,18 +1104,65 @@ class ProductionConfig:
                 )
             if not str(self.ai_advisory_policy_path or "").strip():
                 raise ValueError("enabled AI advisory requires an explicit policy path")
-            if ai_provider == "fixture":
-                if not str(self.ai_advisory_fixture_response_path or "").strip():
-                    raise ValueError(
-                        "fixture AI advisory provider requires a response path"
-                    )
-            else:
+            if reconciliation_cutoff is None:
+                raise ValueError(
+                    "enabled AI advisory requires a reconciliation cutoff"
+                )
+            if ai_provider not in {"fixture", GOOGLE_VERTEX_PROVIDER_ID}:
+                raise ValueError(
+                    "configured AI advisory provider adapter is not installed and reviewed"
+                )
+            if ai_provider == "fixture" and not str(
+                self.ai_advisory_fixture_response_path or ""
+            ).strip():
+                raise ValueError(
+                    "fixture AI advisory provider requires a response path"
+                )
+            alias_key_path = str(self.ai_advisory_alias_key_file or "").strip()
+            if not alias_key_path:
+                raise ValueError("enabled AI advisory requires an alias key file")
+            load_provider_alias_key(alias_key_path)
+            receipt_path = str(self.ai_advisory_activation_receipt_path or "").strip()
+            if not receipt_path:
+                raise ValueError("enabled AI advisory requires an activation receipt")
+            if ai_provider == GOOGLE_VERTEX_PROVIDER_ID:
+                project_id = validate_vertex_project(self.ai_advisory_project)
+                if str(self.ai_advisory_location or "").strip() != GOOGLE_VERTEX_LOCATION:
+                    raise ValueError("Vertex AI advisory location is not reviewed")
+                if str(self.ai_advisory_model or "").strip() != GOOGLE_VERTEX_MODEL_ID:
+                    raise ValueError("Vertex AI advisory model is not reviewed")
+                if str(self.ai_advisory_adapter_revision or "") != GOOGLE_VERTEX_ADAPTER_REVISION:
+                    raise ValueError("Vertex AI advisory adapter revision is not reviewed")
+                if str(self.ai_advisory_api_version or "") != GOOGLE_VERTEX_API_VERSION:
+                    raise ValueError("Vertex AI advisory API version is not reviewed")
+                if endpoint != GOOGLE_VERTEX_ENDPOINT:
+                    raise ValueError("Vertex AI advisory endpoint is not reviewed")
+                allowed_hosts = [
+                    str(item or "").strip().rstrip(".").lower()
+                    for item in self.ai_advisory_allowed_hosts
+                ]
+                if allowed_hosts != ["aiplatform.googleapis.com"]:
+                    raise ValueError("Vertex AI advisory host allowlist is not exact")
+                if str(self.ai_advisory_api_key_file or "").strip():
+                    raise ValueError("Vertex AI ADC adapter does not accept an API key file")
+                normalize_vertex_request_options(self.ai_advisory_request_options)
+                load_google_adc_credentials(project_id)
+            elif ai_provider != "fixture":
                 secret_path = str(self.ai_advisory_api_key_file or "").strip()
                 if not secret_path:
                     raise ValueError(
                         "hosted AI advisory provider requires an API key file"
                     )
-                _read_secret_file(secret_path, "AI_ADVISORY_API_KEY")
+                read_secure_utf8(secret_path, name="AI_ADVISORY_API_KEY")
+            validate_activation_receipt(
+                receipt_path,
+                provider_id=ai_provider,
+                model_id=str(self.ai_advisory_model or "").strip(),
+                adapter_revision=str(self.ai_advisory_adapter_revision or ""),
+                endpoint=endpoint,
+                hosted=ai_provider != "fixture",
+                reconciliation_cutoff=reconciliation_cutoff,
+            )
         for name, value in {
             "prediction_outbox_batch_size": self.prediction_outbox_batch_size,
             "prediction_outbox_max_attempts": self.prediction_outbox_max_attempts,
@@ -1210,6 +1332,18 @@ class ProductionConfig:
         cfg.forwarder_max_line_bytes = _env_int(
             "FORWARDER_MAX_LINE_BYTES", cfg.forwarder_max_line_bytes
         )
+        cfg.forwarder_quarantine_path = os.getenv(
+            "FORWARDER_QUARANTINE_PATH",
+            cfg.forwarder_quarantine_path,
+        )
+        cfg.forwarder_max_quarantine_bytes = _env_int(
+            "FORWARDER_MAX_QUARANTINE_BYTES",
+            cfg.forwarder_max_quarantine_bytes,
+        )
+        cfg.forwarder_max_quarantine_events = _env_int(
+            "FORWARDER_MAX_QUARANTINE_EVENTS",
+            cfg.forwarder_max_quarantine_events,
+        )
         cfg.worker_batch_size = _env_int("WORKER_BATCH_SIZE", cfg.worker_batch_size)
         cfg.worker_poll_seconds = _env_float("WORKER_POLL_SECONDS", cfg.worker_poll_seconds)
         cfg.event_lease_seconds = _env_float(
@@ -1310,6 +1444,12 @@ class ProductionConfig:
         cfg.ai_advisory_model = os.getenv(
             "AI_ADVISORY_MODEL", cfg.ai_advisory_model
         )
+        cfg.ai_advisory_project = os.getenv(
+            "AI_ADVISORY_PROJECT", cfg.ai_advisory_project
+        )
+        cfg.ai_advisory_location = os.getenv(
+            "AI_ADVISORY_LOCATION", cfg.ai_advisory_location
+        )
         cfg.ai_advisory_policy_path = os.getenv(
             "AI_ADVISORY_POLICY_PATH", cfg.ai_advisory_policy_path
         )
@@ -1328,6 +1468,16 @@ class ProductionConfig:
         )
         cfg.ai_advisory_adapter_revision = os.getenv(
             "AI_ADVISORY_ADAPTER_REVISION", cfg.ai_advisory_adapter_revision
+        )
+        cfg.ai_advisory_activation_receipt_path = os.getenv(
+            "AI_ADVISORY_ACTIVATION_RECEIPT_PATH",
+            cfg.ai_advisory_activation_receipt_path,
+        )
+        cfg.ai_advisory_alias_key_file = os.getenv(
+            "AI_ADVISORY_ALIAS_KEY_FILE", cfg.ai_advisory_alias_key_file
+        )
+        cfg.ai_advisory_allowed_hosts = _env_json_string_list(
+            "AI_ADVISORY_ALLOWED_HOSTS_JSON", cfg.ai_advisory_allowed_hosts
         )
         cfg.ai_advisory_request_options = _env_json(
             "AI_ADVISORY_REQUEST_OPTIONS_JSON", cfg.ai_advisory_request_options
@@ -1374,6 +1524,23 @@ class ProductionConfig:
         cfg.ai_advisory_retention_days = _env_int(
             "AI_ADVISORY_RETENTION_DAYS",
             cfg.ai_advisory_retention_days,
+        )
+        cfg.ai_advisory_max_queue_records = _env_int(
+            "AI_ADVISORY_MAX_QUEUE_RECORDS", cfg.ai_advisory_max_queue_records
+        )
+        cfg.ai_advisory_max_records = _env_int(
+            "AI_ADVISORY_MAX_RECORDS", cfg.ai_advisory_max_records
+        )
+        cfg.ai_advisory_max_storage_bytes = _env_int(
+            "AI_ADVISORY_MAX_STORAGE_BYTES", cfg.ai_advisory_max_storage_bytes
+        )
+        cfg.ai_advisory_reconcile_batch_size = _env_int(
+            "AI_ADVISORY_RECONCILE_BATCH_SIZE",
+            cfg.ai_advisory_reconcile_batch_size,
+        )
+        cfg.ai_advisory_reconciliation_cutoff = _env_json(
+            "AI_ADVISORY_RECONCILIATION_CUTOFF_JSON",
+            cfg.ai_advisory_reconciliation_cutoff,
         )
         cfg.webhook_url = os.getenv("WEBHOOK_URL", cfg.webhook_url)
         cfg.webhook_targets = _env_json_list(

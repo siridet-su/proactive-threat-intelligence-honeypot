@@ -41,6 +41,7 @@ from production.utils.sensitive_data import (
     redact_for_log,
 )
 from production.utils.serialization import command_observation_provenance, stable_id
+from production.utils.sensor_identity import validate_sensor_session_id
 from production.utils.validation_diagnostics import (
     build_validation_diagnostic,
 )
@@ -293,6 +294,9 @@ class SessionState:
     dst_ip:           str          = ""
     dst_port:         int          = 22
     sensor:           str          = ""
+    # Original Cowrie session identity scoped to ``sensor``.  ``session_id``
+    # is the authenticated, sensor-aware canonical identity.
+    sensor_session_id: str         = ""
     protocol:         str          = "ssh"
     # SSH fingerprints (for campaign correlation)
     hassh:            Optional[str] = None    # SSH client HASSH hash (from cowrie.client.kex)
@@ -556,7 +560,7 @@ class SessionMonitor:
             durable_evidence_order = embedded_durable_order
         self._stats["events"] += 1
         eid        = event.get("eventid", "")
-        session_id = event.get("session", "unknown")
+        session_id = validate_sensor_session_id(event.get("session"))
         src_ip     = event.get("src_ip", "unknown")
         source_timestamp = event.get("timestamp")
         timestamp = (
@@ -573,6 +577,16 @@ class SessionMonitor:
         if event.get("dst_ip"):     state.dst_ip       = event["dst_ip"]
         if event.get("dst_port"):   state.dst_port     = int(event["dst_port"])
         if event.get("sensor"):     state.sensor       = event["sensor"]
+        identity = event.get("_honeypot_identity")
+        if isinstance(identity, dict):
+            sensor_session_id = identity.get("sensor_session_id")
+            if isinstance(sensor_session_id, str) and sensor_session_id:
+                if (
+                    state.sensor_session_id
+                    and state.sensor_session_id != sensor_session_id
+                ):
+                    raise ValueError("canonical session provenance mismatch")
+                state.sensor_session_id = sensor_session_id
         if event.get("protocol"):   state.protocol     = event["protocol"]
 
         alerts: List[AlertEvent] = []

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import re
+import threading
 import time
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
@@ -16,13 +18,17 @@ from production.ai_advisory.contracts import (
     sha256_json,
     validate_provider_output,
 )
-from production.ai_advisory.projection import build_ai_advisory_projection
+from production.ai_advisory.projection import (
+    build_ai_advisory_projection,
+    restore_validated_output_aliases,
+)
 from production.ai_advisory.provider import (
     AIAdvisoryProvider,
     AIProviderUnavailable,
     build_ai_advisory_provider,
 )
 from production.ai_advisory.rendering import render_validated_advisory
+from production.ai_advisory.security import ProviderAliasScope, load_provider_alias_key
 from production.storage import open_storage
 from production.utils.config import ProductionConfig
 from production.utils.sensitive_data import redact_exception_for_log
@@ -35,6 +41,16 @@ TASK_KEYS = {"schema_version", "report_id", "session_id", "assessment_id"}
 ZERO_SHA256 = "0" * 64
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PROVIDER_USAGE_INTEGER_KEYS = frozenset(
+    {
+        "prompt_token_count",
+        "candidates_token_count",
+        "thoughts_token_count",
+        "total_token_count",
+        "cached_content_token_count",
+        "tool_use_prompt_token_count",
+    }
+)
 
 
 def _identity_text(value: Any, label: str, *, allow_empty: bool = False) -> str:
@@ -67,6 +83,25 @@ def _retry_delay(config: ProductionConfig, attempts: int) -> float:
         float(config.ai_advisory_retry_max_seconds),
         float(config.ai_advisory_retry_base_seconds) * (2**exponent),
     )
+
+
+def _provider_usage_metrics(response: Any) -> Dict[str, Any]:
+    """Accept only aggregate, non-negative provider usage telemetry."""
+
+    raw = getattr(response, "usage_metadata", {})
+    if not isinstance(raw, Mapping):
+        return {}
+    result: Dict[str, Any] = {}
+    for key in _PROVIDER_USAGE_INTEGER_KEYS:
+        value = raw.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            result[f"provider_{key}"] = value
+    traffic_type = raw.get("traffic_type")
+    if isinstance(traffic_type, str) and re.fullmatch(
+        r"[A-Z][A-Z0-9_]{0,63}", traffic_type
+    ):
+        result["provider_traffic_type"] = traffic_type
+    return result
 
 
 def _safe_log(payload: Mapping[str, Any]) -> None:
@@ -110,6 +145,87 @@ class AIAdvisoryWorker:
         self.response_schema = provider_output_json_schema(self.policy)
         self.schema_sha256 = contract_schema_sha256(self.policy)
         self.worker_owner = new_job_owner("ai-advisory")
+        self.alias_key = (
+            load_provider_alias_key(config.ai_advisory_alias_key_file)
+            if config.enable_ai_advisory
+            else b""
+        )
+        self._provider_call_thread: threading.Thread | None = None
+
+    def _alias_scope(self) -> ProviderAliasScope:
+        provider_scope = sha256_json(
+            {
+                "provider_id": str(getattr(self.provider, "provider_id", "") or ""),
+                "model_id": str(getattr(self.provider, "model_id", "") or ""),
+                "adapter_revision": str(
+                    getattr(self.provider, "adapter_revision", "")
+                    or self.config.ai_advisory_adapter_revision
+                ),
+                "endpoint": self.config.ai_advisory_endpoint,
+                "api_version": self.config.ai_advisory_api_version,
+            }
+        )
+        return ProviderAliasScope(self.alias_key, provider_scope)
+
+    def _call_provider_with_deadline(
+        self,
+        projection: Mapping[str, Any],
+        identity: Mapping[str, str],
+    ) -> Any:
+        """Bound even an adapter that fails to honor its transport timeout."""
+
+        if (
+            self._provider_call_thread is not None
+            and self._provider_call_thread.is_alive()
+        ):
+            raise AIProviderUnavailable(
+                "previous AI advisory provider call is still outstanding"
+            )
+
+        result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+        def invoke() -> None:
+            try:
+                result_queue.put(
+                    (
+                        True,
+                        self.provider.generate(
+                            projection,
+                            prompt_contract=self.policy["prompt_contract"],
+                            response_schema=self.response_schema,
+                            schema_sha256=self.schema_sha256,
+                            policy_sha256=str(
+                                projection["provenance"]["ai_policy_sha256"]
+                            ),
+                            timeout_seconds=self.config.ai_advisory_timeout_seconds,
+                            max_response_bytes=min(
+                                self.config.ai_advisory_max_response_bytes,
+                                int(self.policy["limits"]["max_response_bytes"]),
+                            ),
+                            idempotency_key=identity["request_sha256"],
+                        ),
+                    )
+                )
+            except BaseException as exc:
+                result_queue.put((False, exc))
+
+        thread = threading.Thread(
+            target=invoke,
+            name="ai-provider-call",
+            daemon=True,
+        )
+        self._provider_call_thread = thread
+        thread.start()
+        thread.join(float(self.config.ai_advisory_timeout_seconds))
+        if thread.is_alive():
+            raise AIProviderUnavailable("AI advisory provider deadline exceeded")
+        self._provider_call_thread = None
+        succeeded, value = result_queue.get_nowait()
+        if not succeeded:
+            if isinstance(value, Exception):
+                raise value
+            raise AIProviderUnavailable("AI advisory provider failed")
+        return value
 
     def _validate_task(self, job: Mapping[str, Any]) -> Dict[str, str]:
         task = job.get("task")
@@ -188,7 +304,7 @@ class AIAdvisoryWorker:
                 "provider_identity": provider_identity,
                 "prompt_sha256": self.prompt_sha256,
                 "schema_sha256": self.schema_sha256,
-                "policy_sha256": self.policy_sha256,
+                "policy_sha256": projection["provenance"]["ai_policy_sha256"],
                 "request_bytes": request_bytes,
                 "request_tokens": request_tokens,
                 "request_limits": {
@@ -229,7 +345,7 @@ class AIAdvisoryWorker:
             "prompt_contract": self.policy["prompt_contract"],
             "response_schema": self.response_schema,
             "schema_sha256": self.schema_sha256,
-            "policy_sha256": self.policy_sha256,
+            "policy_sha256": projection["provenance"]["ai_policy_sha256"],
         }
 
     def _enforce_request_budget(self, identity: Mapping[str, str]) -> None:
@@ -253,9 +369,33 @@ class AIAdvisoryWorker:
     def _cached_record(
         row: Mapping[str, Any], task: Mapping[str, str]
     ) -> Dict[str, Any]:
+        same_report = (
+            str(row.get("report_id") or "") == task["report_id"]
+            and str(row.get("assessment_id") or "") == task["assessment_id"]
+        )
+        advisory_id = str(row["advisory_id"])
+        cache_key = str(row["cache_key"])
+        if not same_report:
+            # Keep a report-specific local association without another provider
+            # call. This prevents a cache hit for an older report from being
+            # displayed as the current report's advisory.
+            cache_key = stable_id(
+                "ai_advisory_report_cache_link",
+                {
+                    "source_cache_key": cache_key,
+                    "report_id": task["report_id"],
+                    "assessment_id": task["assessment_id"],
+                },
+            )
+            advisory_id = stable_id(
+                "ai_advisory_report_link",
+                {"cache_key": cache_key, "source_advisory_id": advisory_id},
+            )
+        metrics = dict(row["metrics"])
+        metrics["cache_hit"] = True
         return {
-            "advisory_id": row["advisory_id"],
-            "cache_key": row["cache_key"],
+            "advisory_id": advisory_id,
+            "cache_key": cache_key,
             "report_id": task["report_id"],
             "session_id": task["session_id"],
             "assessment_id": task["assessment_id"],
@@ -269,7 +409,7 @@ class AIAdvisoryWorker:
             "schema_sha256": row["schema_sha256"],
             "policy_sha256": row["policy_sha256"],
             "payload": row["payload"],
-            "metrics": row["metrics"],
+            "metrics": metrics,
         }
 
     def _record(
@@ -327,10 +467,12 @@ class AIAdvisoryWorker:
             or str(report_row.get("session_id") or "") != task["session_id"]
         ):
             raise AIAdvisoryContractError("persisted report identity does not match task")
+        alias_scope = self._alias_scope()
         projection = build_ai_advisory_projection(
             report,
             policy=self.policy,
             policy_sha256=self.policy_sha256,
+            alias_scope=alias_scope,
         )
         identity = self._request_identity(projection)
         self._enforce_request_budget(identity)
@@ -348,19 +490,10 @@ class AIAdvisoryWorker:
                 raise RuntimeError("AI advisory cache completion lost its claim")
             return "cache_replayed"
 
-        response = self.provider.generate(
-            projection,
-            prompt_contract=self.policy["prompt_contract"],
-            response_schema=self.response_schema,
-            schema_sha256=self.schema_sha256,
-            policy_sha256=self.policy_sha256,
-            timeout_seconds=self.config.ai_advisory_timeout_seconds,
-            max_response_bytes=min(
-                self.config.ai_advisory_max_response_bytes,
-                int(self.policy["limits"]["max_response_bytes"]),
-            ),
-        )
+        response = self._call_provider_with_deadline(projection, identity)
+        provider_usage = _provider_usage_metrics(response)
         try:
+            computed_response_sha256 = sha256_json(response.structured_output)
             response_bytes = stable_json(response.structured_output).encode("utf-8")
             response_limit = min(
                 self.config.ai_advisory_max_response_bytes,
@@ -368,7 +501,13 @@ class AIAdvisoryWorker:
             )
             if len(response_bytes) > response_limit:
                 raise AIAdvisoryContractError("provider response exceeds the configured limit")
-            if response.response_sha256 != sha256_json(response.structured_output):
+            echoed_response_sha256 = str(response.response_sha256 or "")
+            if not _SHA256_RE.fullmatch(echoed_response_sha256):
+                raise AIAdvisoryContractError(
+                    "provider response hash echo is invalid",
+                    code="hash_mismatch",
+                )
+            if echoed_response_sha256 != computed_response_sha256:
                 raise AIAdvisoryContractError(
                     "provider response hash mismatch",
                     code="hash_mismatch",
@@ -402,8 +541,9 @@ class AIAdvisoryWorker:
                 response.structured_output,
                 projection=projection,
                 policy=self.policy,
-                policy_sha256=self.policy_sha256,
+                policy_sha256=str(projection["provenance"]["ai_policy_sha256"]),
             )
+            validated = restore_validated_output_aliases(validated, alias_scope)
             rendered = render_validated_advisory(
                 validated,
                 report=report,
@@ -427,13 +567,14 @@ class AIAdvisoryWorker:
                 identity=identity,
                 projection=projection,
                 status="rejected",
-                response_sha256=response.response_sha256,
+                response_sha256=computed_response_sha256,
                 payload=payload,
                 metrics={
                     "schema_valid": False,
                     "validator_accepted": False,
                     "validator_reason_code": exc.code,
                     "cache_hit": False,
+                    **provider_usage,
                 },
             )
             renew_claim()
@@ -471,9 +612,13 @@ class AIAdvisoryWorker:
             },
             "provenance": {
                 "projection_sha256": projection["projection_sha256"],
-                "evidence_sha256": projection["evidence_sha256"],
+                # Local audit records retain canonical local identity; only the
+                # provider projection uses the provider-scoped alias digest.
+                "evidence_sha256": str(
+                    (report.get("provenance") or {}).get("evidence_sha256") or ""
+                ),
                 "request_sha256": identity["request_sha256"],
-                "response_sha256": response.response_sha256,
+                "response_sha256": computed_response_sha256,
                 "provider_id": response.provider_id,
                 "model_id": response.model_id,
                 "prompt_sha256": self.prompt_sha256,
@@ -504,7 +649,7 @@ class AIAdvisoryWorker:
             identity=identity,
             projection=projection,
             status="accepted",
-            response_sha256=response.response_sha256,
+            response_sha256=computed_response_sha256,
             payload=payload,
             metrics={
                 "schema_valid": True,
@@ -519,6 +664,7 @@ class AIAdvisoryWorker:
                 "shadow_evidence_reference_count": len(evidence_refs),
                 "request_bytes": int(identity["request_bytes"]),
                 "request_tokens_estimate": int(identity["request_tokens"]),
+                **provider_usage,
             },
         )
         renew_claim()
@@ -540,13 +686,37 @@ class AIAdvisoryWorker:
     ) -> int:
         if not self.config.enable_ai_advisory:
             return 0
-        # Retain only the bounded advisory extension.  This is deliberately
-        # outside canonical report retention and never deletes sessions,
-        # events, reports, predictions, or historical compatibility records.
-        self.storage.prune_ai_advisories(
-            self.config.ai_advisory_retention_days,
-            keep_latest_per_session=True,
-        )
+        try:
+            self.storage.initialize_ai_advisory_extension()
+            # Reconcile the gap between canonical commit and best-effort
+            # enqueue. Both operations are idempotent and queue bounded.
+            self.storage.reconcile_ai_advisory_outbox(
+                reconciliation_cutoff=(
+                    self.config.ai_advisory_reconciliation_cutoff
+                ),
+                limit=self.config.ai_advisory_reconcile_batch_size,
+                max_queue_records=self.config.ai_advisory_max_queue_records,
+            )
+            # Only optional AI rows are pruned. Canonical reports, sessions,
+            # events, predictions, and deterministic artifacts are untouched.
+            self.storage.prune_ai_advisories(
+                self.config.ai_advisory_retention_days,
+                keep_latest_per_session=False,
+                max_records=self.config.ai_advisory_max_records,
+                max_storage_bytes=self.config.ai_advisory_max_storage_bytes,
+            )
+        except Exception as exc:
+            _safe_log(
+                {
+                    "service": "ai_advisory_worker",
+                    "status": "extension_unavailable",
+                    "error_code": "ai_extension_unavailable",
+                    "error_type": "StorageError",
+                    "timestamp": utc_now(),
+                }
+            )
+            redact_exception_for_log(exc)
+            return 0
         processed = 0
         for _ in range(self.config.ai_advisory_batch_size):
             if should_stop is not None and should_stop():
@@ -605,6 +775,7 @@ class AIAdvisoryWorker:
                     )
                     del exc
                 except Exception as exc:
+                    retryable = not isinstance(exc, AIAdvisoryContractError)
                     error_code = (
                         "ai_job_invalid"
                         if isinstance(exc, AIAdvisoryContractError)
@@ -618,7 +789,7 @@ class AIAdvisoryWorker:
                         job["claim_token"],
                         error_code,
                         error_type,
-                        False,
+                        retryable,
                         self.config.ai_advisory_max_attempts,
                         _retry_delay(self.config, int(job.get("attempts") or 1)),
                     )

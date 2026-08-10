@@ -97,7 +97,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     runtime_archive = artifact_root / "python-runtime.tar.gz"
     _tar_directory(runtime_root, runtime_archive, runtime_manifest["archive_root"])
 
-    lock = artifact_root / "requirements-next-behavior-corpus.lock.txt"
+    lock = artifact_root / "requirements-runtime.lock.txt"
     lock_source = Path(__file__).resolve().parents[1] / lock.name
     shutil.copyfile(lock_source, lock)
     requirements = [line.split("==", 1) for line in lock.read_text(encoding="utf-8").splitlines() if line]
@@ -131,7 +131,7 @@ def test_runtime_and_wheel_manifests_are_content_addressed_and_closed(tmp_path: 
     assert runtime["runtime_id"].startswith("python_runtime_")
     assert runtime["inventory"]["bin/python3"]["type"] == "symlink"
     assert wheels["bundle_id"].startswith("python_wheels_")
-    assert len(wheels["wheels"]) == 37
+    assert len(wheels["wheels"]) == 52
 
 
 def test_receipt_verifies_every_artifact_and_rejects_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,7 +147,7 @@ def test_receipt_verifies_every_artifact_and_rejects_mutation(tmp_path: Path, mo
     assert receipt_path.stat().st_mode & 0o777 == 0o600
     verified = verify_receipt(receipt_path, fixture["artifact_root"])
     assert verified["verified"] is True
-    assert verified["wheel_count"] == 37
+    assert verified["wheel_count"] == 52
 
     fixture["application"].write_bytes(b"mutated")
     with pytest.raises(RuntimeDependencyReceiptError, match="identity mismatch"):
@@ -188,6 +188,47 @@ def test_wheel_manifest_rejects_missing_or_extra_artifacts(tmp_path: Path, monke
             resolver_version="25.0.1",
             download_arguments=["--only-binary=:all:", "--python-version=3.12"],
         )
+
+
+@pytest.mark.parametrize(
+    ("python_tag", "abi_tag", "platform_tag"),
+    [
+        ("cp313", "cp313", "manylinux_2_28_x86_64"),
+        ("py3", "none", "win_amd64"),
+    ],
+)
+def test_wheel_manifest_rejects_incompatible_target_tags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    python_tag: str,
+    abi_tag: str,
+    platform_tag: str,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    changed = json.loads(json.dumps(fixture["wheel_manifest"]))
+    wheel = changed["wheels"][0]
+    prefix = wheel["filename"][:-4].rsplit("-", 3)[0]
+    wheel["filename"] = (
+        f"{prefix}-{python_tag}-{abi_tag}-{platform_tag}.whl"
+    )
+    wheel["python_tag"] = python_tag
+    wheel["abi_tag"] = abi_tag
+    wheel["platform_tag"] = platform_tag
+
+    with pytest.raises(RuntimeDependencyReceiptError, match="incompatible"):
+        validate_wheel_manifest(changed)
+
+
+def test_wheel_manifest_rejects_tags_that_disagree_with_filename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    changed = json.loads(json.dumps(fixture["wheel_manifest"]))
+    changed["wheels"][0]["python_tag"] = "cp312"
+
+    with pytest.raises(RuntimeDependencyReceiptError, match="do not match"):
+        validate_wheel_manifest(changed)
 
 
 def test_archive_rejects_unmanifested_overlay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

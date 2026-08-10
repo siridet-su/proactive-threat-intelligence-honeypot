@@ -121,6 +121,22 @@ def test_missing_required_unit_or_active_state_fails_closed() -> None:
     ]
 
 
+def test_gcp_inventory_refuses_missing_managed_ai_worker() -> None:
+    loaded = _loaded()
+    unit_files, active = _valid_gcp_inventory()
+    unit_files.pop("honeypot-ai-advisory-worker.service")
+    result = validate_unit_inventory(
+        loaded,
+        "gcp_backend",
+        unit_files=unit_files,
+        active_units=active,
+    )
+    assert result["status"] == "invalid"
+    assert result["errors"]["missing_installed_units"] == [
+        "honeypot-ai-advisory-worker.service"
+    ]
+
+
 def test_pi_profile_bounds_management_to_forwarder_and_cowrie_dependency() -> None:
     loaded = _loaded()
     result = validate_unit_inventory(

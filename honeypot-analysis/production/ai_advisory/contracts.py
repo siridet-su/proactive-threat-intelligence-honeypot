@@ -483,6 +483,14 @@ def validate_provider_output(
         )
         for index, item in enumerate(templates)
     ]
+    template_ids = [
+        item["template_id"] for item in normalized_advisory["template_selections"]
+    ]
+    if len(template_ids) != len(set(template_ids)):
+        raise AIAdvisoryContractError(
+            "template selections contain duplicates",
+            code="duplicate_output",
+        )
     selected_from_templates = {
         "selected_finding_ids": {ref for item in normalized_advisory["template_selections"] for ref in item["finding_ids"]},
         "selected_relationship_ids": {ref for item in normalized_advisory["template_selections"] for ref in item["relationship_ids"]},
@@ -565,6 +573,13 @@ def validate_provider_output(
                 **normalized,
             },
         )
+        if normalized["candidate_id"] in {
+            item["candidate_id"] for item in normalized_candidates
+        }:
+            raise AIAdvisoryContractError(
+                "shadow candidates contain duplicates",
+                code="duplicate_output",
+            )
         normalized_candidates.append(normalized)
 
     return {

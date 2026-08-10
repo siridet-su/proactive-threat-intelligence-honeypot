@@ -42,6 +42,18 @@ def test_common_environment_and_pi_template_contain_no_hmac_secret_setting() -> 
     assert "credential-hmac-keyring" not in pi_service
 
 
+def test_common_environment_selects_transformer_without_implicit_vomm_fallback() -> None:
+    environment_example = (SYSTEMD_DIR / "common.env.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "PREDICTION_POLICY_PATH=/opt/honeypot/configs/"
+        "prediction_policy.transformer_poc.trusted.json"
+    ) in environment_example
+    assert "PREDICTION_POLICY_PATH=/opt/honeypot/configs/prediction_policy.trusted.json" not in environment_example
+
+
 def test_example_config_selects_hmac_without_embedding_key_material() -> None:
     config = json.loads(
         (ROOT / "configs" / "production_config.example.json").read_text(
@@ -119,6 +131,7 @@ def test_ingest_service_exposes_owner_only_startup_diagnostics_path() -> None:
 
 def test_all_long_running_units_have_bounded_graceful_stop_settings() -> None:
     services = (
+        "honeypot-ai-advisory-worker.service",
         "honeypot-analysis-worker.service",
         "honeypot-dashboard-api.service",
         "honeypot-enrichment-worker.service",
@@ -133,6 +146,44 @@ def test_all_long_running_units_have_bounded_graceful_stop_settings() -> None:
         unit = (SYSTEMD_DIR / name).read_text(encoding="utf-8")
         assert "TimeoutStopSec=120" in unit, name
         assert "KillSignal=SIGTERM" in unit, name
+
+
+def test_ai_worker_is_managed_but_static_and_disabled_by_default() -> None:
+    unit = (SYSTEMD_DIR / "honeypot-ai-advisory-worker.service").read_text(
+        encoding="utf-8"
+    )
+    environment = (
+        SYSTEMD_DIR / "services" / "ai-advisory-worker.env.example"
+    ).read_text(encoding="utf-8")
+    common = (SYSTEMD_DIR / "common.env.example").read_text(encoding="utf-8")
+    assert "[Install]" not in unit
+    assert "ENABLE_AI_ADVISORY=false" in environment
+    assert "ENABLE_AI_ADVISORY=false" in common
+    assert "AI_ADVISORY_ACTIVATION_RECEIPT_PATH=" in environment
+    assert "AI_ADVISORY_ALIAS_KEY_FILE=" in environment
+    assert "AI_ADVISORY_RECONCILIATION_CUTOFF_JSON={}" in environment
+    assert "AI_ADVISORY_PROVIDER=google_vertex_gemini" in environment
+    assert "AI_ADVISORY_PROJECT=project-dff4b23a-3010-4936-a02" in environment
+    assert "AI_ADVISORY_LOCATION=global" in environment
+    assert "AI_ADVISORY_MODEL=gemini-2.5-flash" in environment
+    assert not any(
+        line.startswith("AI_ADVISORY_API_KEY_FILE=")
+        for line in environment.splitlines()
+    )
+    assert "ProtectHome=true" in unit
+    assert "PrivateDevices=true" in unit
+    assert "CapabilityBoundingSet=" in unit
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in unit
+    assert "MemoryMax=512M" in unit
+    assert "CPUQuota=50%" in unit
+    assert "TasksMax=64" in unit
+
+    config = json.loads(
+        (ROOT / "configs" / "production_config.example.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert config["ai_advisory_reconciliation_cutoff"] == {}
 
 
 def test_example_config_documents_event_processing_defaults() -> None:

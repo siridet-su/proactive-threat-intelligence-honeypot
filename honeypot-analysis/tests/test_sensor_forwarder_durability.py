@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import os
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +25,9 @@ def _config(tmp_path: Path, **overrides: object) -> SimpleNamespace:
         "forwarder_max_spool_bytes": 1024 * 1024,
         "forwarder_min_free_bytes": 0,
         "forwarder_max_line_bytes": 1024,
+        "forwarder_quarantine_path": str(tmp_path / "quarantine.ndjson"),
+        "forwarder_max_quarantine_bytes": 1024 * 1024,
+        "forwarder_max_quarantine_events": 100,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -48,6 +53,36 @@ def _checkpoint(config: SimpleNamespace) -> sensor_forwarder.TailCheckpoint:
     return sensor_forwarder.CowrieLogTailer(
         config.cowrie_log_path, f"{config.spool_path}.offset"
     )._load_checkpoint()
+
+
+def test_post_events_accepts_indexed_all_rejected_http_400(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = _config(tmp_path)
+    acknowledgement = {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": [{"index": 0, "error_code": "invalid_event"}],
+        "total": 1,
+    }
+    error = urllib.error.HTTPError(
+        config.ingest_url,
+        400,
+        "Bad Request",
+        hdrs=None,
+        fp=io.BytesIO(json.dumps(acknowledgement).encode("utf-8")),
+    )
+    monkeypatch.setattr(
+        sensor_forwarder.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
+
+    assert sensor_forwarder.post_events(
+        config,
+        [{"eventid": "", "session": "bad"}],
+    ) == acknowledgement
 
 
 def test_spool_fsync_completes_before_offset_commit(tmp_path, monkeypatch) -> None:
@@ -391,11 +426,128 @@ def test_corrupt_spool_error_is_bounded_stable_and_reported(tmp_path, monkeypatc
     assert "timestamp" not in captured[0]
 
 
+def test_permanent_reject_is_durably_quarantined_and_does_not_block_spool(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = _config(tmp_path)
+    rejected = {
+        "eventid": "",
+        "session": "poison-session",
+        "password": "must-be-redacted",
+    }
+    valid = {
+        "eventid": "cowrie.session.connect",
+        "session": "valid-session",
+    }
+    _write_events(config.cowrie_log_path, [rejected, valid])
+    monkeypatch.setattr(
+        sensor_forwarder,
+        "post_events",
+        lambda *_args, **_kwargs: {
+            "accepted": 1,
+            "duplicates": 0,
+            "rejected": [{"index": 0, "error_code": "invalid_event"}],
+            "total": 2,
+        },
+    )
+
+    result = sensor_forwarder.forward_once(config)
+
+    assert result.sent == 1
+    assert result.rejected == 1
+    assert result.quarantined == 1
+    assert result.remaining == 0
+    assert not Path(config.spool_path).exists()
+    quarantine_path = Path(config.forwarder_quarantine_path)
+    assert quarantine_path.stat().st_mode & 0o777 == 0o600
+    records = [
+        json.loads(line)
+        for line in quarantine_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(records) == 1
+    assert records[0]["schema_version"] == sensor_forwarder.QUARANTINE_SCHEMA
+    assert records[0]["error_code"] == "invalid_event"
+    assert records[0]["event"]["password"] == "[REDACTED]"
+    assert "must-be-redacted" not in quarantine_path.read_text(encoding="utf-8")
+
+
+def test_quarantine_is_bounded_and_evicts_oldest_records(tmp_path) -> None:
+    quarantine = sensor_forwarder.RejectedEventQuarantine(
+        str(tmp_path / "bounded-quarantine.ndjson")
+    )
+    evicted_total = 0
+    for index in range(3):
+        _, evicted = quarantine.append_rejected(
+            sensor_id="sensor-a",
+            rejected=[
+                (
+                    {
+                        "eventid": "",
+                        "session": f"rejected-{index}",
+                    },
+                    {"index": 0, "error_code": "invalid_event"},
+                )
+            ],
+            max_bytes=16 * 1024,
+            max_events=2,
+        )
+        evicted_total += evicted
+
+    records = [
+        json.loads(line)
+        for line in quarantine.path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert evicted_total == 1
+    assert len(records) == 2
+    assert [record["event"]["session"] for record in records] == [
+        "rejected-1",
+        "rejected-2",
+    ]
+    assert quarantine.size_bytes() <= 16 * 1024
+
+
+def test_quarantine_failure_preserves_main_spool_for_safe_replay(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = _config(tmp_path)
+    event = {"eventid": "", "session": "quarantine-failure"}
+    _write_events(config.cowrie_log_path, [event])
+    monkeypatch.setattr(
+        sensor_forwarder,
+        "post_events",
+        lambda *_args, **_kwargs: {
+            "accepted": 0,
+            "duplicates": 0,
+            "rejected": [{"index": 0, "error_code": "invalid_event"}],
+            "total": 1,
+        },
+    )
+    original_replace = sensor_forwarder._atomic_replace_bytes
+
+    def fail_quarantine(path: Path, payload: bytes) -> None:
+        if path == Path(config.forwarder_quarantine_path):
+            raise OSError("simulated quarantine failure")
+        original_replace(path, payload)
+
+    monkeypatch.setattr(sensor_forwarder, "_atomic_replace_bytes", fail_quarantine)
+
+    result = sensor_forwarder.forward_once(config)
+
+    assert result.rejected == 1
+    assert result.quarantined == 0
+    assert result.remaining == 1
+    assert Path(config.spool_path).exists()
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
         ("forwarder_batch_size", 0, "positive integer"),
         ("forwarder_max_spool_bytes", 0, "positive integer"),
+        ("forwarder_max_quarantine_bytes", 0, "positive integer"),
+        ("forwarder_max_quarantine_events", 0, "positive integer"),
         ("forwarder_min_free_bytes", -1, "non-negative integer"),
         ("forwarder_max_line_bytes", 1024 * 1024 + 1, "must not exceed"),
     ],
@@ -403,3 +555,15 @@ def test_corrupt_spool_error_is_bounded_stable_and_reported(tmp_path, monkeypatc
 def test_forwarder_safety_configuration_fails_closed(field, value, message) -> None:
     with pytest.raises(ValueError, match=message):
         ProductionConfig(**{field: value})
+
+
+def test_forwarder_quarantine_configuration_fails_closed() -> None:
+    with pytest.raises(ValueError, match="at least 1024"):
+        ProductionConfig(forwarder_max_quarantine_bytes=512)
+    with pytest.raises(ValueError, match="must not exceed"):
+        ProductionConfig(forwarder_max_quarantine_events=100_001)
+    with pytest.raises(ValueError, match="must differ"):
+        ProductionConfig(
+            spool_path="same.ndjson",
+            forwarder_quarantine_path="same.ndjson",
+        )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -19,6 +20,7 @@ def test_pyproject_separates_runtime_and_optional_dependency_groups() -> None:
     assert project["requires-python"] == ">=3.11"
     assert project["dependencies"] == ["requests>=2.31,<3"]
     assert set(extras) == {
+        "ai-advisory",
         "securebert",
         "training",
         "artifacts",
@@ -26,6 +28,7 @@ def test_pyproject_separates_runtime_and_optional_dependency_groups() -> None:
         "test",
     }
     assert any(item.startswith("reportlab") for item in extras["artifacts"])
+    assert any(item.startswith("google-genai") for item in extras["ai-advisory"])
     assert any(item.startswith("stix2-validator") for item in extras["artifacts"])
     assert any(item.startswith("torch") for item in extras["securebert"])
     assert any(item.startswith("scikit-learn") for item in extras["evaluation"])
@@ -35,8 +38,9 @@ def test_pyproject_separates_runtime_and_optional_dependency_groups() -> None:
 def test_requirement_files_match_documented_optional_groups() -> None:
     expected = {
         "requirements.txt": "requests>=2.31,<3",
+        "requirements-ai-advisory.txt": "google-genai>=2.13,<3",
         "requirements-dev.txt": "pytest>=8,<10",
-        "requirements-securebert.txt": "transformers>=4.40,<5",
+        "requirements-securebert.txt": "transformers>=5.3,<5.4",
         "requirements-training.txt": "pandas>=2.2,<4",
         "requirements-artifacts.txt": "stix2-validator>=3.2,<4",
         "requirements-evaluation.txt": "scikit-learn>=1.4,<2",
@@ -54,6 +58,27 @@ def test_requirement_files_match_documented_optional_groups() -> None:
         "constraints-mongodb.txt",
     ):
         assert not (ROOT / archived).exists()
+
+
+def test_production_runtime_lock_extends_model_lock_without_rewriting_it() -> None:
+    model_lock = ROOT / "requirements-next-behavior-corpus.lock.txt"
+    runtime_lock = ROOT / "requirements-runtime.lock.txt"
+    model_lines = set(model_lock.read_text(encoding="utf-8").splitlines())
+    runtime_lines = runtime_lock.read_text(encoding="utf-8").splitlines()
+
+    assert len(model_lines) == 37
+    assert len(runtime_lines) == 52
+    assert model_lines < set(runtime_lines)
+    assert runtime_lines == sorted(runtime_lines, key=str.lower)
+    assert "google-genai==2.13.0" in runtime_lines
+    assert "google-auth==2.56.3" in runtime_lines
+    assert hashlib.sha256(runtime_lock.read_bytes()).hexdigest() == (
+        "e205f68a18388e3a374a0c2342c5ef4d23de6830fa7156c374bc283cf099b252"
+    )
+    ai_requirements = (ROOT / "requirements-ai-advisory.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "-c requirements-runtime.lock.txt" in ai_requirements
 
 
 def test_core_environment_imports_every_production_module_in_isolation() -> None:

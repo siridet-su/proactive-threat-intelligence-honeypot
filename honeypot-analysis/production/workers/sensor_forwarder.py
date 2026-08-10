@@ -11,6 +11,7 @@ import shutil
 import stat as stat_module
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +36,10 @@ else:
 DEFAULT_MAX_SPOOL_BYTES = 64 * 1024 * 1024
 DEFAULT_MIN_FREE_BYTES = 32 * 1024 * 1024
 DEFAULT_MAX_LINE_BYTES = 256 * 1024
+DEFAULT_MAX_QUARANTINE_BYTES = 16 * 1024 * 1024
+DEFAULT_MAX_QUARANTINE_EVENTS = 1_000
 OFFSET_SCHEMA = "cowrie_forwarder_offset.v2"
+QUARANTINE_SCHEMA = "cowrie_forwarder_quarantine.v1"
 
 
 if __package__ == "production":
@@ -138,6 +142,9 @@ class ForwardResult:
     truncation_detected: bool = False
     disk_limited: bool = False
     lock_contended: bool = False
+    quarantined: int = 0
+    quarantine_evicted: int = 0
+    quarantine_bytes: int = 0
 
 
 class ForwarderInstanceLock:
@@ -171,6 +178,117 @@ class ForwarderInstanceLock:
 
 class SpoolCapacityError(OSError):
     """Raised before an append that would violate a disk safety bound."""
+
+
+class RejectedEventQuarantine:
+    """Private, bounded, durable dead-letter storage for permanent rejects."""
+
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+
+    def size_bytes(self) -> int:
+        try:
+            return self.path.stat().st_size
+        except FileNotFoundError:
+            return 0
+
+    @staticmethod
+    def _record(
+        sensor_id: str,
+        event: Dict[str, Any],
+        rejection: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        sanitized = sanitize_cowrie_event_for_persistence(event)
+        event_bytes = json.dumps(
+            sanitized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        error_code = str(rejection.get("error_code") or "ingest_rejected")[:128]
+        identity_material = {
+            "sensor_id": str(sensor_id or ""),
+            "event_sha256": hashlib.sha256(event_bytes).hexdigest(),
+            "error_code": error_code,
+        }
+        quarantine_id = "quarantine_" + hashlib.sha256(
+            json.dumps(
+                identity_material,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:32]
+        return {
+            "schema_version": QUARANTINE_SCHEMA,
+            "quarantine_id": quarantine_id,
+            "quarantined_at": utc_now(),
+            **identity_material,
+            "event_bytes": len(event_bytes),
+            "event": sanitized,
+        }
+
+    @staticmethod
+    def _encode(record: Dict[str, Any]) -> bytes:
+        return json.dumps(
+            record,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+
+    def append_rejected(
+        self,
+        *,
+        sensor_id: str,
+        rejected: List[Tuple[Dict[str, Any], Dict[str, Any]]],
+        max_bytes: int,
+        max_events: int,
+    ) -> Tuple[int, int]:
+        """Durably add rejects, evicting oldest rows to enforce both bounds."""
+
+        if not rejected:
+            return 0, 0
+        existing_lines: List[bytes] = []
+        existing_ids: set[str] = set()
+        if self.path.exists():
+            for raw_line in self.path.read_bytes().splitlines():
+                if not raw_line.strip():
+                    continue
+                line = raw_line + b"\n"
+                existing_lines.append(line)
+                try:
+                    parsed = json.loads(raw_line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if isinstance(parsed, dict):
+                    quarantine_id = parsed.get("quarantine_id")
+                    if isinstance(quarantine_id, str):
+                        existing_ids.add(quarantine_id)
+
+        added_lines: List[bytes] = []
+        for event, rejection in rejected:
+            record = self._record(sensor_id, event, rejection)
+            if record["quarantine_id"] in existing_ids:
+                continue
+            encoded = self._encode(record)
+            if len(encoded) > max_bytes:
+                record.pop("event", None)
+                record["event_omitted_due_to_quarantine_bound"] = True
+                encoded = self._encode(record)
+            if len(encoded) > max_bytes:
+                raise OSError("quarantine bound cannot hold rejection metadata")
+            existing_ids.add(record["quarantine_id"])
+            added_lines.append(encoded)
+
+        lines = existing_lines + added_lines
+        evicted = 0
+        total_bytes = sum(len(line) for line in lines)
+        while lines and (len(lines) > max_events or total_bytes > max_bytes):
+            total_bytes -= len(lines.pop(0))
+            evicted += 1
+
+        _atomic_replace_bytes(self.path, b"".join(lines))
+        return len(added_lines), evicted
 
 
 class CowrieLogTailer:
@@ -549,14 +667,36 @@ def post_events(config: ProductionConfig, events: List[Dict[str, Any]]) -> Dict[
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=config.forwarder_timeout_seconds) as response:
-        encoded = response.read(1_048_577)
+    try:
+        response = urllib.request.urlopen(
+            request,
+            timeout=config.forwarder_timeout_seconds,
+        )
+    except urllib.error.HTTPError as exc:
+        # A completely rejected batch is a valid indexed acknowledgement even
+        # though ingest returns HTTP 400.  Other HTTP errors remain retryable.
+        encoded = exc.read(1_048_577)
         if len(encoded) > 1_048_576:
-            raise ValueError("ingest response exceeds size limit")
-        parsed = json.loads(encoded.decode("utf-8"))
-        if not isinstance(parsed, dict):
-            raise ValueError("ingest response must be an object")
+            raise ValueError("ingest response exceeds size limit") from exc
+        try:
+            parsed = json.loads(encoded.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise exc
+        if (
+            exc.code != 400
+            or not isinstance(parsed, dict)
+            or not {"accepted", "duplicates", "rejected", "total"}.issubset(parsed)
+        ):
+            raise exc
         return parsed
+    with response:
+        encoded = response.read(1_048_577)
+    if len(encoded) > 1_048_576:
+        raise ValueError("ingest response exceeds size limit")
+    parsed = json.loads(encoded.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError("ingest response must be an object")
+    return parsed
 
 
 def _result(
@@ -571,6 +711,9 @@ def _result(
     disk_limited: bool = False,
     checkpoint_committed: bool = True,
     spool_parse_errors: int = 0,
+    quarantined: int = 0,
+    quarantine_evicted: int = 0,
+    quarantine_bytes: int = 0,
 ) -> ForwardResult:
     return ForwardResult(
         sent=sent,
@@ -590,12 +733,20 @@ def _result(
         rotation_detected=tail_read.rotation_detected,
         truncation_detected=tail_read.truncation_detected,
         disk_limited=disk_limited,
+        quarantined=quarantined,
+        quarantine_evicted=quarantine_evicted,
+        quarantine_bytes=quarantine_bytes,
     )
 
 
 def _forward_once_unlocked(config: ProductionConfig) -> ForwardResult:
     tailer = CowrieLogTailer(config.cowrie_log_path, f"{config.spool_path}.offset")
     spool = DiskSpool(config.spool_path)
+    quarantine_path = str(
+        getattr(config, "forwarder_quarantine_path", "")
+        or f"{config.spool_path}.quarantine.ndjson"
+    )
+    quarantine = RejectedEventQuarantine(quarantine_path)
     batch_size = max(int(config.forwarder_batch_size), 1)
     max_line_bytes = int(getattr(config, "forwarder_max_line_bytes", DEFAULT_MAX_LINE_BYTES))
     tail_read = tailer.prepare_new_events(limit=batch_size, max_line_bytes=max_line_bytes)
@@ -742,9 +893,46 @@ def _forward_once_unlocked(config: ProductionConfig) -> ForwardResult:
             )
         rejected_indexes.append(index)
 
-    rejected_events = [events[index] for index in sorted(rejected_indexes)]
-    rewritten = [json.dumps(event, sort_keys=True, separators=(",", ":")) for event in rejected_events]
-    rewritten.extend(remaining_lines)
+    rejected_pairs = [
+        (events[int(item["index"])], item)
+        for item in sorted(rejected_items, key=lambda item: int(item["index"]))
+    ]
+    quarantine_evicted = 0
+    if rejected_pairs:
+        try:
+            _, quarantine_evicted = quarantine.append_rejected(
+                sensor_id=str(config.sensor_id),
+                rejected=rejected_pairs,
+                max_bytes=int(
+                    getattr(
+                        config,
+                        "forwarder_max_quarantine_bytes",
+                        DEFAULT_MAX_QUARANTINE_BYTES,
+                    )
+                ),
+                max_events=int(
+                    getattr(
+                        config,
+                        "forwarder_max_quarantine_events",
+                        DEFAULT_MAX_QUARANTINE_EVENTS,
+                    )
+                ),
+            )
+        except OSError as exc:
+            # Do not shorten the spool unless every rejected row has first
+            # reached durable quarantine. Accepted rows may replay as harmless
+            # duplicates after the operator restores quarantine capacity.
+            return _result(
+                spool,
+                tail_read,
+                sent=accepted,
+                duplicates=duplicates,
+                rejected=rejected_count,
+                spooled=spooled,
+                error=_safe_exception_text(exc),
+                spool_parse_errors=spool_parse_errors,
+            )
+    rewritten = list(remaining_lines)
     try:
         # The durable spool is only shortened after a complete acknowledgement.
         spool.replace_remaining(rewritten)
@@ -758,6 +946,9 @@ def _forward_once_unlocked(config: ProductionConfig) -> ForwardResult:
             spooled=spooled,
             error=_safe_exception_text(exc),
             spool_parse_errors=spool_parse_errors,
+            quarantined=rejected_count,
+            quarantine_evicted=quarantine_evicted,
+            quarantine_bytes=quarantine.size_bytes(),
         )
     return _result(
         spool,
@@ -767,7 +958,14 @@ def _forward_once_unlocked(config: ProductionConfig) -> ForwardResult:
         rejected=rejected_count,
         spooled=spooled,
         spool_parse_errors=spool_parse_errors,
-        error=(f"{rejected_count} event(s) rejected by ingest and retained" if rejected_count else ""),
+        quarantined=rejected_count,
+        quarantine_evicted=quarantine_evicted,
+        quarantine_bytes=quarantine.size_bytes(),
+        error=(
+            f"{rejected_count} event(s) rejected by ingest and quarantined"
+            if rejected_count
+            else ""
+        ),
     )
 
 

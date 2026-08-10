@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -14,8 +15,12 @@ from production.ai_advisory.contracts import (
     sha256_json,
     validate_provider_output,
 )
-from production.ai_advisory.projection import build_ai_advisory_projection
+from production.ai_advisory.projection import (
+    build_ai_advisory_projection,
+    validate_ai_advisory_projection,
+)
 from production.ai_advisory.rendering import render_validated_advisory
+from production.ai_advisory.security import ProviderAliasScope
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
 from production.utils.config import ProductionConfig
 from production.utils.serialization import stable_json
@@ -24,6 +29,11 @@ from production.utils.serialization import stable_json
 ROOT = Path(__file__).resolve().parents[1]
 BEHAVIOR_POLICY = ROOT / "configs" / "threat_hypothesis_behavior.trusted.json"
 CLASSIFICATION_POLICY = ROOT / "configs" / "classification_rules.trusted.json"
+RECONCILIATION_CUTOFF = {
+    "schema_version": "prediction_evidence_cutoff.v1",
+    "received_at": "2026-08-08T00:00:00.000000+00:00",
+    "event_id": "event-cutoff",
+}
 
 
 def _report(*, command: str = "uname -a") -> dict:
@@ -303,10 +313,68 @@ def test_ai_configuration_is_disabled_by_default_and_fails_closed() -> None:
             enable_ai_advisory=True,
             ai_advisory_provider="fixture",
             ai_advisory_model="fixture-model",
+            ai_advisory_reconciliation_cutoff=RECONCILIATION_CUTOFF,
+        )
+
+
+def test_ai_activation_refuses_missing_managed_worker_receipt(tmp_path: Path) -> None:
+    fixture = tmp_path / "response.json"
+    fixture.write_text("{}", encoding="utf-8")
+    alias_key = tmp_path / "alias.key"
+    alias_key.write_bytes(b"a" * 32)
+    alias_key.chmod(0o600)
+    with pytest.raises(ValueError, match="activation receipt"):
+        ProductionConfig(
+            enable_ai_advisory=True,
+            ai_advisory_provider="fixture",
+            ai_advisory_model="fixture-model",
+            ai_advisory_fixture_response_path=str(fixture),
+            ai_advisory_alias_key_file=str(alias_key.resolve()),
+            ai_advisory_reconciliation_cutoff=RECONCILIATION_CUTOFF,
+        )
+
+    with pytest.raises(ValueError, match="not installed and reviewed"):
+        ProductionConfig(
+            enable_ai_advisory=True,
+            ai_advisory_provider="hosted-unreviewed",
+            ai_advisory_model="unreviewed-model",
+            ai_advisory_endpoint="https://api.example.test/v1/advisory",
+            ai_advisory_allowed_hosts=["api.example.test"],
+            ai_advisory_reconciliation_cutoff=RECONCILIATION_CUTOFF,
+            ai_advisory_policy_path=str(
+                ROOT / "configs" / "ai_advisory_policy.v1.json"
+            ),
         )
 
 
 def test_ai_environment_overrides_are_validated_before_file_configuration(tmp_path: Path, monkeypatch) -> None:
+    alias_key = tmp_path / "alias.key"
+    alias_key.write_bytes(b"a" * 32)
+    alias_key.chmod(0o600)
+    checked = datetime.now(timezone.utc) - timedelta(minutes=1)
+    receipt = tmp_path / "activation.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": "ai_advisory_activation_receipt.v1",
+                "status": "ready",
+                "provider_id": "fixture",
+                "model_id": "env-model",
+                "adapter_revision": "provider-neutral.v1",
+                "endpoint_sha256": "",
+                "provider_adapter_reviewed": True,
+                "managed_worker_unit": "honeypot-ai-advisory-worker.service",
+                "worker_status": "ready",
+                "credentials_status": "not_required",
+                "reconciliation_mode": "new_sessions_only",
+                "reconciliation_cutoff": RECONCILIATION_CUTOFF,
+                "health_checked_at": checked.isoformat(),
+                "expires_at": (checked + timedelta(minutes=30)).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipt.chmod(0o600)
     config_path = tmp_path / "production.json"
     config_path.write_text(
         json.dumps(
@@ -317,8 +385,11 @@ def test_ai_environment_overrides_are_validated_before_file_configuration(tmp_pa
                 "ai_advisory_provider": "disabled",
                 "ai_advisory_model": "file-model",
                 "ai_advisory_policy_path": str(ROOT / "configs" / "ai_advisory_policy.v1.json"),
-                "ai_advisory_fixture_response_path": str(tmp_path / "file-response.json"),
-            }
+                    "ai_advisory_fixture_response_path": str(tmp_path / "file-response.json"),
+                    "ai_advisory_alias_key_file": str(alias_key.resolve()),
+                    "ai_advisory_activation_receipt_path": str(receipt.resolve()),
+                    "ai_advisory_reconciliation_cutoff": RECONCILIATION_CUTOFF,
+                }
         ),
         encoding="utf-8",
     )
@@ -351,3 +422,95 @@ def test_provider_schema_is_strict_and_hash_bound_to_policy() -> None:
 
     assert_closed(schema)
     assert contract_schema_sha256(policy) == sha256_json(schema)
+
+
+def test_provider_scoped_aliases_hide_and_separate_canonical_identifiers() -> None:
+    report, _projection, policy, digest = _context()
+    first_scope = ProviderAliasScope(b"a" * 32, "provider-a")
+    second_scope = ProviderAliasScope(b"a" * 32, "provider-b")
+    first = build_ai_advisory_projection(
+        report, policy=policy, policy_sha256=digest, alias_scope=first_scope
+    )
+    second = build_ai_advisory_projection(
+        report, policy=policy, policy_sha256=digest, alias_scope=second_scope
+    )
+    serialized = stable_json(first)
+    assert report["assessment_id"] not in serialized
+    assert report["canonical_evidence"]["evidence_sha256"] not in serialized
+    canonical_finding = report["behavioral_findings"][0]["finding_id"]
+    assert canonical_finding not in serialized
+    assert first["assessment_id"] != second["assessment_id"]
+    assert first["evidence_sha256"] != second["evidence_sha256"]
+    assert first_scope.restore("finding", first["findings"][0]["finding_id"])
+
+
+@pytest.mark.parametrize(
+    ("collection", "field"),
+    [
+        ("evidence_index", "evidence_kind"),
+        ("evidence_index", "status"),
+        ("findings", "origin"),
+        ("findings", "finding_type"),
+        ("findings", "policy_rule_id"),
+        ("findings", "semantic_family"),
+        ("findings", "severity"),
+        ("findings", "status"),
+    ],
+)
+def test_projection_categorical_fields_use_closed_vocabularies(
+    collection: str, field: str
+) -> None:
+    _report_value, projection, policy, digest = _context()
+    mutated = copy.deepcopy(projection)
+    mutated[collection][0][field] = "attacker_controlled_category"
+    mutated["projection_sha256"] = sha256_json(
+        {key: value for key, value in mutated.items() if key != "projection_sha256"}
+    )
+    with pytest.raises(AIAdvisoryContractError, match="allowlisted"):
+        validate_ai_advisory_projection(
+            mutated, policy=policy, policy_sha256=digest
+        )
+
+
+def test_duplicate_templates_and_candidate_identities_are_rejected() -> None:
+    _report_value, projection, policy, digest = _context()
+    duplicate_template = _valid_response(projection, digest)
+    duplicate_template["validated_advisory"]["template_selections"].append(
+        copy.deepcopy(
+            duplicate_template["validated_advisory"]["template_selections"][0]
+        )
+    )
+    with pytest.raises(AIAdvisoryContractError) as template_error:
+        validate_provider_output(
+            duplicate_template,
+            projection=projection,
+            policy=policy,
+            policy_sha256=digest,
+        )
+    assert template_error.value.code == "duplicate_output"
+
+    duplicate_candidate = _valid_response(projection, digest)
+    candidate = {
+        "candidate_type": "possible_falsifiable_hypothesis",
+        "status": "unverified_ai_candidate",
+        "premise_finding_ids": duplicate_candidate["validated_advisory"][
+            "selected_finding_ids"
+        ],
+        "premise_relationship_ids": [],
+        "premise_evidence_refs": [projection["evidence_index"][0]["evidence_id"]],
+        "reason_codes": ["canonical_limitations_present"],
+        "missing_evidence_codes": ["corroborating_event_missing"],
+        "falsifier_codes": ["alternative_explanation_supported"],
+    }
+    duplicate_candidate["shadow_candidates"]["candidates"] = [
+        candidate,
+        copy.deepcopy(candidate),
+    ]
+    with pytest.raises(AIAdvisoryContractError) as candidate_error:
+        validate_provider_output(
+            duplicate_candidate,
+            projection=projection,
+            policy=policy,
+            policy_sha256=digest,
+        )
+    assert candidate_error.value.code == "duplicate_output"

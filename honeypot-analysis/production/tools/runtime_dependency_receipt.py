@@ -30,10 +30,11 @@ WHEEL_MANIFEST_SCHEMA = "python_wheel_bundle.v1"
 RECEIPT_SCHEMA = "runtime_dependency_receipt.v1"
 BUILD_ENVIRONMENT_SCHEMA = "python_runtime_build_environment.v1"
 FROZEN_PYTHON_VERSION = "3.12.13"
+FROZEN_LOCK_FILENAME = "requirements-runtime.lock.txt"
 FROZEN_LOCK_SHA256 = (
-    "468db1f2f4dad879b6cd4cc60402117f8ec77bce6d0b64266760e5ce0e4d5ace"
+    "e205f68a18388e3a374a0c2342c5ef4d23de6830fa7156c374bc283cf099b252"
 )
-FROZEN_REQUIREMENT_COUNT = 37
+FROZEN_REQUIREMENT_COUNT = 52
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 REQUIREMENT_RE = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s]+)$")
@@ -430,6 +431,8 @@ def _parse_locked_requirements(text: str) -> dict[str, dict[str, str]]:
 
 def _locked_requirements(lock_path: Path) -> dict[str, dict[str, str]]:
     lock_path = _regular_file(lock_path, "dependency lock")
+    if lock_path.name != FROZEN_LOCK_FILENAME:
+        raise RuntimeDependencyReceiptError("dependency lock filename is not frozen")
     if sha256_file(lock_path) != FROZEN_LOCK_SHA256:
         raise RuntimeDependencyReceiptError("dependency lock hash is not frozen")
     return _parse_locked_requirements(lock_path.read_text(encoding="utf-8"))
@@ -450,12 +453,7 @@ def _wheel_metadata(path: Path) -> dict[str, Any]:
     project = _require_text(metadata.get("Name"), "wheel project")
     version = _require_text(metadata.get("Version"), "wheel version")
     filename = path.name
-    if not filename.endswith(".whl"):
-        raise RuntimeDependencyReceiptError("wheel filename is invalid")
-    try:
-        _prefix, python_tag, abi_tag, platform_tag = filename[:-4].rsplit("-", 3)
-    except ValueError as exc:
-        raise RuntimeDependencyReceiptError(f"wheel tags are invalid: {filename}") from exc
+    python_tag, abi_tag, platform_tag = _wheel_filename_tags(filename)
     return {
         "filename": filename,
         "project": project,
@@ -466,6 +464,78 @@ def _wheel_metadata(path: Path) -> dict[str, Any]:
         "bytes": path.stat().st_size,
         "sha256": sha256_file(path),
     }
+
+
+def _wheel_filename_tags(filename: str) -> tuple[str, str, str]:
+    """Parse the compressed compatibility tags from a wheel filename."""
+
+    if not filename.endswith(".whl"):
+        raise RuntimeDependencyReceiptError("wheel filename is invalid")
+    try:
+        prefix, python_tag, abi_tag, platform_tag = filename[:-4].rsplit("-", 3)
+    except ValueError as exc:
+        raise RuntimeDependencyReceiptError(f"wheel tags are invalid: {filename}") from exc
+    tag_pattern = re.compile(r"^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$")
+    if not prefix or any(
+        tag_pattern.fullmatch(value) is None
+        for value in (python_tag, abi_tag, platform_tag)
+    ):
+        raise RuntimeDependencyReceiptError(f"wheel tags are invalid: {filename}")
+    return python_tag, abi_tag, platform_tag
+
+
+def _frozen_platform_compatible(platform_tag: str) -> bool:
+    if platform_tag == "any":
+        return True
+    if platform_tag in {
+        "manylinux1_x86_64",
+        "manylinux2010_x86_64",
+        "manylinux2014_x86_64",
+    }:
+        return True
+    match = re.fullmatch(r"manylinux_(\d+)_(\d+)_x86_64", platform_tag)
+    return bool(match and int(match.group(1)) == 2 and int(match.group(2)) <= 34)
+
+
+def _frozen_python_abi_compatible(
+    python_tag: str,
+    abi_tag: str,
+    platform_tag: str,
+) -> bool:
+    if platform_tag == "any":
+        return abi_tag == "none" and python_tag in {"py3", "py312", "cp312"}
+    if not _frozen_platform_compatible(platform_tag):
+        return False
+    if abi_tag == "none":
+        return python_tag in {"py3", "py312", "cp312"}
+    if python_tag == "cp312" and abi_tag in {"cp312", "abi3"}:
+        return True
+    abi3_match = re.fullmatch(r"cp3(\d{1,2})", python_tag)
+    return bool(
+        abi_tag == "abi3"
+        and abi3_match
+        and 2 <= int(abi3_match.group(1)) <= 12
+    )
+
+
+def _require_frozen_wheel_compatibility(
+    python_tag: str,
+    abi_tag: str,
+    platform_tag: str,
+    filename: str,
+) -> None:
+    """Require at least one tag triple compatible with CPython 3.12/x86_64."""
+
+    compatible = any(
+        _frozen_python_abi_compatible(python_value, abi_value, platform_value)
+        for python_value in python_tag.split(".")
+        for abi_value in abi_tag.split(".")
+        for platform_value in platform_tag.split(".")
+    )
+    if not compatible:
+        raise RuntimeDependencyReceiptError(
+            f"wheel is incompatible with the frozen CPython target: {filename}"
+        )
 
 
 def _wheel_metadata_bytes(filename: str, value: bytes) -> dict[str, str]:
@@ -499,6 +569,12 @@ def create_wheel_manifest(
         raise RuntimeDependencyReceiptError("wheel count does not match frozen lock")
     matched: set[str] = set()
     for wheel in wheels:
+        _require_frozen_wheel_compatibility(
+            wheel["python_tag"],
+            wheel["abi_tag"],
+            wheel["platform_tag"],
+            wheel["filename"],
+        )
         project = _normalized_project(wheel["project"])
         requirement = requirements.get(project)
         if requirement is None or requirement["version"] != wheel["version"]:
@@ -527,7 +603,11 @@ def create_wheel_manifest(
         "python_version": "3.12",
         "abi": "cp312",
         "architecture": "x86_64",
-        "platforms": ["manylinux_2_17_x86_64", "manylinux_2_28_x86_64"],
+        "platforms": [
+            "manylinux_2_17_x86_64",
+            "manylinux_2_28_x86_64",
+            "manylinux_2_34_x86_64",
+        ],
     }
     resolver = {
         "name": "pip",
@@ -556,11 +636,23 @@ def validate_wheel_manifest(value: Any) -> dict[str, Any]:
     if value["schema_version"] != WHEEL_MANIFEST_SCHEMA or not ID_RE.fullmatch(str(value["bundle_id"])):
         raise RuntimeDependencyReceiptError("wheel manifest identity is invalid")
     target = value["target"]
-    expected_target = {
-        "implementation": "CPython", "python_version": "3.12", "abi": "cp312",
-        "architecture": "x86_64", "platforms": ["manylinux_2_17_x86_64", "manylinux_2_28_x86_64"],
-    }
-    if target != expected_target:
+    expected_targets = (
+        {
+            "implementation": "CPython", "python_version": "3.12", "abi": "cp312",
+            "architecture": "x86_64",
+            "platforms": ["manylinux_2_17_x86_64", "manylinux_2_28_x86_64"],
+        },
+        {
+            "implementation": "CPython", "python_version": "3.12", "abi": "cp312",
+            "architecture": "x86_64",
+            "platforms": [
+                "manylinux_2_17_x86_64",
+                "manylinux_2_28_x86_64",
+                "manylinux_2_34_x86_64",
+            ],
+        },
+    )
+    if target not in expected_targets:
         raise RuntimeDependencyReceiptError("wheel target is not the frozen target")
     indexes = value["indexes"]
     expected_indexes = sorted(["https://download.pytorch.org/whl/cpu", "https://pypi.org/simple"])
@@ -589,7 +681,10 @@ def validate_wheel_manifest(value: Any) -> dict[str, Any]:
         "bytes": lock["bytes"], "sha256": _require_sha256(lock["sha256"], "wheel lock sha256"),
         "requirement_count": lock["requirement_count"],
     }
-    if "/" in normalized_lock["filename"] or normalized_lock["sha256"] != FROZEN_LOCK_SHA256:
+    if (
+        normalized_lock["filename"] != FROZEN_LOCK_FILENAME
+        or normalized_lock["sha256"] != FROZEN_LOCK_SHA256
+    ):
         raise RuntimeDependencyReceiptError("wheel lock identity is invalid")
     if normalized_lock["requirement_count"] != FROZEN_REQUIREMENT_COUNT or not isinstance(normalized_lock["bytes"], int) or normalized_lock["bytes"] < 1:
         raise RuntimeDependencyReceiptError("wheel lock metadata is invalid")
@@ -620,12 +715,23 @@ def validate_wheel_manifest(value: Any) -> dict[str, Any]:
         )
         if wheel["source_index"] != expected_source:
             raise RuntimeDependencyReceiptError("wheel source index is invalid")
+        parsed_tags = _wheel_filename_tags(filename)
+        declared_tags = (
+            _require_text(wheel["python_tag"], "wheel python tag"),
+            _require_text(wheel["abi_tag"], "wheel ABI tag"),
+            _require_text(wheel["platform_tag"], "wheel platform tag"),
+        )
+        if declared_tags != parsed_tags:
+            raise RuntimeDependencyReceiptError(
+                "wheel compatibility tags do not match its filename"
+            )
+        _require_frozen_wheel_compatibility(*declared_tags, filename)
         normalized_wheels.append({
             "filename": filename, "project": project,
             "version": _require_text(wheel["version"], "wheel version"),
-            "python_tag": _require_text(wheel["python_tag"], "wheel python tag"),
-            "abi_tag": _require_text(wheel["abi_tag"], "wheel ABI tag"),
-            "platform_tag": _require_text(wheel["platform_tag"], "wheel platform tag"),
+            "python_tag": declared_tags[0],
+            "abi_tag": declared_tags[1],
+            "platform_tag": declared_tags[2],
             "source_index": expected_source,
             "bytes": size, "sha256": _require_sha256(wheel["sha256"], "wheel sha256"),
         })

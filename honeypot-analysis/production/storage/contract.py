@@ -585,6 +585,8 @@ class StorageBackend(Protocol):
         token: str,
         report_payload: Dict[str, Any],
         enqueue_ai_advisory: bool = False,
+        ai_advisory_max_queue_records: int = 10_000,
+        ai_advisory_reconciliation_cutoff: Optional[Dict[str, str]] = None,
         *,
         now: Any = None,
     ) -> Optional[str]: ...
@@ -599,7 +601,32 @@ class StorageBackend(Protocol):
         now: Any = None,
     ) -> List[Dict[str, Any]]: ...
 
+    def initialize_ai_advisory_extension(self) -> None: ...
+
+    def enqueue_ai_advisory_job(
+        self,
+        report_id: str,
+        session_id: str,
+        assessment_id: str,
+        *,
+        reconciliation_cutoff: Dict[str, str],
+        max_queue_records: int = 10_000,
+        now: Any = None,
+    ) -> Optional[str]: ...
+
+    def reconcile_ai_advisory_outbox(
+        self,
+        *,
+        reconciliation_cutoff: Dict[str, str],
+        limit: int = 100,
+        max_queue_records: int = 10_000,
+    ) -> Dict[str, int]: ...
+
     def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]: ...
+
+    def get_current_report_for_session(
+        self, session_id: str
+    ) -> Optional[Dict[str, Any]]: ...
 
     def get_ai_advisory_by_cache_key(
         self, cache_key: str
@@ -609,11 +636,21 @@ class StorageBackend(Protocol):
         self, session_id: str
     ) -> Optional[Dict[str, Any]]: ...
 
+    def get_ai_advisory_for_report(
+        self, report_id: str, assessment_id: str
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def get_ai_advisory_outbox_for_report(
+        self, report_id: str, assessment_id: str
+    ) -> Optional[Dict[str, Any]]: ...
+
     def prune_ai_advisories(
         self,
         retention_days: int = 30,
-        keep_latest_per_session: bool = True,
+        keep_latest_per_session: bool = False,
         *,
+        max_records: int = 50_000,
+        max_storage_bytes: int = 256 * 1024 * 1024,
         now: Any = None,
     ) -> Dict[str, Any]: ...
 

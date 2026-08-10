@@ -2138,7 +2138,25 @@ def load_ai_advisory_detail(
         }
     try:
         storage = _storage or _open_monitor_storage(config)
-        row = storage.get_ai_advisory_for_session(clean_session_id)
+        report = storage.get_current_report_for_session(clean_session_id)
+        if not report:
+            return {
+                "ok": True,
+                "status": "not_available",
+                "session_id": clean_session_id,
+                "advisory": {},
+                "timestamp": utc_now(),
+            }
+        report_id = str(report.get("report_id") or "")
+        report_payload = (
+            report.get("payload") if isinstance(report.get("payload"), dict) else {}
+        )
+        assessment_id = str(report_payload.get("assessment_id") or "")
+        if not report_id or not assessment_id:
+            raise ValueError("current canonical report identity is invalid")
+        row = storage.get_ai_advisory_for_report(report_id, assessment_id)
+        outbox = storage.get_ai_advisory_outbox_for_report(report_id, assessment_id)
+        older = storage.get_ai_advisory_for_session(clean_session_id)
     except Exception as exc:
         return {
             "ok": False,
@@ -2148,10 +2166,21 @@ def load_ai_advisory_detail(
             "timestamp": utc_now(),
         }
     if not row:
+        outbox_status = str((outbox or {}).get("status") or "")
+        if outbox_status in {"queued", "retry", "running"}:
+            state = "pending"
+        elif outbox_status == "failed":
+            state = "failed"
+        elif older:
+            state = "superseded"
+        else:
+            state = "unavailable"
         return {
             "ok": True,
-            "status": "not_available",
+            "status": state,
             "session_id": clean_session_id,
+            "report_id": report_id,
+            "assessment_id": assessment_id,
             "advisory": {},
             "timestamp": utc_now(),
         }
@@ -4383,7 +4412,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
         return False
 
     def _require_raw_command_admin(self) -> bool:
-        """Allow the temporary raw-command view only across loopback."""
+        """Require both loopback transport and the dedicated admin token."""
         bind_loopback = self.monitor_config.bind_host == "127.0.0.1"
         client_host = self.client_address[0] if self.client_address else ""
         client_loopback = _is_loopback_management_address(client_host)
@@ -4396,7 +4425,18 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 },
             )
             return False
-        return True
+        decision = authorize_read(
+            single_header_value(self.headers, "Authorization"),
+            _monitor_raw_commands_token(self.monitor_config),
+            allow_anonymous=False,
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
 
     def _require_feedback_write(self) -> bool:
         if not _monitor_feedback_enabled(self.monitor_config):

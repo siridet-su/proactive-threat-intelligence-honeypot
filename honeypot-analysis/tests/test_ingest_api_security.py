@@ -6,6 +6,7 @@ import socket
 import threading
 import time
 from contextlib import contextmanager
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 
@@ -20,6 +21,7 @@ from production.utils.http_security import (
     is_loopback_host,
     parse_bearer_token,
 )
+from production.utils.sensor_identity import canonical_session_id
 
 
 class FakeStorage:
@@ -316,6 +318,88 @@ def test_sensor_specific_auth_enforces_identity_and_global_token_compatibility()
         assert unauthorized["error"]["code"] == "unauthorized"
 
 
+def test_ingest_binds_authenticated_sensor_and_namespaces_session_identity() -> None:
+    config = _config(
+        api_token="",
+        ingest_sensor_tokens={
+            "sensor-a": "sensor-a-token",
+            "sensor-b": "sensor-b-token",
+        },
+    )
+    with _running_server(config) as (server, storage):
+        for sensor_id, token in (
+            ("sensor-a", "sensor-a-token"),
+            ("sensor-b", "sensor-b-token"),
+        ):
+            status, _, response = _request(
+                server,
+                "POST",
+                "/events",
+                payload={
+                    "sensor_id": sensor_id,
+                    "events": [
+                        {
+                            "eventid": "cowrie.session.connect",
+                            "session": "same-cowrie-session",
+                            "sensor": "attacker-controlled-sensor",
+                            "sensor_id": "attacker-controlled-sensor-id",
+                        }
+                    ],
+                },
+                headers=_auth_headers(token, sensor_id),
+            )
+            assert status == HTTPStatus.ACCEPTED
+            assert response["sensor_id"] == sensor_id
+
+        persisted = list(storage.events.values())
+        assert len(persisted) == 2
+        assert {event["sensor"] for event in persisted} == {"sensor-a", "sensor-b"}
+        assert {event["sensor_id"] for event in persisted} == {"sensor-a", "sensor-b"}
+        assert {event["session"] for event in persisted} == {
+            canonical_session_id("sensor-a", "same-cowrie-session"),
+            canonical_session_id("sensor-b", "same-cowrie-session"),
+        }
+        for event in persisted:
+            identity = event["_honeypot_identity"]
+            assert identity["sensor_id"] == event["sensor"]
+            assert identity["sensor_session_id"] == "same-cowrie-session"
+            assert identity["canonical_session_id"] == event["session"]
+
+
+@pytest.mark.parametrize(
+    ("session_value", "message"),
+    [
+        (None, "session must be a string"),
+        (1234, "session must be a string"),
+        ("", "session is required"),
+        (" padded ", "surrounding whitespace"),
+        ("bad\nvalue", "control characters"),
+        ("x" * 257, "must not exceed"),
+    ],
+)
+def test_ingest_rejects_invalid_session_identity(
+    session_value: object,
+    message: str,
+) -> None:
+    with _running_server(_config()) as (server, storage):
+        status, _, response = _request(
+            server,
+            "POST",
+            "/events",
+            payload=[
+                {
+                    "eventid": "cowrie.session.connect",
+                    "session": session_value,
+                }
+            ],
+            headers=_auth_headers(),
+        )
+        assert status == HTTPStatus.BAD_REQUEST
+        assert response["rejected"][0]["error_code"] == "invalid_event"
+        assert message in response["rejected"][0]["error"]
+        assert not storage.events
+
+
 def test_acknowledgements_distinguish_accepted_duplicate_partial_and_rejected() -> None:
     secret = "raw-rejected-password-must-not-echo"
     with _running_server(_config()) as (server, _):
@@ -416,7 +500,12 @@ def test_content_body_batch_and_event_limits_return_sanitized_errors() -> None:
             server,
             "POST",
             "/events",
-            payload=[{"eventid": "cowrie.session.connect"}],
+            payload=[
+                {
+                    "eventid": "cowrie.session.connect",
+                    "session": "storage-failure",
+                }
+            ],
             headers=_auth_headers(),
         )
         assert status == 413
@@ -495,7 +584,12 @@ def test_storage_failures_return_generic_500_without_exception_details() -> None
             server,
             "POST",
             "/events",
-            payload=[{"eventid": "cowrie.session.connect"}],
+            payload=[
+                {
+                    "eventid": "cowrie.session.connect",
+                    "session": "storage-failure",
+                }
+            ],
             headers=_auth_headers(),
         )
 

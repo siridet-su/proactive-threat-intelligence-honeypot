@@ -10,6 +10,24 @@ from production.utils.config import ProductionConfig
 
 
 class _Storage:
+    def get_current_report_for_session(self, session_id: str):
+        assert session_id == "session-1"
+        return {
+            "report_id": "report_0123456789abcdef0123456789abcdef",
+            "payload": {
+                "assessment_id": "session_assessment_0123456789abcdef0123456789abcdef"
+            },
+        }
+
+    def get_ai_advisory_for_report(self, report_id: str, assessment_id: str):
+        assert report_id == "report_0123456789abcdef0123456789abcdef"
+        assert assessment_id == "session_assessment_0123456789abcdef0123456789abcdef"
+        return self.get_ai_advisory_for_session("session-1")
+
+    def get_ai_advisory_outbox_for_report(self, report_id: str, assessment_id: str):
+        del report_id, assessment_id
+        return {"status": "succeeded"}
+
     def get_ai_advisory_for_session(self, session_id: str):
         assert session_id == "session-1"
         return {
@@ -60,6 +78,28 @@ def test_additive_monitor_loader_keeps_ai_separate_and_non_authoritative() -> No
     ] == "unverified_ai_candidate"
     assert "canonical_evidence" not in result["advisory"]
     assert "response_guidance_v3" not in result["advisory"]
+
+
+class _StaleStorage(_Storage):
+    def get_ai_advisory_for_report(self, report_id: str, assessment_id: str):
+        del report_id, assessment_id
+        return None
+
+    def get_ai_advisory_outbox_for_report(self, report_id: str, assessment_id: str):
+        del report_id, assessment_id
+        return None
+
+
+def test_monitor_never_displays_an_advisory_for_an_older_report() -> None:
+    result = load_ai_advisory_detail(
+        MonitorConfig(db_path=":memory:", reports_dir="reports"),
+        "session-1",
+        _storage=_StaleStorage(),
+    )
+    assert result["ok"] is True
+    assert result["status"] == "superseded"
+    assert result["advisory"] == {}
+    assert result["report_id"] == "report_0123456789abcdef0123456789abcdef"
 
 
 def test_monitor_asset_uses_separate_endpoint_labels_and_text_content() -> None:

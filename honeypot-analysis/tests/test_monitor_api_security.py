@@ -160,7 +160,7 @@ def test_monitor_sensitive_reads_require_bearer_when_configured(
     assert session["command_count"] == 1
 
 
-def test_internal_command_view_is_loopback_only_without_token(
+def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -186,9 +186,25 @@ def test_internal_command_view_is_loopback_only_without_token(
     )
     config = _config(tmp_path, raw_commands_token="raw-admin-token")
 
+    missing, missing_responses, _ = _handler(
+        config,
+        "/api/internal/session-commands?session_id=session-safe",
+    )
+    monitor_web.MonitorHandler.do_GET(missing)
+    assert missing_responses[0][0] == HTTPStatus.UNAUTHORIZED
+
+    wrong, wrong_responses, _ = _handler(
+        config,
+        "/api/internal/session-commands?session_id=session-safe",
+        authorization="Bearer read-secret",
+    )
+    monitor_web.MonitorHandler.do_GET(wrong)
+    assert wrong_responses[0][0] == HTTPStatus.UNAUTHORIZED
+
     allowed, allowed_responses, _ = _handler(
         config,
         "/api/internal/session-commands?session_id=session-safe",
+        authorization="Bearer raw-admin-token",
     )
     monitor_web.MonitorHandler.do_GET(allowed)
     assert allowed_responses[0][0] == HTTPStatus.OK
@@ -199,6 +215,7 @@ def test_internal_command_view_is_loopback_only_without_token(
     remote, remote_responses, _ = _handler(
         config,
         "/api/internal/session-commands?session_id=session-safe",
+        authorization="Bearer raw-admin-token",
     )
     remote.client_address = ("198.51.100.20", 4242)
     monitor_web.MonitorHandler.do_GET(remote)
@@ -857,9 +874,10 @@ def test_monitor_detail_prefers_canonical_event_contract_with_legacy_fallback() 
     assert "/api/internal/session-commands?session_id=" in static_html
     assert "cache: 'no-store'" in static_html
     assert "async function loadInternalCommands" in static_html
-    assert "void loadInternalCommands(state.detailSessionId);" in static_html
-    assert "Reveal with admin token" not in static_html
-    assert "window.prompt" not in static_html
+    assert "void loadInternalCommands(adminToken, state.detailSessionId);" in static_html
+    assert "Reveal with admin token" in static_html
+    assert "window.prompt" in static_html
+    assert "'Authorization': `Bearer ${token}`" in static_html
     assert "Sensitive: text is the persisted Cowrie input" in static_html
 
 

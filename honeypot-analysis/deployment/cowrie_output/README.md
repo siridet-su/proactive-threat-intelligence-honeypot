@@ -152,6 +152,19 @@ be accepted as rollback receipts.
 The source checkout is not reset, normalized, or overwritten. The stock
 `cowrie.output.jsonlog` remains present but must be disabled.
 
+## Forwarder rejection quarantine
+
+The downstream forwarder moves indexed permanent ingest rejects into a
+private, bounded NDJSON quarantine before shortening its primary spool. The
+quarantine contains the already-sanitized event, a stable event hash, sensor
+identity, and closed error code. It is mode `0600`, atomically replaced, and
+bounded by configured byte and row limits with oldest-first eviction. It is
+diagnostic/dead-letter evidence only and is never processed automatically.
+
+Valid rows retain at-least-once delivery. A quarantine write failure leaves the
+primary spool intact, so valid acknowledgements may replay as duplicates but
+cannot be silently lost.
+
 Validate before and after restart:
 
 ```sh
