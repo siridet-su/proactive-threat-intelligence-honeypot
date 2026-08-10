@@ -5,6 +5,7 @@ import json
 import math
 import os
 import sqlite3
+import stat
 import uuid
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -58,6 +59,10 @@ class StorageError(RuntimeError):
 
 SQLITE_SCHEMA_VERSION = 3
 AI_ADVISORY_SCHEMA_EXTENSION_ID = "non_authoritative_ai_advisory.v1"
+AI_ADVISORY_RECONCILIATION_CURSOR_SCHEMA = (
+    "ai_advisory_reconciliation_cursor.v1"
+)
+AI_ADVISORY_RECONCILIATION_CURSOR_MAX_BYTES = 4096
 AI_ADVISORY_SCHEMA_OBJECTS = frozenset(
     {
         "ai_advisory_outbox",
@@ -2831,7 +2836,6 @@ class SQLiteStorage:
         session_key = _required_identity(session_id, "session_id")
         assessment_key = _required_identity(assessment_id, "assessment_id")
         cutoff = require_valid_evidence_cutoff(reconciliation_cutoff)
-        cutoff_key = evidence_cutoff_sort_key(cutoff)
         queue_limit = int(max_queue_records)
         if queue_limit < 1:
             raise ValueError("max_queue_records must be positive")
@@ -2869,26 +2873,9 @@ class SQLiteStorage:
             ).fetchone()
             if existing:
                 return ai_job_id
-            first_event = conn.execute(
-                """
-                SELECT received_at, event_id
-                FROM events
-                WHERE session_id=?
-                ORDER BY received_at, event_id
-                LIMIT 1
-                """,
-                (session_key,),
-            ).fetchone()
-            if first_event is None:
-                return None
-            first_event_key = evidence_cutoff_sort_key(
-                {
-                    "schema_version": cutoff["schema_version"],
-                    "received_at": first_event["received_at"],
-                    "event_id": first_event["event_id"],
-                }
-            )
-            if first_event_key <= cutoff_key:
+            if not self._ai_advisory_first_event_after_cutoff(
+                conn, session_key, cutoff
+            ):
                 return None
             queued = conn.execute(
                 """
@@ -2917,6 +2904,267 @@ class SQLiteStorage:
             )
         return ai_job_id
 
+    def _ai_advisory_reconciliation_cursor_path(self) -> Path:
+        return self.path.with_name(
+            f"{self.path.name}.ai-advisory-reconciliation-cursor.json"
+        )
+
+    @staticmethod
+    def _ai_advisory_reconciliation_cursor_payload(
+        cutoff: Dict[str, str],
+        report_row: Optional[sqlite3.Row],
+    ) -> Dict[str, Any]:
+        if report_row is None:
+            rowid = 0
+            report_id = ""
+            created_at = ""
+            payload_sha256 = ""
+        else:
+            rowid = int(report_row["report_rowid"])
+            report_id = str(report_row["report_id"])
+            created_at = str(report_row["created_at"])
+            payload_sha256 = hashlib.sha256(
+                str(report_row["payload_json"]).encode("utf-8")
+            ).hexdigest()
+        return {
+            "schema_version": AI_ADVISORY_RECONCILIATION_CURSOR_SCHEMA,
+            "reconciliation_cutoff": dict(cutoff),
+            "last_report_rowid": rowid,
+            "last_report_id": report_id,
+            "last_report_created_at": created_at,
+            "last_report_payload_sha256": payload_sha256,
+        }
+
+    def _write_ai_advisory_reconciliation_cursor(
+        self, payload: Dict[str, Any]
+    ) -> None:
+        destination = self._ai_advisory_reconciliation_cursor_path()
+        temporary = destination.with_name(
+            f".{destination.name}.{uuid.uuid4().hex}.tmp"
+        )
+        encoded = (stable_json(payload) + "\n").encode("utf-8")
+        if len(encoded) > AI_ADVISORY_RECONCILIATION_CURSOR_MAX_BYTES:
+            raise StorageError("AI advisory reconciliation cursor is oversized")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor: Optional[int] = None
+        try:
+            descriptor = os.open(temporary, flags, 0o600)
+            with os.fdopen(descriptor, "wb", closefd=True) as handle:
+                descriptor = None
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+            directory_descriptor = os.open(
+                destination.parent,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _read_ai_advisory_reconciliation_cursor(
+        self,
+    ) -> Optional[Dict[str, Any]]:
+        path = self._ai_advisory_reconciliation_cursor_path()
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            return None
+        if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            raise StorageError(
+                "AI advisory reconciliation cursor is not a regular file"
+            )
+        if metadata.st_uid != os.geteuid():
+            raise StorageError("AI advisory reconciliation cursor owner is unsafe")
+        if stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise StorageError(
+                "AI advisory reconciliation cursor permissions are unsafe"
+            )
+        if metadata.st_size > AI_ADVISORY_RECONCILIATION_CURSOR_MAX_BYTES:
+            raise StorageError("AI advisory reconciliation cursor is oversized")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            raw = os.read(
+                descriptor, AI_ADVISORY_RECONCILIATION_CURSOR_MAX_BYTES + 1
+            )
+        finally:
+            os.close(descriptor)
+        if not raw or len(raw) > AI_ADVISORY_RECONCILIATION_CURSOR_MAX_BYTES:
+            raise StorageError("AI advisory reconciliation cursor is invalid")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise StorageError("AI advisory reconciliation cursor is invalid") from exc
+        expected = {
+            "schema_version",
+            "reconciliation_cutoff",
+            "last_report_rowid",
+            "last_report_id",
+            "last_report_created_at",
+            "last_report_payload_sha256",
+        }
+        if not isinstance(payload, dict) or set(payload) != expected:
+            raise StorageError("AI advisory reconciliation cursor is invalid")
+        if (
+            payload.get("schema_version")
+            != AI_ADVISORY_RECONCILIATION_CURSOR_SCHEMA
+        ):
+            raise StorageError("AI advisory reconciliation cursor schema is invalid")
+        rowid = payload.get("last_report_rowid")
+        if isinstance(rowid, bool) or not isinstance(rowid, int) or rowid < 0:
+            raise StorageError("AI advisory reconciliation cursor rowid is invalid")
+        for field in (
+            "last_report_id",
+            "last_report_created_at",
+            "last_report_payload_sha256",
+        ):
+            if not isinstance(payload.get(field), str):
+                raise StorageError("AI advisory reconciliation cursor is invalid")
+        if rowid == 0 and any(
+            payload[field]
+            for field in (
+                "last_report_id",
+                "last_report_created_at",
+                "last_report_payload_sha256",
+            )
+        ):
+            raise StorageError("AI advisory reconciliation cursor is invalid")
+        if rowid > 0 and (
+            not payload["last_report_id"]
+            or not payload["last_report_created_at"]
+            or len(payload["last_report_payload_sha256"]) != 64
+        ):
+            raise StorageError("AI advisory reconciliation cursor is invalid")
+        return payload
+
+    @staticmethod
+    def _ai_advisory_first_event_after_cutoff(
+        conn: sqlite3.Connection,
+        session_id: str,
+        cutoff: Dict[str, str],
+    ) -> bool:
+        first_event = conn.execute(
+            """
+            SELECT received_at, event_id
+            FROM events
+            WHERE session_id=?
+            ORDER BY received_at, event_id
+            LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+        if first_event is None:
+            return False
+        first_event_key = evidence_cutoff_sort_key(
+            {
+                "schema_version": cutoff["schema_version"],
+                "received_at": first_event["received_at"],
+                "event_id": first_event["event_id"],
+            }
+        )
+        return first_event_key > evidence_cutoff_sort_key(cutoff)
+
+    def _bootstrap_ai_advisory_reconciliation_cursor(
+        self,
+        conn: sqlite3.Connection,
+        cutoff: Dict[str, str],
+    ) -> Dict[str, Any]:
+        post_cutoff_event = conn.execute(
+            """
+            SELECT 1
+            FROM events
+            WHERE processed IN (0, 1)
+              AND received_at >= ?
+              AND (
+                  received_at > ?
+                  OR (received_at = ? AND event_id > ?)
+              )
+            LIMIT 1
+            """,
+            (
+                cutoff["received_at"],
+                cutoff["received_at"],
+                cutoff["received_at"],
+                cutoff["event_id"],
+            ),
+        ).fetchone()
+        report_row: Optional[sqlite3.Row] = None
+        if post_cutoff_event is None:
+            report_row = conn.execute(
+                """
+                SELECT rowid AS report_rowid, report_id, payload_json, created_at
+                FROM reports
+                ORDER BY rowid DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        payload = self._ai_advisory_reconciliation_cursor_payload(
+            cutoff, report_row
+        )
+        self._write_ai_advisory_reconciliation_cursor(payload)
+        return payload
+
+    def _validated_ai_advisory_reconciliation_rowid(
+        self,
+        conn: sqlite3.Connection,
+        cursor: Dict[str, Any],
+    ) -> int:
+        rowid = int(cursor["last_report_rowid"])
+        if rowid == 0:
+            return 0
+        current = conn.execute(
+            """
+            SELECT rowid AS report_rowid, report_id, payload_json, created_at
+            FROM reports
+            WHERE rowid=?
+            """,
+            (rowid,),
+        ).fetchone()
+        if current is not None:
+            current_payload = self._ai_advisory_reconciliation_cursor_payload(
+                dict(cursor["reconciliation_cutoff"]), current
+            )
+            if all(
+                current_payload[field] == cursor[field]
+                for field in (
+                    "last_report_id",
+                    "last_report_created_at",
+                    "last_report_payload_sha256",
+                )
+            ):
+                return rowid
+            if str(current["report_id"]) == cursor["last_report_id"]:
+                return max(rowid - 1, 0)
+        moved = conn.execute(
+            """
+            SELECT rowid
+            FROM reports
+            WHERE report_id=? AND rowid>?
+            LIMIT 1
+            """,
+            (cursor["last_report_id"], rowid),
+        ).fetchone()
+        if moved is not None:
+            return rowid
+        raise StorageError(
+            "AI advisory reconciliation cursor no longer matches reports"
+        )
+
     def reconcile_ai_advisory_outbox(
         self,
         *,
@@ -2929,55 +3177,50 @@ class SQLiteStorage:
         cutoff = require_valid_evidence_cutoff(reconciliation_cutoff)
         scan_limit = min(max(int(limit), 1), 10_000)
         with self.connection() as conn:
+            cursor = self._read_ai_advisory_reconciliation_cursor()
+            if cursor is None or cursor["reconciliation_cutoff"] != cutoff:
+                cursor = self._bootstrap_ai_advisory_reconciliation_cursor(
+                    conn, cutoff
+                )
+            last_report_rowid = self._validated_ai_advisory_reconciliation_rowid(
+                conn, cursor
+            )
             rows = conn.execute(
                 """
-                SELECT r.report_id, r.session_id, r.payload_json
-                FROM reports AS r
-                LEFT JOIN ai_advisory_outbox AS o
-                  ON o.report_id = r.report_id
-                WHERE o.job_id IS NULL
-                  AND EXISTS (
-                      SELECT 1 FROM events AS present_event
-                      WHERE present_event.session_id = r.session_id
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM events AS prior_event
-                      WHERE prior_event.session_id = r.session_id
-                        AND (
-                            prior_event.received_at < ?
-                            OR (
-                                prior_event.received_at = ?
-                                AND prior_event.event_id <= ?
-                            )
-                        )
-                  )
-                  AND json_valid(r.payload_json)
-                  AND json_extract(r.payload_json, '$.schema_version') =
-                      'session_assessment.v4'
-                  AND typeof(json_extract(r.payload_json, '$.assessment_id')) =
-                      'text'
-                ORDER BY r.created_at, r.report_id
+                SELECT rowid AS report_rowid, report_id, session_id,
+                       payload_json, created_at
+                FROM reports
+                WHERE rowid > ?
+                ORDER BY rowid
                 LIMIT ?
                 """,
-                (
-                    cutoff["received_at"],
-                    cutoff["received_at"],
-                    cutoff["event_id"],
-                    scan_limit,
-                ),
+                (last_report_rowid, scan_limit),
             ).fetchall()
         enqueued = 0
+        scanned = 0
         bounded = 0
+        advanced_row: Optional[sqlite3.Row] = None
         for row in rows:
             try:
                 payload = json.loads(row["payload_json"] or "{}")
             except (TypeError, json.JSONDecodeError):
+                advanced_row = row
                 continue
             if payload.get("schema_version") != "session_assessment.v4":
+                advanced_row = row
                 continue
             assessment_id = str(payload.get("assessment_id") or "").strip()
             if not assessment_id:
+                advanced_row = row
                 continue
+            with self.connection() as conn:
+                eligible = self._ai_advisory_first_event_after_cutoff(
+                    conn, str(row["session_id"]), cutoff
+                )
+            if not eligible:
+                advanced_row = row
+                continue
+            scanned += 1
             result = self.enqueue_ai_advisory_job(
                 str(row["report_id"]),
                 str(row["session_id"]),
@@ -2989,7 +3232,14 @@ class SQLiteStorage:
                 bounded += 1
                 break
             enqueued += 1
-        return {"scanned": len(rows), "enqueued": enqueued, "bounded": bounded}
+            advanced_row = row
+        if advanced_row is not None:
+            self._write_ai_advisory_reconciliation_cursor(
+                self._ai_advisory_reconciliation_cursor_payload(
+                    cutoff, advanced_row
+                )
+            )
+        return {"scanned": scanned, "enqueued": enqueued, "bounded": bounded}
 
     def claim_ai_advisory_jobs(
         self,

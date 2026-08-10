@@ -158,6 +158,26 @@ The cutoff therefore survives process and VM restart and cannot silently move
 within an approved activation. It adds no SQLite schema and does not modify or
 delete canonical reports.
 
+Reconciliation uses an owner-only durable cursor beside the SQLite file rather
+than rescanning every historical report on each poll. The cursor binds the
+exact reconciliation cutoff and the last contiguously classified report row,
+including its identity, creation time, and payload hash. Normal idle work is an
+indexed SQLite `rowid > watermark` lookup. A replacement report receives a new
+row or is detected by the cursor sentinel, so late deterministic reanalysis is
+not skipped. The cursor advances only after a report is safely identified as
+historical/ineligible or its stable outbox job is durably present. A crash
+before the atomic, fsynced cursor replacement replays already classified rows;
+stable job identity prevents a duplicate outbox row or provider call.
+
+When the cursor is first created and no event exists strictly after the cutoff,
+the current maximum report row is a safe baseline because all durable work is
+on the historical side of the activation boundary. If post-cutoff events
+already exist, bootstrap begins at row zero and processes bounded batches once
+instead of assuming that work was enqueued. Missing cursor state therefore
+recovers conservatively, while malformed, unsafe-permission, symlinked, or
+report-inconsistent cursor state fails closed. The cursor is optional-AI state,
+does not change `PRAGMA user_version`, and is not canonical report evidence.
+
 ## Configuration and secrets
 
 The default is `enable_ai_advisory=false` and provider `disabled`. An enabled
