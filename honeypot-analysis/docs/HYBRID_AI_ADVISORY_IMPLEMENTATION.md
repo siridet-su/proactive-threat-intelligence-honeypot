@@ -10,7 +10,7 @@ reviewed hosted adapter is `google_vertex_gemini`, implemented with the current
 Credentials (ADC). Its reviewed runtime identity is model
 `gemini-2.5-flash`, location `global`, API `v1`, endpoint
 `https://aiplatform.googleapis.com`, and adapter revision
-`google-genai.vertex-adc.v1`. The offline fixture remains available for
+`google-genai.vertex-adc.v2`. The offline fixture remains available for
 deterministic contract tests. Enabling any other hosted provider fails at
 startup.
 
@@ -79,6 +79,13 @@ The provider may return only `ai_provider_output.v1`:
   alert, or execution field is accepted.
 
 The generated JSON Schema sets `additionalProperties=false` on every object.
+The Vertex adapter appends one deterministic request-specific instruction that
+spells out the cross-field abstention semantics which JSON Schema cannot fully
+express. In particular, when no finding, relationship, or manual action
+identifier is eligible, it requires `abstained=true`, the
+`no_eligible_selection` reason, and empty selection arrays. This provider
+instruction does not replace or relax the original hashed schema or executable
+validator.
 The executable validator additionally proves dynamic ID membership, reference
 resolution, hash echoes, closed-vocabulary membership, bounded cardinality,
 abstention consistency, falsifiability, and existing action safety. The worker

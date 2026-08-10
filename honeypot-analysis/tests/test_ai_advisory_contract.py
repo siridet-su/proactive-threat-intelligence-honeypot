@@ -256,6 +256,85 @@ def test_invalid_or_authoritative_provider_output_fails_closed(
     assert raised.value.code == code
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda value: value.pop("shadow_candidates"),
+            "provider output has invalid keys",
+        ),
+        (
+            lambda value: value["validated_advisory"].update(
+                {"abstained": "false"}
+            ),
+            "abstained must be boolean",
+        ),
+        (
+            lambda value: value.update({"validated_advisory": []}),
+            "validated_advisory must be an object",
+        ),
+        (
+            lambda value: value["validated_advisory"].update(
+                {"abstention_reason_code": "not_a_reviewed_reason"}
+            ),
+            "unknown abstention reason",
+        ),
+        (
+            lambda value: value["validated_advisory"].update(
+                {"template_selections": None}
+            ),
+            "template_selections must be a bounded array",
+        ),
+        (
+            lambda value: value.clear() or value.update(
+                {"result": {"unexpected": "wrapper"}}
+            ),
+            "provider output has invalid keys",
+        ),
+    ],
+)
+def test_provider_output_shape_and_type_failures_remain_closed(
+    mutation, message: str
+) -> None:
+    _report_value, projection, policy, digest = _context()
+    response = _valid_response(projection, digest)
+    mutation(response)
+    with pytest.raises(AIAdvisoryContractError, match=message):
+        validate_provider_output(
+            response,
+            projection=projection,
+            policy=policy,
+            policy_sha256=digest,
+        )
+
+
+def test_canonical_identifier_cannot_cross_an_aliased_response_boundary() -> None:
+    report, _projection, policy, digest = _context()
+    alias_scope = ProviderAliasScope(b"a" * 32, "provider-a")
+    projection = build_ai_advisory_projection(
+        report,
+        policy=policy,
+        policy_sha256=digest,
+        alias_scope=alias_scope,
+    )
+    response = _valid_response(
+        projection,
+        projection["provenance"]["ai_policy_sha256"],
+    )
+    response["validated_advisory"]["selected_finding_ids"] = [
+        report["behavioral_findings"][0]["finding_id"]
+    ]
+
+    with pytest.raises(AIAdvisoryContractError) as raised:
+        validate_provider_output(
+            response,
+            projection=projection,
+            policy=policy,
+            policy_sha256=projection["provenance"]["ai_policy_sha256"],
+        )
+    assert raised.value.code == "invented_reference"
+
+
 def test_shadow_candidate_remains_bounded_unverified_and_separate() -> None:
     report, projection, policy, digest = _context()
     original = copy.deepcopy(report)

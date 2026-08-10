@@ -435,6 +435,18 @@ class _AuthenticationFailureProvider(_RecordingProvider):
         )
 
 
+class _MismatchedIdentityProvider(_RecordingProvider):
+    def generate(self, projection, **kwargs):
+        output = _response_for_projection(dict(projection))
+        return AIProviderResponse(
+            provider_id="different-provider",
+            model_id=self.model_id,
+            structured_output=output,
+            response_sha256=sha256_json(output),
+            adapter_revision=self.adapter_revision,
+        )
+
+
 def test_authentication_failure_cannot_change_committed_deterministic_report(
     tmp_path: Path,
 ) -> None:
@@ -454,6 +466,27 @@ def test_authentication_failure_cannot_change_committed_deterministic_report(
     assert outbox["status"] == "failed"
     assert outbox["last_error_code"] == "ai_job_invalid"
     assert storage.get_ai_advisory_for_session("ai-worker-session") is None
+
+
+def test_provider_identity_mismatch_is_rejected_without_changing_report(
+    tmp_path: Path,
+) -> None:
+    storage, _report_value, report_id = _storage_with_report(tmp_path, enqueue=True)
+    before_json = storage.get_report_by_id(report_id)["payload_json"]
+    fixture = tmp_path / "unused.json"
+    worker = AIAdvisoryWorker(
+        _config(tmp_path, fixture),
+        provider=_MismatchedIdentityProvider(),
+        storage=storage,
+    )
+
+    assert worker.process_once() == 1
+    assert storage.get_report_by_id(report_id)["payload_json"] == before_json
+    row = storage.get_ai_advisory_for_session("ai-worker-session")
+    assert row["status"] == "rejected"
+    assert row["payload"]["validation"]["reason_code"] == (
+        "provider_identity_mismatch"
+    )
 
 
 def test_accepted_provider_usage_is_bounded_to_aggregate_metrics(tmp_path: Path) -> None:

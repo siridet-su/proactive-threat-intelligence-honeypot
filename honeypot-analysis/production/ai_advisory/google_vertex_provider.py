@@ -23,7 +23,7 @@ REVIEWED_MODEL_ID = "gemini-2.5-flash"
 REVIEWED_LOCATION = "global"
 REVIEWED_ENDPOINT = "https://aiplatform.googleapis.com"
 REVIEWED_API_VERSION = "v1"
-ADAPTER_REVISION = "google-genai.vertex-adc.v1"
+ADAPTER_REVISION = "google-genai.vertex-adc.v2"
 ADC_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 _PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
@@ -236,6 +236,39 @@ def _vertex_response_schema(value: Any) -> Any:
     return value
 
 
+def _vertex_request_contract_instruction(projection: Mapping[str, Any]) -> str:
+    """Return one bounded request-specific abstention/selection instruction."""
+
+    has_selection = bool(
+        projection.get("findings")
+        or projection.get("relationships")
+        or (projection.get("guidance") or {}).get("actions")
+    )
+    abstention = projection.get("abstention") or {}
+    if bool(abstention.get("abstained")):
+        reason = str(abstention.get("reason_code") or "policy_requires_abstention")
+        return (
+            "Request-specific mandatory output: set validated_advisory.abstained "
+            f"to true, set abstention_reason_code to {reason}, and return empty "
+            "selected_finding_ids, selected_relationship_ids, ranked_action_ids, "
+            "and template_selections arrays."
+        )
+    if not has_selection:
+        return (
+            "Request-specific mandatory output: no eligible finding, relationship, "
+            "or action identifiers exist. Set validated_advisory.abstained to true, "
+            "set abstention_reason_code to no_eligible_selection, and return empty "
+            "selected_finding_ids, selected_relationship_ids, ranked_action_ids, "
+            "and template_selections arrays."
+        )
+    return (
+        "Request-specific output rule: a non-abstained advisory must select at "
+        "least one supplied finding, relationship, action, or valid template. If "
+        "nothing is selected, set abstained to true, choose one supplied reason "
+        "code, and leave every selection and template array empty."
+    )
+
+
 class GoogleVertexGeminiProvider:
     """Constrained Vertex AI Gemini provider using ``google-genai`` and ADC."""
 
@@ -319,9 +352,13 @@ class GoogleVertexGeminiProvider:
             "schema_sha256": str(schema_sha256),
             "policy_sha256": str(policy_sha256),
         }
+        system_instruction = [
+            *(str(item) for item in prompt_contract),
+            _vertex_request_contract_instruction(projection),
+        ]
         config: Dict[str, Any] = {
             "http_options": {"timeout": timeout_ms},
-            "system_instruction": "\n".join(str(item) for item in prompt_contract),
+            "system_instruction": "\n".join(system_instruction),
             "temperature": self.request_options["temperature"],
             "candidate_count": 1,
             "max_output_tokens": self.request_options["max_output_tokens"],
