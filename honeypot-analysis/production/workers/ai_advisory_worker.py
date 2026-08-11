@@ -29,7 +29,7 @@ from production.ai_advisory.provider import (
 )
 from production.ai_advisory.rendering import render_validated_advisory
 from production.ai_advisory.security import ProviderAliasScope, load_provider_alias_key
-from production.storage import open_storage
+from production.storage import open_existing_storage
 from production.utils.config import ProductionConfig
 from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, stable_json, utc_now
@@ -136,7 +136,10 @@ class AIAdvisoryWorker:
         storage: Any = None,
     ) -> None:
         self.config = config
-        self.storage = storage or open_storage(config.database_url)
+        # Canonical migrations and full integrity scans are deployment gates.
+        # This optional worker joins an already initialized database through a
+        # bounded, read-only schema/ledger readiness check.
+        self.storage = storage or open_existing_storage(config.database_url)
         self.policy, self.policy_sha256, self.policy_path = (
             load_ai_advisory_policy(config.ai_advisory_policy_path)
         )

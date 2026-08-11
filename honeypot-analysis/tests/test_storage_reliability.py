@@ -14,6 +14,7 @@ from production.storage.backend import (
     SQLITE_SCHEMA_VERSION,
     SQLiteStorage,
     StorageError,
+    open_existing_storage,
 )
 from production.tools.sqlite_backup_restore import (
     create_backup,
@@ -71,6 +72,48 @@ def test_sqlite_migrations_reject_future_and_tampered_ledgers(
         )
     with pytest.raises(StorageError, match="checksum mismatch"):
         tampered.initialize()
+
+
+def test_existing_storage_readiness_is_bounded_and_checks_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = _storage(tmp_path)
+    storage.initialize()
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):  # type: ignore[no-untyped-def]
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", traced_connect)
+    selected = open_existing_storage(f"sqlite:///{storage.path}")
+
+    assert isinstance(selected, SQLiteStorage)
+    assert not any("quick_check" in statement.lower() for statement in statements)
+    assert len(statements) == 4
+    assert any("schema_migrations" in statement for statement in statements)
+
+    with original_connect(storage.path) as connection:
+        connection.execute(
+            "UPDATE schema_migrations SET checksum=? WHERE version=2",
+            ("0" * 64,),
+        )
+    with pytest.raises(StorageError, match="migration ledger is not ready"):
+        open_existing_storage(f"sqlite:///{storage.path}")
+
+
+def test_existing_storage_readiness_rejects_unsafe_path(
+    tmp_path: Path,
+) -> None:
+    storage = _storage(tmp_path)
+    storage.initialize()
+    alias = tmp_path / "database-link.db"
+    alias.symlink_to(storage.path)
+
+    with pytest.raises(StorageError, match="not a regular file"):
+        open_existing_storage(f"sqlite:///{alias}")
 
 
 def test_prediction_outbox_is_deduplicated_retried_and_completed(

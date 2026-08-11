@@ -204,6 +204,22 @@ def _sqlite_migration_definitions() -> tuple[tuple[int, str, tuple[str, ...]], .
     )
 
 
+def _sqlite_migration_checksum(
+    version: int,
+    name: str,
+    statements: tuple[str, ...],
+) -> str:
+    return hashlib.sha256(
+        stable_json(
+            {
+                "version": version,
+                "name": name,
+                "statements": statements,
+            }
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _decode_json(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return value
@@ -850,15 +866,7 @@ class SQLiteStorage:
         if any(version > SQLITE_SCHEMA_VERSION for version in applied):
             raise StorageError("SQLite migration ledger is newer than this release")
         for version, name, statements in _sqlite_migration_definitions():
-            checksum = hashlib.sha256(
-                stable_json(
-                    {
-                        "version": version,
-                        "name": name,
-                        "statements": statements,
-                    }
-                ).encode("utf-8")
-            ).hexdigest()
+            checksum = _sqlite_migration_checksum(version, name, statements)
             existing = applied.get(version)
             if existing:
                 if (
@@ -955,6 +963,73 @@ class SQLiteStorage:
 
         with self.connection() as conn:
             self._ensure_ai_advisory_schema(conn)
+
+    def verify_existing_schema(self) -> None:
+        """Fail closed on an untrusted canonical schema without scanning data.
+
+        This is the bounded readiness path for an optional worker joining an
+        already initialized production database.  Canonical deployment and
+        migration paths continue to use :meth:`initialize`, including its full
+        integrity checks.
+        """
+
+        try:
+            metadata = self.path.lstat()
+        except FileNotFoundError as exc:
+            raise StorageError("SQLite database does not exist") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise StorageError("SQLite database is not a regular file")
+        if metadata.st_uid != os.geteuid():
+            raise StorageError("SQLite database owner does not match the worker")
+        if stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise StorageError("SQLite database permissions are unsafe")
+
+        database_uri = f"{self.path.resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(database_uri, uri=True, timeout=5.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if user_version != SQLITE_SCHEMA_VERSION:
+                raise StorageError("SQLite schema version is not ready")
+            required_tables = {
+                "events",
+                "sessions",
+                "analysis_jobs",
+                "reports",
+                "schema_migrations",
+            }
+            present_tables = {
+                str(item["name"])
+                for item in conn.execute(
+                    """
+                    SELECT name FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name IN (?, ?, ?, ?, ?)
+                    """,
+                    tuple(sorted(required_tables)),
+                ).fetchall()
+            }
+            if present_tables != required_tables:
+                raise StorageError("SQLite canonical schema is incomplete")
+            applied = [
+                (int(row["version"]), str(row["name"]), str(row["checksum"]))
+                for row in conn.execute(
+                    """
+                    SELECT version, name, checksum FROM schema_migrations
+                    ORDER BY version
+                    """
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+        expected = [
+            (version, name, _sqlite_migration_checksum(version, name, statements))
+            for version, name, statements in _sqlite_migration_definitions()
+        ]
+        if applied != expected:
+            raise StorageError("SQLite migration ledger is not ready")
 
     @staticmethod
     def _verify_ai_advisory_schema_objects(conn: sqlite3.Connection) -> None:
@@ -5738,4 +5813,26 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
         raise StorageError(f"unsupported database backend: {settings.backend}")
     storage: StorageBackend = SQLiteStorage(settings.database_url)
     storage.initialize()
+    return storage
+
+
+def open_existing_storage(database: str | DatabaseSettings) -> StorageBackend:
+    """Open a trusted existing database without migration or full data scans."""
+
+    try:
+        settings = (
+            database
+            if isinstance(database, DatabaseSettings)
+            else DatabaseSettings.from_url(database)
+        )
+    except DatabaseConfigurationError as exc:
+        raise StorageError(str(exc)) from exc
+
+    if settings.backend != SQLITE_BACKEND:  # pragma: no cover - validated above
+        raise StorageError(f"unsupported database backend: {settings.backend}")
+    database_path = Path(settings.database_url.replace("sqlite:///", "", 1))
+    if not database_path.parent.exists():
+        raise StorageError("SQLite database parent directory does not exist")
+    storage: StorageBackend = SQLiteStorage(settings.database_url)
+    storage.verify_existing_schema()
     return storage

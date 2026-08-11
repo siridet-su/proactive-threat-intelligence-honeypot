@@ -211,6 +211,24 @@ def test_schema_extension_and_optional_atomic_outbox(tmp_path: Path) -> None:
         assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
 
+def test_worker_default_storage_open_skips_canonical_initialize(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = tmp_path / "response.json"
+    fixture.write_text("{}", encoding="utf-8")
+    config = _config(tmp_path, fixture)
+    SQLiteStorage(config.database_url).initialize()
+
+    def unexpected_initialize(self) -> None:  # type: ignore[no-untyped-def]
+        raise AssertionError("AI worker must not rerun canonical initialization")
+
+    monkeypatch.setattr(SQLiteStorage, "initialize", unexpected_initialize)
+    worker = AIAdvisoryWorker(config)
+
+    assert isinstance(worker.storage, SQLiteStorage)
+
+
 def test_schema_extension_checksum_tampering_fails_closed(tmp_path: Path) -> None:
     storage, _report, _report_id = _storage_with_report(tmp_path, enqueue=False)
     storage.initialize_ai_advisory_extension()
