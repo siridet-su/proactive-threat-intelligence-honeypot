@@ -24,17 +24,29 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 
-RECEIPT_SCHEMA = "honeypot_activation_guard_receipt.v2"
+RECEIPT_SCHEMA = "honeypot_activation_guard_receipt.v3"
+SUPPORTED_RECEIPT_SCHEMAS = frozenset(
+    {"honeypot_activation_guard_receipt.v2", RECEIPT_SCHEMA}
+)
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+DEFAULT_INTEGRITY_DEADLINE_SECONDS = 300
+MAX_DEADLINE_SECONDS = 900
 STATES = frozenset(
     {
         "GUARD_ARMED",
+        "PRE_CUTOVER_DATABASE_VERIFIED",
+        "PRE_CUTOVER_DATABASE_FAILED",
         "CANDIDATE_STARTING",
         "CANDIDATE_PENDING",
+        "CANDIDATE_SERVICE_READY",
+        "CANDIDATE_DATABASE_VERIFIED",
         "CANDIDATE_READY",
         "CANDIDATE_HEALTH_FAILED",
+        "CANDIDATE_DATABASE_FAILED",
         "FALLBACK_REQUESTED",
         "RECOVERY_PENDING",
+        "FALLBACK_SERVICE_READY",
+        "FALLBACK_DATABASE_VERIFIED",
         "FALLBACK_COMPLETED",
         "FALLBACK_INCOMPLETE",
         "ACTIVATION_COMPLETED",
@@ -126,33 +138,61 @@ def _marker(path: Path) -> str:
     return value if REVISION_RE.fullmatch(value) else ""
 
 
-def _database_ok(path: Path) -> bool:
+def _database_readiness(path: Path) -> Dict[str, bool]:
     if not path.is_file():
-        return False
+        return {"database_verified": False, "queues_verified": False}
     uri = f"file:{path.resolve()}?mode=ro"
     try:
         with sqlite3.connect(uri, uri=True, timeout=5) as connection:
-            quick = str(connection.execute("PRAGMA quick_check").fetchone()[0]).lower()
-            integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0]).lower()
+            connection.execute("SELECT 1").fetchone()
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if quick != "ok" or integrity != "ok" or version != 3:
-                return False
+            if version != 3:
+                return {"database_verified": False, "queues_verified": False}
             for table in ("analysis_jobs", "enrichment_jobs", "threat_hunt_jobs", "prediction_outbox"):
                 columns = {
                     str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")
                 }
                 if "status" in columns:
                     pending = connection.execute(
-                        f"SELECT COUNT(*) FROM {table} WHERE status IN ('running','pending')"
-                    ).fetchone()[0]
-                    pending += connection.execute(
-                        f"SELECT COUNT(*) FROM {table} WHERE status IN ('queued','retry','in_progress')"
-                    ).fetchone()[0]
-                    if int(pending) != 0:
-                        return False
-        return True
+                        f"SELECT 1 FROM {table} "
+                        "WHERE status IN ('running','pending','queued','retry','in_progress') "
+                        "LIMIT 1"
+                    ).fetchone()
+                    if pending is not None:
+                        return {"database_verified": True, "queues_verified": False}
+        return {"database_verified": True, "queues_verified": True}
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return {"database_verified": False, "queues_verified": False}
+
+
+def _database_integrity_ok(path: Path, *, deadline_seconds: int) -> bool:
+    """Run the expensive SQLite integrity gate once within a monotonic budget."""
+
+    if not path.is_file():
+        return False
+    deadline = time.monotonic() + deadline_seconds
+
+    def stop_after_deadline() -> int:
+        return 1 if time.monotonic() >= deadline else 0
+
+    uri = f"file:{path.resolve()}?mode=ro"
+    try:
+        with sqlite3.connect(uri, uri=True, timeout=5) as connection:
+            connection.set_progress_handler(stop_after_deadline, 10_000)
+            quick = str(connection.execute("PRAGMA quick_check").fetchone()[0]).lower()
+            integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0]).lower()
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            connection.set_progress_handler(None, 0)
+        return quick == "ok" and integrity == "ok" and version == 3
     except (OSError, sqlite3.Error, ValueError, TypeError):
         return False
+
+
+def _bounded_deadline(value: int, *, name: str) -> int:
+    parsed = int(value)
+    if parsed < 1 or parsed > MAX_DEADLINE_SECONDS:
+        raise ValueError(f"{name} must be between 1 and {MAX_DEADLINE_SECONDS} seconds")
+    return parsed
 
 
 class ActivationGuard:
@@ -171,6 +211,9 @@ class ActivationGuard:
         receipt: str,
         initial_deadline: int = 210,
         recovery_deadline: int = 180,
+        initial_health_deadline: int | None = None,
+        recovery_health_deadline: int | None = None,
+        integrity_deadline: int = DEFAULT_INTEGRITY_DEADLINE_SECONDS,
         poll_seconds: float = 2.0,
     ) -> None:
         if not REVISION_RE.fullmatch(Path(candidate).name) or not REVISION_RE.fullmatch(Path(recovery).name):
@@ -189,8 +232,21 @@ class ActivationGuard:
         self.health = dict(health)
         self.database = Path(database).resolve()
         self.receipt = Path(receipt).resolve()
-        self.initial_deadline = max(int(initial_deadline), 1)
-        self.recovery_deadline = max(int(recovery_deadline), 1)
+        self.initial_health_deadline = _bounded_deadline(
+            initial_deadline if initial_health_deadline is None else initial_health_deadline,
+            name="initial health deadline",
+        )
+        self.recovery_health_deadline = _bounded_deadline(
+            recovery_deadline if recovery_health_deadline is None else recovery_health_deadline,
+            name="recovery health deadline",
+        )
+        self.integrity_deadline = _bounded_deadline(
+            integrity_deadline,
+            name="integrity deadline",
+        )
+        # Retain the legacy attributes and receipt fields for callers that inspect them.
+        self.initial_deadline = self.initial_health_deadline
+        self.recovery_deadline = self.recovery_health_deadline
         self.poll_seconds = max(float(poll_seconds), 0.1)
         self.started_at = _now()
         self.events: List[Dict[str, Any]] = []
@@ -200,7 +256,7 @@ class ActivationGuard:
     @classmethod
     def from_receipt(cls, path: str | Path, *, health: Mapping[str, str]) -> "ActivationGuard":
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        if payload.get("schema_version") != RECEIPT_SCHEMA:
+        if payload.get("schema_version") not in SUPPORTED_RECEIPT_SCHEMAS:
             raise ValueError("unsupported activation receipt schema")
         guard = cls.__new__(cls)
         guard.candidate = str(payload["candidate"])
@@ -213,6 +269,18 @@ class ActivationGuard:
         guard.receipt = Path(path).resolve()
         guard.initial_deadline = int(payload.get("initial_deadline_seconds", 210))
         guard.recovery_deadline = int(payload.get("recovery_deadline_seconds", 180))
+        guard.initial_health_deadline = _bounded_deadline(
+            int(payload.get("initial_health_deadline_seconds", guard.initial_deadline)),
+            name="initial health deadline",
+        )
+        guard.recovery_health_deadline = _bounded_deadline(
+            int(payload.get("recovery_health_deadline_seconds", guard.recovery_deadline)),
+            name="recovery health deadline",
+        )
+        guard.integrity_deadline = _bounded_deadline(
+            int(payload.get("integrity_deadline_seconds", DEFAULT_INTEGRITY_DEADLINE_SECONDS)),
+            name="integrity deadline",
+        )
         guard.poll_seconds = 2.0
         guard.started_at = str(payload.get("started_at") or _now())
         guard.events = list(payload.get("events") or [])
@@ -236,6 +304,7 @@ class ActivationGuard:
                 "marker_verified",
                 "database_verified",
                 "queues_verified",
+                "integrity_verified",
             }
             and isinstance(value, (str, int, float, bool, list, dict))
         }
@@ -251,6 +320,9 @@ class ActivationGuard:
             "database": str(self.database),
             "initial_deadline_seconds": self.initial_deadline,
             "recovery_deadline_seconds": self.recovery_deadline,
+            "initial_health_deadline_seconds": self.initial_health_deadline,
+            "recovery_health_deadline_seconds": self.recovery_health_deadline,
+            "integrity_deadline_seconds": self.integrity_deadline,
             "started_at": self.started_at,
             "updated_at": _now(),
             "state": self.state,
@@ -271,29 +343,29 @@ class ActivationGuard:
         _run(["systemctl", "stop", *self.services], timeout=120)
         _run(["systemctl", "start", *self.services], timeout=120)
 
-    def _verification(self, expected: str) -> Dict[str, Any]:
+    def _lightweight_verification(self, expected: str) -> Dict[str, Any]:
         symlink_ok = os.path.realpath(self.active_link) == expected
         marker_ok = _marker(self.marker) == Path(expected).name
         service_states = _service_states(self.services)
         services_ok = all(value == "active" for value in service_states.values())
         health_ok = {name: _health(url) for name, url in self.health.items()}
         health_ready = all(health_ok.values())
-        database_ok = _database_ok(self.database)
+        database = _database_readiness(self.database)
         return {
             "symlink_verified": symlink_ok,
             "marker_verified": marker_ok,
             "services_active": services_ok,
             "health_ready": health_ready,
-            "database_verified": database_ok,
-            "queues_verified": database_ok,
+            "database_verified": database["database_verified"],
+            "queues_verified": database["queues_verified"],
             "service_states": service_states,
             "health": health_ok,
         }
 
-    def _wait(self, expected: str, deadline: int, pending_state: str) -> bool:
+    def _wait_for_health(self, expected: str, deadline: int, pending_state: str) -> tuple[bool, str]:
         start = time.monotonic()
         while time.monotonic() - start < deadline:
-            facts = self._verification(expected)
+            facts = self._lightweight_verification(expected)
             if all(
                 facts[key]
                 for key in (
@@ -310,7 +382,7 @@ class ActivationGuard:
                     elapsed_seconds=round(time.monotonic() - start, 3),
                     **{key: facts[key] for key in ("services_active", "health_ready", "symlink_verified", "marker_verified", "database_verified", "queues_verified")},
                 )
-                return True
+                return True, "ready"
             self._write_event(
                 pending_state,
                 elapsed_seconds=round(time.monotonic() - start, 3),
@@ -321,39 +393,21 @@ class ActivationGuard:
                 database_verified=facts["database_verified"],
                 queues_verified=facts["queues_verified"],
             )
+            if "failed" in facts["service_states"].values():
+                return False, "service_failed"
             time.sleep(self.poll_seconds)
-        return False
+        return False, "health_deadline_expired"
 
-    def activate(self) -> bool:
-        self._switch(self.candidate)
-        self._restart()
-        self._write_event("CANDIDATE_STARTING")
-        if self._wait(self.candidate, self.initial_deadline, "CANDIDATE_PENDING"):
-            self._write_event("CANDIDATE_READY")
-            return True
-        self._write_event("CANDIDATE_HEALTH_FAILED", reason="initial_readiness_deadline_expired")
-        self.fallback()
-        return False
+    def _integrity_gate(self) -> bool:
+        return _database_integrity_ok(
+            self.database,
+            deadline_seconds=self.integrity_deadline,
+        )
 
-    def fallback(self) -> bool:
-        self._write_event("FALLBACK_REQUESTED", reason="candidate_not_accepted")
-        self._switch(self.recovery)
-        self._restart()
-        start = time.monotonic()
-        while time.monotonic() - start < self.recovery_deadline:
-            self._write_event("RECOVERY_PENDING", elapsed_seconds=round(time.monotonic() - start, 3))
-            if self._wait(self.recovery, min(10, self.recovery_deadline), "RECOVERY_PENDING"):
-                self._write_event("FALLBACK_COMPLETED")
-                return True
-            if time.monotonic() - start >= self.recovery_deadline:
-                break
-        self._write_event("FALLBACK_INCOMPLETE", reason="recovery_verification_deadline_expired")
-        return False
-
-    def finalize(self) -> bool:
-        facts = self._verification(self.candidate)
-        if all(
-            facts[key]
+    @staticmethod
+    def _facts_ready(facts: Mapping[str, Any]) -> bool:
+        return all(
+            bool(facts[key])
             for key in (
                 "symlink_verified",
                 "marker_verified",
@@ -362,10 +416,124 @@ class ActivationGuard:
                 "database_verified",
                 "queues_verified",
             )
-        ):
+        )
+
+    def activate(self) -> bool:
+        preflight = self._lightweight_verification(self.recovery)
+        if not self._facts_ready(preflight):
+            self._write_event(
+                "PRE_CUTOVER_DATABASE_FAILED",
+                reason="pre_cutover_recovery_not_ready",
+                database_verified=preflight["database_verified"],
+                queues_verified=preflight["queues_verified"],
+                integrity_verified=False,
+            )
+            return False
+        if not self._integrity_gate():
+            self._write_event(
+                "PRE_CUTOVER_DATABASE_FAILED",
+                reason="pre_cutover_integrity_verification_failed",
+                database_verified=True,
+                queues_verified=True,
+                integrity_verified=False,
+            )
+            return False
+        post_integrity_preflight = self._lightweight_verification(self.recovery)
+        if not self._facts_ready(post_integrity_preflight):
+            self._write_event(
+                "PRE_CUTOVER_DATABASE_FAILED",
+                reason="pre_cutover_post_integrity_readiness_failed",
+                database_verified=post_integrity_preflight["database_verified"],
+                queues_verified=post_integrity_preflight["queues_verified"],
+                integrity_verified=True,
+            )
+            return False
+        self._write_event(
+            "PRE_CUTOVER_DATABASE_VERIFIED",
+            database_verified=True,
+            queues_verified=True,
+            integrity_verified=True,
+        )
+        self._switch(self.candidate)
+        self._restart()
+        self._write_event("CANDIDATE_STARTING")
+        ready, reason = self._wait_for_health(
+            self.candidate,
+            self.initial_health_deadline,
+            "CANDIDATE_PENDING",
+        )
+        if not ready:
+            self._write_event("CANDIDATE_HEALTH_FAILED", reason=reason)
+            self.fallback()
+            return False
+        self._write_event("CANDIDATE_SERVICE_READY")
+        if not self._integrity_gate():
+            self._write_event(
+                "CANDIDATE_DATABASE_FAILED",
+                reason="candidate_integrity_verification_failed",
+                integrity_verified=False,
+            )
+            self.fallback()
+            return False
+        final_facts = self._lightweight_verification(self.candidate)
+        if not self._facts_ready(final_facts):
+            self._write_event(
+                "CANDIDATE_DATABASE_FAILED",
+                reason="candidate_post_integrity_readiness_failed",
+                integrity_verified=True,
+            )
+            self.fallback()
+            return False
+        self._write_event(
+            "CANDIDATE_DATABASE_VERIFIED",
+            database_verified=True,
+            queues_verified=True,
+            integrity_verified=True,
+        )
+        self._write_event("CANDIDATE_READY")
+        return True
+
+    def fallback(self) -> bool:
+        self._write_event("FALLBACK_REQUESTED", reason="candidate_not_accepted")
+        self._switch(self.recovery)
+        self._restart()
+        ready, reason = self._wait_for_health(
+            self.recovery,
+            self.recovery_health_deadline,
+            "RECOVERY_PENDING",
+        )
+        if not ready:
+            self._write_event("FALLBACK_INCOMPLETE", reason=f"recovery_{reason}")
+            return False
+        self._write_event("FALLBACK_SERVICE_READY")
+        if not self._integrity_gate():
+            self._write_event("FALLBACK_INCOMPLETE", reason="recovery_integrity_verification_failed")
+            return False
+        final_facts = self._lightweight_verification(self.recovery)
+        if not self._facts_ready(final_facts):
+            self._write_event("FALLBACK_INCOMPLETE", reason="recovery_post_integrity_readiness_failed")
+            return False
+        self._write_event(
+            "FALLBACK_DATABASE_VERIFIED",
+            database_verified=True,
+            queues_verified=True,
+            integrity_verified=True,
+        )
+        self._write_event("FALLBACK_COMPLETED")
+        return True
+
+    def finalize(self) -> bool:
+        facts = self._lightweight_verification(self.candidate)
+        integrity_recorded = any(
+            event.get("state") == "CANDIDATE_DATABASE_VERIFIED"
+            and event.get("integrity_verified") is True
+            for event in self.events
+        )
+        if self.state == "CANDIDATE_READY" and integrity_recorded and self._facts_ready(facts):
             self._write_event("ACTIVATION_COMPLETED", **{key: facts[key] for key in ("services_active", "health_ready", "symlink_verified", "marker_verified", "database_verified", "queues_verified")})
             return True
-        self._write_event("FALLBACK_INCOMPLETE", reason="candidate_final_verification_failed")
+        self._write_event("CANDIDATE_HEALTH_FAILED", reason="candidate_final_verification_failed")
+        self.fallback()
         return False
 
 
@@ -392,6 +560,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--receipt", required=True)
     parser.add_argument("--initial-deadline", type=int, default=210)
     parser.add_argument("--recovery-deadline", type=int, default=180)
+    parser.add_argument("--initial-health-deadline", type=int)
+    parser.add_argument("--recovery-health-deadline", type=int)
+    parser.add_argument(
+        "--integrity-deadline",
+        type=int,
+        default=DEFAULT_INTEGRITY_DEADLINE_SECONDS,
+    )
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     return parser
 
@@ -414,6 +589,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             receipt=args.receipt,
             initial_deadline=args.initial_deadline,
             recovery_deadline=args.recovery_deadline,
+            initial_health_deadline=args.initial_health_deadline,
+            recovery_health_deadline=args.recovery_health_deadline,
+            integrity_deadline=args.integrity_deadline,
             poll_seconds=args.poll_seconds,
         )
     if args.command == "activate":
