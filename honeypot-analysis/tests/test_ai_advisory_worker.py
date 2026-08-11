@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from production.ai_advisory.contracts import AIAdvisoryContractError, load_ai_advisory_policy
+from production.ai_advisory.contracts import (
+    AIAdvisoryContractError,
+    load_ai_advisory_policy,
+    validate_provider_output,
+)
 from production.ai_advisory.projection import build_ai_advisory_projection
 from production.ai_advisory.contracts import sha256_json
 from production.ai_advisory.provider import AIProviderResponse, AIProviderUnavailable
@@ -406,13 +410,16 @@ class _RecordingProvider:
         self.response_hash = response_hash
         self.usage_metadata = usage_metadata or {}
         self.idempotency_keys: list[str] = []
+        self.projection = None
+        self.response = None
 
     def generate(self, projection, **kwargs):
+        self.projection = copy.deepcopy(dict(projection))
         self.idempotency_keys.append(kwargs["idempotency_key"])
         if self.delay:
             time.sleep(self.delay)
         output = _response_for_projection(dict(projection))
-        return AIProviderResponse(
+        self.response = AIProviderResponse(
             provider_id=self.provider_id,
             model_id=self.model_id,
             structured_output=output,
@@ -424,6 +431,35 @@ class _RecordingProvider:
             adapter_revision=self.adapter_revision,
             usage_metadata=self.usage_metadata,
         )
+        return self.response
+
+
+def test_worker_acceptance_and_redundant_provider_scoped_validation_agree(
+    tmp_path: Path,
+) -> None:
+    storage, _report_value, _report_id = _storage_with_report(
+        tmp_path, enqueue=True
+    )
+    provider = _RecordingProvider()
+    worker = AIAdvisoryWorker(
+        _config(tmp_path, tmp_path / "unused.json"),
+        provider=provider,
+        storage=storage,
+    )
+
+    assert worker.process_once() == 1
+    assert storage.get_ai_advisory_for_session("ai-worker-session")[
+        "status"
+    ] == "accepted"
+    assert provider.projection is not None and provider.response is not None
+    provider_digest = provider.projection["provenance"]["ai_policy_sha256"]
+    assert provider_digest != worker.policy_sha256
+    assert validate_provider_output(
+        provider.response.structured_output,
+        projection=provider.projection,
+        policy=worker.policy,
+        policy_sha256=provider_digest,
+    )["validated_advisory"]
 
 
 class _AuthenticationFailureProvider(_RecordingProvider):

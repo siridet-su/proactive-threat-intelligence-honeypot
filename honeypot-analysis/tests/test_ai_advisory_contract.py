@@ -335,6 +335,48 @@ def test_canonical_identifier_cannot_cross_an_aliased_response_boundary() -> Non
     assert raised.value.code == "invented_reference"
 
 
+def test_redundant_provider_validation_uses_provider_scoped_policy_hash() -> None:
+    report, _projection, policy, canonical_digest = _context()
+    alias_scope = ProviderAliasScope(b"b" * 32, "reviewed-canary-provider")
+    projection = build_ai_advisory_projection(
+        report,
+        policy=policy,
+        policy_sha256=canonical_digest,
+        alias_scope=alias_scope,
+    )
+    provider_digest = projection["provenance"]["ai_policy_sha256"]
+    response = _valid_response(projection, provider_digest)
+
+    assert provider_digest != canonical_digest
+    assert validate_provider_output(
+        response,
+        projection=projection,
+        policy=policy,
+        policy_sha256=provider_digest,
+    )["validated_advisory"]
+
+    for incorrect_digest in (canonical_digest, "f" * 64):
+        with pytest.raises(AIAdvisoryContractError) as raised:
+            validate_provider_output(
+                response,
+                projection=projection,
+                policy=policy,
+                policy_sha256=incorrect_digest,
+            )
+        assert raised.value.code == "hash_mismatch"
+
+    mismatched_projection = copy.deepcopy(response)
+    mismatched_projection["projection_sha256"] = "e" * 64
+    with pytest.raises(AIAdvisoryContractError) as raised:
+        validate_provider_output(
+            mismatched_projection,
+            projection=projection,
+            policy=policy,
+            policy_sha256=provider_digest,
+        )
+    assert raised.value.code == "hash_mismatch"
+
+
 def test_shadow_candidate_remains_bounded_unverified_and_separate() -> None:
     report, projection, policy, digest = _context()
     original = copy.deepcopy(report)
