@@ -20,6 +20,7 @@ def test_pyproject_separates_runtime_and_optional_dependency_groups() -> None:
     assert project["requires-python"] == ">=3.11"
     assert project["dependencies"] == ["requests>=2.31,<3"]
     assert set(extras) == {
+        "mongodb",
         "ai-advisory",
         "securebert",
         "training",
@@ -28,6 +29,7 @@ def test_pyproject_separates_runtime_and_optional_dependency_groups() -> None:
         "test",
     }
     assert any(item.startswith("reportlab") for item in extras["artifacts"])
+    assert any(item.startswith("pymongo") for item in extras["mongodb"])
     assert any(item.startswith("google-genai") for item in extras["ai-advisory"])
     assert any(item.startswith("stix2-validator") for item in extras["artifacts"])
     assert any(item.startswith("torch") for item in extras["securebert"])
@@ -38,6 +40,7 @@ def test_pyproject_separates_runtime_and_optional_dependency_groups() -> None:
 def test_requirement_files_match_documented_optional_groups() -> None:
     expected = {
         "requirements.txt": "requests>=2.31,<3",
+        "requirements-mongodb.txt": "pymongo==4.17.0",
         "requirements-ai-advisory.txt": "google-genai>=2.13,<3",
         "requirements-dev.txt": "pytest>=8,<10",
         "requirements-securebert.txt": "transformers>=5.3,<5.4",
@@ -52,7 +55,6 @@ def test_requirement_files_match_documented_optional_groups() -> None:
     assert "requests==" in constraints
     assert "pytest==" in constraints
     for archived in (
-        "requirements-mongodb.txt",
         "requirements-postgresql.txt",
         "requirements-vertex.txt",
         "constraints-mongodb.txt",
@@ -67,13 +69,15 @@ def test_production_runtime_lock_extends_model_lock_without_rewriting_it() -> No
     runtime_lines = runtime_lock.read_text(encoding="utf-8").splitlines()
 
     assert len(model_lines) == 37
-    assert len(runtime_lines) == 52
+    assert len(runtime_lines) == 54
     assert model_lines < set(runtime_lines)
     assert runtime_lines == sorted(runtime_lines, key=str.lower)
     assert "google-genai==2.13.0" in runtime_lines
     assert "google-auth==2.56.3" in runtime_lines
+    assert "pymongo==4.17.0" in runtime_lines
+    assert "dnspython==2.8.0" in runtime_lines
     assert hashlib.sha256(runtime_lock.read_bytes()).hexdigest() == (
-        "e205f68a18388e3a374a0c2342c5ef4d23de6830fa7156c374bc283cf099b252"
+        "8d5cf671c79e7c6127d7573fe291d36c189cdfa62da74cd12005e52c82b25bd6"
     )
     ai_requirements = (ROOT / "requirements-ai-advisory.txt").read_text(
         encoding="utf-8"

@@ -13,6 +13,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mongodb = [
+  "pymongo>=4.17,<4.18",
+]
 ai-advisory = [
   "google-genai>=2.13,<3",
 ]

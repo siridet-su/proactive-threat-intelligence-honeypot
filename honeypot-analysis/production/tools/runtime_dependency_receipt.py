@@ -32,9 +32,9 @@ BUILD_ENVIRONMENT_SCHEMA = "python_runtime_build_environment.v1"
 FROZEN_PYTHON_VERSION = "3.12.13"
 FROZEN_LOCK_FILENAME = "requirements-runtime.lock.txt"
 FROZEN_LOCK_SHA256 = (
-    "e205f68a18388e3a374a0c2342c5ef4d23de6830fa7156c374bc283cf099b252"
+    "8d5cf671c79e7c6127d7573fe291d36c189cdfa62da74cd12005e52c82b25bd6"
 )
-FROZEN_REQUIREMENT_COUNT = 52
+FROZEN_REQUIREMENT_COUNT = 54
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 REQUIREMENT_RE = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s]+)$")

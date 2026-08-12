@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from production.storage import (
+    CanonicalEventRecord,
     DatabaseConfigurationError,
     DatabaseSettings,
     SQLiteStorage,
@@ -140,6 +141,53 @@ def test_sqlite_adapter_implements_contract_and_health_check(
     assert isinstance(storage, SQLiteStorage)
     assert isinstance(storage, StorageBackend)
     assert storage.health_check() == {"ok": True, "backend": "sqlite"}
+
+
+def test_backend_neutral_event_record_preserves_bytes_identity_and_received_at(
+    tmp_path: Path,
+) -> None:
+    event = {
+        "eventid": "cowrie.command.input",
+        "session": "sensor-a:cowrie-session-a",
+        "src_ip": "192.0.2.10",
+        "timestamp": "2026-08-12T00:00:00Z",
+        "input": "id",
+    }
+    record = CanonicalEventRecord.create(
+        "sensor-a",
+        event,
+        received_at="2026-08-12T01:02:03+00:00",
+    )
+    storage = open_storage(f"sqlite:///{tmp_path / 'canonical-record.db'}")
+
+    first = storage.store_canonical_event(record)
+    second = storage.store_canonical_event(record)
+    row = storage.fetch_events(limit=1)[0]
+
+    assert first == (record.event_id, True)
+    assert second == (record.event_id, False)
+    assert record.received_at == "2026-08-12T01:02:03.000000+00:00"
+    assert row["received_at"] == record.received_at
+    assert row["payload_json"] == record.payload_json
+
+
+def test_backend_neutral_event_record_rejects_tampering(tmp_path: Path) -> None:
+    record = CanonicalEventRecord.create(
+        "sensor-a",
+        {
+            "eventid": "cowrie.login.failed",
+            "session": "sensor-a:cowrie-session-a",
+            "src_ip": "192.0.2.10",
+        },
+        received_at="2026-08-12T01:02:03Z",
+    )
+    tampered = CanonicalEventRecord(
+        **{**record.__dict__, "payload_sha256": "0" * 64}
+    )
+    storage = open_storage(f"sqlite:///{tmp_path / 'tampered-record.db'}")
+
+    with pytest.raises(StorageError, match="integrity validation"):
+        storage.store_canonical_event(tampered)
 
 
 def test_sqlite_health_check_is_read_only_and_does_not_reinitialize_schema(

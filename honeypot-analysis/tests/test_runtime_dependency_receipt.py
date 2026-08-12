@@ -131,7 +131,7 @@ def test_runtime_and_wheel_manifests_are_content_addressed_and_closed(tmp_path: 
     assert runtime["runtime_id"].startswith("python_runtime_")
     assert runtime["inventory"]["bin/python3"]["type"] == "symlink"
     assert wheels["bundle_id"].startswith("python_wheels_")
-    assert len(wheels["wheels"]) == 52
+    assert len(wheels["wheels"]) == 54
 
 
 def test_receipt_verifies_every_artifact_and_rejects_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,7 +147,7 @@ def test_receipt_verifies_every_artifact_and_rejects_mutation(tmp_path: Path, mo
     assert receipt_path.stat().st_mode & 0o777 == 0o600
     verified = verify_receipt(receipt_path, fixture["artifact_root"])
     assert verified["verified"] is True
-    assert verified["wheel_count"] == 52
+    assert verified["wheel_count"] == 54
 
     fixture["application"].write_bytes(b"mutated")
     with pytest.raises(RuntimeDependencyReceiptError, match="identity mismatch"):

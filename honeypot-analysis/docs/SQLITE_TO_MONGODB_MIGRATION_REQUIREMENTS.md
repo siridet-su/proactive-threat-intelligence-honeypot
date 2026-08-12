@@ -1,8 +1,67 @@
 # Future SQLite to MongoDB migration requirements
 
-Status: requirements only. SQLite remains the sole production backend. This
-document does not authorize a schema change, data copy, dual write, cutover,
-credential use, or service deployment.
+Status: offline backend implementation complete; Atlas staging remains an
+external gate and SQLite remains the sole production backend. The repository
+contains a backend-neutral canonical event record, the complete formal runtime
+storage contract, a content-addressed MongoDB schema/index/validator manifest,
+a validated least-privilege identity manifest, shadow and rollback-mirror state
+machines, and bounded migration/reconciliation tooling. The implementation is
+exercised against a disposable local MongoDB 8.0 replica set but is deliberately
+not selectable through `open_storage`. This document does not authorize an
+Atlas purchase, data copy, shadow activation, cutover, credential use, or
+service deployment.
+
+## Verified Atlas control-plane gate (2026-08-12)
+
+The observed legacy Atlas environment is organization
+`6a549939366a569efa96227b`, project `6a549939366a569efa96236e` (`Project 0`),
+and cluster `Honeypot-DB`. The project has three human Project Owners and an
+Atlas Charts identity. It also has three broad, unscoped database users:
+`atlasAdmin` and two `readWriteAnyDatabase` identities. The project has no API
+keys, project service accounts, custom database roles, private endpoints, or
+peering.
+
+The legacy cluster is an AWS Hong Kong `AP_EAST_1` M0 replica set running
+MongoDB 8.0.29. It has 0.5 GB configured storage and reported 538,739,600 bytes
+of logical data. It has no Cloud Backup, PITR, snapshots, or backup schedule.
+Its IP access list includes three `/32` entries and `0.0.0.0/0`. The Pi legacy
+processor has live Atlas connections from public egress `110.77.157.101`, which
+is not one of the explicit `/32` entries. The open rule cannot be removed until
+that live legacy dependency and other Project Owners' consumers have approved
+narrow replacements.
+
+This proves that the existing M0 is a shared legacy environment, not a safe
+canonical destination. Existing `honeypot_db` collections remain noncanonical
+legacy/archive data and must not be modified or copied wholesale.
+
+## Selected future canonical environment
+
+Use a separate, dedicated Atlas project and cluster named
+`Honeypot-Canonical`; do not upgrade or repurpose `Honeypot-DB`. Prefer GCP
+Singapore to colocate with capstone's GCP `asia-southeast1` runtime. The last
+observed SQLite source size was approximately 6.3 GB. A 10 GB default volume is
+therefore not a defensible migration target after BSON, indexes, receipts,
+working space, and growth are included. The first paid staging review should
+quote the smallest dedicated tier that supports replica-set transactions,
+Cloud Backup, continuous backup/PITR, and at least 20 GB configured storage in
+that region. M10 with 20 GB is the technical starting candidate if the Atlas
+quote confirms those features; M20 is recommended headroom, not a proven
+minimum. No tier should be purchased until a consistent production SQLite
+backup is measured by the migration tool and the exact Atlas quote is approved.
+
+The canonical project access list must never include `0.0.0.0/0`. Prefer a
+private endpoint from capstone. If that is not approved, allow only capstone's
+stable egress `34.142.229.209/32` as a documented interim limitation. The Pi
+does not receive canonical MongoDB credentials or direct canonical database
+access.
+
+The runtime database user is exactly `10k`, SCRAM-SHA-256, cluster-scoped to
+`Honeypot-Canonical`, and assigned only the custom role described in
+`configs/mongodb_runtime_identity.v1.json`. That role grants CRUD and bounded
+inspection only on `honeypot_canonical_v1`; it excludes collection/index/user,
+backup, network, project, bypass-validation, and database administration. A
+separate deployment identity installs validators/indexes and the manifest,
+then is removed from the runtime credential path.
 
 ## Non-negotiable migration boundary
 
@@ -96,6 +155,31 @@ MongoDB-specific risks that require executable tests include:
   collisions; and
 - transaction size/time limits must accommodate analysis completion or require
   a reviewed transactional redesign with equivalent recovery semantics.
+
+## Implemented offline migration controls
+
+- `MongoDBStorageBackend` implements all formal runtime operations using
+  deterministic application IDs, primary majority reads, majority+j writes,
+  fenced claims, and transactions for multi-document publication.
+- `SQLiteMongoShadowOutbox` writes the authoritative SQLite event and its
+  deterministic shadow intent in one SQLite transaction. MongoDB remains
+  non-authoritative and discrepancies are durable promotion blockers.
+- `MongoSQLiteRollbackMirror` implements the future acknowledgement states
+  neither, Mongo-only, SQLite-only, both-exact, and either-side conflict. It is
+  not connected to ingest.
+- `mongodb_canonical_migration` reads only a consistent immutable SQLite backup,
+  streams documents with bounded memory, preserves IDs and JSON bytes, and
+  emits content-addressed count/cutoff/whole-document aggregate evidence.
+- reconciliation compares every migrated domain and reports missing,
+  unexpected, or changed state without repairing either side.
+- `mongodb_schema_admin` separates install authority from read-only runtime
+  verification and accepts its URI only through an owner-only file reference.
+
+The local exact-version gate remains explicit: MongoDB 8.0.4 was the closest
+usable 8.0 container on this host. MongoDB 8.0.29 could not run because that
+server build rejects the host's newer kernel. Exact Atlas 8.0.29 behavior,
+authentication, backup/PITR, regional latency, capacity, and restore must be
+validated in the isolated staging environment before promotion review.
 
 ## Compatibility and verification gates
 

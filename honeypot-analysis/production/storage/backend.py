@@ -27,7 +27,7 @@ from production.storage.contract import (
     validate_job_failure_fields,
     validate_webhook_completion_fields,
 )
-from production.utils.serialization import event_id as make_event_id
+from production.storage.canonical_event import CanonicalEventRecord
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.prediction.evidence_cutoff import (
     evidence_cutoff_sort_key,
@@ -41,10 +41,7 @@ from production.prediction.prediction_snapshot_contract import (
     validate_prediction_snapshot_integrity,
 )
 from production.utils.feedback import normalize_feedback_payload
-from production.utils.sensitive_data import (
-    redact_error_for_log,
-    sanitize_cowrie_event_for_persistence,
-)
+from production.utils.sensitive_data import redact_error_for_log
 from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     SESSION_SOURCE_UNKNOWN_LEGACY,
@@ -1292,9 +1289,32 @@ class SQLiteStorage:
         )
 
     def store_event(self, sensor_id: str, event: Dict[str, Any]) -> tuple[str, bool]:
-        persisted_event = sanitize_cowrie_event_for_persistence(event)
-        eid = make_event_id(sensor_id, persisted_event)
-        now = utc_now()
+        record = CanonicalEventRecord.create(sensor_id, event)
+        try:
+            return self.store_canonical_event(record)
+        except StorageError:
+            # A replay arriving through the legacy ingest method receives a
+            # new local clock value. The first durable received_at remains
+            # authoritative when the authenticated sensor and canonical event
+            # bytes are exact; explicit CanonicalEventRecord writes bind and
+            # verify received_at strictly for shadow/mirror operation.
+            existing = self.get_event(record.event_id)
+            if (
+                existing is not None
+                and existing.get("sensor_id") == record.sensor_id
+                and existing.get("payload_json") == record.payload_json
+            ):
+                return record.event_id, False
+            raise
+
+    def store_canonical_event(
+        self,
+        record: CanonicalEventRecord,
+    ) -> tuple[str, bool]:
+        try:
+            record.verify()
+        except ValueError as exc:
+            raise StorageError("canonical event record failed integrity validation") from exc
         with self.connection() as conn:
             cur = conn.execute(
                 """
@@ -1303,23 +1323,40 @@ class SQLiteStorage:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    eid,
-                    sensor_id,
-                    str(persisted_event.get("session", "unknown")),
-                    str(persisted_event.get("src_ip", "unknown")),
-                    str(persisted_event.get("eventid", "")),
-                    persisted_event.get("timestamp"),
-                    stable_json(persisted_event),
-                    now,
+                    record.event_id,
+                    record.sensor_id,
+                    record.session_id,
+                    str(record.event.get("src_ip", "unknown")),
+                    str(record.event.get("eventid", "")),
+                    record.event.get("timestamp"),
+                    record.payload_json,
+                    record.received_at,
                 ),
             )
-            return eid, cur.rowcount == 1
+            inserted = cur.rowcount == 1
+            if not inserted:
+                existing = conn.execute(
+                    """
+                    SELECT sensor_id, session_id, received_at, payload_json
+                    FROM events WHERE event_id = ?
+                    """,
+                    (record.event_id,),
+                ).fetchone()
+                if existing is None or (
+                    existing["sensor_id"] != record.sensor_id
+                    or existing["session_id"] != record.session_id
+                    or existing["received_at"] != record.received_at
+                    or existing["payload_json"] != record.payload_json
+                ):
+                    raise StorageError("conflicting duplicate canonical event ID")
+            return record.event_id, inserted
 
     def fetch_unprocessed_events(self, limit: int) -> List[Dict[str, Any]]:
         with self.connection() as conn:
             rows = conn.execute(
                 """
-                SELECT event_id, sensor_id, payload_json FROM events
+                SELECT event_id, sensor_id, payload_json, processed, received_at
+                FROM events
                 WHERE processed = 0
                 ORDER BY received_at, event_id
                 LIMIT ?
@@ -1332,9 +1369,30 @@ class SQLiteStorage:
                 "sensor_id": row["sensor_id"],
                 "event": json.loads(row["payload_json"]),
                 "payload_json": row["payload_json"],
+                "processed": bool(row["processed"]),
+                "received_at": row["received_at"],
             }
             for row in rows
         ]
+
+    def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+        identity = _required_identity(event_id, "event_id")
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT event_id, sensor_id, payload_json, processed, received_at "
+                "FROM events WHERE event_id=? LIMIT 1",
+                (identity,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "event_id": row["event_id"],
+            "sensor_id": row["sensor_id"],
+            "event": json.loads(row["payload_json"]),
+            "payload_json": row["payload_json"],
+            "processed": bool(row["processed"]),
+            "received_at": row["received_at"],
+        }
 
     def load_session_event_snapshot(
         self,
@@ -2194,7 +2252,7 @@ class SQLiteStorage:
         with self.connection() as conn:
             rows = conn.execute(
                 f"""
-                SELECT event_id, sensor_id, payload_json, processed FROM events
+                SELECT event_id, sensor_id, payload_json, processed, received_at FROM events
                 {where}
                 ORDER BY received_at, event_id
                 LIMIT ?
@@ -2208,6 +2266,7 @@ class SQLiteStorage:
                 "event": json.loads(row["payload_json"]),
                 "payload_json": row["payload_json"],
                 "processed": bool(row["processed"]),
+                "received_at": row["received_at"],
             }
             for row in rows
         ]
@@ -4625,12 +4684,13 @@ class SQLiteStorage:
         policy_version: str,
         policy_sha256: str,
         effective_path: str,
-    ) -> None:
+        activated_at: Any = None,
+    ) -> bool:
         digest = str(policy_sha256 or "").strip().lower()
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ValueError("policy_sha256 must be a lowercase SHA-256 digest")
         with self.connection() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO data_lifecycle_policy_ledger
                 (policy_sha256, policy_id, policy_version, effective_path, activated_at)
@@ -4641,9 +4701,10 @@ class SQLiteStorage:
                     _required_identity(policy_id, "policy_id"),
                     _required_identity(policy_version, "policy_version"),
                     _required_identity(effective_path, "effective_path"),
-                    utc_now(),
+                    _utc_timestamp(activated_at),
                 ),
             )
+            return cursor.rowcount == 1
 
     def claim_prediction_outbox(
         self,

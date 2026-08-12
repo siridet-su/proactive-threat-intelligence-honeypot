@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
+from production.storage.canonical_event import CanonicalEventRecord
 from production.utils.sensitive_data import redact_error_for_log
 
 
@@ -367,7 +368,15 @@ def safe_database_label(database: str | DatabaseSettings) -> str:
 
 @runtime_checkable
 class StorageBackend(Protocol):
-    """Logical persistence contract shared by runtime services and tools."""
+    """Logical persistence contract shared by runtime services and tools.
+
+    Implementations preserve deterministic application identities and
+    canonical JSON bytes. Inserts are idempotent only for identical canonical
+    content; identity conflicts fail closed. Claims atomically increment the
+    attempt count and issue fenced, expiring tokens. Multi-record publication
+    is transactional and returned collections use explicit application order,
+    never SQLite rowid, MongoDB ObjectId, or backend-natural order.
+    """
 
     def initialize(self) -> None: ...
 
@@ -381,7 +390,16 @@ class StorageBackend(Protocol):
         event: Dict[str, Any],
     ) -> tuple[str, bool]: ...
 
+    def store_canonical_event(
+        self,
+        record: CanonicalEventRecord,
+    ) -> tuple[str, bool]: ...
+
+    def verify_existing_schema(self) -> None: ...
+
     def fetch_unprocessed_events(self, limit: int) -> List[Dict[str, Any]]: ...
+
+    def get_event(self, event_id: str) -> Optional[Dict[str, Any]]: ...
 
     def load_session_event_snapshot(
         self,
@@ -861,6 +879,52 @@ class StorageBackend(Protocol):
     ) -> List[Dict[str, Any]]: ...
 
     def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str: ...
+
+    def enqueue_prediction_outbox(self, payload: Dict[str, Any]) -> str: ...
+
+    def claim_prediction_outbox(
+        self,
+        owner: str,
+        limit: int,
+        lease_seconds: float,
+        max_attempts: int,
+        *,
+        now: Any = None,
+    ) -> List[Dict[str, Any]]: ...
+
+    def complete_prediction_outbox(
+        self,
+        outbox_id: str,
+        owner: str,
+        token: str,
+        snapshot_id: str,
+        *,
+        now: Any = None,
+    ) -> bool: ...
+
+    def fail_prediction_outbox(
+        self,
+        outbox_id: str,
+        owner: str,
+        token: str,
+        error_code: str,
+        error_type: str,
+        retryable: bool,
+        max_attempts: int,
+        retry_delay_seconds: float,
+        *,
+        now: Any = None,
+    ) -> str: ...
+
+    def record_data_lifecycle_policy(
+        self,
+        *,
+        policy_id: str,
+        policy_version: str,
+        policy_sha256: str,
+        effective_path: str,
+        activated_at: Any = None,
+    ) -> bool: ...
 
     def get_latest_prediction_snapshot(
         self,
