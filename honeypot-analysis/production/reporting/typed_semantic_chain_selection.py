@@ -10,7 +10,7 @@ from production.reporting.typed_semantic_facts import validate_typed_semantic_fa
 from production.utils.serialization import stable_json
 
 
-SCHEMA_VERSION = "typed_semantic_chain_selection.v2"
+SCHEMA_VERSION = "typed_semantic_chain_selection.v3"
 
 
 def _clean(value: Any) -> str:
@@ -25,19 +25,138 @@ def _ordered_required_facts(
     chain: dict[str, Any],
     facts: dict[str, dict[str, Any]],
     required: list[str],
+    chain_relationships: list[dict[str, Any]],
+    rule: dict[str, Any],
+    entity_refs: list[str],
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
-    selected: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
-    position = 0
+    """Return the earliest valid successful required-operation subsequence.
+
+    The dynamic program keeps at most one lexicographically earliest prefix
+    for each (required-depth, final-fact) state.  Its state is therefore
+    bounded by ``len(required) * len(chain.fact_refs)`` and never enumerates
+    combinatorial fact combinations.
+    """
+
+    fact_positions = {
+        _clean(reference): index
+        for index, reference in enumerate(chain.get("fact_refs") or [])
+        if _clean(reference)
+    }
+
+    def successful(fact: dict[str, Any], operation: dict[str, Any]) -> bool:
+        return bool(
+            operation.get("effect_status") == "reported_completed"
+            and (fact.get("outcome") or {}).get("status") == "reported_success"
+            and (fact.get("outcome") or {}).get("scope") == "fragment"
+        )
+
+    transition_types = {
+        _clean(value)
+        for value in rule.get("required_transition_types") or ["same_path_transition"]
+        if _clean(value)
+    }
+    transition_rules = rule.get("required_transitions") or []
+    same_entity_rule = rule.get("same_entity_required", True) is not False
+
+    def transition_supported(
+        source: tuple[str, dict[str, Any], dict[str, Any]],
+        target: tuple[str, dict[str, Any], dict[str, Any]],
+        transition_index: int,
+    ) -> bool:
+        configured = (
+            transition_rules[transition_index]
+            if transition_index < len(transition_rules)
+            and isinstance(transition_rules[transition_index], dict)
+            else {}
+        )
+        allowed = {
+            _clean(value)
+            for value in configured.get("relationship_types") or transition_types
+            if _clean(value)
+        }
+        same_entity = configured.get("same_entity_required", same_entity_rule)
+        endpoints = {source[0], target[0]}
+        related = [
+            relationship
+            for relationship in chain_relationships
+            if {
+                _clean(relationship.get("source_fact_id")),
+                _clean(relationship.get("target_fact_id")),
+            } == endpoints
+            and _clean(relationship.get("relationship_type")) in allowed
+        ]
+        if any(
+            relationship.get("status") in {"blocked", "conflicting"}
+            for relationship in related
+        ):
+            return False
+        return any(
+            relationship.get("status") == "supported"
+            and relationship.get("causality_semantics")
+            in {"", "evidence_link_not_causal_or_intent_proof"}
+            and (
+                not same_entity
+                or (
+                    len(entity_refs) == 1
+                    and _clean(relationship.get("entity_ref")) == entity_refs[0]
+                )
+            )
+            for relationship in related
+        )
+
+    states: list[dict[str, list[tuple[str, dict[str, Any], dict[str, Any]]]]] = [
+        {} for _ in required
+    ]
     for fact_ref in chain.get("fact_refs") or []:
-        fact = facts.get(_clean(fact_ref)) or {}
+        fact_ref = _clean(fact_ref)
+        fact = facts.get(fact_ref) or {}
+        position = fact_positions.get(fact_ref, -1)
         for operation in fact.get("operations") or []:
-            if position >= len(required):
-                break
-            if operation.get("operation_type") == required[position]:
-                selected.append((fact_ref, fact, operation))
-                position += 1
-                break
-    return selected
+            if not isinstance(operation, dict) or not successful(fact, operation):
+                continue
+            operation_type = _clean(operation.get("operation_type"))
+            for depth in range(len(required) - 1, -1, -1):
+                if operation_type != required[depth]:
+                    continue
+                current = (fact_ref, fact, operation)
+                if depth == 0:
+                    candidate = [current]
+                else:
+                    predecessors = [
+                        sequence
+                        for sequence in states[depth - 1].values()
+                        if fact_positions.get(sequence[-1][0], -1) < position
+                        and transition_supported(
+                            sequence[-1], current, depth - 1
+                        )
+                    ]
+                    if not predecessors:
+                        continue
+                    candidate = min(
+                        predecessors,
+                        key=lambda sequence: tuple(
+                            (fact_positions.get(item[0], -1), item[0])
+                            for item in sequence
+                        ),
+                    ) + [current]
+                existing = states[depth].get(fact_ref)
+                key = lambda sequence: tuple(
+                    (fact_positions.get(item[0], -1), item[0])
+                    for item in sequence
+                )
+                if existing is None or key(candidate) < key(existing):
+                    states[depth][fact_ref] = candidate
+
+    for depth in range(len(required) - 1, -1, -1):
+        if states[depth]:
+            return min(
+                states[depth].values(),
+                key=lambda sequence: tuple(
+                    (fact_positions.get(item[0], -1), item[0])
+                    for item in sequence
+                ),
+            )
+    return []
 
 
 def _selection_for_rule(
@@ -71,7 +190,18 @@ def _selection_for_rule(
             continue
         if not same_entity_rule and len(entity_refs) > 1:
             continue
-        selected = _ordered_required_facts(chain, facts, required)
+        chain_relationships = [
+            relationships.get(_clean(reference)) or {}
+            for reference in chain.get("relationship_refs") or []
+        ]
+        selected = _ordered_required_facts(
+            chain,
+            facts,
+            required,
+            chain_relationships,
+            rule,
+            entity_refs,
+        )
         selected_types = [item[2].get("operation_type") for item in selected]
         complete = selected_types == required
         if not complete and selected_types != required[: len(selected_types)]:
@@ -89,10 +219,6 @@ def _selection_for_rule(
             for _fact_ref, fact, operation in selected
         ):
             continue
-        chain_relationships = [
-            relationships.get(_clean(reference)) or {}
-            for reference in chain.get("relationship_refs") or []
-        ]
         transition_types = rule.get("required_transition_types") or [
             "same_path_transition"
         ]

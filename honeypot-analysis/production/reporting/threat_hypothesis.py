@@ -598,7 +598,7 @@ def build_supported_assessment(
             + list(definition.get("limitations") or []),
         )
         claim.update({
-            "claim_basis": "typed_semantic_chain_selection.v2",
+            "claim_basis": "typed_semantic_chain_selection.v3",
             "connected_chain_id": _clean(match.get("chain_id")),
             "behavior_policy_rule_id": _clean(definition.get("rule_id")),
             "relationship_refs": list(

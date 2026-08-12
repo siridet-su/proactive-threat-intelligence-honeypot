@@ -34,11 +34,20 @@ def _snapshot() -> dict:
         "schema_version": "durable_session_event_manifest.v1",
         "session_id": "replay-session",
         "through_event_id": "event-2",
+        "through_received_at": "2026-08-11T00:00:01.000000+00:00",
         "event_count": 2,
         "manifest_sha256": "",
         "event_entries": [
-            {"event_id": "event-1", "payload_sha256": "b" * 64},
-            {"event_id": "event-2", "payload_sha256": "c" * 64},
+            {
+                "event_id": "event-1",
+                "received_at": "2026-08-11T00:00:00.000000+00:00",
+                "payload_sha256": "b" * 64,
+            },
+            {
+                "event_id": "event-2",
+                "received_at": "2026-08-11T00:00:01.000000+00:00",
+                "payload_sha256": "c" * 64,
+            },
         ],
         "events": [
             {
@@ -60,6 +69,7 @@ def _snapshot() -> dict:
             "schema_version": value["schema_version"],
             "session_id": value["session_id"],
             "through_event_id": value["through_event_id"],
+            "through_received_at": value["through_received_at"],
             "event_entries": value["event_entries"],
         }).encode()
     ).hexdigest()

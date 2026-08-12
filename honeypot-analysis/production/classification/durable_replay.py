@@ -15,7 +15,9 @@ from production.classification.trust import (
 from production.prediction.trusted_history import (
     build_prediction_trusted_history_manifest,
     normalize_trusted_phases,
+    validate_prediction_trusted_history_manifest,
 )
+from production.prediction.evidence_cutoff import make_evidence_cutoff
 from production.utils.serialization import stable_id, stable_json
 from production.utils.sensitive_data import redact_for_artifact
 
@@ -122,6 +124,7 @@ def reclassify_durable_prefix(
         "schema_version": _text(durable_snapshot.get("schema_version")),
         "session_id": _text(durable_snapshot.get("session_id")),
         "through_event_id": _text(durable_snapshot.get("through_event_id")),
+        "through_received_at": _text(durable_snapshot.get("through_received_at")),
         "event_entries": entries,
     }
     if (
@@ -144,6 +147,7 @@ def reclassify_durable_prefix(
         entry = entries[index] if index < len(entries) else {}
         durable_order = {
             "event_id": _text(entry.get("event_id")),
+            "received_at": _text(entry.get("received_at")),
             "payload_sha256": _text(entry.get("payload_sha256")),
             "event_index": index,
         }
@@ -203,8 +207,9 @@ def reclassify_durable_prefix(
         if not is_trusted_classification_event(classification):
             continue
         try:
+            raw_command_index = classification.get("compound_command_index")
             command_index = int(
-                classification.get("compound_command_index") or len(phases)
+                len(phases) if raw_command_index is None else raw_command_index
             )
         except (TypeError, ValueError):
             command_index = len(phases)
@@ -237,17 +242,25 @@ def reclassify_durable_prefix(
                 current["labels"].append(label)
     normalized_phases = normalize_trusted_phases(phases, cap=None)
     reconstructed["prediction_trusted_history"] = normalized_phases[-8:]
-    cutoff = {
-        "schema_version": "prediction_evidence_cutoff.v1",
-        "event_id": _text(durable_snapshot.get("through_event_id")),
-    }
-    reconstructed["prediction_trusted_history_manifest"] = (
-        build_prediction_trusted_history_manifest(
+    cutoff = make_evidence_cutoff(
+        durable_snapshot.get("through_received_at"),
+        durable_snapshot.get("through_event_id"),
+    )
+    history_manifest = build_prediction_trusted_history_manifest(
             phases=normalized_phases,
             evidence_cutoff=cutoff,
             classifier_environment=current_identity,
-        )
     )
+    manifest_errors = validate_prediction_trusted_history_manifest(
+        history_manifest,
+        expected_phases=normalized_phases,
+    )
+    if manifest_errors:
+        raise ClassificationReplayError(
+            "replay trusted-history manifest is invalid: "
+            + "; ".join(manifest_errors)
+        )
+    reconstructed["prediction_trusted_history_manifest"] = history_manifest
     reconstructed["classification_replay"] = {
         "schema_version": CLASSIFICATION_REPLAY_SCHEMA,
         "durable_event_manifest_sha256": _text(durable_snapshot.get("manifest_sha256")),

@@ -408,7 +408,11 @@ class MongoDBStorageBackend(MongoDBRuntimeOperations):
             if digest != document.get("payload_sha256"):
                 raise StorageError("canonical MongoDB event payload hash mismatch")
             events.append(item["event"])
-            entries.append({"event_id": item["event_id"], "payload_sha256": digest})
+            entries.append({
+                "event_id": item["event_id"],
+                "received_at": item["received_at"],
+                "payload_sha256": digest,
+            })
             if item["event_id"] == watermark:
                 found = True
                 break
@@ -418,6 +422,7 @@ class MongoDBStorageBackend(MongoDBRuntimeOperations):
             "schema_version": "durable_session_event_manifest.v1",
             "session_id": selected_session,
             "through_event_id": watermark,
+            "through_received_at": entries[-1]["received_at"],
             "event_entries": entries,
         }
         return {

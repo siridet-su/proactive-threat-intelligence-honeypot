@@ -1426,7 +1426,7 @@ class SQLiteStorage:
         with self.connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT event_id, payload_json
+                SELECT event_id, payload_json, received_at
                 FROM events
                 WHERE session_id = ?
                 ORDER BY received_at, event_id
@@ -1453,6 +1453,7 @@ class SQLiteStorage:
                 entries.append(
                     {
                         "event_id": event_id,
+                        "received_at": str(row["received_at"]),
                         "payload_sha256": hashlib.sha256(
                             row["payload_json"].encode("utf-8")
                         ).hexdigest(),
@@ -1469,6 +1470,7 @@ class SQLiteStorage:
             "schema_version": "durable_session_event_manifest.v1",
             "session_id": selected_session,
             "through_event_id": watermark,
+            "through_received_at": entries[-1]["received_at"],
             "event_entries": entries,
         }
         return {

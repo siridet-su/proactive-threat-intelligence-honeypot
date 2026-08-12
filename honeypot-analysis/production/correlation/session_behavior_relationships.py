@@ -103,6 +103,41 @@ def _command_outcome(event: Dict[str, Any]) -> str:
     return "outcome_unknown"
 
 
+def _cwd_after_command(
+    command: str,
+    *,
+    current_cwd: str,
+    outcome: str,
+    fragment_count: int,
+) -> tuple[str, bool]:
+    """Resolve a confirmed standalone ``cd`` without interpreting a shell.
+
+    The boolean distinguishes a non-directory command from a directory change
+    that failed or could not be resolved.  In the latter case later relative
+    paths fail closed instead of inheriting stale context.
+    """
+
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return current_cwd, False
+    if not tokens or posixpath.basename(tokens[0]).lower() != "cd":
+        return current_cwd, False
+    if (
+        fragment_count != 1
+        or outcome != "cowrie_reported_success"
+        or len(tokens) != 2
+        or any(marker in tokens[1] for marker in ("$", "`", "*", "?", "[", "]"))
+    ):
+        return "", True
+    target = tokens[1]
+    if target.startswith("/"):
+        return posixpath.normpath(target), True
+    if current_cwd.startswith("/"):
+        return posixpath.normpath(posixpath.join(current_cwd, target)), True
+    return "", True
+
+
 def _safe_url(value: str) -> Optional[Dict[str, Any]]:
     raw = _clean(value).rstrip(".,)")
     try:
@@ -539,6 +574,7 @@ def _command_observation(
     source_refs: List[str],
     mappings: List[Dict[str, Any]],
     cwd: str = "",
+    cwd_status: str = "",
     policy_document: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     extracted = extract_command_entities(
@@ -578,6 +614,7 @@ def _command_observation(
         "operator_before": operator_before,
         "operator_after": operator_after,
         "working_directory_observed": _clean(cwd),
+        "working_directory_status": _clean(cwd_status),
         "source_index": source_index,
         "action_types": extracted["action_types"],
         "entities": extracted["entities"],
@@ -612,6 +649,7 @@ def _build_command_observations(
     command_eventids = set(
         (_policy_section(policy_document, "event_types").get("command") or [])
     )
+    confirmed_cwd = ""
 
     for source_index, event in enumerate(raw_events):
         eventid = _clean(event.get("eventid"))
@@ -624,6 +662,17 @@ def _build_command_observations(
         fragments = split_compound_command(original, split_pipes=True)
         outcome = _command_outcome(event)
         outcome_scope = "compound_event" if len(fragments) > 1 else "fragment"
+        observed_cwd = _clean(event.get("cwd"))
+        if observed_cwd.startswith("/"):
+            confirmed_cwd = posixpath.normpath(observed_cwd)
+        effective_cwd = confirmed_cwd
+        effective_cwd_status = (
+            "observed"
+            if observed_cwd.startswith("/")
+            else "confirmed"
+            if effective_cwd.startswith("/")
+            else ""
+        )
         raw_ref = _event_evidence_id(session_id, source_index, event)
         for fragment in fragments:
             mappings, mapping_refs = _trusted_mappings_for_fragment(
@@ -649,9 +698,18 @@ def _build_command_observations(
                 source_index=source_index,
                 source_refs=[raw_ref] + mapping_refs,
                 mappings=mappings,
-                cwd=_clean(event.get("cwd")),
+                cwd=effective_cwd,
+                cwd_status=effective_cwd_status,
                 policy_document=policy_document,
             ))
+        confirmed_cwd, changed_directory = _cwd_after_command(
+            original,
+            current_cwd=effective_cwd,
+            outcome=outcome,
+            fragment_count=len(fragments),
+        )
+        if not changed_directory:
+            confirmed_cwd = effective_cwd
         covered.add((timestamp, original))
         compound_index += 1
 
