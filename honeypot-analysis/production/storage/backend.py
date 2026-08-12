@@ -5864,7 +5864,8 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
 
         receipt = load_storage_epoch(settings.storage_epoch_receipt_path)
         require_active_release(receipt)
-        if receipt["rollback_mirror_path"] != settings.rollback_sqlite_database_path:
+        mirror_identity = receipt["rollback_mirror"]
+        if mirror_identity["path"] != settings.rollback_sqlite_database_path:
             raise StorageError("MongoDB rollback mirror path disagrees with epoch receipt")
         uri = read_mongodb_uri(settings.mongodb_uri_file, max_bytes=65_536)
         mongo = MongoDBStorageBackend(uri)
@@ -5880,7 +5881,7 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
         if mirror_info.st_uid != os.geteuid() or mirror_info.st_mode & 0o077:
             raise StorageError("MongoDB rollback mirror must be service-owned mode 0600")
         mirror = SQLiteStorage(f"sqlite:///{settings.rollback_sqlite_database_path}")
-        mirror.initialize()
+        mirror.verify_existing_schema()
         return MongoEpochStorage(mongo, mirror, receipt)
     if settings.backend != SQLITE_BACKEND:
         raise StorageError(f"unsupported database backend: {settings.backend}")

@@ -17,11 +17,39 @@ from production.storage.mongodb_epoch import (
     require_active_release,
     verify_runtime_deployment,
 )
+from production.storage.rollback_mirror_identity import (
+    durability_policy as mirror_durability_policy,
+    prepare_rollback_mirror,
+)
 from production.utils.serialization import stable_json
 from production.tools.mongodb_epoch_receipt import finalize_epoch_receipt
 
 
-def _receipt(tmp_path):
+def _mirror_identity(path="/var/lib/honeypot/mongodb-epoch-mirror.db"):
+    identity = {
+        "schema_version": "rollback_mirror_identity.v1",
+        "identity_id": "",
+        "mirror_id": "rollback-mirror-11111111-1111-4111-8111-111111111111",
+        "epoch_id": "mongodb-epoch-test",
+        "path": str(path),
+        "initial_sha256": "9" * 64,
+        "sqlite_schema_version": 3,
+        "initial_event_count": 0,
+        "created_at": "2026-08-12T00:00:01+00:00",
+        "journal_mode": "wal",
+        "synchronous": "full",
+        "durability_policy": mirror_durability_policy(),
+        "creator_tool_version": "mongodb_epoch_receipt.prepare_mirror.v1",
+        "reviewed_release_sha": "b" * 40,
+        "reviewed_release_tree": "d" * 40,
+    }
+    identity["identity_id"] = hashlib.sha256(
+        stable_json({k: v for k, v in identity.items() if k != "identity_id"}).encode()
+    ).hexdigest()
+    return identity
+
+
+def _receipt(tmp_path, mirror_identity=None):
     path = tmp_path / "epoch.json"
     document = {
         "schema_version": "canonical_storage_epoch.v2",
@@ -80,7 +108,7 @@ def _receipt(tmp_path):
             ],
             "attacker_command_markers_authoritative": False,
         },
-        "rollback_mirror_path": "/var/lib/honeypot/mongodb-epoch-mirror.db",
+        "rollback_mirror": mirror_identity or _mirror_identity(),
         "capacity_policy": capacity_policy(),
         "receipt_sha256": "",
     }
@@ -97,6 +125,18 @@ def test_epoch_receipt_is_content_addressed_and_exact(tmp_path):
     document["epoch_id"] = "tampered"
     path.write_text(stable_json(document) + "\n")
     with pytest.raises(ValueError, match="hash mismatch"):
+        load_storage_epoch(path)
+
+
+def test_epoch_receipt_requires_versioned_mirror_identity(tmp_path):
+    path, document = _receipt(tmp_path)
+    document.pop("rollback_mirror")
+    document["rollback_mirror_path"] = "/var/lib/honeypot/mirror.db"
+    document["receipt_sha256"] = hashlib.sha256(
+        stable_json({k: v for k, v in document.items() if k != "receipt_sha256"}).encode()
+    ).hexdigest()
+    path.write_text(stable_json(document) + "\n")
+    with pytest.raises(ValueError, match="fields are not exact"):
         load_storage_epoch(path)
 
 
@@ -349,9 +389,15 @@ def test_epoch_duplicate_replay_uses_first_durable_received_at(monkeypatch):
 
 
 def test_epoch_boundary_rejects_pre_epoch_mongodb_event(tmp_path):
-    _path, receipt = _receipt(tmp_path)
-    mirror = SQLiteStorage(f"sqlite:///{tmp_path / 'mirror.db'}")
-    mirror.initialize()
+    mirror_path = tmp_path / "mirror.db"
+    identity = prepare_rollback_mirror(
+        mirror_path, epoch_id="mongodb-epoch-test",
+        reviewed_release_sha="b" * 40, reviewed_release_tree="d" * 40,
+        created_at="2026-08-12T00:00:01+00:00",
+        mirror_id="rollback-mirror-boundary-mongo",
+    )
+    _path, receipt = _receipt(tmp_path, identity)
+    mirror = SQLiteStorage(f"sqlite:///{mirror_path}")
     mongo = _EpochMongo(
         {"received_at": "2026-08-11T23:59:59+00:00", "event_id": "event-old"}
     )
@@ -361,9 +407,15 @@ def test_epoch_boundary_rejects_pre_epoch_mongodb_event(tmp_path):
 
 
 def test_epoch_boundary_rejects_historical_mirror_event(tmp_path):
-    _path, receipt = _receipt(tmp_path)
-    mirror = SQLiteStorage(f"sqlite:///{tmp_path / 'mirror.db'}")
-    mirror.initialize()
+    mirror_path = tmp_path / "mirror.db"
+    identity = prepare_rollback_mirror(
+        mirror_path, epoch_id="mongodb-epoch-test",
+        reviewed_release_sha="b" * 40, reviewed_release_tree="d" * 40,
+        created_at="2026-08-12T00:00:01+00:00",
+        mirror_id="rollback-mirror-boundary-sqlite",
+    )
+    _path, receipt = _receipt(tmp_path, identity)
+    mirror = SQLiteStorage(f"sqlite:///{mirror_path}")
     record = CanonicalEventRecord.create(
         "sensor-1",
         {"eventid": "cowrie.command.input", "session": "session-old", "input": "id"},

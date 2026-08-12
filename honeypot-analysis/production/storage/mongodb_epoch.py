@@ -16,6 +16,10 @@ from production.storage.canonical_event import CanonicalEventRecord
 from production.storage.mongodb_identity import load_mongodb_runtime_identity
 from production.storage.mongodb_manifest import load_mongodb_schema_manifest
 from production.storage.mongodb_shadow import MongoSQLiteRollbackMirror
+from production.storage.rollback_mirror_identity import (
+    validate_rollback_mirror_identity,
+    verify_rollback_mirror,
+)
 from production.utils.serialization import stable_json, utc_now
 
 
@@ -95,12 +99,14 @@ def load_storage_epoch(path: str | Path) -> Dict[str, Any]:
         "schema_manifest_identity", "runtime_role_identity",
         "classifier_policy_environment_bindings",
         "failed_predecessor", "provenance_rules",
-        "rollback_mirror_path", "capacity_policy", "receipt_sha256",
+        "rollback_mirror", "capacity_policy", "receipt_sha256",
     }
     if not isinstance(document, dict) or set(document) != required:
         raise ValueError("storage epoch receipt fields are not exact")
     if document["schema_version"] != EPOCH_SCHEMA or document["backend"] != "mongodb":
         raise ValueError("storage epoch receipt selects an unsupported contract")
+    if document["receipt_sha256"] != _digest(document, "receipt_sha256"):
+        raise ValueError("storage epoch receipt hash mismatch")
     if document["database"] != CANONICAL_DATABASE:
         raise ValueError("storage epoch database is invalid")
     deployment = document["deployment_identity"]
@@ -164,11 +170,10 @@ def load_storage_epoch(path: str | Path) -> Dict[str, Any]:
         raise ValueError("classifier/policy/environment binding fields are not exact")
     for key, value in bindings.items():
         _require_sha256(value, key)
-    mirror_path = Path(str(document["rollback_mirror_path"] or ""))
-    if not mirror_path.is_absolute():
-        raise ValueError("rollback mirror path must be absolute")
-    if document["receipt_sha256"] != _digest(document, "receipt_sha256"):
-        raise ValueError("storage epoch receipt hash mismatch")
+    mirror_identity = validate_rollback_mirror_identity(
+        document["rollback_mirror"], epoch_id=str(document["epoch_id"])
+    )
+    mirror_path = Path(mirror_identity["path"])
     archive = document["previous_sqlite_archive"]
     if not isinstance(archive, dict) or set(archive) != {
         "path", "sha256", "schema_version", "cutoff", "counts",
@@ -332,6 +337,9 @@ class MongoEpochStorage:
         self.receipt = receipt
         self.mirror = MongoSQLiteRollbackMirror(mongo, mirror_sqlite)
         self.capacity = MongoCapacityGuard(mongo)
+        self.mirror_verification = verify_rollback_mirror(
+            self.receipt["rollback_mirror"], phase="auto"
+        )
         self._verify_epoch_boundaries()
 
     def _verify_epoch_boundaries(self) -> None:
@@ -386,4 +394,5 @@ class MongoEpochStorage:
         metrics["canonical_storage_epoch_id"] = self.receipt["epoch_id"]
         metrics["capacity"] = self.capacity.status()
         metrics["rollback_mirror_path"] = str(self.mirror_sqlite.path)
+        metrics["rollback_mirror_identity_id"] = self.receipt["rollback_mirror"]["identity_id"]
         return metrics

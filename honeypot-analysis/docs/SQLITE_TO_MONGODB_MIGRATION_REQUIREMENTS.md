@@ -2,7 +2,8 @@
 
 Status: the reviewed backend is selectable only through an exact
 `canonical_storage_epoch.v2` receipt, owner-only Atlas URI credential, and a
-separate synchronous SQLite rollback mirror. SQLite remains the production
+separate synchronous SQLite rollback mirror bound through
+`rollback_mirror_identity.v1`. SQLite remains the production
 authority until the documented Atlas M0 parity, backup, capacity, and cutover
 gates pass. The repository
 contains a backend-neutral canonical event record, the complete formal runtime
@@ -76,7 +77,7 @@ changing analytical authority or event meaning. In particular it must preserve:
 
 `database_backend=mongodb` is accepted only when the protected URI, exact Atlas
 schema, storage-epoch receipt, capacity policy, and separate rollback-mirror
-path all validate. Otherwise startup fails closed. There must never be two
+identity all validate. Otherwise startup fails closed. There must never be two
 independently authoritative primary stores: the historical SQLite cutoff owns
 the prefix, and MongoDB owns only the explicitly recorded later epoch.
 
@@ -96,6 +97,18 @@ release commit/tree/manifest, failed predecessor, and historical SQLite
 policy/environment hashes. Runtime verifies the protected URI hostname and
 connected replica-set/version before authority can activate. Atlas deployment
 IDs are receipt values, never application-source constants.
+
+The receipt also embeds a content-addressed `rollback_mirror_identity.v1`.
+Preparation creates the schema and immutable lineage row, verifies WAL plus
+`synchronous=FULL`, commits, truncates/checkpoints the WAL, closes writers, and
+hashes the resulting main database with zero canonical events. Empty sidecars
+are not identity artifacts; any non-empty sidecar blocks preparation. Before
+activation, runtime requires the exact initial SHA-256 and zero-event state.
+After the first canonical write the file hash is expected to change: restarts
+instead verify the embedded mirror/epoch/release lineage, immutable-lineage
+triggers, schema, durability PRAGMAs, integrity, and the normal exact
+MongoDB-to-SQLite event contract. The initial hash is immutable creation
+lineage, not a post-write file invariant.
 
 The epoch receipt records historical SQLite policy/environment hashes and new
 MongoDB-epoch policy/environment hashes independently. Both lineages are
@@ -211,6 +224,9 @@ MongoDB-specific risks that require executable tests include:
 - `MongoSQLiteRollbackMirror` implements the future acknowledgement states
   neither, Mongo-only, SQLite-only, both-exact, and either-side conflict. It is
   not connected to ingest.
+- `mongodb_epoch_receipt --prepare-mirror` exclusively creates a fresh mirror
+  and its non-secret content-addressed identity. Operators do not manually
+  calculate the initial database hash.
 - `mongodb_canonical_migration` reads only a consistent immutable SQLite backup,
   streams documents with bounded memory, preserves IDs and JSON bytes, and
   emits content-addressed count/cutoff/whole-document aggregate evidence.
