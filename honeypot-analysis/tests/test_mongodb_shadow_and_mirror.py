@@ -10,8 +10,11 @@ from production.storage import (
     MongoSQLiteRollbackMirror,
     SQLiteMongoShadowOutbox,
     StorageError,
-    install_mongodb_schema,
     open_storage,
+)
+from tests.mongodb_test_support import (
+    cleanup_canonical_test_database,
+    prepare_canonical_test_database,
 )
 
 
@@ -22,15 +25,14 @@ def backends(tmp_path):
         pytest.skip("MONGODB_TEST_URI is not configured for an isolated replica set")
     pymongo = pytest.importorskip("pymongo")
     client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5_000)
-    client.drop_database("honeypot_canonical_v1")
-    install_mongodb_schema(client)
+    prepare_canonical_test_database(client)
     mongo = MongoDBStorageBackend(client=client)
     mongo.initialize()
     sqlite = open_storage(f"sqlite:///{tmp_path / 'authority.db'}")
     try:
         yield sqlite, mongo
     finally:
-        client.drop_database("honeypot_canonical_v1")
+        cleanup_canonical_test_database(client)
         client.close()
 
 

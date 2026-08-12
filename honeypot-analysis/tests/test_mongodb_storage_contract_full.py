@@ -17,7 +17,10 @@ from production.storage import (
     MongoDBStorageBackend,
     StorageBackend,
     StorageError,
-    install_mongodb_schema,
+)
+from tests.mongodb_test_support import (
+    cleanup_canonical_test_database,
+    prepare_canonical_test_database,
 )
 
 
@@ -32,14 +35,13 @@ def full_mongo():
     pymongo = pytest.importorskip("pymongo")
     client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5_000)
     client.admin.command("ping")
-    client.drop_database("honeypot_canonical_v1")
-    install_mongodb_schema(client)
+    prepare_canonical_test_database(client)
     storage = MongoDBStorageBackend(client=client)
     storage.initialize()
     try:
         yield storage
     finally:
-        client.drop_database("honeypot_canonical_v1")
+        cleanup_canonical_test_database(client)
         client.close()
 
 

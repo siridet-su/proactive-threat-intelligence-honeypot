@@ -10,6 +10,8 @@ Group=honeypot
 WorkingDirectory=/opt/honeypot
 EnvironmentFile=-/etc/honeypot/common.env
 EnvironmentFile=-/etc/honeypot/services/monitor-web.env
+LoadCredential=mongodb-uri
+Environment=MONGODB_URI_FILE=%d/mongodb-uri
 ExecStart=/opt/honeypot/.venv/bin/python -m production.api.monitor_web --host 127.0.0.1 --port 8090
 Restart=always
 RestartSec=5

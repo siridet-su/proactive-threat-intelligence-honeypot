@@ -457,7 +457,7 @@ def load_analysis_context(
     storage: Any = None,
 ) -> Dict[str, Any]:
     config.apply_environment()
-    storage = storage or open_storage(config.database_url)
+    storage = storage or open_storage(config.database_settings())
     feeds = None
     mitre_attack = None
     if config.enable_feed_loading:
@@ -603,7 +603,7 @@ async def analyze_job(
     storage: Any = None,
 ) -> Dict[str, Any]:
     session_payload = job.get("session") or json.loads(job["payload_json"])
-    selected_storage = storage or open_storage(config.database_url)
+    selected_storage = storage or open_storage(config.database_settings())
     session_payload = reconstruct_canonical_session_events(
         selected_storage,
         session_payload,
@@ -737,7 +737,7 @@ async def analyze_job(
 class AnalysisWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
         self.worker_owner = new_job_owner("analysis")
 
     def _fail_claim(self, job: Dict[str, Any], exc: Exception, *, retryable: bool) -> str:

@@ -165,6 +165,8 @@ def _monitor_database_url(config: MonitorConfig) -> str:
 
 
 def _monitor_database_descriptor(config: MonitorConfig) -> Dict[str, str]:
+    if config.production_config is not None:
+        return config.production_config.safe_database_descriptor()
     return safe_database_descriptor(_monitor_database_url(config))
 
 
@@ -181,12 +183,15 @@ def _monitor_database_display(config: MonitorConfig) -> str:
 
 
 def _open_monitor_storage(config: MonitorConfig) -> Any:
+    if config.production_config is not None:
+        return open_storage(config.production_config.database_settings())
     return open_storage(_monitor_database_url(config))
 
 
 def _monitor_runtime_config(config: MonitorConfig) -> ProductionConfig:
     cfg = copy.copy(config.production_config or ProductionConfig())
-    cfg.database_url = _monitor_database_url(config)
+    if config.production_config is None:
+        cfg.database_url = _monitor_database_url(config)
     cfg.reports_dir = config.reports_dir
     cfg.mitre_attack_path = config.mitre_attack_path or cfg.mitre_attack_path
     cfg.response_guidance_policy_path = (

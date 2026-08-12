@@ -11,10 +11,13 @@ from production.storage import (
     CanonicalEventRecord,
     MongoDBStorageBackend,
     StorageError,
-    install_mongodb_schema,
     load_mongodb_runtime_identity,
     load_mongodb_schema_manifest,
     open_storage,
+)
+from tests.mongodb_test_support import (
+    cleanup_canonical_test_database,
+    prepare_canonical_test_database,
 )
 
 
@@ -82,14 +85,13 @@ def mongo_storage():
     pymongo = pytest.importorskip("pymongo")
     client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5_000)
     client.admin.command("ping")
-    client.drop_database("honeypot_canonical_v1")
-    install_mongodb_schema(client)
+    prepare_canonical_test_database(client)
     storage = MongoDBStorageBackend(client=client)
     storage.initialize()
     try:
         yield storage
     finally:
-        client.drop_database("honeypot_canonical_v1")
+        cleanup_canonical_test_database(client)
         client.close()
 
 

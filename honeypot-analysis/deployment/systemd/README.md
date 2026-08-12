@@ -106,9 +106,24 @@ defined correlation-retention window, then restart only the session worker.
 Each listed prior key must also be present in `keys`. For a suspected key
 compromise, do not retain the compromised key as a correlation alias.
 
-SQLite is the only supported runtime backend. Set `DATABASE_BACKEND=sqlite`
-and provide a `sqlite:///` URL through each service-specific credential; any
-other backend fails closed. Keep
+SQLite is the safe default runtime backend. Set `DATABASE_BACKEND=sqlite` and
+`SQLITE_DATABASE_PATH=/var/lib/honeypot/production_pilot.db`. A reviewed
+MongoDB epoch changes only the backend and non-secret rollback/receipt paths;
+it must also install the exact root-owned runtime URI without printing it:
+
+```bash
+sudo install -d -o root -g root -m 0700 /etc/credstore
+sudo install -o root -g root -m 0600 /secure/source/mongodb-runtime-uri \
+  /etc/credstore/mongodb-uri
+```
+
+Each capstone unit loads that file into its private systemd credential
+directory and sets `MONGODB_URI_FILE=%d/mongodb-uri`. The persistent URI is
+never placed in `common.env`, JSON configuration, logs, the release receipt,
+or the repository, and the Pi never receives it. MongoDB selection additionally
+requires `ROLLBACK_SQLITE_DATABASE_PATH` and
+`STORAGE_EPOCH_RECEIPT_PATH`; missing or inconsistent epoch evidence fails
+startup closed. Keep
 `ANALYSIS_SKIP_EMPTY_SESSIONS=true`, and keep `ANALYSIS_SUPPRESS_STDOUT=true`.
 
 5. Install backend services.

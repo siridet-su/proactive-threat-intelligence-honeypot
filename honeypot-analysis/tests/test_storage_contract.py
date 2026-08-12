@@ -24,6 +24,9 @@ DATABASE_ENVIRONMENT_KEYS = (
     "DATABASE_BACKEND",
     "DATABASE_URL",
     "SQLITE_DATABASE_PATH",
+    "MONGODB_URI_FILE",
+    "ROLLBACK_SQLITE_DATABASE_PATH",
+    "STORAGE_EPOCH_RECEIPT_PATH",
     "HONEYPOT_CONFIG_FILE",
 )
 
@@ -81,7 +84,7 @@ def test_legacy_database_url_still_selects_backend(
 def test_non_sqlite_url_fails_closed() -> None:
     with pytest.raises(
         DatabaseConfigurationError,
-        match="supports SQLite only",
+        match="conflicts",
     ):
         DatabaseSettings.from_values(
             database_backend="sqlite",
@@ -100,7 +103,7 @@ def test_explicit_sqlite_path_conflict_with_legacy_url_fails() -> None:
             database_url="sqlite:///one.db",
             sqlite_database_path="two.db",
         )
-@pytest.mark.parametrize("backend", ["mongodb", "postgresql", "postgres"])
+@pytest.mark.parametrize("backend", ["postgresql", "postgres"])
 def test_archived_database_backends_are_rejected(backend: str) -> None:
     with pytest.raises(DatabaseConfigurationError, match="expected sqlite"):
         DatabaseSettings.from_values(database_backend=backend)
@@ -112,9 +115,22 @@ def test_unsupported_url_error_does_not_echo_credentials() -> None:
     with pytest.raises(StorageError) as raised:
         safe_database_descriptor(database_url)
 
-    assert "SQLite only" in str(raised.value)
+    assert "expected sqlite or MongoDB" in str(raised.value)
     assert "unit-user" not in str(raised.value)
     assert "unit-password" not in str(raised.value)
+
+
+def test_mongodb_requires_every_fail_closed_runtime_path(tmp_path: Path) -> None:
+    with pytest.raises(DatabaseConfigurationError, match="URI, rollback mirror"):
+        DatabaseSettings.from_values(database_backend="mongodb")
+    settings = DatabaseSettings.from_values(
+        database_backend="mongodb",
+        mongodb_uri_file=str(tmp_path / "uri"),
+        rollback_sqlite_database_path=str(tmp_path / "mirror.db"),
+        storage_epoch_receipt_path=str(tmp_path / "epoch.json"),
+    )
+    assert settings.backend == "mongodb"
+    assert "uri" not in settings.safe_descriptor()
 
 
 def test_specifically_configured_missing_file_fails(

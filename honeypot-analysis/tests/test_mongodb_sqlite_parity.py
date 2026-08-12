@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
-from production.storage import CanonicalEventRecord, MongoDBStorageBackend, install_mongodb_schema, open_storage
+from production.storage import CanonicalEventRecord, MongoDBStorageBackend, open_storage
 from production.tools.mongodb_parity_receipt import build_parity_receipt, verify_parity_receipt, write_parity_receipt
 from production.utils.serialization import stable_json
+from tests.mongodb_test_support import cleanup_canonical_test_database, prepare_canonical_test_database
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,11 +22,11 @@ def parity_backends(tmp_path):
     uri = os.getenv("MONGODB_TEST_URI", "")
     if not uri: pytest.skip("MONGODB_TEST_URI is not configured for an isolated replica set")
     pymongo = pytest.importorskip("pymongo"); client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5_000)
-    client.drop_database("honeypot_canonical_v1"); install_mongodb_schema(client)
+    prepare_canonical_test_database(client)
     mongo = MongoDBStorageBackend(client=client); mongo.initialize()
     sqlite = open_storage(f"sqlite:///{tmp_path / 'parity.db'}")
     try: yield sqlite, mongo, client
-    finally: client.drop_database("honeypot_canonical_v1"); client.close()
+    finally: cleanup_canonical_test_database(client); client.close()
 
 
 def _digest(value) -> str:

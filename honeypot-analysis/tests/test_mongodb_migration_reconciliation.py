@@ -6,13 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from production.storage import CanonicalEventRecord, MongoDBStorageBackend, install_mongodb_schema, open_storage
+from production.storage import CanonicalEventRecord, MongoDBStorageBackend, open_storage
 from production.storage.backend import StorageError
 from production.tools import mongodb_canonical_migration
 from production.tools.mongodb_canonical_migration import (
     migrate_sqlite_backup,
     reconcile_sqlite_backup,
 )
+from tests.mongodb_test_support import cleanup_canonical_test_database, prepare_canonical_test_database
 
 
 @pytest.fixture()
@@ -22,13 +23,12 @@ def migration_target():
         pytest.skip("MONGODB_TEST_URI is not configured for an isolated replica set")
     pymongo = pytest.importorskip("pymongo")
     client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5_000)
-    client.drop_database("honeypot_canonical_v1")
-    install_mongodb_schema(client)
+    prepare_canonical_test_database(client)
     storage = MongoDBStorageBackend(client=client); storage.initialize()
     try:
         yield storage
     finally:
-        client.drop_database("honeypot_canonical_v1"); client.close()
+        cleanup_canonical_test_database(client); client.close()
 
 
 def _backup_fixture(tmp_path: Path) -> Path:

@@ -299,7 +299,7 @@ def _event_matches(
 
 
 class MongoSQLiteRollbackMirror:
-    """Future post-cutover dual-durable ACK state machine (not activated)."""
+    """Post-cutover dual-durable ACK state machine for the new epoch."""
 
     def __init__(self, mongo: MongoDBStorageBackend, sqlite: SQLiteStorage) -> None:
         self.mongo = mongo

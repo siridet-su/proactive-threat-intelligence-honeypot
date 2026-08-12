@@ -341,11 +341,14 @@ class ProductionConfig:
     api_token: str = ""
     ingest_sensor_tokens: Dict[str, str] = field(default_factory=dict)
 
-    # SQLite is the sole canonical runtime backend. ``database_url`` remains a
-    # compatibility input for callers already using sqlite:/// URLs.
+    # MongoDB activation is fail-closed behind owner-only URI, rollback mirror,
+    # and reviewed epoch-receipt paths. ``database_url`` remains SQLite-only.
     database_backend: str = ""
     sqlite_database_path: str = ""
     database_url: str = ""
+    mongodb_uri_file: str = ""
+    rollback_sqlite_database_path: str = ""
+    storage_epoch_receipt_path: str = ""
     ingest_host: str = "127.0.0.1"
     ingest_port: int = 8080
     ingest_max_body_bytes: int = 5 * 1024 * 1024
@@ -1195,6 +1198,9 @@ class ProductionConfig:
             database_backend=self.database_backend,
             database_url=self.database_url,
             sqlite_database_path=self.sqlite_database_path,
+            mongodb_uri_file=self.mongodb_uri_file,
+            rollback_sqlite_database_path=self.rollback_sqlite_database_path,
+            storage_epoch_receipt_path=self.storage_epoch_receipt_path,
         )
 
     def safe_database_descriptor(self) -> Dict[str, str]:
@@ -1205,6 +1211,9 @@ class ProductionConfig:
         self.database_backend = settings.backend
         self.database_url = settings.database_url
         self.sqlite_database_path = settings.sqlite_database_path
+        self.mongodb_uri_file = settings.mongodb_uri_file
+        self.rollback_sqlite_database_path = settings.rollback_sqlite_database_path
+        self.storage_epoch_receipt_path = settings.storage_epoch_receipt_path
 
     @classmethod
     def from_env(cls, config_path: Optional[str] = None) -> "ProductionConfig":
@@ -1252,6 +1261,17 @@ class ProductionConfig:
                 "SQLITE_DATABASE_PATH",
                 str(file_values.get("sqlite_database_path") or ""),
             ),
+            mongodb_uri_file=os.getenv(
+                "MONGODB_URI_FILE", str(file_values.get("mongodb_uri_file") or "")
+            ),
+            rollback_sqlite_database_path=os.getenv(
+                "ROLLBACK_SQLITE_DATABASE_PATH",
+                str(file_values.get("rollback_sqlite_database_path") or ""),
+            ),
+            storage_epoch_receipt_path=os.getenv(
+                "STORAGE_EPOCH_RECEIPT_PATH",
+                str(file_values.get("storage_epoch_receipt_path") or ""),
+            ),
         )
         config_values = {
             k: v for k, v in file_values.items() if k in cls.__dataclass_fields__
@@ -1261,6 +1281,9 @@ class ProductionConfig:
                 "database_backend": database_settings.backend,
                 "database_url": database_settings.database_url,
                 "sqlite_database_path": database_settings.sqlite_database_path,
+                "mongodb_uri_file": database_settings.mongodb_uri_file,
+                "rollback_sqlite_database_path": database_settings.rollback_sqlite_database_path,
+                "storage_epoch_receipt_path": database_settings.storage_epoch_receipt_path,
             }
         )
         config_values = _apply_ai_environment_overrides(config_values)

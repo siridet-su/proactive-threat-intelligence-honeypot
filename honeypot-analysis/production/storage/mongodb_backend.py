@@ -156,13 +156,12 @@ def install_mongodb_schema(
 
 
 class MongoDBStorageBackend(MongoDBRuntimeOperations):
-    """Complete offline candidate for the canonical runtime storage contract.
+    """Canonical MongoDB adapter selected only through a reviewed epoch gate.
 
-    Selection remains intentionally absent from ``open_storage``: passing the
-    contract and offline parity gates does not authorize an Atlas environment,
-    production cutover, credential installation, or a second authority.
-    SQLite remains the sole production authority until a separate reviewed
-    staging and cutover process changes that explicit configuration boundary.
+    Direct construction remains useful for isolated parity tests. Production
+    selection is fail-closed in ``open_storage`` behind the protected URI,
+    exact storage-epoch receipt, installed schema manifest, and synchronous
+    SQLite rollback mirror.
     """
 
     def __init__(

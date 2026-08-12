@@ -139,7 +139,7 @@ class AIAdvisoryWorker:
         # Canonical migrations and full integrity scans are deployment gates.
         # This optional worker joins an already initialized database through a
         # bounded, read-only schema/ledger readiness check.
-        self.storage = storage or open_existing_storage(config.database_url)
+        self.storage = storage or open_existing_storage(config.database_settings())
         self.policy, self.policy_sha256, self.policy_path = (
             load_ai_advisory_policy(config.ai_advisory_policy_path)
         )

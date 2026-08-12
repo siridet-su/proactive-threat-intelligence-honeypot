@@ -248,7 +248,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return storage
         # Direct unit-test handlers have no server. Keep that narrow testing
         # seam while production always receives the initialized adapter.
-        return open_storage(self.config.database_url)
+        settings = getattr(self.config, "database_settings", None)
+        return open_storage(
+            settings() if callable(settings) else self.config.database_url
+        )
 
     def _request_id(self) -> str:
         current = getattr(self, "_dashboard_request_id", "")
@@ -630,7 +633,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = ProductionConfig.from_env(args.config)
     _validate_dashboard_runtime(config)
-    storage = open_storage(config.database_url)
+    storage = open_storage(config.database_settings())
     server = build_server(config, storage=storage)
     print(
         json.dumps(

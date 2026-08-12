@@ -19,8 +19,9 @@ deployment, monitoring, validation, database, or service operations.
   contextual only.
 - `session_assessment.v4` and `response_guidance.v3` remain the canonical
   report contracts.  Guidance is manual-only and never executable.
-- SQLite is the only supported backend.  Historical v1/v2/v3 records remain
-  readable and unchanged.
+- The selected canonical epoch must match its reviewed receipt. Pre-MongoDB
+  SQLite history and historical v1/v2/v3 records remain readable and unchanged;
+  a MongoDB epoch requires its separate exact SQLite rollback mirror.
 - Do not retrain, recalibrate, replace, or silently switch the Transformer.
 - Do not add public ports, broaden the TCP/2222 firewall rule, or expose
   secrets.  Do not modify the Raspberry Pi as part of a VM rebuild.

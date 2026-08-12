@@ -17,6 +17,7 @@ def _record(label: str) -> CanonicalEventRecord:
 
 
 def test_network_unavailable_fails_closed_without_fallback() -> None:
+    pytest.importorskip("pymongo")
     storage = MongoDBStorageBackend(
         "mongodb://127.0.0.1:27999/?directConnection=true", timeout_ms=100
     )

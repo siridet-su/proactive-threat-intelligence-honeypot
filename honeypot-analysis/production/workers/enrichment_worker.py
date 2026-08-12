@@ -33,7 +33,7 @@ class EnrichmentWorker:
 
     def __init__(self, config: ProductionConfig, providers: Optional[List[EnrichmentProvider]] = None) -> None:
         self.config = config
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
         self.providers = providers if providers is not None else build_default_providers(config)
         self.data_lifecycle_policy = load_data_lifecycle_policy(
             config.data_lifecycle_policy_path

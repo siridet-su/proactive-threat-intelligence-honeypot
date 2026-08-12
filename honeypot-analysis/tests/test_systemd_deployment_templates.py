@@ -25,8 +25,36 @@ def test_credential_hmac_keyring_is_worker_only_systemd_credential() -> None:
     for name, document in service_documents.items():
         if name != "honeypot-session-worker.service":
             assert "credential-hmac-keyring" not in document
-            assert "LoadCredential=" not in document
             assert "SetCredential=" not in document
+
+
+def test_capstone_storage_services_receive_only_the_protected_mongodb_uri() -> None:
+    expected = {
+        "honeypot-ai-advisory-worker.service",
+        "honeypot-analysis-worker.service",
+        "honeypot-dashboard-api.service",
+        "honeypot-enrichment-worker.service",
+        "honeypot-feed-refresh.service",
+        "honeypot-ingest-api.service",
+        "honeypot-monitor-web.service",
+        "honeypot-session-count-monitor.service",
+        "honeypot-session-worker.service",
+        "honeypot-threat-hunt-worker.service",
+        "honeypot-webhook-dispatcher.service",
+    }
+    selected = set()
+    for path in SYSTEMD_DIR.glob("*.service"):
+        document = path.read_text(encoding="utf-8")
+        if "LoadCredential=mongodb-uri" in document:
+            selected.add(path.name)
+            assert (
+                "LoadCredential=mongodb-uri" in document
+            )
+            assert "Environment=MONGODB_URI_FILE=%d/mongodb-uri" in document
+    assert selected == expected
+    assert "mongodb-uri" not in (
+        SYSTEMD_DIR / "honeypot-sensor-forwarder.service"
+    ).read_text(encoding="utf-8")
 
 
 def test_common_environment_and_pi_template_contain_no_hmac_secret_setting() -> None:

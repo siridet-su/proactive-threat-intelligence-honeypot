@@ -11,7 +11,7 @@ Internet attacker
   -> sanitized JSON and sensor_forwarder (bounded durable batches)
   -> private Tailscale HTTP with sensor authentication
   -> capstone ingest_api
-  -> SQLite (transactions, deduplication, leases, outbox)
+  -> selected canonical storage epoch (SQLite or reviewed MongoDB Atlas)
   -> session_worker/session_monitor
   -> reviewed classification and canonical evidence reconstruction
   -> session_assessment.v4 + advisory Transformer snapshot
@@ -34,8 +34,9 @@ receipt.
   Cowrie feed and sends authenticated, bounded batches.
 - `production.api.ingest_api` validates authentication, limits, event shape,
   and sensitive-data policy before a transaction reaches SQLite.
-- `production.storage.backend` is authoritative. SQLite is the only active
-  backend; historical adapters are read-only.
+- `production.storage.backend` is authoritative. A reviewed MongoDB epoch is
+  selected only by an exact receipt and dual-durable SQLite rollback mirror;
+  the pre-cutoff SQLite history remains a separate read-only authority.
 - Session workers reconstruct complete sessions, apply reviewed deterministic
   classification, and build occurrence-preserving evidence relationships.
 - Reports and APIs revalidate the same v4/v3 contracts at their boundaries.

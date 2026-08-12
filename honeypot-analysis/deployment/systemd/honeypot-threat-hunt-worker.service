@@ -10,6 +10,8 @@ Group=honeypot
 WorkingDirectory=/opt/honeypot
 EnvironmentFile=-/etc/honeypot/common.env
 EnvironmentFile=-/etc/honeypot/services/threat-hunt-worker.env
+LoadCredential=mongodb-uri
+Environment=MONGODB_URI_FILE=%d/mongodb-uri
 ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.threat_hunt_worker --config /etc/honeypot/production_config.json
 Restart=always
 RestartSec=5

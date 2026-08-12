@@ -1,15 +1,17 @@
-# Future SQLite to MongoDB migration requirements
+# SQLite to MongoDB canonical-epoch requirements
 
-Status: offline backend implementation complete; Atlas staging remains an
-external gate and SQLite remains the sole production backend. The repository
+Status: the reviewed backend is selectable only through an exact
+`canonical_storage_epoch.v1` receipt, owner-only Atlas URI credential, and a
+separate synchronous SQLite rollback mirror. SQLite remains the production
+authority until the documented Atlas M0 parity, backup, capacity, and cutover
+gates pass. The repository
 contains a backend-neutral canonical event record, the complete formal runtime
 storage contract, a content-addressed MongoDB schema/index/validator manifest,
 a validated least-privilege identity manifest, shadow and rollback-mirror state
 machines, and bounded migration/reconciliation tooling. The implementation is
-exercised against a disposable local MongoDB 8.0 replica set but is deliberately
-not selectable through `open_storage`. This document does not authorize an
-Atlas purchase, data copy, shadow activation, cutover, credential use, or
-service deployment.
+exercised against MongoDB 8.0. Historical SQLite data is never copied into the
+new M0 epoch. This document does not authorize a paid Atlas resource or any
+reuse of the legacy Atlas environment.
 
 ## Verified Atlas control-plane gate (2026-08-12)
 
@@ -34,20 +36,15 @@ This proves that the existing M0 is a shared legacy environment, not a safe
 canonical destination. Existing `honeypot_db` collections remain noncanonical
 legacy/archive data and must not be modified or copied wholesale.
 
-## Selected future canonical environment
+## Selected free canonical environment
 
-Use a separate, dedicated Atlas project and cluster named
-`Honeypot-Canonical`; do not upgrade or repurpose `Honeypot-DB`. Prefer GCP
-Singapore to colocate with capstone's GCP `asia-southeast1` runtime. The last
-observed SQLite source size was approximately 6.3 GB. A 10 GB default volume is
-therefore not a defensible migration target after BSON, indexes, receipts,
-working space, and growth are included. The first paid staging review should
-quote the smallest dedicated tier that supports replica-set transactions,
-Cloud Backup, continuous backup/PITR, and at least 20 GB configured storage in
-that region. M10 with 20 GB is the technical starting candidate if the Atlas
-quote confirms those features; M20 is recommended headroom, not a proven
-minimum. No tier should be purchased until a consistent production SQLite
-backup is measured by the migration tool and the exact Atlas quote is approved.
+The isolated project uses the free M0 cluster `Honeypot-Canonical` on GCP
+Singapore. Its 0.5 GB constraint is accepted only for a new, empty canonical
+epoch: the approximately 6.3 GB historical SQLite authority remains an
+immutable read-only archive. Canonical storage and index bytes are monitored
+separately with warnings at 60% and 75% and a fail-safe write gate at 85%.
+Canonical evidence is never silently deleted, assigned a TTL, or moved to a
+paid tier.
 
 The canonical project access list must never include `0.0.0.0/0`. Prefer a
 private endpoint from capstone. If that is not approved, allow only capstone's
@@ -77,10 +74,44 @@ changing analytical authority or event meaning. In particular it must preserve:
 - manual-only response guidance and prohibited automatic alerts/execution; and
 - prediction, enrichment, correlation, and AI as non-authoritative context.
 
-SQLite must remain the only accepted `database_backend` until a MongoDB adapter,
-contract tests, migration validator, backup/restore procedure, and rollback plan
-have all passed review. There must never be two independently authoritative
-primary stores.
+`database_backend=mongodb` is accepted only when the protected URI, exact Atlas
+schema, storage-epoch receipt, capacity policy, and separate rollback-mirror
+path all validate. Otherwise startup fails closed. There must never be two
+independently authoritative primary stores: the historical SQLite cutoff owns
+the prefix, and MongoDB owns only the explicitly recorded later epoch.
+
+For each post-cutover event the application fixes `event_id` and `received_at`
+once, majority-writes and verifies MongoDB, writes and verifies the SQLite
+rollback mirror with `synchronous=FULL`, and only then permits the ingest ACK.
+An exact retry repairs either missing copy; conflicting content fails closed.
+
+M0 has no reviewed managed PITR/Cloud Backup guarantee. Before cutover retain a
+verified immutable SQLite archive, test backup/restore of the new rollback
+mirror, and test a manual `mongodump`/`mongorestore` round trip using synthetic
+staging data. Do not describe that procedure as managed backup.
+
+## Manual M0 export and restore
+
+Use a GPG-verified MongoDB Database Tools release on the capstone host. Keep
+archives outside the application release, owner-only, encrypted at rest when
+retained, and record the tool version and archive SHA-256. Never place the URI
+on the Pi or in a repository script. The reviewed operational sequence is:
+
+1. pause canonical writes and drain workers so the export has a declared
+   cutoff; record collection counts and the current epoch receipt;
+2. run `mongodump` with the protected capstone runtime credential, database
+   `honeypot_canonical_v1`, `--archive`, and `--gzip`;
+3. hash the archive and store it with the epoch/cutoff/count receipt;
+4. restore only into an isolated empty schema-qualified test environment using
+   `mongorestore --archive --gzip`; never overwrite the live epoch as a test;
+5. verify schema, indexes, validators, collection counts, canonical IDs, payload
+   hashes, and a sample of durable-prefix manifests before accepting restore;
+6. delete synthetic restore data and retain the production archive according
+   to the owner-approved research retention policy.
+
+The staging qualification used Database Tools 100.17.0 and a synthetic event
+round trip without retaining any attacker data. Production cutover still
+requires a new consistent export after forwarding is paused and queues drain.
 
 ## Current Pi MongoDB environment is not a migration target yet
 

@@ -416,7 +416,7 @@ class WebhookDispatcher:
     ) -> None:
         self.config = config
         self.config.validate_event_processing()
-        self.storage = storage or open_storage(config.database_url)
+        self.storage = storage or open_storage(config.database_settings())
         self.worker_id = worker_id or f"webhook-{os.getpid()}-{uuid4()}"
         self.alert_authority_policy = load_alert_authority_policy(
             config.alert_authority_policy_path

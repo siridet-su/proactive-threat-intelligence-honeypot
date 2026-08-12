@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from production.storage.contract import (
     DatabaseConfigurationError,
     DatabaseSettings,
+    MONGODB_BACKEND,
     SQLITE_BACKEND,
     StorageBackend,
     JOB_QUEUE_TABLES,
@@ -5851,16 +5852,23 @@ class SQLiteStorage:
         return delivery_id
 
 
-def safe_database_descriptor(database_url: str) -> Dict[str, str]:
-    """Return a log-safe database description for a legacy runtime URL."""
+def safe_database_descriptor(
+    database_url: str | DatabaseSettings,
+) -> Dict[str, str]:
+    """Return a log-safe database description without exposing credentials."""
     try:
-        return DatabaseSettings.from_url(database_url).safe_descriptor()
+        settings = (
+            database_url
+            if isinstance(database_url, DatabaseSettings)
+            else DatabaseSettings.from_url(database_url)
+        )
+        return settings.safe_descriptor()
     except DatabaseConfigurationError as exc:
         raise StorageError(str(exc)) from exc
 
 
 def open_storage(database: str | DatabaseSettings) -> StorageBackend:
-    """Open and initialize the canonical SQLite storage adapter."""
+    """Open the explicitly selected canonical adapter, failing closed."""
     try:
         settings = (
             database
@@ -5870,7 +5878,37 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
     except DatabaseConfigurationError as exc:
         raise StorageError(str(exc)) from exc
 
-    if settings.backend != SQLITE_BACKEND:  # pragma: no cover - validated above
+    if settings.backend == MONGODB_BACKEND:
+        from production.ai_advisory.security import read_secure_utf8
+        from production.storage.mongodb_backend import MongoDBStorageBackend
+        from production.storage.mongodb_epoch import (
+            MongoEpochStorage,
+            load_storage_epoch,
+            require_active_release,
+        )
+
+        receipt = load_storage_epoch(settings.storage_epoch_receipt_path)
+        require_active_release(receipt)
+        if receipt["rollback_mirror_path"] != settings.rollback_sqlite_database_path:
+            raise StorageError("MongoDB rollback mirror path disagrees with epoch receipt")
+        uri = read_secure_utf8(
+            settings.mongodb_uri_file, name="MONGODB_URI", max_bytes=65_536
+        )
+        mongo = MongoDBStorageBackend(uri)
+        mongo.initialize()
+        mirror_path = Path(settings.rollback_sqlite_database_path)
+        try:
+            mirror_info = mirror_path.lstat()
+        except OSError as exc:
+            raise StorageError("MongoDB rollback mirror is not pre-created") from exc
+        if mirror_path.is_symlink() or not mirror_path.is_file():
+            raise StorageError("MongoDB rollback mirror must be a regular non-symlink file")
+        if mirror_info.st_uid != os.geteuid() or mirror_info.st_mode & 0o077:
+            raise StorageError("MongoDB rollback mirror must be service-owned mode 0600")
+        mirror = SQLiteStorage(f"sqlite:///{settings.rollback_sqlite_database_path}")
+        mirror.initialize()
+        return MongoEpochStorage(mongo, mirror, receipt)
+    if settings.backend != SQLITE_BACKEND:
         raise StorageError(f"unsupported database backend: {settings.backend}")
     storage: StorageBackend = SQLiteStorage(settings.database_url)
     storage.initialize()
@@ -5889,7 +5927,9 @@ def open_existing_storage(database: str | DatabaseSettings) -> StorageBackend:
     except DatabaseConfigurationError as exc:
         raise StorageError(str(exc)) from exc
 
-    if settings.backend != SQLITE_BACKEND:  # pragma: no cover - validated above
+    if settings.backend == MONGODB_BACKEND:
+        return open_storage(settings)
+    if settings.backend != SQLITE_BACKEND:
         raise StorageError(f"unsupported database backend: {settings.backend}")
     database_path = Path(settings.database_url.replace("sqlite:///", "", 1))
     if not database_path.parent.exists():

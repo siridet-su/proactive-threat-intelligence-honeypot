@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from production.storage.session_provenance import SESSION_SOURCE_PRODUCTION_LIVE
@@ -10,7 +11,8 @@ from production.utils.sensitive_data import redact_error_for_log
 
 
 SQLITE_BACKEND = "sqlite"
-SUPPORTED_DATABASE_BACKENDS = {SQLITE_BACKEND}
+MONGODB_BACKEND = "mongodb"
+SUPPORTED_DATABASE_BACKENDS = {SQLITE_BACKEND, MONGODB_BACKEND}
 DEFAULT_SQLITE_DATABASE_PATH = "production_state.db"
 
 EVENT_FAILURE_CODES = frozenset(
@@ -275,12 +277,14 @@ def _backend_from_url(database_url: str) -> str:
     value = str(database_url or "").strip()
     if value.startswith("sqlite:///"):
         return SQLITE_BACKEND
+    if value.startswith(("mongodb://", "mongodb+srv://")):
+        return MONGODB_BACKEND
     if "://" not in value:
         raise DatabaseConfigurationError(
             "database_url must use sqlite:///DATABASE_PATH; plain paths are not accepted"
         )
     raise DatabaseConfigurationError(
-        "unsupported database URL; the canonical runtime supports SQLite only"
+        "unsupported database URL; expected sqlite or MongoDB"
     )
 
 
@@ -295,11 +299,14 @@ def _sqlite_path_from_url(database_url: str) -> str:
 
 @dataclass(frozen=True)
 class DatabaseSettings:
-    """Validated canonical SQLite connection settings."""
+    """Validated canonical storage settings with secret-safe descriptors."""
 
     backend: str
     database_url: str
     sqlite_database_path: str = ""
+    mongodb_uri_file: str = ""
+    rollback_sqlite_database_path: str = ""
+    storage_epoch_receipt_path: str = ""
 
     @classmethod
     def from_values(
@@ -308,6 +315,9 @@ class DatabaseSettings:
         database_backend: str = "",
         database_url: str = "",
         sqlite_database_path: str = "",
+        mongodb_uri_file: str = "",
+        rollback_sqlite_database_path: str = "",
+        storage_epoch_receipt_path: str = "",
     ) -> "DatabaseSettings":
         backend = _normalize_backend(database_backend)
         legacy_url = str(database_url or "").strip()
@@ -316,7 +326,7 @@ class DatabaseSettings:
         url_backend = _backend_from_url(legacy_url) if legacy_url else ""
         if backend and backend not in SUPPORTED_DATABASE_BACKENDS:
             raise DatabaseConfigurationError(
-                f"unsupported database backend {backend!r}; expected sqlite"
+                f"unsupported database backend {backend!r}; expected sqlite or mongodb"
             )
         if backend and url_backend and backend != url_backend:
             raise DatabaseConfigurationError(
@@ -324,10 +334,35 @@ class DatabaseSettings:
             )
         selected_backend = backend or url_backend or SQLITE_BACKEND
 
-        legacy_path = _sqlite_path_from_url(legacy_url) if legacy_url else ""
+        legacy_path = (
+            _sqlite_path_from_url(legacy_url)
+            if legacy_url and url_backend == SQLITE_BACKEND
+            else ""
+        )
         if legacy_path and sqlite_path and legacy_path != sqlite_path:
             raise DatabaseConfigurationError(
                 "SQLITE_DATABASE_PATH conflicts with legacy sqlite database_url"
+            )
+        if selected_backend == MONGODB_BACKEND:
+            uri_file = str(mongodb_uri_file or "").strip()
+            mirror_path = str(rollback_sqlite_database_path or "").strip()
+            receipt_path = str(storage_epoch_receipt_path or "").strip()
+            if legacy_url:
+                raise DatabaseConfigurationError(
+                    "MongoDB credentials must use MONGODB_URI_FILE, not database_url"
+                )
+            if not uri_file or not mirror_path or not receipt_path:
+                raise DatabaseConfigurationError(
+                    "MongoDB requires URI, rollback mirror, and storage epoch receipt files"
+                )
+            if not all(Path(value).is_absolute() for value in (uri_file, mirror_path, receipt_path)):
+                raise DatabaseConfigurationError("MongoDB runtime paths must be absolute")
+            return cls(
+                backend=MONGODB_BACKEND,
+                database_url="",
+                mongodb_uri_file=uri_file,
+                rollback_sqlite_database_path=mirror_path,
+                storage_epoch_receipt_path=receipt_path,
             )
         selected_path = sqlite_path or legacy_path or DEFAULT_SQLITE_DATABASE_PATH
         return cls(
@@ -342,10 +377,14 @@ class DatabaseSettings:
 
     def safe_descriptor(self) -> Dict[str, str]:
         """Return the non-secret SQLite connection identity."""
-        return {
-            "backend": SQLITE_BACKEND,
-            "database_path": self.sqlite_database_path,
-        }
+        if self.backend == MONGODB_BACKEND:
+            return {
+                "backend": MONGODB_BACKEND,
+                "database": "honeypot_canonical_v1",
+                "rollback_database_path": self.rollback_sqlite_database_path,
+                "storage_epoch_receipt_path": self.storage_epoch_receipt_path,
+            }
+        return {"backend": SQLITE_BACKEND, "database_path": self.sqlite_database_path}
 
 
 def safe_database_label(database: str | DatabaseSettings) -> str:
@@ -363,6 +402,8 @@ def safe_database_label(database: str | DatabaseSettings) -> str:
         else DatabaseSettings.from_url(database)
     )
     descriptor = settings.safe_descriptor()
+    if settings.backend == MONGODB_BACKEND:
+        return "mongodb://honeypot_canonical_v1"
     return f"sqlite:///{descriptor['database_path']}"
 
 

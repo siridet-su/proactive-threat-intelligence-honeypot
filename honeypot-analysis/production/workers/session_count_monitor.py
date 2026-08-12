@@ -251,7 +251,11 @@ def main() -> None:
     state_path = Path(args.state_path)
     state = load_state(state_path)
     state = prepare_state_for_session_source(state, session_source, logger, external_only=external_only)
-    count = completed_session_count(config.database_url, session_source=session_source, external_only=external_only)
+    count = completed_session_count(
+        config.database_settings(),
+        session_source=session_source,
+        external_only=external_only,
+    )
     newly_notified = evaluate_thresholds(
         count,
         thresholds,

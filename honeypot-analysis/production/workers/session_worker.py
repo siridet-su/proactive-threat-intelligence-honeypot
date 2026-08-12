@@ -209,7 +209,7 @@ class SessionWorker:
         )
         self.credential_hasher = load_credential_hmac_keyring(keyring_path)
         config.apply_environment()
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
         self.data_lifecycle_policy = load_data_lifecycle_policy(
             config.data_lifecycle_policy_path
         )

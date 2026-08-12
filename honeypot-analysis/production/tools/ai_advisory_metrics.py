@@ -119,7 +119,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = ProductionConfig.from_env(args.config)
-    storage = open_storage(config.database_url)
+    storage = open_storage(config.database_settings())
     rows = storage.list_rows(
         "ai_advisories", limit=min(max(int(args.limit), 1), 100_000)
     )

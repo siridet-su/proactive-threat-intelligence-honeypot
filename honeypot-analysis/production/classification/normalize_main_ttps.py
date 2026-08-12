@@ -300,7 +300,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: List[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = ProductionConfig.from_env(args.config or None)
-    database_url = args.database_url or config.database_url
+    database_url = args.database_url or config.database_settings()
     tables = [item.strip() for item in args.tables.split(",") if item.strip()]
     result = normalize_storage(
         database_url=database_url,

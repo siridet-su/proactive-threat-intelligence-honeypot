@@ -543,7 +543,7 @@ def create_or_update_campaign(
 class CampaignClusteringWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
         self.policy = _policy(config)
         self.alert_authority_policy = load_alert_authority_policy(
             config.alert_authority_policy_path

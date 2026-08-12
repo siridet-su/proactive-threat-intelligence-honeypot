@@ -10,6 +10,8 @@ Group=honeypot
 WorkingDirectory=/opt/honeypot
 EnvironmentFile=-/etc/honeypot/common.env
 EnvironmentFile=-/etc/honeypot/services/feed-refresh.env
+LoadCredential=mongodb-uri
+Environment=MONGODB_URI_FILE=%d/mongodb-uri
 ExecStart=/opt/honeypot/.venv/bin/python -m production.enrichment.refresh_feeds --config /etc/honeypot/production_config.json
 TimeoutStartSec=15min
 UMask=0077

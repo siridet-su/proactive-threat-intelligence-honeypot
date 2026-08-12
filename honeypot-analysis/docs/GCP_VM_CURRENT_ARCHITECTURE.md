@@ -35,7 +35,7 @@ Internet client
   -> Tailscale backend link
   -> Raspberry Pi Cowrie and privacy-boundary forwarder
   -> authenticated ingest API
-  -> durable SQLite events and session reconstruction
+  -> current canonical storage epoch and session reconstruction
   -> session worker and canonical evidence
   -> classification / session_assessment.v4
   -> advisory Transformer prediction and response_guidance.v3
@@ -46,8 +46,11 @@ Cowrie evidence and the canonical evidence snapshot are authoritative.  The
 Transformer, enrichment feeds, correlations, and optional prose are
 non-authoritative context.  `response_guidance.v3` is advisory only,
 requires manual approval, and cannot execute an action, create an alert, or
-create a webhook.  SQLite is the only active runtime backend; historical
-records are read through compatibility adapters and are not rewritten.
+create a webhook. A MongoDB epoch, if activated by a separate reviewed
+cutover, contains only post-cutoff canonical data and synchronously mirrors
+each ACK-eligible event to a new SQLite rollback file. The pre-cutoff SQLite
+database remains a distinct read-only historical archive and is not rewritten
+or silently federated into current APIs.
 
 ## Immutable and mutable boundaries
 
@@ -68,8 +71,8 @@ application release.
 The following are mutable runtime state and are not part of the immutable
 release-tree identity:
 
-- `/var/lib/honeypot/production_pilot.db`, queues, leases, reports, spool,
-  feed caches, and feed provenance;
+- the current canonical database, post-cutover SQLite rollback mirror, queues,
+  leases, reports, spool, feed caches, and feed provenance;
 - `/var/backups/honeypot` and isolated restore material;
 - journals, logs, and temporary files;
 - service-scoped secret files under `/etc/honeypot` or systemd credentials;
