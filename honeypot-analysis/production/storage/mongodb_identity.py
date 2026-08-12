@@ -11,10 +11,10 @@ from typing import Any, Dict
 from production.utils.serialization import stable_json
 
 
-MONGODB_RUNTIME_IDENTITY_SCHEMA = "mongodb_runtime_identity.v1"
+MONGODB_RUNTIME_IDENTITY_SCHEMA = "mongodb_runtime_identity.v2"
 DEFAULT_MONGODB_RUNTIME_IDENTITY = Path(
-    "configs/mongodb_runtime_identity.v1.json"
-)
+    __file__
+).resolve().parents[2] / "configs/mongodb_runtime_identity.v2.json"
 RUNTIME_ACTIONS = frozenset(
     {
         "find",
@@ -63,7 +63,7 @@ def load_mongodb_runtime_identity(
         "username": "10k",
         "authentication": "SCRAM-SHA-256",
         "database": "honeypot_canonical_v1",
-        "cluster_scope": "Honeypot-Canonical",
+        "cluster_scope": "epoch_receipt",
         "credential_delivery": "owner_only_systemd_credential_file",
         "secret_material_present": False,
     }

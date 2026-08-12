@@ -5859,6 +5859,7 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
             MongoEpochStorage,
             load_storage_epoch,
             require_active_release,
+            verify_runtime_deployment,
         )
 
         receipt = load_storage_epoch(settings.storage_epoch_receipt_path)
@@ -5868,6 +5869,7 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
         uri = read_mongodb_uri(settings.mongodb_uri_file, max_bytes=65_536)
         mongo = MongoDBStorageBackend(uri)
         mongo.initialize()
+        verify_runtime_deployment(receipt, uri, mongo)
         mirror_path = Path(settings.rollback_sqlite_database_path)
         try:
             mirror_info = mirror_path.lstat()

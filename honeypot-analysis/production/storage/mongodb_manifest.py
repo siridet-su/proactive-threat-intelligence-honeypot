@@ -10,7 +10,9 @@ from production.utils.serialization import stable_json
 
 
 MONGODB_SCHEMA_MANIFEST_VERSION = "mongodb_canonical_schema_manifest.v1"
-DEFAULT_MONGODB_SCHEMA_MANIFEST = Path("configs/mongodb_canonical_schema.v1.json")
+DEFAULT_MONGODB_SCHEMA_MANIFEST = (
+    Path(__file__).resolve().parents[2] / "configs/mongodb_canonical_schema.v1.json"
+)
 
 
 class MongoDBManifestError(ValueError):

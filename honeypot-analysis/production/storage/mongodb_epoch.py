@@ -6,25 +6,25 @@ import hashlib
 import json
 import os
 import stat
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
 from production.storage.canonical_event import CanonicalEventRecord
+from production.storage.mongodb_identity import load_mongodb_runtime_identity
+from production.storage.mongodb_manifest import load_mongodb_schema_manifest
 from production.storage.mongodb_shadow import MongoSQLiteRollbackMirror
 from production.utils.serialization import stable_json, utc_now
 
 
-EPOCH_SCHEMA = "canonical_storage_epoch.v1"
+EPOCH_SCHEMA = "canonical_storage_epoch.v2"
 CAPACITY_SCHEMA = "mongodb_capacity_policy.v1"
 M0_CAPACITY_BYTES = 512 * 1024 * 1024
-SCHEMA_MANIFEST_ID = "593bfa5464a63135c86c27469db3676961136eaa78f906996b1e2e2bbc8c89a5"
-RUNTIME_ROLE_ID = "743d97e79b82ff69535712f4f901bc484b99c600bf70868d0a5dd013b84231af"
-ATLAS_ORG_ID = "6a58feef2d2de3b8062f0864"
-ATLAS_PROJECT_ID = "6a7c8771b3b5a11455cc67f1"
-ATLAS_CLUSTER_ID = "6a7c8d3d368d336cfdbf25df"
-ATLAS_CLUSTER_NAME = "Honeypot-Canonical"
+CANONICAL_DATABASE = "honeypot_canonical_v1"
+SCHEMA_MANIFEST_ID = load_mongodb_schema_manifest().sha256
+RUNTIME_ROLE_ID = load_mongodb_runtime_identity().sha256
 POLICY_BINDING_FIELDS = {
     "classification_rules_file_sha256",
     "classification_trust_policy_file_sha256",
@@ -42,6 +42,20 @@ def _require_sha256(value: Any, name: str) -> str:
     selected = str(value or "")
     if len(selected) != 64 or any(character not in "0123456789abcdef" for character in selected):
         raise ValueError(f"{name} must be a lowercase SHA-256")
+    return selected
+
+
+def _require_hex_id(value: Any, name: str) -> str:
+    selected = str(value or "")
+    if len(selected) != 24 or any(character not in "0123456789abcdef" for character in selected):
+        raise ValueError(f"{name} must be a 24-character lowercase hexadecimal ID")
+    return selected
+
+
+def _require_nonempty(value: Any, name: str) -> str:
+    selected = str(value or "").strip()
+    if not selected or len(selected) > 255 or any(ord(character) < 0x20 for character in selected):
+        raise ValueError(f"{name} must be a bounded non-empty string")
     return selected
 
 
@@ -74,32 +88,61 @@ def load_storage_epoch(path: str | Path) -> Dict[str, Any]:
         raise ValueError("storage epoch receipt must not be group/other writable")
     document = json.loads(selected.read_text(encoding="utf-8"))
     required = {
-        "schema_version", "epoch_id", "backend", "atlas_org_id",
-        "atlas_project_id", "atlas_cluster_id", "atlas_cluster_name",
+        "schema_version", "epoch_id", "backend", "deployment_identity",
         "database", "start_time", "first_eligible_event_cutoff",
         "previous_sqlite_archive", "reviewed_release_sha",
+        "reviewed_release_tree", "release_manifest_sha256",
         "schema_manifest_identity", "runtime_role_identity",
         "classifier_policy_environment_bindings",
+        "failed_predecessor", "provenance_rules",
         "rollback_mirror_path", "capacity_policy", "receipt_sha256",
     }
     if not isinstance(document, dict) or set(document) != required:
         raise ValueError("storage epoch receipt fields are not exact")
     if document["schema_version"] != EPOCH_SCHEMA or document["backend"] != "mongodb":
         raise ValueError("storage epoch receipt selects an unsupported contract")
-    if document["database"] != "honeypot_canonical_v1":
+    if document["database"] != CANONICAL_DATABASE:
         raise ValueError("storage epoch database is invalid")
-    expected_atlas = {
-        "atlas_org_id": ATLAS_ORG_ID,
-        "atlas_project_id": ATLAS_PROJECT_ID,
-        "atlas_cluster_id": ATLAS_CLUSTER_ID,
-        "atlas_cluster_name": ATLAS_CLUSTER_NAME,
-    }
-    if any(document[key] != expected for key, expected in expected_atlas.items()):
-        raise ValueError("storage epoch Atlas identity is invalid")
+    deployment = document["deployment_identity"]
+    if not isinstance(deployment, dict) or set(deployment) != {
+        "atlas_org_id", "atlas_project_id", "atlas_cluster_id",
+        "atlas_cluster_name", "provider", "region", "srv_hostname",
+        "replica_set_name", "mongodb_server_version",
+    }:
+        raise ValueError("storage epoch deployment identity fields are not exact")
+    for key in ("atlas_org_id", "atlas_project_id", "atlas_cluster_id"):
+        _require_hex_id(deployment[key], f"deployment_identity.{key}")
+    for key in ("atlas_cluster_name", "region", "replica_set_name", "mongodb_server_version"):
+        _require_nonempty(deployment[key], f"deployment_identity.{key}")
+    if deployment["provider"] not in {"AWS", "AZURE", "GCP"}:
+        raise ValueError("storage epoch deployment provider is invalid")
+    srv_hostname = _require_nonempty(deployment["srv_hostname"], "deployment_identity.srv_hostname").lower()
+    if srv_hostname != deployment["srv_hostname"] or not srv_hostname.endswith(".mongodb.net"):
+        raise ValueError("storage epoch Atlas SRV hostname is invalid")
     if document["schema_manifest_identity"] != SCHEMA_MANIFEST_ID:
         raise ValueError("storage epoch schema manifest binding is invalid")
     if document["runtime_role_identity"] != RUNTIME_ROLE_ID:
         raise ValueError("storage epoch runtime role binding is invalid")
+    _require_sha256(document["release_manifest_sha256"], "release_manifest_sha256")
+    release_tree = str(document["reviewed_release_tree"] or "")
+    if len(release_tree) != 40 or any(character not in "0123456789abcdef" for character in release_tree):
+        raise ValueError("reviewed_release_tree must be a lowercase Git SHA-1")
+    predecessor = document["failed_predecessor"]
+    if not isinstance(predecessor, dict) or set(predecessor) != {
+        "epoch_id", "preservation_receipt_sha256", "authority"
+    } or predecessor["authority"] != "non_authoritative_failed_software_validation_evidence":
+        raise ValueError("failed predecessor binding is invalid")
+    _require_nonempty(predecessor["epoch_id"], "failed_predecessor.epoch_id")
+    _require_sha256(predecessor["preservation_receipt_sha256"], "failed_predecessor.preservation_receipt_sha256")
+    if document["provenance_rules"] != {
+        "synthetic_session_source": "e2e_test",
+        "exclude_from": [
+            "empirical_calibration", "attacker_prevalence", "command_frequency",
+            "thesis_ground_truth", "model_quality_evaluation",
+        ],
+        "attacker_command_markers_authoritative": False,
+    }:
+        raise ValueError("storage epoch provenance rules are invalid")
     if document["capacity_policy"] != capacity_policy():
         raise ValueError("storage epoch capacity policy is invalid")
     start_time = _utc_datetime(document["start_time"], "start_time")
@@ -157,6 +200,50 @@ def load_storage_epoch(path: str | Path) -> Dict[str, Any]:
     return document
 
 
+def verify_runtime_deployment(
+    receipt: Dict[str, Any],
+    uri: str,
+    mongo: Any,
+    *,
+    runtime_metadata: Dict[str, str] | None = None,
+) -> Dict[str, str]:
+    """Prove the protected URI and connected server match the receipt identity."""
+
+    deployment = receipt["deployment_identity"]
+    metadata = runtime_metadata or {
+        "atlas_org_id": str(os.getenv("ATLAS_ORG_ID") or "").strip(),
+        "atlas_project_id": str(os.getenv("ATLAS_PROJECT_ID") or "").strip(),
+        "atlas_cluster_id": str(os.getenv("ATLAS_CLUSTER_ID") or "").strip(),
+        "atlas_cluster_name": str(os.getenv("ATLAS_CLUSTER_NAME") or "").strip(),
+        "provider": str(os.getenv("ATLAS_PROVIDER") or "").strip(),
+        "region": str(os.getenv("ATLAS_REGION") or "").strip(),
+    }
+    expected_metadata = {key: deployment[key] for key in metadata}
+    if metadata != expected_metadata:
+        raise ValueError("configured Atlas deployment metadata disagrees with storage epoch receipt")
+    parsed = urlsplit(uri)
+    if parsed.scheme.lower() != "mongodb+srv" or not parsed.hostname:
+        raise ValueError("canonical Atlas runtime requires an exact mongodb+srv URI")
+    if parsed.hostname.lower().rstrip(".") != deployment["srv_hostname"]:
+        raise ValueError("MongoDB URI endpoint disagrees with storage epoch receipt")
+    uri_database = parsed.path.lstrip("/").split("/", 1)[0]
+    if uri_database and uri_database != receipt["database"]:
+        raise ValueError("MongoDB URI database disagrees with storage epoch receipt")
+    hello = mongo.database.command("hello")
+    if not bool(hello.get("isWritablePrimary")):
+        raise ValueError("MongoDB deployment is not writable primary")
+    if str(hello.get("setName") or "") != deployment["replica_set_name"]:
+        raise ValueError("MongoDB replica-set identity disagrees with storage epoch receipt")
+    version = str(mongo.client.server_info().get("version") or "")
+    if version != deployment["mongodb_server_version"]:
+        raise ValueError("MongoDB server version disagrees with storage epoch receipt")
+    return {
+        "srv_hostname": parsed.hostname.lower().rstrip("."),
+        "replica_set_name": str(hello["setName"]),
+        "mongodb_server_version": version,
+    }
+
+
 def require_active_release(receipt: Dict[str, Any]) -> str:
     configured = str(os.getenv("DEPLOYED_COMMIT") or "").strip()
     candidates = [configured] if configured else []
@@ -168,6 +255,25 @@ def require_active_release(receipt: Dict[str, Any]) -> str:
     expected = str(receipt["reviewed_release_sha"])
     if expected not in candidates:
         raise ValueError("storage epoch receipt does not bind the active release")
+    expected_tree = str(receipt["reviewed_release_tree"])
+    configured_tree = str(os.getenv("DEPLOYED_TREE") or "").strip()
+    tree_candidates = [configured_tree] if configured_tree else []
+    expected_manifest = str(receipt["release_manifest_sha256"])
+    configured_manifest = str(os.getenv("RELEASE_MANIFEST_SHA256") or "").strip()
+    manifest_candidates = [configured_manifest] if configured_manifest else []
+    for root in (Path.cwd(), Path(__file__).resolve().parents[2]):
+        for name, target in (
+            ("DEPLOYED_TREE", tree_candidates),
+            ("RELEASE_MANIFEST_SHA256", manifest_candidates),
+        ):
+            try:
+                target.append((root / name).read_text(encoding="utf-8").strip())
+            except OSError:
+                pass
+    if expected_tree not in tree_candidates:
+        raise ValueError("storage epoch receipt does not bind the active release tree")
+    if expected_manifest not in manifest_candidates:
+        raise ValueError("storage epoch receipt does not bind the active release manifest")
     return expected
 
 

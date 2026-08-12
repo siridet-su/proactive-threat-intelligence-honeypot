@@ -15,20 +15,29 @@ from production.storage.mongodb_epoch import (
     capacity_policy,
     load_storage_epoch,
     require_active_release,
+    verify_runtime_deployment,
 )
 from production.utils.serialization import stable_json
+from production.tools.mongodb_epoch_receipt import finalize_epoch_receipt
 
 
 def _receipt(tmp_path):
     path = tmp_path / "epoch.json"
     document = {
-        "schema_version": "canonical_storage_epoch.v1",
+        "schema_version": "canonical_storage_epoch.v2",
         "epoch_id": "mongodb-epoch-test",
         "backend": "mongodb",
-        "atlas_org_id": "6a58feef2d2de3b8062f0864",
-        "atlas_project_id": "6a7c8771b3b5a11455cc67f1",
-        "atlas_cluster_id": "6a7c8d3d368d336cfdbf25df",
-        "atlas_cluster_name": "Honeypot-Canonical",
+        "deployment_identity": {
+            "atlas_org_id": "6a58feef2d2de3b8062f0864",
+            "atlas_project_id": "6a58feef2d2de3b8062f0922",
+            "atlas_cluster_id": "6b1111111111111111111111",
+            "atlas_cluster_name": "Honeypot-Canonical-Retry",
+            "provider": "GCP",
+            "region": "SOUTHEASTERN_ASIA_PACIFIC",
+            "srv_hostname": "honeypot-canonical-retry.example.mongodb.net",
+            "replica_set_name": "atlas-retry-shard-0",
+            "mongodb_server_version": "8.0.29",
+        },
         "database": "honeypot_canonical_v1",
         "start_time": "2026-08-12T00:00:00+00:00",
         "first_eligible_event_cutoff": {"received_at": "2026-08-12T00:00:00+00:00", "event_id": ""},
@@ -48,6 +57,8 @@ def _receipt(tmp_path):
             },
         },
         "reviewed_release_sha": "b" * 40,
+        "reviewed_release_tree": "d" * 40,
+        "release_manifest_sha256": "e" * 64,
         "schema_manifest_identity": SCHEMA_MANIFEST_ID,
         "runtime_role_identity": RUNTIME_ROLE_ID,
         "classifier_policy_environment_bindings": {
@@ -55,6 +66,19 @@ def _receipt(tmp_path):
             "classification_trust_policy_file_sha256": "2" * 64,
             "classifier_environment_file_sha256": "3" * 64,
             "prediction_policy_file_sha256": "4" * 64,
+        },
+        "failed_predecessor": {
+            "epoch_id": "mongodb-m0-canonical-20260812",
+            "preservation_receipt_sha256": "f" * 64,
+            "authority": "non_authoritative_failed_software_validation_evidence",
+        },
+        "provenance_rules": {
+            "synthetic_session_source": "e2e_test",
+            "exclude_from": [
+                "empirical_calibration", "attacker_prevalence", "command_frequency",
+                "thesis_ground_truth", "model_quality_evaluation",
+            ],
+            "attacker_command_markers_authoritative": False,
         },
         "rollback_mirror_path": "/var/lib/honeypot/mongodb-epoch-mirror.db",
         "capacity_policy": capacity_policy(),
@@ -76,6 +100,17 @@ def test_epoch_receipt_is_content_addressed_and_exact(tmp_path):
         load_storage_epoch(path)
 
 
+def test_epoch_receipt_finalizer_is_exclusive_and_self_verifying(tmp_path):
+    _, document = _receipt(tmp_path)
+    document.pop("receipt_sha256")
+    output = tmp_path / "final.json"
+    receipt = finalize_epoch_receipt(document, output)
+    assert receipt == load_storage_epoch(output)
+    assert output.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(FileExistsError):
+        finalize_epoch_receipt(document, output)
+
+
 def test_epoch_preserves_distinct_historical_and_new_policy_lineage(tmp_path):
     path, document = _receipt(tmp_path)
     receipt = load_storage_epoch(path)
@@ -83,6 +118,109 @@ def test_epoch_preserves_distinct_historical_and_new_policy_lineage(tmp_path):
         receipt["previous_sqlite_archive"]["policy_environment_bindings"]
         != receipt["classifier_policy_environment_bindings"]
     )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("atlas_project_id", "6a7c8771b3b5a11455cc67f1"),
+        ("atlas_cluster_id", "6a7c8d3d368d336cfdbf25df"),
+        ("atlas_cluster_name", "Honeypot-Canonical"),
+        ("srv_hostname", "legacy-honeypot-db.example.mongodb.net"),
+    ],
+)
+def test_epoch_deployment_identity_is_receipt_bound_not_source_bound(tmp_path, field, value):
+    path, document = _receipt(tmp_path)
+    document["deployment_identity"][field] = value
+    document["receipt_sha256"] = hashlib.sha256(
+        stable_json({k: v for k, v in document.items() if k != "receipt_sha256"}).encode()
+    ).hexdigest()
+    path.write_text(stable_json(document) + "\n")
+    assert load_storage_epoch(path)["deployment_identity"][field] == value
+
+
+class _RuntimeClient:
+    def server_info(self):
+        return {"version": "8.0.29"}
+
+
+class _RuntimeDatabase:
+    def command(self, name):
+        assert name == "hello"
+        return {"isWritablePrimary": True, "setName": "atlas-retry-shard-0"}
+
+
+class _RuntimeMongo:
+    client = _RuntimeClient()
+    database = _RuntimeDatabase()
+
+
+def _runtime_metadata(receipt):
+    deployment = receipt["deployment_identity"]
+    return {
+        key: deployment[key]
+        for key in (
+            "atlas_org_id", "atlas_project_id", "atlas_cluster_id",
+            "atlas_cluster_name", "provider", "region",
+        )
+    }
+
+
+def test_runtime_deployment_requires_exact_receipt_endpoint_and_server(tmp_path):
+    path, _ = _receipt(tmp_path)
+    receipt = load_storage_epoch(path)
+    uri = "mongodb+srv://user:secret@honeypot-canonical-retry.example.mongodb.net/honeypot_canonical_v1"
+    assert verify_runtime_deployment(
+        receipt, uri, _RuntimeMongo(), runtime_metadata=_runtime_metadata(receipt)
+    )["mongodb_server_version"] == "8.0.29"
+    with pytest.raises(ValueError, match="endpoint"):
+        verify_runtime_deployment(
+            receipt,
+            "mongodb+srv://user:secret@legacy-honeypot-db.example.mongodb.net/honeypot_canonical_v1",
+            _RuntimeMongo(),
+            runtime_metadata=_runtime_metadata(receipt),
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["atlas_org_id", "atlas_project_id", "atlas_cluster_id", "atlas_cluster_name", "provider", "region"],
+)
+def test_runtime_deployment_rejects_nonsecret_metadata_mismatch(tmp_path, field):
+    path, _ = _receipt(tmp_path)
+    receipt = load_storage_epoch(path)
+    metadata = _runtime_metadata(receipt)
+    metadata[field] = "wrong"
+    with pytest.raises(ValueError, match="deployment metadata"):
+        verify_runtime_deployment(
+            receipt,
+            "mongodb+srv://user:secret@honeypot-canonical-retry.example.mongodb.net/honeypot_canonical_v1",
+            _RuntimeMongo(),
+            runtime_metadata=metadata,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation,error",
+    [
+        (("replica_set_name", "wrong"), "replica-set"),
+        (("mongodb_server_version", "8.0.28"), "server version"),
+    ],
+)
+def test_runtime_deployment_rejects_connected_identity_mismatch(tmp_path, mutation, error):
+    path, document = _receipt(tmp_path)
+    document["deployment_identity"][mutation[0]] = mutation[1]
+    document["receipt_sha256"] = hashlib.sha256(
+        stable_json({k: v for k, v in document.items() if k != "receipt_sha256"}).encode()
+    ).hexdigest()
+    path.write_text(stable_json(document) + "\n")
+    with pytest.raises(ValueError, match=error):
+        verify_runtime_deployment(
+            load_storage_epoch(path),
+            "mongodb+srv://user:secret@honeypot-canonical-retry.example.mongodb.net/honeypot_canonical_v1",
+            _RuntimeMongo(),
+            runtime_metadata=_runtime_metadata(load_storage_epoch(path)),
+        )
 
 
 def test_historical_policy_lineage_must_be_complete_sha256_bindings(tmp_path):
@@ -104,9 +242,25 @@ def test_epoch_receipt_must_bind_active_release(tmp_path, monkeypatch):
     path, document = _receipt(tmp_path)
     receipt = load_storage_epoch(path)
     monkeypatch.setenv("DEPLOYED_COMMIT", document["reviewed_release_sha"])
+    monkeypatch.setenv("DEPLOYED_TREE", document["reviewed_release_tree"])
+    monkeypatch.setenv("RELEASE_MANIFEST_SHA256", document["release_manifest_sha256"])
     assert require_active_release(receipt) == document["reviewed_release_sha"]
     monkeypatch.setenv("DEPLOYED_COMMIT", "d" * 40)
     with pytest.raises(ValueError, match="active release"):
+        require_active_release(receipt)
+
+
+def test_epoch_receipt_rejects_other_release_tree_or_manifest(tmp_path, monkeypatch):
+    path, document = _receipt(tmp_path)
+    receipt = load_storage_epoch(path)
+    monkeypatch.setenv("DEPLOYED_COMMIT", document["reviewed_release_sha"])
+    monkeypatch.setenv("DEPLOYED_TREE", "0" * 40)
+    monkeypatch.setenv("RELEASE_MANIFEST_SHA256", document["release_manifest_sha256"])
+    with pytest.raises(ValueError, match="release tree"):
+        require_active_release(receipt)
+    monkeypatch.setenv("DEPLOYED_TREE", document["reviewed_release_tree"])
+    monkeypatch.setenv("RELEASE_MANIFEST_SHA256", "0" * 64)
+    with pytest.raises(ValueError, match="release manifest"):
         require_active_release(receipt)
 
 

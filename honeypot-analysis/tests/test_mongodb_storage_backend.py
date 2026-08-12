@@ -52,17 +52,17 @@ def test_mongodb_manifest_freezes_namespace_order_durability_and_no_ttl() -> Non
 
 def test_mongodb_runtime_identity_is_exact_and_least_privilege() -> None:
     identity = json.loads(
-        Path("configs/mongodb_runtime_identity.v1.json").read_text(encoding="utf-8")
+        Path("configs/mongodb_runtime_identity.v2.json").read_text(encoding="utf-8")
     )
     privileges = set(identity["custom_role"]["privileges"])
     prohibited_roles = set(identity["prohibited_roles"])
     prohibited_actions = set(identity["prohibited_actions"])
 
-    assert identity["schema_version"] == "mongodb_runtime_identity.v1"
+    assert identity["schema_version"] == "mongodb_runtime_identity.v2"
     assert identity["username"] == "10k"
     assert identity["authentication"] == "SCRAM-SHA-256"
     assert identity["database"] == "honeypot_canonical_v1"
-    assert identity["cluster_scope"] == "Honeypot-Canonical"
+    assert identity["cluster_scope"] == "epoch_receipt"
     assert identity["secret_material_present"] is False
     assert privileges == {
         "find", "insert", "update", "remove", "listCollections",

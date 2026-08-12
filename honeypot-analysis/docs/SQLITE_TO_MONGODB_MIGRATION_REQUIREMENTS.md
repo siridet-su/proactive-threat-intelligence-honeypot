@@ -1,7 +1,7 @@
 # SQLite to MongoDB canonical-epoch requirements
 
 Status: the reviewed backend is selectable only through an exact
-`canonical_storage_epoch.v1` receipt, owner-only Atlas URI credential, and a
+`canonical_storage_epoch.v2` receipt, owner-only Atlas URI credential, and a
 separate synchronous SQLite rollback mirror. SQLite remains the production
 authority until the documented Atlas M0 parity, backup, capacity, and cutover
 gates pass. The repository
@@ -52,9 +52,9 @@ stable egress `34.142.229.209/32` as a documented interim limitation. The Pi
 does not receive canonical MongoDB credentials or direct canonical database
 access.
 
-The runtime database user is exactly `10k`, SCRAM-SHA-256, cluster-scoped to
-`Honeypot-Canonical`, and assigned only the custom role described in
-`configs/mongodb_runtime_identity.v1.json`. That role grants CRUD and bounded
+The runtime database user is exactly `10k`, SCRAM-SHA-256, scoped by the exact
+epoch receipt to its reviewed cluster, and assigned only the custom role described in
+`configs/mongodb_runtime_identity.v2.json`. That role grants CRUD and bounded
 inspection only on `honeypot_canonical_v1`; it excludes collection/index/user,
 backup, network, project, bypass-validation, and database administration. A
 separate deployment identity installs validators/indexes and the manifest,
@@ -89,6 +89,13 @@ M0 has no reviewed managed PITR/Cloud Backup guarantee. Before cutover retain a
 verified immutable SQLite archive, test backup/restore of the new rollback
 mirror, and test a manual `mongodump`/`mongorestore` round trip using synthetic
 staging data. Do not describe that procedure as managed backup.
+
+The v2 epoch receipt records the exact Atlas organization/project/cluster,
+provider, region, SRV hostname, replica-set name, observed server version,
+release commit/tree/manifest, failed predecessor, and historical SQLite
+policy/environment hashes. Runtime verifies the protected URI hostname and
+connected replica-set/version before authority can activate. Atlas deployment
+IDs are receipt values, never application-source constants.
 
 The epoch receipt records historical SQLite policy/environment hashes and new
 MongoDB-epoch policy/environment hashes independently. Both lineages are
