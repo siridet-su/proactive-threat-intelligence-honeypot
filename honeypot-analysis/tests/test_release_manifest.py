@@ -113,6 +113,41 @@ def test_release_manifest_binds_package_tree_config_artifact_and_rollback(
     assert recorded["build_context"]["static_assets"]["monitor"]["sha256"]
 
 
+def test_release_manifest_binds_v3_classifier_receipt_to_effective_configuration(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    classifier_receipt = tmp_path / "next_behavior_classifier_environment.v1.json"
+    classifier_receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": "next_behavior_classifier_environment.v3",
+                "source_identity": {"sha256": "a" * 64},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
+        configuration_paths={
+            "policy": str(policy),
+            "classifier_environment": str(classifier_receipt),
+        },
+    )
+    assert manifest["classifier_environment"]["source_identity_sha256"] == "a" * 64
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+    assert verify_manifest(output, release)["verified"] is True
+
+    classifier_receipt.write_text(classifier_receipt.read_text() + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="classifier environment|effective configuration"):
+        verify_manifest(output, release)
+
+
 def test_release_manifest_rejects_overlay_and_artifact_changes(
     tmp_path: Path,
 ) -> None:

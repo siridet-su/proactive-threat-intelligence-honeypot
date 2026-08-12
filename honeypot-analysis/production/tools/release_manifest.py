@@ -324,6 +324,33 @@ def _frozen_model_bundle_receipt(
     return receipt
 
 
+def _classifier_environment_receipt(path_text: str) -> dict[str, Any]:
+    """Bind a content-addressed classifier receipt to the release manifest."""
+
+    path = Path(path_text).resolve()
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("classifier environment receipt must be a regular file")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("classifier environment receipt is unreadable") from exc
+    if not isinstance(value, dict):
+        raise ValueError("classifier environment receipt is invalid")
+    if value.get("schema_version") != "next_behavior_classifier_environment.v3":
+        return {}
+    source = value.get("source_identity")
+    if not isinstance(source, dict) or not SHA256_PATTERN.fullmatch(
+        str(source.get("sha256") or "")
+    ):
+        raise ValueError("classifier environment source identity is invalid")
+    return {
+        "path": str(path),
+        "receipt_sha256": _sha256_file(path),
+        "schema_version": str(value["schema_version"]),
+        "source_identity_sha256": str(source["sha256"]),
+    }
+
+
 def build_manifest(
     *,
     revision: str,
@@ -410,6 +437,15 @@ def build_manifest(
             release_root=release_root,
             bundle_root=Path(frozen_model_bundle_manifest_path).resolve().parent,
         )
+    classifier_receipts = [
+        path
+        for path in configuration_paths.values()
+        if Path(path).name == "next_behavior_classifier_environment.v1.json"
+    ]
+    if classifier_receipts:
+        classifier_receipt = _classifier_environment_receipt(classifier_receipts[0])
+        if classifier_receipt:
+            manifest["classifier_environment"] = classifier_receipt
     return manifest
 
 
@@ -477,6 +513,32 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
     if schema_version in IMMUTABLE_SOURCE_SCHEMA_VERSIONS:
         if manifest.get("release_identity") != _release_identity_contract():
             raise ValueError("release identity policy does not match manifest")
+    classifier_environment = manifest.get("classifier_environment")
+    if classifier_environment is not None:
+        if not isinstance(classifier_environment, dict):
+            raise ValueError("classifier environment release binding is invalid")
+        actual_classifier_environment = _classifier_environment_receipt(
+            str(classifier_environment.get("path") or "")
+        )
+        if actual_classifier_environment != classifier_environment:
+            raise ValueError("classifier environment release binding does not match")
+        configured = [
+            receipt
+            for receipt in (manifest.get("effective_configurations") or {}).values()
+            if isinstance(receipt, dict)
+            and receipt.get("path") == classifier_environment.get("path")
+        ]
+        if not configured or configured[0].get("sha256") != classifier_environment.get(
+            "receipt_sha256"
+        ):
+            raise ValueError("classifier environment receipt is not an effective configuration")
+    elif schema_version == SCHEMA_VERSION and any(
+        Path(str(receipt.get("path") or "")).name
+        == "next_behavior_classifier_environment.v1.json"
+        for receipt in (manifest.get("effective_configurations") or {}).values()
+        if isinstance(receipt, dict)
+    ):
+        raise ValueError("classifier environment release binding is required")
     if schema_version == SCHEMA_VERSION:
         build_context = manifest.get("build_context")
         if not isinstance(build_context, dict):

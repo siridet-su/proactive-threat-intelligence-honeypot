@@ -30,7 +30,7 @@
     "runtime_trust_policy_path": "production/classification/trust.py",
     "runtime_trust_policy_sha256": "4c7af019a6ff39b5b35fd8e6929571f69c3574ad27d6fb254db02f940de2f885",
     "runtime_classifier_environment_path": "configs/next_behavior_classifier_environment.v1.json",
-    "runtime_classifier_environment_sha256": "c99e209880a277b8c41175b99769ec6af6eaf2b7abc46da27f5336e257bab084",
+    "runtime_classifier_environment_sha256": "3b241b86b12fea45efe658939f25a5f11d3ce81859c8e85fa9f9bd4c6f64b90a",
     "runtime_classifier_checkpoint_path": "models/securebert_ttp/checkpoint-6765/model.safetensors",
     "runtime_classifier_checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
     "trusted_model_only_threshold": 0.9,

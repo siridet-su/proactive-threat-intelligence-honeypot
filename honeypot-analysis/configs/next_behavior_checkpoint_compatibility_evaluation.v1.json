@@ -42,7 +42,7 @@
     "rule_policy_sha256": "32744defdf1746d23764772ad20cf8fd4c2630c04f63ed85cbb4bbfc28f7d7fc",
     "old_trust_policy_sha256": "1e3518583516a200fc5198ba65cbf10a3f056e4006baa27fc7b5fc6aa835eecd",
     "current_trust_policy_sha256": "4c7af019a6ff39b5b35fd8e6929571f69c3574ad27d6fb254db02f940de2f885",
-    "classifier_environment_sha256": "3a7972722db965733dc40f10d83e88f812998f6a8aae78bc87d44f72733d0c85",
+    "classifier_environment_sha256": "1b981f3c21b39702d0bb749e03acd30c6e6c1e9dd5a83c83721917e003e4b5c6",
     "classifier_checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
     "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
     "preprocessing_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
@@ -103,7 +103,7 @@
     "production/classification/classification_pipeline.py": "a8e283664af15f40c13e6bf091eeea439c2f28bb83011b4dbf1dd432b27d780e",
     "production/classification/durable_replay.py": "e50525fe99c42865e0cbd3adf215645d9f6e85469d857ef5b4c6c78cb58d4ba5",
     "production/prediction/trusted_history.py": "d1a109209153fba8c8cba2935dd75a453173fb2eca8d36b8add3fe95f5c9fd7f",
-    "production/classification/environment.py": "195c55d6937af557272ad7411ff084d9c4da4386002a041505e21f3fd1e4b899",
+    "production/classification/environment.py": "3da4ef8b3c2fe775ccfd9a2a146b1787da8c7bb4a1addcf5e98ffb2bce31436f",
     "configs/next_behavior_preprocessing.v1.json": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1",
     "data/feeds/mitre_attack_cache.json": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c"
   },

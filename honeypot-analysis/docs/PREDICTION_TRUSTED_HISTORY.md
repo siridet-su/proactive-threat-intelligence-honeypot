@@ -32,5 +32,9 @@ prefix.  The monitor's bounded classification tail remains a live projection
 only; it is never substituted for the durable-prefix classification manifest.
 
 The classifier environment receipt binds the v2 builder and runtime hashes.
-Changing the reviewed classifier policy or receipt creates a new provenance
-identity; historical manifests remain readable and are not reinterpreted.
+Current v3 receipts additionally bind a content-addressed classifier source
+identity (including parser, authority, trusted-history, policy, trust, and
+MITRE assets). The release manifest separately binds that receipt to the final
+Git revision/tree, avoiding a receipt-to-commit self-reference. Changing the
+reviewed classifier policy or receipt creates a new provenance identity;
+historical manifests remain readable and are not reinterpreted.

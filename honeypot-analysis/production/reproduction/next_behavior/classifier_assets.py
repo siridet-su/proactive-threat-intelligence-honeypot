@@ -18,10 +18,12 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
 
 
-SCHEMA_VERSION = "next_behavior_classifier_environment.v2"
+SCHEMA_VERSION = "next_behavior_classifier_environment.v3"
+COMPATIBILITY_SCHEMA_VERSION = "next_behavior_classifier_environment.v2"
 LEGACY_SCHEMA_VERSION = "next_behavior_classifier_environment.v1"
+SOURCE_IDENTITY_SCHEMA_VERSION = "classifier_source_identity.v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_TOP_LEVEL_FIELDS = frozenset(
+_LEGACY_TOP_LEVEL_FIELDS = frozenset(
     {
         "schema_version",
         "python",
@@ -31,6 +33,7 @@ _TOP_LEVEL_FIELDS = frozenset(
         "freeze",
     }
 )
+_TOP_LEVEL_FIELDS = _LEGACY_TOP_LEVEL_FIELDS | {"source_identity"}
 _PYTHON_FIELDS = frozenset({"implementation", "version"})
 _LOCK_FIELDS = frozenset({"path", "sha256"})
 _CLASSIFIER_FIELDS = frozenset(
@@ -73,13 +76,34 @@ _POLICY_FIELDS = frozenset(
         "trusted_history_maximum_phases",
     }
 )
-_FREEZE_FIELDS = frozenset(
+_LEGACY_FREEZE_FIELDS = frozenset(
     {
         "basis_commit",
         "release_revision",
         "historical_runtime_threshold_distinction_preserved",
         "raw_scores_are_probabilities",
     }
+)
+_V3_FREEZE_FIELDS = frozenset(
+    {
+        "basis_commit",
+        "historical_runtime_threshold_distinction_preserved",
+        "raw_scores_are_probabilities",
+    }
+)
+_SOURCE_IDENTITY_FIELDS = frozenset({"schema_version", "files", "sha256"})
+SOURCE_IDENTITY_PATHS = (
+    "production/classification/securebert_classifier.py",
+    "production/classification/classification_pipeline.py",
+    "production/classification/authority.py",
+    "production/classification/environment.py",
+    "production/reproduction/next_behavior/classifier_assets.py",
+    "production/semantics/command_operations.py",
+    "production/prediction/trusted_history.py",
+    "production/prediction/next_behavior_runtime.py",
+    "configs/classification_rules.trusted.json",
+    "production/classification/trust.py",
+    "data/feeds/mitre_attack_cache.json",
 )
 _MODEL_FILE_PATHS = frozenset(
     {
@@ -122,14 +146,81 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def source_identity_sha256(files: Mapping[str, str]) -> str:
+    encoded = json.dumps(
+        dict(sorted((str(path), str(digest)) for path, digest in files.items())),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_source_identity(repository_root: Path) -> Dict[str, Any]:
+    files: Dict[str, str] = {}
+    for relative in SOURCE_IDENTITY_PATHS:
+        path = repository_root / relative
+        if not path.is_file() or path.is_symlink():
+            raise ClassifierAssetError(f"missing classifier source identity asset: {relative}")
+        files[relative] = file_sha256(path)
+    return {
+        "schema_version": SOURCE_IDENTITY_SCHEMA_VERSION,
+        "files": files,
+        "sha256": source_identity_sha256(files),
+    }
+
+
+def verify_classifier_source_identity(
+    manifest: Mapping[str, Any],
+    *,
+    repository_root: Path,
+) -> Dict[str, Any] | None:
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        return None
+    source = manifest.get("source_identity")
+    if not isinstance(source, Mapping):
+        raise ClassifierAssetError("classifier source identity is missing")
+    files = source.get("files")
+    if not isinstance(files, Mapping):
+        raise ClassifierAssetError("classifier source identity files are invalid")
+    expected = {str(path): str(digest) for path, digest in files.items()}
+    actual: Dict[str, str] = {}
+    for relative, digest in expected.items():
+        if relative not in SOURCE_IDENTITY_PATHS:
+            raise ClassifierAssetError("classifier source identity contains an unexpected path")
+        if not _is_sha256(digest):
+            raise ClassifierAssetError("classifier source identity contains an invalid hash")
+        path = repository_root / relative
+        if not path.is_file() or path.is_symlink():
+            raise ClassifierAssetError(f"missing classifier source identity asset: {relative}")
+        actual[relative] = file_sha256(path)
+        if actual[relative] != digest:
+            raise ClassifierAssetError(f"classifier source identity mismatch: {relative}")
+    if set(actual) != set(SOURCE_IDENTITY_PATHS):
+        raise ClassifierAssetError("classifier source identity file set is incomplete")
+    identity_hash = source_identity_sha256(actual)
+    if source.get("sha256") != identity_hash:
+        raise ClassifierAssetError("classifier source identity hash mismatch")
+    return {
+        "schema_version": SOURCE_IDENTITY_SCHEMA_VERSION,
+        "files": actual,
+        "sha256": identity_hash,
+    }
+
+
 def validate_classifier_manifest(value: Any) -> list[str]:
     if not isinstance(value, dict):
         return ["classifier environment manifest must be an object"]
     errors: list[str] = []
-    if set(value) != _TOP_LEVEL_FIELDS:
+    schema = value.get("schema_version")
+    expected_top_level = _TOP_LEVEL_FIELDS if schema == SCHEMA_VERSION else _LEGACY_TOP_LEVEL_FIELDS
+    if set(value) != expected_top_level:
         errors.append("classifier environment fields are invalid")
-    if value.get("schema_version") not in {SCHEMA_VERSION, LEGACY_SCHEMA_VERSION}:
-        errors.append(f"schema_version must be {SCHEMA_VERSION}")
+    if schema not in {
+        SCHEMA_VERSION,
+        COMPATIBILITY_SCHEMA_VERSION,
+        LEGACY_SCHEMA_VERSION,
+    }:
+        errors.append(f"schema_version must be one of {SCHEMA_VERSION}, {COMPATIBILITY_SCHEMA_VERSION}, {LEGACY_SCHEMA_VERSION}")
 
     python = value.get("python")
     if not isinstance(python, dict) or set(python) != _PYTHON_FIELDS:
@@ -150,7 +241,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
 
     classifier = value.get("classifier")
     classifier_fields = _CLASSIFIER_FIELDS
-    if value.get("schema_version") == LEGACY_SCHEMA_VERSION:
+    if schema == LEGACY_SCHEMA_VERSION:
         classifier_fields = _CLASSIFIER_FIELDS - {"splitter_sha256"}
     if not isinstance(classifier, dict) or set(classifier) != classifier_fields:
         errors.append("classifier fields are invalid")
@@ -195,7 +286,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
 
     policy = value.get("classification_policy")
     policy_fields = _POLICY_FIELDS
-    if value.get("schema_version") == LEGACY_SCHEMA_VERSION:
+    if schema == LEGACY_SCHEMA_VERSION:
         policy_fields = _POLICY_FIELDS - {
             "rule_policy_id",
             "rule_policy_version",
@@ -226,7 +317,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
         ):
             if not _is_sha256(policy.get(hash_field)):
                 errors.append(f"classification_policy.{hash_field} is invalid")
-        if value.get("schema_version") == SCHEMA_VERSION:
+        if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION}:
             if policy.get("authority_decision_contract_version") != "command_authority_decision.v1":
                 errors.append("authority decision contract version is invalid")
             if not _is_sha256(policy.get("authority_decision_sha256")):
@@ -280,16 +371,42 @@ def validate_classifier_manifest(value: Any) -> list[str]:
         if policy.get("compound_command_splitter") != _COMPOUND_SPLITTER:
             errors.append("compound command splitter is not frozen")
 
+    source_identity = value.get("source_identity")
+    if schema == SCHEMA_VERSION:
+        if not isinstance(source_identity, dict) or set(source_identity) != _SOURCE_IDENTITY_FIELDS:
+            errors.append("classifier source identity fields are invalid")
+        else:
+            if source_identity.get("schema_version") != SOURCE_IDENTITY_SCHEMA_VERSION:
+                errors.append("classifier source identity schema is invalid")
+            files = source_identity.get("files")
+            if not isinstance(files, dict) or set(files) != set(SOURCE_IDENTITY_PATHS):
+                errors.append("classifier source identity file set is invalid")
+            else:
+                for relative, digest in files.items():
+                    path = Path(_clean(relative))
+                    if (
+                        path.is_absolute()
+                        or ".." in path.parts
+                        or relative not in SOURCE_IDENTITY_PATHS
+                        or not _is_sha256(digest)
+                    ):
+                        errors.append("classifier source identity contains an unsafe file")
+            if not _is_sha256(source_identity.get("sha256")):
+                errors.append("classifier source identity hash is invalid")
+
     freeze = value.get("freeze")
-    freeze_fields = _FREEZE_FIELDS
-    if value.get("schema_version") == LEGACY_SCHEMA_VERSION:
-        freeze_fields = _FREEZE_FIELDS - {"release_revision"}
+    if schema == SCHEMA_VERSION:
+        freeze_fields = _V3_FREEZE_FIELDS
+    elif schema == COMPATIBILITY_SCHEMA_VERSION:
+        freeze_fields = _LEGACY_FREEZE_FIELDS
+    else:
+        freeze_fields = _LEGACY_FREEZE_FIELDS - {"release_revision"}
     if not isinstance(freeze, dict) or set(freeze) != freeze_fields:
         errors.append("freeze fields are invalid")
     else:
         if not re.fullmatch(r"[0-9a-f]{40}", _clean(freeze.get("basis_commit"))):
             errors.append("freeze.basis_commit is invalid")
-        if value.get("schema_version") == SCHEMA_VERSION and not re.fullmatch(
+        if schema == COMPATIBILITY_SCHEMA_VERSION and not re.fullmatch(
             r"[0-9a-f]{40}", _clean(freeze.get("release_revision"))
         ):
             errors.append("freeze.release_revision is invalid")
@@ -329,6 +446,7 @@ def verify_classifier_assets(
     errors = validate_classifier_manifest(manifest)
     if errors:
         raise ClassifierAssetError("; ".join(errors))
+    verify_classifier_source_identity(manifest, repository_root=repository_root)
     classifier = manifest["classifier"]
     policy = manifest["classification_policy"]
     verified: Dict[str, Any] = {}

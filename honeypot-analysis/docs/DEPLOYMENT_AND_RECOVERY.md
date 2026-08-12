@@ -2,7 +2,8 @@
 
 Production releases are built from a clean `git archive` of one commit. A
 release manifest binds the Git revision, release-tree hash, code/configuration
-hashes, dependency identity, policy hashes, and model references. Mutable
+hashes, dependency identity, policy hashes, classifier-environment identity,
+and model references. Mutable
 databases, queues, reports, secrets, feed caches, virtual environments, and
 the separately managed frozen model bundle are outside the source archive.
 
@@ -33,7 +34,11 @@ policy; historical v2-v6 manifests retain their original semantics.
 Run `production.tools.release_manifest verify`, then independently verify the
 current runtime-feed provenance and cache hashes. Only after both pass may the
 deployment write and re-read `DEPLOYED_COMMIT` and atomically repoint
-`/opt/honeypot`. Reconcile only reviewed obsolete units, run systemd validation
+`/opt/honeypot`. The copied `DEPLOYMENT_MANIFEST.json` must retain the v7
+`classifier_environment` receipt binding. v3 classifier receipts bind the
+immutable classifier content identity rather than a future Git commit; the
+release manifest binds the final commit and release tree. Reconcile only
+reviewed obsolete units, run systemd validation
 and the managed-unit profile, restart only affected services, and verify
 health, hashes, queues, inference, reports, APIs/UI, PDF/STIX, and
 advisory-only authority. The production gate includes one synthetic-credential

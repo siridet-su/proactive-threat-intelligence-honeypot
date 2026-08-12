@@ -17,11 +17,15 @@ from typing import Any, Dict
 from production.reproduction.next_behavior.classifier_assets import (
     ClassifierAssetError,
     validate_classifier_manifest,
+    verify_classifier_source_identity,
 )
 from production.utils.serialization import stable_json
 
 
-SCHEMA_VERSION = "classification_environment.v2"
+SCHEMA_VERSION = "classification_environment.v3"
+LEGACY_SCHEMA_VERSIONS = frozenset(
+    {"next_behavior_classifier_environment.v1", "next_behavior_classifier_environment.v2"}
+)
 DEFAULT_RECEIPT_PATH = "configs/next_behavior_classifier_environment.v1.json"
 
 
@@ -60,13 +64,16 @@ def load_classifier_environment(
     errors = validate_classifier_manifest(receipt)
     if errors:
         raise ClassifierAssetError("; ".join(errors))
-    if receipt.get("schema_version") != "next_behavior_classifier_environment.v2":
-        raise ClassifierAssetError("runtime classifier environment must be v2")
+    receipt_schema = _clean(receipt.get("schema_version"))
+    if receipt_schema not in {
+        "next_behavior_classifier_environment.v3",
+        *LEGACY_SCHEMA_VERSIONS,
+    }:
+        raise ClassifierAssetError("runtime classifier environment schema is unsupported")
     classifier = receipt.get("classifier") or {}
     policy = receipt.get("classification_policy") or {}
     freeze = receipt.get("freeze") or {}
     required = {
-        "release_revision": freeze.get("release_revision"),
         "parser_hash": classifier.get("operation_parser_sha256"),
         "splitter_hash": classifier.get("splitter_sha256"),
         "pipeline_hash": classifier.get("pipeline_sha256"),
@@ -81,11 +88,19 @@ def load_classifier_environment(
         "trusted_history_runtime_hash": policy.get("trusted_history_runtime_sha256"),
         "securebert_checkpoint": classifier.get("checkpoint_sha256"),
     }
+    if receipt_schema == "next_behavior_classifier_environment.v2":
+        required["release_revision"] = freeze.get("release_revision")
+    elif receipt_schema == "next_behavior_classifier_environment.v1":
+        required["basis_commit"] = freeze.get("basis_commit")
+    else:
+        required["source_identity"] = (receipt.get("source_identity") or {}).get("sha256")
     if any(not _clean(value) for value in required.values()):
         raise ClassifierAssetError("classifier environment provenance is incomplete")
     configured_revision = _clean(os.getenv("DEPLOYED_COMMIT"))
-    receipt_revision = _clean(freeze.get("release_revision"))
-    if configured_revision and configured_revision.lower() != receipt_revision.lower():
+    receipt_revision = _clean(
+        freeze.get("release_revision") or freeze.get("basis_commit")
+    )
+    if receipt_schema in LEGACY_SCHEMA_VERSIONS and configured_revision and configured_revision.lower() != receipt_revision.lower():
         raise ClassifierAssetError("classifier environment release revision mismatch")
     deployment_manifest = root / "DEPLOYMENT_MANIFEST.json"
     if deployment_manifest.is_file() and not deployment_manifest.is_symlink():
@@ -94,10 +109,24 @@ def load_classifier_environment(
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise ClassifierAssetError("deployment manifest is unreadable") from exc
         deployed_revision = _clean(deployed.get("git_revision"))
-        if deployed_revision and deployed_revision.lower() != receipt_revision.lower():
+        if configured_revision and deployed_revision and configured_revision.lower() != deployed_revision.lower():
             raise ClassifierAssetError("classifier environment deployment revision mismatch")
+        if receipt_schema in LEGACY_SCHEMA_VERSIONS and deployed_revision and deployed_revision.lower() != receipt_revision.lower():
+            raise ClassifierAssetError("classifier environment deployment revision mismatch")
+        if receipt_schema == "next_behavior_classifier_environment.v3":
+            binding = deployed.get("classifier_environment")
+            if not isinstance(binding, dict):
+                raise ClassifierAssetError("classifier environment release binding is missing")
+            if binding.get("receipt_sha256") != _sha256(path):
+                raise ClassifierAssetError("classifier environment release receipt mismatch")
+            source_identity = receipt.get("source_identity") or {}
+            if binding.get("source_identity_sha256") != source_identity.get("sha256"):
+                raise ClassifierAssetError("classifier environment release source identity mismatch")
+    elif receipt_schema == "next_behavior_classifier_environment.v3" and configured_revision:
+        raise ClassifierAssetError("classifier environment release binding is unavailable")
 
     if verify_assets:
+        verify_classifier_source_identity(receipt, repository_root=root)
         checks = {
             "production/classification/securebert_classifier.py": classifier.get("adapter_sha256"),
             "production/classification/classification_pipeline.py": classifier.get("pipeline_sha256"),
@@ -145,7 +174,11 @@ def environment_identity(environment: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "environment_sha256": _clean(environment.get("environment_sha256")),
-        "release_revision": _clean(freeze.get("release_revision") or freeze.get("basis_commit")),
+        "release_revision": _clean(freeze.get("release_revision")),
+        "basis_commit": _clean(freeze.get("basis_commit")),
+        "source_identity_sha256": _clean(
+            (environment.get("source_identity") or {}).get("sha256")
+        ),
         "parser_sha256": _clean(classifier.get("operation_parser_sha256")),
         "splitter_sha256": _clean(classifier.get("splitter_sha256")),
         "pipeline_sha256": _clean(classifier.get("pipeline_sha256")),
