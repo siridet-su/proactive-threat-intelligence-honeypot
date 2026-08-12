@@ -34,71 +34,6 @@ The two previously optional Phase 12 items that could change whether a trusted h
 
 # 1. MUST FIX before thesis evaluation
 
-## Phase 2 — Fix durable replay and typed chain/context correctness
-
-### What will be fixed
-
-1. Correct command-index-zero grouping in durable replay.
-2. Carry the complete durable watermark `(received_at,event_id)`.
-3. Require replay-created history manifests to validate immediately.
-4. Replace greedy first-match chain selection with deterministic bounded search for the earliest valid successful subsequence.
-5. Propagate confirmed cwd into relative-path identity resolution.
-6. Preserve existing failure, ambiguity, chronology, and same-entity abstention.
-
-### Why
-
-Replay currently disagrees with realtime grouping, can construct an invalid cutoff, and misses valid chains after an earlier failed attempt.
-
-### Main files/functions/contracts
-
-- [durable_replay.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/classification/durable_replay.py)
-- [evidence_cutoff.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/prediction/evidence_cutoff.py)
-- [trusted_history.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/prediction/trusted_history.py)
-- SQLite/Mongo session snapshot loaders
-- [typed_semantic_chain_selection.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/reporting/typed_semantic_chain_selection.py)
-- [session_behavior_relationships.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/correlation/session_behavior_relationships.py)
-- [typed_semantic_facts.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/reporting/typed_semantic_facts.py)
-
-### Required tests
-
-- First command with two trusted labels remains one phase in realtime and replay.
-- Replay manifest contains canonical `received_at` and `event_id`.
-- Replay manifest passes its strict validator.
-- Realtime and replay history hashes match for the same exact prefix.
-- Failed transfer followed by successful transfer→chmod→execution yields a complete later chain.
-- Failed prerequisite without later successful replacement still abstains.
-- Successful `cd /tmp` plus relative transfer→chmod→execute resolves to one entity.
-- Failed or ambiguous `cd` does not resolve later paths.
-- Mismatched paths and unresolved variables continue to abstain.
-- Long-session replay stays deterministic and memory-bounded.
-
-### Acceptance criteria
-
-- Same durable prefix produces identical phase grouping, hashes, and graph output in realtime replay.
-- All constructed cutoffs are canonical and valid.
-- Valid later retries are found without linking unrelated attempts.
-- Selection remains deterministic if several valid subsequences exist.
-- No combinatorial/unbounded chain search is introduced.
-
-### Contract/version change
-
-Introduce `typed_semantic_chain_selection.v3`.
-
-The storage schema and database indexes do not need to change. Snapshot payloads must expose the existing `received_at` already held by canonical event records.
-
-### Transformer checkpoint
-
-Replay/cutoff corrections alone do not require retraining. If corrected grouping changes model-visible phase sequences, the checkpoint requires compatibility re-evaluation and may require retraining in combination with Phase 1.
-
-### Historical compatibility
-
-- Historical v2 chain selections remain readable.
-- New v3 selection IDs may differ.
-- Historical assessments must not be rewritten.
-- New explicit replay outputs get new identities and provenance.
-
----
-
 ## Phase 3 — Restore canonical authority and create an integrity-bound hypothesis contract
 
 ### What will be fixed
@@ -678,10 +613,9 @@ None.
 
 # Recommended execution order
 
-1. **Phase 2** — Correct durable replay grouping/cutoffs, retry-aware chain selection, and cwd-aware entity resolution.
-2. **Phase 3** — Introduce trusted-only canonical findings, `session_assessment.v5`, and the full-content `threat_hypothesis_set.v2`.
-3. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
-4. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
+1. **Phase 3** — Introduce trusted-only canonical findings, `session_assessment.v5`, and the full-content `threat_hypothesis_set.v2`.
+2. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
+3. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
 5. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
 6. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
 7. **Transformer decision** — Preserve and fully re-evaluate/recalibrate the existing checkpoint only if compatibility is proven; otherwise retrain, recalibrate, and issue a new model-bundle/checkpoint receipt. Preserve the prior checkpoint as immutable historical evidence.
@@ -696,7 +630,7 @@ None.
 16. Only after a clean separate review, prepare a new thesis-evaluation release.
 17. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
 
-The first remaining implementation phase is **Phase 2 — Fix durable replay and typed chain/context correctness**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
+The first remaining implementation phase is **Phase 3 — Restore canonical authority and create an integrity-bound hypothesis contract**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
 
 No implementation, commit, deployment, service action, or production mutation was performed.
 

@@ -42,3 +42,18 @@
 - Compatibility/historical-data impact: existing classification events/reports are not rewritten or backfilled. Historical v2 events/v1 authority decisions remain readable under their original identities. New classification uses new policy/environment identity.
 - Model/checkpoint impact: SecureBERT and Transformer checkpoint bytes unchanged. Transformer compatibility/retraining remains deliberately undecided until Phase 7 and the deterministic-semantics freeze gate.
 - Remaining limitations: contextual tactic choice, direction-sensitive transfer mappings, parent/sub-technique policy, and other trusted ATT&CK cleanup remain in Phase 7. No compatibility, retraining, or recalibration decision was made.
+
+## Phase 2 — Fix durable replay and typed chain/context correctness
+
+- Completion timestamp: `2026-08-13T06:00:57+07:00`
+- Findings addressed: command-index-zero replay splitting; invalid replay cutoff lacking `received_at`; greedy failed-first chain selection; relative transfer/permission/execution chains losing confirmed cwd.
+- Exact implementation: canonical storage snapshots now expose each event's existing `received_at` and the exact through-watermark; replay uses explicit zero-safe grouping, constructs a canonical cutoff, and immediately validates its history manifest. Chain selection v3 uses deterministic bounded dynamic programming over successful same-entity transitions. Command observations propagate only observed or confirmed cwd, clearing it after failed/ambiguous directory changes.
+- Files/functions/contracts changed: `production/classification/durable_replay.py`; `production/correlation/session_behavior_relationships.py`; `production/reporting/threat_hypothesis.py`; `production/reporting/typed_semantic_chain_selection.py`; `production/reporting/typed_semantic_facts.py`; `production/storage/backend.py`; `production/storage/mongodb_backend.py`; `tests/test_cross_layer_consistency.py`; `tests/test_phase2_replay_chain_context.py`.
+- Contract version introduced: `typed_semantic_chain_selection.v3`. No database schema or index changed.
+- Implementation commit SHA: `0893efc0acef183ce7a7fe1b587294d977927aa4`
+- Implementation tree SHA: `c87c4f3e4d30b20d4e06bc38feda3963938784d7`
+- Tests and exact results: replay/chain/cwd/typed/storage/semantic focused group → `93 passed, 13 skipped`; skips are opt-in external MongoDB integration/failure-injection cases; `git diff --check` PASS.
+- Acceptance criteria: PASS. Realtime/replay first-command multi-label manifests match exactly; all replay cutoffs validate; a later successful retry forms the complete chain; failed/unreplaced, mismatched, variable, and ambiguous cases abstain; multiple runs over a 203-command retry fixture are byte-identical; search state is bounded by required-depth × chain-fact count.
+- Compatibility/historical-data impact: historical v2 selections and assessments are not rewritten. New v3 selection identities may differ. Snapshot payloads expose already-stored ordering metadata only; SQLite/Mongo persistence schemas remain unchanged.
+- Model/checkpoint impact: no checkpoint/model bytes changed and no compatibility decision was made. Corrected grouping can affect future sequence fingerprints and remains part of the post-Phase-7 gate.
+- Remaining limitations: prediction history still uses v2 representation until Phase 4; mapping/tactic semantics remain scheduled for Phase 7.
