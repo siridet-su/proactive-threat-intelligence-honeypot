@@ -13,7 +13,7 @@ import argparse
 import os
 from typing import Sequence
 
-from production.ai_advisory.security import read_secure_utf8
+from production.ai_advisory.security import read_mongodb_uri
 from production.storage.mongodb_backend import (
     MongoDBStorageBackend,
     install_mongodb_schema,
@@ -28,7 +28,7 @@ def _client() -> object:
     uri_file = os.getenv("MONGODB_URI_FILE", "").strip()
     if not uri_file:
         raise ValueError("MONGODB_URI_FILE is required")
-    uri = read_secure_utf8(uri_file, name="MONGODB_URI", max_bytes=65_536)
+    uri = read_mongodb_uri(uri_file, max_bytes=65_536)
     return MongoClient(
         uri,
         retryWrites=True,

@@ -5879,7 +5879,7 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
         raise StorageError(str(exc)) from exc
 
     if settings.backend == MONGODB_BACKEND:
-        from production.ai_advisory.security import read_secure_utf8
+        from production.ai_advisory.security import read_mongodb_uri
         from production.storage.mongodb_backend import MongoDBStorageBackend
         from production.storage.mongodb_epoch import (
             MongoEpochStorage,
@@ -5891,9 +5891,7 @@ def open_storage(database: str | DatabaseSettings) -> StorageBackend:
         require_active_release(receipt)
         if receipt["rollback_mirror_path"] != settings.rollback_sqlite_database_path:
             raise StorageError("MongoDB rollback mirror path disagrees with epoch receipt")
-        uri = read_secure_utf8(
-            settings.mongodb_uri_file, name="MONGODB_URI", max_bytes=65_536
-        )
+        uri = read_mongodb_uri(settings.mongodb_uri_file, max_bytes=65_536)
         mongo = MongoDBStorageBackend(uri)
         mongo.initialize()
         mirror_path = Path(settings.rollback_sqlite_database_path)

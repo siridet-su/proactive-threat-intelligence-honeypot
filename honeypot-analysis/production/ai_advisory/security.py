@@ -36,6 +36,13 @@ ACTIVATION_KEYS = {
     "expires_at",
 }
 
+# systemd places LoadCredential= material in a read-only tmpfs below this
+# fixed mount root.  The unit-specific directory is supplied dynamically via
+# CREDENTIALS_DIRECTORY; only the reviewed ``mongodb-uri`` child is accepted
+# by the MongoDB-specific loader below.
+_SYSTEMD_CREDENTIALS_ROOT = Path("/run/credentials")
+_SYSTEMD_MONGODB_CREDENTIAL_NAME = "mongodb-uri"
+
 
 def _open_absolute_no_symlink(path: Path) -> int:
     if not path.is_absolute():
@@ -111,6 +118,98 @@ def read_secure_utf8(path_text: str, *, name: str, max_bytes: int = 65_536) -> s
     if not value:
         raise ValueError(f"{name} must not be empty")
     return value
+
+
+def _read_systemd_mongodb_credential(
+    path_text: str,
+    *,
+    max_bytes: int,
+) -> bytes:
+    """Read the exact reviewed systemd LoadCredential MongoDB contract.
+
+    This deliberately is not an exception in ``read_secure_file``.  Ordinary
+    protected files remain service-owned and owner-only; only a path supplied
+    by systemd through ``CREDENTIALS_DIRECTORY`` may use the root-owned,
+    read-only credential representation.
+    """
+
+    credentials_text = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
+    if not credentials_text:
+        raise ValueError("systemd MongoDB credential directory is unavailable")
+    credentials_dir = Path(credentials_text)
+    path = Path(str(path_text or ""))
+    if not credentials_dir.is_absolute() or not path.is_absolute():
+        raise ValueError("systemd MongoDB credential path must be absolute")
+    # The child directory is dynamic, but the systemd credential mount root is
+    # fixed.  This prevents an attacker-controlled CREDENTIALS_DIRECTORY from
+    # turning an arbitrary root-owned file into an accepted credential.
+    if credentials_dir.parent != _SYSTEMD_CREDENTIALS_ROOT:
+        raise ValueError("systemd MongoDB credential directory is invalid")
+    if credentials_dir != Path(os.path.normpath(str(credentials_dir))):
+        raise ValueError("systemd MongoDB credential directory is not canonical")
+    expected_path = credentials_dir / _SYSTEMD_MONGODB_CREDENTIAL_NAME
+    if path != expected_path:
+        raise ValueError("MongoDB credential path is outside CREDENTIALS_DIRECTORY")
+
+    try:
+        directory_metadata = os.stat(credentials_dir, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError("systemd MongoDB credential directory is unavailable") from exc
+    if not stat.S_ISDIR(directory_metadata.st_mode):
+        raise ValueError("systemd MongoDB credential directory is not a directory")
+    if directory_metadata.st_uid != 0 or stat.S_IMODE(directory_metadata.st_mode) != 0o550:
+        raise ValueError("systemd MongoDB credential directory has unsafe ownership or mode")
+    try:
+        mount_flags = os.statvfs(credentials_dir).f_flag
+    except OSError as exc:
+        raise ValueError("systemd MongoDB credential mount is unavailable") from exc
+    if not mount_flags & getattr(os, "ST_RDONLY", 1):
+        raise ValueError("systemd MongoDB credential mount must be read-only")
+
+    try:
+        descriptor = _open_absolute_no_symlink(path)
+    except OSError as exc:
+        raise ValueError("systemd MongoDB credential is unavailable or traverses a symlink") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("systemd MongoDB credential must be a regular file")
+        if metadata.st_uid != 0 or metadata.st_gid != 0:
+            raise ValueError("systemd MongoDB credential has unsafe ownership")
+        # This is the representation observed from the reviewed unit.  In
+        # particular, no writable or world-readable root-owned files qualify.
+        if stat.S_IMODE(metadata.st_mode) != 0o440:
+            raise ValueError("systemd MongoDB credential has unsafe mode")
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(remaining, 8192))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        value = b"".join(chunks)
+        if len(value) < 1 or len(value) > max_bytes:
+            raise ValueError("systemd MongoDB credential has an invalid size")
+        return value
+    finally:
+        os.close(descriptor)
+
+
+def read_mongodb_uri(path_text: str, *, max_bytes: int = 65_536) -> str:
+    """Read a MongoDB URI from either the strict file or LoadCredential path."""
+
+    if os.getenv("CREDENTIALS_DIRECTORY", "").strip():
+        value = _read_systemd_mongodb_credential(path_text, max_bytes=max_bytes)
+    else:
+        value = read_secure_file(path_text, name="MONGODB_URI", max_bytes=max_bytes)
+    try:
+        decoded = value.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise ValueError("MONGODB_URI must contain UTF-8") from exc
+    if not decoded or any(ord(char) < 0x20 for char in decoded):
+        raise ValueError("MONGODB_URI must not be empty")
+    return decoded
 
 
 def validate_https_endpoint(endpoint: str, allowed_hosts: Sequence[str]) -> SplitResult:
