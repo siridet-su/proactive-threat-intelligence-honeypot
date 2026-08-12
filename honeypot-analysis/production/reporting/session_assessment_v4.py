@@ -326,6 +326,7 @@ def _validate_classification_policy(document: Dict[str, Any]) -> None:
         "classification_rule_policy.v1",
         "classification_rule_policy.v2",
         "classification_rule_policy.v3",
+        "classification_rule_policy.v4",
     }:
         raise ValueError("classification policy schema is invalid")
     if not _clean(document.get("policy_id")) or not _clean(document.get("version")):
@@ -337,11 +338,17 @@ def _validate_classification_policy(document: Dict[str, Any]) -> None:
     if not isinstance(rules, list) or not rules:
         raise ValueError("classification policy has no rules")
     reviewed_only = _clean(body.get("rule_review_mode")).lower() != "include_unreviewed"
-    if document.get("schema_version") == "classification_rule_policy.v3":
+    if document.get("schema_version") in {
+        "classification_rule_policy.v3",
+        "classification_rule_policy.v4",
+    }:
         authority = body.get("runtime_authority")
         if not isinstance(authority, dict) or authority.get(
             "schema_version"
-        ) != "command_authority_decision.v1":
+        ) not in {
+            "command_authority_decision.v1",
+            "command_authority_decision.v2",
+        }:
             raise ValueError("classification runtime authority metadata is invalid")
         if authority.get("regex_default_promotion") != "audit_only":
             raise ValueError("classification regex default must be audit-only")

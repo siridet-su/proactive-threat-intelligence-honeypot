@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-SCHEMA_VERSION = "classification_rule_policy.v3"
-AUTHORITY_DECISION_SCHEMA = "command_authority_decision.v1"
+SCHEMA_VERSION = "classification_rule_policy.v4"
+AUTHORITY_DECISION_SCHEMA = "command_authority_decision.v2"
 TTP_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
 ALLOWED_SOURCE_TYPES = {
     "human_curated_command_rule",
@@ -135,6 +135,11 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
                     "policy.runtime_authority.trusted_literal_fallback_rule_ids "
                     "must be a list of rule IDs"
                 )
+            if authority.get("trusted_regex_operation_class") != "reviewed_operation_context":
+                errors.append(
+                    "policy.runtime_authority.trusted_regex_operation_class must be "
+                    "reviewed_operation_context"
+                )
     rules = _rules(policy)
     if not rules:
         errors.append("policy: at least one rule is required")
@@ -200,6 +205,11 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
                         if rule_authority.get("safety_class") != "literal_unambiguous":
                             errors.append(
                                 f"{path}.runtime_authority trusted promotion must be literal_unambiguous"
+                            )
+                        if rule_authority.get("operation_class") != "reviewed_operation_context":
+                            errors.append(
+                                f"{path}.runtime_authority trusted promotion must use "
+                                "reviewed_operation_context"
                             )
             elif rule_id not in configured_ids:
                 # The policy-level allow-list is explicit metadata for the

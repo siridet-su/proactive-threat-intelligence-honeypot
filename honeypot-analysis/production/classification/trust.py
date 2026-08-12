@@ -19,8 +19,10 @@ AUDIT_ONLY_CLASSIFICATION_SOURCES = {
     "securebert_unavailable",
     "unclassified",
 }
-AUTHORITY_DECISION_SCHEMA = "command_authority_decision.v1"
-CLASSIFICATION_EVENT_SCHEMA = "classification_event.v2"
+AUTHORITY_DECISION_SCHEMA = "command_authority_decision.v2"
+CLASSIFICATION_EVENT_SCHEMA = "classification_event.v3"
+HISTORICAL_AUTHORITY_DECISION_SCHEMAS = frozenset({"command_authority_decision.v1"})
+HISTORICAL_CLASSIFICATION_EVENT_SCHEMAS = frozenset({"classification_event.v2"})
 MIN_TRUSTED_SECUREBERT_CONFIDENCE = 0.55
 _OPAQUE_BUSYBOX_APPLET_RE = re.compile(
     r"^(?:/bin/)?busybox\s+[A-Z]{4,12}(?:\s|$)",
@@ -54,8 +56,10 @@ def classification_evidence_tier(event: Dict[str, Any]) -> str:
     # and the immutable rule-policy provenance.  Historical v1 events remain
     # readable as legacy report input, but are never emitted by the current
     # runtime classifier.
+    is_current_event = event.get("classification_event_schema") == CLASSIFICATION_EVENT_SCHEMA
+    is_historical_event = event.get("classification_event_schema") in HISTORICAL_CLASSIFICATION_EVENT_SCHEMAS
     is_new_event = (
-        event.get("classification_event_schema") == CLASSIFICATION_EVENT_SCHEMA
+        is_current_event
         or "authority_decision" in event
         or "rule_policy_id" in event
     )
@@ -63,7 +67,10 @@ def classification_evidence_tier(event: Dict[str, Any]) -> str:
         authority = event.get("authority_decision")
         if not isinstance(authority, dict):
             return "audit_only_candidate"
-        if authority.get("schema_version") != AUTHORITY_DECISION_SCHEMA:
+        allowed_authority_schemas = {AUTHORITY_DECISION_SCHEMA}
+        if is_historical_event:
+            allowed_authority_schemas.update(HISTORICAL_AUTHORITY_DECISION_SCHEMAS)
+        if authority.get("schema_version") not in allowed_authority_schemas:
             return "audit_only_candidate"
         if authority.get("decision") != "trusted" or authority.get("trusted_eligible") is not True:
             return "audit_only_candidate"

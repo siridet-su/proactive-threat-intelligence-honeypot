@@ -318,7 +318,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
             if not _is_sha256(policy.get(hash_field)):
                 errors.append(f"classification_policy.{hash_field} is invalid")
         if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION}:
-            if policy.get("authority_decision_contract_version") != "command_authority_decision.v1":
+            if policy.get("authority_decision_contract_version") != "command_authority_decision.v2":
                 errors.append("authority decision contract version is invalid")
             if not _is_sha256(policy.get("authority_decision_sha256")):
                 errors.append("authority decision contract hash is invalid")

@@ -106,7 +106,7 @@ class CommandFragment:
     operator_after: str = ""
 
 
-CLASSIFICATION_RULE_POLICY_SCHEMA = "classification_rule_policy.v3"
+CLASSIFICATION_RULE_POLICY_SCHEMA = "classification_rule_policy.v4"
 DEFAULT_CLASSIFICATION_RULE_POLICY = "configs/classification_rules.trusted.json"
 
 # Minimal emergency fallback only. Full command coverage lives in the versioned
@@ -246,6 +246,11 @@ def _rule_metadata_by_spec(document: Dict[str, Any]) -> Dict[Tuple[str, str, str
             for item in authority.get("trusted_literal_fallback_rule_ids", [])
             if _clean_text(item)
         }
+    operation_class = _clean_text(
+        authority.get("trusted_regex_operation_class")
+        if isinstance(authority, dict)
+        else ""
+    )
     for rule in _policy_rules(document):
         pattern = _clean_text(rule.get("pattern"))
         tid = _clean_text(rule.get("ttp")).upper()
@@ -263,7 +268,11 @@ def _rule_metadata_by_spec(document: Dict[str, Any]) -> Dict[Tuple[str, str, str
                 ),
                 "reviewed": _clean_text(item.get("rule_id")) in approved,
                 "safety_class": "literal_unambiguous",
+                "operation_class": operation_class,
             }
+        elif _clean_text(item.get("rule_id")) in approved:
+            runtime_authority = dict(runtime_authority)
+            runtime_authority.setdefault("operation_class", operation_class)
         item["runtime_authority"] = runtime_authority
         indexed[(pattern, tid, name)] = item
     return indexed
@@ -504,8 +513,12 @@ def _rule_based_ttp_with_rules(
     matched: List[TTPPrediction] = []
     seen = set()
     for pattern, tid, name in rules:
-        if tid not in seen and pattern.search(command):
+        match = pattern.search(command)
+        if tid not in seen and match:
             metadata = (metadata_by_spec or {}).get((pattern.pattern, tid, name), {})
+            metadata = dict(metadata)
+            metadata["regex_match_start"] = match.start()
+            metadata["regex_match_end"] = match.end()
             authority = candidate_authority_decision(
                 parser_decision=parser_decision or {},
                 evidence_type="command_regex",
@@ -536,9 +549,15 @@ def _operation_based_ttp(
     *,
     parsed: Optional[Dict[str, Any]] = None,
     policy_provenance: Optional[Dict[str, Any]] = None,
+    operator_before: str = "",
 ) -> List[TTPPrediction]:
     parsed = parsed if isinstance(parsed, dict) else parse_command_operation(command)
-    parser_decision = command_authority_decision(command, parsed, structural_match=True)
+    parser_decision = command_authority_decision(
+        command,
+        parsed,
+        structural_match=True,
+        operator_before=operator_before,
+    )
     matched: List[TTPPrediction] = []
     seen: set[str] = set()
     for rule in rules:
@@ -732,7 +751,12 @@ class NotebookParityClassifier:
                 "securebert_error", evidence_type="securebert",
             )
 
-    def _classify_single(self, command: str) -> List[Dict[str, Any]]:
+    def _classify_single(
+        self,
+        command: str,
+        *,
+        operator_before: str = "",
+    ) -> List[Dict[str, Any]]:
         command = (command or "").strip()
         if not command:
             return []
@@ -742,6 +766,7 @@ class NotebookParityClassifier:
             command,
             parsed,
             structural_match=False,
+            operator_before=operator_before,
         )
         rule_predictions = _operation_based_ttp(
             command,
@@ -749,12 +774,14 @@ class NotebookParityClassifier:
             self.rule_evidence_source,
             parsed=parsed,
             policy_provenance=self._policy_provenance(),
+            operator_before=operator_before,
         )
         if rule_predictions:
             parser_decision = command_authority_decision(
                 command,
                 parsed,
                 structural_match=True,
+                operator_before=operator_before,
             )
         else:
             rule_predictions = _rule_based_ttp_with_rules(
@@ -878,7 +905,10 @@ class NotebookParityClassifier:
 
         events: List[Dict[str, Any]] = []
         for fragment in fragments:
-            for event in self._classify_single(fragment.text):
+            for event in self._classify_single(
+                fragment.text,
+                operator_before=fragment.operator_before,
+            ):
                 item = dict(event)
                 if fragment.count > 1:
                     item["original_command"] = original_command
@@ -887,6 +917,11 @@ class NotebookParityClassifier:
                     item["subcommand_count"] = fragment.count
                     item["operator_before"] = fragment.operator_before
                     item["operator_after"] = fragment.operator_after
+                    item["fragment_execution"] = (
+                        "conditional_unproven"
+                        if fragment.operator_before in {"&&", "||"}
+                        else "submitted_direct"
+                    )
                 events.append(item)
         return events
 
