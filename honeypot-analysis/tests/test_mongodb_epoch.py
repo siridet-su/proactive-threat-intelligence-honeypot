@@ -41,10 +41,10 @@ def _receipt(tmp_path):
             "final_timestamp": "2026-08-12T00:00:00+00:00",
             "release_sha": "c" * 40,
             "policy_environment_bindings": {
-                "classification_rules_file_sha256": "1" * 64,
-                "classification_trust_policy_file_sha256": "2" * 64,
-                "classifier_environment_file_sha256": "3" * 64,
-                "prediction_policy_file_sha256": "4" * 64,
+                "classification_rules_file_sha256": "5" * 64,
+                "classification_trust_policy_file_sha256": "6" * 64,
+                "classifier_environment_file_sha256": "7" * 64,
+                "prediction_policy_file_sha256": "8" * 64,
             },
         },
         "reviewed_release_sha": "b" * 40,
@@ -73,6 +73,30 @@ def test_epoch_receipt_is_content_addressed_and_exact(tmp_path):
     document["epoch_id"] = "tampered"
     path.write_text(stable_json(document) + "\n")
     with pytest.raises(ValueError, match="hash mismatch"):
+        load_storage_epoch(path)
+
+
+def test_epoch_preserves_distinct_historical_and_new_policy_lineage(tmp_path):
+    path, document = _receipt(tmp_path)
+    receipt = load_storage_epoch(path)
+    assert (
+        receipt["previous_sqlite_archive"]["policy_environment_bindings"]
+        != receipt["classifier_policy_environment_bindings"]
+    )
+
+
+def test_historical_policy_lineage_must_be_complete_sha256_bindings(tmp_path):
+    path, document = _receipt(tmp_path)
+    document["previous_sqlite_archive"]["policy_environment_bindings"].pop(
+        "prediction_policy_file_sha256"
+    )
+    document["receipt_sha256"] = hashlib.sha256(
+        stable_json(
+            {key: value for key, value in document.items() if key != "receipt_sha256"}
+        ).encode()
+    ).hexdigest()
+    path.write_text(stable_json(document) + "\n")
+    with pytest.raises(ValueError, match="bindings are incomplete"):
         load_storage_epoch(path)
 
 

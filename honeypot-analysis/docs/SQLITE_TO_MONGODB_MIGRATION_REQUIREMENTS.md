@@ -90,6 +90,12 @@ verified immutable SQLite archive, test backup/restore of the new rollback
 mirror, and test a manual `mongodump`/`mongorestore` round trip using synthetic
 staging data. Do not describe that procedure as managed backup.
 
+The epoch receipt records historical SQLite policy/environment hashes and new
+MongoDB-epoch policy/environment hashes independently. Both lineages are
+validated, but they are not forced equal: a reviewed release boundary may
+update policy provenance without reinterpreting or rewriting historical
+assessments.
+
 ## Manual M0 export and restore
 
 Use a GPG-verified MongoDB Database Tools release on the capstone host. Keep

@@ -149,8 +149,11 @@ def load_storage_epoch(path: str | Path) -> Dict[str, Any]:
         raise ValueError("historical SQLite archive counts are incomplete")
     if archive["cutoff"] != cutoff:
         raise ValueError("historical SQLite cutoff and epoch cutoff disagree")
-    if archive["policy_environment_bindings"] != bindings:
-        raise ValueError("historical SQLite policy bindings and epoch bindings disagree")
+    archive_bindings = archive["policy_environment_bindings"]
+    if not isinstance(archive_bindings, dict) or set(archive_bindings) != POLICY_BINDING_FIELDS:
+        raise ValueError("historical SQLite policy/environment bindings are incomplete")
+    for key, value in archive_bindings.items():
+        _require_sha256(value, f"previous_sqlite_archive.{key}")
     return document
 
 
