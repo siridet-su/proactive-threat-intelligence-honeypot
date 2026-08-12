@@ -34,52 +34,6 @@ The two previously optional Phase 12 items that could change whether a trusted h
 
 # 1. MUST FIX before thesis evaluation
 
-## Phase 0 — Freeze the remediation baseline and version map
-
-### What will be fixed
-
-Establish an immutable baseline for implementation and document which new producer consumes which contract version.
-
-### Why
-
-Several changes alter IDs, hashes, policy identities, and prediction eligibility. A baseline prevents new work from being confused with previously reviewed behavior.
-
-### Main areas affected
-
-- Git candidate fingerprint and inventory
-- Classifier environment receipt
-- Policy/configuration hashes
-- Model compatibility receipt
-- Release-manifest inputs
-- A new contract-lineage/compatibility document
-
-### Tests
-
-- Baseline fingerprint reproducibility
-- Clean-worktree/inventory check
-- Contract registry rejects duplicate or ambiguous schema IDs
-- Historical fixture versions remain recognized
-
-### Acceptance criteria
-
-- Exact source commit/tree and configuration hashes recorded.
-- Every proposed contract version has one producer and explicit consumers.
-- Historical versions have a documented disposition: readable, display-only, inference-eligible, or rejected.
-
-### Contract change
-
-No runtime contract change yet; this phase records the change plan.
-
-### Transformer impact
-
-None.
-
-### Historical compatibility
-
-No data is rewritten.
-
----
-
 ## Phase 1 — Correct command authority and trusted ATT&CK promotion
 
 ### What will be fixed
@@ -826,27 +780,26 @@ None.
 
 # Recommended execution order
 
-1. **Phase 0** — Freeze the remediation baseline and approve the contract-version matrix.
-2. **Phase 1** — Implement operation-context classifier authority, trusted ATT&CK promotion, and conditional-fragment containment.
-3. **Phase 2** — Correct durable replay grouping/cutoffs, retry-aware chain selection, and cwd-aware entity resolution.
-4. **Phase 3** — Introduce trusted-only canonical findings, `session_assessment.v5`, and the full-content `threat_hypothesis_set.v2`.
-5. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
-6. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
-7. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
-8. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
-9. **Transformer decision** — Preserve and fully re-evaluate/recalibrate the existing checkpoint only if compatibility is proven; otherwise retrain, recalibrate, and issue a new model-bundle/checkpoint receipt. Preserve the prior checkpoint as immutable historical evidence.
-10. **Phase 5** — Implement graph-only `response_guidance.v4` and exact-prefix current-policy reevaluation.
-11. **Phase 6** — Run the integrated must-fix regression suite and repeat the independent read-only behavioral-authority audit.
-12. **Phase 8** — Correct prediction/evaluation UI terminology and provenance.
-13. **Phase 9** — Replace campaign/attribution/STIX overclaims with bounded behavioral-similarity and observable semantics.
-14. **Phase 10** — Complete hypothesis provenance and evidence-layer presentation.
-15. **Phase 11** — Reconcile methodology, architecture, model, release, and limitation documentation.
-16. **Phase 12** — Apply remaining optional presentation and maintenance cleanup; no trusted-sequence-affecting work remains in this phase.
-17. Run the full repository suite, exact private runtime/model validation, policy/schema validators, replay parity, deterministic secret scan, and release-review checks.
-18. Only after a clean separate review, prepare a new thesis-evaluation release.
-19. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
+1. **Phase 1** — Implement operation-context classifier authority, trusted ATT&CK promotion, and conditional-fragment containment.
+2. **Phase 2** — Correct durable replay grouping/cutoffs, retry-aware chain selection, and cwd-aware entity resolution.
+3. **Phase 3** — Introduce trusted-only canonical findings, `session_assessment.v5`, and the full-content `threat_hypothesis_set.v2`.
+4. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
+5. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
+6. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
+7. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
+8. **Transformer decision** — Preserve and fully re-evaluate/recalibrate the existing checkpoint only if compatibility is proven; otherwise retrain, recalibrate, and issue a new model-bundle/checkpoint receipt. Preserve the prior checkpoint as immutable historical evidence.
+9. **Phase 5** — Implement graph-only `response_guidance.v4` and exact-prefix current-policy reevaluation.
+10. **Phase 6** — Run the integrated must-fix regression suite and repeat the independent read-only behavioral-authority audit.
+11. **Phase 8** — Correct prediction/evaluation UI terminology and provenance.
+12. **Phase 9** — Replace campaign/attribution/STIX overclaims with bounded behavioral-similarity and observable semantics.
+13. **Phase 10** — Complete hypothesis provenance and evidence-layer presentation.
+14. **Phase 11** — Reconcile methodology, architecture, model, release, and limitation documentation.
+15. **Phase 12** — Apply remaining optional presentation and maintenance cleanup; no trusted-sequence-affecting work remains in this phase.
+16. Run the full repository suite, exact private runtime/model validation, policy/schema validators, replay parity, deterministic secret scan, and release-review checks.
+17. Only after a clean separate review, prepare a new thesis-evaluation release.
+18. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
 
-The first remaining implementation phase is **Phase 0 — Freeze the remediation baseline and version map**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
+The first remaining implementation phase is **Phase 1 — Correct command authority and trusted ATT&CK promotion**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
 
 No implementation, commit, deployment, service action, or production mutation was performed.
 
