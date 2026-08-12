@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VOCABULARY_PATH = (
     PROJECT_ROOT / "configs" / "typed_semantic_vocabulary.v1.json"
 )
-POLICY_SCHEMA = "typed_semantic_vocabulary_policy.v1"
+POLICY_SCHEMA = "typed_semantic_vocabulary_policy.v2"
 SHA256_LENGTH = 64
 
 _ROOT_KEYS = {
@@ -51,8 +51,15 @@ _CONTRACT_KEYS = {
 _SENSITIVE_PATH_POLICY_KEYS = {
     "schema_version",
     "match_scope",
-    "exact_absolute_paths",
-    "suffix_path_segments",
+    "default_class",
+    "classes",
+}
+_SENSITIVITY_CLASSES = {
+    "account_metadata": "account_enumeration",
+    "password_hash_store": "credential_material",
+    "private_key_material": "credential_material",
+    "token_cloud_credentials": "credential_material",
+    "generic_configuration": "ordinary_configuration",
 }
 _VOCABULARY_KEYS = {
     "operation_families",
@@ -198,7 +205,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
     ):
         if (
             sensitive_paths.get("schema_version")
-            != "typed_sensitive_path_policy.v1"
+            != "typed_sensitive_path_policy.v2"
         ):
             errors.append(
                 "sensitive_path_policy.schema_version is invalid"
@@ -211,52 +218,58 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                 "sensitive_path_policy.match_scope must require complete "
                 "parsed path operands"
             )
-        exact_paths = _string_list(
-            sensitive_paths.get("exact_absolute_paths"),
-            "sensitive_path_policy.exact_absolute_paths",
-            errors,
-        )
-        for path in exact_paths:
-            if (
-                not path.startswith("/")
-                or path != posixpath.normpath(path)
-                or path != path.strip()
-            ):
-                errors.append(
-                    "sensitive_path_policy exact paths must be canonical "
-                    "absolute paths"
-                )
-        suffixes = sensitive_paths.get("suffix_path_segments")
-        if not isinstance(suffixes, list) or not suffixes:
+        if sensitive_paths.get("default_class") != "generic_configuration":
+            errors.append("sensitive_path_policy.default_class is invalid")
+        classes = sensitive_paths.get("classes")
+        if not isinstance(classes, dict) or set(classes) != set(_SENSITIVITY_CLASSES):
             errors.append(
-                "sensitive_path_policy.suffix_path_segments must be a "
-                "non-empty list"
+                "sensitive_path_policy.classes must define the reviewed closed taxonomy"
             )
         else:
-            normalized_suffixes: List[tuple[str, ...]] = []
-            for index, suffix in enumerate(suffixes):
-                label = (
-                    "sensitive_path_policy.suffix_path_segments"
-                    f"[{index}]"
-                )
-                segments = _string_list(suffix, label, errors)
-                if len(segments) < 2:
-                    errors.append(f"{label} must contain at least two segments")
-                if any(
-                    segment in {".", ".."}
-                    or "/" in segment
-                    or segment != segment.strip()
-                    for segment in segments
+            seen_paths: set[str] = set()
+            seen_suffixes: set[tuple[str, ...]] = set()
+            for class_name, expected_sensitivity in _SENSITIVITY_CLASSES.items():
+                definition = classes[class_name]
+                label = f"sensitive_path_policy.classes.{class_name}"
+                if not _exact_keys(
+                    definition,
+                    {"sensitivity", "exact_absolute_paths", "suffix_path_segments"},
+                    label,
+                    errors,
                 ):
-                    errors.append(
-                        f"{label} contains an invalid path segment"
-                    )
-                normalized_suffixes.append(tuple(segments))
-            if len(normalized_suffixes) != len(set(normalized_suffixes)):
-                errors.append(
-                    "sensitive_path_policy suffixes must not contain "
-                    "duplicates"
-                )
+                    continue
+                if definition.get("sensitivity") != expected_sensitivity:
+                    errors.append(f"{label}.sensitivity is invalid")
+                exact_paths = definition.get("exact_absolute_paths")
+                if not isinstance(exact_paths, list) or any(
+                    not isinstance(path, str)
+                    or not path.startswith("/")
+                    or path != posixpath.normpath(path)
+                    or path in seen_paths
+                    for path in exact_paths or []
+                ):
+                    errors.append(f"{label}.exact_absolute_paths is invalid")
+                else:
+                    seen_paths.update(exact_paths)
+                suffixes = definition.get("suffix_path_segments")
+                if not isinstance(suffixes, list):
+                    errors.append(f"{label}.suffix_path_segments must be a list")
+                    continue
+                for index, suffix in enumerate(suffixes):
+                    segments = tuple(suffix) if isinstance(suffix, list) else ()
+                    if (
+                        len(segments) < 2
+                        or any(
+                            not isinstance(segment, str)
+                            or not segment.strip()
+                            or segment in {".", ".."}
+                            or "/" in segment
+                            for segment in segments
+                        )
+                        or segments in seen_suffixes
+                    ):
+                        errors.append(f"{label}.suffix_path_segments[{index}] is invalid")
+                    seen_suffixes.add(segments)
 
     vocabulary = value.get("vocabulary")
     lists: Dict[str, List[str]] = {}
@@ -383,11 +396,12 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                 "sensitive_read": {
                     "required_operation_types": {
                         "file_read",
-                        "credential_path_read",
+                        "credential_material_read",
                     },
                     "allowed_operation_types": {
                         "file_read",
-                        "credential_path_read",
+                        "credential_material_read",
+                        "account_metadata_read",
                     },
                     "operation_match_mode": "all_required",
                     "required_entity_role": "credential_paths",
@@ -453,9 +467,11 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                         "process_inspection",
                         "network_socket_inspection",
                         "account_database_inspection",
+                        "account_metadata_read",
                         "filesystem_search",
                     },
                     "allowed_operation_types": {
+                        "file_read",
                         "host_uptime_inspection",
                         "filesystem_capacity_inspection",
                         "system_identity_inspection",
@@ -464,6 +480,7 @@ def validate_typed_semantic_vocabulary(value: Any) -> List[str]:
                         "process_inspection",
                         "network_socket_inspection",
                         "account_database_inspection",
+                        "account_metadata_read",
                         "filesystem_search",
                     },
                     "operation_match_mode": "exactly_one_required",
@@ -661,6 +678,45 @@ def load_typed_semantic_vocabulary(path_text: str = "") -> Dict[str, Any]:
                 f"typed semantic vocabulary load failed: {exc.__class__.__name__}"
             ],
         }
+
+
+def classify_path_evidence(
+    value: Any,
+    policy: Dict[str, Any],
+) -> str:
+    """Return one reviewed class for a complete literal path operand."""
+
+    if not isinstance(value, str) or not value or value != value.strip():
+        return ""
+    path = value
+    if path.startswith("relative:"):
+        path = path[len("relative:"):]
+    if (
+        not path
+        or any(character in path for character in ("$", "`", "*", "?", "[", "]"))
+    ):
+        return ""
+    path_policy = policy.get("sensitive_path_policy") or {}
+    classes = path_policy.get("classes") or {}
+    segments = tuple(segment for segment in path.split("/") if segment)
+    for class_name in (
+        "account_metadata",
+        "password_hash_store",
+        "private_key_material",
+        "token_cloud_credentials",
+    ):
+        definition = classes.get(class_name) or {}
+        if path in set(definition.get("exact_absolute_paths") or []):
+            return class_name
+        for suffix in definition.get("suffix_path_segments") or []:
+            suffix_tuple = tuple(suffix) if isinstance(suffix, list) else ()
+            if (
+                suffix_tuple
+                and len(segments) >= len(suffix_tuple)
+                and segments[-len(suffix_tuple):] == suffix_tuple
+            ):
+                return class_name
+    return _clean(path_policy.get("default_class"))
 
 
 def vocabulary_summary(loaded: Dict[str, Any]) -> Dict[str, Any]:

@@ -13,6 +13,7 @@ from copy import deepcopy
 from typing import Any, Dict, List
 
 from production.policies.typed_semantic_vocabulary import (
+    classify_path_evidence,
     load_typed_semantic_vocabulary,
 )
 from production.reporting.typed_semantic_facts import (
@@ -21,7 +22,7 @@ from production.reporting.typed_semantic_facts import (
 from production.utils.serialization import stable_json
 
 
-SCHEMA_VERSION = "typed_semantic_family_selection.v1"
+SCHEMA_VERSION = "typed_semantic_family_selection.v2"
 ACTIVATED_FAMILIES = (
     "sensitive_read",
     "transfer",
@@ -39,6 +40,7 @@ INSPECTION_OPERATIONS = frozenset({
     "process_inspection",
     "network_socket_inspection",
     "account_database_inspection",
+    "account_metadata_read",
     "filesystem_search",
 })
 FILESYSTEM_CHANGE_OPERATIONS = frozenset({
@@ -75,6 +77,7 @@ _MATCH_KEYS = {
     "entity_role",
     "entity_type",
     "entity_value",
+    "evidence_class",
     "path_identity_id",
     "path_resolution_status",
     "outcome_status",
@@ -126,6 +129,7 @@ def _match_or_reasons(
     fact: Dict[str, Any],
     requirement: Dict[str, Any],
     family: str,
+    policy: Dict[str, Any],
 ) -> tuple[List[Dict[str, Any]], List[str]]:
     reasons: List[str] = []
     parse = fact.get("parse") or {}
@@ -303,6 +307,7 @@ def _match_or_reasons(
                 "executed_paths",
                 "literal_values",
             },
+            "account_metadata_read": {"read_paths"},
         }
         required_roles = {
             role_name
@@ -423,6 +428,14 @@ def _match_or_reasons(
             "entity_role": entity_role,
             "entity_type": _clean(entity.get("entity_type")),
             "entity_value": _clean(entity.get("normalized_value")),
+            "evidence_class": (
+                classify_path_evidence(
+                    entity.get("normalized_value"),
+                    policy,
+                )
+                if entity.get("entity_type") == "path"
+                else ""
+            ),
             "path_identity_id": _clean(path.get("path_identity_id")),
             "path_resolution_status": _clean(
                 path.get("resolution_status")
@@ -453,6 +466,7 @@ def _selection_payload(
             fact,
             requirement,
             family,
+            policy,
         )
         matches.extend(fact_matches)
         if reasons:
@@ -778,7 +792,7 @@ def validate_policy_output_trace(
             continue
         expected_operations = {
             "sensitive_read": [
-                "credential_path_read",
+                "credential_material_read",
                 "file_read",
             ],
             "transfer": ["transfer_observed"],
@@ -994,6 +1008,7 @@ def validate_policy_output_trace(
         proof_scopes = frozenset(match.get("proof_scopes") or [])
         allowed_proof_scopes = (
             {
+                frozenset({"general_command_semantics"}),
                 frozenset({
                     "general_command_semantics",
                     "literal_command",
@@ -1001,6 +1016,10 @@ def validate_policy_output_trace(
                 frozenset({
                     "shell_syntax",
                     "literal_command",
+                }),
+                frozenset({
+                    "general_command_semantics",
+                    "shell_syntax",
                 }),
                 frozenset({
                     "general_command_semantics",

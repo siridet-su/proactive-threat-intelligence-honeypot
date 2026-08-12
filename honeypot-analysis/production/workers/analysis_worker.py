@@ -15,6 +15,10 @@ from production.classification.trust import (
     classification_audit_reason,
     is_trusted_classification_event,
 )
+from production.classification.classification_pipeline import NotebookParityClassifier
+from production.classification.securebert_classifier import load_securebert_classifier
+from production.classification.environment import load_classifier_environment
+from production.classification.durable_replay import reclassify_durable_prefix
 from production.reporting.canonical_pipeline import (
     CanonicalAssessmentCoordinator,
     build_session_correlation_hunting_context,
@@ -605,10 +609,49 @@ async def analyze_job(
         session_payload,
         max_events=config.canonical_evidence_max_events,
     )
+    context = load_analysis_context(config, storage=selected_storage)
+    classifier_environment = load_classifier_environment(
+        getattr(config, "classifier_environment_path", ""),
+        verify_assets=True,
+    )
+    replay_classifier = NotebookParityClassifier(
+        bert_fn=load_securebert_classifier(config),
+        mitre_db=context["mitre_attack"],
+        high_confidence=float(
+            config.classification_policy.get("bert_min_confidence", 0.55)
+        ),
+        rule_policy_path=config.classification_rules_path,
+    )
+    replay_snapshot = selected_storage.load_session_event_snapshot(
+        str(session_payload.get("canonical_event_manifest", {}).get("session_id") or ""),
+        str(session_payload.get("canonical_event_manifest", {}).get("through_event_id") or ""),
+        config.canonical_evidence_max_events,
+    )
+    replay_manifest_keys = (
+        "schema_version",
+        "session_id",
+        "through_event_id",
+        "event_count",
+        "manifest_sha256",
+    )
+    if {
+        key: replay_snapshot.get(key) for key in replay_manifest_keys
+    } != {
+        key: session_payload.get("canonical_event_manifest", {}).get(key)
+        for key in replay_manifest_keys
+    }:
+        raise SessionAssessmentV4Error(
+            "durable prefix changed between manifest verification and classification replay"
+        )
+    session_payload = reclassify_durable_prefix(
+        session_payload,
+        replay_snapshot,
+        replay_classifier,
+        classifier_environment,
+    )
     state = session_state_from_payload(session_payload)
     if not getattr(state, "bpg_list", None) or not getattr(state, "ioc_summary", None):
         attach_runtime_context(state)
-    context = load_analysis_context(config, storage=selected_storage)
     trigger = build_pipeline_trigger(
         coordinator_class=coordinator_class,
         feeds=context["feeds"],

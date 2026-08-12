@@ -35,6 +35,19 @@ CLASSIFICATION_POLICY = ROOT / "configs/classification_rules.trusted.json"
 
 def _spec() -> dict[str, Any]:
     value = load_fixture("typed_semantic_poc_combined", "combined")
+    corrections = json.loads(
+        (ROOT / "configs/behavioral_label_corrections.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )["corrections"]
+    for case in value.get("cases") or []:
+        replacements = corrections.get(case.get("case_id"), {}).get(
+            "expected_operation_replacements", {}
+        )
+        case["expected_operations"] = [
+            replacements.get(operation, operation)
+            for operation in case.get("expected_operations") or []
+        ]
     assert value["schema_version"] == (
         "typed_semantic_poc_combined_evaluation.v1"
     )

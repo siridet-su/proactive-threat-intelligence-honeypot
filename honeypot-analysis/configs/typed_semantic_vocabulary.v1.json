@@ -1,8 +1,8 @@
 {
-  "schema_version": "typed_semantic_vocabulary_policy.v1",
+  "schema_version": "typed_semantic_vocabulary_policy.v2",
   "policy_id": "honeypot-typed-semantic-vocabulary",
-  "version": "1.7.0",
-  "semantic_extractor_version": "typed-shell-subset.v2.3",
+  "version": "2.0.0",
+  "semantic_extractor_version": "typed-shell-subset.v2.4",
   "authority": {
     "mode": "family_scoped_policy_input",
     "may_select_findings": true,
@@ -13,7 +13,7 @@
   "review": {
     "method": "developer-authored closed semantic vocabulary",
     "reviewed": true,
-    "last_reviewed": "2026-07-30",
+    "last_reviewed": "2026-08-11",
     "scope": "bounded Cowrie SSH shell evidence with direct transfer-event policy input"
   },
   "contract": {
@@ -25,39 +25,44 @@
     "shadow_diff_schema": "typed_semantic_shadow_diff.v1"
   },
   "sensitive_path_policy": {
-    "schema_version": "typed_sensitive_path_policy.v1",
+    "schema_version": "typed_sensitive_path_policy.v2",
     "match_scope": "complete_parsed_path_operand",
-    "exact_absolute_paths": [
-      "/etc/passwd",
-      "/etc/shadow"
-    ],
-    "suffix_path_segments": [
-      [
-        ".aws",
-        "credentials"
-      ],
-      [
-        ".config",
-        "gcloud",
-        "application_default_credentials.json"
-      ],
-      [
-        ".ssh",
-        "id_dsa"
-      ],
-      [
-        ".ssh",
-        "id_ecdsa"
-      ],
-      [
-        ".ssh",
-        "id_ed25519"
-      ],
-      [
-        ".ssh",
-        "id_rsa"
-      ]
-    ]
+    "default_class": "generic_configuration",
+    "classes": {
+      "account_metadata": {
+        "sensitivity": "account_enumeration",
+        "exact_absolute_paths": ["/etc/passwd"],
+        "suffix_path_segments": []
+      },
+      "password_hash_store": {
+        "sensitivity": "credential_material",
+        "exact_absolute_paths": ["/etc/shadow"],
+        "suffix_path_segments": []
+      },
+      "private_key_material": {
+        "sensitivity": "credential_material",
+        "exact_absolute_paths": [],
+        "suffix_path_segments": [
+          [".ssh", "id_dsa"],
+          [".ssh", "id_ecdsa"],
+          [".ssh", "id_ed25519"],
+          [".ssh", "id_rsa"]
+        ]
+      },
+      "token_cloud_credentials": {
+        "sensitivity": "credential_material",
+        "exact_absolute_paths": [],
+        "suffix_path_segments": [
+          [".aws", "credentials"],
+          [".config", "gcloud", "application_default_credentials.json"]
+        ]
+      },
+      "generic_configuration": {
+        "sensitivity": "ordinary_configuration",
+        "exact_absolute_paths": [],
+        "suffix_path_segments": []
+      }
+    }
   },
   "operations": {
     "unknown": {
@@ -194,6 +199,14 @@
     },
     "credential_path_read": {
       "family": "sensitive_read",
+      "effect": "read"
+    },
+    "credential_material_read": {
+      "family": "sensitive_read",
+      "effect": "read"
+    },
+    "account_metadata_read": {
+      "family": "inspection",
       "effect": "read"
     },
     "account_modify": {
@@ -463,11 +476,12 @@
       "sensitive_read": {
         "required_operation_types": [
           "file_read",
-          "credential_path_read"
+          "credential_material_read"
         ],
-        "allowed_operation_types": [
-          "file_read",
-          "credential_path_read"
+      "allowed_operation_types": [
+        "file_read",
+        "credential_material_read",
+        "account_metadata_read"
         ],
         "operation_match_mode": "all_required",
         "required_entity_role": "credential_paths",
@@ -537,9 +551,11 @@
           "process_inspection",
           "network_socket_inspection",
           "account_database_inspection",
+          "account_metadata_read",
           "filesystem_search"
         ],
         "allowed_operation_types": [
+          "file_read",
           "host_uptime_inspection",
           "filesystem_capacity_inspection",
           "system_identity_inspection",
@@ -548,6 +564,7 @@
           "process_inspection",
           "network_socket_inspection",
           "account_database_inspection",
+          "account_metadata_read",
           "filesystem_search"
         ],
         "operation_match_mode": "exactly_one_required",

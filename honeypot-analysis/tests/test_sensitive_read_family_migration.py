@@ -166,8 +166,6 @@ def _legacy_guidance(observed: dict) -> dict:
     "command",
     [
         "cat /etc/shadow",
-        "head -n 1 /etc/passwd",
-        "grep root /etc/passwd",
         "tail -c 8 /etc/shadow",
     ],
 )
@@ -188,7 +186,7 @@ def test_resolved_successful_read_commands_select_the_family(
     assert {
         tuple(match["operation_types"])
         for match in selection["matches"]
-    } == {("credential_path_read", "file_read")}
+    } == {("credential_material_read", "file_read")}
     assert all(
         match["outcome_status"] == "reported_success"
         and match["effect_status"] == "reported_completed"
@@ -209,6 +207,37 @@ def test_resolved_successful_read_commands_select_the_family(
     }
     assert report["hypothesis_sets"] == []
     assert "review-credential-exposure-and-reuse" in {
+        action["action_id"]
+        for action in report["response_guidance_v3"]["advisory_actions"]
+    }
+    sensitive_guidance = next(
+        finding
+        for finding in report["response_guidance_v3"]["findings"]
+        if finding.get("semantic_family") == "sensitive_read"
+    )
+    evidence_class_trace = next(
+        trace
+        for trace in sensitive_guidance["matched_predicates"]
+        if trace["predicate"] == "required_evidence_classes"
+    )
+    assert evidence_class_trace["matched"] == ["password_hash_store"]
+    assert evidence_class_trace["result"] is True
+    assert validate_session_assessment_v4(report) == []
+
+
+@pytest.mark.parametrize("command", ["head -n 1 /etc/passwd", "grep root /etc/passwd"])
+def test_account_metadata_read_is_inspection_not_sensitive_guidance(
+    command: str,
+) -> None:
+    payload = _session(command, session_id="account-metadata")
+    _snapshot, _observed, fact_set, selection = _typed_inputs(payload)
+    report = _report(payload)
+
+    assert selection["status"] == "abstained"
+    assert {operation["operation_type"] for fact in fact_set["facts"] for operation in fact["operations"]} == {
+        "file_read", "account_metadata_read"
+    }
+    assert "review-credential-exposure-and-reuse" not in {
         action["action_id"]
         for action in report["response_guidance_v3"]["advisory_actions"]
     }

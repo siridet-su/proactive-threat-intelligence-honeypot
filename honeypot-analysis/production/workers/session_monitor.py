@@ -372,6 +372,14 @@ class SessionState:
     # closed-session job is enqueued.  It is evidence provenance, not Cowrie
     # input, and must survive the reporting bridge intact.
     canonical_event_manifest: dict = field(default_factory=dict)
+    # Immutable classifier binding and a separate bounded ring of trusted
+    # Transformer phases.  The general classification tail remains a UI/live
+    # projection and is never canonical for closed-session analysis.
+    classification_environment: dict = field(default_factory=dict)
+    prediction_trusted_history: List[dict] = field(default_factory=list)
+    prediction_trusted_history_manifest: dict = field(default_factory=dict)
+    prediction_trusted_phase_count: int = 0
+    prediction_trusted_label_count: int = 0
 
     @property
     def unique_tactics(self) -> List[str]:
@@ -464,6 +472,7 @@ class SessionMonitor:
         credential_hasher: Optional[CredentialHasher] = None,
         campaign_profile_cache_limit: int = 10_000,
         session_event_history_limit: int = 10_000,
+        classification_environment: Optional[dict] = None,
         enable_legacy_campaign_tracker: bool = True,
         enable_alert_evaluation: bool = True,
     ):
@@ -536,6 +545,7 @@ class SessionMonitor:
         ):
             raise ValueError("session_event_history_limit must be a positive integer")
         self.session_event_history_limit = int(session_event_history_limit)
+        self.classification_environment = dict(classification_environment or {})
 
 
     def on_event(
@@ -706,6 +716,7 @@ class SessionMonitor:
                             sources.append(source)
 
                     state.classification_events.append(classification)
+                    self._append_prediction_trusted_phase(state, classification)
 
                 # Sigma keyword match
                 sigma_hits = self._sigma_match(cmd)
@@ -727,6 +738,81 @@ class SessionMonitor:
         for a in alerts:
             self.on_alert(a)
         return alerts
+
+    @staticmethod
+    def _append_prediction_trusted_phase(
+        state: SessionState,
+        classification: Dict[str, Any],
+    ) -> None:
+        """Maintain a separate last-eight trusted-phase ring.
+
+        Audit candidates are intentionally ignored before the ring is
+        updated, so high-volume model noise cannot evict a trusted phase.
+        Classifications belonging to one compound command share one phase.
+        """
+
+        if not is_trusted_classification_event(classification):
+            return
+        ttp = str(classification.get("ttp") or "").strip().upper()
+        tactic = str(classification.get("tactic") or "").strip()
+        if not ttp and not tactic:
+            return
+        try:
+            command_index = int(classification.get("compound_command_index"))
+        except (TypeError, ValueError):
+            command_index = len(getattr(state, "commands", []) or []) - 1
+        history = getattr(state, "prediction_trusted_history", None)
+        if not isinstance(history, list):
+            history = []
+            state.prediction_trusted_history = history
+        if history and history[-1].get("command_index") == command_index:
+            phase = history[-1]
+        else:
+            phase = {
+                "command_index": command_index,
+                "event_id": str(
+                    (classification.get("durable_evidence_order") or {}).get(
+                        "event_id"
+                    )
+                    or classification.get("evidence_id")
+                    or ""
+                ),
+                "tactics": [],
+                "techniques": [],
+                "labels": [],
+            }
+            history.append(phase)
+            state.prediction_trusted_phase_count = int(
+                getattr(state, "prediction_trusted_phase_count", 0) or 0
+            ) + 1
+        if tactic and tactic != "unknown" and tactic not in phase["tactics"]:
+            phase["tactics"].append(tactic)
+        if ttp and ttp != "T0000_UNKNOWN" and ttp not in phase["techniques"]:
+            phase["techniques"].append(ttp)
+        if tactic and ttp and ttp != "T0000_UNKNOWN":
+            label = {
+                "tactic": tactic,
+                "technique": ttp,
+            }
+            evidence_id = str(
+                (classification.get("durable_evidence_order") or {}).get(
+                    "event_id"
+                )
+                or classification.get("evidence_id")
+                or ""
+            ).strip()
+            if evidence_id:
+                label["classification_evidence_id"] = evidence_id
+            if label not in phase.setdefault("labels", []):
+                phase["labels"].append(label)
+                # This is a durable-prefix counter, not the size of the
+                # bounded realtime ring.  Keep it monotonic so the v2
+                # manifest can truthfully report truncation after eviction.
+                state.prediction_trusted_label_count = int(
+                    getattr(state, "prediction_trusted_label_count", 0) or 0
+                ) + 1
+        if len(history) > 8:
+            del history[:-8]
 
     def _bound_session_history(self, state: SessionState) -> None:
         """Bound realtime evidence while durable raw events remain authoritative."""

@@ -18,6 +18,9 @@ from production.prediction.next_behavior_runtime import (
     validate_prediction_snapshot_integrity,
 )
 from production.prediction.evidence_cutoff import make_evidence_cutoff
+from production.prediction.trusted_history import (
+    build_prediction_trusted_history_manifest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +113,21 @@ def test_transformer_policy_is_explicit_single_model() -> None:
     assert policy["predictive_alerts"] == {"enabled": False}
 
 
+def test_prediction_policy_binds_classifier_environment_file_bytes() -> None:
+    document = json.loads(
+        (ROOT / "configs/prediction_policy.transformer_poc.trusted.json").read_text()
+    )
+    policy = document["policy"]
+    assert policy["runtime_classifier_environment_sha256"] == hashlib.sha256(
+        (ROOT / policy["runtime_classifier_environment_path"]).read_bytes()
+    ).hexdigest()
+
+    tampered = json.loads(json.dumps(document))
+    tampered["policy"]["runtime_classifier_environment_sha256"] = "0" * 64
+    errors = validate_policy_document(tampered)
+    assert any("does not match the referenced file bytes" in error for error in errors)
+
+
 def test_transformer_production_config_uses_policy_bound_rule_file() -> None:
     """The live classifier must use the exact artifact stamped into forecasts."""
 
@@ -139,6 +157,48 @@ def test_live_adapter_uses_no_raw_command_text() -> None:
     serialized = json.dumps(safe, sort_keys=True)
     assert "redacted-command" not in serialized
     assert safe["observation_groups"][0]["tactics"] == ["execution"]
+
+
+def test_live_adapter_rejects_tampered_v2_trusted_history_hashes() -> None:
+    phases = [
+        {
+            "command_index": 0,
+            "event_id": "event-cutoff",
+            "labels": [{"tactic": "execution", "technique": "T1059"}],
+        }
+    ]
+    manifest = build_prediction_trusted_history_manifest(
+        phases=phases,
+        evidence_cutoff=make_evidence_cutoff(
+            "2026-07-27T00:00:01Z", "event-cutoff"
+        ),
+        classifier_environment={"environment_sha256": "a" * 64},
+    )
+    payload = _payload()
+    payload["prediction_trusted_history"] = phases
+    payload["prediction_trusted_history_manifest"] = manifest
+    safe = build_live_next_behavior_session(
+        payload,
+        rule_policy_sha256=_policy()["runtime_rule_policy_sha256"],
+        trust_policy_sha256=_policy()["runtime_trust_policy_sha256"],
+        classifier_checkpoint_sha256=_policy()[
+            "runtime_classifier_checkpoint_sha256"
+        ],
+    )
+    assert safe is not None
+    tampered = json.loads(json.dumps(payload))
+    tampered["prediction_trusted_history_manifest"]["ordered_trusted_phases"][0][
+        "phase_sha256"
+    ] = "d" * 64
+    with pytest.raises(ValueError, match="manifest rejected"):
+        build_live_next_behavior_session(
+            tampered,
+            rule_policy_sha256=_policy()["runtime_rule_policy_sha256"],
+            trust_policy_sha256=_policy()["runtime_trust_policy_sha256"],
+            classifier_checkpoint_sha256=_policy()[
+                "runtime_classifier_checkpoint_sha256"
+            ],
+        )
 
 
 @pytest.mark.skipif(

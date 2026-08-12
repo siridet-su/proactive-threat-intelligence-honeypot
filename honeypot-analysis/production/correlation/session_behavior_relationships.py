@@ -25,6 +25,7 @@ from production.policies.threat_hypothesis_behavior_policy import (
     resolve_behavior_policy,
 )
 from production.utils.serialization import stable_id
+from production.semantics.command_operations import parse_command_operation
 
 
 SCHEMA_VERSION = "session_behavior_relationships.v1"
@@ -355,21 +356,32 @@ def extract_command_entities(
         if entities["modified_paths"]:
             action_types.append(_clean(permission_definition.get("action_type")))
 
-    if executable in script_interpreters:
-        for value in tokens[1:]:
-            if value.startswith("-"):
-                continue
-            if value.startswith(("/", "./", "~", "$")):
-                _add_entity(entities, "executed_paths", "path", value, cwd)
-                break
-        if entities["executed_paths"]:
+    parsed_operation = parse_command_operation(
+        command,
+        working_directory=cwd,
+        working_directory_status="observed" if cwd.startswith("/") else "",
+    )
+    if (
+        parsed_operation.get("parse_status") == "parsed"
+        and "execution_attempt" in parsed_operation.get("operation_types", [])
+    ):
+        for item in (parsed_operation.get("entities") or {}).get(
+            "executed_paths", []
+        ):
+            if isinstance(item, dict) and item.get("linkable") is True:
+                _add_entity(
+                    entities,
+                    "executed_paths",
+                    "path",
+                    _clean(item.get("raw_value")),
+                    cwd,
+                )
+        if entities["executed_paths"] or (
+            parsed_operation.get("entities") or {}
+        ).get("literal_values"):
             action_types.append("execution_attempt")
-        elif operator_before == "|" and executable in shell_interpreters:
-            action_types.append("shell_pipe_consumer")
-    elif tokens and tokens[0].startswith(("/", "./", "~", "$")):
-        _add_entity(entities, "executed_paths", "path", tokens[0], cwd)
-        if entities["executed_paths"]:
-            action_types.append("execution_attempt")
+    elif operator_before == "|" and executable in shell_interpreters:
+        action_types.append("shell_pipe_consumer")
 
     deletion_executables = {
         _clean(value).lower() for value in deletion_definition.get("executables") or []

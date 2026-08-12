@@ -243,6 +243,12 @@ def test_explicit_invalid_policies_fail_closed_without_substitution(tmp_path: Pa
     assert report["hypothesis_sets"] == []
     assert report["provenance"]["behavior_policy"]["effective_path"] == "built_in_fail_closed"
     assert report["provenance"]["behavior_policy"]["requested_policy_honored"] is False
+    coverage = report["canonical_evidence"]["semantic_coverage"]
+    assert report["provenance"]["typed_semantics"]["status"] == "unavailable"
+    assert coverage["coverage_status"] == "unavailable"
+    assert coverage["typed_analyzed_count"] == 0
+    assert coverage["omitted_count"] == coverage["eligible_semantic_observation_count"]
+    assert coverage["reason_code"] == "typed_policy_validation_failed"
 
     missing_classification = build_session_assessment_v4(
         [_payload()],
@@ -252,6 +258,55 @@ def test_explicit_invalid_policies_fail_closed_without_substitution(tmp_path: Pa
     )
     assert missing_classification["status"] == "observation_only_abstention"
     assert missing_classification["provenance"]["classification_policy"]["status"] == "invalid"
+    missing_coverage = missing_classification["canonical_evidence"]["semantic_coverage"]
+    assert missing_coverage["coverage_status"] == "unavailable"
+    assert missing_coverage["typed_analyzed_count"] == 0
+    assert missing_coverage["omitted_count"] == missing_coverage["eligible_semantic_observation_count"]
+    assert missing_coverage["reason_code"] == "typed_policy_validation_failed"
+
+
+def test_typed_semantic_coverage_limit_is_full_at_limit_and_unavailable_above() -> None:
+    def _limit_payload(session_id: str, count: int) -> dict:
+        return {
+            "session_id": session_id,
+            "commands": ["id"] * count,
+            "classification_events": [],
+            "raw_events": [
+                {
+                    "session": session_id,
+                    "timestamp": f"2026-08-12T00:00:{index % 60:02d}Z",
+                    "eventid": "cowrie.command.input",
+                    "input": "id",
+                }
+                for index in range(count)
+            ],
+        }
+
+    at_limit = _limit_payload("coverage-at-limit", 2048)
+    exact_report = build_session_assessment_v4(
+        [at_limit],
+        raw_events=at_limit["raw_events"],
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_policy_path=CLASSIFICATION_POLICY,
+    )
+    exact = exact_report["canonical_evidence"]["semantic_coverage"]
+    assert exact["coverage_status"] == "full"
+    assert exact["typed_analyzed_count"] == 2048
+    assert exact["omitted_count"] == 0
+
+    above_limit = _limit_payload("coverage-above-limit", 2049)
+    above_report = build_session_assessment_v4(
+        [above_limit],
+        raw_events=above_limit["raw_events"],
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_policy_path=CLASSIFICATION_POLICY,
+    )
+    above = above_report["canonical_evidence"]["semantic_coverage"]
+    assert above["coverage_status"] == "unavailable"
+    assert above["typed_analyzed_count"] == 0
+    assert above["omitted_count"] == 2049
+    assert above["limit_reached"] == "max_facts"
+    assert above["reason_code"] == "eligible_observation_limit_exceeded"
 
 
 def test_cached_graph_mismatch_is_ignored_and_rebuilt_deterministically() -> None:

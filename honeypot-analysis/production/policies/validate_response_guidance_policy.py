@@ -31,6 +31,10 @@ ALLOWED_CONDITION_KEYS = {
     "absent_flags",
     "min_command_count",
     "activated_semantic_families",
+    "required_operation_types",
+    "required_evidence_classes",
+    "required_outcome_statuses",
+    "required_effect_statuses",
 }
 LIST_CONDITION_KEYS = ALLOWED_CONDITION_KEYS - {"min_command_count"}
 OBSERVED_CONDITION_KEYS = frozenset(ALLOWED_CONDITION_KEYS)
@@ -270,13 +274,12 @@ def validate_response_guidance_policy(policy: Any) -> List[str]:
                     errors.append(
                         f"{path}: semantic_family is not activated"
                     )
-                expected_condition = {
-                    "activated_semantic_families": [semantic_family]
-                }
-                if condition != expected_condition:
+                if not isinstance(condition, dict) or condition.get(
+                    "activated_semantic_families"
+                ) != [semantic_family]:
                     errors.append(
-                        f"{path}: semantic-family rules must use only their "
-                        "activated semantic family condition"
+                        f"{path}: semantic-family rules must require exactly "
+                        "their activated semantic family"
                     )
             elif (
                 isinstance(condition, dict)

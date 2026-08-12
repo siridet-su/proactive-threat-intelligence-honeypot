@@ -1409,6 +1409,9 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
         hypothesis_sets = [
             item for item in merged.get("hypothesis_sets") or [] if isinstance(item, dict)
         ]
+        canonical_evidence = merged.get("canonical_evidence") or {}
+        coverage = canonical_evidence.get("semantic_coverage") or {}
+        graph = canonical_evidence.get("semantic_graph") or {}
         return {
             "schema_version": "session_assessment.v4",
             "campaign_name": "",
@@ -1421,6 +1424,18 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
             ),
             "ai_enriched": "false",
             "analysis_mode": "deterministic_session_assessment_v4",
+            "semantic_coverage": _text(
+                coverage.get("coverage_status") or "unavailable"
+            ),
+            "semantic_omitted_count": _text(
+                coverage.get("omitted_count") or 0
+            ),
+            "semantic_graph_counts": (
+                f"{len(graph.get('evidence_nodes') or [])} evidence / "
+                f"{len(graph.get('fact_nodes') or [])} facts / "
+                f"{len(graph.get('relationship_edges') or [])} relationships / "
+                f"{len(graph.get('chain_nodes') or [])} chains"
+            ),
             "post_session_follow_on_hypothesis": "; ".join(
                 _text(hypothesis.get("statement"))
                 for hypothesis_set in hypothesis_sets
@@ -4303,6 +4318,13 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
                 "Classification policy SHA-256: "
                 f"{(provenance.get('classification_policy') or {}).get('sha256', '')}",
                 f"Evaluator Git revision: {provenance.get('evaluator_git_revision', '')}",
+                "Semantic coverage: "
+                f"{(merged.get('canonical_evidence') or {}).get('semantic_coverage', {}).get('coverage_status', 'unavailable')} "
+                f"(omitted {(merged.get('canonical_evidence') or {}).get('semantic_coverage', {}).get('omitted_count', 0)})",
+                "Canonical semantic graph: "
+                f"{len((merged.get('canonical_evidence') or {}).get('semantic_graph', {}).get('evidence_nodes') or [])} evidence nodes, "
+                f"{len((merged.get('canonical_evidence') or {}).get('semantic_graph', {}).get('relationship_edges') or [])} relationship edges, "
+                f"{len((merged.get('canonical_evidence') or {}).get('semantic_graph', {}).get('chain_nodes') or [])} chain nodes",
             ])
         )
     return (

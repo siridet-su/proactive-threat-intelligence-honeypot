@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-07-30-command-transfer-attempt-v1",
+  "version": "2026-08-11-typed-connected-chain-v2",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -15,11 +15,12 @@
       "Observation-only typed inspection activation decision",
       "Observation-only typed filesystem-change activation decision",
       "Bounded typed Cowrie execution-attempt activation decision",
-      "Attempt-only typed HTTP(S) command transfer decision"
+      "Attempt-only typed HTTP(S) command transfer decision",
+      "Exact-entity typed connected-chain and bounded incomplete-chain review"
     ],
     "reviewed": true,
     "reviewer": "project developer",
-    "last_reviewed": "2026-07-30",
+    "last_reviewed": "2026-08-11",
     "review_status": "approved for scoped Cowrie SSH analysis"
   },
   "policy": {
@@ -141,6 +142,13 @@
       }
     },
     "claims": {
+      "authority_boundary": {
+        "schema_version": "behavioral_authority_decision.v1",
+        "legacy_explicit_reviewed_fallback_rule_ids": [],
+        "deferred_families": ["identity", "scheduled_task"],
+        "typed_selection_required": true,
+        "regex_fallback_without_typed_support": "audit_only"
+      },
       "connected": [
         {
           "rule_id": "remote-content-piped-to-shell",
@@ -211,6 +219,35 @@
           "claim_type": "connected_transfer_permission_change",
           "text": "A transfer attempt and permission-modification attempt referencing the same artifact path were observed; linked execution was not observed.",
           "limitations": []
+        }
+      ],
+      "typed_connected": [
+        {
+          "rule_id": "typed-transfer-permission-execution",
+      "required_operation_types": [
+        "transfer_attempt",
+        "permission_modify",
+        "execution_attempt"
+      ],
+      "minimum_incomplete_operation_count": 2,
+      "required_transition_types": ["same_path_transition"],
+      "supporting_relationship_types": ["transfer_observation_confirmation"],
+      "same_entity_required": true,
+          "claim_type": "connected_transfer_permission_execution",
+          "text": "A transfer attempt, permission-modification attempt, and execution attempt referencing the same resolved artifact path were observed in chronological order.",
+          "evidence_status": "supported",
+          "limitations": [
+            "The relationship does not establish successful transfer, payload identity, execution effects, compromise, persistence, or attacker intent.",
+            "Cowrie-reported command success is bounded to the simulated shell and does not prove a real-host effect."
+          ],
+          "incomplete_claim_type": "possible_follow_on_execution",
+          "incomplete_text": "A transfer attempt and permission-modification attempt referenced the same resolved artifact path, but no supported execution attempt for that path was observed.",
+          "missing_evidence_text": "A supported execution-attempt observation for the same resolved path is missing.",
+          "falsifier_codes": [
+            "execution_observed_elsewhere_for_same_path",
+            "path_identity_not_shared",
+            "prior_attempt_reported_failed"
+          ]
         }
       ],
       "independent": {

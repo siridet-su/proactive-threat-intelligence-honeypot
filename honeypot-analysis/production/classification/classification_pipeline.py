@@ -21,6 +21,16 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 from production.policies.validate_classification_rules import (
     validate_classification_rule_policy,
 )
+from production.semantics.command_operations import (
+    parse_command_operation,
+    structural_predicate_matches,
+)
+from production.classification.authority import (
+    CLASSIFICATION_EVENT_SCHEMA_VERSION,
+    SCHEMA_VERSION as AUTHORITY_DECISION_SCHEMA,
+    candidate_authority_decision,
+    command_authority_decision,
+)
 from production.utils.sensitive_data import redact_exception_for_log
 
 
@@ -31,9 +41,13 @@ class TTPPrediction:
     confidence: float
     high_conf: bool
     source: str = ""
+    rule_id: str = ""
+    evidence_type: str = ""
+    authority_decision: Optional[Dict[str, Any]] = None
 
     def to_event(self, command: str, tactic: str = "unknown") -> Dict[str, Any]:
-        return {
+        event = {
+            "classification_event_schema": CLASSIFICATION_EVENT_SCHEMA_VERSION,
             "command": command,
             "ttp": None if self.tid == "T0000_UNKNOWN" else self.tid,
             "tactic": tactic,
@@ -42,6 +56,13 @@ class TTPPrediction:
             "name": self.name,
             "high_confidence": self.high_conf,
         }
+        if self.rule_id:
+            event["rule_id"] = self.rule_id
+        if self.evidence_type:
+            event["evidence_type"] = self.evidence_type
+        if self.authority_decision is not None:
+            event["authority_decision"] = dict(self.authority_decision)
+        return event
 
 
 @dataclass
@@ -55,7 +76,7 @@ class MergedResult:
     def final_ttps(self) -> List[TTPPrediction]:
         # Notebook behavior: rules are authoritative for raw shell commands.
         if self.rule_ttps:
-            return self.rule_ttps
+            return [prediction for prediction in self.rule_ttps if prediction.high_conf]
         return [p for p in self.bert_ttps if p.high_conf]
 
 
@@ -85,7 +106,7 @@ class CommandFragment:
     operator_after: str = ""
 
 
-CLASSIFICATION_RULE_POLICY_SCHEMA = "classification_rule_policy.v1"
+CLASSIFICATION_RULE_POLICY_SCHEMA = "classification_rule_policy.v3"
 DEFAULT_CLASSIFICATION_RULE_POLICY = "configs/classification_rules.trusted.json"
 
 # Minimal emergency fallback only. Full command coverage lives in the versioned
@@ -193,6 +214,11 @@ def load_classification_rule_policy(path_text: str = "") -> Dict[str, Any]:
                         "created": "2026-06-02",
                         "version": "1.0",
                     },
+                    "runtime_authority": {
+                        "promotion_class": "audit_only",
+                        "reviewed": False,
+                        "safety_class": "literal_unambiguous",
+                    },
                 }
                 for idx, (pattern, tid, name) in enumerate(EMERGENCY_RULE_SPECS, start=1)
             ],
@@ -205,6 +231,57 @@ def _policy_rules(document: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(body, dict):
         return []
     return [dict(rule) for rule in body.get("rules") or [] if isinstance(rule, dict)]
+
+
+def _rule_metadata_by_spec(document: Dict[str, Any]) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
+    """Index policy metadata without changing the public three-tuple API."""
+
+    indexed: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    body = document.get("policy", document)
+    authority = body.get("runtime_authority") if isinstance(body, dict) else {}
+    approved = set()
+    if isinstance(authority, dict):
+        approved = {
+            _clean_text(item)
+            for item in authority.get("trusted_literal_fallback_rule_ids", [])
+            if _clean_text(item)
+        }
+    for rule in _policy_rules(document):
+        pattern = _clean_text(rule.get("pattern"))
+        tid = _clean_text(rule.get("ttp")).upper()
+        name = _clean_text(rule.get("technique_name") or rule.get("name") or tid)
+        if not pattern or not tid:
+            continue
+        item = dict(rule)
+        runtime_authority = item.get("runtime_authority")
+        if not isinstance(runtime_authority, dict):
+            runtime_authority = {
+                "promotion_class": (
+                    "trusted_literal_fallback"
+                    if _clean_text(item.get("rule_id")) in approved
+                    else "audit_only"
+                ),
+                "reviewed": _clean_text(item.get("rule_id")) in approved,
+                "safety_class": "literal_unambiguous",
+            }
+        item["runtime_authority"] = runtime_authority
+        indexed[(pattern, tid, name)] = item
+    return indexed
+
+
+def _structural_rules(document: Dict[str, Any], review_mode: str) -> List[Dict[str, Any]]:
+    emergency_fallback = document.get("policy_id") == "emergency-python-fallback"
+    return [
+        rule
+        for rule in _policy_rules(document)
+        if rule.get("enabled") is not False
+        and rule.get("evidence_type") == "command_operation"
+        and _rule_allowed_for_runtime(
+            rule,
+            review_mode,
+            emergency_fallback=emergency_fallback,
+        )
+    ]
 
 
 def _runtime_rule_review_mode(document: Dict[str, Any], rule_review_mode: str = "") -> str:
@@ -247,6 +324,8 @@ def load_rule_specs(
         if rule.get("enabled") is False:
             continue
         if not _rule_allowed_for_runtime(rule, review_mode, emergency_fallback=emergency_fallback):
+            continue
+        if rule.get("evidence_type") == "command_operation":
             continue
         pattern = _clean_text(rule.get("pattern"))
         tid = _clean_text(rule.get("ttp")).upper()
@@ -413,6 +492,10 @@ def _rule_based_ttp_with_rules(
     rules: Sequence[Tuple[re.Pattern[str], str, str]],
     combined_pattern: re.Pattern[str],
     source: str = "rule",
+    *,
+    metadata_by_spec: Optional[Dict[Tuple[str, str, str], Dict[str, Any]]] = None,
+    parser_decision: Optional[Dict[str, Any]] = None,
+    policy_provenance: Optional[Dict[str, Any]] = None,
 ) -> List[TTPPrediction]:
     command = command or ""
     if not combined_pattern.search(command):
@@ -422,25 +505,97 @@ def _rule_based_ttp_with_rules(
     seen = set()
     for pattern, tid, name in rules:
         if tid not in seen and pattern.search(command):
+            metadata = (metadata_by_spec or {}).get((pattern.pattern, tid, name), {})
+            authority = candidate_authority_decision(
+                parser_decision=parser_decision or {},
+                evidence_type="command_regex",
+                rule_metadata=metadata,
+                policy_provenance=policy_provenance or {},
+                emergency=source == "emergency_python_fallback",
+            )
             matched.append(
                 TTPPrediction(
                     tid=tid,
                     name=name,
                     confidence=1.0,
-                    high_conf=source != "emergency_python_fallback",
+                    high_conf=bool(authority.get("trusted_eligible")),
                     source=source,
+                    rule_id=_clean_text(metadata.get("rule_id")),
+                    evidence_type="command_regex",
+                    authority_decision=authority,
                 )
             )
             seen.add(tid)
     return matched
 
 
+def _operation_based_ttp(
+    command: str,
+    rules: Sequence[Dict[str, Any]],
+    source: str = "rule",
+    *,
+    parsed: Optional[Dict[str, Any]] = None,
+    policy_provenance: Optional[Dict[str, Any]] = None,
+) -> List[TTPPrediction]:
+    parsed = parsed if isinstance(parsed, dict) else parse_command_operation(command)
+    parser_decision = command_authority_decision(command, parsed, structural_match=True)
+    matched: List[TTPPrediction] = []
+    seen: set[str] = set()
+    for rule in rules:
+        tid = _clean_text(rule.get("ttp")).upper()
+        if tid in seen or not structural_predicate_matches(
+            parsed,
+            rule.get("operation_predicate") or {},
+        ):
+            continue
+        authority = candidate_authority_decision(
+            parser_decision=parser_decision,
+            evidence_type="command_operation",
+            rule_metadata=rule,
+            policy_provenance=policy_provenance or {},
+            emergency=source == "emergency_python_fallback",
+        )
+        matched.append(TTPPrediction(
+            tid=tid,
+            name=_clean_text(rule.get("technique_name") or tid),
+            confidence=1.0,
+            high_conf=bool(authority.get("trusted_eligible")),
+            source=source,
+            rule_id=_clean_text(rule.get("rule_id")),
+            evidence_type="command_operation",
+            authority_decision=authority,
+        ))
+        seen.add(tid)
+    return matched
+
+
 def rule_based_ttp(command: str) -> List[TTPPrediction]:
-    return _rule_based_ttp_with_rules(
+    parsed = parse_command_operation(command)
+    policy_provenance = {
+        "rule_policy_id": _clean_text(RULE_POLICY.get("policy_id")),
+        "rule_policy_version": _clean_text(RULE_POLICY.get("version")),
+        "rule_policy_sha256": _clean_text(RULE_POLICY.get("source_sha256")),
+        "rule_policy_load_status": _clean_text(RULE_POLICY.get("load_status")),
+    }
+    parser_decision = command_authority_decision(command, parsed, structural_match=False)
+    structural = _operation_based_ttp(
+        command,
+        _structural_rules(
+            RULE_POLICY,
+            _runtime_rule_review_mode(RULE_POLICY),
+        ),
+        RULE_EVIDENCE_SOURCE,
+        parsed=parsed,
+        policy_provenance=policy_provenance,
+    )
+    return structural or _rule_based_ttp_with_rules(
         command,
         RULES,
         _COMBINED_PATTERN,
         RULE_EVIDENCE_SOURCE,
+        metadata_by_spec=_rule_metadata_by_spec(RULE_POLICY),
+        parser_decision=parser_decision,
+        policy_provenance=policy_provenance,
     )
 
 
@@ -489,7 +644,17 @@ class NotebookParityClassifier:
                 policy_document=self.rule_policy,
             )
         )
+        self.structural_rules = (
+            []
+            if rule_specs is not None
+            else _structural_rules(self.rule_policy, self.rule_review_mode)
+        )
         self.rules = _compile_rules(self.rule_specs)
+        self.rule_metadata = (
+            {}
+            if rule_specs is not None
+            else _rule_metadata_by_spec(self.rule_policy)
+        )
         self.combined_pattern = re.compile(
             "|".join(pattern.pattern for pattern, _, _ in self.rules) if self.rules else r"(?!)",
             re.IGNORECASE,
@@ -504,6 +669,8 @@ class NotebookParityClassifier:
 
     def _policy_provenance(self) -> Dict[str, Any]:
         return {
+            "classification_event_schema": CLASSIFICATION_EVENT_SCHEMA_VERSION,
+            "authority_decision_schema": AUTHORITY_DECISION_SCHEMA,
             "rule_policy_id": self.rule_policy_id,
             "rule_policy_version": self.rule_policy_version,
             "rule_review_mode": self.rule_review_mode,
@@ -539,32 +706,65 @@ class NotebookParityClassifier:
 
     def _bert_prediction(self, command: str) -> TTPPrediction:
         if not self.bert_fn:
-            return TTPPrediction("T0000_UNKNOWN", "SecureBERT unavailable", 0.0, False, "securebert_unavailable")
+            return TTPPrediction(
+                "T0000_UNKNOWN", "SecureBERT unavailable", 0.0, False,
+                "securebert_unavailable", evidence_type="securebert",
+            )
         try:
             tid, confidence = self.bert_fn(command)
             confidence = float(confidence or 0.0)
             if tid and confidence >= self.high_confidence:
-                return TTPPrediction(tid, self._technique_name(tid), round(confidence, 4), True, "securebert")
+                return TTPPrediction(
+                    tid, self._technique_name(tid), round(confidence, 4), True,
+                    "securebert", evidence_type="securebert",
+                )
             return TTPPrediction(
                 tid or "T0000_UNKNOWN",
                 "Unclassified (low confidence)",
                 round(confidence, 4),
                 False,
                 "securebert_low_confidence",
+                evidence_type="securebert",
             )
         except Exception:
-            return TTPPrediction("T0000_UNKNOWN", "SecureBERT error", 0.0, False, "securebert_error")
+            return TTPPrediction(
+                "T0000_UNKNOWN", "SecureBERT error", 0.0, False,
+                "securebert_error", evidence_type="securebert",
+            )
 
     def _classify_single(self, command: str) -> List[Dict[str, Any]]:
         command = (command or "").strip()
         if not command:
             return []
 
-        rule_predictions = _rule_based_ttp_with_rules(
+        parsed = parse_command_operation(command)
+        parser_decision = command_authority_decision(
+            command,
+            parsed,
+            structural_match=False,
+        )
+        rule_predictions = _operation_based_ttp(
+            command,
+            self.structural_rules,
+            self.rule_evidence_source,
+            parsed=parsed,
+            policy_provenance=self._policy_provenance(),
+        )
+        if rule_predictions:
+            parser_decision = command_authority_decision(
+                command,
+                parsed,
+                structural_match=True,
+            )
+        else:
+            rule_predictions = _rule_based_ttp_with_rules(
             command,
             self.rules,
             self.combined_pattern,
             self.rule_evidence_source,
+            metadata_by_spec=self.rule_metadata,
+            parser_decision=parser_decision,
+            policy_provenance=self._policy_provenance(),
         )
         if is_shell_noise(command, self.rules, self.combined_pattern) and not rule_predictions:
             return [{
@@ -577,6 +777,14 @@ class NotebookParityClassifier:
                 "high_confidence": False,
                 "agreement_status": "not_applicable",
                 "confidence_semantics": "audit_only_shell_noise",
+                "classification_event_schema": CLASSIFICATION_EVENT_SCHEMA_VERSION,
+                "authority_decision": {
+                    "schema_version": AUTHORITY_DECISION_SCHEMA,
+                    "decision": "audit_only",
+                    "trusted_eligible": False,
+                    "safety_class": parser_decision.get("safety_class", "unknown"),
+                    "reasons": ["shell_noise"],
+                },
                 **self._policy_provenance(),
             }]
 
@@ -591,7 +799,8 @@ class NotebookParityClassifier:
                 emergency_rule = prediction.source == "emergency_python_fallback"
                 source = prediction.source or "rule"
                 agreement_status = "emergency_rule_only" if emergency_rule else "rule_only"
-                high_confidence = not emergency_rule
+                authority = dict(prediction.authority_decision or {})
+                high_confidence = bool(authority.get("trusted_eligible")) and not emergency_rule
                 confidence_semantics = (
                     "unreviewed_emergency_rule_audit_only"
                     if emergency_rule
@@ -632,19 +841,34 @@ class NotebookParityClassifier:
             return events
 
         if has_bert:
-            return [{
+            event = {
                 **bert_prediction.to_event(command, self._tactic(bert_prediction.tid)),
                 "agreement_status": "model_only",
                 "confidence_semantics": "model_score_not_calibrated_probability",
                 **self._policy_provenance(),
-            }]
+            }
+            event["authority_decision"] = candidate_authority_decision(
+                parser_decision=parser_decision,
+                evidence_type="securebert",
+                rule_metadata=None,
+                policy_provenance=self._policy_provenance(),
+            )
+            event["high_confidence"] = False
+            return [event]
 
-        return [{
+        event = {
             **bert_prediction.to_event(command, "unknown"),
             "agreement_status": "model_below_policy_threshold",
             "confidence_semantics": "audit_only_model_score_not_calibrated_probability",
             **self._policy_provenance(),
-        }]
+        }
+        event["authority_decision"] = candidate_authority_decision(
+            parser_decision=parser_decision,
+            evidence_type="securebert",
+            rule_metadata=None,
+            policy_provenance=self._policy_provenance(),
+        )
+        return [event]
 
     def classify(self, command: str) -> List[Dict[str, Any]]:
         original_command = (command or "").strip()
@@ -675,7 +899,11 @@ def auto_label_commands(
     exclude_ttps = exclude_ttps or set()
     labeled: List[Dict[str, Any]] = []
     for command in commands:
-        matches = [match for match in rule_based_ttp(command.strip()) if match.tid not in exclude_ttps]
+        matches = [
+            match
+            for match in rule_based_ttp(command.strip())
+            if match.high_conf and match.tid not in exclude_ttps
+        ]
         for match in matches:
             labeled.append(
                 {

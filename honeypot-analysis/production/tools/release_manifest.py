@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from production.tools.managed_systemd_units import load_managed_unit_policy
+from production.tools.frozen_model_bundle import verify_release_links
 
 
 SCHEMA_VERSION = "honeypot_release_manifest.v7"
@@ -405,6 +406,10 @@ def build_manifest(
             frozen_model_bundle_manifest_path,
             frozen_model_bundle_package_path,
         )
+        verify_release_links(
+            release_root=release_root,
+            bundle_root=Path(frozen_model_bundle_manifest_path).resolve().parent,
+        )
     return manifest
 
 
@@ -543,6 +548,10 @@ def verify_manifest(path: Path, release_root: Path) -> dict[str, Any]:
         )
         if actual != frozen_model_bundle:
             raise ValueError("frozen model bundle does not match manifest receipt")
+        verify_release_links(
+            release_root=release_root,
+            bundle_root=Path(actual["manifest_path"]).parent,
+        )
     if not Path(str(manifest.get("rollback_location", ""))).exists():
         raise ValueError("rollback location is missing")
     return {

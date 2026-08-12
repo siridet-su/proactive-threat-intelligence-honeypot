@@ -14,6 +14,9 @@ from production.ai_advisory.security import ProviderAliasScope
 from production.utils.serialization import stable_id
 from production.reporting.session_assessment_v4 import validate_session_assessment_v4
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
+from production.reporting.typed_semantic_family_selection import (
+    ACTIVATED_FAMILIES as CANONICAL_ACTIVATED_SEMANTIC_FAMILIES,
+)
 
 
 PROJECTION_KEYS = {
@@ -196,15 +199,10 @@ POLICY_RULE_IDS = {
     "transfer-permission-execution-deletion",
 }
 SEVERITIES = {"not_applicable", "info", "low", "medium", "high", "critical"}
-SEMANTIC_FAMILIES = {
-    "",
-    "sensitive_read",
-    "transfer",
-    "inspection",
-    "filesystem",
-    "execution",
-    "command_transfer_attempt",
-}
+# The deterministic typed-semantic contract is the source of truth.  Keep the
+# empty value for guidance findings that intentionally have no semantic family,
+# while preserving strict rejection for every non-canonical value.
+SEMANTIC_FAMILIES = {"", *CANONICAL_ACTIVATED_SEMANTIC_FAMILIES}
 RELATIONSHIP_TYPES = {
     "observed_relationship",
     "account_modified",
@@ -500,6 +498,31 @@ def validate_ai_advisory_projection(
 
 
 def _evidence_index(evidence: Mapping[str, Any]) -> list[Dict[str, Any]]:
+    graph = evidence.get("semantic_graph") or {}
+    if isinstance(graph, Mapping) and isinstance(graph.get("evidence_nodes"), list):
+        precedence = (
+            "direct_transfer_observation",
+            "cowrie_event_observation",
+            "command_observation",
+            "trusted_attck_candidate",
+        )
+        output = []
+        for ordinal, item in enumerate(sorted(
+            (node for node in graph.get("evidence_nodes") or [] if isinstance(node, Mapping)),
+            key=lambda node: _clean(node.get("evidence_id")),
+        )):
+            kinds = set(item.get("evidence_kinds") or [])
+            evidence_kind = next(
+                (kind for kind in precedence if kind in kinds),
+                "command_observation",
+            )
+            output.append({
+                "evidence_id": _clean(item.get("evidence_id")),
+                "evidence_kind": evidence_kind,
+                "ordinal": ordinal,
+                "status": _clean(item.get("status") or "observed"),
+            })
+        return output
     output = []
     ordinal = 0
     for collection, kind in (
@@ -527,6 +550,52 @@ def _evidence_index(evidence: Mapping[str, Any]) -> list[Dict[str, Any]]:
 
 
 def _relationships(evidence: Mapping[str, Any], evidence_ids: set[str]) -> list[Dict[str, Any]]:
+    graph = evidence.get("semantic_graph") or {}
+    if isinstance(graph, Mapping) and isinstance(graph.get("relationship_edges"), list):
+        chain_ids = {
+            _clean(item.get("chain_id"))
+            for item in graph.get("chain_nodes") or []
+            if isinstance(item, Mapping) and _clean(item.get("chain_id"))
+        }
+        output = []
+        for item in graph.get("relationship_edges") or []:
+            if not isinstance(item, Mapping):
+                continue
+            relationship_id = _clean(item.get("relationship_id"))
+            if not relationship_id:
+                continue
+            refs = [
+                _clean(ref)
+                for ref in item.get("evidence_refs") or []
+                if _clean(ref)
+            ]
+            if any(ref not in evidence_ids for ref in refs):
+                raise AIAdvisoryContractError("relationship has unresolved evidence reference")
+            output.append({
+                "relationship_id": relationship_id,
+                "relationship_type": _clean(item.get("relationship_type")),
+                "status": _clean(item.get("status")),
+                "source_evidence_ref": refs[0] if refs else "",
+                "target_evidence_ref": refs[1] if len(refs) > 1 else "",
+                "entity_ref": _clean(item.get("entity_ref")),
+                "chain_ref": next(
+                    (
+                        _clean(chain.get("chain_id"))
+                        for chain in graph.get("chain_nodes") or []
+                        if isinstance(chain, Mapping)
+                        and relationship_id in {
+                            _clean(ref)
+                            for ref in (
+                                (chain.get("required_relationship_refs") or [])
+                                + (chain.get("supporting_relationship_refs") or [])
+                            )
+                        }
+                    ),
+                    "",
+                ),
+                "limitation_codes": list(item.get("limitation_codes") or []),
+            })
+        return output
     entity_ids = {
         _clean(item.get("entity_id"))
         for item in evidence.get("entities") or []
@@ -634,10 +703,23 @@ def build_ai_advisory_projection(
     evidence_ids = {item["evidence_id"] for item in evidence_index}
     relationships = _relationships(evidence, evidence_ids)
     relationship_ids = {item["relationship_id"] for item in relationships}
+    graph = evidence.get("semantic_graph") or {}
+    trusted_authority_ids = {
+        _clean(item.get("candidate_id"))
+        for item in graph.get("authority_decisions") or []
+        if isinstance(item, Mapping) and item.get("decision") == "trusted"
+    }
+    has_authority_decisions = isinstance(
+        graph.get("authority_decisions"), list
+    )
 
     findings = []
     for item in report_copy.get("behavioral_findings") or []:
         if not isinstance(item, Mapping):
+            continue
+        if has_authority_decisions and _clean(item.get("finding_id")) not in trusted_authority_ids:
+            # Preserve audit-only candidates in the local report/graph, but
+            # fail closed before any provider-scoped projection.
             continue
         refs = _strings(item.get("evidence_refs"))
         rel_refs = _strings(item.get("relationship_refs"))

@@ -25,6 +25,12 @@ from production.prediction.next_behavior_contract import (
     require_valid_next_behavior_session,
 )
 from production.prediction.next_behavior_label_policy import normalize_classifier_outputs
+from production.prediction.trusted_history import (
+    MAX_TRUSTED_PHASES,
+    SCHEMA_VERSION as TRUSTED_HISTORY_SCHEMA,
+    normalize_trusted_phases,
+    validate_prediction_trusted_history_manifest,
+)
 from production.prediction.evidence_cutoff import require_valid_evidence_cutoff
 from production.prediction.next_behavior_chronology import (
     NextBehaviorChronologyError,
@@ -234,11 +240,89 @@ def build_live_next_behavior_session(
     session_id = _clean(payload.get("session_id"))
     if not session_id:
         raise NextBehaviorRuntimeError("session_id is required")
-    events = [
-        dict(item)
-        for item in payload.get("classification_events") or []
-        if isinstance(item, Mapping)
-    ]
+    raw_manifest = payload.get("prediction_trusted_history_manifest")
+    has_manifest = isinstance(raw_manifest, Mapping)
+    has_bounded_trusted_history = isinstance(
+        payload.get("prediction_trusted_history"), list
+    )
+    supplied_history = normalize_trusted_phases(
+        payload.get("prediction_trusted_history") or []
+    )
+    if has_manifest and raw_manifest.get("schema_version") == TRUSTED_HISTORY_SCHEMA:
+        manifest_errors = validate_prediction_trusted_history_manifest(
+            raw_manifest,
+            expected_phases=(supplied_history if has_bounded_trusted_history else None),
+        )
+        if manifest_errors:
+            raise NextBehaviorRuntimeError(
+                "prediction trusted history manifest rejected: "
+                + "; ".join(manifest_errors)
+            )
+        # The hashed manifest is the authoritative input at inference.  The
+        # legacy list is checked above when supplied, but never allowed to
+        # replace the verified content.
+        trusted_history = normalize_trusted_phases(
+            raw_manifest.get("ordered_trusted_phases") or []
+        )
+        has_bounded_trusted_history = True
+    else:
+        trusted_history = supplied_history
+    if has_bounded_trusted_history:
+        # The realtime 10,000-event classification tail is not used when a
+        # session carries its explicit trusted Transformer history.  Rebuild
+        # minimal rule-like events solely from the already trusted phases;
+        # audit candidates never enter this path.
+        events = []
+        for phase in trusted_history:
+            labels = phase.get("labels") or []
+            if not labels:
+                tactics = phase.get("tactics") or []
+                techniques = phase.get("techniques") or []
+                if len(tactics) == 1 and len(techniques) == 1:
+                    labels = [{"tactic": tactics[0], "technique": techniques[0]}]
+            for label in labels:
+                technique = _clean(label.get("technique"))
+                tactic = _clean(label.get("tactic")) or "unknown"
+                events.append(
+                    {
+                        "classification_event_schema": "classification_event.v2",
+                        "command": "",
+                        "ttp": technique,
+                        "tactic": tactic,
+                        "source": "rule",
+                        "confidence": 1.0,
+                        "high_confidence": True,
+                        "evidence_tier": "trusted_observation",
+                        "authority_decision": {
+                            "schema_version": "command_authority_decision.v1",
+                            "decision": "trusted",
+                            "trusted_eligible": True,
+                            "safety_class": "reviewed_structural_match",
+                        },
+                        "rule_policy_id": "bound-history",
+                        "rule_policy_version": "bound-history",
+                        "rule_policy_sha256": rule_policy_sha256,
+                        "rule_policy_load_status": "loaded",
+                        "durable_evidence_order": {
+                            "event_id": _clean(phase.get("event_id")),
+                        },
+                        "event_timestamp": (
+                            "1970-01-01T00:00:00Z"
+                            if int(phase.get("command_index") or 0) == 0
+                            else "1970-01-01T00:00:%02dZ"
+                            % min(int(phase.get("command_index") or 0), 59)
+                        ),
+                        "compound_command_index": int(
+                            phase.get("command_index") or 0
+                        ),
+                    }
+                )
+    else:
+        events = [
+            dict(item)
+            for item in payload.get("classification_events") or []
+            if isinstance(item, Mapping)
+        ]
     if not events:
         return None
     grouped: Dict[tuple[str, str, int], list[Dict[str, Any]]] = {}
@@ -412,6 +496,10 @@ def build_live_next_behavior_session(
         },
         "observation_groups": groups,
     }
+    if has_manifest:
+        safe["prediction_trusted_history_manifest"] = deepcopy(
+            payload["prediction_trusted_history_manifest"]
+        )
     return require_valid_next_behavior_session(safe)
 
 
@@ -500,6 +588,24 @@ class FrozenTransformerPocPredictor:
                     hash_field,
                 ):
                     raise NextBehaviorRuntimeError(f"{label} SHA-256 mismatch")
+            environment_path = _clean(
+                self.policy.get("runtime_classifier_environment_path")
+            )
+            environment_hash = _clean(
+                self.policy.get("runtime_classifier_environment_sha256")
+            )
+            if environment_path or environment_hash:
+                if not environment_path or not _require_sha(
+                    environment_hash,
+                    "runtime_classifier_environment_sha256",
+                ):
+                    raise NextBehaviorRuntimeError(
+                        "classifier environment binding is incomplete"
+                    )
+                if _sha256_file(environment_path) != environment_hash:
+                    raise NextBehaviorRuntimeError(
+                        "classifier environment SHA-256 mismatch"
+                    )
             self.model, self.metadata = load_checkpoint(
                 self.policy["transformer_checkpoint_path"],
                 expected_spec=self.spec,
@@ -572,6 +678,9 @@ class FrozenTransformerPocPredictor:
                 ),
                 "runtime_classifier_checkpoint_sha256": _clean(
                     self.policy.get("runtime_classifier_checkpoint_sha256")
+                ),
+                "runtime_classifier_environment_sha256": _clean(
+                    self.policy.get("runtime_classifier_environment_sha256")
                 ),
             },
             "authority": deepcopy(AUTHORITY),

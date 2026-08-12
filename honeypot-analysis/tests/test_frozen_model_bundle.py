@@ -128,8 +128,17 @@ def test_create_verify_archive_and_link_bundle_without_release_overlay(
     (release / "data/models").mkdir(parents=True)
     links = bundle.install_release_links(release_root=release, bundle_root=root)
     assert links["release_links"]["models"] == str(root)
+    assert links["prediction_ready"] is True
     assert (release / "data/models/checkpoint.pt").resolve() == root / "transformer/checkpoint.pt"
     assert (release / "models/securebert_ttp").resolve() == root / "securebert_ttp"
+    verified_links = bundle.verify_release_links(
+        release_root=release,
+        bundle_root=root,
+    )
+    assert verified_links["prediction_ready"] is True
+    assert set(verified_links["transformer_artifacts"]) == {
+        role for role, _path_key, _hash_key in bundle.TRANSFORMER_SPECS
+    }
 
     archive = tmp_path / "bundle.tar"
     archive_receipt = bundle.archive_bundle(bundle_root=root, archive_path=archive)
@@ -160,3 +169,52 @@ def test_release_link_installation_refuses_existing_artifact(tmp_path: Path) -> 
     )
     with pytest.raises(bundle.FrozenModelBundleError, match="already exists"):
         bundle.install_release_links(release_root=release, bundle_root=root)
+
+
+def test_prediction_readiness_rejects_missing_or_wrong_release_link(
+    tmp_path: Path,
+) -> None:
+    release = tmp_path / "release"
+    (release / "data/models").mkdir(parents=True)
+    root = tmp_path / "bundle"
+    transformer = root / "transformer"
+    transformer.mkdir(parents=True)
+    artifacts = {}
+    for role, _path_key, _hash_key in bundle.TRANSFORMER_SPECS:
+        suffix = ".pt" if role == "transformer_checkpoint" else ".json"
+        source = transformer / f"{role}{suffix}"
+        source.write_bytes(role.encode("utf-8"))
+        artifacts[role] = {
+            "relative_path": f"transformer/{source.name}",
+            "bytes": source.stat().st_size,
+            "sha256": _sha(source),
+        }
+    (root / bundle.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema_version": bundle.SCHEMA_VERSION,
+                "bundle_id": "frozen_model_bundle_test",
+                "transformer": {"artifacts": artifacts},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (release / "models").symlink_to(root, target_is_directory=True)
+
+    with pytest.raises(
+        bundle.FrozenModelBundleError,
+        match="prediction artifact link is missing",
+    ):
+        bundle.verify_release_links(release_root=release, bundle_root=root)
+
+    first = next(iter(artifacts.values()))
+    wrong = tmp_path / "wrong"
+    wrong.write_bytes(b"wrong")
+    (release / "data/models" / Path(first["relative_path"]).name).symlink_to(
+        wrong
+    )
+    with pytest.raises(
+        bundle.FrozenModelBundleError,
+        match="targets the wrong bundle",
+    ):
+        bundle.verify_release_links(release_root=release, bundle_root=root)

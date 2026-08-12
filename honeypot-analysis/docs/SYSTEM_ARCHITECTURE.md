@@ -56,10 +56,20 @@ receipt.
 `session_assessment.v4` is the sole assessment authority for newly generated
 reports. Its evaluator normalizes one Cowrie session, rebuilds evidence
 relationships rather than accepting a caller cache, and creates exactly one
-content-addressed `canonical_evidence_snapshot.v1`. That snapshot contains
+content-addressed `canonical_evidence_snapshot.v3` containing the historical
+v1/v2 evidence input plus typed coverage and a semantic graph. That snapshot contains
 sensor evidence, observations, direct Cowrie transfer events, entities,
 relationships, connected chains, and trusted ATT&CK candidates. Model-only or
 audit-only classifications are excluded.
+
+The `typed_semantic_coverage.v1` record makes bounded analysis explicit: its
+current v1 runtime emits only `full` or `unavailable`; policy/resource
+validation failure reports zero typed observations and an explicit reason,
+never a truncated `partial` prefix. `canonical_semantic_graph.v1` deduplicates
+compatible evidence and rejects conflicting identities while resolving fact,
+relationship, chain, and authority references for findings, hypotheses,
+manual guidance, monitor/dashboard views, and AI projection. Historical v1/v2
+reports remain read-only and are not silently recomputed.
 
 The classification policy is read once, validated as a whole, hashed from
 those exact bytes, and compiled from that document. An explicitly configured

@@ -1,0 +1,77 @@
+{
+  "schema_version": "behavioral_label_corrections.v1",
+  "created_at": "2026-08-11",
+  "basis": "Reviewed operation-aware taxonomy corrections applied after the immutable typed_semantic_fixtures.v2 evaluation was frozen.",
+  "source_fixture": "evaluation/typed_semantic_fixtures.v2.json",
+  "source_fixture_sha256": "b62a6062a91c31dd3cb7310e926d7d700c9f420f6863b676ec63f66dd7866b7a",
+  "taxonomy_corrections": {
+    "account_metadata": {
+      "paths": ["/etc/passwd"],
+      "operation_type": "account_metadata_read",
+      "semantic_family": "inspection",
+      "credential_exposure_guidance_eligible": false
+    },
+    "credential_material": {
+      "classes": [
+        "password_hash_store",
+        "private_key_material",
+        "token_cloud_credentials"
+      ],
+      "operation_type": "credential_material_read",
+      "semantic_family": "sensitive_read"
+    }
+  },
+  "corrections": {
+    "EXH-007": {
+      "eligible_matches": 1,
+      "expected_entity": "/run/cowrie/unsupported.zsh",
+      "expected_operations": ["execution_attempt"]
+    },
+    "EXH-008": {
+      "eligible_matches": 1,
+      "expected_entity": "/run/cowrie/unsupported.rb",
+      "expected_operations": ["execution_attempt"]
+    },
+    "EXI-013": {
+      "eligible_matches": 1,
+      "expected_entity": "/srv/cowrie/runner",
+      "expected_operations": ["execution_attempt"]
+    },
+    "EXI-014": {
+      "eligible_matches": 1,
+      "expected_entity": "/var/tmp/native-payload",
+      "expected_operations": ["execution_attempt"]
+    },
+    "EXI-019": {
+      "eligible_matches": 1,
+      "expected_entity": "/tmp/debug.sh",
+      "expected_operations": ["execution_attempt"]
+    },
+    "EXI-020": {
+      "eligible_matches": 1,
+      "expected_entity": "/tmp/app.js",
+      "expected_operations": ["execution_attempt"]
+    },
+    "IFH-034": {
+      "expected_operation_replacements": {
+        "credential_path_read": "credential_material_read"
+      }
+    },
+    "IFI-045": {
+      "expected_operation_replacements": {
+        "credential_path_read": "credential_material_read"
+      }
+    },
+    "POC-002": {
+      "expected_operation_replacements": {
+        "credential_path_read": "credential_material_read"
+      }
+    }
+  },
+  "authority": {
+    "trusted_label_evaluation_only": true,
+    "runtime_scoring_change": false,
+    "model_retraining_authorized": false,
+    "threshold_or_calibration_change": false
+  }
+}

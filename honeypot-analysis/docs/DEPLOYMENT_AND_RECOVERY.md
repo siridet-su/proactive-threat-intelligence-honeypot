@@ -56,11 +56,13 @@ creation first verifies candidate sources against the reviewed policies and
 receipts, copies exact bytes, and records the old release only as provenance.
 
 Use `production.tools.frozen_model_bundle` to `create`, `verify` with
-`--runtime-check --smoke-test`, `install-release-links`, and `archive`. The
-link installer fails closed if any target/model link already exists. It adds
-the reviewed Transformer paths and classifier-model link without changing
-policy-relative paths. Release-manifest verification then checks each link and
-model file plus the exact bundle-manifest and recovery-archive receipts.
+`--runtime-check --smoke-test`, `install-release-links`,
+`verify-release-links`, and `archive`. The link installer fails closed if any
+target/model link already exists. It adds the reviewed Transformer paths and
+classifier-model link without changing policy-relative paths. Release-manifest
+creation and verification both require every policy-relative Transformer link
+and the classifier-model link to resolve to the receipt-bound bundle; a release
+with a missing or substituted model path is not prediction-ready.
 
 Keep both bundle and archive while any live or rollback release refers to
 them. On a replacement host, verify the archive SHA-256 from the dependent

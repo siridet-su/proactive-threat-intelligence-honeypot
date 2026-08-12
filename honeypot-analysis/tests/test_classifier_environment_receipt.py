@@ -21,3 +21,11 @@ def test_classifier_environment_receipt_matches_current_runtime_code() -> None:
     assert classifier["pipeline_sha256"] == hashlib.sha256(
         (ROOT / "production/classification/classification_pipeline.py").read_bytes()
     ).hexdigest()
+    assert classifier["operation_parser_sha256"] == hashlib.sha256(
+        (ROOT / "production/semantics/command_operations.py").read_bytes()
+    ).hexdigest()
+    assert receipt["classification_policy"]["rule_policy_sha256"] == (
+        hashlib.sha256(
+            (ROOT / "configs/classification_rules.trusted.json").read_bytes()
+        ).hexdigest()
+    )

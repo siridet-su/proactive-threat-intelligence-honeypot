@@ -69,6 +69,13 @@ FAIL_CLOSED_POLICY: Dict[str, Any] = {
             "relationship_types": {},
         },
         "claims": {
+            "authority_boundary": {
+                "schema_version": "behavioral_authority_decision.v1",
+                "legacy_explicit_reviewed_fallback_rule_ids": [],
+                "deferred_families": ["identity", "scheduled_task"],
+                "typed_selection_required": True,
+                "regex_fallback_without_typed_support": "audit_only",
+            },
             "connected": [],
             "independent": {},
             "follow_on": {
@@ -254,6 +261,35 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             errors.append(f"policy.relationships.relationship_types: missing mapping for {action_type!r}")
 
     claims = body.get("claims") or {}
+    authority_boundary = claims.get("authority_boundary") or {}
+    if not isinstance(authority_boundary, dict):
+        errors.append("policy.claims.authority_boundary: must be an object")
+    else:
+        if authority_boundary.get("schema_version") != (
+            "behavioral_authority_decision.v1"
+        ):
+            errors.append(
+                "policy.claims.authority_boundary.schema_version is invalid"
+            )
+        _validate_string_list(
+            authority_boundary.get("legacy_explicit_reviewed_fallback_rule_ids"),
+            "policy.claims.authority_boundary.legacy_explicit_reviewed_fallback_rule_ids",
+            errors,
+            allow_empty=True,
+        )
+        _validate_string_list(
+            authority_boundary.get("deferred_families"),
+            "policy.claims.authority_boundary.deferred_families",
+            errors,
+        )
+        if authority_boundary.get("typed_selection_required") is not True:
+            errors.append(
+                "policy.claims.authority_boundary.typed_selection_required must be true"
+            )
+        if authority_boundary.get("regex_fallback_without_typed_support") != "audit_only":
+            errors.append(
+                "policy.claims.authority_boundary regex fallback must be audit_only"
+            )
     connected = claims.get("connected")
     if not isinstance(connected, list) or not connected:
         errors.append("policy.claims.connected: must be a non-empty list")
@@ -272,6 +308,110 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
         _validate_action_types(rule.get("required_action_types"), f"{path}.required_action_types", errors)
         _validate_action_types(rule.get("excluded_action_types", []), f"{path}.excluded_action_types", errors, allow_empty=True)
         _validate_claim(rule, path, errors)
+
+    typed_connected = claims.get("typed_connected")
+    if not isinstance(typed_connected, list) or not typed_connected:
+        errors.append("policy.claims.typed_connected: must be a non-empty list")
+    for index, rule in enumerate(
+        typed_connected if isinstance(typed_connected, list) else []
+    ):
+        path = f"policy.claims.typed_connected[{index}]"
+        if not isinstance(rule, dict):
+            errors.append(f"{path}: must be an object")
+            continue
+        expected = {
+            "rule_id",
+            "required_operation_types",
+            "minimum_incomplete_operation_count",
+            "claim_type",
+            "text",
+            "evidence_status",
+            "limitations",
+            "incomplete_claim_type",
+            "incomplete_text",
+            "missing_evidence_text",
+            "falsifier_codes",
+        }
+        optional = {
+            "required_transition_types",
+            "supporting_relationship_types",
+            "required_transitions",
+            "same_entity_required",
+        }
+        if not expected.issubset(set(rule)) or not set(rule).issubset(expected | optional):
+            errors.append(f"{path}: typed connected rule shape is invalid")
+            continue
+        if not str(rule.get("rule_id") or "").strip():
+            errors.append(f"{path}: missing rule_id")
+        _validate_action_types(
+            rule.get("required_operation_types"),
+            f"{path}.required_operation_types",
+            errors,
+        )
+        for key in (
+            "required_transition_types",
+            "supporting_relationship_types",
+        ):
+            if key in rule:
+                _validate_string_list(
+                    rule.get(key), f"{path}.{key}", errors, allow_empty=True
+                )
+        if "same_entity_required" in rule and not isinstance(
+            rule.get("same_entity_required"), bool
+        ):
+            errors.append(f"{path}.same_entity_required: must be boolean")
+        if "required_transitions" in rule:
+            transitions = rule.get("required_transitions")
+            if not isinstance(transitions, list):
+                errors.append(f"{path}.required_transitions: must be a list")
+            else:
+                for transition_index, transition in enumerate(transitions):
+                    if not isinstance(transition, dict):
+                        errors.append(
+                            f"{path}.required_transitions[{transition_index}]: must be an object"
+                        )
+                        continue
+                    if set(transition) - {
+                        "relationship_types", "same_entity_required"
+                    }:
+                        errors.append(
+                            f"{path}.required_transitions[{transition_index}]: shape is invalid"
+                        )
+                    _validate_string_list(
+                        transition.get("relationship_types"),
+                        f"{path}.required_transitions[{transition_index}].relationship_types",
+                        errors,
+                    )
+                    if not isinstance(
+                        transition.get("same_entity_required"), bool
+                    ):
+                        errors.append(
+                            f"{path}.required_transitions[{transition_index}].same_entity_required: must be boolean"
+                        )
+        minimum_prefix = rule.get("minimum_incomplete_operation_count")
+        if (
+            isinstance(minimum_prefix, bool)
+            or not isinstance(minimum_prefix, int)
+            or minimum_prefix < 1
+            or minimum_prefix >= len(rule.get("required_operation_types") or [])
+        ):
+            errors.append(
+                f"{path}.minimum_incomplete_operation_count: must be a "
+                "positive integer smaller than the required chain length"
+            )
+        _validate_claim(rule, path, errors)
+        for key in (
+            "incomplete_claim_type",
+            "incomplete_text",
+            "missing_evidence_text",
+        ):
+            if not str(rule.get(key) or "").strip():
+                errors.append(f"{path}.{key}: missing value")
+        _validate_string_list(
+            rule.get("falsifier_codes"),
+            f"{path}.falsifier_codes",
+            errors,
+        )
 
     independent = claims.get("independent")
     if not isinstance(independent, dict):

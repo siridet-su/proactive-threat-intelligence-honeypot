@@ -8,6 +8,8 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Tuple
 
 from production.utils.serialization import stable_id
+from production.semantics.command_operations import parse_command_operation
+from production.policies.typed_semantic_vocabulary import classify_path_evidence
 
 
 _WRAPPERS = {"env", "nohup", "setsid", "sudo"}
@@ -515,41 +517,24 @@ def _read_path_entities(
     ]
 
 
-def _sensitive_path_match(
+def _path_evidence_class(
     entity: Dict[str, Any],
     policy: Dict[str, Any],
-) -> bool:
+) -> str:
     if entity.get("entity_type") != "path":
-        return False
-    path_policy = policy.get("sensitive_path_policy") or {}
+        return ""
     values = [
         entity.get("normalized_value"),
         entity.get("original_value"),
-    ]
-    exact_paths = set(path_policy.get("exact_absolute_paths") or [])
-    suffixes = [
-        tuple(suffix)
-        for suffix in path_policy.get("suffix_path_segments") or []
-        if isinstance(suffix, list)
     ]
     for value in values:
         path = value if isinstance(value, str) else ""
         if not path:
             continue
-        if path.startswith("relative:"):
-            path = path[len("relative:"):]
-        if any(character in path for character in ("$", "`", "*", "?", "[", "]")):
-            continue
-        if path in exact_paths:
-            return True
-        segments = tuple(segment for segment in path.split("/") if segment)
-        if any(
-            len(segments) >= len(suffix)
-            and segments[-len(suffix):] == suffix
-            for suffix in suffixes
-        ):
-            return True
-    return False
+        evidence_class = classify_path_evidence(path, policy)
+        if evidence_class:
+            return evidence_class
+    return ""
 
 
 def _rebuild_credential_path_entities(
@@ -572,7 +557,11 @@ def _rebuild_credential_path_entities(
     if parsed_paths:
         for item in parsed_paths:
             if (
-                _sensitive_path_match(item, policy)
+                _path_evidence_class(item, policy) in {
+                    "password_hash_store",
+                    "private_key_material",
+                    "token_cloud_credentials",
+                }
                 and not any(
                     existing.get("entity_id") == item.get("entity_id")
                     for existing in entities["credential_paths"]
@@ -590,12 +579,20 @@ def _rebuild_credential_path_entities(
 def _add_sensitive_read_operation(
     operations: List[Dict[str, Any]],
     entities: Dict[str, List[Dict[str, Any]]],
-    observation: Dict[str, Any],
+    policy: Dict[str, Any],
 ) -> None:
     credential_refs = {
-        item.get("entity_id")
+        item.get("entity_id"): _path_evidence_class(item, policy)
         for item in entities.get("credential_paths", [])
         if isinstance(item, dict) and item.get("entity_id")
+    }
+    account_metadata_refs = {
+        item.get("entity_id")
+        for item in entities.get("read_paths", [])
+        if isinstance(item, dict)
+        and item.get("entity_id")
+        and _path_evidence_class(item, policy)
+        == "account_metadata"
     }
     read_refs = {
         entity_ref
@@ -603,22 +600,20 @@ def _add_sensitive_read_operation(
         if operation.get("operation_type") == "file_read"
         for entity_ref in operation.get("entity_refs") or []
     }
-    refs = sorted(credential_refs & read_refs)
-    if not refs:
-        return
-    literal = (
-        "credential_path_access"
-        if "credential_path_access" in (
-            observation.get("action_types") or []
-        )
-        else ""
-    )
-    _add_operation(operations, _operation(
-        "credential_path_read",
-        proof_scope="literal_command",
-        entity_refs=refs,
-        source_literal_action=literal,
-    ))
+    refs = sorted(set(credential_refs) & read_refs)
+    if refs:
+        _add_operation(operations, _operation(
+            "credential_material_read",
+            proof_scope="general_command_semantics",
+            entity_refs=refs,
+        ))
+    metadata_refs = sorted(account_metadata_refs & read_refs)
+    if metadata_refs:
+        _add_operation(operations, _operation(
+            "account_metadata_read",
+            proof_scope="general_command_semantics",
+            entity_refs=metadata_refs,
+        ))
 
 
 def _general_operations(
@@ -1355,6 +1350,11 @@ def extract_typed_semantics(
 
     entities = _empty_entities(policy)
     _merge_source_entities(entities, observation.get("entities") or {})
+    source_execution_entity_ids = {
+        _clean(item.get("entity_id"))
+        for item in entities.get("executed_paths") or []
+        if isinstance(item, dict) and _clean(item.get("entity_id"))
+    }
     source_credential_entities = deepcopy(
         entities.get("credential_paths") or []
     )
@@ -1403,6 +1403,83 @@ def extract_typed_semantics(
                 )
                 operations.extend(general)
                 abstentions.extend(general_abstentions)
+
+                # The neutral parser is shared with canonical extraction and
+                # structural classification.  It may recover a direct or
+                # interpreter-based execution attempt only when canonical
+                # evidence independently recorded the same literal action and,
+                # for path execution, the exact same resolved entity.
+                shared = parse_command_operation(
+                    _clean(observation.get("command")),
+                    working_directory=working_directory,
+                    working_directory_status=working_directory_status,
+                )
+                shared_execution = (
+                    shared.get("parse_status") == "parsed"
+                    and "execution_attempt"
+                    in (shared.get("operation_types") or [])
+                    and "execution_attempt"
+                    in (observation.get("action_types") or [])
+                    and (
+                        not operations
+                        or all(
+                            item.get("operation_type") == "unknown"
+                            for item in operations
+                        )
+                    )
+                )
+                if shared_execution:
+                    execution_refs: List[str] = []
+                    for item in (shared.get("entities") or {}).get(
+                        "executed_paths", []
+                    ):
+                        if not isinstance(item, dict) or item.get("linkable") is not True:
+                            continue
+                        reference = _add_entity(
+                            entities,
+                            "executed_paths",
+                            "path",
+                            _clean(item.get("raw_value")),
+                            working_directory=working_directory,
+                            working_directory_status=working_directory_status,
+                        )
+                        if reference in source_execution_entity_ids:
+                            execution_refs.append(reference)
+                    if (shared.get("entities") or {}).get("literal_values"):
+                        execution_refs.append(_add_entity(
+                            entities,
+                            "literal_values",
+                            "literal",
+                            "inline_program_present",
+                        ))
+                    if execution_refs:
+                        operations = [
+                            item
+                            for item in operations
+                            if item.get("operation_type") != "execution_attempt"
+                        ]
+                        _add_operation(operations, _operation(
+                            "execution_attempt",
+                            proof_scope="general_command_semantics",
+                            entity_refs=execution_refs,
+                            source_literal_action="execution_attempt",
+                        ))
+                        abstentions = [
+                            reason
+                            for reason in abstentions
+                            if reason not in {
+                                "unsupported_executable",
+                                "unsupported_option",
+                            }
+                        ]
+                        general_abstentions = [
+                            reason
+                            for reason in general_abstentions
+                            if reason not in {
+                                "unsupported_executable",
+                                "unsupported_option",
+                            }
+                        ]
 
                 hard_abstention = bool(
                     {
@@ -1497,7 +1574,7 @@ def extract_typed_semantics(
                     _add_sensitive_read_operation(
                         operations,
                         entities,
-                        observation,
+                        policy,
                     )
 
     operation_types = [

@@ -21,6 +21,9 @@ from production.policies.validate_response_guidance_policy import (
     validate_response_guidance_asset_profile,
     validate_response_guidance_policy,
 )
+from production.reporting.canonical_semantic_graph import (
+    validate_canonical_semantic_graph,
+)
 from production.reporting.typed_semantic_family_selection import (
     policy_output_trace,
     select_activated_semantic_family,
@@ -66,6 +69,29 @@ def _canonical_text_list(values: Any) -> List[str]:
     return _texts(values if isinstance(values, (list, tuple, set)) else [values])
 
 
+def _normalized_entity_values(values: Any) -> List[str]:
+    """Cross the sole entity-to-display boundary without rendering mappings."""
+
+    output: List[str] = []
+    candidates = values if isinstance(values, (list, tuple, set)) else [values]
+    for value in candidates:
+        if isinstance(value, str):
+            normalized = _clean(value)
+        elif isinstance(value, dict):
+            if (
+                not _clean(value.get("entity_type"))
+                or value.get("uncertain") is True
+                or value.get("linkable") is not True
+            ):
+                continue
+            normalized = _clean(value.get("normalized_value"))
+        else:
+            continue
+        if normalized and normalized not in output:
+            output.append(normalized)
+    return output
+
+
 def _canonical_mapping(mapping: Any) -> Dict[str, Any]:
     """Keep the observed fields v3 may display, hash, or evaluate.
 
@@ -103,9 +129,9 @@ def _canonical_mapping(mapping: Any) -> Dict[str, Any]:
     entities = mapping.get("entities")
     if isinstance(entities, dict):
         canonical_entities = {
-            _clean(entity_type): _canonical_text_list(entity_values)
+            _clean(entity_type): _normalized_entity_values(entity_values)
             for entity_type, entity_values in entities.items()
-            if _clean(entity_type) and _canonical_text_list(entity_values)
+            if _clean(entity_type) and _normalized_entity_values(entity_values)
         }
         if canonical_entities:
             output["entities"] = canonical_entities
@@ -174,7 +200,26 @@ def canonical_evidence_snapshot(observed_behavior: Any) -> Dict[str, Any]:
     """
 
     observed = observed_behavior if isinstance(observed_behavior, dict) else {}
-    if observed.get("schema_version") == "canonical_evidence_snapshot.v1":
+    if observed.get("schema_version") == "canonical_evidence_snapshot.v3":
+        snapshot = json.loads(stable_json(observed))
+        recorded = _clean(snapshot.get("evidence_sha256")).lower()
+        copied = deepcopy(snapshot)
+        copied.pop("evidence_sha256", None)
+        if len(recorded) != 64 or recorded != _document_sha256(copied):
+            raise ValueError("canonical evidence v3 digest is inconsistent")
+        graph_errors = validate_canonical_semantic_graph(
+            snapshot.get("semantic_graph")
+        )
+        if graph_errors:
+            raise ValueError(
+                "canonical evidence v3 semantic graph is invalid: "
+                + "; ".join(graph_errors)
+            )
+        return snapshot
+    if observed.get("schema_version") in {
+        "canonical_evidence_snapshot.v1",
+        "canonical_evidence_snapshot.v2",
+    }:
         snapshot = json.loads(stable_json(observed))
         recorded = _clean(snapshot.get("evidence_sha256")).lower()
         hash_input = deepcopy(snapshot)
@@ -203,7 +248,12 @@ def canonical_evidence_snapshot(observed_behavior: Any) -> Dict[str, Any]:
 
 def canonical_evidence_sha256(observed_behavior: Any) -> str:
     snapshot = canonical_evidence_snapshot(observed_behavior)
-    if snapshot.get("schema_version") == "canonical_evidence_snapshot.v1":
+    if snapshot.get("schema_version") == "canonical_evidence_snapshot.v3":
+        return _clean(snapshot.get("evidence_sha256")).lower()
+    if snapshot.get("schema_version") in {
+        "canonical_evidence_snapshot.v1",
+        "canonical_evidence_snapshot.v2",
+    }:
         return _clean(snapshot.get("evidence_sha256")).lower()
     return _document_sha256(snapshot)
 
@@ -213,7 +263,11 @@ def _snapshot_values(
     legacy_name: str,
     canonical_name: str,
 ) -> Any:
-    if snapshot.get("schema_version") == "canonical_evidence_snapshot.v1":
+    if snapshot.get("schema_version") in {
+        "canonical_evidence_snapshot.v1",
+        "canonical_evidence_snapshot.v2",
+        "canonical_evidence_snapshot.v3",
+    }:
         return snapshot.get(canonical_name) or []
     return snapshot.get(legacy_name) or []
 
@@ -343,7 +397,7 @@ def _observed_facts(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         for entity_type, values in (observation.get("entities") or {}).items():
             if entity_type not in entities:
                 continue
-            entities[entity_type].update(_texts(values or []))
+            entities[entity_type].update(_normalized_entity_values(values or []))
     transfer_refs: Set[str] = set()
     for observation in _snapshot_values(
         snapshot, "transfer_event_observations", "transfer_observations"
@@ -1068,6 +1122,7 @@ def build_response_guidance_v3(
     enrichment_context: Any = None,
     typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
     activated_semantic_families: Iterable[str] = (),
+    blocked_policy_rule_ids: Iterable[str] = (),
 ) -> Dict[str, Any]:
     """Evaluate v3 policy directly against immutable observed Cowrie evidence."""
 
@@ -1096,6 +1151,9 @@ def build_response_guidance_v3(
         _clean(value)
         for value in activated_semantic_families
         if _clean(value)
+    }
+    blocked_rules = {
+        _clean(value) for value in blocked_policy_rule_ids if _clean(value)
     }
     activated_family_order = list(
         CURRENT_ACTIVATED_SEMANTIC_FAMILIES
@@ -1130,28 +1188,17 @@ def build_response_guidance_v3(
         })
         for family, selection in semantic_selections.items()
     }
-    credential_values = sorted({
-        _clean(match.get("entity_value"))
-        for match in (
-            semantic_selections.get("sensitive_read") or {}
-        ).get("matches") or []
-        if isinstance(match, dict) and _clean(match.get("entity_value"))
-    })
-    if credential_values:
-        context_values["credential_paths"] = ", ".join(
-            credential_values
-        )
-    artifact_hash_values = sorted({
-        _clean(match.get("entity_value"))
-        for match in (
-            semantic_selections.get("transfer") or {}
-        ).get("matches") or []
-        if isinstance(match, dict) and _clean(match.get("entity_value"))
-    })
-    if artifact_hash_values:
-        context_values["artifact_hashes"] = ", ".join(
-            artifact_hash_values
-        )
+    semantic_context: Dict[str, Set[str]] = {}
+    for selection in semantic_selections.values():
+        for match in selection.get("matches") or []:
+            if not isinstance(match, dict):
+                continue
+            role = _clean(match.get("entity_role"))
+            value = _clean(match.get("entity_value"))
+            if role and value:
+                semantic_context.setdefault(role, set()).add(value)
+    for role, values in semantic_context.items():
+        context_values[role] = ", ".join(sorted(values))
     family_selection_hashes = {
         family: _clean(selection.get("selection_sha256"))
         for family, selection in semantic_selections.items()
@@ -1198,19 +1245,71 @@ def build_response_guidance_v3(
     ) -> Tuple[bool, List[Dict[str, Any]], List[str]]:
         semantic_family = _clean(rule.get("semantic_family"))
         if semantic_family:
-            refs = semantic_refs.get(semantic_family) or []
-            matched = bool(refs)
-            return (
-                matched,
-                [{
+            condition = rule.get("applies_when") or {}
+            matches = list(
+                (semantic_selections.get(semantic_family) or {}).get("matches")
+                or []
+            )
+            trace = [{
                     "predicate": "activated_semantic_families",
                     "expected": [semantic_family],
-                    "matched": [semantic_family] if matched else [],
-                    "result": matched,
-                    "evidence_refs": refs if matched else [],
-                }],
-                refs if matched else [],
-            )
+                    "matched": [semantic_family] if matches else [],
+                    "result": bool(matches),
+                    "evidence_refs": semantic_refs.get(semantic_family) or [],
+            }]
+            predicate_fields = {
+                "required_operation_types": "operation_types",
+                "required_evidence_classes": "evidence_class",
+                "required_outcome_statuses": "outcome_status",
+                "required_effect_statuses": "effect_status",
+            }
+            for predicate, field in predicate_fields.items():
+                expected = _texts(condition.get(predicate) or [])
+                if not expected:
+                    continue
+                filtered = []
+                for match in matches:
+                    actual = match.get(field)
+                    actual_values = set(
+                        _texts(actual if isinstance(actual, list) else [actual])
+                    )
+                    predicate_matched = (
+                        set(expected).issubset(actual_values)
+                        if predicate == "required_operation_types"
+                        else bool(set(expected).intersection(actual_values))
+                    )
+                    if predicate_matched:
+                        filtered.append(match)
+                refs = sorted({
+                    _clean(ref)
+                    for match in filtered
+                    for ref in match.get("supporting_evidence_refs") or []
+                    if _clean(ref)
+                })
+                trace.append({
+                    "predicate": predicate,
+                    "expected": expected,
+                    "matched": sorted({
+                        value
+                        for match in filtered
+                        for value in _texts(
+                            match.get(field)
+                            if isinstance(match.get(field), list)
+                            else [match.get(field)]
+                        )
+                        if value in expected
+                    }),
+                    "result": bool(filtered),
+                    "evidence_refs": refs,
+                })
+                matches = filtered
+            refs = sorted({
+                _clean(ref)
+                for match in matches
+                for ref in match.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            return bool(matches and refs), trace, refs
         return _condition_match(rule.get("applies_when"), facts)
 
     findings: List[Dict[str, Any]] = []
@@ -1218,6 +1317,8 @@ def build_response_guidance_v3(
     if status == "available":
         for rule in document.get("finding_rules") or []:
             if not isinstance(rule, dict):
+                continue
+            if _clean(rule.get("rule_id")) in blocked_rules:
                 continue
             matched, trace, refs = match_rule(rule)
             if not matched or not refs:
@@ -1255,6 +1356,8 @@ def build_response_guidance_v3(
             findings.append(finding)
         for rule in document.get("action_playbooks") or []:
             if not isinstance(rule, dict):
+                continue
+            if _clean(rule.get("rule_id")) in blocked_rules:
                 continue
             matched, trace, refs = match_rule(rule)
             if not matched or not refs:
@@ -1410,6 +1513,7 @@ def build_response_guidance_v3_from_paths(
     enrichment_context: Any = None,
     typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
     activated_semantic_families: Iterable[str] = (),
+    blocked_policy_rule_ids: Iterable[str] = (),
 ) -> Dict[str, Any]:
     """Load exact configuration files and evaluate canonical observed evidence."""
 
@@ -1432,6 +1536,7 @@ def build_response_guidance_v3_from_paths(
         enrichment_context=enrichment_context,
         typed_semantic_fact_set=typed_semantic_fact_set,
         activated_semantic_families=activated_semantic_families,
+        blocked_policy_rule_ids=blocked_policy_rule_ids,
     )
 
 

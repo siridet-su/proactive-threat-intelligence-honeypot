@@ -14,6 +14,8 @@ deployment, implementation, and reproducibility records below.
 - [Hybrid AI implementation](HYBRID_AI_ADVISORY_IMPLEMENTATION.md)
 - [Hybrid AI implementation plan](HYBRID_AI_IMPLEMENTATION_PLAN.md)
 - [Runtime dependency receipt](RUNTIME_DEPENDENCY_RECEIPT.md)
+- [Prediction trusted history](PREDICTION_TRUSTED_HISTORY.md)
+- [Canonical semantic graph and authority](SEMANTIC_GRAPH_AND_AUTHORITY.md)
 - [Future SQLite to MongoDB migration requirements](SQLITE_TO_MONGODB_MIGRATION_REQUIREMENTS.md)
 
 The repository root [README](../README.md) contains setup, development checks,

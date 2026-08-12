@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import stat
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -41,7 +43,65 @@ def _probability(value: Any) -> bool:
     )
 
 
-def _validate_transformer(policy: Dict[str, Any], errors: List[str]) -> None:
+def _repository_root(repository_root: str | Path | None) -> Path:
+    return (
+        Path(repository_root).resolve()
+        if repository_root is not None
+        else Path(__file__).resolve().parents[2]
+    )
+
+
+def _resolve_referenced_path(
+    value: Any,
+    *,
+    repository_root: Path,
+) -> Path:
+    path = Path(str(value or "").strip())
+    return path if path.is_absolute() else repository_root / path
+
+
+def _validate_environment_binding(
+    policy: Dict[str, Any],
+    errors: List[str],
+    *,
+    repository_root: Path,
+) -> None:
+    path_text = str(policy.get("runtime_classifier_environment_path") or "").strip()
+    expected = str(policy.get("runtime_classifier_environment_sha256") or "").strip().lower()
+    if not path_text or not expected:
+        return
+    path = _resolve_referenced_path(path_text, repository_root=repository_root)
+    try:
+        metadata = path.lstat()
+    except OSError:
+        errors.append(
+            "policy.runtime_classifier_environment_path must reference a readable regular file"
+        )
+        return
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        errors.append(
+            "policy.runtime_classifier_environment_path must reference a readable regular non-symlink file"
+        )
+        return
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        errors.append(
+            "policy.runtime_classifier_environment_path must reference a readable regular file"
+        )
+        return
+    if digest != expected:
+        errors.append(
+            "policy.runtime_classifier_environment_sha256 does not match the referenced file bytes"
+        )
+
+
+def _validate_transformer(
+    policy: Dict[str, Any],
+    errors: List[str],
+    *,
+    repository_root: Path,
+) -> None:
     if policy.get("compute_weighted_ensemble_baseline") is not False:
         errors.append(f"{TRANSFORMER_POC_MODE} requires compute_weighted_ensemble_baseline=false")
     if policy.get("weight_influence_scope") != "not_applicable_external_authority":
@@ -58,6 +118,7 @@ def _validate_transformer(policy: Dict[str, Any], errors: List[str]) -> None:
         "transformer_calibration_path",
         "runtime_rule_policy_path",
         "runtime_trust_policy_path",
+        "runtime_classifier_environment_path",
         "runtime_classifier_checkpoint_path",
     )
     for field in required_paths:
@@ -74,6 +135,7 @@ def _validate_transformer(policy: Dict[str, Any], errors: List[str]) -> None:
         "calibration_membership_sha256",
         "runtime_rule_policy_sha256",
         "runtime_trust_policy_sha256",
+        "runtime_classifier_environment_sha256",
         "runtime_classifier_checkpoint_sha256",
         "immutable_final_result_sha256",
     )
@@ -87,6 +149,11 @@ def _validate_transformer(policy: Dict[str, Any], errors: List[str]) -> None:
     for field in ("tactic_probability_threshold", "terminal_probability_threshold"):
         if not _probability(policy.get(field)):
             errors.append(f"policy.{field} must be in [0, 1]")
+    _validate_environment_binding(
+        policy,
+        errors,
+        repository_root=repository_root,
+    )
 
 
 def _validate_vomm(policy: Dict[str, Any], errors: List[str]) -> None:
@@ -120,7 +187,11 @@ def _validate_vomm(policy: Dict[str, Any], errors: List[str]) -> None:
         )
 
 
-def validate_policy_document(document: Dict[str, Any]) -> List[str]:
+def validate_policy_document(
+    document: Dict[str, Any],
+    *,
+    repository_root: str | Path | None = None,
+) -> List[str]:
     if not isinstance(document, dict):
         return ["policy document must be an object"]
     policy = _policy_body(document)
@@ -135,8 +206,9 @@ def validate_policy_document(document: Dict[str, Any]) -> List[str]:
             "policy.prediction_mode must select the frozen Transformer or explicit VOMM rollback"
         )
         return errors
+    root = _repository_root(repository_root)
     if mode == TRANSFORMER_POC_MODE:
-        _validate_transformer(policy, errors)
+        _validate_transformer(policy, errors, repository_root=root)
     else:
         _validate_vomm(policy, errors)
     return errors
@@ -149,7 +221,11 @@ def main(argv: List[str] | None = None) -> int:
         default="configs/prediction_policy.transformer_poc.trusted.json",
     )
     args = parser.parse_args(argv)
-    errors = validate_policy_document(load_policy_file(args.policy))
+    policy_path = Path(args.policy)
+    errors = validate_policy_document(
+        load_policy_file(policy_path),
+        repository_root=policy_path.resolve().parent.parent,
+    )
     if errors:
         for error in errors:
             print(f"ERROR: {error}")

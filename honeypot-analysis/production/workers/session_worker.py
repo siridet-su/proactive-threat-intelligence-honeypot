@@ -16,6 +16,7 @@ from production.workers.session_monitor import SessionMonitor, SessionState
 from production.enrichment.threat_feed_loader import load_threat_feeds
 
 from production.classification.classification_pipeline import NotebookParityClassifier
+from production.classification.environment import load_classifier_environment, environment_identity
 from production.utils.config import ProductionConfig
 from production.policies.data_lifecycle_policy import load_data_lifecycle_policy
 from production.policies.alert_authority_policy import load_alert_authority_policy
@@ -47,6 +48,7 @@ from production.prediction.next_behavior_runtime import (
     FrozenTransformerPocPredictor,
     finalize_prediction_snapshot,
 )
+from production.prediction.trusted_history import build_prediction_trusted_history_manifest
 from production.prediction.evidence_cutoff import (
     make_evidence_cutoff,
     require_valid_evidence_cutoff,
@@ -260,6 +262,10 @@ class SessionWorker:
         self._session_latest_snapshots: Dict[str, Dict[str, Any]] = {}
         self._session_prediction_snapshots: Dict[str, List[Dict[str, Any]]] = {}
         self.bert_fn = load_securebert_classifier(config)
+        self.classifier_environment = load_classifier_environment(
+            getattr(config, "classifier_environment_path", ""),
+            verify_assets=True,
+        )
         self.classifier = None
         self.session_ttp_correlation_policy = self._load_session_ttp_correlation_policy()
         self.prediction_engine = self._new_prediction_engine()
@@ -292,6 +298,9 @@ class SessionWorker:
 
     def _session_payload(self, state: Any) -> Dict[str, Any]:
         payload = session_to_payload(state)
+        payload["classification_environment"] = environment_identity(
+            self.classifier_environment
+        )
         payload["session_source"] = self._session_source()
         correlation_id = str(payload.get("last_applied_event_id") or "").strip()
         if correlation_id:
@@ -707,6 +716,9 @@ class SessionWorker:
             credential_hasher=self.credential_hasher,
             campaign_profile_cache_limit=self.config.campaign_profile_cache_limit,
             session_event_history_limit=self.config.session_event_history_limit,
+            classification_environment=environment_identity(
+                self.classifier_environment
+            ),
             enable_legacy_campaign_tracker=False,
             enable_alert_evaluation=(
                 self.alert_authority_policy.automatic_alerts_authorized
@@ -919,6 +931,20 @@ class SessionWorker:
             raise WorkerError(
                 "prediction trigger event does not match evidence cutoff"
             )
+        payload["prediction_trusted_history_manifest"] = (
+            build_prediction_trusted_history_manifest(
+                phases=payload.get("prediction_trusted_history") or [],
+                evidence_cutoff=cutoff,
+                classifier_environment=payload.get("classification_environment")
+                or {},
+                original_trusted_phase_count=payload.get(
+                    "prediction_trusted_phase_count"
+                ),
+            )
+        )
+        payload["prediction_trusted_history"] = payload[
+            "prediction_trusted_history_manifest"
+        ]["ordered_trusted_phases"]
         task = {
             "schema_version": "prediction_outbox_task.v2",
             "session_id": str(payload.get("session_id") or "unknown"),

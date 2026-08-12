@@ -1,5 +1,5 @@
 {
-  "schema_version": "next_behavior_classifier_environment.v1",
+  "schema_version": "next_behavior_classifier_environment.v2",
   "python": {
     "implementation": "CPython",
     "version": "3.12.13"
@@ -11,7 +11,9 @@
   "classifier": {
     "adapter": "production.classification.securebert_classifier.SecureBertCommandClassifier",
     "adapter_sha256": "72c7cb7a4c2a9f85f141d8eb39a12b24414e0cd861f463ac6cb9e4811cc622be",
-    "pipeline_sha256": "85a5f26d9a7c481b35b8862a2322a6e048a17285ceccb4cc975b72ad9132ff92",
+    "pipeline_sha256": "a8e283664af15f40c13e6bf091eeea439c2f28bb83011b4dbf1dd432b27d780e",
+    "operation_parser_sha256": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1",
+    "splitter_sha256": "68b5e6348af55bd309cac993a702317d120f80c4a8ac57d75302f83ff56e1a9f",
     "checkpoint_id": "securebert_ttp_model_v2/checkpoint-6765",
     "checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
     "parameter_count": 149755588,
@@ -30,19 +32,30 @@
     }
   },
   "classification_policy": {
+    "rule_policy_id": "honeypot-command-classification-rules",
+    "rule_policy_version": "2026-08-11-operation-aware-v3",
     "rule_policy_path": "configs/classification_rules.trusted.json",
-    "rule_policy_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "rule_policy_sha256": "32744defdf1746d23764772ad20cf8fd4c2630c04f63ed85cbb4bbfc28f7d7fc",
     "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
     "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
     "trust_policy_path": "production/classification/trust.py",
-    "trust_policy_sha256": "e4fcf976a18e079a493fcab0472bb220d42e42512a8ae78dc9ccb52799c38b39",
+    "trust_policy_sha256": "4c7af019a6ff39b5b35fd8e6929571f69c3574ad27d6fb254db02f940de2f885",
     "securebert_candidate_threshold": 0.55,
     "trusted_model_only_threshold": 0.9,
     "drop_rule_securebert_disagreements": true,
-    "compound_command_splitter": "production.classification.classification_pipeline.split_compound_command"
+    "compound_command_splitter": "production.classification.classification_pipeline.split_compound_command",
+    "authority_decision_contract_version": "command_authority_decision.v1",
+    "authority_decision_sha256": "872c0cb3840b47d7239c9fdf8920d700bc0fed95a7c9e93cdaf62565fe961c86",
+    "trusted_history_schema_version": "prediction_trusted_history_manifest.v2",
+    "trusted_history_builder_path": "production/prediction/trusted_history.py",
+    "trusted_history_builder_sha256": "d1a109209153fba8c8cba2935dd75a453173fb2eca8d36b8add3fe95f5c9fd7f",
+    "trusted_history_runtime_path": "production/prediction/next_behavior_runtime.py",
+    "trusted_history_runtime_sha256": "bd1fd2b022812043654c944319b444c0cb2c5ce7647fb7a00056db53329b63cc",
+    "trusted_history_maximum_phases": 8
   },
   "freeze": {
     "basis_commit": "e3de17c727d8dd8b16f57654da4566e8a5700c03",
+    "release_revision": "e3de17c727d8dd8b16f57654da4566e8a5700c03",
     "historical_runtime_threshold_distinction_preserved": true,
     "raw_scores_are_probabilities": false
   }

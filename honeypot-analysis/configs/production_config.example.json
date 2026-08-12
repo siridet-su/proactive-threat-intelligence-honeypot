@@ -137,6 +137,7 @@
     "rule_review_mode": "reviewed_only"
   },
   "classification_rules_path": "configs/classification_rules.trusted.json",
+  "classifier_environment_path": "configs/next_behavior_classifier_environment.v1.json",
   "threat_hypothesis_behavior_policy_path": "configs/threat_hypothesis_behavior.trusted.json",
   "prediction_policy_path": "configs/prediction_policy.transformer_poc.trusted.json",
   "data_lifecycle_policy_path": "configs/data_lifecycle_policy.v1.json",

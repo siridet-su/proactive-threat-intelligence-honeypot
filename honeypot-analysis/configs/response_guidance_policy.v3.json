@@ -1,8 +1,8 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.6.0",
-  "updated_at": "2026-07-30",
+  "version": "3.7.0",
+  "updated_at": "2026-08-11",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
   "automatic_execution": false,
@@ -91,7 +91,9 @@
       "severity": "low",
       "statement": "Cowrie reported success for a parsed, supported inspection command in its simulated shell; result contents, malicious intent, compromise, and real-host effects are not established.",
       "applies_when": {
-        "activated_semantic_families": ["inspection"]
+        "activated_semantic_families": ["inspection"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
       },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
@@ -114,7 +116,9 @@
       "severity": "medium",
       "statement": "Cowrie reported success for a parsed, supported filesystem-change command in its simulated shell; the resulting filesystem state, malicious intent, persistence, cleanup, compromise, and real-host effects are not established.",
       "applies_when": {
-        "activated_semantic_families": ["filesystem"]
+        "activated_semantic_families": ["filesystem"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
       },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
@@ -137,7 +141,10 @@
       "severity": "medium",
       "statement": "Cowrie reported success for a parsed, supported execution-attempt command in its simulated shell; program existence, completed execution, program effects, malicious intent, compromise, persistence, and real-host effects are not established.",
       "applies_when": {
-        "activated_semantic_families": ["execution"]
+        "activated_semantic_families": ["execution"],
+        "required_operation_types": ["execution_attempt"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
       },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
@@ -160,7 +167,11 @@
       "severity": "high",
       "statement": "Cowrie reported success for a parsed file-read command targeting a resolved credential-related path; acquisition and real-host use are not established.",
       "applies_when": {
-        "activated_semantic_families": ["sensitive_read"]
+        "activated_semantic_families": ["sensitive_read"],
+        "required_operation_types": ["credential_material_read", "file_read"],
+        "required_evidence_classes": ["password_hash_store", "private_key_material", "token_cloud_credentials"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
       },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
@@ -182,7 +193,7 @@
       "references": ["mitre-t1105", "cisa-small-business"],
       "severity": "medium",
       "statement": "Cowrie recorded a direct file-transfer event for the resolved artifact SHA-256 {artifact_hashes}; execution and any real-host effect are not established.",
-      "applies_when": {"activated_semantic_families": ["transfer"]},
+      "applies_when": {"activated_semantic_families": ["transfer"], "required_operation_types": ["transfer_observed"], "required_outcome_statuses": ["event_observed"], "required_effect_statuses": ["event_observed"]},
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
         "basis": ["Migrated from reviewed transfer rule", "Requires a typed direct Cowrie transfer observation and exact artifact SHA-256", "ATT&CK candidates and transfer commands cannot select this finding"],
@@ -204,7 +215,10 @@
       "severity": "medium",
       "statement": "Cowrie reported success for a parsed, supported command that attempted HTTP(S) remote-content access; received bytes, a completed transfer, a created destination, artifact identity, execution, and real-host effects are not established.",
       "applies_when": {
-        "activated_semantic_families": ["transfer_attempt"]
+        "activated_semantic_families": ["transfer_attempt"],
+        "required_operation_types": ["remote_content_access", "transfer_attempt"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
       },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
@@ -270,7 +284,11 @@
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1552", "cisa-small-business"],
       "applies_when": {
-        "activated_semantic_families": ["sensitive_read"]
+        "activated_semantic_families": ["sensitive_read"],
+        "required_operation_types": ["credential_material_read", "file_read"],
+        "required_evidence_classes": ["password_hash_store", "private_key_material", "token_cloud_credentials"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
       },
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
@@ -315,7 +333,7 @@
       "semantic_family": "transfer",
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1105", "cisa-small-business"],
-      "applies_when": {"activated_semantic_families": ["transfer"]},
+      "applies_when": {"activated_semantic_families": ["transfer"], "required_operation_types": ["transfer_observed"], "required_outcome_statuses": ["event_observed"], "required_effect_statuses": ["event_observed"]},
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
         "basis": ["Direct Cowrie transfer event with a resolved artifact SHA-256", "No transfer command, prediction, enrichment, or ATT&CK mapping can select this playbook"],
@@ -359,7 +377,7 @@
       "semantic_family": "execution",
       "source_type": "trusted_control_guidance",
       "references": ["mitre-t1059", "cisa-small-business"],
-      "applies_when": {"activated_semantic_families": ["execution"]},
+      "applies_when": {"activated_semantic_families": ["execution"], "required_operation_types": ["execution_attempt"], "required_outcome_statuses": ["reported_success"], "required_effect_statuses": ["reported_completed"]},
       "provenance": {
         "method": "reviewed_observed_evidence_policy_migration",
         "basis": ["Exact activated typed execution-attempt observation", "Resolved script path or explicit inline-program identity", "Cowrie command outcome does not prove completed or real-host execution"],

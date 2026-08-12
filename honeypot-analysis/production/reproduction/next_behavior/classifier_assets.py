@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
 
 
-SCHEMA_VERSION = "next_behavior_classifier_environment.v1"
+SCHEMA_VERSION = "next_behavior_classifier_environment.v2"
+LEGACY_SCHEMA_VERSION = "next_behavior_classifier_environment.v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _TOP_LEVEL_FIELDS = frozenset(
     {
@@ -37,6 +38,8 @@ _CLASSIFIER_FIELDS = frozenset(
         "adapter",
         "adapter_sha256",
         "pipeline_sha256",
+        "operation_parser_sha256",
+        "splitter_sha256",
         "checkpoint_id",
         "checkpoint_sha256",
         "parameter_count",
@@ -48,6 +51,8 @@ _CLASSIFIER_FIELDS = frozenset(
 )
 _POLICY_FIELDS = frozenset(
     {
+        "rule_policy_id",
+        "rule_policy_version",
         "rule_policy_path",
         "rule_policy_sha256",
         "mitre_cache_path",
@@ -58,11 +63,20 @@ _POLICY_FIELDS = frozenset(
         "trusted_model_only_threshold",
         "drop_rule_securebert_disagreements",
         "compound_command_splitter",
+        "authority_decision_contract_version",
+        "authority_decision_sha256",
+        "trusted_history_schema_version",
+        "trusted_history_builder_path",
+        "trusted_history_builder_sha256",
+        "trusted_history_runtime_path",
+        "trusted_history_runtime_sha256",
+        "trusted_history_maximum_phases",
     }
 )
 _FREEZE_FIELDS = frozenset(
     {
         "basis_commit",
+        "release_revision",
         "historical_runtime_threshold_distinction_preserved",
         "raw_scores_are_probabilities",
     }
@@ -114,7 +128,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
     errors: list[str] = []
     if set(value) != _TOP_LEVEL_FIELDS:
         errors.append("classifier environment fields are invalid")
-    if value.get("schema_version") != SCHEMA_VERSION:
+    if value.get("schema_version") not in {SCHEMA_VERSION, LEGACY_SCHEMA_VERSION}:
         errors.append(f"schema_version must be {SCHEMA_VERSION}")
 
     python = value.get("python")
@@ -135,7 +149,10 @@ def validate_classifier_manifest(value: Any) -> list[str]:
             errors.append("dependency lock SHA-256 is invalid")
 
     classifier = value.get("classifier")
-    if not isinstance(classifier, dict) or set(classifier) != _CLASSIFIER_FIELDS:
+    classifier_fields = _CLASSIFIER_FIELDS
+    if value.get("schema_version") == LEGACY_SCHEMA_VERSION:
+        classifier_fields = _CLASSIFIER_FIELDS - {"splitter_sha256"}
+    if not isinstance(classifier, dict) or set(classifier) != classifier_fields:
         errors.append("classifier fields are invalid")
     else:
         if classifier.get("adapter") != _CLASSIFIER_ADAPTER:
@@ -147,10 +164,15 @@ def validate_classifier_manifest(value: Any) -> list[str]:
         for field in (
             "adapter_sha256",
             "pipeline_sha256",
+            "operation_parser_sha256",
             "checkpoint_sha256",
         ):
             if not _is_sha256(classifier.get(field)):
                 errors.append(f"classifier.{field} is invalid")
+        if value.get("schema_version") == SCHEMA_VERSION and not _is_sha256(
+            classifier.get("splitter_sha256")
+        ):
+            errors.append("classifier.splitter_sha256 is invalid")
         for field in ("parameter_count", "label_count", "max_length"):
             number = classifier.get(field)
             if isinstance(number, bool) or not isinstance(number, int) or number < 1:
@@ -172,7 +194,21 @@ def validate_classifier_manifest(value: Any) -> list[str]:
                     errors.append("classifier.files contains an unsafe receipt")
 
     policy = value.get("classification_policy")
-    if not isinstance(policy, dict) or set(policy) != _POLICY_FIELDS:
+    policy_fields = _POLICY_FIELDS
+    if value.get("schema_version") == LEGACY_SCHEMA_VERSION:
+        policy_fields = _POLICY_FIELDS - {
+            "rule_policy_id",
+            "rule_policy_version",
+            "authority_decision_contract_version",
+            "authority_decision_sha256",
+            "trusted_history_schema_version",
+            "trusted_history_builder_path",
+            "trusted_history_builder_sha256",
+            "trusted_history_runtime_path",
+            "trusted_history_runtime_sha256",
+            "trusted_history_maximum_phases",
+        }
+    if not isinstance(policy, dict) or set(policy) != policy_fields:
         errors.append("classification_policy fields are invalid")
     else:
         for path_field in (
@@ -190,6 +226,37 @@ def validate_classifier_manifest(value: Any) -> list[str]:
         ):
             if not _is_sha256(policy.get(hash_field)):
                 errors.append(f"classification_policy.{hash_field} is invalid")
+        if value.get("schema_version") == SCHEMA_VERSION:
+            if policy.get("authority_decision_contract_version") != "command_authority_decision.v1":
+                errors.append("authority decision contract version is invalid")
+            if not _is_sha256(policy.get("authority_decision_sha256")):
+                errors.append("authority decision contract hash is invalid")
+            if policy.get("trusted_history_schema_version") != (
+                "prediction_trusted_history_manifest.v2"
+            ):
+                errors.append("trusted-history manifest schema is invalid")
+            for field in (
+                "trusted_history_builder_path",
+                "trusted_history_runtime_path",
+            ):
+                path = Path(_clean(policy.get(field)))
+                if (
+                    not _clean(policy.get(field))
+                    or path.is_absolute()
+                    or ".." in path.parts
+                ):
+                    errors.append(f"{field} is unsafe")
+            for field in (
+                "trusted_history_builder_sha256",
+                "trusted_history_runtime_sha256",
+            ):
+                if not _is_sha256(policy.get(field)):
+                    errors.append(f"{field} is invalid")
+            if (
+                type(policy.get("trusted_history_maximum_phases")) is not int
+                or policy.get("trusted_history_maximum_phases") != 8
+            ):
+                errors.append("trusted-history maximum phases are not frozen")
         candidate = policy.get("securebert_candidate_threshold")
         trusted = policy.get("trusted_model_only_threshold")
         if not isinstance(candidate, (int, float)) or isinstance(candidate, bool):
@@ -214,11 +281,18 @@ def validate_classifier_manifest(value: Any) -> list[str]:
             errors.append("compound command splitter is not frozen")
 
     freeze = value.get("freeze")
-    if not isinstance(freeze, dict) or set(freeze) != _FREEZE_FIELDS:
+    freeze_fields = _FREEZE_FIELDS
+    if value.get("schema_version") == LEGACY_SCHEMA_VERSION:
+        freeze_fields = _FREEZE_FIELDS - {"release_revision"}
+    if not isinstance(freeze, dict) or set(freeze) != freeze_fields:
         errors.append("freeze fields are invalid")
     else:
         if not re.fullmatch(r"[0-9a-f]{40}", _clean(freeze.get("basis_commit"))):
             errors.append("freeze.basis_commit is invalid")
+        if value.get("schema_version") == SCHEMA_VERSION and not re.fullmatch(
+            r"[0-9a-f]{40}", _clean(freeze.get("release_revision"))
+        ):
+            errors.append("freeze.release_revision is invalid")
         if freeze.get("historical_runtime_threshold_distinction_preserved") is not True:
             errors.append("historical/runtime threshold distinction is not preserved")
         if freeze.get("raw_scores_are_probabilities") is not False:
@@ -272,6 +346,11 @@ def verify_classifier_assets(
         repository_root / "production/classification/classification_pipeline.py",
         classifier["pipeline_sha256"],
         "classification pipeline",
+    )
+    verified["command_operation_parser"] = _verify_file(
+        repository_root / "production/semantics/command_operations.py",
+        classifier["operation_parser_sha256"],
+        "command operation parser",
     )
     for path_field, hash_field in (
         ("rule_policy_path", "rule_policy_sha256"),

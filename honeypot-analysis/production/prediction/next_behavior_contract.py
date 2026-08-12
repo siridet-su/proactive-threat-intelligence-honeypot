@@ -13,6 +13,10 @@ from copy import deepcopy
 from math import isfinite
 from typing import Any, Dict, Iterable, List, Mapping
 
+from production.prediction.trusted_history import (
+    validate_prediction_trusted_history_manifest,
+)
+
 SESSION_SCHEMA_VERSION = "next_behavior_session.v1"
 PHASE_SCHEMA_VERSION = "next_behavior_phase.v1"
 EXAMPLE_SCHEMA_VERSION = "next_behavior_example.v1"
@@ -101,6 +105,7 @@ _SESSION_FIELDS = frozenset(
         "pseudonymization_key_id",
         "audit_summary",
         "observation_groups",
+        "prediction_trusted_history_manifest",
     }
 )
 _GROUP_FIELDS = frozenset(
@@ -366,6 +371,106 @@ def validate_next_behavior_session(value: Any) -> List[str]:
         errors.append("pseudonymization_key_id must be non-empty when present")
     if "audit_summary" in value:
         errors.extend(_validate_audit_summary(value["audit_summary"], "audit_summary"))
+    if "prediction_trusted_history_manifest" in value:
+        history = value.get("prediction_trusted_history_manifest")
+        if not isinstance(history, dict):
+            errors.append("prediction_trusted_history_manifest must be an object")
+        else:
+            if history.get("schema_version") not in {
+                "prediction_trusted_history_manifest.v1",
+                "prediction_trusted_history_manifest.v2",
+            }:
+                errors.append("prediction_trusted_history_manifest schema is invalid")
+            phases = history.get("ordered_trusted_phases")
+            if not isinstance(phases, list) or len(phases) > 8:
+                errors.append("prediction trusted history must contain at most 8 phases")
+            if history.get("schema_version") == "prediction_trusted_history_manifest.v2":
+                errors.extend(
+                    f"prediction trusted history: {error}"
+                    for error in validate_prediction_trusted_history_manifest(history)
+                )
+                if type(history.get("truncated")) is not bool:
+                    errors.append("prediction trusted history truncated flag is invalid")
+                for key in (
+                    "original_trusted_phase_count",
+                    "selected_trusted_phase_count",
+                    "omitted_prefix_phase_count",
+                ):
+                    if (
+                        isinstance(history.get(key), bool)
+                        or not isinstance(history.get(key), int)
+                        or history.get(key) < 0
+                    ):
+                        errors.append(f"prediction trusted history {key} is invalid")
+                if (
+                    isinstance(history.get("selected_trusted_phase_count"), int)
+                    and history.get("selected_trusted_phase_count") != len(phases or [])
+                ):
+                    errors.append(
+                        "prediction trusted history selected count is inconsistent"
+                    )
+                original = history.get("original_trusted_phase_count")
+                selected = history.get("selected_trusted_phase_count")
+                omitted = history.get("omitted_prefix_phase_count")
+                if (
+                    isinstance(original, int)
+                    and isinstance(selected, int)
+                    and isinstance(omitted, int)
+                    and original != selected + omitted
+                ):
+                    errors.append(
+                        "prediction trusted history truncation counts do not reconcile"
+                    )
+                if (
+                    isinstance(omitted, int)
+                    and history.get("truncated") is not (omitted > 0)
+                ):
+                    errors.append(
+                        "prediction trusted history truncated flag is inconsistent"
+                    )
+                for phase_index, phase in enumerate(phases or []):
+                    if not isinstance(phase, dict):
+                        errors.append(
+                            f"prediction trusted history phase {phase_index} must be an object"
+                        )
+                        continue
+                    labels = phase.get("labels")
+                    if not isinstance(labels, list) or not labels:
+                        errors.append(
+                            f"prediction trusted history phase {phase_index} labels are invalid"
+                        )
+                        continue
+                    seen_labels = set()
+                    for label_index, label in enumerate(labels):
+                        if not isinstance(label, dict):
+                            errors.append(
+                                f"prediction trusted history label {phase_index}:{label_index} must be an object"
+                            )
+                            continue
+                        tactic = _clean(label.get("tactic"))
+                        technique = _clean(label.get("technique")).upper()
+                        if not tactic or not technique:
+                            errors.append(
+                                f"prediction trusted history label {phase_index}:{label_index} is incomplete"
+                            )
+                        key = (tactic, technique)
+                        if key in seen_labels:
+                            errors.append(
+                                f"prediction trusted history phase {phase_index} labels are duplicated"
+                            )
+                        seen_labels.add(key)
+                    expected_tactics = sorted({key[0] for key in seen_labels})
+                    expected_techniques = sorted({key[1] for key in seen_labels})
+                    if phase.get("tactics") != expected_tactics:
+                        errors.append(
+                            f"prediction trusted history phase {phase_index} tactics do not match labels"
+                        )
+                    if phase.get("techniques") != expected_techniques:
+                        errors.append(
+                            f"prediction trusted history phase {phase_index} techniques do not match labels"
+                        )
+            if not _is_sha256(history.get("history_manifest_sha256")):
+                errors.append("prediction trusted history manifest hash is invalid")
 
     groups = value.get("observation_groups")
     if not isinstance(groups, list) or not groups:

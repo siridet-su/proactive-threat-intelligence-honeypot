@@ -110,7 +110,10 @@ def _receipt(path: Path, expected: str, label: str) -> dict[str, Any]:
 
 def _transformer_policy(policy_path: Path) -> tuple[dict[str, Any], str]:
     document = load_policy_file(policy_path)
-    errors = validate_policy_document(document)
+    errors = validate_policy_document(
+        document,
+        repository_root=policy_path.resolve().parent.parent,
+    )
     if errors:
         raise FrozenModelBundleError("invalid prediction policy: " + "; ".join(errors))
     policy = document.get("policy")
@@ -543,6 +546,20 @@ def create_bundle(
 
 def install_release_links(*, release_root: Path, bundle_root: Path) -> dict[str, Any]:
     manifest = load_bundle_manifest(bundle_root / MANIFEST_NAME)
+    release_root = release_root.resolve()
+    bundle_root = bundle_root.resolve()
+    data_root = release_root / "data"
+    if data_root.is_symlink() or (data_root.exists() and not data_root.is_dir()):
+        raise FrozenModelBundleError("release data path must be a real directory")
+    data_root.mkdir(exist_ok=True)
+    model_path_root = data_root / "models"
+    if model_path_root.is_symlink() or (
+        model_path_root.exists() and not model_path_root.is_dir()
+    ):
+        raise FrozenModelBundleError(
+            "release data/models path must be a real directory"
+        )
+    model_path_root.mkdir(exist_ok=True)
     links: dict[str, str] = {}
     for role, _path_key, _hash_key in TRANSFORMER_SPECS:
         item = manifest["transformer"]["artifacts"][role]
@@ -557,13 +574,70 @@ def install_release_links(*, release_root: Path, bundle_root: Path) -> dict[str,
         raise FrozenModelBundleError("release models link already exists")
     os.symlink(bundle_root, models)
     links["models"] = str(bundle_root)
-    for relative, target in links.items():
-        resolved = (release_root / relative).resolve()
-        if not resolved.is_relative_to(bundle_root.resolve()):
-            raise FrozenModelBundleError("release link resolves outside the bundle")
-        if relative != "models" and not resolved.is_file():
-            raise FrozenModelBundleError("release artifact link is invalid")
-    return {"bundle_id": manifest["bundle_id"], "release_links": links}
+    verified = verify_release_links(
+        release_root=release_root,
+        bundle_root=bundle_root,
+    )
+    return {**verified, "release_links": links}
+
+
+def verify_release_links(
+    *,
+    release_root: Path,
+    bundle_root: Path,
+) -> dict[str, Any]:
+    """Require every policy-relative runtime model path to bind to one bundle."""
+
+    release_root = release_root.resolve()
+    bundle_root = bundle_root.resolve()
+    manifest = load_bundle_manifest(bundle_root / MANIFEST_NAME)
+    verified: dict[str, dict[str, Any]] = {}
+    for role, _path_key, _hash_key in TRANSFORMER_SPECS:
+        item = (manifest.get("transformer") or {}).get("artifacts", {}).get(role)
+        if not isinstance(item, Mapping):
+            raise FrozenModelBundleError(f"bundle missing {role}")
+        source = bundle_root / _safe_relative(str(item.get("relative_path") or ""))
+        receipt = _receipt(source, str(item.get("sha256") or ""), role)
+        if receipt["bytes"] != item.get("bytes"):
+            raise FrozenModelBundleError(f"bundle receipt mismatch for {role}")
+        target = release_root / "data/models" / source.name
+        if not target.is_symlink():
+            raise FrozenModelBundleError(
+                f"release prediction artifact link is missing: {target}"
+            )
+        try:
+            resolved = target.resolve(strict=True)
+        except OSError as exc:
+            raise FrozenModelBundleError(
+                f"release prediction artifact link is invalid: {target}"
+            ) from exc
+        if resolved != source.resolve():
+            raise FrozenModelBundleError(
+                f"release prediction artifact link targets the wrong bundle: {target}"
+            )
+        verified[role] = {
+            "release_path": str(target),
+            "bundle_path": str(source),
+            "bytes": receipt["bytes"],
+            "sha256": receipt["sha256"],
+        }
+    models = release_root / "models"
+    try:
+        models_target = models.resolve(strict=True) if models.is_symlink() else None
+    except OSError as exc:
+        raise FrozenModelBundleError(
+            "release classifier-model link is invalid"
+        ) from exc
+    if models_target != bundle_root:
+        raise FrozenModelBundleError(
+            "release classifier-model link does not target the frozen bundle"
+        )
+    return {
+        "bundle_id": manifest["bundle_id"],
+        "prediction_ready": True,
+        "transformer_artifacts": verified,
+        "classifier_model_path": str(models),
+    }
 
 
 def archive_bundle(*, bundle_root: Path, archive_path: Path) -> dict[str, Any]:
@@ -600,6 +674,9 @@ def _parser() -> argparse.ArgumentParser:
     links = commands.add_parser("install-release-links")
     links.add_argument("--release-root", type=Path, required=True)
     links.add_argument("--bundle-root", type=Path, required=True)
+    verify_links = commands.add_parser("verify-release-links")
+    verify_links.add_argument("--release-root", type=Path, required=True)
+    verify_links.add_argument("--bundle-root", type=Path, required=True)
     archive = commands.add_parser("archive")
     archive.add_argument("--bundle-root", type=Path, required=True)
     archive.add_argument("--archive", type=Path, required=True)
@@ -630,6 +707,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     elif args.command == "install-release-links":
         receipt = install_release_links(
+            release_root=args.release_root,
+            bundle_root=args.bundle_root,
+        )
+    elif args.command == "verify-release-links":
+        receipt = verify_release_links(
             release_root=args.release_root,
             bundle_root=args.bundle_root,
         )

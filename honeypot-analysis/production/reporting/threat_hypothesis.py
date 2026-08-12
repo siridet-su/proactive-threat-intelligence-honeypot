@@ -22,6 +22,9 @@ from production.reporting.typed_semantic_family_selection import (
     policy_output_trace,
     select_activated_semantic_family,
 )
+from production.reporting.typed_semantic_chain_selection import (
+    select_typed_semantic_chains,
+)
 from production.utils.serialization import stable_id
 
 
@@ -487,6 +490,38 @@ def _connected_behavior_claims(
     return claims
 
 
+def _canonical_chain_for_typed_match(
+    observed: Dict[str, Any], match: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Map a typed chain back to the immutable canonical chain domain."""
+
+    typed_refs = set(_texts(match.get("source_observation_refs") or []))
+    if not typed_refs:
+        return {}
+    candidates = []
+    for chain in observed.get("connected_behavior_chains") or []:
+        if not isinstance(chain, dict) or chain.get("chain_status") != "supported":
+            continue
+        canonical_refs = set(_texts(chain.get("evidence_refs") or []))
+        if typed_refs.issubset(canonical_refs):
+            candidates.append(chain)
+    if len(candidates) != 1:
+        return {}
+    return candidates[0]
+
+
+def _typed_chain_selection(
+    fact_set: Optional[Dict[str, Any]], claims_policy: Dict[str, Any]
+) -> Dict[str, Any]:
+    if not isinstance(fact_set, dict):
+        return {}
+    rules = claims_policy.get("typed_connected") or []
+    try:
+        return select_typed_semantic_chains(fact_set, rules)
+    except ValueError:
+        return {}
+
+
 def build_supported_assessment(
     observed: Dict[str, Any],
     behavior_policy_document: Optional[Dict[str, Any]] = None,
@@ -494,11 +529,25 @@ def build_supported_assessment(
     *,
     typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
     activated_semantic_families: Iterable[str] = (),
+    canonical_semantic_graph: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     claims_policy = _claim_policy(document)
     independent = claims_policy.get("independent") or {}
     chain = list(observed.get("ordered_behavior_chain") or [])
+    graph_evidence_refs = None
+    if isinstance(canonical_semantic_graph, dict):
+        graph_evidence_refs = {
+            _clean(item.get("evidence_id"))
+            for item in canonical_semantic_graph.get("evidence_nodes") or []
+            if isinstance(item, dict) and _clean(item.get("evidence_id"))
+        }
+
+    def graph_refs_ok(values: Iterable[Any]) -> bool:
+        if graph_evidence_refs is None:
+            return True
+        return set(_texts(values)).issubset(graph_evidence_refs)
+
     activated_families = {
         _clean(value) for value in activated_semantic_families if _clean(value)
     }
@@ -526,6 +575,39 @@ def build_supported_assessment(
         document,
         suppressed_action_types=suppressed_action_types,
     )
+    typed_chain_selection = _typed_chain_selection(
+        typed_semantic_fact_set, claims_policy
+    )
+    typed_rules = {
+        _clean(rule.get("rule_id")): rule
+        for rule in claims_policy.get("typed_connected") or []
+        if isinstance(rule, dict) and _clean(rule.get("rule_id"))
+    }
+    for match in typed_chain_selection.get("matches") or []:
+        if not isinstance(match, dict) or match.get("status") != "complete":
+            continue
+        definition = typed_rules.get(_clean(match.get("rule_id"))) or {}
+        if not _clean(match.get("chain_id")) or not definition:
+            continue
+        claim = _claim(
+            _clean(definition.get("claim_type")),
+            _clean(definition.get("text")),
+            _clean(definition.get("evidence_status")) or "supported",
+            match.get("supporting_evidence_refs") or [],
+            list(match.get("limitations") or [])
+            + list(definition.get("limitations") or []),
+        )
+        claim.update({
+            "claim_basis": "typed_semantic_chain_selection.v2",
+            "connected_chain_id": _clean(match.get("chain_id")),
+            "behavior_policy_rule_id": _clean(definition.get("rule_id")),
+            "relationship_refs": list(
+                match.get("required_relationship_refs")
+                or match.get("relationship_refs")
+                or []
+            ) + list(match.get("supporting_relationship_refs") or []),
+        })
+        connected_claims.append(claim)
     objectives: List[Dict[str, Any]] = list(connected_claims)
     filesystem_definition = independent.get("filesystem") or {}
     inspection_definition = independent.get("inspection") or {}
@@ -892,6 +974,27 @@ def build_supported_assessment(
             cleanup_definition.get("limitations") or [],
         ))
 
+    if isinstance(canonical_semantic_graph, dict):
+        graph_evidence_refs = {
+            _clean(item.get("evidence_id"))
+            for item in canonical_semantic_graph.get("evidence_nodes") or []
+            if isinstance(item, dict) and _clean(item.get("evidence_id"))
+        }
+        objectives = [
+            item
+            for item in objectives
+            if set(_texts(item.get("evidence_refs") or [])).issubset(
+                graph_evidence_refs
+            )
+        ]
+        connected_claims = [
+            item
+            for item in connected_claims
+            if set(_texts(item.get("evidence_refs") or [])).issubset(
+                graph_evidence_refs
+            )
+        ]
+
     if not objectives:
         status = "observed_behavior_only"
     elif any(item["evidence_status"] == "supported" for item in objectives):
@@ -903,6 +1006,9 @@ def build_supported_assessment(
         "assessment_status": status,
         "possible_objectives": objectives,
         "connected_behavior_claims": connected_claims,
+        # Kept as an in-process handoff so the canonical semantic graph can
+        # bind the exact same v2 chain selection that produced the claims.
+        "typed_chain_selection": typed_chain_selection,
         "claim_preference": "connected_behavior_chains_before_independent_command_claims",
         "behavior_policy": policy_summary(document),
         "unknowns": [
@@ -919,6 +1025,7 @@ def build_follow_on_hypothesis(
     *,
     typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
     activated_semantic_families: Iterable[str] = (),
+    canonical_semantic_graph: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     claims_policy = _claim_policy(document)
@@ -928,11 +1035,85 @@ def build_follow_on_hypothesis(
     progress_types = set(follow_on_policy.get("progress_action_types") or [])
     completion_types = set(follow_on_policy.get("completion_action_types") or [])
     chain = list(observed.get("ordered_behavior_chain") or [])
+    graph_evidence_refs = None
+    if isinstance(canonical_semantic_graph, dict):
+        graph_evidence_refs = {
+            _clean(item.get("evidence_id"))
+            for item in canonical_semantic_graph.get("evidence_nodes") or []
+            if isinstance(item, dict) and _clean(item.get("evidence_id"))
+        }
+
+    def graph_refs_ok(values: Iterable[Any]) -> bool:
+        if graph_evidence_refs is None:
+            return True
+        return set(_texts(values)).issubset(graph_evidence_refs)
+
     activated_families = {
         _clean(value)
         for value in activated_semantic_families
         if _clean(value)
     }
+    typed_chain_selection = _typed_chain_selection(
+        typed_semantic_fact_set, claims_policy
+    )
+    typed_rules = {
+        _clean(rule.get("rule_id")): rule
+        for rule in claims_policy.get("typed_connected") or []
+        if isinstance(rule, dict) and _clean(rule.get("rule_id"))
+    }
+    typed_incomplete = []
+    for match in typed_chain_selection.get("matches") or []:
+        if not isinstance(match, dict) or match.get("status") != "incomplete":
+            continue
+        canonical_chain = _canonical_chain_for_typed_match(observed, match)
+        definition = typed_rules.get(_clean(match.get("rule_id"))) or {}
+        if canonical_chain and definition and graph_refs_ok(
+            match.get("supporting_evidence_refs") or []
+        ):
+            typed_incomplete.append((match, canonical_chain, definition))
+    if typed_incomplete:
+        claims: List[Dict[str, Any]] = []
+        gaps: List[Dict[str, Any]] = []
+        for match, canonical_chain, definition in typed_incomplete:
+            claim = _claim(
+                _clean(definition.get("incomplete_claim_type")),
+                _clean(definition.get("incomplete_text")),
+                "partially_supported",
+                match.get("supporting_evidence_refs") or [],
+                match.get("limitations") or [],
+            )
+            claim.update({
+                "claim_basis": "typed_semantic_chain_selection.v1",
+                "connected_chain_id": _clean(canonical_chain.get("chain_id")),
+            })
+            claims.append(claim)
+            gaps.append({
+                "text": _clean(definition.get("missing_evidence_text")),
+                "data_source": "typed_semantic_fact_set.v2",
+                "machine_evaluable": True,
+                "evidence_refs": list(match.get("supporting_evidence_refs") or []),
+                "connected_chain_id": _clean(canonical_chain.get("chain_id")),
+                "falsifier_codes": list(definition.get("falsifier_codes") or []),
+            })
+        last_match, last_chain, _definition = typed_incomplete[-1]
+        return {
+            "claims": claims,
+            "abstained": False,
+            "abstention_reason": "",
+            "basis_last_evidence_id": (last_match.get("supporting_evidence_refs") or [""])[-1],
+            "basis_session_last_trusted_evidence_id": _clean(
+                (chain[-1] if chain else {}).get("evidence_id")
+            ),
+            "basis_connected_chain_ids": [
+                _clean(item[1].get("chain_id")) for item in typed_incomplete
+            ],
+            "disconfirming_observations": [],
+            "evidence_gaps": gaps,
+            "external_validation_suggestions": [],
+            "scope": "post_session_cowrie_observable_behavior",
+            "selection_semantics": "typed_same_entity_incomplete_chain",
+            "behavior_policy": policy_summary(document),
+        }
     if {"transfer", "inspection"}.intersection(activated_families):
         family_selections: Dict[str, Dict[str, Any]] = {}
         if isinstance(typed_semantic_fact_set, dict):
@@ -956,6 +1137,7 @@ def build_follow_on_hypothesis(
             if isinstance(match, dict)
             for ref in match.get("supporting_evidence_refs") or []
             if _clean(ref)
+            and graph_refs_ok([ref])
         })
         inspection_refs = sorted({
             _clean(ref)
@@ -965,6 +1147,7 @@ def build_follow_on_hypothesis(
             if isinstance(match, dict)
             for ref in match.get("supporting_evidence_refs") or []
             if _clean(ref)
+            and graph_refs_ok([ref])
         })
         refs = transfer_refs or inspection_refs
         if transfer_refs:
@@ -1035,6 +1218,8 @@ def build_follow_on_hypothesis(
     rejected_incomplete_chains: List[Dict[str, str]] = []
     for connected in observed.get("connected_behavior_chains") or []:
         if not isinstance(connected, dict):
+            continue
+        if not graph_refs_ok(connected.get("evidence_refs") or []):
             continue
         action_types = set(connected.get("action_types") or [])
         has_transfer = bool(progress_types & action_types)

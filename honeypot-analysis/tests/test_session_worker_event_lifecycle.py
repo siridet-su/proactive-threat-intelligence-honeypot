@@ -565,7 +565,7 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
         for event in final_payload["classification_events"]
         if event.get("evidence_tier") == "trusted_observation"
     }
-    assert {"T1033", "T1003"} <= trusted_ttps
+    assert {"T1033", "T1087.001"} <= trusted_ttps
 
     snapshots = storage.list_rows_for_session(
         "prediction_snapshots",

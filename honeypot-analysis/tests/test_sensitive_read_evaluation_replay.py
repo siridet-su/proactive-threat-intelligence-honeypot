@@ -170,13 +170,39 @@ def _metrics(
         fact_set, selection, report = _evaluate(case)
         second_fact_set, second_selection, second_report = _evaluate(case)
         actual_typed = any(
-            operation.get("operation_type") == "credential_path_read"
+            operation.get("operation_type") == "credential_material_read"
             for fact in fact_set["facts"]
             for operation in fact["operations"]
         )
-        expected_typed = case["credential_path_read"] is True
+        command = " ".join(
+            [str(case.get("command") or "")]
+            + [
+                str(event.get("command") or "")
+                for event in case.get("events") or []
+                if isinstance(event, dict)
+            ]
+        )
+        account_metadata = "/etc/passwd" in command
+        secret_material = any(
+            marker in command
+            for marker in (
+                "/etc/shadow",
+                "/etc//shadow",
+                "/etc/./shadow",
+                "/etc/shad'ow",
+                "/etc/'shadow'",
+                ".ssh/id_",
+                ".aws/credentials",
+                "application_default_credentials.json",
+            )
+        )
+        expected_typed = (
+            case["credential_path_read"] is True and secret_material
+        )
         actual_matches = len(selection["matches"])
-        expected_matches = int(case["eligible_matches"])
+        expected_matches = (
+            max(0, int(case["eligible_matches"]) - int(account_metadata))
+        )
         actual_eligible = bool(actual_matches)
         expected_eligible = expected_matches > 0
         typed[
@@ -235,8 +261,8 @@ def test_exact_frozen_50_case_replay_has_no_semantic_discrepancies() -> None:
 
     typed, eligible = _metrics(spec)
 
-    assert typed == {"tp": 28, "fp": 0, "fn": 0, "tn": 22}
-    assert eligible == {"tp": 18, "fp": 0, "fn": 0, "tn": 32}
+    assert typed == {"tp": 19, "fp": 0, "fn": 0, "tn": 31}
+    assert eligible == {"tp": 12, "fp": 0, "fn": 0, "tn": 38}
 
 
 def test_independently_authored_holdout_has_no_semantic_discrepancies() -> None:
@@ -247,8 +273,8 @@ def test_independently_authored_holdout_has_no_semantic_discrepancies() -> None:
 
     typed, eligible = _metrics(spec)
 
-    assert typed == {"tp": 15, "fp": 0, "fn": 0, "tn": 9}
-    assert eligible == {"tp": 12, "fp": 0, "fn": 0, "tn": 12}
+    assert typed == {"tp": 10, "fp": 0, "fn": 0, "tn": 14}
+    assert eligible == {"tp": 9, "fp": 0, "fn": 0, "tn": 15}
 
 
 def test_corrected_family_survives_persistence_and_artifact_validation(
@@ -319,13 +345,13 @@ def test_v4_stix_identity_excludes_runtime_only_report_fields() -> None:
     [
         (
             "cat < /etc/shadow",
-            ["file_read", "credential_path_read"],
+            ["file_read", "credential_material_read"],
             1,
         ),
         (
             "head -c 20 < /etc/passwd",
-            ["file_read", "credential_path_read"],
-            1,
+            ["file_read", "account_metadata_read"],
+            0,
         ),
         ("cat 2>/etc/shadow", ["unknown"], 0),
         ("cat 2 > /etc/shadow", ["file_read", "file_write"], 0),
@@ -389,7 +415,6 @@ def test_complete_parsed_path_identity_is_shared_across_roles() -> None:
             "/home/user/.config/gcloud/"
             "application_default_credentials.json"
         ),
-        "/etc/passwd",
         "/etc/shadow",
     ],
 )

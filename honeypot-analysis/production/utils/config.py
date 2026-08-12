@@ -509,6 +509,7 @@ class ProductionConfig:
         "rule_review_mode": "reviewed_only",
     })
     classification_rules_path: str = "configs/classification_rules.trusted.json"
+    classifier_environment_path: str = "configs/next_behavior_classifier_environment.v1.json"
     threat_hypothesis_behavior_policy_path: str = "configs/threat_hypothesis_behavior.trusted.json"
     prediction_policy_path: str = "configs/prediction_policy.trusted.json"
     data_lifecycle_policy_path: str = "configs/data_lifecycle_policy.v1.json"
@@ -1657,6 +1658,10 @@ class ProductionConfig:
         cfg.enable_actor_attribution = _env_bool("ENABLE_ACTOR_ATTRIBUTION", cfg.enable_actor_attribution)
         cfg.classification_policy = _env_json("CLASSIFICATION_POLICY_JSON", cfg.classification_policy)
         cfg.classification_rules_path = os.getenv("CLASSIFICATION_RULES_PATH", cfg.classification_rules_path)
+        cfg.classifier_environment_path = os.getenv(
+            "CLASSIFIER_ENVIRONMENT_PATH",
+            cfg.classifier_environment_path,
+        )
         cfg.threat_hypothesis_behavior_policy_path = os.getenv(
             "THREAT_HYPOTHESIS_BEHAVIOR_POLICY_PATH",
             cfg.threat_hypothesis_behavior_policy_path,

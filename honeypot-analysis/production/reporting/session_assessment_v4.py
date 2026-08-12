@@ -28,6 +28,16 @@ from production.reporting.response_guidance_v3 import (
     canonical_evidence_snapshot as guidance_evidence_snapshot,
     validate_response_guidance_v3,
 )
+from production.reporting.behavioral_authority import apply_behavioral_authority
+from production.reporting.canonical_semantic_graph import (
+    build_canonical_semantic_graph,
+    validate_canonical_semantic_graph,
+)
+from production.reporting.semantic_coverage import (
+    build_semantic_coverage,
+    semantic_observation_counts,
+    validate_semantic_coverage,
+)
 from production.reporting.threat_hypothesis import (
     build_follow_on_hypothesis,
     build_observed_behavior,
@@ -139,8 +149,15 @@ def _source_payload(session: Any, raw_events: Iterable[Dict[str, Any]]) -> Dict[
     def get(name: str, default: Any) -> Any:
         return session.get(name, default) if isinstance(session, dict) else getattr(session, name, default)
 
+    classification_manifest = get("trusted_classification_manifest", {}) or {}
+    snapshot_version = (
+        "canonical_evidence_snapshot.v2"
+        if isinstance(classification_manifest, dict)
+        and classification_manifest.get("manifest_sha256")
+        else "canonical_evidence_snapshot.v1"
+    )
     return {
-        "schema_version": "canonical_cowrie_evidence_snapshot.v1",
+        "schema_version": snapshot_version,
         "session_id": _clean(get("session_id", "unknown")) or "unknown",
         "src_ip": _clean(get("src_ip", "")),
         "commands": list(get("commands", []) or []),
@@ -155,6 +172,10 @@ def _source_payload(session: Any, raw_events: Iterable[Dict[str, Any]]) -> Dict[
         "canonical_event_manifest": deepcopy(
             get("canonical_event_manifest", {}) or {}
         ),
+        "classification_environment": deepcopy(
+            get("classification_environment", {}) or {}
+        ),
+        "trusted_classification_manifest": deepcopy(classification_manifest),
         "login_success": bool(get("login_success", False)),
     }
 
@@ -197,8 +218,20 @@ def build_canonical_evidence_snapshot(
             "login_success",
         )
     }
+    snapshot_version = (
+        "canonical_evidence_snapshot.v2"
+        if (source.get("trusted_classification_manifest") or {}).get("manifest_sha256")
+        else "canonical_evidence_snapshot.v1"
+    )
+    if snapshot_version == "canonical_evidence_snapshot.v2":
+        source_evidence["classification_environment"] = deepcopy(
+            source.get("classification_environment") or {}
+        )
+        source_evidence["trusted_classification_manifest"] = deepcopy(
+            source.get("trusted_classification_manifest") or {}
+        )
     snapshot = {
-        "schema_version": "canonical_evidence_snapshot.v1",
+        "schema_version": snapshot_version,
         # Classifier scores and model-only candidates are deliberately excluded
         # from this sensor-evidence digest and the authoritative snapshot.
         "source_evidence_sha256": _sha256_json(source_evidence),
@@ -227,6 +260,13 @@ def build_canonical_evidence_snapshot(
             authoritative.get("trusted_attck_candidates") or []
         ),
     }
+    if snapshot_version == "canonical_evidence_snapshot.v2":
+        snapshot["classification_environment"] = deepcopy(
+            source.get("classification_environment") or {}
+        )
+        snapshot["trusted_classification_manifest"] = deepcopy(
+            source.get("trusted_classification_manifest") or {}
+        )
     snapshot = redact_for_artifact(snapshot)
     if not isinstance(snapshot, dict):
         raise SessionAssessmentV4Error(
@@ -282,7 +322,11 @@ def _file_policy(path_text: str, default_relative: str, provided: Optional[Dict[
 
 
 def _validate_classification_policy(document: Dict[str, Any]) -> None:
-    if document.get("schema_version") != "classification_rule_policy.v1":
+    if document.get("schema_version") not in {
+        "classification_rule_policy.v1",
+        "classification_rule_policy.v2",
+        "classification_rule_policy.v3",
+    }:
         raise ValueError("classification policy schema is invalid")
     if not _clean(document.get("policy_id")) or not _clean(document.get("version")):
         raise ValueError("classification policy identity is incomplete")
@@ -293,6 +337,14 @@ def _validate_classification_policy(document: Dict[str, Any]) -> None:
     if not isinstance(rules, list) or not rules:
         raise ValueError("classification policy has no rules")
     reviewed_only = _clean(body.get("rule_review_mode")).lower() != "include_unreviewed"
+    if document.get("schema_version") == "classification_rule_policy.v3":
+        authority = body.get("runtime_authority")
+        if not isinstance(authority, dict) or authority.get(
+            "schema_version"
+        ) != "command_authority_decision.v1":
+            raise ValueError("classification runtime authority metadata is invalid")
+        if authority.get("regex_default_promotion") != "audit_only":
+            raise ValueError("classification regex default must be audit-only")
     reviewed_runtime_rules = 0
     rule_ids = set()
     for rule in rules:
@@ -306,10 +358,15 @@ def _validate_classification_policy(document: Dict[str, Any]) -> None:
         rule_ids.add(rule_id)
         if not re.fullmatch(r"T\d{4}(?:\.\d{3})?", _clean(rule.get("ttp")).upper()):
             raise ValueError("classification rule ATT&CK identifier is invalid")
-        try:
-            re.compile(_clean(rule.get("pattern")), re.IGNORECASE)
-        except re.error as exc:
-            raise ValueError("classification rule regex is invalid") from exc
+        if rule.get("evidence_type") == "command_operation":
+            predicate = rule.get("operation_predicate")
+            if not isinstance(predicate, dict) or not predicate:
+                raise ValueError("classification structural predicate is invalid")
+        else:
+            try:
+                re.compile(_clean(rule.get("pattern")), re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError("classification rule regex is invalid") from exc
         if not reviewed_only or (rule.get("provenance") or {}).get("reviewed") is True:
             reviewed_runtime_rules += 1
     if reviewed_runtime_rules == 0:
@@ -505,10 +562,16 @@ def _finding(claim: Dict[str, Any], connected: bool) -> Dict[str, Any]:
         "status": _clean(claim.get("evidence_status")) or "insufficient_evidence",
         "evidence_refs": refs,
         "relationship_refs": sorted({
-            _clean(claim.get("connected_chain_id")) if connected else ""
-        } - {""}),
+            _clean(ref)
+            for ref in claim.get("relationship_refs") or []
+            if _clean(ref)
+        }) if connected else [],
         "behavior_policy_rule_id": _clean(claim.get("behavior_policy_rule_id")),
     }
+    if _clean(claim.get("claim_basis")):
+        content["claim_basis"] = _clean(claim.get("claim_basis"))
+    if connected and _clean(claim.get("connected_chain_id")):
+        content["connected_chain_id"] = _clean(claim.get("connected_chain_id"))
     semantic_family = _clean(claim.get("semantic_family"))
     if semantic_family:
         content.update({
@@ -633,6 +696,12 @@ def build_session_assessment_v4(
             behavior_policy_path=behavior_policy_path,
         )
     )
+    base_snapshot = deepcopy(snapshot)
+    coverage_input = dict(observed)
+    coverage_input["durable_event_manifest"] = deepcopy(
+        base_snapshot.get("durable_event_manifest") or {}
+    )
+    coverage = build_semantic_coverage(coverage_input)
     behavior = policy_summary(behavior_document, include_integrity=True)
     classification = _file_policy(
         classification_policy_path,
@@ -659,8 +728,21 @@ def build_session_assessment_v4(
     typed_error_type = ""
     if policy_valid:
         try:
+            limit = coverage["configured_limits"]
+            counts = semantic_observation_counts(coverage_input)
+            if counts["eligible_semantic_observation_count"] > limit["max_facts"]:
+                raise ValueError("eligible_observation_limit_exceeded")
+            if any(
+                len(str(item.get("command") or "").encode("utf-8"))
+                > limit["max_command_length"]
+                for item in observed.get("ordered_command_observations") or []
+                if isinstance(item, dict)
+            ):
+                raise ValueError("command_length_limit_exceeded")
+            if counts["total_command_bytes"] > limit["max_total_command_bytes"]:
+                raise ValueError("total_command_bytes_limit_exceeded")
             typed_provenance = build_typed_semantic_provenance(
-                snapshot,
+                base_snapshot,
                 observed_behavior=observed,
                 behavior_policy_sha256=_clean(behavior.get("sha256")),
                 classification_policy_sha256=_clean(
@@ -677,17 +759,85 @@ def build_session_assessment_v4(
                     "typed semantic fact set failed validation"
                 )
             typed_status = "valid"
+            coverage = build_semantic_coverage(
+                coverage_input,
+                limits=coverage.get("configured_limits"),
+                typed_analyzed_count=counts["eligible_semantic_observation_count"],
+                typed_metrics=typed_fact_set.get("limits") or {},
+                status="full",
+            )
         except Exception as exc:
             typed_fact_set = {}
             typed_error_type = exc.__class__.__name__
+            reason = str(exc)
+            reason_code = (
+                "eligible_observation_limit_exceeded"
+                if "eligible_observation_limit" in reason
+                else "command_length_limit_exceeded"
+                if "command_length_limit" in reason
+                else "total_command_bytes_limit_exceeded"
+                if "total_command_bytes_limit" in reason
+                else "entity_limit_exceeded"
+                if "entity limit" in reason
+                else "relationship_limit_exceeded"
+                if "relationship limit" in reason
+                else "chain_limit_exceeded"
+                if "chain limit" in reason
+                else "typed_semantic_evaluation_unavailable"
+            )
+            coverage = build_semantic_coverage(
+                coverage_input,
+                limits=coverage.get("configured_limits"),
+                typed_analyzed_count=0,
+                status="unavailable",
+                reason_code=reason_code,
+                limit_reached=(
+                    "max_facts"
+                    if "eligible_observation_limit" in reason
+                    else "max_command_length"
+                    if "command_length_limit" in reason
+                    else "max_total_command_bytes"
+                    if "total_command_bytes_limit" in reason
+                    else "max_entities"
+                    if "entity limit" in reason
+                    else "max_relationships"
+                    if "relationship limit" in reason
+                    else "max_chains"
+                    if "chain limit" in reason
+                    else ""
+                ),
+            )
+    else:
+        # Policy validation is a prerequisite for typed semantics.  The
+        # initial default coverage record is intentionally replaced so an
+        # invalid/missing reviewed policy can never be reported as complete
+        # typed analysis.
+        coverage = build_semantic_coverage(
+            coverage_input,
+            limits=coverage.get("configured_limits"),
+            typed_analyzed_count=0,
+            status="unavailable",
+            reason_code="typed_policy_validation_failed",
+        )
     findings: List[Dict[str, Any]] = []
     hypothesis_sets: List[Dict[str, Any]] = []
+    typed_chain_selection: Dict[str, Any] = {}
+    semantic_graph_input = build_canonical_semantic_graph(
+        base_snapshot,
+        typed_fact_set=typed_fact_set,
+        coverage=coverage,
+    )
+    if validate_canonical_semantic_graph(semantic_graph_input):
+        raise SessionAssessmentV4Error(
+            "canonical semantic graph input failed validation"
+        )
     if policy_valid:
         supported = build_supported_assessment(
             observed,
             behavior_policy_document=behavior_document,
             behavior_policy_path=behavior_policy_path,
             typed_semantic_fact_set=typed_fact_set,
+            canonical_semantic_graph=semantic_graph_input,
             activated_semantic_families=(
                 CURRENT_ACTIVATED_SEMANTIC_FAMILIES
             ),
@@ -697,12 +847,74 @@ def build_session_assessment_v4(
             behavior_policy_document=behavior_document,
             behavior_policy_path=behavior_policy_path,
             typed_semantic_fact_set=typed_fact_set,
+            canonical_semantic_graph=semantic_graph_input,
             activated_semantic_families=(
                 CURRENT_ACTIVATED_SEMANTIC_FAMILIES
             ),
         )
         findings = _deduplicated_findings(supported)
         hypothesis_sets = _hypothesis_sets(follow_on)
+        typed_chain_selection = (
+            supported.get("typed_chain_selection")
+            if isinstance(supported, dict)
+            and isinstance(supported.get("typed_chain_selection"), dict)
+            else {}
+        )
+    findings, audit_findings, authority_decisions = apply_behavioral_authority(
+        findings,
+        typed_status=typed_status,
+        activated_families=CURRENT_ACTIVATED_SEMANTIC_FAMILIES,
+        authority_policy=(
+            (behavior_document.get("policy") or {}).get("claims", {}).get(
+                "authority_boundary"
+            )
+            if isinstance(behavior_document, dict)
+            else {}
+        ),
+    )
+    # Keep audit-only candidates visible in the deterministic report for
+    # analyst review, but do not let them masquerade as promoted findings.
+    # The graph carries the authoritative decision for downstream consumers.
+    findings = findings + audit_findings
+    audit_chain_ids = {
+        _clean(item.get("connected_chain_id"))
+        for item in audit_findings
+        if _clean(item.get("connected_chain_id"))
+    }
+    if audit_chain_ids:
+        hypothesis_sets = [
+            item
+            for item in hypothesis_sets
+            if not audit_chain_ids.intersection(
+                {_clean(ref) for ref in item.get("relationship_refs") or []}
+            )
+        ]
+    graph = build_canonical_semantic_graph(
+        base_snapshot,
+        typed_fact_set=typed_fact_set,
+        coverage=coverage,
+        authority_decisions=authority_decisions,
+        audit_only_candidates=audit_findings,
+        chain_selection=typed_chain_selection,
+    )
+    if validate_canonical_semantic_graph(graph):
+        raise SessionAssessmentV4Error("canonical semantic graph failed validation")
+    snapshot = deepcopy(base_snapshot)
+    snapshot["schema_version"] = "canonical_evidence_snapshot.v3"
+    snapshot["observed_evidence_sha256"] = _clean(
+        base_snapshot.get("evidence_sha256")
+    )
+    snapshot["observed_evidence_schema_version"] = _clean(
+        base_snapshot.get("schema_version")
+    )
+    snapshot["semantic_coverage"] = coverage
+    snapshot["semantic_graph"] = graph
+    # The v1/v2 evidence digest is retained as ``observed_evidence_sha256``;
+    # the v3 digest itself must never be part of the value it hashes.  The
+    # copied base snapshot already contains its historical ``evidence_sha256``
+    # field, so remove that inherited value before calculating the new digest.
+    snapshot.pop("evidence_sha256", None)
+    snapshot["evidence_sha256"] = _sha256_json(snapshot)
     provenance = {
         "evidence_sha256": snapshot["evidence_sha256"],
         "behavior_policy": behavior,
@@ -811,6 +1023,12 @@ def build_session_assessment_v4(
         activated_semantic_families=(
             CURRENT_ACTIVATED_SEMANTIC_FAMILIES
         ),
+        blocked_policy_rule_ids={
+            _clean(item.get("policy_rule_id"))
+            for item in authority_decisions
+            if item.get("decision") == "audit_only"
+            and _clean(item.get("policy_rule_id"))
+        },
     )
     record["response_guidance_v3"] = guidance
     record["assessment_id"] = canonical_assessment_id(record)
@@ -835,6 +1053,52 @@ def validate_session_assessment_v4(
     hash_input.pop("evidence_sha256", None)
     if not SHA256_RE.fullmatch(recorded_hash) or recorded_hash != _sha256_json(hash_input):
         errors.append("canonical_evidence.evidence_sha256 mismatch")
+    snapshot_schema = _clean(evidence.get("schema_version"))
+    if snapshot_schema not in {
+        "canonical_evidence_snapshot.v1",
+        "canonical_evidence_snapshot.v2",
+        "canonical_evidence_snapshot.v3",
+    }:
+        errors.append("canonical_evidence snapshot schema is invalid")
+    if snapshot_schema == "canonical_evidence_snapshot.v2":
+        classification_manifest = evidence.get("trusted_classification_manifest")
+        environment = evidence.get("classification_environment")
+        if not isinstance(classification_manifest, dict) or not _clean(
+            classification_manifest.get("manifest_sha256")
+        ):
+            errors.append(
+                "canonical_evidence.v2 requires trusted_classification_manifest"
+            )
+        if not isinstance(environment, dict) or not _clean(
+            environment.get("environment_sha256")
+        ):
+            errors.append(
+                "canonical_evidence.v2 requires classification_environment"
+            )
+    if snapshot_schema == "canonical_evidence_snapshot.v3":
+        coverage = evidence.get("semantic_coverage")
+        graph = evidence.get("semantic_graph")
+        observed_schema = evidence.get("observed_evidence_schema_version")
+        if observed_schema not in {
+            "canonical_evidence_snapshot.v1",
+            "canonical_evidence_snapshot.v2",
+        }:
+            errors.append("canonical_evidence.v3 requires observed v1/v2 evidence")
+        observed_snapshot = deepcopy(evidence)
+        observed_snapshot.pop("evidence_sha256", None)
+        observed_snapshot.pop("observed_evidence_sha256", None)
+        observed_snapshot.pop("observed_evidence_schema_version", None)
+        observed_snapshot.pop("semantic_coverage", None)
+        observed_snapshot.pop("semantic_graph", None)
+        observed_snapshot["schema_version"] = observed_schema
+        if _sha256_json(observed_snapshot) != _clean(
+            evidence.get("observed_evidence_sha256")
+        ):
+            errors.append("canonical_evidence.v3 observed evidence hash mismatch")
+        if validate_semantic_coverage(coverage):
+            errors.append("canonical_evidence.v3 semantic coverage is invalid")
+        if validate_canonical_semantic_graph(graph):
+            errors.append("canonical_evidence.v3 semantic graph is invalid")
     provenance = value.get("provenance") or {}
     if provenance.get("evidence_sha256") != recorded_hash:
         errors.append("provenance evidence hash mismatch")
@@ -1034,6 +1298,7 @@ def validate_session_assessment_v4(
         errors.extend(
             f"response_guidance_v3: {error}" for error in guidance_errors
         )
+    observed_evidence = evidence or {}
     evidence_refs = {
         _clean(item.get("evidence_id"))
         for key in (
@@ -1043,8 +1308,19 @@ def validate_session_assessment_v4(
             "trusted_attck_candidates",
             "audit_only_candidates",
         )
-        for item in evidence.get(key) or []
+        for item in observed_evidence.get(key) or []
         if isinstance(item, dict) and _clean(item.get("evidence_id"))
+    }
+    graph = evidence.get("semantic_graph") or {}
+    graph_relationship_refs = {
+        _clean(item.get("relationship_id"))
+        for item in graph.get("relationship_edges") or []
+        if isinstance(item, dict) and _clean(item.get("relationship_id"))
+    }
+    graph_chain_refs = {
+        _clean(item.get("chain_id"))
+        for item in graph.get("chain_nodes") or []
+        if isinstance(item, dict) and _clean(item.get("chain_id"))
     }
     transfer_evidence_refs = canonical_transfer_evidence_refs(evidence)
     for finding in value.get("behavioral_findings") or []:
@@ -1058,6 +1334,10 @@ def validate_session_assessment_v4(
             "relationship_refs": sorted({_clean(ref) for ref in finding.get("relationship_refs") or [] if _clean(ref)}),
             "behavior_policy_rule_id": _clean(finding.get("behavior_policy_rule_id")),
         }
+        if _clean(finding.get("claim_basis")):
+            content["claim_basis"] = _clean(finding.get("claim_basis"))
+        if _clean(finding.get("connected_chain_id")):
+            content["connected_chain_id"] = _clean(finding.get("connected_chain_id"))
         semantic_family = _clean(finding.get("semantic_family"))
         if semantic_family:
             if legacy_pre_typed:
@@ -1082,6 +1362,14 @@ def validate_session_assessment_v4(
         unknown_refs = set(content["evidence_refs"]) - evidence_refs
         if unknown_refs:
             errors.append(f"finding has unknown evidence refs: {sorted(unknown_refs)}")
+        unknown_relationships = set(content["relationship_refs"]) - graph_relationship_refs
+        if unknown_relationships:
+            errors.append(
+                f"finding has unknown relationship refs: {sorted(unknown_relationships)}"
+            )
+        connected_chain_id = _clean(finding.get("connected_chain_id"))
+        if connected_chain_id and connected_chain_id not in graph_chain_refs:
+            errors.append("finding has unknown connected chain ref")
         if semantic_family:
             trace = finding.get("semantic_trace") or {}
             if semantic_family not in set(

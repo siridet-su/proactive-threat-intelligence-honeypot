@@ -44,10 +44,28 @@ EVALUATOR_REVISION = "966269e68aedab556f6a11c26068bd1d11bf2f1d"
 V4_FINDING = "observed_cowrie_execution_attempt_command"
 V3_FINDING = "observed-cowrie-execution-attempt-command"
 V3_ACTION = "correlate-observed-execution-attempt"
+LABEL_CORRECTIONS = ROOT / "configs/behavioral_label_corrections.v1.json"
+
+
+def _apply_reviewed_label_corrections(value: dict[str, Any]) -> dict[str, Any]:
+    document = json.loads(LABEL_CORRECTIONS.read_text(encoding="utf-8"))
+    assert document["schema_version"] == "behavioral_label_corrections.v1"
+    assert document["source_fixture_sha256"] == hashlib.sha256(
+        (ROOT / document["source_fixture"]).read_bytes()
+    ).hexdigest()
+    corrections = document["corrections"]
+    for case in value.get("cases") or []:
+        correction = corrections.get(case.get("case_id")) or {}
+        for key in ("eligible_matches", "expected_entity", "expected_operations"):
+            if key in correction:
+                case[key] = correction[key]
+    return value
 
 
 def _spec() -> dict[str, Any]:
-    value = load_fixture("execution_attempt", "independent")
+    value = _apply_reviewed_label_corrections(
+        load_fixture("execution_attempt", "independent")
+    )
     assert value["schema_version"] == (
         "typed_execution_attempt_evaluation.v1"
     )
@@ -57,7 +75,9 @@ def _spec() -> dict[str, Any]:
 
 
 def _holdout() -> dict[str, Any]:
-    value = load_fixture("execution_attempt", "holdout")
+    value = _apply_reviewed_label_corrections(
+        load_fixture("execution_attempt", "holdout")
+    )
     assert value["schema_version"] == (
         "typed_execution_attempt_holdout.v1"
     )
@@ -283,7 +303,7 @@ def test_frozen_execution_attempt_evaluation() -> None:
             else "fn" if expected
             else "tn"
         ] += 1
-    assert counts == {"tp": 8, "fp": 0, "fn": 0, "tn": 16}
+    assert counts == {"tp": 12, "fp": 0, "fn": 0, "tn": 12}
 
 
 def test_frozen_execution_attempt_holdout() -> None:
@@ -300,7 +320,7 @@ def test_frozen_execution_attempt_holdout() -> None:
             else "fn" if expected
             else "tn"
         ] += 1
-    assert counts == {"tp": 4, "fp": 0, "fn": 0, "tn": 8}
+    assert counts == {"tp": 6, "fp": 0, "fn": 0, "tn": 6}
 
 
 def test_frozen_execution_cases_persist_and_render(

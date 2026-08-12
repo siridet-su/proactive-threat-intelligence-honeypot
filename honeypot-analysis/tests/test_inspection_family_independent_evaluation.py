@@ -51,12 +51,27 @@ FIXED_EVALUATOR_REVISION = (
 )
 INSPECTION_FINDING = "observed_cowrie_inspection_command"
 INSPECTION_GUIDANCE_FINDING = "observed-cowrie-inspection-command"
+LABEL_CORRECTIONS = ROOT / "configs/behavioral_label_corrections.v1.json"
 
 
 def _load_spec_path(
     role: str,
 ) -> dict[str, Any]:
     value = load_fixture("inspection", role)
+    corrections = json.loads(LABEL_CORRECTIONS.read_text(encoding="utf-8"))[
+        "corrections"
+    ]
+    for case in value.get("cases") or []:
+        replacements = (
+            corrections.get(case.get("case_id"), {}).get(
+                "expected_operation_replacements"
+            )
+            or {}
+        )
+        case["expected_operation_types"] = [
+            replacements.get(operation, operation)
+            for operation in case.get("expected_operation_types") or []
+        ]
     assert value["expected_labels_frozen_before_execution"] is True
     return value
 

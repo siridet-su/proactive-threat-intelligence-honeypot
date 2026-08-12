@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -395,7 +396,39 @@ def test_release_manifest_rejects_mutable_feed_cache_as_immutable_config(
 def test_release_manifest_binds_separate_frozen_model_bundle(tmp_path: Path) -> None:
     release, package, policy, artifact, rollback = _fixture(tmp_path)
     bundle_root = tmp_path / "frozen-model-bundle"
-    bundle_root.mkdir()
+    transformer_root = bundle_root / "transformer"
+    transformer_root.mkdir(parents=True)
+    transformer_artifacts = {}
+    for role, _path_key, _hash_key in (
+        (
+            "transformer_checkpoint",
+            "transformer_checkpoint_path",
+            "transformer_checkpoint_sha256",
+        ),
+        (
+            "transformer_model_spec",
+            "transformer_model_spec_path",
+            "transformer_model_spec_file_sha256",
+        ),
+        (
+            "transformer_vocabulary",
+            "transformer_vocabulary_path",
+            "transformer_vocabulary_file_sha256",
+        ),
+        (
+            "transformer_calibration",
+            "transformer_calibration_path",
+            "transformer_calibration_file_sha256",
+        ),
+    ):
+        suffix = ".pt" if role == "transformer_checkpoint" else ".json"
+        source = transformer_root / f"{role}{suffix}"
+        source.write_bytes(role.encode("utf-8"))
+        transformer_artifacts[role] = {
+            "relative_path": f"transformer/{source.name}",
+            "bytes": source.stat().st_size,
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        }
     bundle_manifest = bundle_root / "FROZEN_MODEL_BUNDLE_MANIFEST.json"
     bundle_manifest.write_text(
         json.dumps(
@@ -403,10 +436,16 @@ def test_release_manifest_binds_separate_frozen_model_bundle(tmp_path: Path) -> 
                 "schema_version": "frozen_model_bundle.v1",
                 "bundle_id": "frozen_model_bundle_test",
                 "artifact_inventory_sha256": "b" * 64,
+                "transformer": {"artifacts": transformer_artifacts},
             }
         ),
         encoding="utf-8",
     )
+    (release / "data/models").mkdir(parents=True)
+    for item in transformer_artifacts.values():
+        source = bundle_root / item["relative_path"]
+        (release / "data/models" / source.name).symlink_to(source)
+    (release / "models").symlink_to(bundle_root, target_is_directory=True)
     bundle_package = tmp_path / "frozen-model-bundle.tar"
     bundle_package.write_bytes(b"bundle-recovery-package")
     manifest = _build_manifest(
@@ -428,6 +467,51 @@ def test_release_manifest_binds_separate_frozen_model_bundle(tmp_path: Path) -> 
     bundle_package.write_bytes(b"changed")
     with pytest.raises(ValueError, match="frozen model bundle"):
         verify_manifest(output, release)
+
+
+def test_release_manifest_refuses_prediction_bundle_without_release_links(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    bundle_root = tmp_path / "frozen-model-bundle"
+    transformer_root = bundle_root / "transformer"
+    transformer_root.mkdir(parents=True)
+    artifacts = {}
+    for role in (
+        "transformer_checkpoint",
+        "transformer_model_spec",
+        "transformer_vocabulary",
+        "transformer_calibration",
+    ):
+        source = transformer_root / f"{role}.bin"
+        source.write_bytes(role.encode("utf-8"))
+        artifacts[role] = {
+            "relative_path": f"transformer/{source.name}",
+            "bytes": source.stat().st_size,
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        }
+    manifest_path = bundle_root / "FROZEN_MODEL_BUNDLE_MANIFEST.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "frozen_model_bundle.v1",
+                "bundle_id": "frozen_model_bundle_test",
+                "artifact_inventory_sha256": "b" * 64,
+                "transformer": {"artifacts": artifacts},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="prediction artifact link is missing"):
+        _build_manifest(
+            release=release,
+            package=package,
+            policy=policy,
+            artifact=artifact,
+            rollback=rollback,
+            frozen_model_bundle_manifest_path=str(manifest_path),
+        )
 
 
 def test_release_manifest_keeps_v2_records_readable(tmp_path: Path) -> None:
