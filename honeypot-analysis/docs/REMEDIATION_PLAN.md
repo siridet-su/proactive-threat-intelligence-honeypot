@@ -34,125 +34,6 @@ The two previously optional Phase 12 items that could change whether a trusted h
 
 # 1. MUST FIX before thesis evaluation
 
-## Phase 4 — Correct prediction history, live model input, target boundary, and evaluation
-
-### What will be fixed
-
-1. Build distinct behavior phases before truncating to eight.
-2. Store the last eight distinct phases, not eight commands.
-3. Preserve:
-
-   - actual canonical timestamps;
-   - duration/elapsed buckets;
-   - label provenance;
-   - confidence/agreement semantics;
-   - audit-only counts;
-   - outcome/attempt semantics;
-   - original command, label, and phase counts;
-   - selected and omitted counts;
-   - upstream truncation state.
-
-4. Remove fabricated 1970 timestamps and synthetic rule-only provenance.
-5. Version the target to explicitly define:
-
-   - submitted/attempted trusted behavior;
-   - failed command handling;
-   - skipped conditional exclusion;
-   - terminal outcome;
-   - multi-label set semantics.
-
-6. Stop creating forecasts after `session.closed`.
-7. Use close only to resolve/evaluate the last pre-close forecast.
-8. Align runtime triggers with trusted distinct-phase boundaries.
-9. Disable weight-eligible automatic feedback until a target-aware evaluator exists.
-10. Replace feedback with prefix/cutoff-aware, next-distinct, multi-label evaluation.
-11. Fail closed on corrupt/integrity-invalid current prediction snapshots.
-12. Define canonical handling of late arrivals.
-
-### Why
-
-The deployed adapter currently does not reproduce the frozen training representation, truncates at the wrong layer, and evaluates the wrong target.
-
-### Main files/functions/contracts
-
-- [session_monitor.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/workers/session_monitor.py)
-- [trusted_history.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/prediction/trusted_history.py)
-- [next_behavior_runtime.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/prediction/next_behavior_runtime.py)
-- [next_behavior_preprocessing.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/prediction/next_behavior_preprocessing.py)
-- [next_behavior_tensor.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/prediction/next_behavior_tensor.py)
-- [session_worker.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/workers/session_worker.py)
-- [feedback.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/utils/feedback.py)
-- Prediction snapshot contract and storage readers
-- Prediction policy/model/environment receipts
-
-### Required tests
-
-- Direct offline causal input and live manifest input have identical model-input hashes/tensors.
-- Rule+model agreement, confidence, and provenance survive history serialization.
-- Five-minute repeated phase remains `over_60s`.
-- execution→persistence→discovery×9 produces three distinct phases, not one.
-- More than eight distinct phases retain the newest eight in order.
-- Manifest and model input both report truncation.
-- Audit-only labels never evict trusted phases.
-- Failed attempts follow the exact v2 target definition.
-- Skipped conditional branches never create phases.
-- Login or audit-only events without a history change do not create forecasts.
-- Session close creates no new forecast.
-- Last pre-close forecast is matched to terminal outcome.
-- Auto feedback skips repeated identical phases and supports multi-label targets.
-- Wrong cutoff/prefix prevents evaluation eligibility.
-- Late arrivals cannot rewrite prior forecast evidence boundaries.
-- Integrity-invalid current snapshot is rejected by API/dashboard consumers.
-- Exact CPython/PyTorch/private-checkpoint deterministic inference test.
-- Measured latency and memory against the reviewed runtime.
-
-### Acceptance criteria
-
-- Offline and live tensors are byte-for-byte identical for bound fixtures.
-- No synthetic timestamps or provenance exist.
-- Sequence length eight means eight distinct behavior phases.
-- Terminal outcome is never predicted after it is already known.
-- No old invalid auto-evidence row is eligible for thesis metrics.
-- Current snapshots fail closed on integrity errors.
-- Runtime prediction boundaries match training-example boundaries.
-
-### Contract/version change
-
-Introduce:
-
-- `prediction_trusted_history_manifest.v3`
-- `next_distinct_trusted_behavior_phase_or_session_end.v2`
-- corresponding model-input/tensor schema version
-- prediction snapshot v4
-- target-aware feedback/evaluation contract v2
-
-Update prediction policy, classifier-environment binding, model bundle, compatibility receipt, and release inputs.
-
-### Transformer checkpoint
-
-Preserve the current checkpoint bytes but do not assume compatibility.
-
-Do not run the formal compatibility/retraining gate as part of Phase 4 completion. Phase 4 first implements and validates the corrected history, model-input, target-boundary, and evaluation contracts. The checkpoint decision remains blocked until Phase 7 has completed and the deterministic-semantics freeze has been recorded.
-
-Deferred formal gate, after Phase 7:
-
-1. Reconstruct the corrected corpus under the new classifier/history/target contracts.
-2. Compare input and target fingerprints with the original training receipt.
-3. If unchanged, re-run full evaluation and calibration on the existing checkpoint.
-4. If changed, retrain, recalibrate, and issue a new model-bundle/checkpoint receipt.
-
-Given the classifier authority and target changes, retraining is the expected outcome. Architecture, sequence length eight, vocabulary design, thresholds, and model family should remain unchanged unless evaluation independently demonstrates a need.
-
-### Historical compatibility
-
-- History v1/v2 and snapshot v3 remain readable/display-only.
-- Because v2 lacks timestamps/provenance, it must not be silently upgraded for v2 inference.
-- Existing auto-feedback rows remain stored but are excluded from corrected metrics.
-- Old predictions retain original IDs and calibration provenance.
-- No historical production session is resent or re-predicted automatically.
-
----
-
 ## Phase 5 — Enforce one canonical graph consumer for guidance
 
 ### What will be fixed
@@ -527,7 +408,6 @@ None.
 
 # Recommended execution order
 
-1. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
 3. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
 5. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
 6. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
@@ -543,8 +423,8 @@ None.
 16. Only after a clean separate review, prepare a new thesis-evaluation release.
 17. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
 
-The first remaining implementation phase is **Phase 4 — Correct prediction history, live model input, target boundary, and evaluation (implementation only)**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
+The first remaining implementation phase is **Phase 7 — Complete ATT&CK mapping and tactic-context cleanup**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
 
-No implementation, commit, deployment, service action, or production mutation was performed.
+Completed phases and their immutable commit/test evidence are recorded in `REMEDIATION_COMPLETED.md`. No deployment, service action, or production mutation is authorized by this remaining plan.
 
 **PLAN READY FOR IMPLEMENTATION**
