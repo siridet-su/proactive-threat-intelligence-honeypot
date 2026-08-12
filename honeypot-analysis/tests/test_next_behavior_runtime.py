@@ -159,11 +159,12 @@ def test_live_adapter_uses_no_raw_command_text() -> None:
     assert safe["observation_groups"][0]["tactics"] == ["execution"]
 
 
-def test_live_adapter_rejects_tampered_v2_trusted_history_hashes() -> None:
+def test_live_adapter_rejects_tampered_v3_trusted_history_hashes() -> None:
     phases = [
         {
             "command_index": 0,
             "event_id": "event-cutoff",
+            "event_timestamp": "2026-07-27T00:00:01Z",
             "labels": [{"tactic": "execution", "technique": "T1059"}],
         }
     ]
@@ -285,7 +286,7 @@ def test_api_and_ui_expose_advisory_corrected_target_semantics() -> None:
     api = _current_prediction_payload({"payload": snapshot}, [])
     assert api["snapshot_sha256"] == snapshot["snapshot_sha256"]
     assert api["prediction_contract"] == (
-        "next_distinct_command_behavior_phase_or_session_end.v1"
+        "next_distinct_trusted_behavior_phase_or_session_end.v2"
     )
     assert api["active_model"]["model_type"] == "small_causal_transformer"
     assert api["authority"]["may_create_alert_alone"] is False

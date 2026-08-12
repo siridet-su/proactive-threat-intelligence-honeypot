@@ -169,6 +169,8 @@ def test_tampered_durable_manifest_is_rejected_before_reclassification() -> None
 def test_audit_noise_cannot_evict_trusted_prediction_phases() -> None:
     state = SessionState("history-session", "192.0.2.1", "2026-08-11T00:00:00Z")
     trusted = _classifier().classify("whoami")[0]
+    trusted["tactic"] = "discovery"
+    trusted["event_timestamp"] = "2026-08-11T00:00:00Z"
     trusted["compound_command_index"] = 0
     SessionMonitor._append_prediction_trusted_phase(state, trusted)
     for index in range(10_001):
@@ -191,17 +193,26 @@ def test_audit_noise_cannot_evict_trusted_prediction_phases() -> None:
 
 
 def test_prediction_history_manifest_is_bounded_and_content_addressed() -> None:
+    phase_tactics = ["discovery", "execution"]
+    phase_techniques = ["T1082", "T1059"]
     phases = [
         {
             "command_index": index,
             "event_id": f"event-{index}",
-            "tactics": ["discovery"],
-            "techniques": [f"T{1000 + index:04d}"],
+            "event_timestamp": f"2026-08-11T00:00:{index:02d}Z",
+            "labels": [{
+                "tactic": phase_tactics[index % 2],
+                "technique": phase_techniques[index % 2],
+            }],
         }
         for index in range(20)
     ]
     environment = environment_identity(load_classifier_environment())
-    cutoff = {"schema_version": "prediction_evidence_cutoff.v1", "event_id": "event-20"}
+    cutoff = {
+        "schema_version": "prediction_evidence_cutoff.v1",
+        "received_at": "2026-08-11T00:00:20.000000+00:00",
+        "event_id": "event-20",
+    }
     manifest = build_prediction_trusted_history_manifest(
         phases=phases,
         evidence_cutoff=cutoff,
@@ -217,6 +228,21 @@ def test_prediction_history_manifest_is_bounded_and_content_addressed() -> None:
 
 
 def test_transformer_input_uses_explicit_trusted_history_not_classification_tail() -> None:
+    phase = {
+        "command_index": 1,
+        "event_id": "trusted-event",
+        "event_timestamp": "2026-08-11T00:00:01Z",
+        "labels": [{"tactic": "discovery", "technique": "T1033"}],
+    }
+    manifest = build_prediction_trusted_history_manifest(
+        phases=[phase],
+        evidence_cutoff={
+            "schema_version": "prediction_evidence_cutoff.v1",
+            "received_at": "2026-08-11T00:00:01.000000+00:00",
+            "event_id": "trusted-event",
+        },
+        classifier_environment={"environment_sha256": "a" * 64},
+    )
     payload = {
         "session_id": "history-session",
         "classification_events": [
@@ -228,14 +254,8 @@ def test_transformer_input_uses_explicit_trusted_history_not_classification_tail
             }
             for _ in range(10_001)
         ],
-        "prediction_trusted_history": [
-            {
-                "command_index": 1,
-                "event_id": "trusted-event",
-                "tactics": ["discovery"],
-                "techniques": ["T1033"],
-            }
-        ],
+        "prediction_trusted_history": manifest["ordered_trusted_phases"],
+        "prediction_trusted_history_manifest": manifest,
         "commands": ["whoami"],
         "login_attempts": 0,
         "login_success": True,

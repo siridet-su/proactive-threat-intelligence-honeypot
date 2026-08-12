@@ -62,28 +62,26 @@ def _prediction() -> dict:
     }
 
 
-def test_frozen_contract_verifies_all_bound_code_and_policy_hashes() -> None:
-    contract = _load_contract(CONTRACT, ROOT)
+def test_historical_frozen_contract_cannot_be_reused_for_phase4() -> None:
+    historical = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    assert historical["target_contract_id"] == (
+        "next_distinct_command_behavior_phase_or_session_end.v1"
+    )
+    assert historical["model_changes_permitted"] is False
+    assert historical["authority"]["may_authorize_actions"] is False
+    with pytest.raises(CompatibilityEvaluationError, match="target changed"):
+        _load_contract(CONTRACT, ROOT)
 
-    assert contract["final_role"] == "test"
-    assert contract["model_changes_permitted"] is False
-    assert contract["probability_thresholds"] == {
-        "tactic": 0.5,
-        "terminal": 0.5,
-    }
-    assert contract["authority"]["may_authorize_actions"] is False
 
-
-def test_contract_rejects_posthoc_threshold_changes(tmp_path: Path) -> None:
+def test_historical_contract_remains_immutable_but_not_current(
+    tmp_path: Path,
+) -> None:
     value = json.loads(CONTRACT.read_text(encoding="utf-8"))
     value["probability_thresholds"]["terminal"] = 0.6
     changed = tmp_path / "changed.json"
     changed.write_text(json.dumps(value), encoding="utf-8")
 
-    with pytest.raises(
-        CompatibilityEvaluationError,
-        match="thresholds changed",
-    ):
+    with pytest.raises(CompatibilityEvaluationError, match="target changed"):
         _load_contract(changed, ROOT)
 
 

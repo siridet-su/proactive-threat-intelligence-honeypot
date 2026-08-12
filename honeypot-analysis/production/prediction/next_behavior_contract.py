@@ -17,11 +17,16 @@ from production.prediction.trusted_history import (
     validate_prediction_trusted_history_manifest,
 )
 
-SESSION_SCHEMA_VERSION = "next_behavior_session.v1"
-PHASE_SCHEMA_VERSION = "next_behavior_phase.v1"
-EXAMPLE_SCHEMA_VERSION = "next_behavior_example.v1"
-MODEL_INPUT_SCHEMA_VERSION = "next_behavior_input.v1"
-TARGET_CONTRACT_ID = "next_distinct_command_behavior_phase_or_session_end.v1"
+SESSION_SCHEMA_VERSION = "next_behavior_session.v2"
+PHASE_SCHEMA_VERSION = "next_behavior_phase.v2"
+EXAMPLE_SCHEMA_VERSION = "next_behavior_example.v2"
+MODEL_INPUT_SCHEMA_VERSION = "next_behavior_input.v2"
+TARGET_CONTRACT_ID = "next_distinct_trusted_behavior_phase_or_session_end.v2"
+LEGACY_SESSION_SCHEMA_VERSION = "next_behavior_session.v1"
+LEGACY_PHASE_SCHEMA_VERSION = "next_behavior_phase.v1"
+LEGACY_EXAMPLE_SCHEMA_VERSION = "next_behavior_example.v1"
+LEGACY_MODEL_INPUT_SCHEMA_VERSION = "next_behavior_input.v1"
+LEGACY_TARGET_CONTRACT_ID = "next_distinct_command_behavior_phase_or_session_end.v1"
 TERMINAL_OUTCOME = "session_end_no_further_trusted_behavior"
 
 TRUSTED_LABEL_SOURCES = frozenset(
@@ -47,6 +52,7 @@ AUDIT_REASON_CODES = frozenset(
         "malformed_label",
         "missing_provenance",
         "model_only_not_observed_evidence",
+        "manifest_aggregate_audit_only",
     }
 )
 TACTIC_VOCABULARY = frozenset(
@@ -160,7 +166,7 @@ _PSEUDONYMOUS_ID = re.compile(
 
 
 class NextBehaviorContractError(ValueError):
-    """Raised when a v1 next-behavior record violates the frozen contract."""
+    """Raised when a current next-behavior record violates its contract."""
 
 
 def _clean(value: Any) -> str:
@@ -345,8 +351,14 @@ def validate_next_behavior_session(value: Any) -> List[str]:
         return ["session record must be an object"]
     errors = _unexpected_fields(value, _SESSION_FIELDS, "$")
     errors.extend(_forbidden_paths(value))
-    if value.get("schema_version") != SESSION_SCHEMA_VERSION:
-        errors.append(f"schema_version must be {SESSION_SCHEMA_VERSION}")
+    if value.get("schema_version") not in {
+        SESSION_SCHEMA_VERSION,
+        LEGACY_SESSION_SCHEMA_VERSION,
+    }:
+        errors.append(
+            f"schema_version must be {SESSION_SCHEMA_VERSION} or "
+            f"{LEGACY_SESSION_SCHEMA_VERSION}"
+        )
     if not _is_pseudonymous_id(value.get("session_id"), "session"):
         errors.append("session_id must be a pseudonymous session ID")
     if _clean(value.get("status")) not in {"active", "closed"}:
@@ -379,12 +391,13 @@ def validate_next_behavior_session(value: Any) -> List[str]:
             if history.get("schema_version") not in {
                 "prediction_trusted_history_manifest.v1",
                 "prediction_trusted_history_manifest.v2",
+                "prediction_trusted_history_manifest.v3",
             }:
                 errors.append("prediction_trusted_history_manifest schema is invalid")
             phases = history.get("ordered_trusted_phases")
             if not isinstance(phases, list) or len(phases) > 8:
                 errors.append("prediction trusted history must contain at most 8 phases")
-            if history.get("schema_version") == "prediction_trusted_history_manifest.v2":
+            if history.get("schema_version") == "prediction_trusted_history_manifest.v3":
                 errors.extend(
                     f"prediction trusted history: {error}"
                     for error in validate_prediction_trusted_history_manifest(history)
@@ -392,8 +405,8 @@ def validate_next_behavior_session(value: Any) -> List[str]:
                 if type(history.get("truncated")) is not bool:
                     errors.append("prediction trusted history truncated flag is invalid")
                 for key in (
-                    "original_trusted_phase_count",
-                    "selected_trusted_phase_count",
+                    "original_distinct_phase_count",
+                    "selected_distinct_phase_count",
                     "omitted_prefix_phase_count",
                 ):
                     if (
@@ -403,14 +416,14 @@ def validate_next_behavior_session(value: Any) -> List[str]:
                     ):
                         errors.append(f"prediction trusted history {key} is invalid")
                 if (
-                    isinstance(history.get("selected_trusted_phase_count"), int)
-                    and history.get("selected_trusted_phase_count") != len(phases or [])
+                    isinstance(history.get("selected_distinct_phase_count"), int)
+                    and history.get("selected_distinct_phase_count") != len(phases or [])
                 ):
                     errors.append(
                         "prediction trusted history selected count is inconsistent"
                     )
-                original = history.get("original_trusted_phase_count")
-                selected = history.get("selected_trusted_phase_count")
+                original = history.get("original_distinct_phase_count")
+                selected = history.get("selected_distinct_phase_count")
                 omitted = history.get("omitted_prefix_phase_count")
                 if (
                     isinstance(original, int)

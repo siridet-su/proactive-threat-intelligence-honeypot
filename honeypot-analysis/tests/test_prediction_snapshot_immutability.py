@@ -22,16 +22,26 @@ def _snapshot(
     event_id: str = "event-immutable",
     received_at: str = "2026-07-31T00:00:01Z",
 ) -> dict:
+    cutoff = make_evidence_cutoff(received_at, event_id)
     return finalize_prediction_snapshot(
         {
-            "schema_version": "prediction_snapshot.v3",
+            "schema_version": "prediction_snapshot.v4",
             "session_id": "immutable-session",
             "event_id": event_id,
             "session_status": "active",
             "generated_at": "2026-07-31T00:00:02Z",
             "prediction_status": "predicted",
             "prediction": ["discovery"],
-            "evidence_cutoff": make_evidence_cutoff(received_at, event_id),
+            "evidence_cutoff": cutoff,
+            "prediction_history": {
+                "schema_version": "prediction_trusted_history_manifest.v3",
+                "target_contract_id": "next_distinct_trusted_behavior_phase_or_session_end.v2",
+                "history_manifest_sha256": "a" * 64,
+                "original_distinct_phase_count": 1,
+                "omitted_prefix_phase_count": 0,
+                "ordered_phase_sha256": ["b" * 64],
+                "evidence_cutoff": cutoff,
+            },
             "runtime": {
                 "model_load_time_ms": 1.0,
                 "inference_latency_ms": 2.0,
@@ -137,7 +147,7 @@ def test_historical_valid_v3_without_cutoff_remains_readable_and_current(
     assert current["snapshot_id"] == historical["snapshot_id"]
 
 
-def test_corrupt_stored_v3_is_readable_for_audit_but_never_current(
+def test_corrupt_stored_v4_is_readable_for_audit_but_never_current(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "corrupt.sqlite3"

@@ -380,6 +380,9 @@ class SessionState:
     prediction_trusted_history_manifest: dict = field(default_factory=dict)
     prediction_trusted_phase_count: int = 0
     prediction_trusted_label_count: int = 0
+    prediction_audit_only_label_count: int = 0
+    prediction_trusted_history_revision: int = 0
+    prediction_last_forecast_revision: int = 0
 
     @property
     def unique_tactics(self) -> List[str]:
@@ -642,6 +645,7 @@ class SessionMonitor:
                     command_outcome = "outcome_unknown"
 
                 # Classify command â†’ TTP
+                command_classifications: List[Dict[str, Any]] = []
                 for classification_index, classification in enumerate(self._classify_many_with_source(cmd)):
                     try:
                         classification = _safe_reporting_mapping(
@@ -662,9 +666,7 @@ class SessionMonitor:
                         or safe_cmd
                     )
                     classification["cowrie_eventid"] = eid
-                    classification["event_timestamp"] = str(
-                        source_timestamp or ""
-                    ).strip()
+                    classification["event_timestamp"] = str(timestamp).strip()
                     if durable_evidence_order is not None:
                         classification["durable_evidence_order"] = deepcopy(
                             durable_evidence_order
@@ -716,7 +718,12 @@ class SessionMonitor:
                             sources.append(source)
 
                     state.classification_events.append(classification)
-                    self._append_prediction_trusted_phase(state, classification)
+                    command_classifications.append(classification)
+
+                self._append_prediction_trusted_phase(
+                    state,
+                    command_classifications,
+                )
 
                 # Sigma keyword match
                 sigma_hits = self._sigma_match(cmd)
@@ -742,77 +749,96 @@ class SessionMonitor:
     @staticmethod
     def _append_prediction_trusted_phase(
         state: SessionState,
-        classification: Dict[str, Any],
+        classification: Dict[str, Any] | List[Dict[str, Any]],
     ) -> None:
-        """Maintain a separate last-eight trusted-phase ring.
+        """Maintain a last-eight *distinct* trusted behavior-phase ring.
 
         Audit candidates are intentionally ignored before the ring is
         updated, so high-volume model noise cannot evict a trusted phase.
-        Classifications belonging to one compound command share one phase.
+        All classifications for one compound command are aggregated before
+        deciding whether its tactic set starts a new phase.
         """
 
-        if not is_trusted_classification_event(classification):
+        from production.prediction.trusted_history import normalize_trusted_phases
+
+        candidates = (
+            [classification]
+            if isinstance(classification, dict)
+            else [item for item in classification if isinstance(item, dict)]
+        )
+        audit_count = sum(
+            not is_trusted_classification_event(item) for item in candidates
+        )
+        state.prediction_audit_only_label_count = int(
+            getattr(state, "prediction_audit_only_label_count", 0) or 0
+        ) + audit_count
+        trusted = [
+            item for item in candidates if is_trusted_classification_event(item)
+        ]
+        if not trusted:
             return
-        ttp = str(classification.get("ttp") or "").strip().upper()
-        tactic = str(classification.get("tactic") or "").strip()
-        if not ttp and not tactic:
-            return
+        first = trusted[0]
         try:
-            command_index = int(classification.get("compound_command_index"))
+            command_index = int(first.get("compound_command_index"))
         except (TypeError, ValueError):
             command_index = len(getattr(state, "commands", []) or []) - 1
-        history = getattr(state, "prediction_trusted_history", None)
-        if not isinstance(history, list):
-            history = []
-            state.prediction_trusted_history = history
-        if history and history[-1].get("command_index") == command_index:
-            phase = history[-1]
-        else:
-            phase = {
-                "command_index": command_index,
-                "event_id": str(
-                    (classification.get("durable_evidence_order") or {}).get(
-                        "event_id"
-                    )
-                    or classification.get("evidence_id")
-                    or ""
-                ),
-                "tactics": [],
-                "techniques": [],
-                "labels": [],
-            }
-            history.append(phase)
-            state.prediction_trusted_phase_count = int(
-                getattr(state, "prediction_trusted_phase_count", 0) or 0
-            ) + 1
-        if tactic and tactic != "unknown" and tactic not in phase["tactics"]:
-            phase["tactics"].append(tactic)
-        if ttp and ttp != "T0000_UNKNOWN" and ttp not in phase["techniques"]:
-            phase["techniques"].append(ttp)
-        if tactic and ttp and ttp != "T0000_UNKNOWN":
+        labels = []
+        for item in trusted:
+            ttp = str(item.get("ttp") or "").strip().upper()
+            tactic = str(item.get("tactic") or "").strip()
+            if not tactic or tactic == "unknown" or not ttp or ttp == "T0000_UNKNOWN":
+                continue
             label = {
                 "tactic": tactic,
                 "technique": ttp,
+                "source": item.get("source"),
+                "confidence": item.get("confidence"),
+                "agreement_status": item.get("agreement_status"),
             }
             evidence_id = str(
-                (classification.get("durable_evidence_order") or {}).get(
-                    "event_id"
-                )
-                or classification.get("evidence_id")
+                (item.get("durable_evidence_order") or {}).get("event_id")
+                or item.get("evidence_id")
                 or ""
             ).strip()
             if evidence_id:
                 label["classification_evidence_id"] = evidence_id
-            if label not in phase.setdefault("labels", []):
-                phase["labels"].append(label)
-                # This is a durable-prefix counter, not the size of the
-                # bounded realtime ring.  Keep it monotonic so the v2
-                # manifest can truthfully report truncation after eviction.
-                state.prediction_trusted_label_count = int(
-                    getattr(state, "prediction_trusted_label_count", 0) or 0
-                ) + 1
-        if len(history) > 8:
-            del history[:-8]
+            if label not in labels:
+                labels.append(label)
+        if not labels:
+            return
+        history = getattr(state, "prediction_trusted_history", None)
+        if not isinstance(history, list):
+            history = []
+            state.prediction_trusted_history = history
+        raw_phase = {
+            "command_index": command_index,
+            "event_id": str(
+                (first.get("durable_evidence_order") or {}).get("event_id")
+                or first.get("evidence_id")
+                or ""
+            ),
+            "event_timestamp": str(first.get("event_timestamp") or "").strip(),
+            "labels": labels,
+            "audit_only_label_count": audit_count,
+            "command_outcome": first.get("command_outcome"),
+            "outcome_scope": first.get("outcome_scope"),
+            "fragment_execution": first.get("fragment_execution"),
+        }
+        new_tactics = sorted({item["tactic"] for item in labels})
+        starts_distinct_phase = not history or history[-1].get("tactics") != new_tactics
+        state.prediction_trusted_history = normalize_trusted_phases(
+            [*history, raw_phase], cap=8
+        )
+        if starts_distinct_phase:
+            state.prediction_trusted_phase_count = int(
+                getattr(state, "prediction_trusted_phase_count", 0) or 0
+            ) + 1
+            state.prediction_trusted_history_revision = int(
+                getattr(state, "prediction_trusted_history_revision", 0) or 0
+            ) + 1
+        state.prediction_trusted_label_count = int(
+            getattr(state, "prediction_trusted_label_count", 0) or 0
+        ) + len(labels)
 
     def _bound_session_history(self, state: SessionState) -> None:
         """Bound realtime evidence while durable raw events remain authoritative."""

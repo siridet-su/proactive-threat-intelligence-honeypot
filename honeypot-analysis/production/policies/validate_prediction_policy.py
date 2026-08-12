@@ -110,6 +110,12 @@ def _validate_transformer(
         )
     if policy.get("predictive_alerts") != {"enabled": False}:
         errors.append(f"{TRANSFORMER_POC_MODE} requires predictive_alerts.enabled=false")
+    compatibility = policy.get("checkpoint_compatibility_status")
+    if compatibility not in {
+        "pending_phase7_deterministic_semantics_freeze",
+        "accepted_after_deterministic_semantics_freeze",
+    }:
+        errors.append("policy.checkpoint_compatibility_status is invalid")
     required_paths = (
         "transformer_checkpoint_path",
         "transformer_model_spec_path",

@@ -14,6 +14,7 @@ import math
 import time
 from collections import Counter
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
@@ -44,7 +45,10 @@ from production.prediction.prediction_snapshot_contract import (
     validate_prediction_snapshot_integrity,
 )
 from production.prediction.next_behavior_model import load_checkpoint, predict_next_behavior
-from production.prediction.next_behavior_preprocessing import build_live_model_input
+from production.prediction.next_behavior_preprocessing import (
+    build_live_model_input,
+    build_model_input_from_trusted_history_manifest,
+)
 from production.prediction.next_behavior_tensor import (
     require_valid_vocabulary,
     tensorize_model_input,
@@ -258,9 +262,8 @@ def build_live_next_behavior_session(
                 "prediction trusted history manifest rejected: "
                 + "; ".join(manifest_errors)
             )
-        # The hashed manifest is the authoritative input at inference.  The
-        # legacy list is checked above when supplied, but never allowed to
-        # replace the verified content.
+        # The hashed v3 manifest is the authoritative input at inference. The
+        # bounded list is checked above when supplied, but cannot replace it.
         trusted_history = normalize_trusted_phases(
             raw_manifest.get("ordered_trusted_phases") or []
         )
@@ -268,11 +271,22 @@ def build_live_next_behavior_session(
     else:
         trusted_history = supplied_history
     if has_bounded_trusted_history:
-        # The realtime 10,000-event classification tail is not used when a
-        # session carries its explicit trusted Transformer history.  Rebuild
-        # minimal rule-like events solely from the already trusted phases;
-        # audit candidates never enter this path.
+        # The realtime classification tail is not used when a session carries
+        # its explicit trusted history. Rebuild privacy-safe group inputs using
+        # the phase's actual time/provenance fields; never synthesize 1970 time
+        # or rule-only provenance.
         events = []
+        source_reverse = {
+            "reviewed_rule": "rule",
+            "rule_model_agreement": "both",
+            "securebert": "model",
+        }
+        confidence_value = {
+            "high": 0.95,
+            "medium": 0.70,
+            "low": 0.10,
+            "not_applicable": None,
+        }
         for phase in trusted_history:
             labels = phase.get("labels") or []
             if not labels:
@@ -285,13 +299,26 @@ def build_live_next_behavior_session(
                 tactic = _clean(label.get("tactic")) or "unknown"
                 events.append(
                     {
+                        # This is a private adapter row reconstructed only from
+                        # an already validated v3 manifest. Its compatibility
+                        # shape is consumed by the frozen label normalizer; it
+                        # is never persisted as a new classification event.
                         "classification_event_schema": "classification_event.v2",
                         "command": "",
                         "ttp": technique,
                         "tactic": tactic,
-                        "source": "rule",
-                        "confidence": 1.0,
-                        "high_confidence": True,
+                        "source": source_reverse.get(
+                            _clean(label.get("source")), "rule"
+                        ),
+                        "confidence": confidence_value.get(
+                            _clean(label.get("confidence_bucket")), None
+                        ),
+                        "agreement_status": _clean(
+                            label.get("agreement_status")
+                        ),
+                        "high_confidence": _clean(
+                            label.get("confidence_bucket")
+                        ) == "high",
                         "evidence_tier": "trusted_observation",
                         "authority_decision": {
                             "schema_version": "command_authority_decision.v1",
@@ -306,14 +333,11 @@ def build_live_next_behavior_session(
                         "durable_evidence_order": {
                             "event_id": _clean(phase.get("event_id")),
                         },
-                        "event_timestamp": (
-                            "1970-01-01T00:00:00Z"
-                            if int(phase.get("command_index") or 0) == 0
-                            else "1970-01-01T00:00:%02dZ"
-                            % min(int(phase.get("command_index") or 0), 59)
+                        "event_timestamp": _clean(
+                            phase.get("end_timestamp")
                         ),
                         "compound_command_index": int(
-                            phase.get("command_index") or 0
+                            phase.get("end_command_index") or 0
                         ),
                     }
                 )
@@ -323,8 +347,6 @@ def build_live_next_behavior_session(
             for item in payload.get("classification_events") or []
             if isinstance(item, Mapping)
         ]
-    if not events:
-        return None
     grouped: Dict[tuple[str, str, int], list[Dict[str, Any]]] = {}
     order: list[tuple[str, str, int]] = []
     for index, event in enumerate(events):
@@ -371,6 +393,90 @@ def build_live_next_behavior_session(
         "session_age_bucket": _age_bucket(age_seconds),
         "confirmed_transfer_observed": _confirmed_transfer(payload),
     }
+    if has_manifest:
+        groups = []
+        first_timestamp = None
+        for phase_index, phase in enumerate(trusted_history, start=1):
+            timestamp_text = _clean(phase.get("start_timestamp"))
+            try:
+                parsed_timestamp = datetime.fromisoformat(
+                    timestamp_text.replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                raise NextBehaviorChronologyError(
+                    "missing_source_timestamp"
+                ) from exc
+            if first_timestamp is None:
+                first_timestamp = parsed_timestamp
+            relative_time = max(
+                (parsed_timestamp - first_timestamp).total_seconds() * 1000.0,
+                0.0,
+            )
+            provenance = []
+            evidence_refs = []
+            for label_index, label in enumerate(phase.get("labels") or []):
+                raw_ref = _clean(label.get("classification_evidence_id"))
+                safe_ref = _pseudonymous_id(
+                    "evidence",
+                    f"{session_id}:{phase_index}:{label_index}:{raw_ref}",
+                )
+                evidence_refs.append(safe_ref)
+                source = _clean(label.get("source")) or "reviewed_rule"
+                bucket = _clean(label.get("confidence_bucket")) or "not_applicable"
+                provenance.append({
+                    "tactic": _clean(label.get("tactic")),
+                    "technique": _clean(label.get("technique")),
+                    "source": source,
+                    "trust_tier": "trusted_observation",
+                    "policy_sha256": rule_policy_sha256,
+                    "trust_policy_sha256": trust_policy_sha256,
+                    "checkpoint_sha256": (
+                        classifier_checkpoint_sha256
+                        if source in {"securebert", "rule_model_agreement"}
+                        else ""
+                    ),
+                    "confidence": confidence_value.get(bucket),
+                    "confidence_bucket": bucket,
+                    "agreement_status": _clean(label.get("agreement_status")) or "rule_only",
+                    "evidence_ref": safe_ref,
+                })
+            groups.append({
+                "group_id": _pseudonymous_id("group", f"{session_id}:{phase_index}"),
+                "event_order": phase_index,
+                "relative_time_ms": relative_time,
+                "tactics": deepcopy(phase.get("tactics") or []),
+                "techniques": deepcopy(phase.get("techniques") or []),
+                "evidence_refs": sorted(evidence_refs),
+                "label_provenance": sorted(
+                    provenance,
+                    key=lambda item: (
+                        item["tactic"], item["technique"], item["source"], item["evidence_ref"]
+                    ),
+                ),
+                "audit_only_labels": [],
+                "session_context": context,
+            })
+        safe = {
+            "schema_version": SESSION_SCHEMA_VERSION,
+            "session_id": _pseudonymous_id("session", session_id),
+            "source_member_id": _pseudonymous_id("member", "production-live"),
+            "source_member_sha256": hashlib.sha256(b"production-live").hexdigest(),
+            "protocol": _clean(payload.get("protocol") or "ssh").lower(),
+            "status": "closed" if payload.get("is_ended") or payload.get("status") == "closed" else "active",
+            "pseudonymization_key_id": "runtime-derived-identifiers-v1",
+            "audit_summary": {
+                "total": int(raw_manifest.get("audit_only_label_count") or 0),
+                "by_reason": (
+                    {"manifest_aggregate_audit_only": int(raw_manifest.get("audit_only_label_count") or 0)}
+                    if int(raw_manifest.get("audit_only_label_count") or 0) else {}
+                ),
+            },
+            "observation_groups": groups,
+            "prediction_trusted_history_manifest": deepcopy(raw_manifest),
+        }
+        return require_valid_next_behavior_session(safe)
+    if not events:
+        return None
     chronology_records: list[Dict[str, Any]] = []
     for durable_sequence, key in enumerate(order):
         first_event = grouped[key][0]
@@ -523,6 +629,10 @@ class FrozenTransformerPocPredictor:
         try:
             if self.policy.get("prediction_mode") != MODE:
                 raise NextBehaviorRuntimeError("prediction mode is not the frozen Transformer PoC")
+            if self.policy.get("checkpoint_compatibility_status") != "accepted_after_deterministic_semantics_freeze":
+                raise NextBehaviorRuntimeError(
+                    "checkpoint compatibility is pending the Phase 7 deterministic-semantics freeze"
+                )
             self.spec = _load_json(
                 self.policy["transformer_model_spec_path"],
                 self.policy["transformer_model_spec_file_sha256"],
@@ -703,6 +813,25 @@ class FrozenTransformerPocPredictor:
                 "dtype": "float32",
             },
         }
+        history = payload.get("prediction_trusted_history_manifest")
+        if isinstance(history, Mapping) and history.get("schema_version") == TRUSTED_HISTORY_SCHEMA:
+            snapshot["prediction_history"] = {
+                "schema_version": TRUSTED_HISTORY_SCHEMA,
+                "target_contract_id": history.get("target_contract_id"),
+                "history_manifest_sha256": history.get("history_manifest_sha256"),
+                "original_distinct_phase_count": history.get(
+                    "original_distinct_phase_count"
+                ),
+                "omitted_prefix_phase_count": history.get(
+                    "omitted_prefix_phase_count"
+                ),
+                "ordered_phase_sha256": [
+                    item.get("phase_sha256")
+                    for item in history.get("ordered_trusted_phases") or []
+                    if isinstance(item, Mapping)
+                ],
+                "evidence_cutoff": deepcopy(history.get("evidence_cutoff") or {}),
+            }
         if evidence_cutoff is not None:
             cutoff = require_valid_evidence_cutoff(evidence_cutoff)
             if cutoff["event_id"] != event_id:
@@ -763,10 +892,30 @@ class FrozenTransformerPocPredictor:
                     reason="no_trusted_behavior_phase",
                     evidence_cutoff=evidence_cutoff,
                 ))
-            model_input = build_live_model_input(
-                safe_session,
-                max_sequence_length=int(self.spec["architecture"]["maximum_sequence_length"]),
-            )
+            manifest = safe_session.get("prediction_trusted_history_manifest")
+            if isinstance(manifest, Mapping):
+                context = deepcopy(
+                    (safe_session["observation_groups"][-1]).get(
+                        "session_context"
+                    ) or {}
+                )
+                session_alias = _clean(safe_session.get("session_id"))
+                model_input = build_model_input_from_trusted_history_manifest(
+                    manifest,
+                    session_context=context,
+                    evidence_ref_mapper=lambda ref: (
+                        ref
+                        if _clean(ref).startswith("nbevidence_")
+                        else _pseudonymous_id(
+                            "evidence", f"{session_alias}:{_clean(ref)}"
+                        )
+                    ),
+                )
+            else:
+                model_input = build_live_model_input(
+                    safe_session,
+                    max_sequence_length=int(self.spec["architecture"]["maximum_sequence_length"]),
+                )
             tensor = tensorize_model_input(model_input, self.vocabulary)
             raw = predict_next_behavior(self.model, tensor, spec=self.spec)
             calibrated = _apply_frozen_calibration(
@@ -834,6 +983,10 @@ class FrozenTransformerPocPredictor:
                 "tensor_hash": tensor["tensor_hash"],
                 "sequence_length": len(model_input["phase_sequence"]),
                 "truncated": model_input["truncated"],
+                "original_phase_count": model_input["original_phase_count"],
+                "selected_phase_count": model_input["selected_phase_count"],
+                "omitted_prefix_phase_count": model_input["omitted_prefix_phase_count"],
+                "upstream_truncated": model_input["upstream_truncated"],
                 "input_evidence_refs": model_input["input_evidence_refs"],
             }
             snapshot["runtime"]["inference_latency_ms"] = (

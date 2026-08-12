@@ -22,32 +22,43 @@ from production.reporting.semantic_coverage import (
 from production.utils.serialization import stable_id
 
 
-def test_history_v2_preserves_exact_tactic_technique_pairs_and_truncation() -> None:
+def test_history_v3_preserves_exact_tactic_technique_pairs_and_truncation() -> None:
     phases = [
         {
             "command_index": index,
             "event_id": f"event-{index}",
+            "event_timestamp": f"2026-08-12T00:00:{index:02d}Z",
             "labels": [
-                {"tactic": "execution", "technique": f"T{index + 1000:04d}"},
-                {"tactic": "execution", "technique": f"T{index + 2000:04d}"},
+                {
+                    "tactic": "execution" if index % 2 == 0 else "discovery",
+                    "technique": f"T{index + 1000:04d}",
+                },
+                {
+                    "tactic": "execution" if index % 2 == 0 else "discovery",
+                    "technique": f"T{index + 2000:04d}",
+                },
             ],
         }
         for index in range(10)
     ]
     manifest = build_prediction_trusted_history_manifest(
         phases=phases,
-        evidence_cutoff={"schema_version": "prediction_evidence_cutoff.v1", "event_id": "event-10"},
+        evidence_cutoff={
+            "schema_version": "prediction_evidence_cutoff.v1",
+            "received_at": "2026-08-12T00:00:10.000000+00:00",
+            "event_id": "event-10",
+        },
         classifier_environment={"environment_sha256": "a" * 64},
     )
-    assert manifest["schema_version"] == "prediction_trusted_history_manifest.v2"
-    assert manifest["original_trusted_phase_count"] == 10
-    assert manifest["selected_trusted_phase_count"] == 8
+    assert manifest["schema_version"] == "prediction_trusted_history_manifest.v3"
+    assert manifest["original_distinct_phase_count"] == 10
+    assert manifest["selected_distinct_phase_count"] == 8
     assert manifest["omitted_prefix_phase_count"] == 2
     assert manifest["truncated"] is True
-    assert manifest["ordered_trusted_phases"][-1]["labels"] == [
-        {"tactic": "execution", "technique": "T1009"},
-        {"tactic": "execution", "technique": "T2009"},
-    ]
+    assert [
+        (item["tactic"], item["technique"])
+        for item in manifest["ordered_trusted_phases"][-1]["labels"]
+    ] == [("discovery", "T1009"), ("discovery", "T2009")]
 
 
 def test_unversioned_partial_coverage_is_rejected() -> None:
@@ -93,12 +104,13 @@ def test_unavailable_coverage_has_zero_typed_analysis() -> None:
     assert coverage["omitted_count"] == 1
 
 
-def test_tampered_v2_history_phase_ordered_and_manifest_hashes_fail_closed() -> None:
+def test_tampered_v3_history_phase_ordered_and_manifest_hashes_fail_closed() -> None:
     manifest = build_prediction_trusted_history_manifest(
         phases=[
             {
                 "command_index": 1,
                 "event_id": "event-1",
+                "event_timestamp": "2026-08-12T00:00:00.000000+00:00",
                 "labels": [{"tactic": "execution", "technique": "T1059"}],
             }
         ],

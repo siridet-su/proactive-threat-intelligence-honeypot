@@ -85,11 +85,8 @@ from production.workers.threat_hunt_worker import enqueue_threat_hunts_for_sessi
 
 
 DEFAULT_PREDICTION_TRIGGER_EVENTIDS = [
-    "cowrie.login.success",
-    "cowrie.login.failed",
     "cowrie.session.file_download",
     "cowrie.session.file_upload",
-    "cowrie.session.closed",
 ]
 
 DEFAULT_PREDICTION_TRIGGER_PREFIXES = [
@@ -773,6 +770,14 @@ class SessionWorker:
         events do not make the realtime prediction history noisy.
         """
         eventid = str(event.get("eventid") or "").strip()
+        if eventid == "cowrie.session.closed":
+            return {
+                "matched": False,
+                "eventid": eventid,
+                "reason": "session close resolves the final pre-close forecast; it never creates a forecast",
+                "filter_enabled": True,
+                "match_type": "terminal_resolution_only",
+            }
         policy = self.config.prediction_policy or {}
         trigger_policy = policy.get("prediction_triggers") or {}
         if not isinstance(trigger_policy, dict):
@@ -916,6 +921,16 @@ class SessionWorker:
     ) -> bool:
         if not self.prediction_engine.enabled:
             return False
+        if bool(getattr(state, "is_ended", False)):
+            return False
+        history_revision = int(
+            getattr(state, "prediction_trusted_history_revision", 0) or 0
+        )
+        last_revision = int(
+            getattr(state, "prediction_last_forecast_revision", 0) or 0
+        )
+        if history_revision <= last_revision:
+            return False
         if hasattr(self.monitor, "_apply_session_enrichment"):
             self.monitor._apply_session_enrichment(state)
         self._apply_session_ttp_correlations(state)
@@ -940,11 +955,30 @@ class SessionWorker:
                 original_trusted_phase_count=payload.get(
                     "prediction_trusted_phase_count"
                 ),
+                original_command_count=len(payload.get("commands") or []),
+                original_trusted_label_count=payload.get(
+                    "prediction_trusted_label_count"
+                ),
+                audit_only_label_count=payload.get(
+                    "prediction_audit_only_label_count", 0
+                ),
+                upstream_omitted_event_count=max(
+                    int(
+                        (payload.get("canonical_event_manifest") or {}).get(
+                            "event_count"
+                        )
+                        or 0
+                    ) - len(payload.get("raw_events") or []),
+                    0,
+                ),
             )
         )
         payload["prediction_trusted_history"] = payload[
             "prediction_trusted_history_manifest"
         ]["ordered_trusted_phases"]
+        state.prediction_trusted_history_manifest = deepcopy(
+            payload["prediction_trusted_history_manifest"]
+        )
         task = {
             "schema_version": "prediction_outbox_task.v2",
             "session_id": str(payload.get("session_id") or "unknown"),
@@ -960,6 +994,7 @@ class SessionWorker:
             ),
         }
         self.storage.enqueue_prediction_outbox(task)
+        state.prediction_last_forecast_revision = history_revision
         self._record_event_effect("prediction_outbox_enqueued")
         self._drain_prediction_outbox(limit=1)
         return True

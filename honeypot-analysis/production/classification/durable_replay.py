@@ -171,6 +171,13 @@ def reclassify_durable_prefix(
             classification["durable_evidence_order"] = durable_order
             classification["command_outcome"] = _command_outcome(event)
             classification["compound_command_index"] = command_count - 1
+            try:
+                fragment_count = int(classification.get("subcommand_count") or 1)
+            except (TypeError, ValueError):
+                fragment_count = 1
+            classification["outcome_scope"] = (
+                "compound_event" if fragment_count > 1 else "fragment"
+            )
             classification["evidence_tier"] = classification_evidence_tier(classification)
             classification["evidence_id"] = stable_id(
                 "class",
@@ -202,44 +209,55 @@ def reclassify_durable_prefix(
     reconstructed["classification_events"] = classifications
     reconstructed["classification_environment"] = current_identity
     reconstructed["trusted_classification_manifest"] = manifest
-    phases: List[Dict[str, Any]] = []
+    grouped_classifications: Dict[int, List[Dict[str, Any]]] = {}
     for classification in classifications:
-        if not is_trusted_classification_event(classification):
-            continue
         try:
             raw_command_index = classification.get("compound_command_index")
             command_index = int(
-                len(phases) if raw_command_index is None else raw_command_index
+                len(grouped_classifications)
+                if raw_command_index is None else raw_command_index
             )
         except (TypeError, ValueError):
-            command_index = len(phases)
+            command_index = len(grouped_classifications)
+        grouped_classifications.setdefault(command_index, []).append(classification)
+    phases: List[Dict[str, Any]] = []
+    for command_index in sorted(grouped_classifications):
+        candidates = grouped_classifications[command_index]
+        trusted = [
+            item for item in candidates if is_trusted_classification_event(item)
+        ]
+        if not trusted:
+            continue
+        first = trusted[0]
         event_id = _text(
-            (classification.get("durable_evidence_order") or {}).get("event_id")
+            (first.get("durable_evidence_order") or {}).get("event_id")
         )
-        same_phase = bool(
-            phases and phases[-1].get("command_index") == command_index
-        )
-        current = phases[-1] if same_phase else {
-            "command_index": command_index,
-            "event_id": event_id,
-            "tactics": [],
-            "techniques": [],
-            "labels": [],
-        }
-        if not same_phase:
-            phases.append(current)
-        tactic = _text(classification.get("tactic"))
-        ttp = _text(classification.get("ttp")).upper()
-        if tactic and tactic != "unknown" and tactic not in current["tactics"]:
-            current["tactics"].append(tactic)
-        if ttp and ttp != "T0000_UNKNOWN" and ttp not in current["techniques"]:
-            current["techniques"].append(ttp)
-        if tactic and ttp and ttp != "T0000_UNKNOWN":
-            label = {"tactic": tactic, "technique": ttp}
+        labels = []
+        for classification in trusted:
+            tactic = _text(classification.get("tactic"))
+            ttp = _text(classification.get("ttp")).upper()
+            if not tactic or tactic == "unknown" or not ttp or ttp == "T0000_UNKNOWN":
+                continue
+            label = {
+                "tactic": tactic,
+                "technique": ttp,
+                "source": classification.get("source"),
+                "confidence": classification.get("confidence"),
+                "agreement_status": classification.get("agreement_status"),
+            }
             if event_id:
                 label["classification_evidence_id"] = event_id
-            if label not in current["labels"]:
-                current["labels"].append(label)
+            labels.append(label)
+        phases.append({
+            "command_index": command_index,
+            "event_id": event_id,
+            "event_timestamp": _text(first.get("event_timestamp")),
+            "labels": labels,
+            "audit_only_label_count": len(candidates) - len(trusted),
+            "command_outcome": first.get("command_outcome"),
+            "outcome_scope": first.get("outcome_scope"),
+            "fragment_execution": first.get("fragment_execution"),
+        })
     normalized_phases = normalize_trusted_phases(phases, cap=None)
     reconstructed["prediction_trusted_history"] = normalized_phases[-8:]
     cutoff = make_evidence_cutoff(
@@ -250,6 +268,9 @@ def reclassify_durable_prefix(
             phases=normalized_phases,
             evidence_cutoff=cutoff,
             classifier_environment=current_identity,
+            original_command_count=command_count,
+            original_trusted_label_count=trusted_count,
+            audit_only_label_count=len(classifications) - trusted_count,
     )
     manifest_errors = validate_prediction_trusted_history_manifest(
         history_manifest,

@@ -280,11 +280,8 @@
     "prediction_triggers": {
       "enabled": true,
       "eventids": [
-        "cowrie.login.success",
-        "cowrie.login.failed",
         "cowrie.session.file_download",
-        "cowrie.session.file_upload",
-        "cowrie.session.closed"
+        "cowrie.session.file_upload"
       ],
       "eventid_prefixes": ["cowrie.command."]
     },

@@ -133,6 +133,10 @@ _INPUT_FIELDS = frozenset(
         "target_contract_id",
         "max_sequence_length",
         "truncated",
+        "original_phase_count",
+        "selected_phase_count",
+        "omitted_prefix_phase_count",
+        "upstream_truncated",
         "phase_sequence",
         "session_context",
         "input_evidence_refs",
@@ -318,6 +322,16 @@ def _validate_input(value: Any) -> List[str]:
         errors.append("input.max_sequence_length must be positive")
     if type(value.get("truncated")) is not bool:
         errors.append("input.truncated must be boolean")
+    for field in (
+        "original_phase_count",
+        "selected_phase_count",
+        "omitted_prefix_phase_count",
+    ):
+        raw = value.get(field)
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            errors.append(f"input.{field} must be a non-negative integer")
+    if type(value.get("upstream_truncated")) is not bool:
+        errors.append("input.upstream_truncated must be boolean")
     if not _is_sha(value.get("preprocessing_sha256")):
         errors.append("input.preprocessing_sha256 must be a SHA-256 digest")
     if not _is_sha(value.get("vocabulary_sha256")):
@@ -328,6 +342,22 @@ def _validate_input(value: Any) -> List[str]:
         phases = []
     elif isinstance(maximum, int) and len(phases) > maximum:
         errors.append("input.phase_sequence exceeds max_sequence_length")
+    if value.get("selected_phase_count") != len(phases):
+        errors.append("input.selected_phase_count does not match phase_sequence")
+    if (
+        isinstance(value.get("original_phase_count"), int)
+        and isinstance(value.get("selected_phase_count"), int)
+        and isinstance(value.get("omitted_prefix_phase_count"), int)
+        and value["original_phase_count"]
+        != value["selected_phase_count"] + value["omitted_prefix_phase_count"]
+    ):
+        errors.append("input phase counts do not reconcile")
+    expected_truncated = bool(
+        value.get("omitted_prefix_phase_count")
+        or value.get("upstream_truncated")
+    )
+    if value.get("truncated") is not expected_truncated:
+        errors.append("input.truncated does not match truncation metadata")
     flattened_refs: List[str] = []
     for index, phase in enumerate(phases):
         path = f"input.phase_sequence[{index}]"

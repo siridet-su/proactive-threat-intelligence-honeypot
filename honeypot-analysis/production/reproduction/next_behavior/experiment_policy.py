@@ -9,7 +9,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict
 
-from production.prediction.next_behavior_contract import TARGET_CONTRACT_ID
+from production.prediction.next_behavior_contract import (
+    LEGACY_TARGET_CONTRACT_ID as TARGET_CONTRACT_ID,
+)
 from production.prediction.next_behavior_model import ARCHITECTURE, MODEL_FAMILY
 from production.utils.serialization import stable_json
 

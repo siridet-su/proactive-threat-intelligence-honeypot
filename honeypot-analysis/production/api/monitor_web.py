@@ -397,6 +397,12 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         snapshot = storage.get_current_prediction_snapshot(session_id)
         if not snapshot:
             return HTTPStatus.NOT_FOUND, {"error": "prediction not found", "session_id": session_id, "timestamp": utc_now()}
+        if snapshot.get("integrity_errors"):
+            return HTTPStatus.CONFLICT, {
+                "error": "current prediction failed integrity validation",
+                "session_id": session_id,
+                "timestamp": utc_now(),
+            }
         feedback_rows = [
             row for row in storage.list_rows("analyst_feedback", limit=1000)
             if str(row.get("session_id") or "") == session_id

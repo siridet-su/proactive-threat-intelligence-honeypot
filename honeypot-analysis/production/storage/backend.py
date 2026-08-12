@@ -39,9 +39,9 @@ from production.prediction.evidence_cutoff import (
     require_valid_evidence_cutoff,
 )
 from production.prediction.prediction_snapshot_contract import (
-    SNAPSHOT_SCHEMA_VERSION,
     PredictionSnapshotIntegrityError,
     canonical_prediction_content,
+    is_integrity_bound_prediction_snapshot,
     require_valid_prediction_snapshot,
     validate_prediction_snapshot_integrity,
 )
@@ -263,7 +263,7 @@ def _prediction_row_order(
     """Return canonical currentness order; invalid declared cutoffs sort last."""
 
     payload = _prediction_row_payload(row)
-    if payload.get("schema_version") == SNAPSHOT_SCHEMA_VERSION:
+    if is_integrity_bound_prediction_snapshot(payload):
         if validate_prediction_snapshot_integrity(payload):
             return (-1, "", "", str(row.get("snapshot_id") or ""))
         if str(row.get("snapshot_id") or "") != str(
@@ -4931,8 +4931,8 @@ class SQLiteStorage:
     def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str:
         snapshot_id = snapshot.get("snapshot_id") or stable_id("predsnap", snapshot)
         now = snapshot.get("generated_at") or utc_now()
-        is_v3 = snapshot.get("schema_version") == SNAPSHOT_SCHEMA_VERSION
-        if is_v3:
+        is_integrity_bound = is_integrity_bound_prediction_snapshot(snapshot)
+        if is_integrity_bound:
             snapshot = require_valid_prediction_snapshot(snapshot)
             snapshot_id = snapshot["snapshot_id"]
         cutoff = snapshot.get("evidence_cutoff")
@@ -4953,7 +4953,7 @@ class SQLiteStorage:
                 """,
                 (snapshot_id,),
             ).fetchone()
-            if existing is not None and is_v3:
+            if existing is not None and is_integrity_bound:
                 try:
                     existing_payload = json.loads(
                         str(existing["payload_json"] or "{}")
@@ -5032,8 +5032,7 @@ class SQLiteStorage:
             item["payload"] = _prediction_row_payload(item)
             item["integrity_errors"] = (
                 validate_prediction_snapshot_integrity(item["payload"])
-                if item["payload"].get("schema_version")
-                == SNAPSHOT_SCHEMA_VERSION
+                if is_integrity_bound_prediction_snapshot(item["payload"])
                 else []
             )
             items.append(item)
@@ -5072,7 +5071,7 @@ class SQLiteStorage:
         item["payload"] = _prediction_row_payload(item)
         item["integrity_errors"] = (
             validate_prediction_snapshot_integrity(item["payload"])
-            if item["payload"].get("schema_version") == SNAPSHOT_SCHEMA_VERSION
+            if is_integrity_bound_prediction_snapshot(item["payload"])
             else []
         )
         return item

@@ -20,9 +20,9 @@ from production.prediction.evidence_cutoff import (
     require_valid_evidence_cutoff,
 )
 from production.prediction.prediction_snapshot_contract import (
-    SNAPSHOT_SCHEMA_VERSION,
     PredictionSnapshotIntegrityError,
     canonical_prediction_content,
+    is_integrity_bound_prediction_snapshot,
     require_valid_prediction_snapshot,
     validate_prediction_snapshot_integrity,
 )
@@ -1237,8 +1237,8 @@ class MongoDBRuntimeOperations:
         return status if result.modified_count == 1 else "lost_claim"
 
     def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str:
-        identity = str(snapshot.get("snapshot_id") or stable_id("predsnap", snapshot)); is_v3 = snapshot.get("schema_version") == SNAPSHOT_SCHEMA_VERSION
-        normalized = require_valid_prediction_snapshot(snapshot) if is_v3 else dict(snapshot); identity = str(normalized.get("snapshot_id") or identity)
+        identity = str(snapshot.get("snapshot_id") or stable_id("predsnap", snapshot)); is_integrity_bound = is_integrity_bound_prediction_snapshot(snapshot)
+        normalized = require_valid_prediction_snapshot(snapshot) if is_integrity_bound else dict(snapshot); identity = str(normalized.get("snapshot_id") or identity)
         cutoff = normalized.get("evidence_cutoff")
         if cutoff is not None:
             cutoff = require_valid_evidence_cutoff(cutoff)
@@ -1246,18 +1246,23 @@ class MongoDBRuntimeOperations:
         body = stable_json(normalized); existing = self.database.prediction_snapshots.find_one({"_id": identity})
         if existing:
             old = _payload(existing)
-            if is_v3:
+            if is_integrity_bound:
                 require_valid_prediction_snapshot(old)
                 if canonical_prediction_content(old) != canonical_prediction_content(normalized): raise PredictionSnapshotIntegrityError("snapshot_id already stores different canonical content")
                 return identity
         document = {"_id": identity, "schema_version": "mongodb_prediction_snapshot.v1", "snapshot_id": identity, "session_id": str(normalized.get("session_id", "unknown")), "src_ip": str(normalized.get("src_ip", "unknown")), "session_status": str(normalized.get("session_status", "active")), "event_id": str(normalized.get("event_id", "")), "features_hash": str(normalized.get("features_hash", "")), "payload_json": body, "payload_sha256": hashlib.sha256(body.encode()).hexdigest(), "created_at": str(normalized.get("generated_at") or utc_now())}
-        if existing and existing.get("payload_json") != body and is_v3: raise PredictionSnapshotIntegrityError("snapshot identity conflict")
+        if existing and existing.get("payload_json") != body and is_integrity_bound: raise PredictionSnapshotIntegrityError("snapshot identity conflict")
         self.database.prediction_snapshots.replace_one({"_id": identity}, document, upsert=True)
         return identity
 
     @staticmethod
     def _prediction_order(item: Mapping[str, Any]) -> tuple[Any, ...]:
         payload = item.get("payload") if isinstance(item.get("payload"), Mapping) else {}
+        if is_integrity_bound_prediction_snapshot(payload):
+            if validate_prediction_snapshot_integrity(payload):
+                return (-1, "", "", str(item.get("snapshot_id") or ""))
+            if str(item.get("snapshot_id") or "") != str(payload.get("snapshot_id") or ""):
+                return (-1, "", "", str(item.get("snapshot_id") or ""))
         cutoff = payload.get("evidence_cutoff") if isinstance(payload, Mapping) else None
         if isinstance(cutoff, Mapping):
             try: return (1, *evidence_cutoff_sort_key(cutoff), str(item.get("snapshot_id") or ""))
@@ -1267,7 +1272,7 @@ class MongoDBRuntimeOperations:
     def list_prediction_snapshots_for_session(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         output = []
         for document in self.database.prediction_snapshots.find({"session_id": session_id}):
-            item = _row(document) or {}; item["payload"] = _payload(item); item["integrity_errors"] = validate_prediction_snapshot_integrity(item["payload"]) if item["payload"].get("schema_version") == SNAPSHOT_SCHEMA_VERSION else []; output.append(item)
+            item = _row(document) or {}; item["payload"] = _payload(item); item["integrity_errors"] = validate_prediction_snapshot_integrity(item["payload"]) if is_integrity_bound_prediction_snapshot(item["payload"]) else []; output.append(item)
         output.sort(key=self._prediction_order, reverse=True); return output[: max(0, int(limit))]
 
     def get_current_prediction_snapshot(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -1278,7 +1283,7 @@ class MongoDBRuntimeOperations:
 
     def get_prediction_snapshot(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
         item = _row(self.database.prediction_snapshots.find_one({"_id": str(snapshot_id)}))
-        if item is not None: item["payload"] = _payload(item); item["integrity_errors"] = validate_prediction_snapshot_integrity(item["payload"]) if item["payload"].get("schema_version") == SNAPSHOT_SCHEMA_VERSION else []
+        if item is not None: item["payload"] = _payload(item); item["integrity_errors"] = validate_prediction_snapshot_integrity(item["payload"]) if is_integrity_bound_prediction_snapshot(item["payload"]) else []
         return item
 
     def prune_prediction_snapshots(self, retention_days: int = 90, keep_latest_per_session: bool = True, now: Optional[str] = None, dry_run: bool = True) -> Dict[str, Any]:

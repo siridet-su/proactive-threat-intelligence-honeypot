@@ -10,11 +10,15 @@ from production.prediction.evidence_cutoff import validate_evidence_cutoff
 from production.utils.serialization import stable_id, stable_json
 
 
-SNAPSHOT_SCHEMA_VERSION = "prediction_snapshot.v3"
+SNAPSHOT_SCHEMA_VERSION = "prediction_snapshot.v4"
+LEGACY_SNAPSHOT_SCHEMA_VERSION = "prediction_snapshot.v3"
+INTEGRITY_BOUND_SNAPSHOT_SCHEMA_VERSIONS = frozenset(
+    {SNAPSHOT_SCHEMA_VERSION, LEGACY_SNAPSHOT_SCHEMA_VERSION}
+)
 
 
 class PredictionSnapshotIntegrityError(ValueError):
-    """Raised when a v3 snapshot violates its immutable identity contract."""
+    """Raised when a current snapshot violates its immutable identity contract."""
 
 
 def _clean(value: Any) -> str:
@@ -52,13 +56,17 @@ def finalize_prediction_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 def validate_prediction_snapshot_integrity(
     snapshot: Mapping[str, Any],
 ) -> list[str]:
-    """Validate v3 content identity and any additive durable cutoff."""
+    """Validate v4 content identity and its durable prediction boundary."""
 
     if not isinstance(snapshot, Mapping):
         return ["prediction snapshot must be an object"]
     errors: list[str] = []
-    if snapshot.get("schema_version") != SNAPSHOT_SCHEMA_VERSION:
-        errors.append(f"schema_version must be {SNAPSHOT_SCHEMA_VERSION}")
+    schema_version = snapshot.get("schema_version")
+    if schema_version not in INTEGRITY_BOUND_SNAPSHOT_SCHEMA_VERSIONS:
+        errors.append(
+            f"schema_version must be {SNAPSHOT_SCHEMA_VERSION} or "
+            f"{LEGACY_SNAPSHOT_SCHEMA_VERSION}"
+        )
         return errors
     expected = finalize_prediction_snapshot(snapshot)
     if _clean(snapshot.get("snapshot_sha256")).lower() != expected[
@@ -75,7 +83,35 @@ def validate_prediction_snapshot_integrity(
             snapshot.get("event_id")
         ) != _clean(cutoff.get("event_id")):
             errors.append("event_id does not match evidence_cutoff.event_id")
+    if (
+        schema_version == SNAPSHOT_SCHEMA_VERSION
+        and snapshot.get("prediction_status") == "predicted"
+    ):
+        history = snapshot.get("prediction_history")
+        if not isinstance(history, Mapping):
+            errors.append("predicted snapshot requires prediction_history")
+        else:
+            if history.get("schema_version") != "prediction_trusted_history_manifest.v3":
+                errors.append("prediction_history schema is invalid")
+            if history.get("target_contract_id") != "next_distinct_trusted_behavior_phase_or_session_end.v2":
+                errors.append("prediction_history target contract is invalid")
+            digest = _clean(history.get("history_manifest_sha256")).lower()
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                errors.append("prediction_history manifest hash is invalid")
+            hashes = history.get("ordered_phase_sha256")
+            if not isinstance(hashes, list) or not hashes or any(
+                len(_clean(item)) != 64 for item in hashes
+            ):
+                errors.append("prediction_history phase hashes are invalid")
+            if history.get("evidence_cutoff") != snapshot.get("evidence_cutoff"):
+                errors.append("prediction_history cutoff does not match snapshot cutoff")
     return errors
+
+
+def is_integrity_bound_prediction_snapshot(snapshot: Mapping[str, Any]) -> bool:
+    """Return whether the snapshot uses a content-addressed readable contract."""
+
+    return snapshot.get("schema_version") in INTEGRITY_BOUND_SNAPSHOT_SCHEMA_VERSIONS
 
 
 def require_valid_prediction_snapshot(

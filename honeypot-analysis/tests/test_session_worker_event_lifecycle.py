@@ -131,6 +131,7 @@ def test_prediction_snapshot_never_persists_response_guidance_or_creates_alert(
         src_ip="203.0.113.27",
         start_time="2026-07-27T00:00:00Z",
         commands=["whoami"],
+        prediction_trusted_history_revision=1,
     )
     try:
         assert worker._save_prediction_snapshot_unobserved(
@@ -156,7 +157,7 @@ def test_prediction_snapshot_never_persists_response_guidance_or_creates_alert(
         worker.close()
 
 
-def test_invalid_v3_prediction_is_rejected_and_recorded_in_outbox(
+def test_invalid_v4_prediction_is_rejected_and_recorded_in_outbox(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -165,7 +166,7 @@ def test_invalid_v3_prediction_is_rejected_and_recorded_in_outbox(
 
         def predict(self, _features: object, *, event_id: str = "") -> dict:
             return {
-                "schema_version": "prediction_snapshot.v3",
+                "schema_version": "prediction_snapshot.v4",
                 "snapshot_id": "prediction_corrupt",
                 "snapshot_sha256": "0" * 64,
                 "session_id": "integrity-session",
@@ -187,6 +188,7 @@ def test_invalid_v3_prediction_is_rejected_and_recorded_in_outbox(
         src_ip="203.0.113.27",
         start_time="2026-07-27T00:00:00Z",
         commands=["whoami"],
+        prediction_trusted_history_revision=1,
     )
     try:
         assert worker._save_prediction_snapshot_unobserved(
@@ -545,7 +547,7 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
         recovered = restarted.monitor.get_session("session-restart")
         assert recovered is not None
         assert recovered.commands == ["whoami"]
-        assert len(restarted._session_prediction_snapshots["session-restart"]) == 2
+        assert "session-restart" not in restarted._session_prediction_snapshots
         assert restarted.process_unprocessed() == 2
     finally:
         restarted.close()
@@ -572,22 +574,14 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
         "session-restart",
         limit=20,
     )
-    snapshot_event_ids = {row["event_id"] for row in snapshots}
-    assert first_event_ids[1] in snapshot_event_ids
-    assert first_event_ids[2] in snapshot_event_ids
-    assert second_command_id in snapshot_event_ids
-    assert close_id in snapshot_event_ids
+    assert snapshots == []
     for row in snapshots:
         snapshot_payload = json.loads(row["payload_json"])
         cutoff = snapshot_payload["evidence_cutoff"]
         assert cutoff["event_id"] == row["event_id"]
 
     prediction_tasks = storage.list_rows("prediction_outbox", limit=20)
-    assert prediction_tasks
-    for row in prediction_tasks:
-        task = json.loads(row["payload_json"])
-        assert task["schema_version"] == "prediction_outbox_task.v2"
-        assert task["evidence_cutoff"]["event_id"] == task["event_id"]
+    assert prediction_tasks == []
 
     jobs = storage.list_rows("analysis_jobs", limit=10)
     assert len(jobs) == 1

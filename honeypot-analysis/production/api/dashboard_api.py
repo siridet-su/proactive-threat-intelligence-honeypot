@@ -440,6 +440,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     {"error": "prediction not found", "session_id": session_id, "timestamp": utc_now()},
                 )
                 return
+            if snapshot.get("integrity_errors"):
+                self._send_json(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "current prediction failed integrity validation",
+                        "session_id": session_id,
+                        "timestamp": utc_now(),
+                    },
+                )
+                return
             feedback_rows = [
                 row
                 for row in storage.list_rows("analyst_feedback", limit=1000)

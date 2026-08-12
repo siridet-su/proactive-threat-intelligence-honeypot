@@ -11,6 +11,14 @@ import json
 from typing import Any, Dict, Iterable, List, Tuple
 
 from production.classification.trust import is_trusted_classification_event
+from production.prediction.prediction_snapshot_contract import (
+    SNAPSHOT_SCHEMA_VERSION,
+    validate_prediction_snapshot_integrity,
+)
+from production.prediction.trusted_history import (
+    TARGET_CONTRACT_ID,
+    validate_prediction_trusted_history_manifest,
+)
 from production.utils.sensitive_data import redact_for_api, redact_for_artifact
 from production.utils.serialization import stable_json, utc_now
 
@@ -192,10 +200,15 @@ def normalize_feedback_payload(
         payload["label_authority"] = "system_later_session_event"
         confidence = _float(payload.get("evidence_confidence"), 0.0)
         payload["evidence_confidence"] = round(confidence, 4)
-        payload["weight_eligible"] = bool(
-            _text(payload.get("predicted_top_tactic"))
-            and _actual_next_tactic(payload)
-            and confidence >= float(min_auto_evidence_confidence)
+        # Phase-4 evidence is structurally valid evaluation evidence, but it
+        # remains ineligible for model weighting/calibration until Phase 7 and
+        # the deterministic-semantics/checkpoint gate are complete. Historical
+        # auto rows never satisfy the v2 target contract and are also excluded.
+        payload["weight_eligible"] = False
+        payload["weight_exclusion_reason"] = (
+            "pending_post_phase7_checkpoint_compatibility_gate"
+            if payload.get("feedback_contract_version") == "prediction_feedback.v2"
+            else "legacy_auto_evidence_target_not_integrity_bound"
         )
     elif feedback_type == EXPERT_REVIEW:
         if not _text(feedback.get("evidence_origin") or feedback.get("feedback_origin")):
@@ -279,6 +292,10 @@ def feedback_weight_signal(
     feedback_type = _lower(payload.get("feedback_type"))
     if feedback_type not in allowed_types:
         return False, 0.0, f"feedback_type {feedback_type} is not weight eligible"
+    if feedback_type == AUTO_EVIDENCE:
+        if payload.get("feedback_contract_version") != "prediction_feedback.v2":
+            return False, 0.0, "legacy auto evidence is not target-contract eligible"
+        return False, 0.0, "automatic evidence weighting is disabled pending the model gate"
     evidence_origin = _lower(payload.get("evidence_origin"))
     if evidence_origin not in allowed_origins:
         return False, 0.0, f"evidence_origin {evidence_origin} is not production calibration eligible"
@@ -316,58 +333,103 @@ def build_auto_evidence_feedback(
     *,
     min_confidence: float = DEFAULT_AUTO_EVIDENCE_CONFIDENCE,
 ) -> Dict[str, Any] | None:
-    """Create a conservative auto label from later observed session evidence.
+    """Resolve the next-distinct multi-label target at a bound v3 cutoff."""
 
-    The label is only produced when a later classification event exists after
-    the snapshot prefix and that event has high classification confidence.
-    """
-
-    snapshot_payload = prediction_snapshot.get("payload") if isinstance(prediction_snapshot.get("payload"), dict) else prediction_snapshot
-    features = snapshot_payload.get("features") or {}
-    prefix_events = [
-        event for event in features.get("classification_events") or []
-        if isinstance(event, dict) and is_trusted_classification_event(event)
-    ]
-    all_events = [
-        event for event in session_payload.get("classification_events") or []
-        if isinstance(event, dict) and is_trusted_classification_event(event)
-    ]
-    if len(all_events) <= len(prefix_events):
+    snapshot_payload = (
+        prediction_snapshot.get("payload")
+        if isinstance(prediction_snapshot.get("payload"), dict)
+        else prediction_snapshot
+    )
+    if snapshot_payload.get("schema_version") != SNAPSHOT_SCHEMA_VERSION:
         return None
-
+    if validate_prediction_snapshot_integrity(snapshot_payload):
+        return None
+    boundary = snapshot_payload.get("prediction_history")
+    final_manifest = session_payload.get("prediction_trusted_history_manifest")
+    if not isinstance(boundary, dict) or not isinstance(final_manifest, dict):
+        return None
+    if validate_prediction_trusted_history_manifest(final_manifest):
+        return None
+    if boundary.get("target_contract_id") != TARGET_CONTRACT_ID:
+        return None
+    cutoff = boundary.get("evidence_cutoff") or {}
+    final_cutoff = final_manifest.get("evidence_cutoff") or {}
+    if cutoff != snapshot_payload.get("evidence_cutoff"):
+        return None
+    if (
+        _text(final_cutoff.get("received_at")),
+        _text(final_cutoff.get("event_id")),
+    ) < (
+        _text(cutoff.get("received_at")),
+        _text(cutoff.get("event_id")),
+    ):
+        return None
+    prefix_count = boundary.get("original_distinct_phase_count")
+    final_count = final_manifest.get("original_distinct_phase_count")
+    if (
+        isinstance(prefix_count, bool)
+        or not isinstance(prefix_count, int)
+        or not isinstance(final_count, int)
+        or final_count < prefix_count
+    ):
+        return None
+    prefix_hashes = boundary.get("ordered_phase_sha256")
+    if not isinstance(prefix_hashes, list) or not prefix_hashes:
+        return None
+    final_phases = final_manifest.get("ordered_trusted_phases") or []
+    final_omitted = int(final_manifest.get("omitted_prefix_phase_count") or 0)
+    overlap_end = prefix_count - final_omitted
+    overlap_start = max(overlap_end - len(prefix_hashes), 0)
+    overlap_length = max(overlap_end - overlap_start, 0)
+    expected_overlap = prefix_hashes[-overlap_length:] if overlap_length else []
+    actual_overlap = [
+        phase.get("phase_sha256")
+        for phase in final_phases[overlap_start:overlap_end]
+    ]
+    if expected_overlap != actual_overlap:
+        return None
+    if final_count == prefix_count:
+        if not bool(session_payload.get("is_ended") or session_payload.get("status") == "closed"):
+            return None
+        outcome_type = "session_end"
+        actual_tactics: List[str] = []
+        actual_techniques: List[str] = []
+        terminal_outcome = "session_end_no_further_trusted_behavior"
+    else:
+        target_index = prefix_count - final_omitted
+        if target_index < 0 or target_index >= len(final_phases):
+            return None
+        target_phase = final_phases[target_index]
+        outcome_type = "next_behavior_phase"
+        actual_tactics = list(target_phase.get("tactics") or [])
+        actual_techniques = list(target_phase.get("techniques") or [])
+        terminal_outcome = ""
     ranking = snapshot_payload.get("final_ranking") or []
-    predicted_top = ""
-    if isinstance(ranking, list) and ranking and isinstance(ranking[0], dict):
-        predicted_top = _text(ranking[0].get("tactic"))
-    if not predicted_top:
-        return None
-
-    for index, event in enumerate(all_events[len(prefix_events) :], start=len(prefix_events)):
-        tactic = _text(event.get("tactic"))
-        if not tactic or tactic == "unknown":
-            continue
-        confidence = _classification_confidence(event)
-        if confidence < min_confidence:
-            continue
-        feedback = {
-            "feedback_type": AUTO_EVIDENCE,
-            "session_id": _text(snapshot_payload.get("session_id") or session_payload.get("session_id")),
-            "snapshot_id": _text(snapshot_payload.get("snapshot_id")),
-            "label": "auto_observed_next_tactic",
-            "observed_prefix": features.get("tactic_sequence") or _tactic_sequence(prefix_events),
-            "predicted_top_tactic": predicted_top,
-            "predicted_ranking": ranking,
-            "final_actual_next_tactic": tactic,
-            "correct_next_tactic": tactic,
-            "tactic_granularity": "tactic",
-            "evidence_confidence": confidence,
-            "evidence_event_index": index,
-            "evidence_ttp": _text(event.get("ttp")),
-            "evidence_tactic": tactic,
-            "evidence_source": _text(event.get("source")),
-            "evidence_command": _text(event.get("command") or event.get("input")),
-            "evidence_origin": infer_evidence_origin(session_payload),
-            "notes": "Auto label from later high-confidence classification event.",
-        }
-        return normalize_feedback_payload(feedback, min_auto_evidence_confidence=min_confidence)
-    return None
+    predicted_set = sorted({_text(item) for item in snapshot_payload.get("prediction") or [] if _text(item)})
+    feedback = {
+        "feedback_contract_version": "prediction_feedback.v2",
+        "target_contract_id": TARGET_CONTRACT_ID,
+        "feedback_type": AUTO_EVIDENCE,
+        "session_id": _text(snapshot_payload.get("session_id") or session_payload.get("session_id")),
+        "snapshot_id": _text(snapshot_payload.get("snapshot_id")),
+        "label": "auto_observed_next_distinct_behavior_or_session_end",
+        "observed_prefix_manifest_sha256": boundary.get("history_manifest_sha256"),
+        "observed_prefix_phase_count": prefix_count,
+        "predicted_top_tactic": predicted_set[0] if predicted_set else "",
+        "predicted_tactic_set": predicted_set,
+        "predicted_ranking": ranking,
+        "actual_outcome_type": outcome_type,
+        "actual_tactic_set": actual_tactics,
+        "actual_technique_set": actual_techniques,
+        "terminal_outcome": terminal_outcome,
+        "final_actual_next_tactic": actual_tactics[0] if len(actual_tactics) == 1 else "",
+        "correct_next_tactic": actual_tactics[0] if len(actual_tactics) == 1 else "",
+        "tactic_granularity": "unordered_multilabel_tactic_set_or_terminal",
+        "evidence_confidence": 1.0,
+        "evidence_origin": infer_evidence_origin(session_payload),
+        "notes": "Integrity-bound evaluation evidence; weighting disabled pending the post-Phase-7 model gate.",
+    }
+    return normalize_feedback_payload(
+        feedback,
+        min_auto_evidence_confidence=min_confidence,
+    )

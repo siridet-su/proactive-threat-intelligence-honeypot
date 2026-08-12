@@ -31,9 +31,9 @@ from production.prediction.next_behavior_preprocessing import (
 )
 from production.utils.serialization import stable_id, stable_json
 
-VOCABULARY_SCHEMA_VERSION = "next_behavior_vocabulary.v1"
-TENSOR_SCHEMA_VERSION = "next_behavior_tensor_input.v1"
-TARGET_TENSOR_SCHEMA_VERSION = "next_behavior_target_tensor.v1"
+VOCABULARY_SCHEMA_VERSION = "next_behavior_vocabulary.v2"
+TENSOR_SCHEMA_VERSION = "next_behavior_tensor_input.v2"
+TARGET_TENSOR_SCHEMA_VERSION = "next_behavior_target_tensor.v2"
 UNKNOWN_TECHNIQUE = "<UNK>"
 AUDIT_COUNT_BUCKETS = ("0", "1", "2-5", "6+")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")

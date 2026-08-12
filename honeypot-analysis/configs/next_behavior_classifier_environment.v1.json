@@ -1,5 +1,5 @@
 {
-  "schema_version": "next_behavior_classifier_environment.v3",
+  "schema_version": "next_behavior_classifier_environment.v4",
   "python": {
     "implementation": "CPython",
     "version": "3.12.13"
@@ -46,12 +46,19 @@
     "compound_command_splitter": "production.classification.classification_pipeline.split_compound_command",
     "authority_decision_contract_version": "command_authority_decision.v2",
     "authority_decision_sha256": "0a29229b652b61ae417dac7e657bcf88efb4f7c280104c31e2c7ceaac05b7ffa",
-    "trusted_history_schema_version": "prediction_trusted_history_manifest.v2",
+    "trusted_history_schema_version": "prediction_trusted_history_manifest.v3",
     "trusted_history_builder_path": "production/prediction/trusted_history.py",
-    "trusted_history_builder_sha256": "d1a109209153fba8c8cba2935dd75a453173fb2eca8d36b8add3fe95f5c9fd7f",
+    "trusted_history_builder_sha256": "6109fc9e12c718a093cf4752e117c6956b30954251414c33d932d5367693a9b6",
     "trusted_history_runtime_path": "production/prediction/next_behavior_runtime.py",
-    "trusted_history_runtime_sha256": "bd1fd2b022812043654c944319b444c0cb2c5ce7647fb7a00056db53329b63cc",
-    "trusted_history_maximum_phases": 8
+    "trusted_history_runtime_sha256": "8fba8c6dc0ee305f41954057ca34ec2f2827cc611edba336db0f6ffe3cdaa42a",
+    "trusted_history_maximum_phases": 8,
+    "target_contract_id": "next_distinct_trusted_behavior_phase_or_session_end.v2",
+    "model_input_schema_version": "next_behavior_input.v2",
+    "prediction_snapshot_schema_version": "prediction_snapshot.v4",
+    "feedback_contract_version": "prediction_feedback.v2",
+    "checkpoint_compatibility_status": "pending_phase7_deterministic_semantics_freeze",
+    "preprocessing_contract_path": "configs/next_behavior_preprocessing.v2.json",
+    "preprocessing_contract_sha256": "77c35f705dab415cad233d451b10a1fa96329ad7aae8b1ac59a808eaca2fd8b1"
   },
   "freeze": {
     "basis_commit": "e3de17c727d8dd8b16f57654da4566e8a5700c03",
@@ -65,14 +72,23 @@
       "data/feeds/mitre_attack_cache.json": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
       "production/classification/authority.py": "0a29229b652b61ae417dac7e657bcf88efb4f7c280104c31e2c7ceaac05b7ffa",
       "production/classification/classification_pipeline.py": "c0ee06ae357a5abc4b8138218dc0c3d4a83a388ced3e82d059b1a4b2fbdacec6",
-      "production/classification/environment.py": "3da4ef8b3c2fe775ccfd9a2a146b1787da8c7bb4a1addcf5e98ffb2bce31436f",
+      "production/classification/environment.py": "a7d52fb5750169cf4c81f440dd6e7b2054453dfe3a8725f75a91c7eb30c71514",
       "production/classification/securebert_classifier.py": "72c7cb7a4c2a9f85f141d8eb39a12b24414e0cd861f463ac6cb9e4811cc622be",
       "production/classification/trust.py": "22269cf5dff6c11bf1720b46bce56361b140678f1baff3150efe2806ebff2919",
-      "production/prediction/next_behavior_runtime.py": "bd1fd2b022812043654c944319b444c0cb2c5ce7647fb7a00056db53329b63cc",
-      "production/prediction/trusted_history.py": "d1a109209153fba8c8cba2935dd75a453173fb2eca8d36b8add3fe95f5c9fd7f",
-      "production/reproduction/next_behavior/classifier_assets.py": "798a1ff62cafe22a7e00a4f0750b836f9bbdbe3c3dd84fd3a110d670c85a99c6",
-      "production/semantics/command_operations.py": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1"
+      "production/prediction/next_behavior_contract.py": "0ffa3e6aefe2d2784967f7b0f3b5cfaf666c1741b822b267d5204d4ec5e861df",
+      "production/prediction/next_behavior_forecast_contract.py": "483e6bb6125175488df2647b3e9dfc9e605a1f8c68fa4c1dd8a6d82ac9ed3a5f",
+      "production/prediction/next_behavior_preprocessing.py": "deed02c0ff59b7e09b8b749b8d81d2f619bd6d62cddff610dec730e337871e6d",
+      "production/prediction/next_behavior_runtime.py": "8fba8c6dc0ee305f41954057ca34ec2f2827cc611edba336db0f6ffe3cdaa42a",
+      "production/prediction/next_behavior_tensor.py": "8e504247c582e70216fd332a6a3c15a6b34d86672069827ddd224f98111c19b5",
+      "production/prediction/prediction_snapshot_contract.py": "8e0d376c814e3b60c97b81fe1c75179ed800f7993c7b364348eb706d4387da68",
+      "production/prediction/trusted_history.py": "6109fc9e12c718a093cf4752e117c6956b30954251414c33d932d5367693a9b6",
+      "production/reproduction/next_behavior/classifier_assets.py": "cf945a452ca3fec93767aec3ed3d9f76fc4e6ee748f92fd62f61690bba93352f",
+      "production/semantics/command_operations.py": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1",
+      "production/utils/feedback.py": "f8ccb5acbf1882ca0a3660933bbdae26eede8b42ef5721282a8f5853c454026b",
+      "production/workers/session_monitor.py": "1e141fb3bd419ed27ed2cb5599908fc744946bf0087f3b0b3c30b4d5a374f93f",
+      "production/workers/session_worker.py": "c025bccdbd848dc11fb0397f68090293fb55fafb291cc00d8df4d4dac76684c9",
+      "configs/next_behavior_preprocessing.v2.json": "77c35f705dab415cad233d451b10a1fa96329ad7aae8b1ac59a808eaca2fd8b1"
     },
-    "sha256": "2ac32cd1ba8cf3ea88d37f65168a7abb06aa1bc6b2360a3eaec1d8f242f0ef31"
+    "sha256": "169a7706874da58757eef3d658be11199b76bb0eb9efbedeb4d88ce3d19c9052"
   }
 }
