@@ -34,92 +34,6 @@ The two previously optional Phase 12 items that could change whether a trusted h
 
 # 1. MUST FIX before thesis evaluation
 
-## Phase 3 — Restore canonical authority and create an integrity-bound hypothesis contract
-
-### What will be fixed
-
-1. Keep `behavioral_findings` trusted-only.
-2. Keep demoted candidates solely in a clearly named audit collection/graph section.
-3. Require every canonical finding to resolve to a trusted authority decision.
-4. Introduce a strict hypothesis contract binding:
-
-   - question and scope;
-   - status;
-   - statement;
-   - evidence, fact, entity, relationship, and chain references;
-   - chronological ordering;
-   - evidence strength;
-   - gaps and limitations;
-   - falsification/disconfirming conditions;
-   - exhaustive/mutually-exclusive flags;
-   - semantic coverage;
-   - selector and policy provenance.
-
-5. Separate `chain_refs` from `relationship_refs`.
-6. Require every reference to resolve through the canonical graph.
-7. Preserve selector-v3 provenance.
-
-### Why
-
-Current canonical findings contain audit-only candidates, and hypothesis meaning can be changed into a confirmed-compromise claim without changing the assessment identity.
-
-### Main files/functions/contracts
-
-- [session_assessment_v4.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/reporting/session_assessment_v4.py)
-  - authority application
-  - `_hypothesis_sets`
-  - validator and assessment identity
-- [behavioral_authority.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/reporting/behavioral_authority.py)
-- [threat_hypothesis.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/reporting/threat_hypothesis.py)
-- [canonical_semantic_graph.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/reporting/canonical_semantic_graph.py)
-- Monitor/dashboard/artifact consumers
-- AI projection reference validator
-
-### Required tests
-
-- Audit-only finding absent from canonical findings.
-- Audit-only finding remains visible in the explicit audit collection.
-- Every canonical finding has one trusted authority decision.
-- Unknown, audit-only, or conflicting authority reference is rejected.
-- Tampering with each hypothesis field changes the ID or fails validation.
-- Unknown entity/fact/evidence/relationship/chain reference fails.
-- `chain_refs` resolve only to chains; `relationship_refs` only to relationships.
-- Incomplete-chain hypothesis survives AI projection validation.
-- Full chain has a canonical finding but no stale incomplete-chain hypothesis.
-- Prediction, enrichment, campaign, guidance, and AI still cannot affect hypothesis identity.
-- Historical v4 fixtures remain readable.
-
-### Acceptance criteria
-
-- No audit-only candidate appears as a canonical finding.
-- A hypothesis cannot be converted into an observation or real-host claim without invalidating the report.
-- Every hypothesis is fully evidence-grounded and falsifiable.
-- Assessment identity covers the complete canonical hypothesis content.
-- Old reports are displayed as historical v4, not silently validated as v5.
-
-### Contract/version change
-
-Introduce:
-
-- `threat_hypothesis_set.v2`
-- `session_assessment.v5`
-
-`canonical_semantic_graph.v1` may remain if it already contains all required node/reference domains. Otherwise introduce graph v2 rather than changing v1 silently.
-
-### Transformer checkpoint
-
-None. Hypotheses and findings remain excluded from trusted prediction history.
-
-### Historical compatibility
-
-- Historical v4 reports remain immutable and readable.
-- No automatic backfill.
-- Existing IDs remain historical IDs.
-- New v5 assessments receive new IDs.
-- UI must label legacy v4 authority/hypothesis semantics rather than adapting them silently.
-
----
-
 ## Phase 4 — Correct prediction history, live model input, target boundary, and evaluation
 
 ### What will be fixed
@@ -613,8 +527,7 @@ None.
 
 # Recommended execution order
 
-1. **Phase 3** — Introduce trusted-only canonical findings, `session_assessment.v5`, and the full-content `threat_hypothesis_set.v2`.
-2. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
+1. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
 3. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
 5. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
 6. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
@@ -630,7 +543,7 @@ None.
 16. Only after a clean separate review, prepare a new thesis-evaluation release.
 17. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
 
-The first remaining implementation phase is **Phase 3 — Restore canonical authority and create an integrity-bound hypothesis contract**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
+The first remaining implementation phase is **Phase 4 — Correct prediction history, live model input, target boundary, and evaluation (implementation only)**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
 
 No implementation, commit, deployment, service action, or production mutation was performed.
 
