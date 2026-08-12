@@ -27,3 +27,18 @@
 - Compatibility/historical-data impact: documentation/evidence only; no database, report, prediction, or historical record changed or reinterpreted.
 - Model/checkpoint impact: none; the baseline checkpoint and bundle are preserved as immutable historical evidence, and compatibility remains undecided pending Phase 7 and the deterministic-semantics freeze.
 - Remaining limitations: planned producers do not exist until their assigned implementation phases; the registry describes ownership and compatibility intent, not runtime activation.
+
+## Phase 1 — Correct command authority and trusted ATT&CK promotion
+
+- Completion timestamp: `2026-08-13T05:52:18+07:00`
+- Findings addressed: lexical regex promotion from inert text/searches; read-only promotion of persistence/modification mappings; unproven `&&`/`||` fragments entering trusted ATT&CK state and prediction history; missing operation-context provenance on trusted regex fallback.
+- Exact implementation: introduced an operation-context authority gate binding regex matches to the parsed executable, read/write operand, redirection target, mutation-capable command family, and fragment execution status. Conditional RHS fragments without fragment-scoped execution proof remain audit-only. SecureBERT-only candidates and rule/model disagreements remain audit-only.
+- Files/functions/contracts changed: `configs/classification_rules.trusted.json`; `configs/next_behavior_classifier_environment.v1.json`; `configs/prediction_policy.transformer_poc.trusted.json`; `production/classification/authority.py`; `production/classification/classification_pipeline.py`; `production/classification/trust.py`; `production/policies/validate_classification_rules.py`; `production/reporting/session_assessment_v4.py`; `production/reproduction/next_behavior/classifier_assets.py`; `tests/test_session_monitor_behavior.py`; `tests/test_phase1_command_authority_v2.py`.
+- Contract versions introduced: `classification_rule_policy.v4`, `command_authority_decision.v2`, `classification_event.v3`.
+- Implementation commit SHA: `45d48c21f90c7d39aae64e87bce87e63dd81f101`
+- Implementation tree SHA: `633a678d5fc95dbc68626d590856d03688c4017f`
+- Tests and exact results: phase-focused authority/session/replay/environment/runtime group → `53 passed, 2 skipped` (private frozen Transformer runtime/checkpoint unavailable); behavioral/semantic/stabilization/privacy group → `109 passed`; classification and prediction policy validators PASS; `git diff --check` PASS.
+- Acceptance criteria: PASS. Inert mentions/searches cannot create trusted labels; reads cannot satisfy mutation/persistence mappings; unproven conditional fragments do not enter trusted state/history; every trusted regex fallback resolves to the reviewed operation-context class; representative direct unambiguous invocations and structurally proven writes remain trusted.
+- Compatibility/historical-data impact: existing classification events/reports are not rewritten or backfilled. Historical v2 events/v1 authority decisions remain readable under their original identities. New classification uses new policy/environment identity.
+- Model/checkpoint impact: SecureBERT and Transformer checkpoint bytes unchanged. Transformer compatibility/retraining remains deliberately undecided until Phase 7 and the deterministic-semantics freeze gate.
+- Remaining limitations: contextual tactic choice, direction-sensitive transfer mappings, parent/sub-technique policy, and other trusted ATT&CK cleanup remain in Phase 7. No compatibility, retraining, or recalibration decision was made.

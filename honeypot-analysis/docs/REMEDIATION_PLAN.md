@@ -34,108 +34,6 @@ The two previously optional Phase 12 items that could change whether a trusted h
 
 # 1. MUST FIX before thesis evaluation
 
-## Phase 1 — Correct command authority and trusted ATT&CK promotion
-
-### What will be fixed
-
-1. Replace lexical “clean parse + allowlisted regex” trust with a reusable operation-context authority rule.
-2. Require trusted regexes to prove, as appropriate:
-
-   - executable position;
-   - relevant source/destination operand;
-   - read versus write/modify action;
-   - transfer direction;
-   - conditional-fragment eligibility;
-   - reviewed tactic binding.
-
-3. Immediately correct high-risk cases:
-
-   - inert `echo`/`printf`/`grep` mentions;
-   - authorized-keys reads versus writes;
-   - reads of service/startup files;
-   - miner-token searches;
-   - cron/NOPASSWD mentions;
-   - skipped `&&`/`||` branches.
-
-4. Preserve unresolved, ambiguous, and unproven fragments as audit-only candidates.
-5. Keep SecureBERT-only and rule/model disagreement audit-only.
-
-### Why
-
-These defects contaminate trusted TTP summaries and prediction history even when the typed graph later abstains.
-
-### Main files/functions/contracts
-
-- [classification_pipeline.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/classification/classification_pipeline.py)
-  - compound splitting
-  - `_classify_single`
-  - structural/regex selection
-- [authority.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/classification/authority.py)
-  - `command_authority_decision`
-  - `candidate_authority_decision`
-- [trust.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/classification/trust.py)
-- [command_operations.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/semantics/command_operations.py)
-- [session_monitor.py](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/production/workers/session_monitor.py)
-- [classification_rules.trusted.json](/home/rubchek/Desktop/teammate-repo/honeypot-analysis/configs/classification_rules.trusted.json)
-- Classification policy validator
-- Classifier environment receipt and hashes
-
-### Required tests
-
-- `echo whoami` does not trust T1033.
-- `printf 'wget ...'` does not trust T1105.
-- `grep xmrig ...` does not trust T1496.
-- `cat /home/x/.ssh/authorized_keys` does not trust T1098.
-- authorized-keys destination writes can be trusted when structurally proven.
-- `cat /etc/systemd/system/x.service` does not trust T1543.
-- startup-file reads do not trust persistence/event-triggered execution.
-- direct reviewed modification operations still pass.
-- `true || /tmp/a.sh` excludes the RHS from trusted state/history.
-- `false && /tmp/a.sh` excludes the RHS.
-- ambiguous conditional branches remain audit-only.
-- variables, globs, and substitutions continue to abstain.
-- SecureBERT-only/disagreement behavior is unchanged.
-- Trusted candidate cannot be created without a loaded, reviewed, hash-bound policy.
-
-### Acceptance criteria
-
-- No trusted label can arise from a token merely appearing in inert text.
-- Read-only operations cannot satisfy modification/persistence rules.
-- A conditional fragment without execution proof cannot enter trusted TTP state or prediction history.
-- Every trusted regex rule has an explicit reviewed safety/operation class.
-- All current direct, unambiguous mappings continue to work.
-
-### Contract/version change
-
-Introduce:
-
-- `classification_rule_policy.v4`
-- `command_authority_decision.v2`
-- `classification_event.v3`
-
-Regenerate classifier-environment and dependent policy hashes.
-
-### Transformer checkpoint
-
-The checkpoint bytes must be preserved as an immutable historical artifact. However, these changes can alter trusted phases and targets.
-
-The existing checkpoint must not automatically be declared compatible. After corrected corpus generation:
-
-1. compare old and new phase/input/target fingerprints;
-2. if identical for the bound training corpus, re-evaluation may be sufficient;
-3. if any trusted labels, phase boundaries, or targets change, retraining and recalibration are required.
-
-Material changes are likely, so planning should assume a new checkpoint while retaining the old checkpoint for reproducibility.
-
-### Historical compatibility
-
-- Historical classification events remain readable under their original policy/environment identity.
-- Do not reclassify or backfill old sessions automatically.
-- New sessions use v4/v3 contracts.
-- Any explicitly requested historical replay must produce a new assessment identity under the new policy, alongside—not over—the historical record.
-
----
-
 ## Phase 2 — Fix durable replay and typed chain/context correctness
 
 ### What will be fixed
@@ -780,26 +678,25 @@ None.
 
 # Recommended execution order
 
-1. **Phase 1** — Implement operation-context classifier authority, trusted ATT&CK promotion, and conditional-fragment containment.
-2. **Phase 2** — Correct durable replay grouping/cutoffs, retry-aware chain selection, and cwd-aware entity resolution.
-3. **Phase 3** — Introduce trusted-only canonical findings, `session_assessment.v5`, and the full-content `threat_hypothesis_set.v2`.
-4. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
-5. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
-6. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
-7. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
-8. **Transformer decision** — Preserve and fully re-evaluate/recalibrate the existing checkpoint only if compatibility is proven; otherwise retrain, recalibrate, and issue a new model-bundle/checkpoint receipt. Preserve the prior checkpoint as immutable historical evidence.
-9. **Phase 5** — Implement graph-only `response_guidance.v4` and exact-prefix current-policy reevaluation.
-10. **Phase 6** — Run the integrated must-fix regression suite and repeat the independent read-only behavioral-authority audit.
-11. **Phase 8** — Correct prediction/evaluation UI terminology and provenance.
-12. **Phase 9** — Replace campaign/attribution/STIX overclaims with bounded behavioral-similarity and observable semantics.
-13. **Phase 10** — Complete hypothesis provenance and evidence-layer presentation.
-14. **Phase 11** — Reconcile methodology, architecture, model, release, and limitation documentation.
-15. **Phase 12** — Apply remaining optional presentation and maintenance cleanup; no trusted-sequence-affecting work remains in this phase.
-16. Run the full repository suite, exact private runtime/model validation, policy/schema validators, replay parity, deterministic secret scan, and release-review checks.
-17. Only after a clean separate review, prepare a new thesis-evaluation release.
-18. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
+1. **Phase 2** — Correct durable replay grouping/cutoffs, retry-aware chain selection, and cwd-aware entity resolution.
+2. **Phase 3** — Introduce trusted-only canonical findings, `session_assessment.v5`, and the full-content `threat_hypothesis_set.v2`.
+3. **Phase 4 implementation only** — Implement prediction-history v3, exact offline/live tensor parity, corrected trigger/terminal boundaries, and target-aware evaluation safeguards. Do not decide checkpoint compatibility or retraining yet.
+4. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
+5. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
+6. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
+7. **Transformer decision** — Preserve and fully re-evaluate/recalibrate the existing checkpoint only if compatibility is proven; otherwise retrain, recalibrate, and issue a new model-bundle/checkpoint receipt. Preserve the prior checkpoint as immutable historical evidence.
+8. **Phase 5** — Implement graph-only `response_guidance.v4` and exact-prefix current-policy reevaluation.
+9. **Phase 6** — Run the integrated must-fix regression suite and repeat the independent read-only behavioral-authority audit.
+10. **Phase 8** — Correct prediction/evaluation UI terminology and provenance.
+11. **Phase 9** — Replace campaign/attribution/STIX overclaims with bounded behavioral-similarity and observable semantics.
+12. **Phase 10** — Complete hypothesis provenance and evidence-layer presentation.
+13. **Phase 11** — Reconcile methodology, architecture, model, release, and limitation documentation.
+14. **Phase 12** — Apply remaining optional presentation and maintenance cleanup; no trusted-sequence-affecting work remains in this phase.
+15. Run the full repository suite, exact private runtime/model validation, policy/schema validators, replay parity, deterministic secret scan, and release-review checks.
+16. Only after a clean separate review, prepare a new thesis-evaluation release.
+17. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
 
-The first remaining implementation phase is **Phase 1 — Correct command authority and trusted ATT&CK promotion**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
+The first remaining implementation phase is **Phase 2 — Fix durable replay and typed chain/context correctness**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
 
 No implementation, commit, deployment, service action, or production mutation was performed.
 
