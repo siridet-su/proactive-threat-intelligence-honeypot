@@ -1407,7 +1407,7 @@ def _load_report_json_from_artifact(paths: Dict[str, str], reports_dir: str) -> 
 
 def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> Dict[str, str]:
     merged = _merged_report_payload(report_payload, artifact_payload)
-    if merged.get("schema_version") == "session_assessment.v4":
+    if merged.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         findings = [
             item for item in merged.get("behavioral_findings") or [] if isinstance(item, dict)
         ]
@@ -4288,7 +4288,7 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     summary_text = summary.get("summary") or "No compact report summary available yet."
     merged = _merged_report_payload(report_payload, artifact_payload)
     v4_detail = ""
-    if merged.get("schema_version") == "session_assessment.v4":
+    if merged.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         finding_items = [
             (
                 f"[{item.get('status', '')}] {item.get('statement', '')} "

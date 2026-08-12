@@ -32,13 +32,13 @@ def _session() -> dict:
     }
 
 
-def test_terminal_analysis_fallback_is_v4_observation_only_abstention() -> None:
+def test_terminal_analysis_fallback_is_v5_observation_only_abstention() -> None:
     report = deterministic_baseline_report(
         _session(),
         "RuntimeError: operation_failed",
     )
 
-    assert report["schema_version"] == "session_assessment.v4"
+    assert report["schema_version"] == "session_assessment.v5"
     assert report["status"] == "observation_only_abstention"
     assert report["abstention"] == {
         "abstained": True,
@@ -48,7 +48,8 @@ def test_terminal_analysis_fallback_is_v4_observation_only_abstention() -> None:
     assert report["hypothesis_sets"] == []
     assert "threat_hypothesis" not in report
     assert "predicted_next_action" not in str(report)
-    assert validate_session_assessment_v4(report) == []
+    from production.reporting.session_assessment_v5 import validate_session_assessment_v5
+    assert validate_session_assessment_v5(report) == []
 
 
 def test_terminal_fallback_rebinds_id_after_suppressing_supported_findings() -> None:
@@ -74,7 +75,8 @@ def test_terminal_fallback_rebinds_id_after_suppressing_supported_findings() -> 
 
     assert report["behavioral_findings"] == []
     assert report["hypothesis_sets"] == []
-    assert validate_session_assessment_v4(report) == []
+    from production.reporting.session_assessment_v5 import validate_session_assessment_v5
+    assert validate_session_assessment_v5(report) == []
 
 
 def test_invalid_stored_v3_guidance_is_non_actionable() -> None:

@@ -31,11 +31,11 @@ from production.reporting.actor_attribution import enrich_report_with_actor_attr
 from production.reporting.analysis_policy import session_analysis_skip_reason
 from production.reporting.artifacts import attach_report_artifacts
 from production.policies.threat_hypothesis_behavior_policy import load_behavior_policy
-from production.reporting.session_assessment_v4 import (
-    SessionAssessmentV4Error,
-    build_session_assessment_v4,
+from production.reporting.session_assessment_v5 import (
+    SessionAssessmentV5Error as SessionAssessmentV4Error,
+    build_session_assessment_v5 as build_session_assessment_v4,
     canonical_assessment_id,
-    validate_session_assessment_v4,
+    validate_session_assessment as validate_session_assessment_v4,
 )
 from production.utils.credential_hmac import credential_metadata_for_provenance
 from production.utils.config import ProductionConfig
@@ -367,7 +367,7 @@ def attach_threat_evidence_layers(
     session_payload: Dict[str, Any],
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    if report.get("schema_version") == "session_assessment.v4":
+    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         # Visualization is context only. It cannot become a sibling authority
         # field or mutate canonical findings, hypotheses, status, or IDs.
         context = report.setdefault("non_authoritative_context", {})
@@ -385,7 +385,7 @@ def attach_threat_evidence_layers(
         )
         return report
     raise SessionAssessmentV4Error(
-        "threat evidence layers can only attach to session_assessment.v4"
+        "threat evidence layers can only attach to a canonical session assessment"
     )
 
 
@@ -692,9 +692,9 @@ async def analyze_job(
         if isinstance(diagnostic, dict):
             failure.validation_diagnostic = diagnostic
         raise failure from None
-    if result.get("schema_version") != "session_assessment.v4":
+    if result.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"}:
         raise SessionAssessmentV4Error(
-            "new analysis reports must use session_assessment.v4"
+            "analysis reports must use a supported canonical assessment schema"
         )
     result.setdefault("session_id", state.session_id)
     result.setdefault("created_at", utc_now())

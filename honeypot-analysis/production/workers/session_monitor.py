@@ -2072,7 +2072,7 @@ def build_pipeline_trigger(
 
             if not isinstance(result, dict):
                 raise RuntimeError("Coordinator returned no report")
-            if result.get("schema_version") == "session_assessment.v4":
+            if result.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
                 non_authoritative = result.setdefault(
                     "non_authoritative_context", {}
                 )
@@ -2092,7 +2092,7 @@ def build_pipeline_trigger(
                     reporting_view.get("ioc_summary", {}),
                 )
                 result.setdefault("bpg_list", bpg_list)
-            if result.get("schema_version") != "session_assessment.v4":
+            if result.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"}:
                 result = _safe_reporting_mapping(result, "report")
             level = _extract_level(result)
             print(

@@ -2838,14 +2838,14 @@ class SQLiteStorage:
     ) -> Optional[str]:
         assessment_id = str(report_payload.get("assessment_id") or "").strip()
         if (
-            report_payload.get("schema_version") == "session_assessment.v4"
+            report_payload.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
             and assessment_id
         ):
             report_id = stable_id(
                 "report",
                 {
                     "job_id": job_id,
-                    "schema_version": "session_assessment.v4",
+                    "schema_version": report_payload.get("schema_version"),
                     "assessment_id": assessment_id,
                 },
             )
@@ -2859,7 +2859,7 @@ class SQLiteStorage:
         canonical_session_id = (
             canonical_evidence.get("session_id")
             if (
-                report_payload.get("schema_version") == "session_assessment.v4"
+                report_payload.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
                 and isinstance(canonical_evidence, dict)
             )
             else ""
@@ -2993,7 +2993,7 @@ class SQLiteStorage:
             except (TypeError, json.JSONDecodeError) as exc:
                 raise StorageError("committed report is not valid JSON") from exc
             if (
-                payload.get("schema_version") != "session_assessment.v4"
+                payload.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"}
                 or str(payload.get("assessment_id") or "") != assessment_key
             ):
                 raise StorageError("AI advisory enqueue report identity is invalid")
@@ -3336,7 +3336,7 @@ class SQLiteStorage:
             except (TypeError, json.JSONDecodeError):
                 advanced_row = row
                 continue
-            if payload.get("schema_version") != "session_assessment.v4":
+            if payload.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"}:
                 advanced_row = row
                 continue
             assessment_id = str(payload.get("assessment_id") or "").strip()

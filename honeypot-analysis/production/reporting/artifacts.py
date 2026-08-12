@@ -43,13 +43,13 @@ def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
     if (
         label == "report"
         and isinstance(value, dict)
-        and value.get("schema_version") == "session_assessment.v4"
+        and value.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
     ):
         # V4 has already been redacted before its evidence digest and content
         # IDs are computed. Re-redacting at each consumer can alter an
         # otherwise valid canonical snapshot and invalidate its guidance hash.
-        from production.reporting.session_assessment_v4 import (
-            validate_session_assessment_v4,
+        from production.reporting.session_assessment_v5 import (
+            validate_session_assessment as validate_session_assessment_v4,
         )
 
         validate_session_assessment_v4(value, raise_on_error=True)
@@ -222,7 +222,7 @@ def _artifact_version_id(
 ) -> str:
     """Derive a retry-stable version before artifact paths are attached."""
 
-    if report.get("schema_version") == "session_assessment.v4":
+    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         provenance = report.get("provenance") or {}
         evidence_sha256 = str(provenance.get("evidence_sha256") or "").strip()
         assessment_id = str(report.get("assessment_id") or "").strip()
@@ -231,7 +231,7 @@ def _artifact_version_id(
                 "artifact",
                 {
                     "contract": "canonical_report_artifacts.v2",
-                    "schema_version": "session_assessment.v4",
+                    "schema_version": report.get("schema_version"),
                     "assessment_id": assessment_id,
                     "evidence_sha256": evidence_sha256,
                     "session_id": (
@@ -376,7 +376,7 @@ def _artifact_timestamp(
 ) -> str:
     """Choose a source-bound timestamp without consulting the wall clock."""
 
-    if report.get("schema_version") == "session_assessment.v4":
+    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         evidence = report.get("canonical_evidence") or {}
         source_timestamps = [
             _stix_timestamp(str(item.get("timestamp") or ""), fallback="")
@@ -418,7 +418,7 @@ def _stix_source_report_sha256(report: Dict[str, Any]) -> str:
     """Hash the retry-stable report projection represented in STIX."""
 
     basis = deepcopy(report)
-    if basis.get("schema_version") == "session_assessment.v4":
+    if basis.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         for key in (
             "artifacts",
             "generated_at",
@@ -464,7 +464,7 @@ def _evidence_layer_summary_lines(report: Dict[str, Any]) -> List[str]:
 
 
 def _trusted_ttp_ids(report: Dict[str, Any], session_payload: Dict[str, Any]) -> List[str]:
-    if report.get("schema_version") == "session_assessment.v4":
+    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         evidence = report.get("canonical_evidence") or {}
         return list(dict.fromkeys(
             str(item.get("technique_id") or "").strip()
@@ -663,7 +663,7 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
         ),
     }
 
-    if report.get("schema_version") == "session_assessment.v4":
+    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         provenance = report.get("provenance") or {}
         for finding in report.get("behavioral_findings") or []:
             if not isinstance(finding, dict):
@@ -1011,7 +1011,7 @@ def write_markdown_report(
         "## Summary",
         str(
             "Canonical behavioral findings and falsifiable alternatives are listed below."
-            if report.get("schema_version") == "session_assessment.v4"
+            if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
             else (report.get("presentation") or {}).get("summary")
             or report.get("executive_summary") or report.get("summary") or "No summary available."
         ),
@@ -1020,7 +1020,7 @@ def write_markdown_report(
     ]
     for tid in _trusted_ttp_ids(report, session_payload):
         lines.append(f"- {tid}")
-    if report.get("schema_version") == "session_assessment.v4":
+    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         lines.extend(["", "## Behavioral Findings"])
         for finding in report.get("behavioral_findings") or []:
             lines.append(
@@ -1167,7 +1167,7 @@ def write_pdf_report(
             escape(
                 str(
                     "Canonical behavioral findings and falsifiable alternatives are listed below."
-                    if report.get("schema_version") == "session_assessment.v4"
+                    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
                     else (report.get("presentation") or {}).get("summary")
                     or report.get("executive_summary")
                     or report.get("summary")
@@ -1179,7 +1179,7 @@ def write_pdf_report(
         Spacer(1, 8),
     ]
 
-    if report.get("schema_version") == "session_assessment.v4":
+    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         story.append(Paragraph("Behavioral Findings", h2))
         if report.get("behavioral_findings"):
             for finding in report.get("behavioral_findings") or []:

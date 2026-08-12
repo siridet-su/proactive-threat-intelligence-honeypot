@@ -1,4 +1,4 @@
-"""Positive allowlist projection from a validated persisted v4 assessment."""
+"""Positive allowlist projection from a validated persisted assessment."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from production.ai_advisory.contracts import (
 )
 from production.ai_advisory.security import ProviderAliasScope
 from production.utils.serialization import stable_id
-from production.reporting.session_assessment_v4 import validate_session_assessment_v4
+from production.reporting.session_assessment_v5 import validate_session_assessment
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
 from production.reporting.typed_semantic_family_selection import (
     ACTIVATED_FAMILIES as CANONICAL_ACTIVATED_SEMANTIC_FAMILIES,
@@ -140,7 +140,7 @@ EVIDENCE_STATUSES = {
     "partially_supported",
     "trusted",
 }
-FINDING_ORIGINS = {"session_assessment.v4", "response_guidance.v3"}
+FINDING_ORIGINS = {"session_assessment.v4", "session_assessment.v5", "response_guidance.v3"}
 FINDING_STATUSES = {"supported", "partially_supported", "insufficient_evidence"}
 FINDING_TYPES = {
     "connected_artifact_activity",
@@ -692,9 +692,9 @@ def build_ai_advisory_projection(
     """Build the only data object allowed to cross the external AI boundary."""
 
     report_copy = deepcopy(dict(report))
-    errors = validate_session_assessment_v4(report_copy)
+    errors = validate_session_assessment(report_copy)
     if errors:
-        raise AIAdvisoryContractError("persisted v4 report failed validation")
+        raise AIAdvisoryContractError("persisted assessment failed validation")
     guidance = report_copy.get("response_guidance_v3") or {}
     if validate_response_guidance_v3(guidance):
         raise AIAdvisoryContractError("persisted v3 guidance failed validation")
@@ -728,7 +728,7 @@ def build_ai_advisory_projection(
         findings.append(
             {
                 "finding_id": _clean(item.get("finding_id")),
-                "origin": "session_assessment.v4",
+                "origin": _clean(report_copy.get("schema_version")) or "session_assessment.v5",
                 "finding_type": _clean(item.get("finding_type")),
                 "policy_rule_id": _clean(item.get("behavior_policy_rule_id")),
                 "semantic_family": _clean(item.get("semantic_family")),
@@ -781,7 +781,10 @@ def build_ai_advisory_projection(
                 {
                     "hypothesis_id": _clean(item.get("hypothesis_id")),
                     "hypothesis_set_id": _clean(hypothesis_set.get("hypothesis_set_id")),
-                    "status": _clean(item.get("status")),
+                    # The closed provider contract retains its historical
+                    # non-authoritative "active" enum. Local v5 meaning was
+                    # already validated as a bounded unverified alternative.
+                    "status": "active",
                     "evidence_refs": refs,
                     "relationship_refs": set_relationship_refs,
                     "limitation_codes": ["canonical_scope_limitation"],
