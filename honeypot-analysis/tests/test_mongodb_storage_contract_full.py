@@ -324,6 +324,12 @@ def test_ai_advisory_outbox_and_persistence_are_idempotent(full_mongo) -> None:
     ai_job = full_mongo.enqueue_ai_advisory_job(report_id, "sensor-a:session-a", "assessment-a", reconciliation_cutoff=cutoff)
     assert full_mongo.enqueue_ai_advisory_job(report_id, "sensor-a:session-a", "assessment-a", reconciliation_cutoff=cutoff) == ai_job
     claimed = full_mongo.claim_ai_advisory_jobs("ai-a", 1, 60, 3, now="2026-08-12T01:00:02Z")[0]
+    assert claimed["task"] == {
+        "schema_version": "ai_advisory_task.v1",
+        "report_id": report_id,
+        "session_id": "sensor-a:session-a",
+        "assessment_id": "assessment-a",
+    }
     record = {"advisory_id": "advisory-a", "cache_key": "cache-a", "report_id": report_id, "session_id": "sensor-a:session-a", "assessment_id": "assessment-a", "status": "accepted", "projection_sha256": "1" * 64, "request_sha256": "2" * 64, "response_sha256": "3" * 64, "provider_id": "fixture", "model_id": "fixture-model", "prompt_sha256": "4" * 64, "schema_sha256": "5" * 64, "policy_sha256": "6" * 64, "payload": {"authority": "non_authoritative"}, "metrics": {"latency_ms": 1}}
     assert full_mongo.complete_ai_advisory_job(ai_job, "ai-a", claimed["claim_token"], record, now="2026-08-12T01:00:03Z") == "advisory-a"
     assert full_mongo.get_ai_advisory_for_report(report_id, "assessment-a")["payload"]["authority"] == "non_authoritative"

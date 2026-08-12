@@ -29,6 +29,10 @@ from production.storage.contract import (
     validate_webhook_completion_fields,
 )
 from production.storage.canonical_event import CanonicalEventRecord
+from production.storage.job_materialization import (
+    materialize_ai_advisory_job_claim,
+    materialize_analysis_job_claim,
+)
 from production.utils.serialization import stable_id, stable_json, utc_now
 from production.prediction.evidence_cutoff import (
     evidence_cutoff_sort_key,
@@ -2816,18 +2820,7 @@ class SQLiteStorage:
         rows = self.claim_jobs(
             "analysis", owner, limit, lease_seconds, max_attempts, now=now
         )
-        return [
-            {
-                "job_id": row["job_id"],
-                "session_id": row["session_id"],
-                "session": json.loads(row["payload_json"]),
-                "attempts": row["attempts"],
-                "claim_owner": row["claim_owner"],
-                "claim_token": row["claim_token"],
-                "claim_expires_at": row["claim_expires_at"],
-            }
-            for row in rows
-        ]
+        return [materialize_analysis_job_claim(row) for row in rows]
 
     def complete_analysis_job(
         self,
@@ -3393,26 +3386,7 @@ class SQLiteStorage:
             max_attempts,
             now=now,
         )
-        output: List[Dict[str, Any]] = []
-        for row in rows:
-            try:
-                task = json.loads(row["payload_json"])
-            except (TypeError, json.JSONDecodeError):
-                task = None
-            output.append(
-                {
-                    "job_id": row["job_id"],
-                    "report_id": row["report_id"],
-                    "session_id": row["session_id"],
-                    "assessment_id": row["assessment_id"],
-                    "task": task,
-                    "attempts": row["attempts"],
-                    "claim_owner": row["claim_owner"],
-                    "claim_token": row["claim_token"],
-                    "claim_expires_at": row["claim_expires_at"],
-                }
-            )
-        return output
+        return [materialize_ai_advisory_job_claim(row) for row in rows]
 
     def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]:
         with self.connection() as conn:

@@ -27,6 +27,10 @@ from production.prediction.prediction_snapshot_contract import (
     validate_prediction_snapshot_integrity,
 )
 from production.storage.backend import StorageError
+from production.storage.job_materialization import (
+    materialize_ai_advisory_job_claim,
+    materialize_analysis_job_claim,
+)
 from production.storage.contract import (
     JOB_QUEUE_TABLES,
     SESSION_ANALYSIS_FIELDS,
@@ -642,7 +646,10 @@ class MongoDBRuntimeOperations:
         return job_id
 
     def claim_analysis_jobs(self, owner: str, limit: int, lease_seconds: float, max_attempts: int, *, now: Any = None) -> List[Dict[str, Any]]:
-        return self.claim_jobs("analysis", owner, limit, lease_seconds, max_attempts, now=now)
+        rows = self.claim_jobs(
+            "analysis", owner, limit, lease_seconds, max_attempts, now=now
+        )
+        return [materialize_analysis_job_claim(row) for row in rows]
 
     @staticmethod
     def _report_identity(job_id: str, report_payload: Dict[str, Any]) -> tuple[str, str, str]:
@@ -844,7 +851,10 @@ class MongoDBRuntimeOperations:
         return {"scanned": scanned, "enqueued": enqueued, "ineligible": ineligible}
 
     def claim_ai_advisory_jobs(self, owner: str, limit: int, lease_seconds: float, max_attempts: int, *, now: Any = None) -> List[Dict[str, Any]]:
-        return self.claim_jobs("ai_advisory", owner, limit, lease_seconds, max_attempts, now=now)
+        rows = self.claim_jobs(
+            "ai_advisory", owner, limit, lease_seconds, max_attempts, now=now
+        )
+        return [materialize_ai_advisory_job_claim(row) for row in rows]
 
     def _advisory_result(self, document: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
         item = _row(document)
