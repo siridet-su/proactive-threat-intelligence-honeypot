@@ -44,6 +44,8 @@ class TTPPrediction:
     rule_id: str = ""
     evidence_type: str = ""
     authority_decision: Optional[Dict[str, Any]] = None
+    reviewed_tactic: str = ""
+    observation_semantics: str = ""
 
     def to_event(self, command: str, tactic: str = "unknown") -> Dict[str, Any]:
         event = {
@@ -62,6 +64,8 @@ class TTPPrediction:
             event["evidence_type"] = self.evidence_type
         if self.authority_decision is not None:
             event["authority_decision"] = dict(self.authority_decision)
+        if self.observation_semantics:
+            event["observation_semantics"] = self.observation_semantics
         return event
 
 
@@ -536,6 +540,8 @@ def _rule_based_ttp_with_rules(
                     rule_id=_clean_text(metadata.get("rule_id")),
                     evidence_type="command_regex",
                     authority_decision=authority,
+                    reviewed_tactic=_clean_text(metadata.get("reviewed_tactic")).lower(),
+                    observation_semantics=_clean_text(metadata.get("observation_semantics")),
                 )
             )
             seen.add(tid)
@@ -583,6 +589,8 @@ def _operation_based_ttp(
             rule_id=_clean_text(rule.get("rule_id")),
             evidence_type="command_operation",
             authority_decision=authority,
+            reviewed_tactic=_clean_text(rule.get("reviewed_tactic")).lower(),
+            observation_semantics=_clean_text(rule.get("observation_semantics")),
         ))
         seen.add(tid)
     return matched
@@ -607,7 +615,7 @@ def rule_based_ttp(command: str) -> List[TTPPrediction]:
         parsed=parsed,
         policy_provenance=policy_provenance,
     )
-    return structural or _rule_based_ttp_with_rules(
+    regex = _rule_based_ttp_with_rules(
         command,
         RULES,
         _COMBINED_PATTERN,
@@ -616,6 +624,20 @@ def rule_based_ttp(command: str) -> List[TTPPrediction]:
         parser_decision=parser_decision,
         policy_provenance=policy_provenance,
     )
+    return _deduplicate_predictions([*structural, *regex])
+
+
+def _deduplicate_predictions(predictions: Sequence[TTPPrediction]) -> List[TTPPrediction]:
+    """Retain independent exact techniques while removing duplicate mappings."""
+
+    output: List[TTPPrediction] = []
+    seen: set[str] = set()
+    for prediction in predictions:
+        key = _clean_text(prediction.tid).upper()
+        if key and key not in seen:
+            seen.add(key)
+            output.append(prediction)
+    return output
 
 
 def is_shell_noise(
@@ -776,15 +798,8 @@ class NotebookParityClassifier:
             policy_provenance=self._policy_provenance(),
             operator_before=operator_before,
         )
-        if rule_predictions:
-            parser_decision = command_authority_decision(
-                command,
-                parsed,
-                structural_match=True,
-                operator_before=operator_before,
-            )
-        else:
-            rule_predictions = _rule_based_ttp_with_rules(
+        structural_predictions = list(rule_predictions)
+        regex_predictions = _rule_based_ttp_with_rules(
             command,
             self.rules,
             self.combined_pattern,
@@ -793,6 +808,16 @@ class NotebookParityClassifier:
             parser_decision=parser_decision,
             policy_provenance=self._policy_provenance(),
         )
+        rule_predictions = _deduplicate_predictions(
+            [*structural_predictions, *regex_predictions]
+        )
+        if structural_predictions:
+            parser_decision = command_authority_decision(
+                command,
+                parsed,
+                structural_match=True,
+                operator_before=operator_before,
+            )
         if is_shell_noise(command, self.rules, self.combined_pattern) and not rule_predictions:
             return [{
                 "command": command,
@@ -822,7 +847,7 @@ class NotebookParityClassifier:
             bert_tactic = self._tactic(bert_prediction.tid) if bert_prediction.tid != "T0000_UNKNOWN" else "unknown"
             events: List[Dict[str, Any]] = []
             for prediction in rule_predictions:
-                rule_tactic = self._tactic(prediction.tid)
+                rule_tactic = prediction.reviewed_tactic or self._tactic(prediction.tid)
                 emergency_rule = prediction.source == "emergency_python_fallback"
                 source = prediction.source or "rule"
                 agreement_status = "emergency_rule_only" if emergency_rule else "rule_only"

@@ -1067,16 +1067,19 @@ class SessionMonitor:
         if not ttp:
             return fallback or "unknown"
         ttp = _main_ttp_id(ttp)
+        reviewed = str(fallback or "").strip().lower()
 
         if self.mitre_db and hasattr(self.mitre_db, "get_tactics"):
             try:
                 tactics = self.mitre_db.get_tactics(ttp) or []
-                if tactics:
+                if reviewed and reviewed != "unknown":
+                    return reviewed if reviewed in tactics else "unknown"
+                if len(tactics) == 1:
                     return tactics[0]
             except Exception:
                 pass
 
-        return fallback or "unknown"
+        return reviewed or "unknown"
 
     def _classify(self, cmd: str) -> tuple:
         """Returns (ttp_id, tactic). Uses the configured classification policy."""

@@ -39,17 +39,17 @@ def _clean_text(value: Any) -> str:
 
 
 def main_ttp_id(value: Any) -> str:
-    """Return the parent ATT&CK technique ID used by the active pipeline.
+    """Return the exact ATT&CK technique or sub-technique identifier.
 
-    The system intentionally keeps sub-techniques out of the active TTP field
-    to control scope. A source label such as T1565.001 is therefore represented
-    as active TTP T1565, with the original label preserved separately.
+    Phase 7 freezes exact sub-technique identity end to end.  Consumers that
+    deliberately need parent matching must request that relationship explicitly
+    rather than silently rewriting canonical evidence.
     """
 
     text = _clean_text(value).upper()
     if not TTP_ID_RE.match(text):
         return text
-    return text.split(".", 1)[0]
+    return text
 
 
 def is_subtechnique_id(value: Any) -> bool:

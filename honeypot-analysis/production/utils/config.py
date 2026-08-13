@@ -608,8 +608,10 @@ class ProductionConfig:
         },
     })
     prediction_policy: Dict[str, Any] = field(default_factory=lambda: {
-        "enabled": True,
-        "prediction_mode": "external_hard_backoff_vomm",
+        # Fail closed unless a reviewed prediction-policy file is loaded.
+        # The legacy VOMM remains an explicit rollback artifact only.
+        "enabled": False,
+        "prediction_mode": "disabled_pending_reviewed_prediction_policy",
         "compute_weighted_ensemble_baseline": False,
         "weight_influence_scope": "not_applicable_external_authority",
         "primary_transition": {
@@ -721,7 +723,7 @@ class ProductionConfig:
             "low_classification_cap": "low",
         },
         "prediction_triggers": {
-            "enabled": True,
+            "enabled": False,
             "eventids": [
                 "cowrie.login.success",
                 "cowrie.login.failed",
@@ -732,7 +734,7 @@ class ProductionConfig:
             "eventid_prefixes": ["cowrie.command."],
         },
         "predictive_alerts": {
-            "enabled": True,
+            "enabled": False,
             "min_confidence": "medium",
             "min_score": 0.50,
             "min_severity": "high",

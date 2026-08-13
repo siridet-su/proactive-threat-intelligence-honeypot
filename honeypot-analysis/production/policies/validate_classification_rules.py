@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +41,7 @@ ALLOWED_REGEX_PROMOTION_CLASSES = {
     "audit_only",
     "trusted_literal_fallback",
 }
+TACTIC_RE = re.compile(r"^[a-z]+(?:-[a-z]+)*$")
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -144,6 +146,7 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
     if not rules:
         errors.append("policy: at least one rule is required")
     seen_ids = set()
+    rule_by_id: Dict[str, Dict[str, Any]] = {}
     for index, rule in enumerate(rules):
         path = f"rules[{index}]"
         rule_id = str(rule.get("rule_id") or "").strip()
@@ -152,6 +155,8 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
         elif rule_id in seen_ids:
             errors.append(f"{path}: duplicate rule_id {rule_id!r}")
         seen_ids.add(rule_id)
+        if rule_id:
+            rule_by_id[rule_id] = rule
         evidence_type = str(rule.get("evidence_type") or "")
         pattern = str(rule.get("pattern") or "")
         predicate = rule.get("operation_predicate")
@@ -221,6 +226,12 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
             errors.append(f"{path}: invalid ttp {ttp!r}")
         if not rule.get("technique_name"):
             errors.append(f"{path}: missing technique_name")
+        reviewed_tactic = str(rule.get("reviewed_tactic") or "").strip().lower()
+        if (rule.get("provenance") or {}).get("reviewed") is True:
+            if not TACTIC_RE.fullmatch(reviewed_tactic):
+                errors.append(f"{path}: reviewed rule requires reviewed_tactic")
+            if rule.get("observation_semantics") != "submitted_command_attempt_not_outcome":
+                errors.append(f"{path}: reviewed rule requires bounded observation_semantics")
         source_type = str(rule.get("source_type") or "")
         if source_type not in ALLOWED_SOURCE_TYPES:
             errors.append(f"{path}: unsupported source_type {source_type!r}")
@@ -236,6 +247,55 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
                 errors.append(f"{path}: confidence must be between 0 and 1")
         _validate_references(rule, path, errors)
         _validate_provenance(rule, path, errors)
+
+    authority = body.get("runtime_authority") if isinstance(body, dict) else {}
+    allowlist = authority.get("trusted_literal_fallback_rule_ids", []) if isinstance(authority, dict) else []
+    if isinstance(allowlist, list):
+        if len(allowlist) != len(set(allowlist)):
+            errors.append("policy.runtime_authority trusted allowlist contains duplicates")
+        for rule_id in allowlist:
+            rule = rule_by_id.get(str(rule_id))
+            if not rule:
+                errors.append(f"policy.runtime_authority unknown trusted rule {rule_id!r}")
+                continue
+            if rule.get("evidence_type") != "command_regex":
+                errors.append(f"policy.runtime_authority trusted rule {rule_id!r} is not command_regex")
+            if (rule.get("provenance") or {}).get("reviewed") is not True:
+                errors.append(f"policy.runtime_authority trusted rule {rule_id!r} is not reviewed")
+            rule_authority = rule.get("runtime_authority") or {}
+            if rule_authority.get("promotion_class") != "trusted_literal_fallback" or rule_authority.get("reviewed") is not True:
+                errors.append(f"policy.runtime_authority trusted rule {rule_id!r} metadata disagrees")
+
+    cache_binding = policy.get("mitre_cache_binding")
+    if not isinstance(cache_binding, dict):
+        errors.append("policy: missing mitre_cache_binding")
+    else:
+        cache_path = Path(__file__).resolve().parents[2] / str(cache_binding.get("path") or "")
+        expected_hash = str(cache_binding.get("sha256") or "").lower()
+        try:
+            raw = cache_path.read_bytes()
+            cache = json.loads(raw.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            errors.append("policy: bound MITRE cache is unavailable or invalid")
+        else:
+            if hashlib.sha256(raw).hexdigest() != expected_hash:
+                errors.append("policy: bound MITRE cache SHA-256 mismatch")
+            techniques = cache.get("techniques") if isinstance(cache, dict) else {}
+            techniques = techniques if isinstance(techniques, dict) else {}
+            for index, rule in enumerate(rules):
+                if (rule.get("provenance") or {}).get("reviewed") is not True:
+                    continue
+                ttp = str(rule.get("ttp") or "").strip().upper()
+                record = techniques.get(ttp)
+                if not isinstance(record, dict):
+                    errors.append(f"rules[{index}]: reviewed TTP is absent from bound MITRE cache")
+                    continue
+                available = {
+                    str(value).strip().lower().replace(" ", "-")
+                    for value in record.get("tactics") or []
+                }
+                if str(rule.get("reviewed_tactic") or "").strip().lower() not in available:
+                    errors.append(f"rules[{index}]: reviewed_tactic is not valid for bound TTP")
     return errors
 
 

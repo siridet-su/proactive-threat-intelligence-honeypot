@@ -200,6 +200,7 @@ def _operation_context(parsed: Dict[str, Any]) -> Dict[str, Any]:
         "command_family": _text(parsed.get("command_family")).lower(),
         "executable": _text(parsed.get("executable")),
         "operation_types": sorted({_text(item) for item in _list(parsed.get("operation_types")) if _text(item)}),
+        "operands": [_text(item) for item in _list(parsed.get("operands")) if _text(item)],
         "read_paths": sorted(set(_normalized_paths(parsed, "read_paths"))),
         "write_paths": sorted(set(_normalized_paths(parsed, "write_paths"))),
         "redirection_targets": sorted(set(redirection_targets)),
