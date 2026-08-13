@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Classify and export the frozen selected next-behavior corpus safely.
 
-This is the post-ingest stage for
-``build_next_behavior_selected_corpus``.  Raw command text and original
+This is the post-ingest stage for the canonical selected-store
+implementation in ``production.reproduction.next_behavior.selected_store``.
+Raw command text and original
 session identifiers remain confined to the private SQLite store.  The public
 role artifacts contain only HMAC-pseudonymous identifiers, canonical labels,
 privacy-safe examples, and aggregate provenance receipts.
@@ -104,6 +105,9 @@ EXPECTED_MEMBER_COUNTS = {
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BLOCK_SIZE = 8 * 1024 * 1024
+_CANONICAL_SELECTED_STORE_RELATIVE_PATH = Path(
+    "production/reproduction/next_behavior/selected_store.py"
+)
 _FORBIDDEN_PUBLIC_FIELDS = frozenset(
     {
         "command",
@@ -247,6 +251,50 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(_BLOCK_SIZE), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _required_provenance_file_sha256(
+    path: Path,
+    *,
+    label: str,
+) -> str:
+    """Hash one required provenance source, failing closed if it is unsafe."""
+
+    if not path.is_file() or path.is_symlink():
+        raise SelectedSafeCorpusError(
+            f"required provenance source is missing or unsafe: {label}"
+        )
+    try:
+        return _sha256_file(path)
+    except OSError as exc:
+        raise SelectedSafeCorpusError(
+            f"required provenance source is unreadable: {label}"
+        ) from exc
+
+
+def _classification_provenance_source_hashes(
+    repository_root: Path,
+    *,
+    safe_export_path: Path | None = None,
+) -> Dict[str, str]:
+    """Bind classification provenance to the live canonical source modules.
+
+    ``selected_builder_sha256`` is retained as the receipt field name for
+    compatibility with the v1 classification receipt contract.  Its value is
+    deliberately sourced from the canonical ``selected_store.py`` module;
+    the deleted legacy builder path is never an acceptable substitute.
+    """
+
+    return {
+        "selected_builder_sha256": _required_provenance_file_sha256(
+            repository_root / _CANONICAL_SELECTED_STORE_RELATIVE_PATH,
+            label=str(_CANONICAL_SELECTED_STORE_RELATIVE_PATH),
+        ),
+        "safe_builder_sha256": _required_provenance_file_sha256(
+            safe_export_path or Path(__file__),
+            label="production/reproduction/next_behavior/safe_export.py",
+        ),
+    }
 
 
 def _require_sha256(value: Any, label: str) -> str:
@@ -395,11 +443,7 @@ def classify_missing_selected_commands(
             repository_root
             / "production/prediction/next_behavior_label_policy.py"
         ),
-        "selected_builder_sha256": _sha256_file(
-            repository_root
-            / "production/tools/build_next_behavior_selected_corpus.py"
-        ),
-        "safe_builder_sha256": _sha256_file(Path(__file__)),
+        **_classification_provenance_source_hashes(repository_root),
     }
 
     database = open_selected_database(private_database_path)
