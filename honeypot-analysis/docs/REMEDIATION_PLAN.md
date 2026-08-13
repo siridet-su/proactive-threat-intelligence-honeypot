@@ -173,59 +173,6 @@ No backfill, mutation, or replacement of historical artifacts.
 
 These are not allowed to block deterministic remediation, but should be completed before using the affected dashboard/export/model surfaces in the thesis. If a surface is part of the evaluated demonstration, its corresponding item becomes mandatory.
 
-## Phase 7 — Complete ATT&CK mapping and tactic-context cleanup
-
-### What will be fixed
-
-- Add reviewed per-rule tactic binding.
-- Validate each selected tactic against the pinned ATT&CK technique.
-- Resolve parent/sub-technique semantics.
-- Correct:
-
-  - SCP ingress/egress direction;
-  - `known_hosts` versus credential material;
-  - `systemctl status` semantics;
-  - sudoers boundary matching;
-  - structural-first suppression of independent evidence;
-  - archive invocation versus completed collection wording;
-  - failed-attempt terminology.
-- Strengthen the trusted-rule allowlist validator so every entry is unique, exists, is reviewed, has the expected rule type, and agrees with per-rule authority metadata.
-- Fail classifier readiness when the pinned MITRE cache cannot resolve a reviewed trusted TTP tactic; do not emit a trusted `unknown` tactic or silently drop it during history normalization.
-
-### Files/contracts
-
-- Classification policy v4
-- MITRE cache loader/validator
-- Rule-policy validator
-- Session TTP knowledge/correlation modules
-- Reporting and history consumers
-
-### Tests
-
-- One case per corrected mapping.
-- Exact sub-technique parity across classifier, graph, report, and history.
-- Tactic binding cannot name a tactic absent from the pinned MITRE entry.
-- Multiple independent operations can emit multiple exact candidates.
-- Every trusted allowlist entry resolves uniquely to a reviewed authority-compatible rule.
-- Missing/unresolvable tactic metadata fails readiness before any trusted state or history is produced.
-
-### Acceptance criteria
-
-- Tactic is evidence-context-bound, not list-order-derived.
-- Parent/sub-technique handling is consistent end to end.
-- Transfer direction and credential-material semantics are explicit.
-- The complete deterministic technique/tactic/history semantics are frozen and fingerprinted for the subsequent checkpoint compatibility/retraining gate.
-
-### Transformer impact
-
-Any changed trusted tactic/technique sequence triggers the same compatibility/retraining gate described in Phase 4. Phase 7 must complete before that gate begins; no checkpoint preservation, retraining, recalibration, or compatibility conclusion may be made from the intermediate Phase 4 state.
-
-### Historical impact
-
-New policy identity and new outputs only; no historical rewrite.
-
----
-
 ## Phase 8 — Correct research/UI terminology and evaluation provenance
 
 ### What will be fixed
@@ -408,8 +355,7 @@ None.
 
 # Recommended execution order
 
-3. **Phase 7** — Complete every ATT&CK mapping/tactic cleanup capable of changing trusted sequences, including contextual tactic binding, parent/sub-technique handling, transfer direction, credential-material/service/sudoers semantics, independent-evidence handling, allowlist integrity, and unresolved-tactic fail-closed readiness.
-5. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
+5. **Deterministic-semantics freeze gate** — Re-run classifier, replay, history, target-construction, policy, and exact sequence-fingerprint validation. Record that all trusted technique/tactic/history semantics from completed Phases 1, 2, 4, and 7 are frozen. No model decision is permitted before this gate passes.
 6. **Transformer checkpoint compatibility gate** — Reconstruct the corrected corpus and compare exact input/target fingerprints against the original training receipt.
 7. **Transformer decision** — Preserve and fully re-evaluate/recalibrate the existing checkpoint only if compatibility is proven; otherwise retrain, recalibrate, and issue a new model-bundle/checkpoint receipt. Preserve the prior checkpoint as immutable historical evidence.
 8. **Phase 5** — Implement graph-only `response_guidance.v4` and exact-prefix current-policy reevaluation.
@@ -423,7 +369,7 @@ None.
 16. Only after a clean separate review, prepare a new thesis-evaluation release.
 17. Deployment, historical replay, and production activation remain separate explicitly authorized workflows.
 
-The first remaining implementation phase is **Phase 7 — Complete ATT&CK mapping and tactic-context cleanup**. Each phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
+The next mandatory work is the **deterministic-semantics freeze and Transformer checkpoint compatibility gate**. Phase 5 may begin only after that gate is resolved. Each implementation phase must be completed, validated, recorded in `REMEDIATION_COMPLETED.md`, removed from this remaining plan without renumbering later phases, and followed by a stop for explicit authorization before the next phase begins.
 
 Completed phases and their immutable commit/test evidence are recorded in `REMEDIATION_COMPLETED.md`. No deployment, service action, or production mutation is authorized by this remaining plan.
 
