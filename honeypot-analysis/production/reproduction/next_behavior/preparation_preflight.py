@@ -2383,4 +2383,7 @@ def verify_static_preflight_receipt(
         raise NextBehaviorPreparationPreflightError(
             "preflight receipt nested evidence does not match full revalidation"
         )
-    return expected
+    # Return the persisted point-in-time receipt.  Host counters are dynamic;
+    # revalidation proves their reviewed floors and static bindings without
+    # replacing the original evidence with a new measurement.
+    return supplied
