@@ -87,6 +87,15 @@ _CONTEXT_EVENTS = frozenset(
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _KEY_ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _BLOCK_SIZE = 8 * 1024 * 1024
+_CANONICAL_LABEL_ADAPTER_RELATIVE_PATH = Path(
+    "production/prediction/next_behavior_label_policy.py"
+)
+_CANONICAL_ZENODO_CORPUS_RELATIVE_PATH = Path(
+    "production/reproduction/next_behavior/zenodo_corpus.py"
+)
+_PREPROCESSING_SCHEMA_VERSION = "next_behavior_preprocessing.v2"
+_TRUSTED_HISTORY_SCHEMA_VERSION = "prediction_trusted_history_manifest.v3"
+_TRUSTED_HISTORY_MAXIMUM_PHASES = 8
 FINAL_PREPARATION_SCHEMA_VERSION = (
     "next_behavior_final_corpus_preparation.v1"
 )
@@ -174,6 +183,47 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(_BLOCK_SIZE), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _required_provenance_file_sha256(
+    repository_root: Path,
+    relative_path: Path,
+) -> str:
+    """Hash one exact, regular tracked implementation source fail closed."""
+
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise SelectedCorpusBuildError(
+            f"required provenance path is unsafe: {relative_path}"
+        )
+    path = repository_root / relative_path
+    try:
+        path.lstat()
+    except OSError as exc:
+        raise SelectedCorpusBuildError(
+            f"required provenance source is missing: {relative_path}"
+        ) from exc
+    if path.is_symlink() or not path.is_file():
+        raise SelectedCorpusBuildError(
+            f"required provenance source is not a regular file: {relative_path}"
+        )
+    return _sha256_file(path)
+
+
+def _selected_store_provenance_source_hashes(
+    repository_root: Path,
+) -> Dict[str, str]:
+    """Bind implementations actually used by classification-cache import."""
+
+    return {
+        "label_adapter_sha256": _required_provenance_file_sha256(
+            repository_root,
+            _CANONICAL_LABEL_ADAPTER_RELATIVE_PATH,
+        ),
+        "corpus_builder_sha256": _required_provenance_file_sha256(
+            repository_root,
+            _CANONICAL_ZENODO_CORPUS_RELATIVE_PATH,
+        ),
+    }
 
 
 def _file_identity(path: Path) -> tuple[int, str, str]:
@@ -293,6 +343,92 @@ def final_member_receipts_sha256(
     ).hexdigest()
 
 
+def _require_classifier_bound_preprocessing(
+    *,
+    policy: Mapping[str, Any],
+    repository_root: Path,
+    supplied_path: Path,
+) -> str:
+    """Verify the exact preprocessing bytes and semantic tuple in the classifier."""
+
+    bound_preprocessing_relative = Path(
+        _clean(policy.get("preprocessing_contract_path"))
+    )
+    if (
+        not str(bound_preprocessing_relative)
+        or bound_preprocessing_relative.is_absolute()
+        or ".." in bound_preprocessing_relative.parts
+    ):
+        raise SelectedCorpusBuildError(
+            "classifier preprocessing contract path is invalid"
+        )
+    bound_preprocessing_path = repository_root / bound_preprocessing_relative
+    try:
+        bound_metadata = bound_preprocessing_path.lstat()
+        supplied_metadata = supplied_path.lstat()
+    except OSError as exc:
+        raise SelectedCorpusBuildError("preprocessing manifest is missing") from exc
+    if (
+        bound_preprocessing_path.is_symlink()
+        or supplied_path.is_symlink()
+        or not bound_preprocessing_path.is_file()
+        or not supplied_path.is_file()
+        or not bound_metadata.st_size
+        or not supplied_metadata.st_size
+    ):
+        raise SelectedCorpusBuildError(
+            "preprocessing manifest must be a nonempty regular file"
+        )
+    try:
+        if (
+            bound_preprocessing_path.resolve(strict=True)
+            != supplied_path.resolve(strict=True)
+        ):
+            raise SelectedCorpusBuildError(
+                "preprocessing manifest path is not classifier-bound"
+            )
+    except OSError as exc:
+        raise SelectedCorpusBuildError("preprocessing manifest is missing") from exc
+    preprocessing_sha256 = _sha256_file(bound_preprocessing_path)
+    if preprocessing_sha256 != _clean(
+        policy.get("preprocessing_contract_sha256")
+    ).lower():
+        raise SelectedCorpusBuildError(
+            "preprocessing manifest SHA-256 mismatch"
+        )
+    try:
+        preprocessing = json.loads(
+            bound_preprocessing_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SelectedCorpusBuildError(
+            "preprocessing manifest is malformed"
+        ) from exc
+    phase_construction = (
+        preprocessing.get("phase_construction")
+        if isinstance(preprocessing, Mapping)
+        else None
+    )
+    if (
+        not isinstance(preprocessing, Mapping)
+        or preprocessing.get("schema_version")
+        != _PREPROCESSING_SCHEMA_VERSION
+        or preprocessing.get("target_contract_id") != TARGET_CONTRACT_ID
+        or not isinstance(phase_construction, Mapping)
+        or phase_construction.get("maximum_sequence_length")
+        != _TRUSTED_HISTORY_MAXIMUM_PHASES
+        or policy.get("target_contract_id") != TARGET_CONTRACT_ID
+        or policy.get("trusted_history_schema_version")
+        != _TRUSTED_HISTORY_SCHEMA_VERSION
+        or policy.get("trusted_history_maximum_phases")
+        != _TRUSTED_HISTORY_MAXIMUM_PHASES
+    ):
+        raise SelectedCorpusBuildError(
+            "preprocessing/classifier semantic binding is incompatible"
+        )
+    return preprocessing_sha256
+
+
 def _preparation_receipt_basis(
     *,
     completed_selection_path: Path,
@@ -352,8 +488,11 @@ def _preparation_receipt_basis(
     ):
         if not path.is_file() or _sha256_file(path) != expected:
             raise SelectedCorpusBuildError(f"{label} SHA-256 mismatch")
-    if not preprocessing_manifest_path.is_file():
-        raise SelectedCorpusBuildError("preprocessing manifest is missing")
+    preprocessing_sha256 = _require_classifier_bound_preprocessing(
+        policy=policy,
+        repository_root=repository_root,
+        supplied_path=preprocessing_manifest_path,
+    )
     return {
         "schema_version": FINAL_PREPARATION_SCHEMA_VERSION,
         "status": "frozen_for_blinded_preparation",
@@ -375,7 +514,7 @@ def _preparation_receipt_basis(
         "classification_pipeline_sha256": classifier["classifier"][
             "pipeline_sha256"
         ],
-        "preprocessing_sha256": _sha256_file(preprocessing_manifest_path),
+        "preprocessing_sha256": preprocessing_sha256,
         "environment_lock_sha256": dependency_lock["sha256"],
         "label_policy_sha256": policy["rule_policy_sha256"],
         "trust_policy_sha256": policy["trust_policy_sha256"],
@@ -1839,6 +1978,9 @@ def _require_cache_donor_receipts(
             "classification cache donor receipt is malformed"
         ) from exc
     policy = classifier_manifest["classification_policy"]
+    provenance_source_hashes = _selected_store_provenance_source_hashes(
+        repository_root
+    )
     expected = {
         "schema_version": "next_behavior_zenodo_classification.v1",
         "status": "classified",
@@ -1857,14 +1999,7 @@ def _require_cache_donor_receipts(
         "drop_rule_securebert_disagreements": policy[
             "drop_rule_securebert_disagreements"
         ],
-        "label_adapter_sha256": _sha256_file(
-            repository_root
-            / "production/prediction/next_behavior_label_policy.py"
-        ),
-        "corpus_builder_sha256": _sha256_file(
-            repository_root
-            / "production/tools/build_next_behavior_zenodo_corpus.py"
-        ),
+        **provenance_source_hashes,
     }
     for field, value in expected.items():
         if receipt.get(field) != value:

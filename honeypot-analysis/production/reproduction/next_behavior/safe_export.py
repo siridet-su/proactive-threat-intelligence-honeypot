@@ -108,6 +108,9 @@ _BLOCK_SIZE = 8 * 1024 * 1024
 _CANONICAL_SELECTED_STORE_RELATIVE_PATH = Path(
     "production/reproduction/next_behavior/selected_store.py"
 )
+_CANONICAL_LABEL_ADAPTER_RELATIVE_PATH = Path(
+    "production/prediction/next_behavior_label_policy.py"
+)
 _FORBIDDEN_PUBLIC_FIELDS = frozenset(
     {
         "command",
@@ -286,6 +289,10 @@ def _classification_provenance_source_hashes(
     """
 
     return {
+        "label_adapter_sha256": _required_provenance_file_sha256(
+            repository_root / _CANONICAL_LABEL_ADAPTER_RELATIVE_PATH,
+            label=str(_CANONICAL_LABEL_ADAPTER_RELATIVE_PATH),
+        ),
         "selected_builder_sha256": _required_provenance_file_sha256(
             repository_root / _CANONICAL_SELECTED_STORE_RELATIVE_PATH,
             label=str(_CANONICAL_SELECTED_STORE_RELATIVE_PATH),
@@ -439,10 +446,6 @@ def classify_missing_selected_commands(
         "checkpoint_sha256": manifest["classifier"]["checkpoint_sha256"],
         "rule_policy_sha256": policy["rule_policy_sha256"],
         "trust_policy_sha256": policy["trust_policy_sha256"],
-        "label_adapter_sha256": _sha256_file(
-            repository_root
-            / "production/prediction/next_behavior_label_policy.py"
-        ),
         **_classification_provenance_source_hashes(repository_root),
     }
 
@@ -2428,6 +2431,7 @@ def build_selected_safe_corpus(
         else Path(__file__).resolve().parents[2]
     )
     commit = _require_repository_commit(root, code_commit)
+    provenance_source_hashes = _classification_provenance_source_hashes(root)
     if max_sequence_length < 1:
         raise SelectedSafeCorpusError("max_sequence_length must be positive")
     if (
@@ -2924,11 +2928,12 @@ def build_selected_safe_corpus(
             "classification_checkpoint_sha256": classifier_manifest[
                 "classifier"
             ]["checkpoint_sha256"],
-            "label_adapter_sha256": _sha256_file(
-                Path(__file__).parents[1]
-                / "prediction/next_behavior_label_policy.py"
-            ),
-            "safe_builder_sha256": _sha256_file(Path(__file__)),
+            "label_adapter_sha256": provenance_source_hashes[
+                "label_adapter_sha256"
+            ],
+            "safe_builder_sha256": provenance_source_hashes[
+                "safe_builder_sha256"
+            ],
             "pseudonymization_key_id": pseudonymization_key_id,
             "max_sequence_length": max_sequence_length,
             "safe_sessions": {
