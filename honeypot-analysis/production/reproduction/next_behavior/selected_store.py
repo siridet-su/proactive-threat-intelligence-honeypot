@@ -587,6 +587,7 @@ def _normalize_timestamp(value: Any) -> str:
 def open_selected_database(path: Path) -> sqlite3.Connection:
     """Open a private selected-source store with an exact additive schema."""
 
+    fresh_store = not path.exists() or path.stat().st_size == 0
     path.parent.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(path)
     database.execute("PRAGMA foreign_keys=ON")
@@ -679,6 +680,17 @@ def open_selected_database(path: Path) -> sqlite3.Connection:
         );
         """
     )
+    # This index exists to make interrupted-member cleanup proportional to the
+    # member being recovered.  Limit its automatic creation to new stores so
+    # merely opening a large, preserved v1 store never triggers an unexpected
+    # index build or mutates its physical layout.
+    if fresh_store:
+        database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_selected_session_sources_member
+                ON session_sources(source_member, raw_session_id)
+            """
+        )
     existing = database.execute(
         "SELECT value FROM metadata WHERE key = 'store_schema_version'"
     ).fetchone()
@@ -1165,18 +1177,47 @@ def record_final_preparation_generation(
 def _clear_partial_member(
     database: sqlite3.Connection,
     filename: str,
-) -> None:
-    database.execute(
-        "DELETE FROM command_events WHERE source_member = ?", (filename,)
+    *,
+    instrumentation: Counter[str] | None = None,
+) -> bool:
+    """Remove only resumable rows for one incomplete member.
+
+    ``sessions`` is updated only in the atomic member-completion transaction,
+    so rows belonging to an incomplete member have never contributed to that
+    materialization.  Rebuilding every completed session during cleanup was
+    therefore redundant and made preparation quadratic in member count.
+
+    Return whether partial rows existed.  The optional private instrumentation
+    is used by the bounded equivalence/benchmark tests and never enters a
+    corpus receipt.
+    """
+
+    if instrumentation is not None:
+        instrumentation["partial_cleanup_checks"] += 1
+    has_partial_rows = any(
+        database.execute(
+            f"SELECT 1 FROM {table} WHERE source_member = ? LIMIT 1",
+            (filename,),
+        ).fetchone()
+        is not None
+        for table in ("command_events", "context_events", "session_sources")
     )
-    database.execute(
-        "DELETE FROM context_events WHERE source_member = ?", (filename,)
-    )
-    database.execute(
-        "DELETE FROM session_sources WHERE source_member = ?", (filename,)
-    )
-    _rebuild_sessions(database)
+    if not has_partial_rows:
+        return False
+    if instrumentation is not None:
+        instrumentation["partial_members_cleared"] += 1
+    for table, metric in (
+        ("command_events", "partial_command_rows_deleted"),
+        ("context_events", "partial_context_rows_deleted"),
+        ("session_sources", "partial_session_source_rows_deleted"),
+    ):
+        cursor = database.execute(
+            f"DELETE FROM {table} WHERE source_member = ?", (filename,)
+        )
+        if instrumentation is not None:
+            instrumentation[metric] += max(cursor.rowcount, 0)
     database.commit()
+    return True
 
 
 _SESSION_SOURCE_UPSERT = """
@@ -1198,8 +1239,13 @@ ON CONFLICT(raw_session_id, source_member) DO UPDATE SET
 """
 
 
-def _rebuild_sessions(database: sqlite3.Connection) -> None:
-    """Rebuild aggregate flags from resumable per-member observations."""
+def _rebuild_sessions_reference(database: sqlite3.Connection) -> None:
+    """Legacy full-store materialization retained as an equivalence oracle.
+
+    Production ingestion must use :func:`_reconcile_affected_sessions`.  This
+    implementation is intentionally kept byte-for-byte equivalent to the old
+    aggregate query so focused tests can prove the scoped result exactly.
+    """
 
     database.execute("DELETE FROM sessions")
     database.execute(
@@ -1252,12 +1298,105 @@ def _rebuild_sessions(database: sqlite3.Connection) -> None:
     )
 
 
+def _reconcile_affected_sessions(
+    database: sqlite3.Connection,
+    filename: str,
+    *,
+    instrumentation: Counter[str] | None = None,
+) -> int:
+    """Recompute only sessions touched by the completing source member.
+
+    The already durable, member-keyed ``session_sources`` rows are the bounded
+    affected-session tracker.  This avoids retaining a second, potentially
+    multi-million-ID set in Python or in SQLite's memory-backed temp store.
+    """
+
+    affected_count = int(
+        database.execute(
+            """
+            SELECT COUNT(*) FROM session_sources WHERE source_member = ?
+            """,
+            (filename,),
+        ).fetchone()[0]
+    )
+    if instrumentation is not None:
+        instrumentation["scoped_reconciliations"] += 1
+        instrumentation["affected_sessions_reconciled"] += affected_count
+    if affected_count == 0:
+        return 0
+    database.execute(
+        """
+        DELETE FROM sessions
+        WHERE raw_session_id IN (
+            SELECT raw_session_id FROM session_sources
+            WHERE source_member = ?
+        )
+        """,
+        (filename,),
+    )
+    database.execute(
+        """
+        INSERT INTO sessions(
+            raw_session_id, source_member, source_cohort, experiment_role,
+            first_seen, last_seen, protocol, configuration, connected, closed,
+            cross_member, cross_role
+        )
+        SELECT
+            first.raw_session_id,
+            first.source_member,
+            first.source_cohort,
+            first.experiment_role,
+            aggregate.first_seen,
+            aggregate.last_seen,
+            COALESCE(
+                NULLIF(MAX(first.protocol), ''),
+                NULLIF(MAX(any_source.protocol), ''),
+                ''
+            ),
+            COALESCE(
+                NULLIF(MAX(first.configuration), ''),
+                NULLIF(MAX(any_source.configuration), ''),
+                ''
+            ),
+            aggregate.connected,
+            aggregate.closed,
+            CASE WHEN aggregate.member_count > 1 THEN 1 ELSE 0 END,
+            CASE WHEN aggregate.role_count > 1 THEN 1 ELSE 0 END
+        FROM (
+            SELECT raw_session_id,
+                   MIN(first_seen) AS first_seen,
+                   MAX(last_seen) AS last_seen,
+                   MAX(connected) AS connected,
+                   MAX(closed) AS closed,
+                   COUNT(DISTINCT source_member) AS member_count,
+                   COUNT(DISTINCT experiment_role) AS role_count,
+                   MIN(chronological_order) AS first_order
+            FROM session_sources
+            WHERE raw_session_id IN (
+                SELECT raw_session_id FROM session_sources
+                WHERE source_member = ?
+            )
+            GROUP BY raw_session_id
+        ) AS aggregate
+        JOIN session_sources AS first
+          ON first.raw_session_id = aggregate.raw_session_id
+         AND first.chronological_order = aggregate.first_order
+        JOIN session_sources AS any_source
+          ON any_source.raw_session_id = aggregate.raw_session_id
+        GROUP BY first.raw_session_id
+        """,
+        (filename,),
+    )
+    return affected_count
+
+
 def _ingest_one_member(
     database: sqlite3.Connection,
     member: Mapping[str, Any],
     path: Path,
     *,
     flush_size: int,
+    instrumentation: Counter[str] | None = None,
 ) -> Dict[str, Any]:
     filename = member["filename"]
     stored = database.execute(
@@ -1290,7 +1429,11 @@ def _ingest_one_member(
             "stats": json.loads(str(stored[8])),
         }
 
-    _clear_partial_member(database, filename)
+    _clear_partial_member(
+        database,
+        filename,
+        instrumentation=instrumentation,
+    )
     stats: Counter[str] = Counter()
     event_ids: Counter[str] = Counter()
     collection_start = ""
@@ -1408,13 +1551,21 @@ def _ingest_one_member(
         flush()
     except (OSError, EOFError, sqlite3.Error) as exc:
         database.rollback()
-        _clear_partial_member(database, filename)
+        _clear_partial_member(
+            database,
+            filename,
+            instrumentation=instrumentation,
+        )
         raise SelectedCorpusBuildError(
             f"source member ingestion failed: {filename}: "
             f"{type(exc).__name__}"
         ) from exc
     if not collection_start or not collection_end:
-        _clear_partial_member(database, filename)
+        _clear_partial_member(
+            database,
+            filename,
+            instrumentation=instrumentation,
+        )
         raise SelectedCorpusBuildError(
             f"source member has no usable timestamps: {filename}"
         )
@@ -1425,29 +1576,45 @@ def _ingest_one_member(
             "both cowrie.session.connect and cowrie.session.closed required"
         ),
     }
-    database.execute(
-        """
-        INSERT INTO source_members(
-            filename, source_sha256, source_size_bytes, archive_crc32,
-            chronological_order, source_cohort, experiment_role,
-            collection_start, collection_end, stats_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
+    try:
+        database.execute(
+            """
+            INSERT INTO source_members(
+                filename, source_sha256, source_size_bytes, archive_crc32,
+                chronological_order, source_cohort, experiment_role,
+                collection_start, collection_end, stats_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                filename,
+                member["sha256"],
+                member["size_bytes"],
+                member["archive_crc32"],
+                member["chronological_order"],
+                member["source_cohort"],
+                member["experiment_role"],
+                collection_start,
+                collection_end,
+                stable_json(summary),
+            ),
+        )
+        _reconcile_affected_sessions(
+            database,
             filename,
-            member["sha256"],
-            member["size_bytes"],
-            member["archive_crc32"],
-            member["chronological_order"],
-            member["source_cohort"],
-            member["experiment_role"],
-            collection_start,
-            collection_end,
-            stable_json(summary),
-        ),
-    )
-    _rebuild_sessions(database)
-    database.commit()
+            instrumentation=instrumentation,
+        )
+        database.commit()
+    except sqlite3.Error as exc:
+        database.rollback()
+        _clear_partial_member(
+            database,
+            filename,
+            instrumentation=instrumentation,
+        )
+        raise SelectedCorpusBuildError(
+            f"source member completion failed: {filename}: "
+            f"{type(exc).__name__}"
+        ) from exc
     return {
         "status": "ingested",
         "filename": filename,
