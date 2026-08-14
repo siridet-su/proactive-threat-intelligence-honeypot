@@ -2389,6 +2389,44 @@ def run_support_preflight_from_store(
 ) -> Dict[str, Any]:
     """Stream each development role from the private store into aggregation."""
 
+    supplied_donor_hash = _sha256(
+        donor_import_receipt_sha256,
+        "donor_import_receipt_sha256",
+    )
+    _require_support_target_storage(
+        private_database_path,
+        reviewed_root=reviewed_root,
+        mount_probe=mount_probe,
+    )
+    lineage_database = open_selected_database(private_database_path)
+    try:
+        lineage = dict(
+            lineage_database.execute(
+                "SELECT key, value FROM metadata WHERE key IN "
+                "('support_donor_import_receipt_json', "
+                "'support_donor_import_receipt_sha256')"
+            )
+        )
+        try:
+            donor_import = require_valid_development_donor_import(
+                json.loads(lineage["support_donor_import_receipt_json"])
+            )
+        except (KeyError, json.JSONDecodeError) as exc:
+            raise SupportPreflightError(
+                "support store has no verified donor-import lineage"
+            ) from exc
+        stored_donor_hash = _sha256_json(donor_import)
+        if (
+            lineage.get("support_donor_import_receipt_sha256")
+            != stored_donor_hash
+            or supplied_donor_hash != stored_donor_hash
+        ):
+            raise SupportPreflightError(
+                "support preflight donor-import binding mismatch"
+            )
+    finally:
+        lineage_database.close()
+
     require_complete_support_store_classification(
         private_database_path=private_database_path,
         expected_receipt_sha256=classification_receipt_sha256,
@@ -2428,7 +2466,7 @@ def run_support_preflight_from_store(
         source_selection_sha256=source_selection_sha256,
         frozen_semantics=frozen_semantics,
         classification_receipt_sha256=classification_receipt_sha256,
-        donor_import_receipt_sha256=donor_import_receipt_sha256,
+        donor_import_receipt_sha256=stored_donor_hash,
         pseudonymization_key_id=pseudonymization_key_id,
         pseudonymization_key_fingerprint_sha256=key_fingerprint,
         historical_test_membership_receipt=historical_test_membership_receipt,

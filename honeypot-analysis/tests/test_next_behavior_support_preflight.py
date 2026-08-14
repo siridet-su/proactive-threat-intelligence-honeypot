@@ -787,6 +787,23 @@ def test_verified_donor_imports_only_six_development_members(
     historical_receipt, historical_path = _historical_membership(
         root=root, inventory=inventory
     )
+    with pytest.raises(SupportPreflightError, match="donor_import_receipt_sha256"):
+        run_support_preflight_from_store(
+            private_database_path=target_path,
+            pseudonymization_key=KEY,
+            pseudonymization_key_id=KEY_ID,
+            successor_inventory=inventory,
+            inventory_validator=_validator,
+            source_selection_sha256=inventory["source_selection_sha256"],
+            frozen_semantics=_semantics(),
+            classification_receipt_sha256=support_classification_sha256,
+            donor_import_receipt_sha256=None,
+            historical_test_membership_receipt=historical_receipt,
+            historical_test_membership_artifact_path=historical_path,
+            require_selection_discovery=True,
+            reviewed_root=root,
+            mount_probe=probe,
+        )
     receipt = run_support_preflight_from_store(
         private_database_path=target_path,
         pseudonymization_key=KEY,
@@ -796,7 +813,9 @@ def test_verified_donor_imports_only_six_development_members(
         source_selection_sha256=inventory["source_selection_sha256"],
         frozen_semantics=_semantics(),
         classification_receipt_sha256=support_classification_sha256,
-        donor_import_receipt_sha256=None,
+        donor_import_receipt_sha256=hashlib.sha256(
+            stable_json(result).encode()
+        ).hexdigest(),
         historical_test_membership_receipt=historical_receipt,
         historical_test_membership_artifact_path=historical_path,
         require_selection_discovery=True,
@@ -808,6 +827,9 @@ def test_verified_donor_imports_only_six_development_members(
     assert receipt["roles"]["selection"]["sessions"] == 1
     assert receipt["roles"]["calibration"]["sessions"] == 1
     assert receipt["protections"]["test_members_accessed"] is False
+    assert receipt["donor_import_receipt_sha256"] == hashlib.sha256(
+        stable_json(result).encode()
+    ).hexdigest()
 
 
 @pytest.mark.parametrize("alias_kind", ["same_path", "hardlink"])
