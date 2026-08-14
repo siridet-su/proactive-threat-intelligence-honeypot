@@ -1,0 +1,325 @@
+{
+  "schema_version": "next_behavior_source_selection.v2",
+  "selection_id": "successor_calendar_blocks_10_7_7_7.v1",
+  "preserved_source_selection": {
+    "path": "configs/next_behavior_source_selection.v1.json",
+    "schema_version": "next_behavior_source_selection.v1",
+    "sha256": "f453502df46a79c5e934eb3377287d47815605f240d51a305ec89645b2f8f514"
+  },
+  "source": {
+    "zenodo_record_id": 21260400,
+    "doi": "10.5281/zenodo.21260400"
+  },
+  "archive": {
+    "filename": "data_all.zip",
+    "size_bytes": 19372965772,
+    "checksum": "md5:5b6d6e77e5f7247ac400d2318cef7adb",
+    "download_url": "https://zenodo.org/api/records/21260400/files/data_all.zip/content"
+  },
+  "policy": {
+    "selection_basis": "collection_date_only_complete_calendar_blocks",
+    "labels_used": false,
+    "member_sizes_used": false,
+    "test_metrics_used": false,
+    "substitution_allowed": false,
+    "train_rule": "fixed_anchors_2025-07-03_2025-07-10_2025-07-17_plus_all_daily_members_2025-07-18_through_2025-07-24",
+    "selection_window_start_date": "2025-07-25",
+    "selection_window_end_date": "2025-07-31",
+    "calibration_window_start_date": "2025-08-01",
+    "development_cutoff_date": "2025-08-07",
+    "embargo_dates": [
+      "2025-08-08"
+    ],
+    "final_window_start_date": "2025-08-09",
+    "final_window_end_date": "2025-08-16",
+    "excluded_dates": [
+      "2025-08-14"
+    ],
+    "test_access": "sealed_until_one_final_evaluation"
+  },
+  "members": [
+    {
+      "filename": "2025-07-03.json.gz",
+      "archive_path": "../logs_by_day/2025-07-03.json.gz",
+      "collection_date": "2025-07-03",
+      "chronological_order": 1,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-10.json.gz",
+      "archive_path": "../logs_by_day/2025-07-10.json.gz",
+      "collection_date": "2025-07-10",
+      "chronological_order": 2,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-17.json.gz",
+      "archive_path": "../logs_by_day/2025-07-17.json.gz",
+      "collection_date": "2025-07-17",
+      "chronological_order": 3,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-18.json.gz",
+      "archive_path": "../logs_by_day/2025-07-18.json.gz",
+      "collection_date": "2025-07-18",
+      "chronological_order": 4,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-19.json.gz",
+      "archive_path": "../logs_by_day/2025-07-19.json.gz",
+      "collection_date": "2025-07-19",
+      "chronological_order": 5,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-20.json.gz",
+      "archive_path": "../logs_by_day/2025-07-20.json.gz",
+      "collection_date": "2025-07-20",
+      "chronological_order": 6,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-21.json.gz",
+      "archive_path": "../logs_by_day/2025-07-21.json.gz",
+      "collection_date": "2025-07-21",
+      "chronological_order": 7,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-22.json.gz",
+      "archive_path": "../logs_by_day/2025-07-22.json.gz",
+      "collection_date": "2025-07-22",
+      "chronological_order": 8,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-23.json.gz",
+      "archive_path": "../logs_by_day/2025-07-23.json.gz",
+      "collection_date": "2025-07-23",
+      "chronological_order": 9,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-24.json.gz",
+      "archive_path": "../logs_by_day/2025-07-24.json.gz",
+      "collection_date": "2025-07-24",
+      "chronological_order": 10,
+      "cohort": "development",
+      "role": "train",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-25.json.gz",
+      "archive_path": "../logs_by_day/2025-07-25.json.gz",
+      "collection_date": "2025-07-25",
+      "chronological_order": 11,
+      "cohort": "development",
+      "role": "selection",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-26.json.gz",
+      "archive_path": "../logs_by_day/2025-07-26.json.gz",
+      "collection_date": "2025-07-26",
+      "chronological_order": 12,
+      "cohort": "development",
+      "role": "selection",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-27.json.gz",
+      "archive_path": "../logs_by_day/2025-07-27.json.gz",
+      "collection_date": "2025-07-27",
+      "chronological_order": 13,
+      "cohort": "development",
+      "role": "selection",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-28.json.gz",
+      "archive_path": "../logs_by_day/2025-07-28.json.gz",
+      "collection_date": "2025-07-28",
+      "chronological_order": 14,
+      "cohort": "development",
+      "role": "selection",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-29.json.gz",
+      "archive_path": "../logs_by_day/2025-07-29.json.gz",
+      "collection_date": "2025-07-29",
+      "chronological_order": 15,
+      "cohort": "development",
+      "role": "selection",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-30.json.gz",
+      "archive_path": "../logs_by_day/2025-07-30.json.gz",
+      "collection_date": "2025-07-30",
+      "chronological_order": 16,
+      "cohort": "development",
+      "role": "selection",
+      "sealed": false
+    },
+    {
+      "filename": "2025-07-31.json.gz",
+      "archive_path": "../logs_by_day/2025-07-31.json.gz",
+      "collection_date": "2025-07-31",
+      "chronological_order": 17,
+      "cohort": "development",
+      "role": "selection",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-01.json.gz",
+      "archive_path": "../logs_by_day/2025-08-01.json.gz",
+      "collection_date": "2025-08-01",
+      "chronological_order": 18,
+      "cohort": "development",
+      "role": "calibration",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-02.json.gz",
+      "archive_path": "../logs_by_day/2025-08-02.json.gz",
+      "collection_date": "2025-08-02",
+      "chronological_order": 19,
+      "cohort": "development",
+      "role": "calibration",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-03.json.gz",
+      "archive_path": "../logs_by_day/2025-08-03.json.gz",
+      "collection_date": "2025-08-03",
+      "chronological_order": 20,
+      "cohort": "development",
+      "role": "calibration",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-04.json.gz",
+      "archive_path": "../logs_by_day/2025-08-04.json.gz",
+      "collection_date": "2025-08-04",
+      "chronological_order": 21,
+      "cohort": "development",
+      "role": "calibration",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-05.json.gz",
+      "archive_path": "../logs_by_day/2025-08-05.json.gz",
+      "collection_date": "2025-08-05",
+      "chronological_order": 22,
+      "cohort": "development",
+      "role": "calibration",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-06.json.gz",
+      "archive_path": "../logs_by_day/2025-08-06.json.gz",
+      "collection_date": "2025-08-06",
+      "chronological_order": 23,
+      "cohort": "development",
+      "role": "calibration",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-07.json.gz",
+      "archive_path": "../logs_by_day/2025-08-07.json.gz",
+      "collection_date": "2025-08-07",
+      "chronological_order": 24,
+      "cohort": "development",
+      "role": "calibration",
+      "sealed": false
+    },
+    {
+      "filename": "2025-08-09.json.gz",
+      "archive_path": "../logs_by_day/2025-08-09.json.gz",
+      "collection_date": "2025-08-09",
+      "chronological_order": 25,
+      "cohort": "final",
+      "role": "test",
+      "sealed": true
+    },
+    {
+      "filename": "2025-08-10.json.gz",
+      "archive_path": "../logs_by_day/2025-08-10.json.gz",
+      "collection_date": "2025-08-10",
+      "chronological_order": 26,
+      "cohort": "final",
+      "role": "test",
+      "sealed": true
+    },
+    {
+      "filename": "2025-08-11.json.gz",
+      "archive_path": "../logs_by_day/2025-08-11.json.gz",
+      "collection_date": "2025-08-11",
+      "chronological_order": 27,
+      "cohort": "final",
+      "role": "test",
+      "sealed": true
+    },
+    {
+      "filename": "2025-08-12.json.gz",
+      "archive_path": "../logs_by_day/2025-08-12.json.gz",
+      "collection_date": "2025-08-12",
+      "chronological_order": 28,
+      "cohort": "final",
+      "role": "test",
+      "sealed": true
+    },
+    {
+      "filename": "2025-08-13.json.gz",
+      "archive_path": "../logs_by_day/2025-08-13.json.gz",
+      "collection_date": "2025-08-13",
+      "chronological_order": 29,
+      "cohort": "final",
+      "role": "test",
+      "sealed": true
+    },
+    {
+      "filename": "2025-08-15.json.gz",
+      "archive_path": "../logs_by_day/2025-08-15.json.gz",
+      "collection_date": "2025-08-15",
+      "chronological_order": 30,
+      "cohort": "final",
+      "role": "test",
+      "sealed": true
+    },
+    {
+      "filename": "2025-08-16.json.gz",
+      "archive_path": "../logs_by_day/2025-08-16.json.gz",
+      "collection_date": "2025-08-16",
+      "chronological_order": 31,
+      "cohort": "final",
+      "role": "test",
+      "sealed": true
+    }
+  ],
+  "verification": {
+    "status": "pending_archive_verification",
+    "member_receipts": []
+  }
+}
