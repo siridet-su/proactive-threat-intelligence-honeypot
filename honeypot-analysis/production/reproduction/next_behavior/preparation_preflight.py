@@ -2287,7 +2287,97 @@ def verify_static_preflight_receipt(
     )
     supplied = deepcopy(receipt)
     supplied["receipt_sha256"] = digest
-    if supplied != expected:
+    supplied_capacity = supplied.get("capacity")
+    expected_capacity = expected.get("capacity")
+    if not isinstance(supplied_capacity, Mapping) or not isinstance(
+        expected_capacity, Mapping
+    ):
+        raise NextBehaviorPreparationPreflightError(
+            "preflight receipt nested evidence is invalid"
+        )
+    supplied_filesystem = supplied_capacity.get("filesystem")
+    supplied_memory = supplied_capacity.get("memory")
+    expected_filesystem = expected_capacity.get("filesystem")
+    expected_memory = expected_capacity.get("memory")
+    if not all(
+        isinstance(item, Mapping)
+        for item in (
+            supplied_filesystem,
+            supplied_memory,
+            expected_filesystem,
+            expected_memory,
+        )
+        ):
+            raise NextBehaviorPreparationPreflightError(
+                "preflight receipt nested evidence is invalid"
+            )
+    for observed, required, label in (
+        (
+            supplied_filesystem["free_bytes"],
+            supplied_filesystem["minimum_free_bytes"],
+            "capacity.filesystem.free_bytes",
+        ),
+        (
+            supplied_memory["mem_available_bytes"],
+            supplied_memory["minimum_mem_available_bytes"],
+            "capacity.memory.mem_available_bytes",
+        ),
+        (
+            supplied_memory["swap_free_bytes"],
+            supplied_memory["minimum_swap_free_bytes"],
+            "capacity.memory.swap_free_bytes",
+        ),
+    ):
+        if not isinstance(observed, int) or not isinstance(required, int) or observed < required:
+            raise NextBehaviorPreparationPreflightError(
+                f"{label} is below its reviewed floor"
+            )
+    if supplied_filesystem["total_bytes"] < supplied_filesystem["used_bytes"]:
+        raise NextBehaviorPreparationPreflightError(
+            "capacity.filesystem total/used values are invalid"
+        )
+    comparison_supplied = deepcopy(supplied)
+    comparison_expected = deepcopy(expected)
+    for mapping, dynamic_keys in (
+        (
+            comparison_supplied["capacity"]["filesystem"],
+            {"total_bytes", "used_bytes", "free_bytes"},
+        ),
+        (
+            comparison_supplied["capacity"]["memory"],
+            {"mem_available_bytes", "swap_free_bytes"},
+        ),
+        (
+            comparison_expected["capacity"]["filesystem"],
+            {"total_bytes", "used_bytes", "free_bytes"},
+        ),
+        (
+            comparison_expected["capacity"]["memory"],
+            {"mem_available_bytes", "swap_free_bytes"},
+        ),
+    ):
+        for key in dynamic_keys:
+            mapping.pop(key, None)
+    if (
+        isinstance(supplied["frozen_inputs"], Mapping)
+        and supplied["frozen_inputs"].get("stage") == PRE_STAGING_STAGE
+    ):
+        supplied_archive = comparison_supplied["frozen_inputs"].get(
+            "source_archive_availability"
+        )
+        expected_archive = comparison_expected["frozen_inputs"].get(
+            "source_archive_availability"
+        )
+        if not isinstance(supplied_archive, Mapping) or not isinstance(
+            expected_archive, Mapping
+        ):
+            raise NextBehaviorPreparationPreflightError(
+                "preflight receipt source archive evidence is invalid"
+            )
+        for mapping in (supplied_archive, expected_archive):
+            mapping.pop("http_status", None)
+            mapping.pop("accept_ranges", None)
+    if comparison_supplied != comparison_expected:
         raise NextBehaviorPreparationPreflightError(
             "preflight receipt nested evidence does not match full revalidation"
         )
