@@ -576,6 +576,127 @@ def test_frozen_source_and_inventory_must_match_exactly(
         preflight._verify_frozen_inputs(tmp_path, inputs)
 
 
+def test_pre_staging_boundary_accepts_declaration_without_member_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    support_root = tmp_path / "support-preflight"
+    support_root.mkdir()
+    monkeypatch.setattr(preflight, "REVIEWED_OUTPUT_ROOT", tmp_path)
+    support_module = __import__(
+        "production.reproduction.next_behavior.support_preflight",
+        fromlist=["_verify_historical_test_membership_artifact"],
+    )
+    monkeypatch.setattr(
+        support_module,
+        "SUPPORT_PREFLIGHT_ROOT",
+        support_root,
+    )
+    monkeypatch.setattr(preflight, "SUPPORT_PREFLIGHT_ROOT", support_root)
+    receipt = {
+        "schema_version": "historical_test_session_membership.v1",
+        "status": "sealed_pseudonymous_membership_frozen",
+        "source_selection_sha256": preflight.HISTORICAL_SOURCE_SELECTION_SHA256,
+        "test_source_member_membership_sha256": "1" * 64,
+        "pseudonymization_key_id": preflight.HISTORICAL_PSEUDONYMIZATION_KEY_ID,
+        "pseudonymization_key_fingerprint_sha256": (
+            preflight.HISTORICAL_PSEUDONYMIZATION_KEY_FINGERPRINT_SHA256
+        ),
+        "artifact_format": "sorted_unique_nbsession_sha256_lines.v1",
+        "artifact_sha256": "3" * 64,
+        "artifact_size_bytes": 1,
+        "session_count": preflight.HISTORICAL_TEST_SESSION_COUNT,
+        "sorted_unique_membership_sha256": "4" * 64,
+        "raw_content_emitted": False,
+        "test_metrics_included": False,
+    }
+    receipt["receipt_id"] = preflight.stable_id(
+        "historicaltestsessionmembership", receipt
+    )
+    receipt_path = support_root / "membership.receipt.json"
+    artifact_path = support_root / "membership.txt"
+    artifact_path.write_text("nbsession_" + "a" * 64 + "\n", encoding="ascii")
+    receipt["artifact_sha256"] = _sha256(artifact_path)
+    receipt["artifact_size_bytes"] = artifact_path.stat().st_size
+    receipt["receipt_id"] = preflight.stable_id(
+        "historicaltestsessionmembership",
+        {key: item for key, item in receipt.items() if key != "receipt_id"},
+    )
+    receipt_path.write_text(json.dumps(receipt) + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        support_module,
+        "require_valid_historical_test_session_membership",
+        lambda value: value,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "require_valid_historical_test_session_membership",
+        lambda value: value,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "_verify_historical_test_membership_artifact",
+        lambda **_kwargs: {"status": "verified_zero_intersection"},
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_verify_historical_test_membership_artifact",
+        lambda **_kwargs: {"status": "verified_zero_intersection"},
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_head_source_archive",
+        lambda _url: {
+            "http_status": 200,
+            "content_length_bytes": preflight._EXPECTED_ARCHIVE["size_bytes"],
+            "accept_ranges": "bytes",
+        },
+    )
+    selection_pin = {
+        "path": "configs/next_behavior_source_selection.v2.json",
+        "artifact_byte_sha256": _sha256(
+            ROOT / "configs/next_behavior_source_selection.v2.json"
+        ),
+        "schema_version": SOURCE_SELECTION_SCHEMA_VERSION,
+    }
+    stage_a = {
+        "stage": preflight.PRE_STAGING_STAGE,
+        "source_selection": selection_pin,
+        "source_archive_availability": {
+            "schema_version": preflight.SOURCE_ARCHIVE_AVAILABILITY_SCHEMA_VERSION,
+            "url": preflight._EXPECTED_ARCHIVE["download_url"],
+            "expected_size_bytes": preflight._EXPECTED_ARCHIVE["size_bytes"],
+            "expected_md5": preflight._EXPECTED_ARCHIVE["checksum"].removeprefix(
+                "md5:"
+            ),
+        },
+        "historical_test_membership": {
+            "receipt_path": str(receipt_path),
+            "receipt_byte_sha256": _sha256(receipt_path),
+            "artifact_path": str(artifact_path),
+            "artifact_byte_sha256": _sha256(artifact_path),
+            "role_inventory_session_count": preflight.HISTORICAL_TEST_SESSION_COUNT,
+            "role_inventory_session_membership_sha256": (
+                preflight.HISTORICAL_TEST_SESSION_MEMBERSHIP_SHA256
+            ),
+        },
+    }
+    result = preflight._verify_frozen_inputs(ROOT, stage_a)
+    assert result["stage"] == preflight.PRE_STAGING_STAGE
+    assert result["declared_member_count"] == 31
+    assert result["historical_test_membership"]["session_count"] == (
+        preflight.HISTORICAL_TEST_SESSION_COUNT
+    )
+
+
+def test_pre_staging_boundary_rejects_completed_inventory(
+    tmp_path: Path,
+) -> None:
+    inputs = _frozen_inputs(tmp_path / "member-inventory")
+    inputs["stage"] = preflight.PRE_STAGING_STAGE
+    with pytest.raises(NextBehaviorPreparationPreflightError, match="fields"):
+        preflight._verify_frozen_inputs(ROOT, inputs)
+
+
 def test_external_artifact_pin_accepts_distinct_byte_and_contract_hashes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

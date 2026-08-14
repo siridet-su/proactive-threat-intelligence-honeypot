@@ -24,6 +24,8 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
@@ -37,6 +39,12 @@ from production.reproduction.next_behavior.classifier_assets import (
 from production.reproduction.next_behavior.experiment_policy import (
     NextBehaviorExperimentPolicyError,
     require_valid_experiment_policy,
+)
+from production.reproduction.next_behavior.support_preflight import (
+    SUPPORT_PREFLIGHT_ROOT,
+    SupportPreflightError,
+    _verify_historical_test_membership_artifact,
+    require_valid_historical_test_session_membership,
 )
 from production.utils.serialization import stable_id, stable_json
 
@@ -104,6 +112,7 @@ _IMPORT_FIELDS = frozenset({"module", "source_path", "importer_path"})
 _PIN_FIELDS = frozenset({"path", "artifact_byte_sha256", "schema_version"})
 _EXTERNAL_PIN_FIELDS = _PIN_FIELDS | frozenset({"contract_sha256"})
 _CLASSIFIER_MODEL_FIELDS = frozenset({"model_root", "binding_receipt"})
+_PRE_STAGING_CLASSIFIER_MODEL_FIELDS = frozenset({"stage", "status"})
 _MODEL_ROOT_RECEIPT_FIELDS = frozenset(
     {
         "schema_version",
@@ -119,6 +128,43 @@ _PREPROCESSING_FIELDS = _PIN_FIELDS | frozenset(
     {"target_contract_id", "trusted_history_schema_version", "maximum_phases"}
 )
 _FROZEN_INPUT_FIELDS = frozenset({"source_selection", "member_inventory"})
+_PRE_STAGING_FROZEN_INPUT_FIELDS = frozenset(
+    {
+        "stage",
+        "source_selection",
+        "source_archive_availability",
+        "historical_test_membership",
+    }
+)
+_PRE_STAGING_ARCHIVE_FIELDS = frozenset(
+    {"schema_version", "url", "expected_size_bytes", "expected_md5"}
+)
+_PRE_STAGING_MEMBERSHIP_FIELDS = frozenset(
+    {
+        "receipt_path",
+        "receipt_byte_sha256",
+        "artifact_path",
+        "artifact_byte_sha256",
+        "role_inventory_session_count",
+        "role_inventory_session_membership_sha256",
+    }
+)
+PRE_STAGING_STAGE = "pre_staging"
+POST_STAGING_STAGE = "post_staging"
+HISTORICAL_TEST_SESSION_COUNT = 5_334_841
+HISTORICAL_TEST_SESSION_MEMBERSHIP_SHA256 = (
+    "628b5105b3a4210e9c1f4e14b51a18478d554ac009f172816b7447ecf15a9346"
+)
+HISTORICAL_SOURCE_SELECTION_SHA256 = (
+    "078a0d2185f95a13c4642b15a5f8da69bc80df6093dc4d8435f181ff93702487"
+)
+HISTORICAL_PSEUDONYMIZATION_KEY_ID = "next-behavior-hmac-d664dad99120377f"
+HISTORICAL_PSEUDONYMIZATION_KEY_FINGERPRINT_SHA256 = (
+    "d664dad99120377fd7e08fe2128b3ed76107eb82e39873a864bd414503b3173c"
+)
+SOURCE_ARCHIVE_AVAILABILITY_SCHEMA_VERSION = (
+    "next_behavior_source_archive_availability.v1"
+)
 _RUNTIME_FIELDS = frozenset(
     {
         "python_implementation",
@@ -252,6 +298,11 @@ MANDATORY_SUCCESSOR_PREPARATION_IMPORT_BINDINGS = (
         "production/reproduction/next_behavior/preparation_preflight.py",
         "production.reproduction.next_behavior.experiment_policy",
         "production/reproduction/next_behavior/experiment_policy.py",
+    ),
+    (
+        "production/reproduction/next_behavior/preparation_preflight.py",
+        "production.reproduction.next_behavior.support_preflight",
+        "production/reproduction/next_behavior/support_preflight.py",
     ),
     (
         "production/reproduction/next_behavior/preparation_preflight.py",
@@ -1220,6 +1271,20 @@ def _verify_classifier_model(
     }
 
 
+def _defer_classifier_model_for_pre_staging(value: Any) -> Dict[str, Any]:
+    binding = _require_mapping(
+        value, _PRE_STAGING_CLASSIFIER_MODEL_FIELDS, "classifier_model"
+    )
+    if binding != {
+        "stage": PRE_STAGING_STAGE,
+        "status": "deferred_to_post_staging_model_gate",
+    }:
+        raise NextBehaviorPreparationPreflightError(
+            "pre-staging classifier model gate must be explicitly deferred"
+        )
+    return dict(binding)
+
+
 def _verify_preprocessing(
     repository_root: Path, value: Any, classifier: Mapping[str, Any]
 ) -> Dict[str, Any]:
@@ -1281,6 +1346,8 @@ def _verify_preprocessing(
 
 
 def _verify_frozen_inputs(repository_root: Path, value: Any) -> Dict[str, Any]:
+    if isinstance(value, Mapping) and value.get("stage") == PRE_STAGING_STAGE:
+        return _verify_pre_staging_frozen_inputs(repository_root, value)
     del repository_root  # External immutable artifacts must not dirty the repository.
     inputs = _require_mapping(value, _FROZEN_INPUT_FIELDS, "frozen_inputs")
     selection, selection_evidence = _verify_external_pinned_json(
@@ -1472,10 +1539,235 @@ def _verify_frozen_inputs(repository_root: Path, value: Any) -> Dict[str, Any]:
                     "source-selection declaration/member receipt mismatch"
                 )
     return {
+        "stage": POST_STAGING_STAGE,
         "source_selection": selection_evidence,
         "member_inventory": inventory_evidence,
         "member_count": len(selection_names),
         "ordered_member_names_sha256": _sha256_json(selection_names),
+    }
+
+
+def _head_source_archive(url: str) -> Dict[str, Any]:
+    """Read only archive availability probe used by Stage A.
+
+    A HEAD request proves that the declared source endpoint currently exposes
+    the reviewed archive size without opening or downloading archive content.
+    The response is evidence only; member bytes remain a Stage B concern.
+    """
+
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "honeypot-next-behavior-preflight/1"},
+        method="HEAD",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            headers = response.headers
+            content_length = headers.get("Content-Length")
+            return {
+                "http_status": int(response.status),
+                "content_length_bytes": int(content_length or 0),
+                "accept_ranges": str(headers.get("Accept-Ranges") or "").lower(),
+            }
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        raise NextBehaviorPreparationPreflightError(
+            f"source archive availability HEAD request failed: {exc}"
+        ) from exc
+
+
+def _verify_source_archive_availability(value: Any) -> Dict[str, Any]:
+    expected = {
+        "schema_version": SOURCE_ARCHIVE_AVAILABILITY_SCHEMA_VERSION,
+        "url": _EXPECTED_ARCHIVE["download_url"],
+        "expected_size_bytes": _EXPECTED_ARCHIVE["size_bytes"],
+        "expected_md5": _EXPECTED_ARCHIVE["checksum"].removeprefix("md5:"),
+    }
+    binding = _require_mapping(
+        value, _PRE_STAGING_ARCHIVE_FIELDS, "pre_staging.source_archive_availability"
+    )
+    if binding != expected:
+        raise NextBehaviorPreparationPreflightError(
+            "pre-staging source archive availability declaration changed"
+        )
+    observed = _head_source_archive(binding["url"])
+    status = observed["http_status"]
+    if not 200 <= status < 400:
+        raise NextBehaviorPreparationPreflightError(
+            f"source archive availability returned HTTP {status}"
+        )
+    if observed["content_length_bytes"] != binding["expected_size_bytes"]:
+        raise NextBehaviorPreparationPreflightError(
+            "source archive availability content length differs from the reviewed archive"
+        )
+    return {
+        "schema_version": binding["schema_version"],
+        "url": binding["url"],
+        "expected_size_bytes": binding["expected_size_bytes"],
+        "expected_md5": binding["expected_md5"],
+        "http_status": status,
+        "content_length_bytes": observed["content_length_bytes"],
+        "accept_ranges": observed["accept_ranges"],
+        "member_content_opened": False,
+    }
+
+
+def _verify_pre_staging_frozen_inputs(
+    repository_root: Path, value: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """Verify only declarations that can exist before member staging.
+
+    Stage A intentionally does not accept a member inventory or content hashes.
+    The completed inventory path above is Stage B and remains the only input
+    accepted by later support/preparation gates.
+    """
+
+    inputs = _require_mapping(
+        value, _PRE_STAGING_FROZEN_INPUT_FIELDS, "frozen_inputs"
+    )
+    selection, selection_evidence = _verify_pinned_json(
+        repository_root,
+        inputs["source_selection"],
+        label="pre_staging.source_selection",
+        expected_schema=SOURCE_SELECTION_SCHEMA_VERSION,
+    )
+    if (
+        selection.get("selection_id") != _SUCCESSOR_SELECTION_ID
+        or selection.get("preserved_source_selection")
+        != _EXPECTED_PRESERVED_SELECTION
+        or selection.get("source") != _EXPECTED_SOURCE
+        or selection.get("archive") != _EXPECTED_ARCHIVE
+        or selection.get("policy") != _EXPECTED_SELECTION_POLICY
+    ):
+        raise NextBehaviorPreparationPreflightError(
+            "pre-staging source selection is not the frozen label-blind protocol"
+        )
+    declarations = selection.get("members")
+    if declarations != _expected_successor_members():
+        raise NextBehaviorPreparationPreflightError(
+            "pre-staging source selection does not match the frozen 10/7/7/7 calendar"
+        )
+    verification = selection.get("verification")
+    if (
+        not isinstance(verification, Mapping)
+        or verification.get("status") != "pending_archive_verification"
+        or verification.get("member_receipts") != []
+    ):
+        raise NextBehaviorPreparationPreflightError(
+            "pre-staging source selection must not contain member content receipts"
+        )
+    archive_availability = _verify_source_archive_availability(
+        inputs["source_archive_availability"]
+    )
+
+    membership_binding = _require_mapping(
+        inputs["historical_test_membership"],
+        _PRE_STAGING_MEMBERSHIP_FIELDS,
+        "pre_staging.historical_test_membership",
+    )
+    count = membership_binding["role_inventory_session_count"]
+    if count != HISTORICAL_TEST_SESSION_COUNT:
+        raise NextBehaviorPreparationPreflightError(
+            "historical role-inventory session count is incompatible"
+        )
+    if (
+        _require_sha256(
+            membership_binding["role_inventory_session_membership_sha256"],
+            "historical role-inventory session membership SHA-256",
+        )
+        != HISTORICAL_TEST_SESSION_MEMBERSHIP_SHA256
+    ):
+        raise NextBehaviorPreparationPreflightError(
+            "historical role-inventory membership is incompatible"
+        )
+    receipt_path = _external_regular_file(
+        membership_binding["receipt_path"],
+        "pre_staging.historical_test_membership.receipt_path",
+    )
+    artifact_path = _external_regular_file(
+        membership_binding["artifact_path"],
+        "pre_staging.historical_test_membership.artifact_path",
+    )
+    receipt_byte_sha256 = _require_sha256(
+        membership_binding["receipt_byte_sha256"],
+        "pre_staging.historical_test_membership.receipt_byte_sha256",
+    )
+    artifact_byte_sha256 = _require_sha256(
+        membership_binding["artifact_byte_sha256"],
+        "pre_staging.historical_test_membership.artifact_byte_sha256",
+    )
+    if _sha256_bytes(receipt_path.read_bytes()) != receipt_byte_sha256:
+        raise NextBehaviorPreparationPreflightError(
+            "historical membership receipt byte SHA-256 mismatch"
+        )
+    if _sha256_bytes(artifact_path.read_bytes()) != artifact_byte_sha256:
+        raise NextBehaviorPreparationPreflightError(
+            "historical membership artifact byte SHA-256 mismatch"
+        )
+    membership_receipt = _read_json_regular(
+        receipt_path, "historical test-session membership receipt"
+    )
+    try:
+        checked_membership = require_valid_historical_test_session_membership(
+            membership_receipt
+        )
+    except SupportPreflightError as exc:
+        raise NextBehaviorPreparationPreflightError(
+            f"historical membership receipt is invalid: {exc}"
+        ) from exc
+    if (
+        checked_membership["artifact_sha256"] != artifact_byte_sha256
+        or checked_membership["session_count"] != count
+        or checked_membership["sorted_unique_membership_sha256"] == ""
+        or checked_membership["source_selection_sha256"]
+        != HISTORICAL_SOURCE_SELECTION_SHA256
+        or checked_membership["pseudonymization_key_id"]
+        != HISTORICAL_PSEUDONYMIZATION_KEY_ID
+        or checked_membership["pseudonymization_key_fingerprint_sha256"]
+        != HISTORICAL_PSEUDONYMIZATION_KEY_FINGERPRINT_SHA256
+    ):
+        raise NextBehaviorPreparationPreflightError(
+            "historical membership receipt does not bind the declared artifact"
+        )
+    try:
+        _verify_historical_test_membership_artifact(
+            receipt=checked_membership,
+            artifact_path=artifact_path,
+            development_membership=set(),
+            source_selection_sha256=checked_membership["source_selection_sha256"],
+            test_source_member_membership_sha256=checked_membership[
+                "test_source_member_membership_sha256"
+            ],
+            pseudonymization_key_id=checked_membership[
+                "pseudonymization_key_id"
+            ],
+            pseudonymization_key_fingerprint_sha256=checked_membership[
+                "pseudonymization_key_fingerprint_sha256"
+            ],
+            reviewed_root=SUPPORT_PREFLIGHT_ROOT,
+            mount_probe=None,
+        )
+    except SupportPreflightError as exc:
+        raise NextBehaviorPreparationPreflightError(
+            f"historical membership artifact is invalid: {exc}"
+        ) from exc
+    return {
+        "stage": PRE_STAGING_STAGE,
+        "source_selection": selection_evidence,
+        "source_archive_availability": archive_availability,
+        "source_selection_status": "label_blind_declaration_verified",
+        "declared_member_count": len(declarations),
+        "declared_role_counts": dict(SUCCESSOR_ROLE_COUNTS),
+        "historical_test_membership": {
+            "receipt_path": str(receipt_path),
+            "receipt_byte_sha256": receipt_byte_sha256,
+            "artifact_path": str(artifact_path),
+            "artifact_byte_sha256": artifact_byte_sha256,
+            "session_count": checked_membership["session_count"],
+            "role_inventory_session_membership_sha256": (
+                HISTORICAL_TEST_SESSION_MEMBERSHIP_SHA256
+            ),
+            "verified_zero_intersection_with_pre_staging_empty_set": True,
+        },
     }
 
 
@@ -1861,11 +2153,19 @@ def run_static_preflight(
     classifier = _verify_classifier_environment(
         repository_root, root["classifier_environment"]
     )
-    classifier_model = _verify_classifier_model(
-        repository_root,
-        root["classifier_environment"],
-        classifier,
-        root["classifier_model"],
+    pre_staging = (
+        isinstance(root["frozen_inputs"], Mapping)
+        and root["frozen_inputs"].get("stage") == PRE_STAGING_STAGE
+    )
+    classifier_model = (
+        _defer_classifier_model_for_pre_staging(root["classifier_model"])
+        if pre_staging
+        else _verify_classifier_model(
+            repository_root,
+            root["classifier_environment"],
+            classifier,
+            root["classifier_model"],
+        )
     )
     preprocessing = _verify_preprocessing(
         repository_root, root["preprocessing"], classifier
