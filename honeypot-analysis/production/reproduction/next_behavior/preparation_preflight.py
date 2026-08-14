@@ -2377,6 +2377,8 @@ def verify_static_preflight_receipt(
         for mapping in (supplied_archive, expected_archive):
             mapping.pop("http_status", None)
             mapping.pop("accept_ranges", None)
+    comparison_supplied.pop("receipt_sha256", None)
+    comparison_expected.pop("receipt_sha256", None)
     if comparison_supplied != comparison_expected:
         raise NextBehaviorPreparationPreflightError(
             "preflight receipt nested evidence does not match full revalidation"
