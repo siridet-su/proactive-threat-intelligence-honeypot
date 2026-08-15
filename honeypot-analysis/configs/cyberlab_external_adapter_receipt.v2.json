@@ -1,0 +1,31 @@
+{
+  "adapter_path": "production/reproduction/cyberlab_adapter_v2.py",
+  "adapter_schema_version": "cyberlab_cowrie_adapter.v2",
+  "adapter_sha256": "46fda551643888edf00bce5d3c0f34501a68aa138f1e28dcde75ffea19762d1d",
+  "documentation_path": "docs/CYBERLAB_ADAPTER_V2.md",
+  "documentation_sha256": "5ab525fac615e461dc1c0ef0f0faf05d9ded6a5bc604c2fa14820b3eae984f13",
+  "eligibility_ordering": {
+    "command_content_used_for_eligibility": false,
+    "eligible_malformed_event": "fail_closed",
+    "eligible_session": "run_v1_strict_event_validation",
+    "labels_or_tactics_used_for_eligibility": false,
+    "metadata_fields": ["sensor"],
+    "mixed_or_missing_sensor": "exclude_without_command_validation",
+    "required_sensor": "ubuntu_basic_pool",
+    "stage": "before_event_semantic_validation",
+    "wrong_sensor": "exclude_without_command_validation"
+  },
+  "fixture_path": "tests/test_cyberlab_adapter_v2.py",
+  "fixture_sha256": "7a75acff9233c271a1be25827182ccc6214951887366af4768c2c223e172e6df",
+  "previous_adapter_schema_version": "cyberlab_cowrie_adapter.v1",
+  "previous_receipt_path": "configs/cyberlab_external_adapter_receipt.v1.json",
+  "previous_receipt_sha256": "186f84cea8b95be12689b310250126ffb4aa80a72d5bdd9716d3fa1b68d6fff2",
+  "private_session_schema_version": "cyberlab_private_session.v1",
+  "real_external_data_accessed": false,
+  "receipt_id": "cyberlabadapterreceiptv2_92b081ad6160e4505c2604bd3ec1d0c0",
+  "schema_version": "cyberlab_external_adapter_receipt.v2",
+  "sealed_test_accessed": false,
+  "source_policy_path": "configs/cyberlab_external_adapter.v2.json",
+  "source_policy_sha256": "4ebe7169898a418fe945f22b1babef89508afa27df4d65be35ca3db495a5e534",
+  "test_result": "24 passed"
+}
