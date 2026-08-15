@@ -1,0 +1,131 @@
+{
+  "schema_version": "next_trusted_group_target_policy.v1",
+  "policy_id": "successor_trusted_group_realtime_target_20260815.v1",
+  "target_contract_id": "next_trusted_command_behavior_group_or_session_end.v1",
+  "lineage": {
+    "predecessor_target_contract_id": "next_distinct_trusted_behavior_phase_or_session_end.v2",
+    "predecessor_evidence_status": "immutable_historical_no_go",
+    "predecessor_examples_reused": false,
+    "predecessor_contract_modified": false
+  },
+  "prediction_point": {
+    "trigger": "after_each_durably_committed_trusted_command_behavior_group",
+    "requires_at_least_one_trusted_group": true,
+    "active_final_group_is_unresolved": true,
+    "session_close_creates_truth_not_a_new_forecast": true
+  },
+  "input_history": {
+    "schema_version": "next_trusted_group_input.v1",
+    "maximum_trusted_groups": 8,
+    "ordering": "causal_durable_group_order",
+    "same_tactic_groups_collapsed": false,
+    "audit_only_count_is_context_only": true,
+    "model_visible_fields": [
+      "tactics",
+      "techniques",
+      "exact_tactic_technique_labels",
+      "elapsed_since_previous_trusted_group_bucket",
+      "trusted_label_provenance_buckets",
+      "audit_only_label_count",
+      "current_causal_session_context"
+    ],
+    "model_invisible_integrity_fields": [
+      "pseudonymous_group_ids",
+      "pseudonymous_evidence_refs",
+      "content_hashes"
+    ],
+    "raw_commands_allowed": false,
+    "private_identifiers_allowed": false
+  },
+  "target": {
+    "binary_question": "session_end_or_another_trusted_command_behavior_group",
+    "continuation_outcome": "another_trusted_command_behavior_group",
+    "terminal_outcome": "session_end_no_further_trusted_command_behavior_group",
+    "conditional_question": "exact_trusted_attck_tactic_set_of_immediately_next_group",
+    "conditional_tactic_loss_masked_for_terminal": true,
+    "same_tactic_continuation_is_positive": true,
+    "target_source": "immediately_next_trusted_group_or_durable_session_close",
+    "audit_only_or_model_only_target_allowed": false
+  },
+  "causal_and_privacy_boundaries": {
+    "future_group_features_in_input_allowed": false,
+    "future_group_evidence_refs_in_input_allowed": false,
+    "post_prediction_context_in_input_allowed": false,
+    "trusted_observation_tier_required": true,
+    "deterministic_analysis_authoritative": true,
+    "prediction_can_change_findings_guidance_or_actions": false,
+    "historical_backfill_or_reinterpretation_allowed": false
+  },
+  "partitions": {
+    "development_roles": [
+      "train",
+      "selection",
+      "calibration"
+    ],
+    "sealed_test_role": "test",
+    "temporal_membership_must_remain_frozen": true,
+    "test_behavioral_content_access_during_support_analysis": false,
+    "test_metrics_used_during_support_analysis": false
+  },
+  "support_policy": {
+    "minimum_targets_per_role_and_reportable_class": 30,
+    "minimum_distinct_sessions_per_role_and_reportable_class": 30,
+    "required_binary_classes": [
+      "continuation",
+      "session_end"
+    ],
+    "minimum_reportable_conditional_tactic_classes": 2,
+    "unsupported_tactics_retained_in_provenance": true,
+    "unsupported_tactics_reportable_by_future_model": false,
+    "threshold_changes_after_support_observation_allowed": false
+  },
+  "evaluation": {
+    "binary_metrics": [
+      "precision_recall_f1_per_class",
+      "balanced_accuracy",
+      "matthews_correlation_coefficient",
+      "pr_auc",
+      "roc_auc"
+    ],
+    "conditional_tactic_metrics": [
+      "exact_set_accuracy",
+      "micro_macro_precision_recall_f1",
+      "hamming_loss",
+      "jaccard_similarity",
+      "per_tactic_precision_recall_f1"
+    ],
+    "joint_metrics": [
+      "exact_terminal_or_next_tactic_set_accuracy",
+      "whole_session_cluster_bootstrap_intervals"
+    ],
+    "calibration_metrics_after_mapping_only": [
+      "brier_score",
+      "expected_calibration_error",
+      "log_loss"
+    ],
+    "runtime_metrics": [
+      "p50_p95_cpu_latency",
+      "checkpoint_bytes",
+      "process_rss_delta"
+    ]
+  },
+  "baselines": {
+    "fit_role": "train",
+    "selection_role": "selection",
+    "calibration_role": "calibration",
+    "families": [
+      "terminal_prevalence_majority",
+      "repeat_current_tactic_set",
+      "first_order_group_state_markov",
+      "hard_backoff_group_vomm",
+      "interpolated_group_vomm"
+    ],
+    "maximum_vomm_order": 8,
+    "same_membership_as_candidate_required": true
+  },
+  "training_authorization": {
+    "support_analysis_only": true,
+    "transformer_training_authorized": false,
+    "production_change_authorized": false
+  }
+}
