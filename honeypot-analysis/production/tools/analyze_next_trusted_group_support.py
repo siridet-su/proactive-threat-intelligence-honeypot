@@ -113,6 +113,17 @@ def _atomic_write(path: Path, value: dict) -> None:
         raise
 
 
+def _checked_role_stream(selected_role: str, source):
+    """Bind one role eagerly and reject rather than filter cross-role output."""
+
+    if selected_role not in DEVELOPMENT_ROLES:
+        raise SupportAnalysisCliError("support stream role is invalid")
+    for returned_role, session in source:
+        if returned_role != selected_role:
+            raise SupportAnalysisCliError("safe-session iterator returned a wrong role")
+        yield session
+
+
 def run(args: argparse.Namespace) -> dict:
     repository = args.repository.resolve()
     design_commit, design_tree = _verify_design_freeze(repository, args.policy)
@@ -164,15 +175,14 @@ def run(args: argparse.Namespace) -> dict:
     started_wall = time.monotonic()
     started_cpu = time.process_time()
     streams = {
-        role: (
-            session
-            for returned_role, session in iter_development_safe_sessions(
+        role: _checked_role_stream(
+            role,
+            iter_development_safe_sessions(
                 private_database_path=args.database,
                 pseudonymization_key=key,
                 pseudonymization_key_id=expected_key_id,
                 role=role,
-            )
-            if returned_role == role
+            ),
         )
         for role in DEVELOPMENT_ROLES
     }

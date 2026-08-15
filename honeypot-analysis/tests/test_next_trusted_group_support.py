@@ -7,6 +7,10 @@ from production.reproduction.next_behavior.group_target_support import (
     build_group_target_support_receipt,
     validate_group_target_support_receipt,
 )
+from production.tools.analyze_next_trusted_group_support import (
+    SupportAnalysisCliError,
+    _checked_role_stream,
+)
 
 
 HASH = "a" * 64
@@ -174,3 +178,15 @@ def test_operational_measurements_do_not_change_semantic_support_identity() -> N
     assert measured["semantic_support_sha256"] == receipt["semantic_support_sha256"]
     assert measured["receipt_id"] != receipt["receipt_id"]
     assert validate_group_target_support_receipt(measured) == []
+
+
+def test_role_stream_binds_each_role_and_rejects_cross_role_output() -> None:
+    train = list(_checked_role_stream("train", iter([("train", {"id": 1})])))
+
+    assert train == [{"id": 1}]
+    try:
+        list(_checked_role_stream("train", iter([("calibration", {"id": 2})])))
+    except SupportAnalysisCliError as exc:
+        assert "wrong role" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("wrong-role stream was silently filtered")
