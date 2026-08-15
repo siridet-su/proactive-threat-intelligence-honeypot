@@ -1,0 +1,43 @@
+{
+  "schema_version": "cyberlab_external_source_integrity_exclusion_receipt.v1",
+  "policy_path": "configs/cyberlab_external_source_integrity_exclusion.v1.json",
+  "policy_sha256": "779f61028ef18d5f07a4c3307d6a3ffdd19796d6ba018b16028bd746a5d704d4",
+  "adapter_schema_version": "cyberlab_cowrie_adapter.v3",
+  "source_record_id": 3687527,
+  "source_doi": "10.5281/zenodo.3687527",
+  "filename": "cyberlab_2020-01-29.json.gz",
+  "date": "2020-01-29",
+  "role": "selection",
+  "reason_code": "upstream_truncated_source_member",
+  "official_size_bytes": 31660520,
+  "official_md5": "7d2b798aa797115d181ae920cca59002",
+  "original_member_sha256": "aa22210fd69c5a635bfd9748381ac9adc7cdbfeaf79266056a804a37c385d158",
+  "redownload_size_bytes": 31660520,
+  "redownload_md5": "7d2b798aa797115d181ae920cca59002",
+  "redownload_sha256": "aa22210fd69c5a635bfd9748381ac9adc7cdbfeaf79266056a804a37c385d158",
+  "original_gzip_test": "failed: unexpected end of file",
+  "redownload_gzip_test": "failed: unexpected end of file",
+  "json_completeness": "not_complete_gzip_eof_before_json_end",
+  "original_member_path": "/mnt/honeypot-data/cyberlab-external-development-v1/members/cyberlab_2020-01-29.json.gz",
+  "redownload_evidence_path": "/mnt/honeypot-data/cyberlab-external-development-v1/source-integrity/cyberlab_2020-01-29.official-redownload.invalid.json.gz",
+  "validation_commands": [
+    "stat -c %s",
+    "md5sum",
+    "sha256sum",
+    "gzip -t",
+    "python gzip decode probe"
+  ],
+  "behavioral_content_used": false,
+  "partial_prefix_used": false,
+  "replacement_or_role_shift": false,
+  "sealed_test_accessed": false,
+  "usable_role_counts": {
+    "train": 68,
+    "selection": 22,
+    "calibration": 11,
+    "development_total": 101
+  },
+  "predecessor_download_receipt": "/mnt/honeypot-data/cyberlab-external-development-v1/development_download_receipt.v1.json",
+  "predecessor_adapter_receipt": "configs/cyberlab_external_adapter_receipt.v3.json",
+  "receipt_id": "cyberlabsourceintegrityexclusion_966e591373f2474c210cf4e859b3e1f2"
+}
