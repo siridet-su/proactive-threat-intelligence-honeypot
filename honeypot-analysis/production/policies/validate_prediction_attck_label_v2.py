@@ -271,6 +271,7 @@ def validate_prediction_attck_freeze_receipt_v2(
         "base_implementation_v1",
         "environment",
         "known_answers",
+        "known_answer_tests",
         "validator",
         "canonical_trust",
     }
@@ -359,4 +360,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

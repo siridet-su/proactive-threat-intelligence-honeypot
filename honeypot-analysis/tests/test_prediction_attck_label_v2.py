@@ -17,6 +17,10 @@ from production.prediction.prediction_attck_label_v2 import (
     load_prediction_attck_label_policy_v2,
     validate_prediction_attck_label_policy_v2,
 )
+from production.policies.validate_prediction_attck_label_v2 import (
+    validate_prediction_attck_freeze_receipt_v2,
+    validate_prediction_attck_label_environment_v2,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -353,3 +357,21 @@ def test_v2_known_answers_are_complete() -> None:
     assert len(fixture["cases"]) == 21
     assert len({case["case_id"] for case in fixture["cases"]}) == 21
 
+
+def test_v2_environment_binds_current_policy_predicate_and_v1_base() -> None:
+    assert validate_prediction_attck_label_environment_v2(
+        repository_root=ROOT,
+        policy_path="configs/prediction_attck_label_policy.v2.json",
+        environment_path="configs/prediction_attck_label_environment.v2.json",
+    ) == []
+
+
+def test_v2_freeze_receipt_binds_every_reviewed_contract() -> None:
+    receipt = json.loads(
+        (ROOT / "configs" / "prediction_attck_label_freeze_receipt.v2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert validate_prediction_attck_freeze_receipt_v2(
+        receipt, repository_root=ROOT
+    ) == []
