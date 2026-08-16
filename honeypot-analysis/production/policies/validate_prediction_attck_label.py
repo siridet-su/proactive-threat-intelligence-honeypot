@@ -20,6 +20,7 @@ from production.prediction.prediction_attck_label import (
     validate_prediction_attck_environment,
     validate_prediction_attck_label_policy,
 )
+from production.utils.serialization import stable_json
 
 
 def _sha256(path: Path) -> str:
@@ -37,20 +38,13 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _git_identity(root: Path) -> tuple[str, str]:
-    commit = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
+def _git_tree_for_commit(root: Path, commit: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", f"{commit}^{{tree}}"],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
-    tree = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    return commit, tree
 
 
 def validate_prediction_attck_label_environment(
@@ -121,14 +115,105 @@ def validate_prediction_attck_label_environment(
     if not source_selection.is_file() or _sha256(source_selection) != environment.get("source_corpus_membership_sha256"):
         errors.append("environment source membership bytes do not match the frozen selection binding")
     try:
-        commit, tree = _git_identity(root)
+        bound_commit = str(environment.get("repository_commit") or "")
+        tree = _git_tree_for_commit(root, bound_commit)
     except (OSError, subprocess.CalledProcessError) as exc:
         errors.append(f"repository identity unavailable: {exc}")
     else:
-        if environment.get("repository_commit") != commit:
-            errors.append("environment.repository_commit does not match HEAD")
         if environment.get("repository_tree") != tree:
-            errors.append("environment.repository_tree does not match HEAD tree")
+            errors.append("environment.repository_tree does not match the bound repository commit tree")
+    return sorted(set(errors))
+
+
+def validate_prediction_attck_freeze_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    repository_root: str | Path,
+) -> list[str]:
+    """Validate the immutable contract-freeze receipt and every bound byte."""
+
+    root = Path(repository_root).resolve()
+    errors: list[str] = []
+    allowed = {
+        "schema_version", "freeze_id", "status", "authority", "repository",
+        "contracts", "support_policy", "validation", "boundaries", "receipt_sha256",
+    }
+    if not isinstance(receipt, Mapping):
+        return ["freeze receipt must be an object"]
+    errors.extend(
+        f"freeze receipt.{key} is not defined by the contract"
+        for key in sorted(receipt)
+        if key not in allowed
+    )
+    if receipt.get("schema_version") != "prediction_attck_label_freeze_receipt.v1":
+        errors.append("freeze receipt schema_version is invalid")
+    if not str(receipt.get("freeze_id") or "").strip():
+        errors.append("freeze receipt.freeze_id is required")
+    if receipt.get("status") != "frozen_contract_only":
+        errors.append("freeze receipt.status is invalid")
+    if receipt.get("authority") != "prediction_weak_rule_label":
+        errors.append("freeze receipt.authority is invalid")
+    repository = receipt.get("repository")
+    if not isinstance(repository, Mapping):
+        errors.append("freeze receipt.repository is required")
+    else:
+        for field in ("implementation_commit", "implementation_tree"):
+            value = str(repository.get(field) or "")
+            if len(value) != 40 or any(char not in "0123456789abcdef" for char in value):
+                errors.append(f"freeze receipt.repository.{field} is invalid")
+        try:
+            if _git_tree_for_commit(root, str(repository.get("implementation_commit") or "")) != repository.get("implementation_tree"):
+                errors.append("freeze receipt repository tree does not match implementation commit")
+        except (OSError, subprocess.CalledProcessError):
+            errors.append("freeze receipt implementation commit is unavailable")
+
+    contracts = receipt.get("contracts")
+    if not isinstance(contracts, Mapping):
+        errors.append("freeze receipt.contracts is required")
+    else:
+        required_contracts = {
+            "policy", "rule_bindings", "implementation", "environment", "known_answers", "validator"
+        }
+        if set(contracts) != required_contracts:
+            errors.append("freeze receipt.contracts must enumerate every frozen contract")
+        for name, reference in contracts.items():
+            if not isinstance(reference, Mapping) or set(reference) != {"path", "sha256"}:
+                errors.append(f"freeze receipt.contracts.{name} is invalid")
+                continue
+            path = Path(str(reference.get("path") or ""))
+            if path.is_absolute() or ".." in path.parts:
+                errors.append(f"freeze receipt.contracts.{name}.path is unsafe")
+                continue
+            candidate = root / path
+            try:
+                if candidate.is_symlink() or not candidate.is_file() or _sha256(candidate) != reference.get("sha256"):
+                    errors.append(f"freeze receipt.contracts.{name} bytes do not match")
+            except OSError:
+                errors.append(f"freeze receipt.contracts.{name} is unavailable")
+
+    support = receipt.get("support_policy")
+    if not isinstance(support, Mapping) or support.get("analysis_status") != "not_run":
+        errors.append("freeze receipt must record that support analysis was not run")
+    validation = receipt.get("validation")
+    if not isinstance(validation, Mapping) or validation.get("focused_tests_passed") is not True:
+        errors.append("freeze receipt focused test evidence is invalid")
+    boundaries = receipt.get("boundaries")
+    if not isinstance(boundaries, Mapping):
+        errors.append("freeze receipt.boundaries is required")
+    else:
+        for field in ("real_support_inspected", "model_training", "sealed_test_accessed", "production_changed"):
+            if boundaries.get(field) is not False:
+                errors.append(f"freeze receipt.boundaries.{field} must be false")
+        if boundaries.get("canonical_noninterference_proven") is not True:
+            errors.append("freeze receipt canonical noninterference evidence is required")
+    if isinstance(receipt.get("receipt_sha256"), str):
+        body = dict(receipt)
+        body.pop("receipt_sha256", None)
+        digest = hashlib.sha256(stable_json(body).encode("utf-8")).hexdigest()
+        if receipt.get("receipt_sha256") != digest:
+            errors.append("freeze receipt.receipt_sha256 does not match content")
+    else:
+        errors.append("freeze receipt.receipt_sha256 is required")
     return sorted(set(errors))
 
 
@@ -138,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--policy", default="configs/prediction_attck_label_policy.v1.json")
     parser.add_argument("--environment", default="configs/prediction_attck_label_environment.v1.json")
     parser.add_argument("--classification-policy", default=None)
+    parser.add_argument("--freeze-receipt", default=None)
     args = parser.parse_args(argv)
     root = Path(args.repository_root or Path(__file__).resolve().parents[2])
     errors = validate_prediction_attck_label_environment(
@@ -146,6 +232,19 @@ def main(argv: list[str] | None = None) -> int:
         environment_path=args.environment,
         classification_policy_path=args.classification_policy,
     )
+    if args.freeze_receipt:
+        receipt_path = Path(args.freeze_receipt)
+        if not receipt_path.is_absolute():
+            receipt_path = root / receipt_path
+        try:
+            errors.extend(
+                validate_prediction_attck_freeze_receipt(
+                    _load_json(receipt_path),
+                    repository_root=root,
+                )
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            errors.append(f"freeze receipt cannot be loaded: {exc}")
     if errors:
         for error in errors:
             print(f"ERROR: {error}")
