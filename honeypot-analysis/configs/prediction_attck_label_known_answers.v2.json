@@ -1,0 +1,94 @@
+{
+  "schema_version": "prediction_attck_label_known_answers.v2",
+  "fixture_id": "prediction-only-legacy-parity-known-answers-20260816.v2",
+  "authority": "prediction_weak_rule_label",
+  "policy_schema_version": "prediction_attck_label_policy.v2",
+  "admission_class": "reviewed_legacy_literal_invocation",
+  "cases": [
+    {
+      "case_id": "direct_system_discovery_literal_invocation",
+      "expected": "eligible_discovery"
+    },
+    {
+      "case_id": "direct_interpreter_script_literal_invocation",
+      "expected": "eligible_execution"
+    },
+    {
+      "case_id": "direct_literal_path_invocation",
+      "expected": "eligible_execution"
+    },
+    {
+      "case_id": "direct_chmod_literal_invocation",
+      "expected": "eligible_defense_evasion"
+    },
+    {
+      "case_id": "direct_cleanup_literal_invocation",
+      "expected": "eligible_defense_evasion"
+    },
+    {
+      "case_id": "direct_curl_literal_invocation",
+      "expected": "eligible_command_and_control"
+    },
+    {
+      "case_id": "direct_wget_literal_invocation",
+      "expected": "eligible_command_and_control"
+    },
+    {
+      "case_id": "direct_account_creation_literal_invocation",
+      "expected": "eligible_persistence"
+    },
+    {
+      "case_id": "inert_echo_lexical_match",
+      "expected": "excluded"
+    },
+    {
+      "case_id": "conditional_fragment",
+      "expected": "barrier"
+    },
+    {
+      "case_id": "model_only",
+      "expected": "excluded"
+    },
+    {
+      "case_id": "historically_unreviewed_rule",
+      "expected": "excluded"
+    },
+    {
+      "case_id": "corrected_t1053_mapping",
+      "expected": "persistence"
+    },
+    {
+      "case_id": "malformed_evidence",
+      "expected": "barrier"
+    },
+    {
+      "case_id": "conflicting_duplicate",
+      "expected": "barrier"
+    },
+    {
+      "case_id": "dynamic_executable",
+      "expected": "barrier"
+    },
+    {
+      "case_id": "unsupported_composition",
+      "expected": "barrier"
+    },
+    {
+      "case_id": "deterministic_replay",
+      "expected": "identical"
+    },
+    {
+      "case_id": "policy_pattern_tamper",
+      "expected": "fail_closed"
+    },
+    {
+      "case_id": "canonical_noninterference",
+      "expected": "unchanged"
+    },
+    {
+      "case_id": "v1_contract_bytes",
+      "expected": "unchanged"
+    }
+  ]
+}
+
