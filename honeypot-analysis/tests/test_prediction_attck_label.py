@@ -22,6 +22,7 @@ from production.prediction.prediction_attck_label import (
     TERMINAL_OUTCOME,
     build_next_prediction_label_examples,
     build_prediction_attck_environment,
+    build_prediction_barrier,
     build_prediction_label_group,
     evaluate_prediction_candidate,
     load_prediction_attck_label_policy,
@@ -78,7 +79,9 @@ def _candidate(
         "parser_status": parser_status,
         "prediction_context": prediction_context or {
             "reviewed": True,
-            "class": "reviewed_literal_command_pattern",
+            "class": "reviewed_structural_operation"
+            if evidence_type == "command_operation"
+            else "reviewed_literal_command_pattern",
         },
         "policy_sha256": policy["policy_sha256"],
     }
@@ -191,6 +194,29 @@ def test_rule_mapping_mismatch_is_a_causal_barrier(policy: dict) -> None:
     )
     assert result["status"] == "barrier"
     assert result["reason_code"] == "ambiguous_tactic_mapping"
+
+
+def test_structural_rule_requires_structural_prediction_context(policy: dict) -> None:
+    result = evaluate_prediction_candidate(
+        _candidate(
+            policy,
+            evidence_type="command_operation",
+            rule_id="cmd-rule-v2-passwd-account-discovery-t1087-001",
+            technique="T1087.001",
+            prediction_context={
+                "reviewed": True,
+                "class": "reviewed_literal_command_pattern",
+            },
+        ),
+        policy=policy,
+        sanitizer_policy_id="privacy.v1",
+        pseudonymization_policy_id="hmac.v1",
+        parser_identity="parser.v2",
+        splitter_identity="splitter.v1",
+        labeler_identity="labeler.v1",
+    )
+    assert result["status"] == "excluded"
+    assert result["reason_code"] == "prediction_context_not_reviewed"
 
 
 def test_unreviewed_or_unallowlisted_regex_is_excluded(policy: dict) -> None:
@@ -321,23 +347,17 @@ def test_active_final_group_has_no_terminal_target(policy: dict) -> None:
 
 def test_barrier_prevents_transition_but_later_segment_remains_usable(policy: dict) -> None:
     groups = [_group(policy, "before", 1), _group(policy, "after", 3, tactic="execution", technique="T1059")]
-    barrier = {
-        "schema_version": BARRIER_SCHEMA_VERSION,
-        "authority": AUTHORITY,
-        "barrier_id": _id("barrier", "one"),
-        "event_id": _id("event", "barrier"),
-        "source_member_id": groups[0]["source_member_id"],
-        "source_member_sha256": MEMBER_HASH,
-        "event_order": 2,
-        "reason_code": "parser_abstention",
-        "prediction_policy_id": "prediction-only-reviewed-rule-labels-20260816.v1",
-        "prediction_policy_sha256": "b" * 64,
-        "sanitizer_policy_id": "privacy.v1",
-        "pseudonymization_policy_id": "hmac.v1",
-        "status": "causal_barrier",
-    }
-    # Use the policy hash in the barrier so its receipt is internally valid.
-    barrier["prediction_policy_sha256"] = load_prediction_attck_label_policy(POLICY_PATH)["policy_sha256"]
+    barrier = build_prediction_barrier(
+        event_id=_id("event", "barrier"),
+        source_member_id=groups[0]["source_member_id"],
+        source_member_sha256=MEMBER_HASH,
+        event_order=2,
+        reason_code="parser_abstention",
+        prediction_policy_id=policy["policy_id"],
+        prediction_policy_sha256=policy["policy_sha256"],
+        sanitizer_policy_id="privacy.v1",
+        pseudonymization_policy_id="hmac.v1",
+    )
     examples = build_next_prediction_label_examples(_session(policy, groups, barriers=[barrier]))
     assert len(examples) == 1
     assert examples[0]["prediction_group_id"] == groups[1]["group_id"]

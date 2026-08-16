@@ -474,10 +474,13 @@ def _prediction_context_allows(candidate: Mapping[str, Any]) -> bool:
         return _text(candidate.get("evidence_type")) == "command_operation"
     if context.get("reviewed") is not True:
         return False
-    if _text(context.get("class")) not in {
-        "reviewed_structural_operation",
-        "reviewed_literal_command_pattern",
-    }:
+    context_class = _text(context.get("class"))
+    evidence_type = _text(candidate.get("evidence_type"))
+    expected_class = {
+        "command_operation": "reviewed_structural_operation",
+        "command_regex": "reviewed_literal_command_pattern",
+    }.get(evidence_type)
+    if context_class != expected_class:
         return False
     if context.get("inert_text_match") is True:
         return False
@@ -670,6 +673,11 @@ def validate_prediction_label(value: Any) -> list[str]:
             errors.append(f"label.{field} is required")
     if not isinstance(value.get("audit_metadata"), Mapping):
         errors.append("label.audit_metadata is invalid")
+    if all(field in value for field in ("label_id", "schema_version")):
+        body = dict(value)
+        body.pop("label_id", None)
+        if value.get("label_id") != stable_id("predlabel", body):
+            errors.append("label.label_id does not match content")
     errors.extend(_contains_forbidden(value))
     return sorted(set(errors))
 
@@ -781,6 +789,11 @@ def validate_prediction_label_group(value: Any) -> list[str]:
     refs = value.get("evidence_refs")
     if refs != sorted(set(refs or [])) or refs != [value.get("event_id")]:
         errors.append("group.evidence_refs are invalid")
+    if all(field in value for field in ("group_id", "event_id", "labels")):
+        if value.get("group_id") != stable_id(
+            "predgroup", {"event_id": value.get("event_id"), "labels": value.get("labels")}
+        ):
+            errors.append("group.group_id does not match content")
     if isinstance(value.get("group_sha256"), str):
         body = dict(value)
         body.pop("group_sha256", None)
@@ -855,6 +868,11 @@ def validate_prediction_barrier(value: Any) -> list[str]:
         errors.append("barrier.reason_code is invalid")
     if value.get("status") != "causal_barrier":
         errors.append("barrier.status is invalid")
+    if all(field in value for field in ("barrier_id", "event_id", "reason_code")):
+        if value.get("barrier_id") != stable_id(
+            "predbarrier", {"event_id": value.get("event_id"), "reason_code": value.get("reason_code")}
+        ):
+            errors.append("barrier.barrier_id does not match content")
     if not all(_text(value.get(field)) for field in ("prediction_policy_id", "sanitizer_policy_id", "pseudonymization_policy_id")):
         errors.append("barrier provenance identities are required")
     errors.extend(_contains_forbidden(value))
@@ -1196,6 +1214,11 @@ def validate_next_prediction_label_example(value: Any) -> list[str]:
                 errors.append("continuation target labels are required")
     if not isinstance(value.get("changed_from_current"), bool):
         errors.append("example.changed_from_current must be boolean")
+    if all(field in value for field in ("example_id", "target", "model_input")):
+        body = dict(value)
+        body.pop("example_id", None)
+        if value.get("example_id") != stable_id("predexample", body):
+            errors.append("example.example_id does not match content")
     input_refs = set(value.get("model_input", {}).get("input_evidence_refs") or {}) if isinstance(value.get("model_input"), Mapping) else set()
     target_refs = set(target.get("target_evidence_refs") or {}) if isinstance(target, Mapping) else set()
     if input_refs & target_refs:
@@ -1237,6 +1260,12 @@ def validate_prediction_attck_environment(value: Any) -> list[str]:
         body.pop("environment_sha256", None)
         if value["environment_sha256"] != _sha_json(body):
             errors.append("environment.environment_sha256 does not match content")
+    if all(field in value for field in ("environment_id", "schema_version")):
+        body = dict(value)
+        body.pop("environment_id", None)
+        body.pop("environment_sha256", None)
+        if value.get("environment_id") != stable_id("predenv", body):
+            errors.append("environment.environment_id does not match content")
     return sorted(set(errors))
 
 
