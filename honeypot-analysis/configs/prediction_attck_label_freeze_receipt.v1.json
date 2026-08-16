@@ -43,7 +43,7 @@
     "focused_tests_passed": true,
     "focused_test_count": 28,
     "existing_regression_tests_passed": true,
-    "existing_regression_count": 164,
+    "existing_regression_count": 137,
     "compileall_passed": true,
     "git_diff_check_passed": true,
     "pip_check_passed": true,
@@ -56,5 +56,5 @@
     "sealed_test_accessed": false,
     "production_changed": false
   },
-  "receipt_sha256": "00c745f33020751a72617e85dd8c390e13046c62273787eba5e4dfa3ecd2ab8f"
+  "receipt_sha256": "348e1bad645d59a61d7aabad8a6dbe4d865174814a80bfc3dc1b42dd21bc41db"
 }
