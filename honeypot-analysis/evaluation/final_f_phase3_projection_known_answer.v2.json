@@ -1,0 +1,55 @@
+{
+  "schema_version": "final_f_phase3_projection_known_answer.v2",
+  "status": "FROZEN",
+  "implementation_commit": "339ae71bf312da34bbc0e43629e74d7c9f3f6248",
+  "implementation_tree": "d38931ef2d1d478b163388be7c4ed76cea15ba18",
+  "case_id": "phase3-known-answer",
+  "case_shape": "transfer_attempt_then_permission_modify_then_execution_attempt",
+  "provider_scope": "phase3-test-provider",
+  "projection_schema": "ai_advisory_projection.v2",
+  "projection_contract_sha256": "acf6e3a017af771a24cc936e94ccf2edee1bb1612ae3896f6f491c207292e611",
+  "ai_policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+  "assessment_id": "session_assessment_v6_5e4b2cc225f9067719023581af1d50ac",
+  "report_content_sha256": "483b9725a56b91a57e01d2d08e5307084866a8953aa56dee75b22018b0ed729f",
+  "evidence_sha256": "de525515d49fb8a9c0859beeda54eb9bcab3a9a8328d6c56231ea5d5c774f862",
+  "graph_sha256": "3b89c2c1b3be98f108e2190650e884d1ecf2cc26f449e5ac945e8c075d029154",
+  "typed_fact_set_sha256": "f988df9fa1c8f563f9d38b290dc8497a07eacce2994d6845f37ed2f293cd1863",
+  "guidance_content_sha256": "6449fd53bc1bd620ed864339faa359aa542c0f58a34ac59d4e8bb69f89ca889f",
+  "projection_sha256": "f70af84a6a17fe0eda7b0f603a435566cd2e9a01784bbfc951b7cee4b066ebef",
+  "timeline_semantic_families": [
+    ["transfer_attempt"],
+    ["filesystem"],
+    ["execution"]
+  ],
+  "timeline_operation_types": [
+    ["remote_content_access", "transfer_attempt"],
+    ["permission_modify"],
+    ["execution_attempt"]
+  ],
+  "counts": {
+    "timeline_steps": 3,
+    "facts": 3,
+    "chains": 1,
+    "relationships": 3,
+    "findings": 1,
+    "hypotheses": 0,
+    "actions": 2,
+    "limitations": 5,
+    "evidence_gaps": 0
+  },
+  "privacy": {
+    "assessment_scoped_aliases": true,
+    "prohibited_fields_absent": true,
+    "private_values_absent": true,
+    "attacker_controlled_prose_absent": true
+  },
+  "authority": {
+    "ai_alert_authority": false,
+    "ai_canonical_authority": false,
+    "ai_execution_authority": false,
+    "ai_finding_authority": false,
+    "ai_guidance_authority": false,
+    "ai_hypothesis_authority": false,
+    "ai_prediction_authority": false
+  }
+}

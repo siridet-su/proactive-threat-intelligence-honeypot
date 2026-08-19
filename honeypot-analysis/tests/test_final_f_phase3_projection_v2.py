@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from pathlib import Path
 import re
 
 import pytest
@@ -31,6 +32,11 @@ AI_POLICY = "evaluation/final_f_ai_advisory_policy.v2.proposed.json"
 PROJECTION_CONTRACT = "evaluation/final_f_contract_bundle.v1.json"
 ALIAS_KEY = b"phase-3-known-answer-alias-key!!"
 ALIAS_RE = re.compile(r"^a_[0-9a-f]{32}$")
+KNOWN_ANSWER = (
+    Path(__file__).resolve().parents[1]
+    / "evaluation"
+    / "final_f_phase3_projection_known_answer.v2.json"
+)
 RAW_VALUES = (
     "wget https://example.invalid/a -O /tmp/a",
     "chmod 700 /tmp/a",
@@ -248,3 +254,46 @@ def test_projection_fails_closed_on_policy_contract_and_assessment_mismatch(tmp_
             ai_policy_path=AI_POLICY,
             projection_contract_path=PROJECTION_CONTRACT,
         )
+
+
+def test_frozen_phase3_known_answer_rebuilds_exactly(monkeypatch) -> None:
+    expected = json.loads(KNOWN_ANSWER.read_text(encoding="utf-8"))
+    import production.reporting.session_assessment_v4 as assessment_v4
+
+    monkeypatch.setattr(
+        assessment_v4,
+        "_git_revision",
+        lambda: expected["implementation_commit"],
+    )
+    report = _assessment(expected["case_id"])
+    projection = _projection(report)
+    assert report["assessment_id"] == expected["assessment_id"]
+    for key in (
+        "report_content_sha256", "evidence_sha256", "graph_sha256",
+        "typed_fact_set_sha256", "guidance_content_sha256",
+    ):
+        actual = {
+            "report_content_sha256": report["report_content_sha256"],
+            "evidence_sha256": report["canonical_evidence"]["evidence_sha256"],
+            "graph_sha256": report["canonical_evidence"]["semantic_graph"][
+                "graph_sha256"
+            ],
+            "typed_fact_set_sha256": report["canonical_evidence"][
+                "semantic_graph"
+            ]["typed_fact_set_sha256"],
+            "guidance_content_sha256": report["response_guidance_v4"][
+                "content_sha256"
+            ],
+        }[key]
+        assert actual == expected[key]
+    assert projection["projection_sha256"] == expected["projection_sha256"]
+    assert [
+        item["semantic_families"] for item in projection["timeline_steps"]
+    ] == expected["timeline_semantic_families"]
+    assert [
+        item["operation_types"] for item in projection["timeline_steps"]
+    ] == expected["timeline_operation_types"]
+    assert {
+        key: len(projection[key]) for key in expected["counts"]
+    } == expected["counts"]
+    assert projection["authority"] == expected["authority"]
