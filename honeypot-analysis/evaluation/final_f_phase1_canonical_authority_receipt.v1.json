@@ -1,0 +1,57 @@
+{
+  "schema_version": "final_f_phase1_canonical_authority_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "phase": 1,
+  "implementation_commit": "af41815387720921461d47f5fcfe936f20ac6072",
+  "implementation_tree": "65b950fd7b710201f153f24bd6060e69b253fa89",
+  "phase_0_receipt_sha256": "54049763d13173f7e4cedb184b8ebd2f2c98fd7dd8325fcb05aea3a721efe194",
+  "authority_contract": {
+    "current_producer": "session_assessment.v5",
+    "canonical_finding_authority": "trusted_graph_authority_decision_required",
+    "historical_v4_disposition": "read_only_authority_filtered_presentation",
+    "audit_only_presentation": "prohibited_as_canonical"
+  },
+  "files": [
+    {
+      "path": "honeypot-analysis/production/reporting/canonical_pipeline.py",
+      "sha256": "c305ae85dd39f9d6c309c88ba695efb2ffba727f5a7dc5b547f2d5bf96280aca"
+    },
+    {
+      "path": "honeypot-analysis/production/workers/analysis_worker.py",
+      "sha256": "1e05d5f4c2c3644a7c2df1df3d8c8d891f96cccb04babaae3d3d77002c8ace1f"
+    },
+    {
+      "path": "honeypot-analysis/production/reporting/session_assessment_v5.py",
+      "sha256": "0d5910679fc809d425948ca36ddd4ada647ec5f60a743edb5189ad7d6d240fb2"
+    },
+    {
+      "path": "honeypot-analysis/production/api/monitor_web.py",
+      "sha256": "db900c2012b5e4971eb155fb32164667c160a6c2fa6894edfcbdeeaf53d5f157"
+    },
+    {
+      "path": "honeypot-analysis/production/reporting/artifacts.py",
+      "sha256": "6a07c8325a6acbdc647b5f09dfbab757f4c92b534ae0961e8398febf26652d10"
+    },
+    {
+      "path": "honeypot-analysis/tests/test_session_assessment_v4.py",
+      "sha256": "ba76ccc65f9ed9ff193d6f3c10413fddfce00865d39ec74eae887715e86578ed"
+    },
+    {
+      "path": "honeypot-analysis/tests/test_final_f_phase1_authority.py",
+      "sha256": "b86d742b44da20d3a2e87695d149cf6c1e0c3d9155b97dc515fe62bb14ce0eaa"
+    }
+  ],
+  "validation": {
+    "phase_1_authority_suite": "51 passed, 1 skipped",
+    "related_monitor_artifact_suite": "61 passed",
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "pip_check": "PASS"
+  },
+  "production_deployed": false,
+  "historical_records_modified": false,
+  "guidance_architecture_changed": false,
+  "ai_runtime_changed": false,
+  "transformer_changed": false,
+  "receipt_sha256": "a3e9cc6f9efbbbf722108d0b29398efe9b7d506304fe140d188f412dbe6fa9a1"
+}
