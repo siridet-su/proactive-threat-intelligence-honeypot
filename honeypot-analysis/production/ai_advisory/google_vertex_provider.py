@@ -16,6 +16,7 @@ from production.ai_advisory.contracts import AIAdvisoryContractError, sha256_jso
 from production.ai_advisory.provider import AIProviderResponse, AIProviderUnavailable
 from production.ai_advisory.security import endpoint_sha256
 from production.utils.serialization import stable_json
+from production.ai_advisory.integration_v2 import build_ai_vertex_request_v2
 
 
 PROVIDER_ID = "google_vertex_gemini"
@@ -269,6 +270,38 @@ def _vertex_request_contract_instruction(projection: Mapping[str, Any]) -> str:
     )
 
 
+def build_vertex_request(
+    projection: Mapping[str, Any],
+    *,
+    schema_sha256: str,
+    policy_sha256: str,
+    request_options_sha256: str = "",
+) -> dict[str, Any]:
+    """Build the version-dispatched provider request envelope.
+
+    The historical v1 body is preserved byte-for-byte.  V2 carries its own
+    explicit request schema and projection content hash.
+    """
+
+    if projection.get("schema_version") == "ai_advisory_projection.v2":
+        if not request_options_sha256:
+            raise AIAdvisoryContractError(
+                "v2 provider request requires request-options identity"
+            )
+        return build_ai_vertex_request_v2(
+            projection,
+            schema_sha256=schema_sha256,
+            policy_sha256=policy_sha256,
+            request_options_sha256=request_options_sha256,
+        )
+    return {
+        "schema_version": "ai_vertex_request.v1",
+        "projection": projection,
+        "schema_sha256": str(schema_sha256),
+        "policy_sha256": str(policy_sha256),
+    }
+
+
 class GoogleVertexGeminiProvider:
     """Constrained Vertex AI Gemini provider using ``google-genai`` and ADC."""
 
@@ -346,12 +379,12 @@ class GoogleVertexGeminiProvider:
         # worker still supplies and locally fences the content-addressed key.
         del idempotency_key
         timeout_ms = max(1, int(float(timeout_seconds) * 1000))
-        request = {
-            "schema_version": "ai_vertex_request.v1",
-            "projection": projection,
-            "schema_sha256": str(schema_sha256),
-            "policy_sha256": str(policy_sha256),
-        }
+        request = build_vertex_request(
+            projection,
+            schema_sha256=str(schema_sha256),
+            policy_sha256=str(policy_sha256),
+            request_options_sha256=self.request_options_sha256,
+        )
         system_instruction = [
             *(str(item) for item in prompt_contract),
             _vertex_request_contract_instruction(projection),

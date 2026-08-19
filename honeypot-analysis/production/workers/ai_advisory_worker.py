@@ -18,8 +18,26 @@ from production.ai_advisory.contracts import (
     sha256_json,
     validate_provider_output,
 )
+from production.ai_advisory.contracts_v2 import (
+    DEFAULT_PROJECTION_CONTRACT_PATH,
+    build_deterministic_abstention_v2,
+    contract_schema_sha256_v2,
+    provider_output_json_schema_v2,
+    validate_provider_output_v2,
+    validate_validated_output_v2,
+)
+from production.ai_advisory.integration_v2 import (
+    V1_TASK_SCHEMA,
+    V2_RECORD_SCHEMA,
+    V2_TASK_SCHEMA,
+    load_ai_advisory_contract,
+    request_identity_material_v2,
+    validate_ai_advisory_record_v2,
+    v2_invocation_eligibility,
+)
 from production.ai_advisory.projection import (
     build_ai_advisory_projection,
+    build_ai_advisory_projection_v2,
     restore_validated_output_aliases,
 )
 from production.ai_advisory.provider import (
@@ -27,8 +45,15 @@ from production.ai_advisory.provider import (
     AIProviderUnavailable,
     build_ai_advisory_provider,
 )
-from production.ai_advisory.rendering import render_validated_advisory
-from production.ai_advisory.security import ProviderAliasScope, load_provider_alias_key
+from production.ai_advisory.rendering import (
+    render_validated_advisory,
+    render_validated_advisory_v2,
+)
+from production.ai_advisory.security import (
+    AssessmentAliasScope,
+    ProviderAliasScope,
+    load_provider_alias_key,
+)
 from production.storage import open_existing_storage
 from production.utils.config import ProductionConfig
 from production.utils.sensitive_data import redact_exception_for_log
@@ -37,7 +62,15 @@ from production.utils.service_lifecycle import ServiceLifecycle
 from production.workers.job_lifecycle import JobLeaseHeartbeat, new_job_owner
 
 
-TASK_KEYS = {"schema_version", "report_id", "session_id", "assessment_id"}
+TASK_KEYS_V1 = {"schema_version", "report_id", "session_id", "assessment_id"}
+TASK_KEYS_V2 = {
+    "schema_version",
+    "report_id",
+    "session_id",
+    "assessment_id",
+    "report_content_sha256",
+    "advisory_contract_version",
+}
 ZERO_SHA256 = "0" * 64
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -140,13 +173,22 @@ class AIAdvisoryWorker:
         # This optional worker joins an already initialized database through a
         # bounded, read-only schema/ledger readiness check.
         self.storage = storage or open_existing_storage(config.database_settings())
-        self.policy, self.policy_sha256, self.policy_path = (
-            load_ai_advisory_policy(config.ai_advisory_policy_path)
-        )
+        (
+            self.policy,
+            self.policy_sha256,
+            self.policy_path,
+            self.contract_version,
+        ) = load_ai_advisory_contract(config.ai_advisory_policy_path)
         self.provider = provider or build_ai_advisory_provider(config)
         self.prompt_sha256 = sha256_json(self.policy["prompt_contract"])
-        self.response_schema = provider_output_json_schema(self.policy)
-        self.schema_sha256 = contract_schema_sha256(self.policy)
+        if self.contract_version == "v2":
+            self.response_schema = provider_output_json_schema_v2(self.policy)
+            self.schema_sha256 = contract_schema_sha256_v2(self.policy)
+            self.projection_contract_path = str(DEFAULT_PROJECTION_CONTRACT_PATH)
+        else:
+            self.response_schema = provider_output_json_schema(self.policy)
+            self.schema_sha256 = contract_schema_sha256(self.policy)
+            self.projection_contract_path = ""
         self.worker_owner = new_job_owner("ai-advisory")
         self.alias_key = (
             load_provider_alias_key(config.ai_advisory_alias_key_file)
@@ -169,6 +211,16 @@ class AIAdvisoryWorker:
             }
         )
         return ProviderAliasScope(self.alias_key, provider_scope)
+
+    def _v2_alias_scope(self, assessment_id: str) -> AssessmentAliasScope:
+        provider_id = str(getattr(self.provider, "provider_id", "") or "").strip()
+        if not provider_id:
+            provider_id = "unconfigured"
+        return AssessmentAliasScope(
+            self.alias_key,
+            provider_id=provider_id,
+            assessment_id=str(assessment_id or "").strip(),
+        )
 
     def _call_provider_with_deadline(
         self,
@@ -232,10 +284,16 @@ class AIAdvisoryWorker:
 
     def _validate_task(self, job: Mapping[str, Any]) -> Dict[str, str]:
         task = job.get("task")
-        if not isinstance(task, Mapping) or set(task) != TASK_KEYS:
+        if not isinstance(task, Mapping):
             raise AIAdvisoryContractError("AI advisory task contract is invalid")
-        if task.get("schema_version") != "ai_advisory_task.v1":
+        task_schema = str(task.get("schema_version") or "")
+        expected_keys = TASK_KEYS_V2 if task_schema == V2_TASK_SCHEMA else TASK_KEYS_V1
+        if set(task) != expected_keys:
+            raise AIAdvisoryContractError("AI advisory task contract is invalid")
+        if task_schema not in {V1_TASK_SCHEMA, V2_TASK_SCHEMA}:
             raise AIAdvisoryContractError("AI advisory task schema is invalid")
+        if task_schema != f"ai_advisory_task.{self.contract_version}":
+            raise AIAdvisoryContractError("AI advisory task version does not match worker")
         result = {
             key: str(task.get(key) or "").strip()
             for key in ("report_id", "session_id", "assessment_id")
@@ -247,6 +305,18 @@ class AIAdvisoryWorker:
                 raise AIAdvisoryContractError(
                     f"AI advisory task {key} does not match its outbox row"
                 )
+        result["task_schema"] = task_schema
+        if task_schema == V2_TASK_SCHEMA:
+            if task.get("advisory_contract_version") != "v2":
+                raise AIAdvisoryContractError(
+                    "v2 task advisory contract version is invalid"
+                )
+            report_hash = str(task.get("report_content_sha256") or "").lower()
+            if not _SHA256_RE.fullmatch(report_hash):
+                raise AIAdvisoryContractError(
+                    "v2 task report_content_sha256 is invalid"
+                )
+            result["report_content_sha256"] = report_hash
         return result
 
     def _request_identity(self, projection: Mapping[str, Any]) -> Dict[str, str]:
@@ -301,8 +371,29 @@ class AIAdvisoryWorker:
             "api_version": api_version,
             "request_options_sha256": request_options_sha256,
         }
-        request_sha256 = sha256_json(
-            {
+        request_limits = {
+            "max_bytes": min(
+                self.config.ai_advisory_max_request_bytes,
+                int(self.policy["limits"]["max_request_bytes"]),
+            ),
+            "max_tokens": min(
+                self.config.ai_advisory_max_request_tokens,
+                int(self.policy["limits"]["max_request_tokens"]),
+            ),
+        }
+        if self.contract_version == "v2":
+            request_material = request_identity_material_v2(
+                projection,
+                provider_identity=provider_identity,
+                prompt_sha256=self.prompt_sha256,
+                schema_sha256=self.schema_sha256,
+                policy_sha256=projection["provenance"]["ai_policy_sha256"],
+                request_bytes=request_bytes,
+                request_tokens=request_tokens,
+                request_limits=request_limits,
+            )
+        else:
+            request_material = {
                 "projection": projection,
                 "provider_identity": provider_identity,
                 "prompt_sha256": self.prompt_sha256,
@@ -310,18 +401,9 @@ class AIAdvisoryWorker:
                 "policy_sha256": projection["provenance"]["ai_policy_sha256"],
                 "request_bytes": request_bytes,
                 "request_tokens": request_tokens,
-                "request_limits": {
-                    "max_bytes": min(
-                        self.config.ai_advisory_max_request_bytes,
-                        int(self.policy["limits"]["max_request_bytes"]),
-                    ),
-                    "max_tokens": min(
-                        self.config.ai_advisory_max_request_tokens,
-                        int(self.policy["limits"]["max_request_tokens"]),
-                    ),
-                },
+                "request_limits": request_limits,
             }
-        )
+        request_sha256 = sha256_json(request_material)
         return {
             "provider_id": provider_id,
             "model_id": model_id,
@@ -454,6 +536,383 @@ class AIAdvisoryWorker:
             "metrics": dict(metrics),
         }
 
+    def _v2_provenance(
+        self,
+        *,
+        report: Mapping[str, Any],
+        projection: Mapping[str, Any],
+        identity: Mapping[str, str],
+        response_sha256: str,
+        provider_id: str,
+        model_id: str,
+    ) -> dict[str, Any]:
+        evidence = report.get("canonical_evidence") or {}
+        graph = evidence.get("semantic_graph") or {}
+        guidance = report.get("response_guidance_v4") or {}
+        return {
+            "report_content_sha256": str(report.get("report_content_sha256") or ""),
+            "projection_sha256": projection["projection_sha256"],
+            "evidence_sha256": str(evidence.get("evidence_sha256") or ""),
+            "graph_sha256": str(graph.get("graph_sha256") or ""),
+            "typed_fact_set_sha256": str(graph.get("typed_fact_set_sha256") or ""),
+            "guidance_content_sha256": str(guidance.get("content_sha256") or ""),
+            "request_sha256": identity["request_sha256"],
+            "response_sha256": response_sha256,
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "prompt_sha256": self.prompt_sha256,
+            "schema_sha256": self.schema_sha256,
+            "policy_sha256": self.policy_sha256,
+            "projection_contract_sha256": str(
+                (projection.get("provenance") or {}).get(
+                    "projection_contract_sha256"
+                )
+                or ""
+            ),
+            "provider_identity": {
+                "adapter_revision": identity["adapter_revision"],
+                "endpoint_sha256": identity["endpoint_sha256"],
+                "api_version": identity["api_version"],
+                "request_options_sha256": identity["request_options_sha256"],
+            },
+            "request_budget": {
+                "request_bytes": int(identity["request_bytes"]),
+                "request_tokens_estimate": int(identity["request_tokens"]),
+                "max_request_bytes": min(
+                    self.config.ai_advisory_max_request_bytes,
+                    int(self.policy["limits"]["max_request_bytes"]),
+                ),
+                "max_request_tokens": min(
+                    self.config.ai_advisory_max_request_tokens,
+                    int(self.policy["limits"]["max_request_tokens"]),
+                ),
+            },
+        }
+
+    @staticmethod
+    def _v2_safety() -> dict[str, Any]:
+        return {
+            "requires_manual_approval": True,
+            "safe_to_auto_execute": False,
+            "alerts_authorized": False,
+            "response_actions_authorized": False,
+        }
+
+    def _v2_record_payload(
+        self,
+        *,
+        status: str,
+        validation_status: str,
+        reason_code: str,
+        validated_output: Mapping[str, Any] | None,
+        rendered: Mapping[str, Any] | None,
+        provenance: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        authority = (
+            "non_authoritative_deterministic_abstention"
+            if status == "abstained"
+            else (
+                "non_authoritative_rejected_output"
+                if status == "rejected"
+                else "non_authoritative_advisory_only"
+            )
+        )
+        payload = {
+            "schema_version": V2_RECORD_SCHEMA,
+            "status": status,
+            "authority": authority,
+            "validation": {
+                "status": validation_status,
+                "reason_code": reason_code,
+            },
+            "validated_output": dict(validated_output or {}),
+            "rendered_advisory": dict(rendered or {}),
+            "safety": self._v2_safety(),
+            "provenance": dict(provenance),
+        }
+        return validate_ai_advisory_record_v2(
+            payload,
+            projection_sha256=str(provenance.get("projection_sha256") or ""),
+            policy_sha256=str(provenance.get("policy_sha256") or ""),
+        )
+
+    def _process_claim_v2(
+        self,
+        job: Mapping[str, Any],
+        task: Mapping[str, str],
+        *,
+        renew_claim: Callable[[], None],
+    ) -> str:
+        report_row = self.storage.get_report_by_id(task["report_id"])
+        if not report_row or not isinstance(report_row.get("payload"), Mapping):
+            raise AIAdvisoryContractError("persisted canonical report is unavailable")
+        report = report_row["payload"]
+        if report.get("schema_version") != "session_assessment.v6":
+            raise AIAdvisoryContractError("v2 advisory requires a current v6 report")
+        if (
+            str(report.get("assessment_id") or "") != task["assessment_id"]
+            or str(report_row.get("session_id") or "") != task["session_id"]
+            or str(report.get("report_content_sha256") or "").lower()
+            != task.get("report_content_sha256")
+        ):
+            raise AIAdvisoryContractError("v2 report identity does not match task")
+        alias_scope = self._v2_alias_scope(task["assessment_id"])
+        projection = build_ai_advisory_projection_v2(
+            report,
+            alias_scope=alias_scope,
+            ai_policy_path=self.policy_path,
+            projection_contract_path=self.projection_contract_path,
+        )
+        identity = self._request_identity(projection)
+        self._enforce_request_budget(identity)
+        cached = self.storage.get_ai_advisory_by_cache_key(identity["cache_key"])
+        if cached:
+            cached_payload = cached.get("payload")
+            validate_ai_advisory_record_v2(
+                cached_payload,
+                projection_sha256=projection["projection_sha256"],
+                policy_sha256=self.policy_sha256,
+            )
+            renew_claim()
+            completed = self.storage.complete_ai_advisory_job(
+                job["job_id"],
+                job["claim_owner"],
+                job["claim_token"],
+                self._cached_record(cached, task),
+                completion_code="cache_replayed",
+            )
+            if not completed:
+                raise RuntimeError("AI advisory cache completion lost its claim")
+            return "cache_replayed"
+
+        eligible, reason = v2_invocation_eligibility(projection)
+        if not eligible:
+            validated = build_deterministic_abstention_v2(
+                projection=projection,
+                report=report,
+                alias_scope=alias_scope,
+                reason_code=reason,
+                policy_path=self.policy_path,
+                projection_contract_path=self.projection_contract_path,
+            )
+            validated = validate_validated_output_v2(
+                validated,
+                projection=projection,
+                report=report,
+                alias_scope=alias_scope,
+                policy_path=self.policy_path,
+                projection_contract_path=self.projection_contract_path,
+            )
+            rendered = render_validated_advisory_v2(
+                validated, projection=projection, policy=self.policy
+            )
+            response_sha256 = sha256_json(validated)
+            no_call_identity = dict(identity)
+            no_call_identity["provider_id"] = "deterministic_no_call"
+            no_call_identity["model_id"] = ""
+            payload = self._v2_record_payload(
+                status="abstained",
+                validation_status="accepted",
+                reason_code=reason,
+                validated_output=validated,
+                rendered=rendered,
+                provenance=self._v2_provenance(
+                    report=report,
+                    projection=projection,
+                    identity=no_call_identity,
+                    response_sha256=response_sha256,
+                    provider_id="deterministic_no_call",
+                    model_id="",
+                ),
+            )
+            record = self._record(
+                task=task,
+                identity=no_call_identity,
+                projection=projection,
+                status="abstained",
+                response_sha256=response_sha256,
+                payload=payload,
+                metrics={
+                    "schema_valid": True,
+                    "validator_accepted": True,
+                    "validator_reason_code": reason,
+                    "deterministic_no_call": True,
+                    "provider_called": False,
+                    "cache_hit": False,
+                },
+            )
+            renew_claim()
+            completed = self.storage.complete_ai_advisory_job(
+                job["job_id"],
+                job["claim_owner"],
+                job["claim_token"],
+                record,
+                completion_code="deterministic_abstention",
+            )
+            if not completed:
+                raise RuntimeError("AI advisory abstention lost its claim")
+            return "abstained"
+
+        response = self._call_provider_with_deadline(projection, identity)
+        provider_usage = _provider_usage_metrics(response)
+        computed_response_sha256 = sha256_json(response.structured_output)
+        try:
+            response_bytes = stable_json(response.structured_output).encode("utf-8")
+            response_limit = min(
+                self.config.ai_advisory_max_response_bytes,
+                int(self.policy["limits"]["max_response_bytes"]),
+            )
+            if len(response_bytes) > response_limit:
+                raise AIAdvisoryContractError(
+                    "provider response exceeds the configured limit"
+                )
+            echoed_response_sha256 = str(response.response_sha256 or "")
+            if not _SHA256_RE.fullmatch(echoed_response_sha256):
+                raise AIAdvisoryContractError(
+                    "provider response hash echo is invalid", code="hash_mismatch"
+                )
+            if echoed_response_sha256 != computed_response_sha256:
+                raise AIAdvisoryContractError(
+                    "provider response hash mismatch", code="hash_mismatch"
+                )
+            if (
+                response.provider_id != identity["provider_id"]
+                or response.model_id != identity["model_id"]
+            ):
+                raise AIAdvisoryContractError(
+                    "provider response identity does not match the request",
+                    code="provider_identity_mismatch",
+                )
+            for attribute in (
+                "adapter_revision",
+                "endpoint_sha256",
+                "api_version",
+                "request_options_sha256",
+            ):
+                echoed = str(getattr(response, attribute, "") or "")
+                expected = str(identity.get(attribute) or "")
+                if attribute.endswith("sha256"):
+                    _identity_hash(echoed, attribute, allow_empty=True)
+                else:
+                    _identity_text(echoed, attribute, allow_empty=True)
+                if echoed and echoed != expected:
+                    raise AIAdvisoryContractError(
+                        f"provider response {attribute} does not match the request",
+                        code="provider_identity_mismatch",
+                    )
+            validated = validate_provider_output_v2(
+                response.structured_output,
+                projection=projection,
+                report=report,
+                alias_scope=alias_scope,
+                policy_path=self.policy_path,
+                projection_contract_path=self.projection_contract_path,
+            )
+            validated = validate_validated_output_v2(
+                validated,
+                projection=projection,
+                report=report,
+                alias_scope=alias_scope,
+                policy_path=self.policy_path,
+                projection_contract_path=self.projection_contract_path,
+            )
+            rendered = render_validated_advisory_v2(
+                validated, projection=projection, policy=self.policy
+            )
+        except AIAdvisoryContractError as exc:
+            payload = self._v2_record_payload(
+                status="rejected",
+                validation_status="rejected",
+                reason_code=exc.code,
+                validated_output=None,
+                rendered=None,
+                provenance=self._v2_provenance(
+                    report=report,
+                    projection=projection,
+                    identity=identity,
+                    response_sha256=computed_response_sha256,
+                    provider_id=str(response.provider_id or "unavailable"),
+                    model_id=str(response.model_id or ""),
+                ),
+            )
+            record = self._record(
+                task=task,
+                identity=identity,
+                projection=projection,
+                status="rejected",
+                response_sha256=computed_response_sha256,
+                payload=payload,
+                metrics={
+                    "schema_valid": False,
+                    "validator_accepted": False,
+                    "validator_reason_code": exc.code,
+                    "provider_called": True,
+                    "cache_hit": False,
+                    **provider_usage,
+                },
+            )
+            renew_claim()
+            completed = self.storage.complete_ai_advisory_job(
+                job["job_id"],
+                job["claim_owner"],
+                job["claim_token"],
+                record,
+                completion_code="rejected",
+            )
+            if not completed:
+                raise RuntimeError("AI advisory rejection lost its claim")
+            return "rejected"
+
+        synthesis = validated["synthesis"]
+        status = "abstained" if synthesis["abstained"] else "accepted"
+        payload = self._v2_record_payload(
+            status=status,
+            validation_status="accepted",
+            reason_code=str(synthesis.get("abstention_reason_code") or ""),
+            validated_output=validated,
+            rendered=rendered,
+            provenance=self._v2_provenance(
+                report=report,
+                projection=projection,
+                identity=identity,
+                response_sha256=computed_response_sha256,
+                provider_id=str(response.provider_id or ""),
+                model_id=str(response.model_id or ""),
+            ),
+        )
+        record = self._record(
+            task=task,
+            identity=identity,
+            projection=projection,
+            status=status,
+            response_sha256=computed_response_sha256,
+            payload=payload,
+            metrics={
+                "schema_valid": True,
+                "validator_accepted": True,
+                "validator_reason_code": "",
+                "provider_called": True,
+                "cache_hit": False,
+                "abstained": bool(synthesis["abstained"]),
+                "selected_chain_count": len(synthesis["selected_chain_ids"]),
+                "selected_finding_count": len(synthesis["ranked_finding_ids"]),
+                "selected_action_count": len(synthesis["ranked_action_ids"]),
+                "review_plan_step_count": len(synthesis["review_plan"]),
+                **provider_usage,
+            },
+        )
+        renew_claim()
+        completed = self.storage.complete_ai_advisory_job(
+            job["job_id"],
+            job["claim_owner"],
+            job["claim_token"],
+            record,
+            completion_code="accepted",
+        )
+        if not completed:
+            raise RuntimeError("AI advisory completion lost its claim")
+        return status
+
     def _process_claim(
         self,
         job: Mapping[str, Any],
@@ -461,6 +920,10 @@ class AIAdvisoryWorker:
         renew_claim: Callable[[], None],
     ) -> str:
         task = self._validate_task(job)
+        if self.contract_version == "v2":
+            return self._process_claim_v2(
+                job, task, renew_claim=renew_claim
+            )
         report_row = self.storage.get_report_by_id(task["report_id"])
         if not report_row or not isinstance(report_row.get("payload"), Mapping):
             raise AIAdvisoryContractError("persisted canonical report is unavailable")

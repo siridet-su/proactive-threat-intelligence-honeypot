@@ -112,3 +112,183 @@ def render_validated_advisory(
     }
     _validate_rendered_privacy(result)
     return {**result, "render_sha256": sha256_json(result)}
+
+
+V2_RENDERED_SCHEMA = "ai_advisory_rendered.v2"
+_V2_SECTION_HEADINGS = {
+    "chains": "AI-selected deterministic chains",
+    "findings": "AI-selected canonical findings",
+    "hypotheses": "Existing bounded hypotheses to test",
+    "actions": "Policy-approved manual analyst checks",
+    "limitations": "Recorded deterministic limitations",
+    "evidence_gaps": "Recorded evidence gaps",
+    "questions": "Suggested analyst questions",
+}
+
+
+def _v2_policy_text(
+    policy: Mapping[str, Any],
+    template_id: str,
+    *,
+    question: bool = False,
+) -> str:
+    catalog_key = "analyst_question_templates" if question else "explanation_templates"
+    catalog = policy.get(catalog_key)
+    if not isinstance(catalog, Mapping) or template_id not in catalog:
+        raise AIAdvisoryContractError("v2 renderer template is unavailable")
+    text = catalog[template_id]
+    if not isinstance(text, str) or not text:
+        raise AIAdvisoryContractError("v2 renderer template is invalid")
+    return text
+
+
+def _v2_item(object_type: str, object_id: str, *, label: str = "") -> dict[str, str]:
+    # IDs are assessment-scoped HMAC aliases, and labels are fixed vocabulary
+    # words.  No report statement/entity/command is copied into the rendering.
+    return {
+        "object_type": object_type,
+        "object_id": str(object_id),
+        "label": label or object_type,
+    }
+
+
+def render_validated_advisory_v2(
+    validated_output: Mapping[str, Any],
+    *,
+    projection: Mapping[str, Any],
+    policy: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Render v2 selections using only policy-owned text and opaque aliases."""
+
+    if validated_output.get("schema_version") != "ai_advisory_validated_output.v2":
+        raise AIAdvisoryContractError("v2 renderer requires validated output v2")
+    synthesis = validated_output.get("synthesis")
+    if not isinstance(synthesis, Mapping):
+        raise AIAdvisoryContractError("v2 validated synthesis is missing")
+    if projection.get("projection_sha256") != validated_output.get("projection_sha256"):
+        raise AIAdvisoryContractError("v2 rendered projection identity mismatch")
+
+    if synthesis.get("abstained") is True:
+        result: Dict[str, Any] = {
+            "schema_version": V2_RENDERED_SCHEMA,
+            "status": "abstained",
+            "abstention_reason_code": str(
+                synthesis.get("abstention_reason_code") or ""
+            ),
+            "sections": [],
+            "review_plan": [],
+        }
+        _validate_rendered_privacy(result)
+        return {**result, "render_sha256": sha256_json(result)}
+
+    sections: list[dict[str, Any]] = []
+    collections = (
+        ("chains", "selected_chain_ids", "chain"),
+        ("findings", "ranked_finding_ids", "finding"),
+        ("hypotheses", "selected_hypothesis_ids", "hypothesis"),
+        ("actions", "ranked_action_ids", "action"),
+        ("limitations", "selected_limitation_codes", "limitation"),
+        ("evidence_gaps", "selected_evidence_gap_codes", "evidence_gap"),
+    )
+    for section_id, field, object_type in collections:
+        values = synthesis.get(field) or []
+        if not values:
+            continue
+        sections.append(
+            {
+                "section_id": section_id,
+                "heading": _V2_SECTION_HEADINGS[section_id],
+                "items": [
+                    _v2_item(object_type, value, label=object_type)
+                    for value in values
+                ],
+            }
+        )
+
+    question_text = {
+        item["template_id"]: _v2_policy_text(
+            policy, item["template_id"], question=True
+        )
+        for item in synthesis.get("analyst_question_selections") or []
+    }
+    if question_text:
+        sections.append(
+            {
+                "section_id": "questions",
+                "heading": _V2_SECTION_HEADINGS["questions"],
+                "items": [
+                    {
+                        "template_id": template_id,
+                        "anchor_type": next(
+                            item["anchor_type"]
+                            for item in synthesis["analyst_question_selections"]
+                            if item["template_id"] == template_id
+                        ),
+                        # The text is a reviewed policy template, not provider
+                        # prose or a report-derived statement.
+                        "text": text,
+                    }
+                    for template_id, text in sorted(question_text.items())
+                ],
+            }
+        )
+
+    explanation_text = {
+        item["template_id"]: _v2_policy_text(
+            policy, item["template_id"], question=False
+        )
+        for item in synthesis.get("explanation_template_selections") or []
+    }
+    if explanation_text:
+        sections.append(
+            {
+                "section_id": "explanations",
+                "heading": "Policy-owned explanation templates",
+                "items": [
+                    {"template_id": key, "text": value}
+                    for key, value in sorted(explanation_text.items())
+                ],
+            }
+        )
+
+    plan = []
+    for item in synthesis.get("review_plan") or []:
+        plan_item = {
+            "order": item["order"],
+            "step_type": item["step_type"],
+            "anchor_type": item["anchor_type"],
+            "anchor_id": item["anchor_id"],
+            "related_chain_ids": list(item["related_chain_ids"]),
+            "related_finding_ids": list(item["related_finding_ids"]),
+            "related_hypothesis_ids": list(item["related_hypothesis_ids"]),
+            "related_action_ids": list(item["related_action_ids"]),
+            "limitation_codes": list(item["limitation_codes"]),
+            "evidence_gap_codes": list(item["evidence_gap_codes"]),
+            "analyst_questions": [
+                question_text[template]
+                for template in item["analyst_question_template_ids"]
+                if template in question_text
+            ],
+            "explanation": (
+                _v2_policy_text(policy, item["explanation_template_id"])
+                if item["explanation_template_id"]
+                else ""
+            ),
+        }
+        plan.append(plan_item)
+
+    result = {
+        "schema_version": V2_RENDERED_SCHEMA,
+        "status": "rendered",
+        "abstention_reason_code": "",
+        "sections": sections,
+        "review_plan": plan,
+    }
+    _validate_rendered_privacy(result)
+    return {**result, "render_sha256": sha256_json(result)}
+
+
+__all__ = [
+    "render_validated_advisory",
+    "render_validated_advisory_v2",
+]

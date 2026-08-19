@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sqlite3
 import stat
 import uuid
@@ -61,6 +62,7 @@ class StorageError(RuntimeError):
 
 SQLITE_SCHEMA_VERSION = 3
 AI_ADVISORY_SCHEMA_EXTENSION_ID = "non_authoritative_ai_advisory.v1"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 AI_ADVISORY_RECONCILIATION_CURSOR_SCHEMA = (
     "ai_advisory_reconciliation_cursor.v1"
 )
@@ -2982,12 +2984,6 @@ class SQLiteStorage:
             "ai_advisory_job",
             {"report_id": report_key, "assessment_id": assessment_key},
         )
-        task = {
-            "schema_version": "ai_advisory_task.v1",
-            "report_id": report_key,
-            "session_id": session_key,
-            "assessment_id": assessment_key,
-        }
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             report = conn.execute(
@@ -3000,8 +2996,36 @@ class SQLiteStorage:
                 payload = json.loads(report["payload_json"] or "{}")
             except (TypeError, json.JSONDecodeError) as exc:
                 raise StorageError("committed report is not valid JSON") from exc
+            report_schema = payload.get("schema_version")
+            if report_schema in {"session_assessment.v4", "session_assessment.v5"}:
+                task = {
+                    "schema_version": "ai_advisory_task.v1",
+                    "report_id": report_key,
+                    "session_id": session_key,
+                    "assessment_id": assessment_key,
+                }
+            elif report_schema == "session_assessment.v6":
+                report_content_sha256 = str(
+                    payload.get("report_content_sha256") or ""
+                ).lower()
+                if not _SHA256_RE.fullmatch(report_content_sha256):
+                    raise StorageError("v6 report content identity is invalid")
+                task = {
+                    "schema_version": "ai_advisory_task.v2",
+                    "report_id": report_key,
+                    "session_id": session_key,
+                    "assessment_id": assessment_key,
+                    "report_content_sha256": report_content_sha256,
+                    "advisory_contract_version": "v2",
+                }
+            else:
+                raise StorageError("AI advisory enqueue report identity is invalid")
             if (
-                payload.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"}
+                payload.get("schema_version") not in {
+                    "session_assessment.v4",
+                    "session_assessment.v5",
+                    "session_assessment.v6",
+                }
                 or str(payload.get("assessment_id") or "") != assessment_key
             ):
                 raise StorageError("AI advisory enqueue report identity is invalid")
@@ -3654,7 +3678,12 @@ class SQLiteStorage:
         advisory_id = _required_identity(
             advisory_record["advisory_id"], "advisory_id"
         )
-        if completion_code not in {"accepted", "rejected", "cache_replayed"}:
+        if completion_code not in {
+            "accepted",
+            "rejected",
+            "cache_replayed",
+            "deterministic_abstention",
+        }:
             raise ValueError("AI advisory completion_code is invalid")
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")

@@ -764,7 +764,12 @@ class MongoDBRuntimeOperations:
         if report is None or report.get("session_id") != session_key:
             raise StorageError("AI advisory enqueue requires a committed report")
         payload = _payload(report)
-        if payload.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"} or str(payload.get("assessment_id") or "") != assessment_key:
+        report_schema = payload.get("schema_version")
+        if report_schema not in {
+            "session_assessment.v4",
+            "session_assessment.v5",
+            "session_assessment.v6",
+        } or str(payload.get("assessment_id") or "") != assessment_key:
             raise StorageError("AI advisory enqueue report identity is invalid")
         if not self._session_after_cutoff(session_key, cutoff):
             return None
@@ -777,8 +782,33 @@ class MongoDBRuntimeOperations:
         if self.database.ai_advisory_outbox.count_documents({"status": {"$in": ["queued", "retry", "running"]}}) >= int(max_queue_records):
             return None
         current = _utc(now)
-        task = {"schema_version": "ai_advisory_task.v1", "report_id": report_key, "session_id": session_key, "assessment_id": assessment_key}
-        document = {"_id": job_id, "schema_version": "mongodb_ai_advisory_job.v1", "job_id": job_id, "report_id": report_key, "session_id": session_key, "assessment_id": assessment_key, "status": "queued", "payload_json": stable_json(task), "attempts": 0, "created_at": current, "updated_at": current, "next_retry_at": None, "claim_owner": None, "claim_token": None, "claim_expires_at": None}
+        if report_schema in {"session_assessment.v4", "session_assessment.v5"}:
+            task = {
+                "schema_version": "ai_advisory_task.v1",
+                "report_id": report_key,
+                "session_id": session_key,
+                "assessment_id": assessment_key,
+            }
+            job_schema = "mongodb_ai_advisory_job.v1"
+        else:
+            report_content_sha256 = str(
+                payload.get("report_content_sha256") or ""
+            ).lower()
+            if len(report_content_sha256) != 64 or any(
+                character not in "0123456789abcdef"
+                for character in report_content_sha256
+            ):
+                raise StorageError("v6 report content identity is invalid")
+            task = {
+                "schema_version": "ai_advisory_task.v2",
+                "report_id": report_key,
+                "session_id": session_key,
+                "assessment_id": assessment_key,
+                "report_content_sha256": report_content_sha256,
+                "advisory_contract_version": "v2",
+            }
+            job_schema = "mongodb_ai_advisory_job.v2"
+        document = {"_id": job_id, "schema_version": job_schema, "job_id": job_id, "report_id": report_key, "session_id": session_key, "assessment_id": assessment_key, "status": "queued", "payload_json": stable_json(task), "attempts": 0, "created_at": current, "updated_at": current, "next_retry_at": None, "claim_owner": None, "claim_token": None, "claim_expires_at": None}
         self._exact_insert("ai_advisory_outbox", job_id, document, compare=("report_id", "assessment_id", "payload_json"))
         return job_id
 
@@ -887,7 +917,12 @@ class MongoDBRuntimeOperations:
         required = {"advisory_id", "cache_key", "report_id", "session_id", "assessment_id", "status", "projection_sha256", "request_sha256", "response_sha256", "provider_id", "model_id", "prompt_sha256", "schema_sha256", "policy_sha256", "payload", "metrics"}
         if set(advisory_record) != required:
             raise ValueError("AI advisory storage record has invalid keys")
-        if completion_code not in {"accepted", "rejected", "cache_replayed"}:
+        if completion_code not in {
+            "accepted",
+            "rejected",
+            "cache_replayed",
+            "deterministic_abstention",
+        }:
             raise ValueError("AI advisory completion_code is invalid")
         current = _utc(now)
 
@@ -901,7 +936,11 @@ class MongoDBRuntimeOperations:
                     raise StorageError("AI advisory record does not match its outbox claim")
             advisory_id = _required(advisory_record["advisory_id"], "advisory_id")
             payload_json, metrics_json = stable_json(advisory_record["payload"]), stable_json(advisory_record["metrics"])
-            document = {"_id": advisory_id, "schema_version": "mongodb_ai_advisory.v1", **{key: str(advisory_record[key] or "") for key in required - {"payload", "metrics"}}, "advisory_id": advisory_id, "payload_json": payload_json, "payload_sha256": hashlib.sha256(payload_json.encode()).hexdigest(), "metrics_json": metrics_json, "created_at": current}
+            payload_schema = str(
+                (advisory_record.get("payload") or {}).get("schema_version")
+                or ""
+            )
+            document = {"_id": advisory_id, "schema_version": ("mongodb_ai_advisory.v2" if payload_schema == "ai_advisory_record.v2" else "mongodb_ai_advisory.v1"), **{key: str(advisory_record[key] or "") for key in required - {"payload", "metrics"}}, "advisory_id": advisory_id, "payload_json": payload_json, "payload_sha256": hashlib.sha256(payload_json.encode()).hexdigest(), "metrics_json": metrics_json, "created_at": current}
             try:
                 self._exact_insert("ai_advisories", advisory_id, document, compare=("cache_key", "report_id", "assessment_id", "payload_json", "metrics_json"), session=session)
             except StorageError:
