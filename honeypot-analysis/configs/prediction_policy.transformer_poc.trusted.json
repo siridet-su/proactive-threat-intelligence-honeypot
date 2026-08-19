@@ -1,8 +1,8 @@
 {
   "schema_version": "prediction_policy.v1",
   "policy_id": "professor-approved-corrected-target-transformer-poc",
-  "version": "2026-08-13-phase4-contracts-pending-phase7",
-  "updated_at": "2026-08-13T00:00:00Z",
+  "version": "2026-08-20-finalf-provenance-rebind",
+  "updated_at": "2026-08-20T00:00:00Z",
   "owner": "honeypot-cloud-analysis",
   "review_status": "professor_approved_experimental_poc",
   "policy": {
@@ -31,7 +31,7 @@
     "runtime_trust_policy_path": "production/classification/trust.py",
     "runtime_trust_policy_sha256": "22269cf5dff6c11bf1720b46bce56361b140678f1baff3150efe2806ebff2919",
     "runtime_classifier_environment_path": "configs/next_behavior_classifier_environment.v1.json",
-    "runtime_classifier_environment_sha256": "ce07d63754cd7fbe0d01d99ff5a9f707e10b12a1fbf62b35ba7f68fcad87b991",
+    "runtime_classifier_environment_sha256": "cbdef20f159b465bb62e25f0575a43b0ecc7caeacc55fb7978cb379c1b73edb4",
     "runtime_classifier_checkpoint_path": "models/securebert_ttp/checkpoint-6765/model.safetensors",
     "runtime_classifier_checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
     "trusted_model_only_threshold": 0.9,

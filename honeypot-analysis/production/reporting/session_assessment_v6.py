@@ -23,6 +23,10 @@ from production.reporting.session_assessment_v5 import (
     validate_threat_hypothesis_set_v2,
 )
 from production.utils.serialization import stable_id, stable_json
+from production.storage.session_provenance import (
+    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+    SESSION_SOURCE_E2E_TEST,
+)
 
 
 SCHEMA_VERSION = "session_assessment.v6"
@@ -258,6 +262,25 @@ def validate_session_assessment_v6(
             digest = _text((provenance.get(label) or {}).get("sha256")).lower()
             if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
                 errors.append(f"session assessment {label} provenance is invalid")
+        evaluation_provenance = provenance.get("evaluation_provenance")
+        if evaluation_provenance is not None:
+            expected_evaluation_provenance = {
+                "schema_version": "controlled_synthetic_provenance.v1",
+                "session_source": SESSION_SOURCE_E2E_TEST,
+                "provenance_marker": CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+                "authority": "authenticated_sensor_metadata_allowlist",
+                "excluded_from": [
+                    "empirical_attacker_statistics",
+                    "transformer_training",
+                    "transformer_calibration",
+                    "transformer_test",
+                    "trusted_prediction_history",
+                    "real_attacker_evaluation_claims",
+                    "production_incident_alert_claims",
+                ],
+            }
+            if evaluation_provenance != expected_evaluation_provenance:
+                errors.append("controlled synthetic evaluation provenance is invalid")
     recorded_content = _text(value.get("report_content_sha256")).lower()
     if recorded_content != _sha(report_content_basis(value)):
         errors.append("report content hash mismatch")

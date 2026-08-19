@@ -148,6 +148,40 @@ def test_release_manifest_binds_v3_classifier_receipt_to_effective_configuration
         verify_manifest(output, release)
 
 
+def test_release_manifest_binds_v4_classifier_receipt_to_effective_configuration(
+    tmp_path: Path,
+) -> None:
+    release, package, policy, artifact, rollback = _fixture(tmp_path)
+    classifier_receipt = tmp_path / "next_behavior_classifier_environment.v1.json"
+    classifier_receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": "next_behavior_classifier_environment.v4",
+                "source_identity": {"sha256": "b" * 64},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = _build_manifest(
+        release=release,
+        package=package,
+        policy=policy,
+        artifact=artifact,
+        rollback=rollback,
+        configuration_paths={
+            "policy": str(policy),
+            "classifier_environment": str(classifier_receipt),
+        },
+    )
+    assert manifest["classifier_environment"]["schema_version"] == (
+        "next_behavior_classifier_environment.v4"
+    )
+    assert manifest["classifier_environment"]["source_identity_sha256"] == "b" * 64
+    output = release / "DEPLOYMENT_MANIFEST.json"
+    write_manifest(output, manifest)
+    assert verify_manifest(output, release)["verified"] is True
+
+
 def test_release_manifest_rejects_overlay_and_artifact_changes(
     tmp_path: Path,
 ) -> None:

@@ -85,10 +85,10 @@
       "configs/next_behavior_preprocessing.v2.json": "77c35f705dab415cad233d451b10a1fa96329ad7aae8b1ac59a808eaca2fd8b1",
       "production/classification/trust.py": "22269cf5dff6c11bf1720b46bce56361b140678f1baff3150efe2806ebff2919",
       "production/utils/feedback.py": "f8ccb5acbf1882ca0a3660933bbdae26eede8b42ef5721282a8f5853c454026b",
-      "production/workers/session_monitor.py": "d7ccf75fe87a29e1f72a2a465ff097c0753742315d19f72ca09bafdb87cd56e1",
-      "production/workers/session_worker.py": "c025bccdbd848dc11fb0397f68090293fb55fafb291cc00d8df4d4dac76684c9",
+      "production/workers/session_monitor.py": "a6e77fc0a625ba6851252c533a92a731fb4da3c8fbd711d8727da5cbfbe5104d",
+      "production/workers/session_worker.py": "81f097a3f948008c53c608c89223429d20357b5d2901f6683b4d8187d4c8bee2",
       "data/feeds/mitre_attack_cache.json": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c"
     },
-    "sha256": "fbbf3c60caa2d0650cdaba1254fec6a650cfb985a52a4be93d2ce4eb2bd49ffe"
+    "sha256": "2d8b6058042ad08d890330286ad57396b7e0ec3b2b9e77741dcade6b7f281d72"
   }
 }

@@ -24,6 +24,17 @@ def attach_runtime_context(state: Any) -> Any:
     ioc_bundle = extract_from_process_sessions(process_sessions)
 
     setattr(state, "process_events", process_events)
+    # ``session_metadata`` also carries the worker-authenticated provenance
+    # boundary.  The Cowrie adapter's derived metadata must not replace those
+    # server-owned fields at session close, otherwise a controlled synthetic
+    # session could lose its exclusion marker just before report/prediction
+    # guards run.  Preserve only the two private trusted keys; all other
+    # runtime metadata remains adapter-derived as before.
+    prior_metadata = getattr(state, "session_metadata", {})
+    if isinstance(prior_metadata, dict) and isinstance(session_meta, dict):
+        for key in ("_trusted_session_source", "_trusted_provenance_marker"):
+            if key in prior_metadata:
+                session_meta[key] = prior_metadata[key]
     setattr(state, "session_metadata", session_meta)
     setattr(state, "process_sessions_summary", context["process_sessions"])
     setattr(state, "bpg_list", context["bpg_list"])

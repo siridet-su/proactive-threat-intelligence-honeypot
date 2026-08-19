@@ -15,6 +15,11 @@ from production.utils.config import ProductionConfig
 from production.workers.session_monitor import SessionMonitor, SessionState
 from production.workers.analysis_worker import AnalysisWorker
 from production.workers.session_worker import SessionWorker, WorkerError
+from production.storage.session_provenance import (
+    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+    SESSION_SOURCE_E2E_TEST,
+    SESSION_SOURCE_PRODUCTION_LIVE,
+)
 
 
 def _config(tmp_path: Path, *, batch_size: int = 10) -> ProductionConfig:
@@ -67,6 +72,80 @@ def _event(session: str, eventid: str, index: int, **extra: object) -> dict:
 def _event_row(storage: object, event_id: str) -> dict:
     rows = storage.list_rows("events", limit=100)
     return next(row for row in rows if row["event_id"] == event_id)
+
+
+def test_authenticated_controlled_source_is_persisted_and_excluded_from_prediction(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.controlled_synthetic_sensor_ids = ["test-sensor"]
+    config.controlled_synthetic_source_ips = ["100.85.50.74"]
+    storage = open_storage(config.database_url)
+    storage.store_event(
+        "test-sensor",
+        _event("synthetic-session", "cowrie.session.connect", 0, src_ip="100.85.50.74"),
+    )
+    storage.store_event(
+        "test-sensor",
+        _event("synthetic-session", "cowrie.command.input", 1, input="whoami", success=1, src_ip="100.85.50.74"),
+    )
+    storage.store_event(
+        "test-sensor",
+        _event("synthetic-session", "cowrie.session.closed", 2, duration=2.0, src_ip="100.85.50.74"),
+    )
+    worker = SessionWorker(config)
+    try:
+        assert worker.process_unprocessed() == 3
+    finally:
+        worker.close()
+    payload = json.loads(storage.get_session("synthetic-session")["payload_json"])
+    assert payload["session_source"] == SESSION_SOURCE_E2E_TEST
+    assert payload["provenance_marker"] == CONTROLLED_SYNTHETIC_PROVENANCE_MARKER
+    assert payload["prediction_exclusion"] == {
+        "excluded": True,
+        "reason": "controlled_synthetic_test_not_prediction_evidence",
+    }
+    assert payload["prediction_trusted_history"] == []
+    assert storage.list_prediction_snapshots_for_session("synthetic-session", limit=10) == []
+    assert storage.list_rows("alerts", limit=10) == []
+
+
+def test_unallowlisted_source_remains_production_live(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.controlled_synthetic_sensor_ids = ["test-sensor"]
+    config.controlled_synthetic_source_ips = ["100.85.50.74"]
+    storage = open_storage(config.database_url)
+    storage.store_event(
+        "test-sensor",
+        _event("real-session", "cowrie.session.connect", 0, src_ip="203.0.113.27"),
+    )
+    worker = SessionWorker(config)
+    try:
+        assert worker.process_unprocessed() == 1
+    finally:
+        worker.close()
+    payload = json.loads(storage.get_session("real-session")["payload_json"])
+    assert payload["session_source"] == SESSION_SOURCE_PRODUCTION_LIVE
+    assert "provenance_marker" not in payload
+    assert "prediction_exclusion" not in payload
+
+
+def test_production_environment_cannot_enable_global_synthetic_source(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.session_source = SESSION_SOURCE_E2E_TEST
+    storage = open_storage(config.database_url)
+    event_id, _ = storage.store_event(
+        "test-sensor",
+        _event("unsafe-session", "cowrie.session.connect", 0, src_ip="100.85.50.74"),
+    )
+    worker = SessionWorker(config)
+    try:
+        row = _event_row(storage, event_id)
+        event = json.loads(row["payload_json"])
+        with pytest.raises(WorkerError, match="provenance allowlists are required"):
+            worker._event_provenance(row, event)
+    finally:
+        worker.close()
 
 
 def test_worker_completes_claim_only_after_durable_session_save(

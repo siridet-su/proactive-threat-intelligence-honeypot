@@ -42,6 +42,11 @@ from production.utils.sensitive_data import (
 )
 from production.utils.serialization import command_observation_provenance, stable_id
 from production.utils.sensor_identity import validate_sensor_session_id
+from production.storage.session_provenance import (
+    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+    SESSION_SOURCE_E2E_TEST,
+    normalize_session_source,
+)
 from production.utils.validation_diagnostics import (
     build_validation_diagnostic,
 )
@@ -556,6 +561,8 @@ class SessionMonitor:
         event: dict,
         *,
         durable_evidence_order: Optional[Dict[str, Any]] = None,
+        trusted_session_source: str = "",
+        trusted_provenance_marker: str = "",
     ) -> List[AlertEvent]:
         """
         Process one Cowrie event. Returns list of alerts fired (may be empty).
@@ -584,6 +591,12 @@ class SessionMonitor:
 
         # Ensure session exists
         state = self._get_or_create(session_id, src_ip, timestamp)
+        if trusted_session_source:
+            self.bind_trusted_session_provenance(
+                state,
+                trusted_session_source,
+                trusted_provenance_marker,
+            )
         state.raw_events.append(self._sanitize_event(event))
 
         if event.get("src_port"):   state.src_port     = int(event["src_port"])
@@ -745,6 +758,32 @@ class SessionMonitor:
         for a in alerts:
             self.on_alert(a)
         return alerts
+
+    @staticmethod
+    def bind_trusted_session_provenance(
+        state: SessionState,
+        session_source: str,
+        provenance_marker: str = "",
+    ) -> None:
+        """Bind server-derived session provenance before event semantics run."""
+
+        source = normalize_session_source(session_source)
+        metadata = state.session_metadata
+        previous = normalize_session_source(
+            metadata.get("_trusted_session_source"),
+            "",
+        )
+        if previous and previous != source:
+            raise ValueError("trusted session provenance mismatch")
+        metadata["_trusted_session_source"] = source
+        if source == SESSION_SOURCE_E2E_TEST:
+            if provenance_marker != CONTROLLED_SYNTHETIC_PROVENANCE_MARKER:
+                raise ValueError("controlled synthetic provenance marker is invalid")
+            metadata["_trusted_provenance_marker"] = (
+                CONTROLLED_SYNTHETIC_PROVENANCE_MARKER
+            )
+        elif provenance_marker:
+            raise ValueError("non-synthetic session cannot carry a provenance marker")
 
     @staticmethod
     def _append_prediction_trusted_phase(
@@ -1460,6 +1499,13 @@ class SessionMonitor:
     def _check_thresholds(self, state: SessionState) -> List[AlertEvent]:
         """Check all thresholds. Return new alerts not previously fired."""
         if not self.enable_alert_evaluation:
+            return []
+        if normalize_session_source(
+            (state.session_metadata or {}).get("_trusted_session_source"),
+            "",
+        ) == SESSION_SOURCE_E2E_TEST:
+            # Controlled Track-B sessions may exercise deterministic analysis,
+            # but can never create production incident/alert claims.
             return []
         alerts = []
         t = self.thresholds

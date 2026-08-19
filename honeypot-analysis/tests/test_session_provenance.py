@@ -5,12 +5,39 @@ import sqlite3
 from pathlib import Path
 
 from production.storage.session_provenance import (
+    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
     SESSION_SOURCE_E2E_TEST,
     SESSION_SOURCE_PRODUCTION_LIVE,
     SESSION_SOURCE_UNKNOWN_LEGACY,
+    controlled_synthetic_provenance,
     infer_legacy_session_source,
     is_external_source_ip,
 )
+
+
+def test_controlled_synthetic_provenance_requires_authenticated_sensor_and_source() -> None:
+    bound = controlled_synthetic_provenance(
+        sensor_id="demo-sensor",
+        source_ip="100.85.50.74",
+        allowed_sensor_ids=["demo-sensor"],
+        allowed_source_ips=["100.85.50.74"],
+    )
+    assert bound == {
+        "session_source": SESSION_SOURCE_E2E_TEST,
+        "provenance_marker": CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+    }
+    assert controlled_synthetic_provenance(
+        sensor_id="demo-sensor",
+        source_ip="203.0.113.10",
+        allowed_sensor_ids=["demo-sensor"],
+        allowed_source_ips=["100.85.50.74"],
+    ) == {"session_source": SESSION_SOURCE_PRODUCTION_LIVE, "provenance_marker": ""}
+    assert controlled_synthetic_provenance(
+        sensor_id="other-sensor",
+        source_ip="100.85.50.74",
+        allowed_sensor_ids=["demo-sensor"],
+        allowed_source_ips=["100.85.50.74"],
+    ) == {"session_source": SESSION_SOURCE_PRODUCTION_LIVE, "provenance_marker": ""}
 from production.tools.backfill_session_source import classify_rows, apply_backfill
 
 

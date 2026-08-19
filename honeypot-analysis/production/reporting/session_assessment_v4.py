@@ -52,6 +52,11 @@ from production.reporting.typed_semantic_family_selection import (
     validate_policy_output_trace,
 )
 from production.utils.serialization import stable_id, stable_json, utc_now
+from production.storage.session_provenance import (
+    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+    SESSION_SOURCE_E2E_TEST,
+    normalize_session_source,
+)
 from production.utils.sensitive_data import redact_for_artifact
 
 
@@ -160,6 +165,8 @@ def _source_payload(session: Any, raw_events: Iterable[Dict[str, Any]]) -> Dict[
         "schema_version": snapshot_version,
         "session_id": _clean(get("session_id", "unknown")) or "unknown",
         "src_ip": _clean(get("src_ip", "")),
+        "session_source": _clean(get("session_source", "")),
+        "provenance_marker": _clean(get("provenance_marker", "")),
         "commands": list(get("commands", []) or []),
         "commands_success": list(get("commands_success", []) or []),
         "commands_failed": list(get("commands_failed", []) or []),
@@ -218,6 +225,19 @@ def build_canonical_evidence_snapshot(
             "login_success",
         )
     }
+    if normalize_session_source(source.get("session_source"), "") == SESSION_SOURCE_E2E_TEST:
+        if source.get("provenance_marker") != CONTROLLED_SYNTHETIC_PROVENANCE_MARKER:
+            raise SessionAssessmentV4Error(
+                "controlled synthetic session provenance marker is invalid"
+            )
+        source_evidence["session_source"] = SESSION_SOURCE_E2E_TEST
+        source_evidence["provenance_marker"] = (
+            CONTROLLED_SYNTHETIC_PROVENANCE_MARKER
+        )
+    elif source.get("provenance_marker"):
+        raise SessionAssessmentV4Error(
+            "non-synthetic session cannot carry a provenance marker"
+        )
     snapshot_version = (
         "canonical_evidence_snapshot.v2"
         if (source.get("trusted_classification_manifest") or {}).get("manifest_sha256")
@@ -980,6 +1000,22 @@ def build_session_assessment_v4(
             snapshot.get("durable_event_manifest") or {}
         ),
     }
+    if normalize_session_source(source.get("session_source"), "") == SESSION_SOURCE_E2E_TEST:
+        provenance["evaluation_provenance"] = {
+            "schema_version": "controlled_synthetic_provenance.v1",
+            "session_source": SESSION_SOURCE_E2E_TEST,
+            "provenance_marker": CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+            "authority": "authenticated_sensor_metadata_allowlist",
+            "excluded_from": [
+                "empirical_attacker_statistics",
+                "transformer_training",
+                "transformer_calibration",
+                "transformer_test",
+                "trusted_prediction_history",
+                "real_attacker_evaluation_claims",
+                "production_incident_alert_claims",
+            ],
+        }
     authority = {
         "observed_evidence_authoritative": True,
         "predictions_authoritative": False,
@@ -1111,6 +1147,25 @@ def validate_session_assessment_v4(
         errors.append("provenance evidence hash mismatch")
     if not GIT_REVISION_RE.fullmatch(_clean(provenance.get("evaluator_git_revision")).lower()):
         errors.append("provenance.evaluator_git_revision is required")
+    evaluation_provenance = provenance.get("evaluation_provenance")
+    if evaluation_provenance is not None:
+        expected_evaluation_provenance = {
+            "schema_version": "controlled_synthetic_provenance.v1",
+            "session_source": SESSION_SOURCE_E2E_TEST,
+            "provenance_marker": CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
+            "authority": "authenticated_sensor_metadata_allowlist",
+            "excluded_from": [
+                "empirical_attacker_statistics",
+                "transformer_training",
+                "transformer_calibration",
+                "transformer_test",
+                "trusted_prediction_history",
+                "real_attacker_evaluation_claims",
+                "production_incident_alert_claims",
+            ],
+        }
+        if evaluation_provenance != expected_evaluation_provenance:
+            errors.append("controlled synthetic evaluation provenance is invalid")
     for name in ("behavior_policy", "classification_policy"):
         policy = provenance.get(name) or {}
         digest = _clean(policy.get("sha256")).lower()
