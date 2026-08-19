@@ -1,0 +1,58 @@
+{
+  "schema_version": "final_f_phase5_integration_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "phase": 5,
+  "completed_at": "2026-08-19T09:50:00Z",
+  "implementation_commit": "3f5e847",
+  "implementation_commit_full": "3f5e8473f63690b44df85e982c441df866a89cad",
+  "implementation_tree": "8103355a03201f72dda597c2a3c9600252618882",
+  "phase_4_receipt_sha256": "00874858334d31fcdd29e1c6f00dd477924e50e8ae4657d515202445220230d1",
+  "contracts": {
+    "request": "ai_vertex_request.v2",
+    "task": "ai_advisory_task.v2",
+    "record": "ai_advisory_record.v2",
+    "rendered": "ai_advisory_rendered.v2",
+    "policy": "ai_advisory_policy.v2",
+    "policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+    "provider_output_schema_sha256": "f181765e38a65de53bf1870c6d0b217dae9c508f66121164fbe5eb0017375a4c",
+    "storage_schema_migration": false,
+    "sqlite_schema_version": 3,
+    "mongodb_collection_layout_changed": false
+  },
+  "files": [
+    {"path": "honeypot-analysis/production/ai_advisory/google_vertex_provider.py", "sha256": "003f797595f8250cd389cb24a5581b41c8020a23d84374bdbd63d70b360c6bf6"},
+    {"path": "honeypot-analysis/production/ai_advisory/integration_v2.py", "sha256": "b706b2e3c9415bfc60af20d0740b56f45709dc43881500a1e429b4d4049606a0"},
+    {"path": "honeypot-analysis/production/ai_advisory/rendering.py", "sha256": "1c3f03fd1fb5bc82e087b64027d13d41d8ed41e059c5563c1a904ff07d3db9e5"},
+    {"path": "honeypot-analysis/production/storage/backend.py", "sha256": "0be6d0ef0f0fc25b096b9a994559c063aa598d378c4a29124b673cdfa611b527"},
+    {"path": "honeypot-analysis/production/storage/mongodb_operations.py", "sha256": "420d100f7225c83355fbfba7010787af6e9a48ffb016f5f3590ffbfa5a7cdffe"},
+    {"path": "honeypot-analysis/production/workers/ai_advisory_worker.py", "sha256": "22673544db8b0bfb1f786fe114c86bcbaf3b4f29e69b947e73d1ea4a9ceedd23"},
+    {"path": "honeypot-analysis/tests/test_phase5_ai_integration_v2.py", "sha256": "531e38fdceb7b2d14ee849a211cd915360f25e3a7763dc78be1e8cb927ef7634"}
+  ],
+  "provider_worker_flow": {
+    "v1": "historical policy/task/request/worker/rendering path unchanged",
+    "v2": "v6 report -> v2 task -> graph-bound projection -> deterministic eligibility -> local abstention or bounded provider call -> local validation -> policy-owned rendering -> atomic advisory record",
+    "provider_failure": "retryable outbox failure or locally persisted rejected advisory; canonical report is untouched",
+    "deterministic_no_call": "persisted abstained v2 record with completion_code deterministic_abstention and provider_called false"
+  },
+  "validation": {
+    "phase5_focused_suite": "177 passed, 15 skipped (MongoDB environment unavailable)",
+    "phase5_v2_integration_suite": "7 passed",
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "pip_check": "PASS",
+    "ai_advisory_policy_v2_validator": "PASS",
+    "final_f_contract_freeze_validator": "PASS",
+    "changed_file_secret_scan": "PASS",
+    "external_provider_calls": false,
+    "fixture_provider_calls_in_tests": true
+  },
+  "compatibility": {
+    "historical_v1_records": "readable and handled by v1 dispatch",
+    "historical_v1_tasks": "exact task shape preserved",
+    "canonical_assessment": "not modified by provider, rejection, timeout, cache, or abstention",
+    "guidance_semantics": "unchanged",
+    "prediction_transformer": "unchanged",
+    "production_deployed": false
+  },
+  "receipt_sha256": "cefabf91047aa1c8dfebbcebaad0e55a07dd2810e2e6ec9786a3748b921ed373"
+}
