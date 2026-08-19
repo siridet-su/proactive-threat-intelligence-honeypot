@@ -1,0 +1,90 @@
+{
+  "schema_version": "final_f_phase6_api_ui_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "phase": 6,
+  "completed_at": "2026-08-19T11:55:23Z",
+  "implementation_commit": "cb81696",
+  "implementation_commit_full": "cb81696fb3a97a368630004d980bf7ad4efaef9f",
+  "implementation_tree": "be8711e37f443dd529ab8978e30ecbdbfe4c8980",
+  "phase_5_receipt_sha256": "7e987e37845383e8cea732f817edf619d0648fee4e35c5fc3538d824c38f406a",
+  "files": [
+    {
+      "path": "honeypot-analysis/production/api/monitor_web.py",
+      "sha256": "71058b98735b8159677fa2a44dbaa80ba529c32f48d30e103dfe8ecaa9565af7"
+    },
+    {
+      "path": "honeypot-analysis/production/api/static/monitor.html",
+      "sha256": "f656e46ad742cc358655a2d9479eb79f110ae85a5ea584e033d03fa041a9d1f5"
+    },
+    {
+      "path": "honeypot-analysis/tests/test_ai_advisory_monitor.py",
+      "sha256": "363eb4e378416e4102ce6285cc3de46903750f2c2d395f35917b16635312f534"
+    },
+    {
+      "path": "honeypot-analysis/tests/test_phase6_ai_advisory_presentation.py",
+      "sha256": "ad00edaaabb39eb6ec41789b38e8670837e54a052d5e92985e6ed2dcdc11d24a"
+    }
+  ],
+  "api_behavior": {
+    "endpoint": "/api/ai-advisory",
+    "cache_control": "no-store",
+    "v2_dispatch": "session_assessment.v6 reports require ai_advisory_record.v2 and local closed-envelope validation",
+    "v1_dispatch": "historical v1 records remain readable and retain their original payload shape",
+    "states": [
+      "pending",
+      "unavailable",
+      "not_available",
+      "abstained",
+      "rejected",
+      "superseded"
+    ],
+    "invalid_or_stale_v2": "fail closed to unavailable without exposing the payload"
+  },
+  "ui_behavior": {
+    "v2_panel": "Graph-grounded AI advisory — non-authoritative",
+    "v2_rendering": "renders only validated existing-object selections and bounded review-plan anchors",
+    "v1_rendering": "historical v1 output remains readable; shadow candidates are explicitly historical-only",
+    "state_rendering": "pending, unavailable, not_available, abstained, rejected, and superseded are explicit",
+    "lane_separation": "deterministic report, AI advisory, and prediction remain separate panels",
+    "raw_private_fields": "not rendered; textContent is used for dynamic values",
+    "screenshots": "not generated; deterministic DOM/static fixtures and loopback endpoint assertions are the compatibility evidence"
+  },
+  "authority_separation": {
+    "canonical_analysis": "unchanged and authoritative",
+    "ai": "non-authoritative; v2 can select/order existing deterministic objects only",
+    "prediction": "separate and not merged into advisory",
+    "shadow_candidates": "historical v1 only; omitted from active v2 response",
+    "failure_effect": "AI pending, unavailable, abstained, rejected, or superseded state cannot alter canonical assessment, guidance, findings, or prediction"
+  },
+  "compatibility": {
+    "phase_0_to_5": "frozen artifacts and contracts unchanged",
+    "provider": "not modified",
+    "worker": "not modified",
+    "storage_schema": "not modified",
+    "canonical_analysis": "not modified",
+    "guidance": "not modified",
+    "transformer_prediction": "not modified",
+    "historical_v1_records": "readable",
+    "production_deployed": false
+  },
+  "validation": {
+    "phase6_focused_suite": "15 passed, 1 deselected (the deselected test was the separately run loopback test)",
+    "phase6_loopback_monitor_test": "1 passed",
+    "advisory_regression_suite": "117 passed, 1 deselected",
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "pip_check": "PASS",
+    "javascript_syntax": "PASS",
+    "changed_file_secret_scan": "PASS",
+    "external_provider_calls": false,
+    "fixture_provider_calls": true
+  },
+  "receipt_basis": {
+    "phase5_receipt_preserved": true,
+    "historical_records_preserved": true,
+    "sealed_prediction_evidence_accessed": false,
+    "production_mutated": false,
+    "deployment_performed": false
+  },
+  "receipt_sha256": "1c91a74f5dc7accd38a51ac138f827c99ebf073ae3bfbb5639f42d375caf3e08"
+}
