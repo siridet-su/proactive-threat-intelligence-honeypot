@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -32,6 +33,11 @@ from tests.test_final_f_phase3_projection_v2 import (
 
 
 POLICY = "configs/ai_advisory_policy.v2.json"
+KNOWN_ANSWER = (
+    Path(__file__).resolve().parents[1]
+    / "evaluation"
+    / "final_f_phase4_contract_known_answer.v2.json"
+)
 
 
 def _context():
@@ -438,3 +444,28 @@ def test_partial_chain_hypothesis_question_and_gap_are_graph_grounded() -> None:
     ]
     with pytest.raises(AIAdvisoryContractError, match="unrelated"):
         _validate(wrong, report, scope, projection)
+
+
+def test_frozen_phase4_known_answer_validates_exactly(monkeypatch) -> None:
+    expected = json.loads(KNOWN_ANSWER.read_text(encoding="utf-8"))
+    import production.reporting.session_assessment_v4 as assessment_v4
+
+    monkeypatch.setattr(
+        assessment_v4, "_git_revision",
+        lambda: expected["implementation_commit"],
+    )
+    report = _assessment(expected["case_id"])
+    scope = _scope(report)
+    projection = _projection(report, scope)
+    assert report["assessment_id"] == expected["assessment_id"]
+    assert projection["projection_sha256"] == expected["projection_sha256"]
+    validated = _validate(
+        expected["provider_output"], report, scope, projection
+    )
+    assert validated["validated_output_sha256"] == expected[
+        "expected_validated_output_sha256"
+    ]
+    policy, _, _ = load_ai_advisory_policy_v2(POLICY)
+    assert contract_schema_sha256_v2(policy) == expected[
+        "provider_output_schema_sha256"
+    ]
