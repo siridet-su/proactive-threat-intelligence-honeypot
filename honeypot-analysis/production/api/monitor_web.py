@@ -54,6 +54,9 @@ from production.reporting.response_guidance_v3 import (
     read_legacy_response_guidance,
     validate_response_guidance_v3,
 )
+from production.reporting.session_assessment_v5 import (
+    trusted_behavioral_findings_for_presentation,
+)
 from production.storage import open_storage, safe_database_descriptor
 
 
@@ -1411,12 +1414,16 @@ def _load_report_json_from_artifact(paths: Dict[str, str], reports_dir: str) -> 
         return {}
 
 
+def _authority_safe_behavioral_findings(
+    report: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    return trusted_behavioral_findings_for_presentation(report)
+
+
 def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> Dict[str, str]:
     merged = _merged_report_payload(report_payload, artifact_payload)
     if merged.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
-        findings = [
-            item for item in merged.get("behavioral_findings") or [] if isinstance(item, dict)
-        ]
+        findings = _authority_safe_behavioral_findings(merged)
         hypothesis_sets = [
             item for item in merged.get("hypothesis_sets") or [] if isinstance(item, dict)
         ]
@@ -1424,17 +1431,17 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
         coverage = canonical_evidence.get("semantic_coverage") or {}
         graph = canonical_evidence.get("semantic_graph") or {}
         return {
-            "schema_version": "session_assessment.v4",
+            "schema_version": _text(merged.get("schema_version")),
             "campaign_name": "",
             "confidence": "Unscored",
-            "confidence_source": "no_global_scoring_in_v4",
+            "confidence_source": "no_global_scoring_in_canonical_assessment",
             "analytical_evidence_strength": _text(merged.get("status") or ""),
             "evidence_strength_reason": (
                 f"{len(findings)} canonical behavioral findings; "
                 f"{len(hypothesis_sets)} falsifiable hypothesis sets"
             ),
             "ai_enriched": "false",
-            "analysis_mode": "deterministic_session_assessment_v4",
+            "analysis_mode": f"deterministic_{_text(merged.get('schema_version'))}",
             "semantic_coverage": _text(
                 coverage.get("coverage_status") or "unavailable"
             ),
@@ -4295,14 +4302,14 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     merged = _merged_report_payload(report_payload, artifact_payload)
     v4_detail = ""
     if merged.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+        canonical_findings = _authority_safe_behavioral_findings(merged)
         finding_items = [
             (
                 f"[{item.get('status', '')}] {item.get('statement', '')} "
                 f"(finding {item.get('finding_id', '')}; evidence "
                 f"{', '.join(item.get('evidence_refs') or [])})"
             )
-            for item in merged.get("behavioral_findings") or []
-            if isinstance(item, dict)
+            for item in canonical_findings
         ]
         hypothesis_items = [
             (

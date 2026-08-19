@@ -337,8 +337,47 @@ def validate_session_assessment(value: Any, *, raise_on_error: bool = False) -> 
     return validate_session_assessment_v4(value, raise_on_error=raise_on_error)
 
 
+def trusted_behavioral_findings_for_presentation(
+    value: Any,
+    *,
+    raise_on_error: bool = False,
+) -> list[dict[str, Any]]:
+    """Return only findings backed by a trusted graph authority decision.
+
+    Historical v4 records remain immutable and readable, but their top-level
+    finding list is not itself an authority boundary.  Current consumers use
+    this derived view so an audit-only candidate in a historical record cannot
+    be presented as canonical.
+    """
+
+    errors = validate_session_assessment(value)
+    if errors:
+        if raise_on_error:
+            raise SessionAssessmentV5Error(
+                "; ".join(errors),
+                producer="trusted_behavioral_findings_for_presentation",
+            )
+        return []
+    if not isinstance(value, Mapping):
+        return []
+    graph = ((value.get("canonical_evidence") or {}).get("semantic_graph") or {})
+    decisions = {
+        _text(item.get("candidate_id")): _text(item.get("decision"))
+        for item in graph.get("authority_decisions") or []
+        if isinstance(item, Mapping)
+    }
+    return [
+        deepcopy(dict(finding))
+        for finding in value.get("behavioral_findings") or []
+        if isinstance(finding, Mapping)
+        and decisions.get(_text(finding.get("finding_id"))) == "trusted"
+    ]
+
+
 __all__ = [
-    "build_session_assessment_v5", "canonical_assessment_id",
+    "SessionAssessmentV5Error", "build_session_assessment_v5",
+    "canonical_assessment_id",
     "read_legacy_session_assessment", "validate_session_assessment",
     "validate_session_assessment_v5", "validate_threat_hypothesis_set_v2",
+    "trusted_behavioral_findings_for_presentation",
 ]

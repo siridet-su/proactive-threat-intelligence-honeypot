@@ -23,6 +23,10 @@ from production.utils.sensitive_data import (
 )
 from production.utils.serialization import stable_id, stable_json
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
+from production.reporting.session_assessment_v5 import (
+    trusted_behavioral_findings_for_presentation,
+    validate_session_assessment,
+)
 from production.reporting.artifact_privacy import sanitize_artifact_boundary
 
 
@@ -48,11 +52,7 @@ def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
         # V4 has already been redacted before its evidence digest and content
         # IDs are computed. Re-redacting at each consumer can alter an
         # otherwise valid canonical snapshot and invalidate its guidance hash.
-        from production.reporting.session_assessment_v5 import (
-            validate_session_assessment as validate_session_assessment_v4,
-        )
-
-        validate_session_assessment_v4(value, raise_on_error=True)
+        validate_session_assessment(value, raise_on_error=True)
         # Canonical evidence and its content IDs are already safe.  The
         # non-authoritative compatibility/audit context is still an artifact
         # input and must pass the shared command-text boundary sanitizer.
@@ -65,6 +65,18 @@ def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
     if not isinstance(redacted, dict):
         raise TypeError(f"{label} must redact to an object")
     return redacted
+
+
+def _canonical_behavioral_findings(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if report.get("schema_version") not in {
+        "session_assessment.v4",
+        "session_assessment.v5",
+    }:
+        return []
+    return trusted_behavioral_findings_for_presentation(
+        report,
+        raise_on_error=True,
+    )
 
 
 def _safe_artifact_text(value: Any, label: str) -> str:
@@ -665,7 +677,7 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
 
     if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
         provenance = report.get("provenance") or {}
-        for finding in report.get("behavioral_findings") or []:
+        for finding in _canonical_behavioral_findings(report):
             if not isinstance(finding, dict):
                 continue
             finding_id = _stix_id(
@@ -1021,14 +1033,15 @@ def write_markdown_report(
     for tid in _trusted_ttp_ids(report, session_payload):
         lines.append(f"- {tid}")
     if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+        canonical_findings = _canonical_behavioral_findings(report)
         lines.extend(["", "## Behavioral Findings"])
-        for finding in report.get("behavioral_findings") or []:
+        for finding in canonical_findings:
             lines.append(
                 f"- [{finding.get('status', '')}] {finding.get('statement', '')} "
                 f"(finding `{finding.get('finding_id', '')}`; evidence: "
                 f"{', '.join(finding.get('evidence_refs') or [])})"
             )
-        if not report.get("behavioral_findings"):
+        if not canonical_findings:
             lines.append("- No policy-supported behavioral finding.")
         lines.extend(["", "## Falsifiable Hypothesis Alternatives"])
         for hypothesis_set in report.get("hypothesis_sets") or []:
@@ -1180,9 +1193,10 @@ def write_pdf_report(
     ]
 
     if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+        canonical_findings = _canonical_behavioral_findings(report)
         story.append(Paragraph("Behavioral Findings", h2))
-        if report.get("behavioral_findings"):
-            for finding in report.get("behavioral_findings") or []:
+        if canonical_findings:
+            for finding in canonical_findings:
                 story.append(Paragraph(escape(
                     f"[{finding.get('status', '')}] {finding.get('statement', '')} "
                     f"(finding {finding.get('finding_id', '')}; evidence "
