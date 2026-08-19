@@ -1279,7 +1279,7 @@ def _v2_chain_status(value: Any) -> str:
     status = _clean(value)
     if status in {"complete", "supported"}:
         return "supported"
-    if status == "partial":
+    if status in {"partial", "incomplete"}:
         return "partial"
     raise AIAdvisoryContractError("chain status is not projectable")
 

