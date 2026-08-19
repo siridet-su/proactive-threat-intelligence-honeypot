@@ -58,6 +58,9 @@ from production.reporting.response_guidance_v4 import validate_response_guidance
 from production.reporting.session_assessment_v6 import (
     trusted_behavioral_findings_for_presentation,
 )
+from production.ai_advisory.integration_v2 import (
+    validate_ai_advisory_record_v2,
+)
 from production.storage import open_storage, safe_database_descriptor
 
 
@@ -2229,12 +2232,17 @@ def load_ai_advisory_detail(
             "session_id": clean_session_id,
             "timestamp": utc_now(),
         }
+    expected_schema = (
+        "ai_advisory_record.v2"
+        if report_payload.get("schema_version") == "session_assessment.v6"
+        else "ai_advisory_record.v1"
+    )
     if not row:
         outbox_status = str((outbox or {}).get("status") or "")
         if outbox_status in {"queued", "retry", "running"}:
             state = "pending"
         elif outbox_status == "failed":
-            state = "failed"
+            state = "unavailable"
         elif older:
             state = "superseded"
         else:
@@ -2245,10 +2253,80 @@ def load_ai_advisory_detail(
             "session_id": clean_session_id,
             "report_id": report_id,
             "assessment_id": assessment_id,
+            "advisory_schema_version": expected_schema,
+            "authority_label": "separate non-authoritative AI advisory",
             "advisory": {},
             "timestamp": utc_now(),
         }
     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    payload_schema = str(payload.get("schema_version") or "")
+    if payload_schema == "ai_advisory_record.v2":
+        try:
+            validate_ai_advisory_record_v2(payload)
+        except Exception:
+            return {
+                "ok": True,
+                "status": "unavailable",
+                "session_id": clean_session_id,
+                "report_id": report_id,
+                "assessment_id": assessment_id,
+                "advisory_schema_version": expected_schema,
+                "authority_label": "separate non-authoritative AI advisory",
+                "advisory": {},
+                "error": "stored v2 advisory failed local validation",
+                "timestamp": utc_now(),
+            }
+    elif payload_schema not in {"ai_advisory_record.v1", ""}:
+        return {
+            "ok": True,
+            "status": "unavailable",
+            "session_id": clean_session_id,
+            "report_id": report_id,
+            "assessment_id": assessment_id,
+            "advisory_schema_version": expected_schema,
+            "authority_label": "separate non-authoritative AI advisory",
+            "advisory": {},
+            "error": "stored advisory schema is unsupported",
+            "timestamp": utc_now(),
+        }
+    if payload_schema and payload_schema != expected_schema:
+        return {
+            "ok": True,
+            "status": "unavailable",
+            "session_id": clean_session_id,
+            "report_id": report_id,
+            "assessment_id": assessment_id,
+            "advisory_schema_version": expected_schema,
+            "authority_label": "separate non-authoritative AI advisory",
+            "advisory": {},
+            "error": "stored advisory version does not match the current report",
+            "timestamp": utc_now(),
+        }
+    is_v2 = payload_schema == "ai_advisory_record.v2"
+    advisory = {
+        "schema_version": payload.get("schema_version"),
+        "status": payload.get("status"),
+        "authority": payload.get("authority"),
+        "validation": payload.get("validation") or {},
+        "rendered_advisory": payload.get("rendered_advisory") or {},
+        "safety": payload.get("safety") or {},
+        "provenance": payload.get("provenance") or {},
+    }
+    if not is_v2:
+        # Shadow candidates remain readable only as historical v1 data. They
+        # are intentionally absent from the active v2 response shape.
+        advisory["shadow_candidates"] = payload.get("shadow_candidates") or {
+            "schema_version": "ai_shadow_candidate_set.v1",
+            "candidates": [],
+        }
+        advisory["shadow_candidates_scope"] = "historical_v1_only"
+        advisory["authority_label"] = (
+            "historical v1 shadow candidates — non-authoritative and not active v2"
+        )
+    else:
+        advisory["authority_label"] = (
+            "v2 graph-grounded AI selections — non-authoritative; existing objects only"
+        )
     return {
         "ok": True,
         "status": str(row.get("status") or "unavailable"),
@@ -2256,19 +2334,9 @@ def load_ai_advisory_detail(
         "advisory_id": str(row.get("advisory_id") or ""),
         "report_id": str(row.get("report_id") or ""),
         "assessment_id": str(row.get("assessment_id") or ""),
-        "advisory": {
-            "schema_version": payload.get("schema_version"),
-            "status": payload.get("status"),
-            "authority": payload.get("authority"),
-            "validation": payload.get("validation") or {},
-            "rendered_advisory": payload.get("rendered_advisory") or {},
-            "shadow_candidates": payload.get("shadow_candidates") or {
-                "schema_version": "ai_shadow_candidate_set.v1",
-                "candidates": [],
-            },
-            "safety": payload.get("safety") or {},
-            "provenance": payload.get("provenance") or {},
-        },
+        "advisory_schema_version": payload_schema or expected_schema,
+        "authority_label": advisory["authority_label"],
+        "advisory": advisory,
         "metrics": row.get("metrics") or {},
         "timestamp": utc_now(),
     }
