@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
+from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, Mapping
 
@@ -10,10 +13,22 @@ from production.ai_advisory.contracts import (
     AIAdvisoryContractError,
     sha256_json,
 )
-from production.ai_advisory.security import ProviderAliasScope
-from production.utils.serialization import stable_id
+from production.ai_advisory.security import AssessmentAliasScope, ProviderAliasScope
+from production.utils.serialization import stable_id, stable_json
 from production.reporting.session_assessment_v5 import validate_session_assessment
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
+from production.reporting.response_guidance_v4 import validate_response_guidance_v4
+from production.reporting.session_assessment_v6 import (
+    validate_session_assessment_v6,
+)
+from production.reporting.canonical_graph_queries import (
+    CanonicalGraphQueryError,
+    ChronologicalGraphView,
+    chronological_graph_view,
+)
+from production.policies.typed_semantic_vocabulary import (
+    load_typed_semantic_vocabulary,
+)
 from production.reporting.typed_semantic_family_selection import (
     ACTIVATED_FAMILIES as CANONICAL_ACTIVATED_SEMANTIC_FAMILIES,
 )
@@ -1029,3 +1044,1027 @@ def restore_validated_output_aliases(
             },
         )
     return result
+
+
+# Additive Final-F projection contract. The v1 builder/validator above remains
+# unchanged for immutable historical advisory records.
+V2_SCHEMA_VERSION = "ai_advisory_projection.v2"
+FROZEN_FINAL_F_CONTRACT_SHA256 = (
+    "acf6e3a017af771a24cc936e94ccf2edee1bb1612ae3896f6f491c207292e611"
+)
+FROZEN_FINAL_F_POLICY_SHA256 = (
+    "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115"
+)
+V2_ALIAS_RE = re.compile(r"^a_[0-9a-f]{32}$")
+V2_TOP_KEYS = {
+    "schema_version", "assessment_id", "report_content_sha256",
+    "evidence_sha256", "graph_sha256", "typed_fact_set_sha256",
+    "guidance_content_sha256", "provenance", "authority",
+    "timeline_steps", "facts", "chains", "relationships", "findings",
+    "hypotheses", "actions", "limitations", "evidence_gaps",
+    "allowed_output", "abstention", "projection_sha256",
+}
+V2_PROVENANCE_KEYS = {
+    "evaluator_git_revision", "behavior_policy_sha256",
+    "classification_policy_sha256", "typed_vocabulary_sha256",
+    "guidance_policy_sha256", "ai_policy_sha256",
+    "projection_contract_sha256",
+}
+V2_AUTHORITY_KEYS = {
+    "ai_canonical_authority", "ai_finding_authority",
+    "ai_hypothesis_authority", "ai_guidance_authority",
+    "ai_alert_authority", "ai_prediction_authority",
+    "ai_execution_authority",
+}
+V2_TIMELINE_KEYS = {
+    "ordinal", "evidence_ids", "fact_ids", "semantic_families",
+    "operation_types", "outcome_status", "entity_ids",
+    "relationship_ids", "chain_ids", "finding_ids",
+}
+V2_FACT_KEYS = {
+    "fact_id", "causal_ordinal", "semantic_family", "operation_types",
+    "outcome_status", "evidence_ids", "entity_ids",
+}
+V2_CHAIN_KEYS = {
+    "chain_id", "status", "fact_ids", "relationship_ids",
+    "evidence_ids", "entity_ids", "limitation_codes",
+    "evidence_gap_codes", "ai_eligible",
+}
+V2_RELATIONSHIP_KEYS = {
+    "relationship_id", "relationship_type", "status", "source_fact_id",
+    "target_fact_id", "entity_id", "limitation_codes",
+}
+V2_FINDING_KEYS = {
+    "finding_id", "finding_type", "semantic_family", "status",
+    "priority_band", "chain_ids", "relationship_ids", "evidence_ids",
+    "limitation_codes",
+}
+V2_HYPOTHESIS_KEYS = {
+    "hypothesis_id", "hypothesis_set_id", "status", "chain_ids",
+    "relationship_ids", "fact_ids", "evidence_ids", "limitation_codes",
+    "evidence_gap_codes", "falsifier_codes",
+}
+V2_ACTION_KEYS = {
+    "action_id", "action_category", "rule_id", "policy_order",
+    "finding_ids", "evidence_ids", "requires_manual_approval",
+    "safe_to_auto_execute", "execution_integration",
+}
+V2_ALLOWED_OUTPUT_KEYS = {
+    "chain_ids", "relationship_ids", "finding_ids", "hypothesis_ids",
+    "action_ids", "limitation_codes", "evidence_gap_codes",
+    "analyst_question_template_ids", "explanation_template_ids",
+    "step_types", "anchor_types", "abstention_reason_codes",
+}
+V2_ABSTENTION_KEYS = {"assessment_abstained", "reason_codes"}
+V2_PROHIBITED_FIELDS = {
+    "raw_command", "command_fragment", "durable_event_ref", "source_ip",
+    "destination_address", "username", "password", "credential", "url",
+    "payload", "filename", "entity_value", "description", "statement",
+    "previous_ai_prose", "raw_events", "commands", "src_ip", "input",
+}
+V2_FAMILIES = {
+    "sensitive_read", "transfer", "transfer_attempt", "inspection",
+    "filesystem", "execution",
+}
+
+
+def _read_v2_json(path_text: str, label: str) -> tuple[dict[str, Any], str]:
+    path = Path(str(path_text or ""))
+    try:
+        raw = path.read_bytes()
+        value = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise AIAdvisoryContractError(f"{label} is unavailable") from exc
+    if not isinstance(value, dict):
+        raise AIAdvisoryContractError(f"{label} must be an object")
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def _v2_inputs(
+    ai_policy_path: str,
+    projection_contract_path: str,
+) -> tuple[dict[str, Any], str, str]:
+    policy, policy_sha256 = _read_v2_json(ai_policy_path, "AI policy v2")
+    bundle, contract_sha256 = _read_v2_json(
+        projection_contract_path, "Final F projection contract"
+    )
+    if contract_sha256 != FROZEN_FINAL_F_CONTRACT_SHA256:
+        raise AIAdvisoryContractError("projection contract identity mismatch")
+    if policy_sha256 != FROZEN_FINAL_F_POLICY_SHA256:
+        raise AIAdvisoryContractError("AI policy v2 identity mismatch")
+    contract = bundle.get("projection_contract") or {}
+    nested = contract.get("nested_exact_keys") or {}
+    expected_nested = {
+        "provenance": V2_PROVENANCE_KEYS,
+        "authority": V2_AUTHORITY_KEYS,
+        "timeline_step": V2_TIMELINE_KEYS,
+        "fact": V2_FACT_KEYS,
+        "chain": V2_CHAIN_KEYS,
+        "relationship": V2_RELATIONSHIP_KEYS,
+        "finding": V2_FINDING_KEYS,
+        "hypothesis": V2_HYPOTHESIS_KEYS,
+        "action": V2_ACTION_KEYS,
+        "allowed_output": V2_ALLOWED_OUTPUT_KEYS,
+        "abstention": V2_ABSTENTION_KEYS,
+    }
+    if (
+        bundle.get("versions", {}).get("projection") != V2_SCHEMA_VERSION
+        or set(contract.get("exact_keys") or []) != V2_TOP_KEYS
+        or any(set(nested.get(key) or []) != value for key, value in expected_nested.items())
+    ):
+        raise AIAdvisoryContractError("projection contract fields mismatch")
+    required_policy = {
+        "schema_version", "step_types", "anchor_types",
+        "abstention_reason_codes", "limitation_codes", "evidence_gap_codes",
+        "falsifier_codes", "analyst_question_templates",
+        "explanation_templates", "limits",
+    }
+    if (
+        not required_policy.issubset(policy)
+        or policy.get("schema_version") != "ai_advisory_policy.v2"
+    ):
+        raise AIAdvisoryContractError("AI policy v2 contract is invalid")
+    for key in (
+        "step_types", "anchor_types", "abstention_reason_codes",
+        "limitation_codes", "evidence_gap_codes", "falsifier_codes",
+    ):
+        values = policy.get(key)
+        if (
+            not isinstance(values, list)
+            or not values
+            or any(not isinstance(item, str) or not item for item in values)
+            or len(values) != len(set(values))
+        ):
+            raise AIAdvisoryContractError(f"AI policy {key} is invalid")
+    for key in ("analyst_question_templates", "explanation_templates"):
+        if not isinstance(policy.get(key), dict) or not policy[key]:
+            raise AIAdvisoryContractError(f"AI policy {key} is invalid")
+    return policy, policy_sha256, contract_sha256
+
+
+def _v2_aliases(
+    scope: AssessmentAliasScope, kind: str, values: Iterable[Any]
+) -> list[str]:
+    return sorted({scope.alias(kind, value) for value in values if _clean(value)})
+
+
+def _v2_codes(
+    values: Iterable[Any],
+    *,
+    allowed: set[str],
+    mappings: tuple[tuple[str, str], ...],
+) -> list[str]:
+    output = []
+    for raw in values:
+        text = _clean(raw).lower().replace("-", "_").replace(" ", "_")
+        if text in allowed and text not in output:
+            output.append(text)
+        for needle, code in mappings:
+            if needle in text and code in allowed and code not in output:
+                output.append(code)
+    return sorted(output)
+
+
+def _v2_limitation_codes(values: Iterable[Any], policy: Mapping[str, Any]) -> list[str]:
+    allowed = set(policy["limitation_codes"])
+    return _v2_codes(values, allowed=allowed, mappings=(
+        ("intent", "attacker_intent_not_established"),
+        ("real_host", "real_host_effect_not_established"),
+        ("real-host", "real_host_effect_not_established"),
+        ("effect_unconfirmed", "real_host_effect_not_established"),
+        ("execution", "execution_not_established"),
+        ("transfer", "transfer_not_confirmed"),
+        ("acquisition", "credential_acquisition_not_established"),
+        ("causal", "relationship_not_causal_proof"),
+        ("relationship", "relationship_not_causal_proof"),
+        ("outcome", "outcome_unknown"),
+        ("unresolved", "unresolved_identity"),
+    ))
+
+
+def _v2_gap_codes(values: Iterable[Any], policy: Mapping[str, Any]) -> list[str]:
+    return _v2_codes(values, allowed=set(policy["evidence_gap_codes"]), mappings=(
+        ("transfer", "direct_transfer_event_missing"),
+        ("execution", "execution_observation_missing"),
+        ("follow_on", "execution_observation_missing"),
+        ("entity", "resolved_entity_link_missing"),
+        ("outcome", "reported_outcome_missing"),
+        ("classification", "trusted_classification_missing"),
+        ("corrobor", "corroborating_event_missing"),
+    ))
+
+
+def _v2_falsifier_codes(values: Iterable[Any], policy: Mapping[str, Any]) -> list[str]:
+    return _v2_codes(values, allowed=set(policy["falsifier_codes"]), mappings=(
+        ("entity", "entity_identity_mismatch"),
+        ("order", "event_order_mismatch"),
+        ("failed", "reported_failure"),
+        ("absent", "direct_event_absent"),
+        ("unavailable", "trusted_evidence_absent"),
+        ("alternative", "alternative_explanation_supported"),
+        ("later", "alternative_explanation_supported"),
+    ))
+
+
+def _v2_relationship_status(value: Any) -> str:
+    status = _clean(value)
+    if status in {"supported", "condition_satisfied", "observed"}:
+        return "supported"
+    if status in {"partial", "condition_unknown", "condition_not_satisfied"}:
+        return "partial"
+    raise AIAdvisoryContractError("relationship status is not projectable")
+
+
+def _v2_chain_status(value: Any) -> str:
+    status = _clean(value)
+    if status in {"complete", "supported"}:
+        return "supported"
+    if status == "partial":
+        return "partial"
+    raise AIAdvisoryContractError("chain status is not projectable")
+
+
+def _v2_projectable_facts(
+    chronology: ChronologicalGraphView,
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    projected = {}
+    families = {}
+    for fact_id in chronology.ordered_fact_ids:
+        family_values = chronology.canonical.semantic_families_for_fact(fact_id)
+        if not family_values:
+            continue
+        if len(family_values) != 1:
+            raise AIAdvisoryContractError("fact semantic family is ambiguous")
+        projected[fact_id] = chronology.canonical.facts_by_id[fact_id]
+        families[fact_id] = family_values[0]
+    return projected, families
+
+
+def _build_ai_advisory_projection_v2_payload(
+    report: Mapping[str, Any],
+    *,
+    alias_scope: AssessmentAliasScope,
+    policy: Mapping[str, Any],
+    policy_sha256: str,
+    contract_sha256: str,
+) -> dict[str, Any]:
+    if validate_session_assessment_v6(report):
+        raise AIAdvisoryContractError("current v6 assessment failed validation")
+    assessment_id = _clean(report.get("assessment_id"))
+    if alias_scope.assessment_id != assessment_id:
+        raise AIAdvisoryContractError("assessment alias scope is stale")
+    evidence = report.get("canonical_evidence") or {}
+    graph = evidence.get("semantic_graph") or {}
+    guidance = report.get("response_guidance_v4") or {}
+    if validate_response_guidance_v4(guidance, parent_graph=graph):
+        raise AIAdvisoryContractError("current guidance v4 failed validation")
+    try:
+        chronology = chronological_graph_view(
+            graph,
+            expected_graph_sha256=_clean(graph.get("graph_sha256")),
+            expected_observed_evidence_sha256=_clean(
+                evidence.get("observed_evidence_sha256")
+            ),
+            expected_typed_fact_set_sha256=_clean(
+                graph.get("typed_fact_set_sha256")
+            ),
+        )
+    except CanonicalGraphQueryError as exc:
+        raise AIAdvisoryContractError("canonical chronology is invalid") from exc
+    facts_by_id, families = _v2_projectable_facts(chronology)
+    projected_fact_ids = set(facts_by_id)
+    graph_relationships = chronology.canonical.relationships_by_id
+    relationships = []
+    for relationship_id, item in sorted(graph_relationships.items()):
+        source = _clean(item.get("source_fact_ref"))
+        target = _clean(item.get("target_fact_ref"))
+        if source not in projected_fact_ids or target not in projected_fact_ids:
+            raise AIAdvisoryContractError(
+                "relationship references a non-projectable fact"
+            )
+        relationships.append({
+            "relationship_id": alias_scope.alias("relationship", relationship_id),
+            "relationship_type": _clean(item.get("relationship_type")),
+            "status": _v2_relationship_status(item.get("status")),
+            "source_fact_id": alias_scope.alias("fact", source),
+            "target_fact_id": alias_scope.alias("fact", target),
+            "entity_id": (
+                alias_scope.alias("entity", item.get("entity_ref"))
+                if _clean(item.get("entity_ref")) else ""
+            ),
+            "limitation_codes": _v2_limitation_codes(
+                item.get("limitation_codes") or [], policy
+            ),
+        })
+
+    hypothesis_chain_ids = {
+        _clean(ref)
+        for hypothesis_set in report.get("hypothesis_sets") or []
+        if isinstance(hypothesis_set, Mapping)
+        for ref in hypothesis_set.get("chain_refs") or []
+        if _clean(ref)
+    }
+    chains = []
+    for chain_id, item in sorted(chronology.canonical.chains_by_id.items()):
+        fact_ids = [_clean(ref) for ref in item.get("fact_refs") or []]
+        relationship_ids = sorted({
+            _clean(ref) for ref in (
+                (item.get("required_relationship_refs") or [])
+                + (item.get("supporting_relationship_refs") or [])
+            ) if _clean(ref)
+        })
+        if set(fact_ids) - projected_fact_ids:
+            raise AIAdvisoryContractError("chain references a non-projectable fact")
+        if set(relationship_ids) - set(graph_relationships):
+            raise AIAdvisoryContractError("chain relationship reference is unresolved")
+        ordered_fact_ids = sorted(
+            fact_ids,
+            key=lambda fact_id: (chronology.dense_ordinals[fact_id], fact_id),
+        )
+        evidence_ids = sorted({
+            _clean(ref)
+            for fact_id in fact_ids
+            for ref in facts_by_id[fact_id].get("source_evidence_refs") or []
+            if _clean(ref)
+        })
+        entity_ids = sorted({
+            _clean(ref)
+            for fact_id in fact_ids
+            for ref in facts_by_id[fact_id].get("entity_refs") or []
+            if _clean(ref)
+        })
+        status = _v2_chain_status(item.get("status"))
+        gaps = []
+        chain_families = {families[fact_id] for fact_id in fact_ids}
+        if status == "partial":
+            if "transfer_attempt" in chain_families and "transfer" not in chain_families:
+                gaps.append("direct_transfer_event_missing")
+            if "execution" not in chain_families:
+                gaps.append("execution_observation_missing")
+        limitations = _v2_limitation_codes(
+            (
+                code for relationship_id in relationship_ids
+                for code in graph_relationships[relationship_id].get(
+                    "limitation_codes"
+                ) or []
+            ),
+            policy,
+        )
+        if relationship_ids and "relationship_not_causal_proof" in set(
+            policy["limitation_codes"]
+        ):
+            limitations = sorted({
+                *limitations, "relationship_not_causal_proof"
+            })
+        chains.append({
+            "chain_id": alias_scope.alias("chain", chain_id),
+            "status": status,
+            "fact_ids": _v2_aliases(alias_scope, "fact", ordered_fact_ids),
+            "relationship_ids": _v2_aliases(
+                alias_scope, "relationship", relationship_ids
+            ),
+            "evidence_ids": _v2_aliases(alias_scope, "evidence", evidence_ids),
+            "entity_ids": _v2_aliases(alias_scope, "entity", entity_ids),
+            "limitation_codes": limitations,
+            "evidence_gap_codes": sorted(gaps),
+            "ai_eligible": (
+                status == "supported"
+                or (status == "partial" and bool(gaps or chain_id in hypothesis_chain_ids))
+            ),
+        })
+
+    chain_alias_by_local = {
+        local_id: alias_scope.alias("chain", local_id)
+        for local_id in chronology.canonical.chains_by_id
+    }
+    relationship_alias_by_local = {
+        local_id: alias_scope.alias("relationship", local_id)
+        for local_id in graph_relationships
+    }
+    trusted = {
+        _clean(item.get("candidate_id"))
+        for item in graph.get("authority_decisions") or []
+        if isinstance(item, Mapping) and item.get("decision") == "trusted"
+    }
+    findings = []
+    finding_local_by_alias = {}
+    for item in report.get("behavioral_findings") or []:
+        if not isinstance(item, Mapping):
+            continue
+        finding_id = _clean(item.get("finding_id"))
+        if finding_id not in trusted:
+            raise AIAdvisoryContractError("projection finding is not trusted")
+        evidence_ids = _strings(item.get("evidence_refs"))
+        relationship_ids = _strings(item.get("relationship_refs"))
+        if set(evidence_ids) - set(chronology.canonical.evidence_by_id):
+            raise AIAdvisoryContractError("finding evidence reference is unresolved")
+        if set(relationship_ids) - set(graph_relationships):
+            raise AIAdvisoryContractError("finding relationship reference is unresolved")
+        chain_ids = []
+        connected = _clean(item.get("connected_chain_id"))
+        if connected:
+            if connected not in chain_alias_by_local:
+                raise AIAdvisoryContractError("finding chain reference is unresolved")
+            chain_ids.append(connected)
+        else:
+            for chain_id, chain in chronology.canonical.chains_by_id.items():
+                refs = set(chain.get("required_relationship_refs") or []) | set(
+                    chain.get("supporting_relationship_refs") or []
+                )
+                if refs.intersection(relationship_ids):
+                    chain_ids.append(chain_id)
+        alias = alias_scope.alias("finding", finding_id)
+        semantic_family = _clean(item.get("semantic_family"))
+        if not semantic_family and chain_ids:
+            chain_fact_ids = {
+                _clean(ref)
+                for chain_id in chain_ids
+                for ref in chronology.canonical.chains_by_id[chain_id].get(
+                    "fact_refs"
+                ) or []
+                if _clean(ref) in projected_fact_ids
+            }
+            if chain_fact_ids:
+                last_fact_id = max(
+                    chain_fact_ids,
+                    key=lambda fact_id: (
+                        chronology.dense_ordinals[fact_id], fact_id
+                    ),
+                )
+                semantic_family = families[last_fact_id]
+        if semantic_family not in V2_FAMILIES:
+            raise AIAdvisoryContractError(
+                "finding semantic family is not projectable"
+            )
+        finding_local_by_alias[alias] = {
+            "evidence_ids": set(evidence_ids),
+            "semantic_family": semantic_family,
+        }
+        findings.append({
+            "finding_id": alias,
+            "finding_type": _clean(item.get("finding_type")),
+            "semantic_family": semantic_family,
+            "status": "supported",
+            "priority_band": "not_applicable",
+            "chain_ids": _v2_aliases(alias_scope, "chain", chain_ids),
+            "relationship_ids": _v2_aliases(
+                alias_scope, "relationship", relationship_ids
+            ),
+            "evidence_ids": _v2_aliases(alias_scope, "evidence", evidence_ids),
+            "limitation_codes": _v2_limitation_codes(
+                item.get("limitations") or [], policy
+            ),
+        })
+
+    hypotheses = []
+    for hypothesis_set in report.get("hypothesis_sets") or []:
+        if not isinstance(hypothesis_set, Mapping):
+            continue
+        set_chain_ids = _strings(hypothesis_set.get("chain_refs"))
+        set_relationship_ids = _strings(hypothesis_set.get("relationship_refs"))
+        set_fact_ids = _strings(hypothesis_set.get("fact_refs"))
+        set_evidence_ids = _strings(hypothesis_set.get("evidence_refs"))
+        if (
+            set(set_chain_ids) - set(chain_alias_by_local)
+            or set(set_relationship_ids) - set(graph_relationships)
+            or set(set_fact_ids) - projected_fact_ids
+            or set(set_evidence_ids) - set(chronology.canonical.evidence_by_id)
+        ):
+            raise AIAdvisoryContractError("hypothesis set reference is unresolved")
+        set_limitations = _v2_limitation_codes(
+            hypothesis_set.get("limitations") or [], policy
+        )
+        set_gaps = _v2_gap_codes(
+            hypothesis_set.get("evidence_gaps") or [], policy
+        )
+        for item in hypothesis_set.get("hypotheses") or []:
+            if not isinstance(item, Mapping):
+                continue
+            supporting = _strings(item.get("supporting_evidence_refs"))
+            if set(supporting) - set(chronology.canonical.evidence_by_id):
+                raise AIAdvisoryContractError("hypothesis evidence is unresolved")
+            hypotheses.append({
+                "hypothesis_id": alias_scope.alias(
+                    "hypothesis", item.get("hypothesis_id")
+                ),
+                "hypothesis_set_id": alias_scope.alias(
+                    "hypothesis_set", hypothesis_set.get("hypothesis_set_id")
+                ),
+                "status": "bounded_unverified_alternative",
+                "chain_ids": _v2_aliases(alias_scope, "chain", set_chain_ids),
+                "relationship_ids": _v2_aliases(
+                    alias_scope, "relationship", set_relationship_ids
+                ),
+                "fact_ids": _v2_aliases(alias_scope, "fact", set_fact_ids),
+                "evidence_ids": _v2_aliases(
+                    alias_scope, "evidence", {*set_evidence_ids, *supporting}
+                ),
+                "limitation_codes": sorted({
+                    *set_limitations,
+                    *_v2_limitation_codes(item.get("limitations") or [], policy),
+                }),
+                "evidence_gap_codes": set_gaps,
+                "falsifier_codes": _v2_falsifier_codes(
+                    item.get("falsification_conditions") or [], policy
+                ),
+            })
+
+    actions = []
+    for item in guidance.get("advisory_actions") or []:
+        if not isinstance(item, Mapping):
+            continue
+        if (
+            item.get("requires_manual_approval") is not True
+            or item.get("safe_to_auto_execute") is not False
+            or item.get("execution_integration") != "not_implemented"
+        ):
+            raise AIAdvisoryContractError("guidance action safety is invalid")
+        evidence_ids = set(_strings(item.get("evidence_refs")))
+        finding_ids = sorted(
+            alias for alias, source in finding_local_by_alias.items()
+            if evidence_ids.intersection(source["evidence_ids"])
+            and (
+                not _clean(item.get("semantic_family"))
+                or source["semantic_family"] == _clean(item.get("semantic_family"))
+            )
+        )
+        if not finding_ids:
+            continue
+        actions.append({
+            "action_id": alias_scope.alias("action", item.get("action_id")),
+            "action_category": "policy_manual_review",
+            "rule_id": _clean(item.get("rule_id")),
+            "policy_order": int(item.get("policy_order") or 0),
+            "finding_ids": finding_ids,
+            "evidence_ids": _v2_aliases(alias_scope, "evidence", evidence_ids),
+            "requires_manual_approval": True,
+            "safe_to_auto_execute": False,
+            "execution_integration": "not_implemented",
+        })
+
+    fact_items = []
+    for fact_id in chronology.ordered_fact_ids:
+        if fact_id not in projected_fact_ids:
+            continue
+        item = facts_by_id[fact_id]
+        fact_items.append({
+            "fact_id": alias_scope.alias("fact", fact_id),
+            "causal_ordinal": chronology.dense_ordinals[fact_id],
+            "semantic_family": families[fact_id],
+            "operation_types": _strings(item.get("operation_types")),
+            "outcome_status": _clean(item.get("outcome_status")),
+            "evidence_ids": _v2_aliases(
+                alias_scope, "evidence", item.get("source_evidence_refs") or []
+            ),
+            "entity_ids": _v2_aliases(
+                alias_scope, "entity", item.get("entity_refs") or []
+            ),
+        })
+    relationship_local_by_alias = {
+        alias_scope.alias("relationship", local_id): item
+        for local_id, item in graph_relationships.items()
+    }
+    chain_local_by_alias = {
+        alias_scope.alias("chain", local_id): item
+        for local_id, item in chronology.canonical.chains_by_id.items()
+    }
+    timeline = []
+    for ordinal in sorted(set(chronology.dense_ordinals.values())):
+        local_fact_ids = [
+            fact_id for fact_id in chronology.fact_ids_at_ordinal(ordinal)
+            if fact_id in projected_fact_ids
+        ]
+        if not local_fact_ids:
+            continue
+        fact_aliases = _v2_aliases(alias_scope, "fact", local_fact_ids)
+        local_evidence = {
+            _clean(ref) for fact_id in local_fact_ids
+            for ref in facts_by_id[fact_id].get("source_evidence_refs") or []
+            if _clean(ref)
+        }
+        local_entities = {
+            _clean(ref) for fact_id in local_fact_ids
+            for ref in facts_by_id[fact_id].get("entity_refs") or []
+            if _clean(ref)
+        }
+        relationship_aliases = sorted(
+            alias for alias, edge in relationship_local_by_alias.items()
+            if _clean(edge.get("source_fact_ref")) in local_fact_ids
+            or _clean(edge.get("target_fact_ref")) in local_fact_ids
+        )
+        chain_aliases = sorted(
+            alias for alias, chain in chain_local_by_alias.items()
+            if set(local_fact_ids).intersection(chain.get("fact_refs") or [])
+        )
+        finding_aliases = sorted(
+            finding["finding_id"] for finding in findings
+            if set(finding["evidence_ids"]).intersection(
+                _v2_aliases(alias_scope, "evidence", local_evidence)
+            )
+        )
+        timeline.append({
+            "ordinal": len(timeline) + 1,
+            "evidence_ids": _v2_aliases(
+                alias_scope, "evidence", local_evidence
+            ),
+            "fact_ids": fact_aliases,
+            "semantic_families": sorted({families[item] for item in local_fact_ids}),
+            "operation_types": sorted({
+                operation for fact_id in local_fact_ids
+                for operation in facts_by_id[fact_id].get("operation_types") or []
+            }),
+            "outcome_status": (
+                _clean(facts_by_id[local_fact_ids[0]].get("outcome_status"))
+                if len({
+                    _clean(facts_by_id[item].get("outcome_status"))
+                    for item in local_fact_ids
+                }) == 1 else "outcome_unknown"
+            ),
+            "entity_ids": _v2_aliases(alias_scope, "entity", local_entities),
+            "relationship_ids": relationship_aliases,
+            "chain_ids": chain_aliases,
+            "finding_ids": finding_aliases,
+        })
+    ordinal_remap = {
+        original: item["ordinal"]
+        for original, item in zip(
+            sorted({
+                chronology.dense_ordinals[fact_id]
+                for fact_id in projected_fact_ids
+            }),
+            timeline,
+        )
+    }
+    for item in fact_items:
+        local_id = alias_scope.restore("fact", item["fact_id"])
+        item["causal_ordinal"] = ordinal_remap[
+            chronology.dense_ordinals[local_id]
+        ]
+
+    limitations = sorted({
+        code for collection in (chains, relationships, findings, hypotheses)
+        for item in collection for code in item.get("limitation_codes") or []
+    })
+    gaps = sorted({
+        code for collection in (chains, hypotheses)
+        for item in collection for code in item.get("evidence_gap_codes") or []
+    })
+    question_map = {
+        "execution_observation_missing": "ask_for_execution_corroboration",
+        "direct_transfer_event_missing": "ask_for_transfer_corroboration",
+        "resolved_entity_link_missing": "ask_to_resolve_entity_identity",
+        "reported_outcome_missing": "ask_to_verify_reported_outcome",
+    }
+    questions = sorted({
+        question_map[gap] for gap in gaps
+        if gap in question_map and question_map[gap] in policy["analyst_question_templates"]
+    })
+    explanations = []
+    for present, template_id in (
+        (chains, "explain_chain_and_limits"),
+        (findings, "explain_finding_priority"),
+        (hypotheses, "explain_hypothesis_test"),
+        (actions, "explain_manual_checks"),
+        (gaps, "explain_evidence_gaps"),
+    ):
+        if present and template_id in policy["explanation_templates"]:
+            explanations.append(template_id)
+
+    provenance = report.get("provenance") or {}
+    typed = provenance.get("typed_semantics") or {}
+    vocabulary = load_typed_semantic_vocabulary()
+    if (
+        vocabulary.get("status") != "valid"
+        or vocabulary.get("sha256")
+        != _clean((typed.get("semantic_vocabulary") or {}).get("sha256"))
+    ):
+        raise AIAdvisoryContractError("typed semantic vocabulary identity mismatch")
+    base = {
+        "schema_version": V2_SCHEMA_VERSION,
+        "assessment_id": alias_scope.alias("assessment", assessment_id),
+        "report_content_sha256": _clean(report.get("report_content_sha256")),
+        "evidence_sha256": _clean(evidence.get("evidence_sha256")),
+        "graph_sha256": _clean(graph.get("graph_sha256")),
+        "typed_fact_set_sha256": _clean(graph.get("typed_fact_set_sha256")),
+        "guidance_content_sha256": _clean(guidance.get("content_sha256")),
+        "provenance": {
+            "evaluator_git_revision": _clean(provenance.get("evaluator_git_revision")),
+            "behavior_policy_sha256": _clean(
+                (provenance.get("behavior_policy") or {}).get("sha256")
+            ),
+            "classification_policy_sha256": _clean(
+                (provenance.get("classification_policy") or {}).get("sha256")
+            ),
+            "typed_vocabulary_sha256": vocabulary["sha256"],
+            "guidance_policy_sha256": _clean(
+                ((guidance.get("provenance") or {}).get("policy") or {}).get(
+                    "file_sha256"
+                )
+            ),
+            "ai_policy_sha256": policy_sha256,
+            "projection_contract_sha256": contract_sha256,
+        },
+        "authority": {key: False for key in sorted(V2_AUTHORITY_KEYS)},
+        "timeline_steps": timeline,
+        "facts": fact_items,
+        "chains": chains,
+        "relationships": relationships,
+        "findings": findings,
+        "hypotheses": hypotheses,
+        "actions": actions,
+        "limitations": limitations,
+        "evidence_gaps": gaps,
+        "allowed_output": {
+            "chain_ids": sorted(item["chain_id"] for item in chains if item["ai_eligible"]),
+            "relationship_ids": sorted(item["relationship_id"] for item in relationships),
+            "finding_ids": sorted(item["finding_id"] for item in findings),
+            "hypothesis_ids": sorted(item["hypothesis_id"] for item in hypotheses),
+            "action_ids": sorted(item["action_id"] for item in actions),
+            "limitation_codes": limitations,
+            "evidence_gap_codes": gaps,
+            "analyst_question_template_ids": questions,
+            "explanation_template_ids": sorted(explanations),
+            "step_types": sorted(policy["step_types"]),
+            "anchor_types": sorted(policy["anchor_types"]),
+            "abstention_reason_codes": sorted(policy["abstention_reason_codes"]),
+        },
+        "abstention": {
+            "assessment_abstained": bool(
+                (report.get("abstention") or {}).get("abstained")
+            ),
+            "reason_codes": (
+                ["canonical_abstention_only"]
+                if (report.get("abstention") or {}).get("abstained")
+                else []
+            ),
+        },
+    }
+    limits = policy["limits"]
+    bounded_collections = {
+        "chains": "max_chains",
+        "relationships": "max_relationships",
+        "findings": "max_findings",
+        "hypotheses": "max_hypotheses",
+        "actions": "max_actions",
+        "limitations": "max_limitations",
+        "evidence_gaps": "max_evidence_gaps",
+    }
+    for collection, limit_key in bounded_collections.items():
+        limit = limits.get(limit_key)
+        if type(limit) is not int or limit < 0 or len(base[collection]) > limit:
+            raise AIAdvisoryContractError(
+                f"projection exceeds reviewed {collection} limit"
+            )
+    request_limit = limits.get("max_request_bytes")
+    if (
+        type(request_limit) is not int
+        or request_limit <= 0
+        or len(stable_json(base).encode("utf-8")) > request_limit
+    ):
+        raise AIAdvisoryContractError("projection exceeds reviewed request limit")
+    return base
+
+
+def _v2_exact(value: Any, keys: set[str], label: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != keys:
+        raise AIAdvisoryContractError(
+            f"{label} violates additionalProperties=false"
+        )
+    return value
+
+
+def _v2_alias_list(value: Any, label: str) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or len(value) != len(set(value))
+        or any(not isinstance(item, str) or not V2_ALIAS_RE.fullmatch(item) for item in value)
+    ):
+        raise AIAdvisoryContractError(f"{label} contains invalid aliases")
+    return value
+
+
+def validate_ai_advisory_projection_v2(
+    projection: Any,
+    *,
+    report: Mapping[str, Any],
+    alias_scope: AssessmentAliasScope,
+    ai_policy_path: str,
+    projection_contract_path: str,
+) -> dict[str, Any]:
+    policy, policy_sha256, contract_sha256 = _v2_inputs(
+        ai_policy_path, projection_contract_path
+    )
+    root = _v2_exact(projection, V2_TOP_KEYS, "projection v2")
+    if root.get("schema_version") != V2_SCHEMA_VERSION:
+        raise AIAdvisoryContractError("projection v2 schema is invalid")
+    if validate_session_assessment_v6(report):
+        raise AIAdvisoryContractError("current v6 assessment failed validation")
+    if alias_scope.assessment_id != _clean(report.get("assessment_id")):
+        raise AIAdvisoryContractError("assessment alias scope is stale")
+    if root.get("assessment_id") != alias_scope.alias(
+        "assessment", report.get("assessment_id")
+    ):
+        raise AIAdvisoryContractError("projection assessment identity mismatch")
+    evidence = report.get("canonical_evidence") or {}
+    graph = evidence.get("semantic_graph") or {}
+    guidance = report.get("response_guidance_v4") or {}
+    expected_hashes = {
+        "report_content_sha256": report.get("report_content_sha256"),
+        "evidence_sha256": evidence.get("evidence_sha256"),
+        "graph_sha256": graph.get("graph_sha256"),
+        "typed_fact_set_sha256": graph.get("typed_fact_set_sha256"),
+        "guidance_content_sha256": guidance.get("content_sha256"),
+    }
+    for key, expected in expected_hashes.items():
+        value = _clean(root.get(key)).lower()
+        if not SHA256_RE.fullmatch(value) or value != _clean(expected).lower():
+            raise AIAdvisoryContractError(f"projection {key} mismatch")
+    provenance = _v2_exact(
+        root.get("provenance"), V2_PROVENANCE_KEYS, "projection provenance"
+    )
+    for key in V2_PROVENANCE_KEYS - {"evaluator_git_revision"}:
+        if not SHA256_RE.fullmatch(_clean(provenance.get(key)).lower()):
+            raise AIAdvisoryContractError(f"projection {key} is invalid")
+    if provenance.get("ai_policy_sha256") != policy_sha256:
+        raise AIAdvisoryContractError("projection AI policy hash mismatch")
+    if provenance.get("projection_contract_sha256") != contract_sha256:
+        raise AIAdvisoryContractError("projection contract hash mismatch")
+    if not SAFE_ATOM_RE.fullmatch(_clean(provenance.get("evaluator_git_revision"))):
+        raise AIAdvisoryContractError("projection evaluator revision is invalid")
+    authority = _v2_exact(
+        root.get("authority"), V2_AUTHORITY_KEYS, "projection authority"
+    )
+    if any(value is not False for value in authority.values()):
+        raise AIAdvisoryContractError("projection grants AI authority")
+
+    vocabulary = load_typed_semantic_vocabulary()
+    operations = set((vocabulary.get("document") or {}).get("operations") or {})
+    outcomes = set(
+        ((vocabulary.get("document") or {}).get("vocabulary") or {}).get(
+            "outcome_statuses"
+        ) or []
+    )
+    collections = (
+        ("timeline_steps", V2_TIMELINE_KEYS),
+        ("facts", V2_FACT_KEYS),
+        ("chains", V2_CHAIN_KEYS),
+        ("relationships", V2_RELATIONSHIP_KEYS),
+        ("findings", V2_FINDING_KEYS),
+        ("hypotheses", V2_HYPOTHESIS_KEYS),
+        ("actions", V2_ACTION_KEYS),
+    )
+    for collection, keys in collections:
+        if not isinstance(root.get(collection), list):
+            raise AIAdvisoryContractError(f"projection {collection} must be a list")
+        for index, item in enumerate(root[collection]):
+            _v2_exact(item, keys, f"projection {collection}[{index}]")
+    ordinals = [item.get("ordinal") for item in root["timeline_steps"]]
+    if ordinals != list(range(1, len(ordinals) + 1)):
+        raise AIAdvisoryContractError("projection timeline ordinals are invalid")
+    for item in root["timeline_steps"]:
+        for key in (
+            "evidence_ids", "fact_ids", "entity_ids", "relationship_ids",
+            "chain_ids", "finding_ids",
+        ):
+            _v2_alias_list(item.get(key), f"timeline {key}")
+        if set(item.get("semantic_families") or []) - V2_FAMILIES:
+            raise AIAdvisoryContractError("timeline semantic family is invalid")
+        if set(item.get("operation_types") or []) - operations:
+            raise AIAdvisoryContractError("timeline operation type is invalid")
+        if item.get("outcome_status") not in outcomes:
+            raise AIAdvisoryContractError("timeline outcome is invalid")
+    for item in root["facts"]:
+        _v2_alias_list([item.get("fact_id")], "fact ID")
+        _v2_alias_list(item.get("evidence_ids"), "fact evidence IDs")
+        _v2_alias_list(item.get("entity_ids"), "fact entity IDs")
+        if item.get("semantic_family") not in V2_FAMILIES:
+            raise AIAdvisoryContractError("fact semantic family is invalid")
+        if set(item.get("operation_types") or []) - operations:
+            raise AIAdvisoryContractError("fact operation type is invalid")
+        if item.get("outcome_status") not in outcomes:
+            raise AIAdvisoryContractError("fact outcome is invalid")
+        if item.get("causal_ordinal") not in ordinals:
+            raise AIAdvisoryContractError("fact causal ordinal is invalid")
+    for collection, identity in (
+        ("chains", "chain_id"), ("relationships", "relationship_id"),
+        ("findings", "finding_id"), ("hypotheses", "hypothesis_id"),
+        ("actions", "action_id"),
+    ):
+        _v2_alias_list(
+            [item[identity] for item in root[collection]],
+            f"{collection} identities",
+        )
+    for item in root["chains"]:
+        if item.get("status") not in {"supported", "partial"}:
+            raise AIAdvisoryContractError("projection chain status is invalid")
+        if type(item.get("ai_eligible")) is not bool:
+            raise AIAdvisoryContractError("projection chain eligibility is invalid")
+        for key in ("fact_ids", "relationship_ids", "evidence_ids", "entity_ids"):
+            _v2_alias_list(item.get(key), f"chain {key}")
+    for item in root["relationships"]:
+        if item.get("status") not in {"supported", "partial"}:
+            raise AIAdvisoryContractError(
+                "projection relationship status is invalid"
+            )
+        for key in ("relationship_id", "source_fact_id", "target_fact_id"):
+            _v2_alias_list([item.get(key)], f"relationship {key}")
+        if item.get("entity_id"):
+            _v2_alias_list([item.get("entity_id")], "relationship entity_id")
+        if not SAFE_ATOM_RE.fullmatch(_clean(item.get("relationship_type"))):
+            raise AIAdvisoryContractError(
+                "projection relationship type is invalid"
+            )
+    for item in root["findings"]:
+        if (
+            item.get("status") != "supported"
+            or item.get("semantic_family") not in V2_FAMILIES
+            or item.get("priority_band") not in {
+                "not_applicable", "reviewed_low", "reviewed_medium",
+                "reviewed_high", "reviewed_critical",
+            }
+        ):
+            raise AIAdvisoryContractError("projection finding state is invalid")
+        for key in ("chain_ids", "relationship_ids", "evidence_ids"):
+            _v2_alias_list(item.get(key), f"finding {key}")
+        if not SAFE_ATOM_RE.fullmatch(_clean(item.get("finding_type"))):
+            raise AIAdvisoryContractError("projection finding type is invalid")
+    for item in root["hypotheses"]:
+        if item.get("status") != "bounded_unverified_alternative":
+            raise AIAdvisoryContractError("projection hypothesis status is invalid")
+        _v2_alias_list([item.get("hypothesis_set_id")], "hypothesis set ID")
+        for key in ("chain_ids", "relationship_ids", "fact_ids", "evidence_ids"):
+            _v2_alias_list(item.get(key), f"hypothesis {key}")
+    for item in root["actions"]:
+        if (
+            item.get("requires_manual_approval") is not True
+            or item.get("safe_to_auto_execute") is not False
+            or item.get("execution_integration") != "not_implemented"
+            or type(item.get("policy_order")) is not int
+            or item.get("policy_order") < 0
+        ):
+            raise AIAdvisoryContractError("projection action safety is invalid")
+        for key in ("finding_ids", "evidence_ids"):
+            _v2_alias_list(item.get(key), f"action {key}")
+        for key in ("action_category", "rule_id"):
+            if not SAFE_ATOM_RE.fullmatch(_clean(item.get(key))):
+                raise AIAdvisoryContractError(f"projection action {key} is invalid")
+    _v2_exact(
+        root.get("allowed_output"), V2_ALLOWED_OUTPUT_KEYS,
+        "projection allowed_output",
+    )
+    _v2_exact(root.get("abstention"), V2_ABSTENTION_KEYS, "projection abstention")
+    if set(root.get("limitations") or []) - set(policy["limitation_codes"]):
+        raise AIAdvisoryContractError("projection limitation code is unknown")
+    if set(root.get("evidence_gaps") or []) - set(policy["evidence_gap_codes"]):
+        raise AIAdvisoryContractError("projection evidence gap is unknown")
+    found = set(_walk_keys(root)).intersection(V2_PROHIBITED_FIELDS)
+    if found:
+        raise AIAdvisoryContractError(
+            f"projection contains prohibited fields: {sorted(found)}",
+            code="projection_privacy_violation",
+        )
+    basis = {key: deepcopy(value) for key, value in root.items() if key != "projection_sha256"}
+    if root.get("projection_sha256") != sha256_json(basis):
+        raise AIAdvisoryContractError("projection v2 content hash mismatch")
+    expected = _build_ai_advisory_projection_v2_payload(
+        report,
+        alias_scope=alias_scope,
+        policy=policy,
+        policy_sha256=policy_sha256,
+        contract_sha256=contract_sha256,
+    )
+    expected["projection_sha256"] = sha256_json(expected)
+    if dict(root) != expected:
+        raise AIAdvisoryContractError(
+            "projection v2 does not match the current graph and policy"
+        )
+    return deepcopy(dict(root))
+
+
+def build_ai_advisory_projection_v2(
+    report: Mapping[str, Any],
+    *,
+    alias_scope: AssessmentAliasScope,
+    ai_policy_path: str,
+    projection_contract_path: str,
+) -> dict[str, Any]:
+    """Build the deterministic, chronological, provider-safe v2 projection."""
+
+    policy, policy_sha256, contract_sha256 = _v2_inputs(
+        ai_policy_path, projection_contract_path
+    )
+    base = _build_ai_advisory_projection_v2_payload(
+        report,
+        alias_scope=alias_scope,
+        policy=policy,
+        policy_sha256=policy_sha256,
+        contract_sha256=contract_sha256,
+    )
+    projection = {**base, "projection_sha256": sha256_json(base)}
+    return validate_ai_advisory_projection_v2(
+        projection,
+        report=report,
+        alias_scope=alias_scope,
+        ai_policy_path=ai_policy_path,
+        projection_contract_path=projection_contract_path,
+    )
