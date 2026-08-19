@@ -654,12 +654,20 @@ class MongoDBRuntimeOperations:
     @staticmethod
     def _report_identity(job_id: str, report_payload: Dict[str, Any]) -> tuple[str, str, str]:
         assessment_id = str(report_payload.get("assessment_id") or "").strip()
-        if report_payload.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"} and assessment_id:
+        if report_payload.get("schema_version") in {
+            "session_assessment.v4",
+            "session_assessment.v5",
+            "session_assessment.v6",
+        } and assessment_id:
             report_id = stable_id("report", {"job_id": job_id, "schema_version": report_payload.get("schema_version"), "assessment_id": assessment_id})
         else:
             report_id = stable_id("report", {"job_id": job_id, "report": report_payload})
         evidence = report_payload.get("canonical_evidence")
-        canonical_session = evidence.get("session_id") if report_payload.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"} and isinstance(evidence, dict) else ""
+        canonical_session = evidence.get("session_id") if report_payload.get("schema_version") in {
+            "session_assessment.v4",
+            "session_assessment.v5",
+            "session_assessment.v6",
+        } and isinstance(evidence, dict) else ""
         session_id = str(canonical_session or report_payload.get("session_id") or (report_payload.get("data_provenance") or {}).get("session", {}).get("session_id") or "unknown").strip()
         return report_id, session_id, assessment_id
 

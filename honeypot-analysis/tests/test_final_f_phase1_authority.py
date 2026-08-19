@@ -15,9 +15,11 @@ from production.reporting.artifacts import (
 from production.reporting.canonical_pipeline import CanonicalAssessmentCoordinator
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
 from production.reporting.session_assessment_v5 import (
-    build_session_assessment_v5,
     trusted_behavioral_findings_for_presentation,
-    validate_session_assessment_v5,
+)
+from production.reporting.session_assessment_v6 import (
+    build_session_assessment_v6,
+    validate_session_assessment_v6,
 )
 from production.utils.serialization import session_to_payload
 from production.workers import analysis_worker
@@ -63,7 +65,7 @@ def _historical_audit_only_report() -> tuple[dict, dict, dict]:
     return report, payload, audit
 
 
-def test_current_producers_use_explicit_v5_contract_and_identity() -> None:
+def test_current_producers_use_explicit_current_contract_and_identity() -> None:
     payload = _payload({
         "case_id": "phase1-producer-parity",
         "events": [("whoami", "success")],
@@ -75,7 +77,7 @@ def test_current_producers_use_explicit_v5_contract_and_identity() -> None:
     coordinated = asyncio.run(coordinator.analyze(
         {}, {}, [payload], [], raw_events=payload["raw_events"]
     ))
-    direct = build_session_assessment_v5(
+    direct = build_session_assessment_v6(
         [payload],
         raw_events=payload["raw_events"],
         behavior_policy_path=str(BEHAVIOR_POLICY),
@@ -83,11 +85,11 @@ def test_current_producers_use_explicit_v5_contract_and_identity() -> None:
     )
     fallback = deterministic_baseline_report(payload, "controlled failure")
 
-    assert coordinated["schema_version"] == "session_assessment.v5"
+    assert coordinated["schema_version"] == "session_assessment.v6"
     assert coordinated["assessment_id"] == direct["assessment_id"]
-    assert fallback["schema_version"] == "session_assessment.v5"
-    assert validate_session_assessment_v5(coordinated) == []
-    assert validate_session_assessment_v5(fallback) == []
+    assert fallback["schema_version"] == "session_assessment.v6"
+    assert validate_session_assessment_v6(coordinated) == []
+    assert validate_session_assessment_v6(fallback) == []
     assert not hasattr(analysis_worker, "build_session_assessment_v4")
     assert not hasattr(analysis_worker, "validate_session_assessment_v4")
 

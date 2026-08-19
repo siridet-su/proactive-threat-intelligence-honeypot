@@ -31,11 +31,11 @@ from production.reporting.actor_attribution import enrich_report_with_actor_attr
 from production.reporting.analysis_policy import session_analysis_skip_reason
 from production.reporting.artifacts import attach_report_artifacts
 from production.policies.threat_hypothesis_behavior_policy import load_behavior_policy
-from production.reporting.session_assessment_v5 import (
-    SessionAssessmentV5Error,
-    build_session_assessment_v5,
-    canonical_assessment_id,
-    validate_session_assessment_v5,
+from production.reporting.session_assessment_v6 import (
+    SessionAssessmentV6Error,
+    build_session_assessment_v6,
+    refresh_session_assessment_v6_identity,
+    validate_session_assessment_v6,
 )
 from production.utils.credential_hmac import credential_metadata_for_provenance
 from production.utils.config import ProductionConfig
@@ -367,12 +367,14 @@ def attach_threat_evidence_layers(
     session_payload: Dict[str, Any],
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if report.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         # Visualization is context only. It cannot become a sibling authority
         # field or mutate canonical findings, hypotheses, status, or IDs.
         context = report.setdefault("non_authoritative_context", {})
         if not isinstance(context, dict):
-            raise SessionAssessmentV5Error(
+            raise SessionAssessmentV6Error(
                 "non_authoritative_context must be an object"
             )
         context["threat_evidence_layers"] = build_threat_evidence_layers(
@@ -384,7 +386,7 @@ def attach_threat_evidence_layers(
             ),
         )
         return report
-    raise SessionAssessmentV5Error(
+    raise SessionAssessmentV6Error(
         "threat evidence layers can only attach to a canonical session assessment"
     )
 
@@ -409,7 +411,7 @@ def deterministic_baseline_report(
 ) -> Dict[str, Any]:
     safe_error = _safe_error_text(error)
     selected = config or ProductionConfig()
-    report = build_session_assessment_v5(
+    report = build_session_assessment_v6(
         [session_payload],
         raw_events=session_payload.get("raw_events") or [],
         behavior_policy_path=selected.threat_hypothesis_behavior_policy_path,
@@ -432,7 +434,7 @@ def deterministic_baseline_report(
     }
     report["behavioral_findings"] = []
     report["hypothesis_sets"] = []
-    report["assessment_id"] = canonical_assessment_id(report)
+    refresh_session_assessment_v6_identity(report)
     report["session_id"] = str(
         (report.get("canonical_evidence") or {}).get("session_id")
         or session_payload.get("session_id")
@@ -447,7 +449,7 @@ def deterministic_baseline_report(
     report = attach_threat_evidence_layers(
         report, session_payload, prediction_snapshot
     )
-    validate_session_assessment_v5(report, raise_on_error=True)
+    validate_session_assessment_v6(report, raise_on_error=True)
     return _safe_report_mapping(report)
 
 
@@ -508,7 +510,7 @@ def reconstruct_canonical_session_events(
 
     expected = session_payload.get("canonical_event_manifest")
     if not isinstance(expected, dict):
-        raise SessionAssessmentV5Error(
+        raise SessionAssessmentV6Error(
             "analysis job lacks a canonical durable event manifest"
         )
     required = {
@@ -519,7 +521,7 @@ def reconstruct_canonical_session_events(
         "manifest_sha256",
     }
     if set(expected) != required:
-        raise SessionAssessmentV5Error(
+        raise SessionAssessmentV6Error(
             "analysis job canonical event manifest contract is invalid"
         )
     actual = storage.load_session_event_snapshot(
@@ -529,19 +531,19 @@ def reconstruct_canonical_session_events(
     )
     actual_summary = {key: actual[key] for key in required}
     if actual_summary != expected:
-        raise SessionAssessmentV5Error(
+        raise SessionAssessmentV6Error(
             "durable session evidence does not match the analysis manifest"
         )
     selected_session_id = str(expected.get("session_id") or "")
     events = list(actual["events"])
     if len(events) != int(expected.get("event_count") or -1):
-        raise SessionAssessmentV5Error(
+        raise SessionAssessmentV6Error(
             "durable session evidence count does not match the analysis manifest"
         )
     for event in events:
         event_session_id = str(event.get("session") or "").strip()
         if event_session_id and event_session_id != selected_session_id:
-            raise SessionAssessmentV5Error(
+            raise SessionAssessmentV6Error(
                 "durable session evidence contains a conflicting session identity"
             )
 
@@ -640,7 +642,7 @@ async def analyze_job(
         key: session_payload.get("canonical_event_manifest", {}).get(key)
         for key in replay_manifest_keys
     }:
-        raise SessionAssessmentV5Error(
+        raise SessionAssessmentV6Error(
             "durable prefix changed between manifest verification and classification replay"
         )
     session_payload = reclassify_durable_prefix(
@@ -692,9 +694,9 @@ async def analyze_job(
         if isinstance(diagnostic, dict):
             failure.validation_diagnostic = diagnostic
         raise failure from None
-    if result.get("schema_version") != "session_assessment.v5":
-        raise SessionAssessmentV5Error(
-            "new analysis reports must use session_assessment.v5"
+    if result.get("schema_version") != "session_assessment.v6":
+        raise SessionAssessmentV6Error(
+            "new analysis reports must use session_assessment.v6"
         )
     result.setdefault("session_id", state.session_id)
     result.setdefault("created_at", utc_now())
@@ -712,7 +714,7 @@ async def analyze_job(
     )
     context_payload = result.setdefault("non_authoritative_context", {})
     if not isinstance(context_payload, dict):
-        raise SessionAssessmentV5Error(
+        raise SessionAssessmentV6Error(
             "non_authoritative_context must be an object"
         )
     context_payload["threat_hunting"] = hunting_context
@@ -728,9 +730,9 @@ async def analyze_job(
             "authority": "non_authoritative_context_only",
             "actor_matches": attribution.get("actor_matches") or [],
         }
-    validate_session_assessment_v5(result, raise_on_error=True)
+    validate_session_assessment_v6(result, raise_on_error=True)
     result = attach_report_artifacts(result, session_payload, config)
-    validate_session_assessment_v5(result, raise_on_error=True)
+    validate_session_assessment_v6(result, raise_on_error=True)
     return result
 
 
@@ -897,7 +899,7 @@ class AnalysisWorker:
                                 config=self.config,
                             )
                             fallback.setdefault("correlation_id", correlation_id)
-                            validate_session_assessment_v5(
+                            validate_session_assessment_v6(
                                 fallback, raise_on_error=True
                             )
                             fallback = attach_report_artifacts(
@@ -905,7 +907,7 @@ class AnalysisWorker:
                                 fallback_session,
                                 self.config,
                             )
-                            validate_session_assessment_v5(
+                            validate_session_assessment_v6(
                                 fallback, raise_on_error=True
                             )
                             heartbeat.check(renew=True)

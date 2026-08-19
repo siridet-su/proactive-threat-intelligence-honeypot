@@ -484,13 +484,23 @@ class _RecoveryCoordinator:
         pass
 
     async def analyze(self, _ioc_bundle: object, _tactic_summary: object, sessions: object, **kwargs: object) -> dict:
-        from production.reporting.session_assessment_v4 import (
-            build_session_assessment_v4,
+        from production.reporting.session_assessment_v6 import (
+            build_session_assessment_v6,
         )
 
-        return build_session_assessment_v4(
+        config = ProductionConfig()
+        return build_session_assessment_v6(
             sessions,
             raw_events=kwargs.get("raw_events", []),
+            behavior_policy_path=config.threat_hypothesis_behavior_policy_path,
+            classification_policy=config.classification_policy,
+            classification_policy_path=config.classification_rules_path,
+            model_artifact_provenance=config.prediction_policy,
+            mitre_cache_path=config.mitre_attack_path,
+            response_guidance_policy_path=config.response_guidance_policy_path,
+            response_guidance_asset_profile_path=(
+                config.response_guidance_asset_profile_path
+            ),
         )
 
 
@@ -594,7 +604,7 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
     ) == 1
     report = json.loads(storage.list_rows("reports", limit=1)[0]["payload_json"])
     assert report["session_id"] == "session-restart"
-    assert report["schema_version"] == "session_assessment.v4"
+    assert report["schema_version"] == "session_assessment.v6"
     assert report["canonical_evidence"]["source_evidence_sha256"]
 
 

@@ -120,7 +120,7 @@ def test_large_session_report_uses_complete_durable_event_manifest(tmp_path) -> 
 
     assert asyncio.run(AnalysisWorker(config).process_once()) == 1
     report = json.loads(storage.list_rows("reports", limit=1)[0]["payload_json"])
-    assert report["schema_version"] == "session_assessment.v4"
+    assert report["schema_version"] == "session_assessment.v6"
     assert report["canonical_evidence"]["durable_event_manifest"] == (
         job_payload["canonical_event_manifest"]
     )

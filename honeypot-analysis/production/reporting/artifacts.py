@@ -23,7 +23,8 @@ from production.utils.sensitive_data import (
 )
 from production.utils.serialization import stable_id, stable_json
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
-from production.reporting.session_assessment_v5 import (
+from production.reporting.response_guidance_v4 import validate_response_guidance_v4
+from production.reporting.session_assessment_v6 import (
     trusted_behavioral_findings_for_presentation,
     validate_session_assessment,
 )
@@ -47,7 +48,9 @@ def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
     if (
         label == "report"
         and isinstance(value, dict)
-        and value.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
+        and value.get("schema_version") in {
+            "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+        }
     ):
         # V4 has already been redacted before its evidence digest and content
         # IDs are computed. Re-redacting at each consumer can alter an
@@ -70,7 +73,7 @@ def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
 def _canonical_behavioral_findings(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     if report.get("schema_version") not in {
         "session_assessment.v4",
-        "session_assessment.v5",
+        "session_assessment.v5", "session_assessment.v6",
     }:
         return []
     return trusted_behavioral_findings_for_presentation(
@@ -234,7 +237,9 @@ def _artifact_version_id(
 ) -> str:
     """Derive a retry-stable version before artifact paths are attached."""
 
-    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if report.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         provenance = report.get("provenance") or {}
         evidence_sha256 = str(provenance.get("evidence_sha256") or "").strip()
         assessment_id = str(report.get("assessment_id") or "").strip()
@@ -388,7 +393,9 @@ def _artifact_timestamp(
 ) -> str:
     """Choose a source-bound timestamp without consulting the wall clock."""
 
-    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if report.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         evidence = report.get("canonical_evidence") or {}
         source_timestamps = [
             _stix_timestamp(str(item.get("timestamp") or ""), fallback="")
@@ -430,7 +437,9 @@ def _stix_source_report_sha256(report: Dict[str, Any]) -> str:
     """Hash the retry-stable report projection represented in STIX."""
 
     basis = deepcopy(report)
-    if basis.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if basis.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         for key in (
             "artifacts",
             "generated_at",
@@ -443,6 +452,11 @@ def _stix_source_report_sha256(report: Dict[str, Any]) -> str:
             guidance.pop("generated_at", None)
             guidance.pop("non_authoritative_context", None)
             basis["response_guidance_v3"] = guidance
+        guidance_v4 = basis.get("response_guidance_v4")
+        if isinstance(guidance_v4, dict):
+            guidance_v4 = deepcopy(guidance_v4)
+            guidance_v4.pop("generated_at", None)
+            basis["response_guidance_v4"] = guidance_v4
     return hashlib.sha256(
         stable_json(basis).encode("utf-8")
     ).hexdigest()
@@ -476,7 +490,9 @@ def _evidence_layer_summary_lines(report: Dict[str, Any]) -> List[str]:
 
 
 def _trusted_ttp_ids(report: Dict[str, Any], session_payload: Dict[str, Any]) -> List[str]:
-    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if report.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         evidence = report.get("canonical_evidence") or {}
         return list(dict.fromkeys(
             str(item.get("technique_id") or "").strip()
@@ -547,10 +563,17 @@ def _append_stix_object(
 
 
 def _trusted_recommendation_actions(report: Dict[str, Any]) -> List[Dict[str, Any]]:
-    guidance = report.get("response_guidance_v3")
-    if not isinstance(guidance, dict) or guidance.get("schema_version") != "response_guidance.v3":
+    guidance = report.get("response_guidance_v4") or report.get("response_guidance_v3")
+    if not isinstance(guidance, dict):
         return []
-    if validate_response_guidance_v3(guidance):
+    if guidance.get("schema_version") == "response_guidance.v4":
+        graph = (report.get("canonical_evidence") or {}).get("semantic_graph") or {}
+        errors = validate_response_guidance_v4(guidance, parent_graph=graph)
+    elif guidance.get("schema_version") == "response_guidance.v3":
+        errors = validate_response_guidance_v3(guidance)
+    else:
+        return []
+    if errors:
         return []
     return [
         item for item in guidance.get("advisory_actions") or []
@@ -675,7 +698,9 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
         ),
     }
 
-    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if report.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         provenance = report.get("provenance") or {}
         for finding in _canonical_behavioral_findings(report):
             if not isinstance(finding, dict):
@@ -910,6 +935,14 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
             }, seen_ids, reference_from_report=False)
 
     for action in _trusted_recommendation_actions(report):
+        guidance_authority = str(
+            (
+                report.get("response_guidance_v4")
+                or report.get("response_guidance_v3")
+                or {}
+            ).get("authority")
+            or ""
+        )
         action_id_value = str(action.get("action_id") or action.get("rule_id") or action.get("description") or stable_json(action))
         coa_id = _stix_id("course-of-action", "policy-action:" + action_id_value)
         coa = {
@@ -923,7 +956,7 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
             "external_references": _external_references(action.get("references")),
             "x_honeypot_action_id": action.get("action_id") or "",
             "x_honeypot_rule_id": action.get("rule_id") or "",
-            "x_honeypot_authority": "deterministic_observed_evidence_policy",
+            "x_honeypot_authority": guidance_authority,
             "x_honeypot_evidence_refs": action.get("evidence_refs") or [],
             "x_honeypot_evidence_scope": action.get("evidence_scope") or [],
             "x_honeypot_requires_manual_approval": True,
@@ -1023,7 +1056,9 @@ def write_markdown_report(
         "## Summary",
         str(
             "Canonical behavioral findings and falsifiable alternatives are listed below."
-            if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
+            if report.get("schema_version") in {
+                "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+            }
             else (report.get("presentation") or {}).get("summary")
             or report.get("executive_summary") or report.get("summary") or "No summary available."
         ),
@@ -1032,7 +1067,9 @@ def write_markdown_report(
     ]
     for tid in _trusted_ttp_ids(report, session_payload):
         lines.append(f"- {tid}")
-    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if report.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         canonical_findings = _canonical_behavioral_findings(report)
         lines.extend(["", "## Behavioral Findings"])
         for finding in canonical_findings:
@@ -1180,7 +1217,9 @@ def write_pdf_report(
             escape(
                 str(
                     "Canonical behavioral findings and falsifiable alternatives are listed below."
-                    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
+                    if report.get("schema_version") in {
+                        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+                    }
                     else (report.get("presentation") or {}).get("summary")
                     or report.get("executive_summary")
                     or report.get("summary")
@@ -1192,7 +1231,9 @@ def write_pdf_report(
         Spacer(1, 8),
     ]
 
-    if report.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if report.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         canonical_findings = _canonical_behavioral_findings(report)
         story.append(Paragraph("Behavioral Findings", h2))
         if canonical_findings:

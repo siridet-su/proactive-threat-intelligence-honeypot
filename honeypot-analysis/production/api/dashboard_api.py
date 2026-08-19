@@ -26,7 +26,10 @@ from production.utils.http_security import (
 )
 from production.utils.serialization import utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
-from production.reporting.response_guidance_v3 import build_response_guidance_v3_from_session
+from production.reporting.response_guidance_v4 import (
+    build_response_guidance_v4_from_paths,
+)
+from production.reporting.session_assessment_v6 import validate_session_assessment
 from production.storage import open_storage
 from production.api.security import (
     api_row_view,
@@ -195,33 +198,49 @@ def _current_decision_payload(
     *,
     report_recommendations: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    del snapshot, report_recommendations
     if not config.enable_response_guidance:
         return {"enabled": False, "reason": "response guidance layer disabled"}
-    session_payload = _session_payload_for_id(storage, session_id)
-    prediction_context = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else snapshot
-    guidance = build_response_guidance_v3_from_session(
-        session_payload,
-        policy_path=config.response_guidance_policy_path,
-        asset_profile_path=config.response_guidance_asset_profile_path,
-        behavior_policy_path=getattr(
-            config, "threat_hypothesis_behavior_policy_path", ""
-        ),
-        classification_policy_path=getattr(
-            config, "classification_rules_path", ""
-        ),
-        forecast_context=prediction_context or {},
-        enrichment_context=session_payload.get("enrichment_status") or {},
-    )
-    guidance["presentation_semantics"] = {
-        "mode": "current_policy_reevaluation",
-        "historical_record": False,
-        "replaces_stored_historical_guidance": False,
-        "description": (
-            "Recomputed from the current v3 policy and immutable current observed "
-            "evidence; it does not replace stored point-in-time guidance."
-        ),
-    }
-    return guidance
+    report_row = storage.get_current_report_for_session(session_id)
+    report = _payload_from_row(report_row or {})
+    if (
+        report.get("schema_version")
+        not in {"session_assessment.v4", "session_assessment.v5", "session_assessment.v6"}
+        or validate_session_assessment(report)
+    ):
+        return {
+            "schema_version": "response_guidance_reevaluation_unavailable.v1",
+            "status": "unavailable",
+            "guidance_state": "validated_current_report_required",
+            "authority": "none",
+            "advisory_actions": [],
+            "reason": "current validated canonical report is unavailable",
+        }
+    evidence = report.get("canonical_evidence") or {}
+    graph = evidence.get("semantic_graph") or {}
+    try:
+        return build_response_guidance_v4_from_paths(
+            graph,
+            session_id=str(evidence.get("session_id") or session_id),
+            policy_path=config.response_guidance_policy_path,
+            asset_profile_path=config.response_guidance_asset_profile_path,
+            expected_graph_sha256=str(graph.get("graph_sha256") or ""),
+            expected_observed_evidence_sha256=str(
+                evidence.get("observed_evidence_sha256") or ""
+            ),
+            expected_typed_fact_set_sha256=str(
+                graph.get("typed_fact_set_sha256") or ""
+            ),
+        )
+    except (TypeError, ValueError):
+        return {
+            "schema_version": "response_guidance_reevaluation_unavailable.v1",
+            "status": "unavailable",
+            "guidance_state": "graph_or_policy_validation_failed",
+            "authority": "none",
+            "advisory_actions": [],
+            "reason": "current report graph or reviewed policy failed validation",
+        }
 
 
 def _external_seed_health_payload(config: ProductionConfig) -> Dict[str, Any]:

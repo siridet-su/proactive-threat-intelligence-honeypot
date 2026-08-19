@@ -2838,7 +2838,11 @@ class SQLiteStorage:
     ) -> Optional[str]:
         assessment_id = str(report_payload.get("assessment_id") or "").strip()
         if (
-            report_payload.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
+            report_payload.get("schema_version") in {
+                "session_assessment.v4",
+                "session_assessment.v5",
+                "session_assessment.v6",
+            }
             and assessment_id
         ):
             report_id = stable_id(
@@ -2859,7 +2863,11 @@ class SQLiteStorage:
         canonical_session_id = (
             canonical_evidence.get("session_id")
             if (
-                report_payload.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}
+                report_payload.get("schema_version") in {
+                    "session_assessment.v4",
+                    "session_assessment.v5",
+                    "session_assessment.v6",
+                }
                 and isinstance(canonical_evidence, dict)
             )
             else ""

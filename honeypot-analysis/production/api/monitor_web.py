@@ -54,7 +54,8 @@ from production.reporting.response_guidance_v3 import (
     read_legacy_response_guidance,
     validate_response_guidance_v3,
 )
-from production.reporting.session_assessment_v5 import (
+from production.reporting.response_guidance_v4 import validate_response_guidance_v4
+from production.reporting.session_assessment_v6 import (
     trusted_behavioral_findings_for_presentation,
 )
 from production.storage import open_storage, safe_database_descriptor
@@ -1422,7 +1423,9 @@ def _authority_safe_behavioral_findings(
 
 def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> Dict[str, str]:
     merged = _merged_report_payload(report_payload, artifact_payload)
-    if merged.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if merged.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         findings = _authority_safe_behavioral_findings(merged)
         hypothesis_sets = [
             item for item in merged.get("hypothesis_sets") or [] if isinstance(item, dict)
@@ -1726,10 +1729,17 @@ def _report_recommendations(
     session_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     merged = _merged_report_payload(report_payload, artifact_payload)
-    response_guidance = merged.get("response_guidance_v3") or {}
-    if (
-        not isinstance(response_guidance, dict)
-        or response_guidance.get("schema_version") != "response_guidance.v3"
+    response_guidance = merged.get("response_guidance_v4") or merged.get(
+        "response_guidance_v3"
+    ) or {}
+    if not isinstance(response_guidance, dict):
+        response_guidance = {}
+    elif response_guidance.get("schema_version") == "response_guidance.v4":
+        graph = (merged.get("canonical_evidence") or {}).get("semantic_graph") or {}
+        if validate_response_guidance_v4(response_guidance, parent_graph=graph):
+            response_guidance = {}
+    elif (
+        response_guidance.get("schema_version") != "response_guidance.v3"
         or validate_response_guidance_v3(response_guidance)
     ):
         response_guidance = {}
@@ -1742,7 +1752,10 @@ def _report_recommendations(
         _as_text_list(canonical_recommendations.get("context_notes"))
         if isinstance(canonical_recommendations, dict) else []
     )
-    policy_authoritative = response_guidance.get("authority") == "deterministic_observed_evidence_policy"
+    policy_authoritative = response_guidance.get("authority") in {
+        "deterministic_observed_evidence_policy",
+        "deterministic_canonical_graph_policy",
+    }
     recommended_actions = [
         str(item.get("description") or "").strip()
         for item in structured_actions
@@ -1789,6 +1802,24 @@ def _historical_response_guidance_payload(report_payload: Any) -> Dict[str, Any]
 
     if not isinstance(report_payload, dict):
         return {}
+    stored_v4 = report_payload.get("response_guidance_v4")
+    if isinstance(stored_v4, dict) and stored_v4.get("schema_version") == "response_guidance.v4":
+        graph = (report_payload.get("canonical_evidence") or {}).get("semantic_graph") or {}
+        validation_errors = validate_response_guidance_v4(
+            stored_v4, parent_graph=graph
+        )
+        if validation_errors:
+            return {
+                "schema_version": "response_guidance_legacy_adapter.v1",
+                "status": "invalid_stored_guidance",
+                "semantics": "Stored graph-bound guidance failed validation and is non-actionable.",
+                "source_schema_version": "response_guidance.v4",
+                "advisory_actions": [],
+                "validation_error_count": len(validation_errors),
+                "recomputed": False,
+                "authoritative_for_new_actions": False,
+            }
+        return copy.deepcopy(stored_v4)
     stored = report_payload.get("response_guidance_v3")
     if isinstance(stored, dict) and stored.get("schema_version") == "response_guidance.v3":
         validation_errors = validate_response_guidance_v3(stored)
@@ -4060,7 +4091,7 @@ def _render_reference_links(references: Iterable[Any], limit: int = 6) -> str:
 
 
 def _render_response_guidance(decision: Dict[str, Any]) -> str:
-    """Render only the v3 response-guidance contract.
+    """Render only validated current/historical response-guidance contracts.
 
     It renders no v1 immediate actions or v2 adapters.
     """
@@ -4068,7 +4099,9 @@ def _render_response_guidance(decision: Dict[str, Any]) -> str:
     if not decision:
         return ""
     guidance = decision
-    if isinstance(guidance, dict) and guidance.get("schema_version") == "response_guidance.v3":
+    if isinstance(guidance, dict) and guidance.get("schema_version") in {
+        "response_guidance.v3", "response_guidance.v4"
+    }:
         findings = [item for item in guidance.get("findings") or [] if isinstance(item, dict)]
         finding = findings[0] if findings else {}
         triage = guidance.get("triage") or {}
@@ -4093,13 +4126,14 @@ def _render_response_guidance(decision: Dict[str, Any]) -> str:
             else '<div class="empty">No policy-approved advisory action matched this session.</div>'
         )
         policy = (guidance.get("provenance") or {}).get("policy") or {}
+        policy_document = policy.get("document") or policy
         return (
             '<div class="decision-panel">'
             '<div class="overview-grid">'
             f'<div class="kv"><span>finding</span><strong>{_html(finding.get("severity") or "-")}</strong></div>'
             f'<div class="kv"><span>review urgency</span><strong>{_html(triage.get("urgency") or "-")}</strong></div>'
             f'<div class="kv"><span>guidance status</span><strong>{_html(guidance.get("status") or "-")}</strong></div>'
-            f'<div class="kv"><span>policy</span><strong>{_html(policy.get("policy_id") or "-")}</strong></div>'
+            f'<div class="kv"><span>policy</span><strong>{_html(policy_document.get("policy_id") or "-")}</strong></div>'
             "</div>"
             f'<p>{_html(finding.get("statement") or "")}</p>'
             "<h3>Advisory Actions</h3>"
@@ -4211,14 +4245,14 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         if reevaluated_decision:
             parts.extend([
                 "<h3>Current Policy Reevaluation</h3>",
-                '<p class="muted">Recomputed from current policy and context; it does not replace the stored historical guidance.</p>',
+                '<p class="muted">Recomputed only from the validated current report graph and reviewed policy; it does not replace stored historical guidance.</p>',
                 _render_response_guidance(reevaluated_decision),
             ])
         parts.append("<h3>Technical Prediction / Report Detail</h3>")
     elif reevaluated_decision:
         parts.extend([
             "<h3>Current Policy Reevaluation</h3>",
-            '<p class="muted">No stored report decision is available. This guidance was recomputed from current policy and context.</p>',
+            '<p class="muted">No stored report decision is available. Reevaluation requires a validated current canonical report graph.</p>',
             _render_response_guidance(reevaluated_decision),
             "<h3>Technical Prediction / Report Detail</h3>",
         ])
@@ -4232,7 +4266,7 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         "</div>",
         '<p class="muted">Hypothesis alternatives are falsifiable analytical questions, not attacker intent or predicted next actions.</p>',
         "<h3>Response Guidance Actions</h3>",
-        '<p class="muted">Actions, when present, are rendered only in the v3 response-guidance panel above.</p>',
+        '<p class="muted">Actions, when present, are rendered only in the validated response-guidance panel above.</p>',
     ])
     if hypothesis_alternatives:
         parts.extend([
@@ -4301,7 +4335,9 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     summary_text = summary.get("summary") or "No compact report summary available yet."
     merged = _merged_report_payload(report_payload, artifact_payload)
     v4_detail = ""
-    if merged.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+    if merged.get("schema_version") in {
+        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
+    }:
         canonical_findings = _authority_safe_behavioral_findings(merged)
         finding_items = [
             (
