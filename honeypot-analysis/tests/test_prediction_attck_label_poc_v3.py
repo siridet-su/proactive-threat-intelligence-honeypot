@@ -10,6 +10,7 @@ from production.prediction.prediction_attck_label_poc_v3 import (
     POLICY_PATH,
     PredictionAttckLabelPocV3Error,
     load_prediction_attck_label_poc_policy,
+    require_materialized_poc_examples,
     validate_prediction_attck_label_poc_freeze_receipt,
     validate_prediction_attck_label_poc_policy,
 )
@@ -87,6 +88,12 @@ def test_dataset_membership_is_frozen_but_examples_are_not_present() -> None:
     assert dataset["role_protocol"]["domain_session_merge"] is False
     assert dataset["sealed_boundary"]["sealed_internal_accessed"] is False
     assert dataset["sealed_boundary"]["sealed_cyberlab_accessed"] is False
+
+
+def test_training_guard_refuses_unmaterialized_examples() -> None:
+    loaded = load_prediction_attck_label_poc_policy(POLICY_FILE)
+    with pytest.raises(PredictionAttckLabelPocV3Error, match="not materialized"):
+        require_materialized_poc_examples(loaded)
 
 
 def test_external_receipt_tampering_fails_closed() -> None:

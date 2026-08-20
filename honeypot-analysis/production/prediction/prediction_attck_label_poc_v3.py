@@ -476,6 +476,33 @@ def load_prediction_attck_label_poc_policy(
     return result
 
 
+def require_materialized_poc_examples(
+    policy: Mapping[str, Any], *, examples_path: str | Path | None = None
+) -> Path:
+    """Refuse training until a separately reviewed example corpus exists.
+
+    Support receipts intentionally freeze membership and aggregate support, not
+    model examples.  This guard prevents a caller from treating authorization
+    alone as proof that training inputs exist.
+    """
+
+    dataset = policy.get("dataset_manifest") if isinstance(policy, Mapping) else None
+    if not isinstance(dataset, Mapping) or dataset.get("status") != "materialized":
+        raise PredictionAttckLabelPocV3Error(
+            "PoC training blocked: current-semantics example corpus is not materialized"
+        )
+    if examples_path is None:
+        raise PredictionAttckLabelPocV3Error(
+            "PoC training blocked: a reviewed examples path is required"
+        )
+    path = Path(examples_path).resolve()
+    if path.is_symlink() or not path.is_file():
+        raise PredictionAttckLabelPocV3Error(
+            "PoC training blocked: examples path is not a regular non-symlink file"
+        )
+    return path
+
+
 def _git_tree_for_commit(root: Path, commit: str) -> str:
     return subprocess.run(
         ["git", "-C", str(root), "rev-parse", f"{commit}^{{tree}}"],
