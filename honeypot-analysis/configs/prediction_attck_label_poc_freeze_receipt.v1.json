@@ -3,8 +3,8 @@
   "freeze_id": "predfreeze_20260820_prediction_attck_experimental_poc_v3",
   "status": "frozen_poc_policy_membership_training_not_started",
   "repository": {
-    "implementation_commit": "056c55afb35631bbac43474f9fc2ef9511c24357",
-    "implementation_tree": "58dea5bcc8bec7f299c192cb5d401ebe6acce63c"
+    "implementation_commit": "659fe80bbc3011943d5457d52d122a24dabdfa33",
+    "implementation_tree": "d1d6974b62da249363517cf00589434fba2cda85"
   },
   "lineage": {
     "predecessor_policy_path": "configs/prediction_attck_label_policy.v2.json",
@@ -100,5 +100,5 @@
     "pip_check_passed": true,
     "deterministic_secret_scan_passed": true
   },
-  "receipt_sha256": "3f406cd8715e98662b0cc4559d4ae44f3dcffefa7ad13d527f6642d286d445b3"
+  "receipt_sha256": "6df8d338d37e1423dba33ff62b60257ff8e9a538ce98ab179b62a5a47a0481a0"
 }
