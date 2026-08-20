@@ -3,8 +3,8 @@
   "freeze_id": "predfreeze_20260820_prediction_attck_experimental_poc_v3",
   "status": "frozen_poc_policy_membership_training_not_started",
   "repository": {
-    "implementation_commit": "659fe80bbc3011943d5457d52d122a24dabdfa33",
-    "implementation_tree": "d1d6974b62da249363517cf00589434fba2cda85"
+    "implementation_commit": "3d375d93d4e0587ea407b20238c2cbc50b633369",
+    "implementation_tree": "baee0c0eadda7a68b6d9ed68c9084abeaf7556f6"
   },
   "lineage": {
     "predecessor_policy_path": "configs/prediction_attck_label_policy.v2.json",
@@ -22,7 +22,7 @@
     },
     "poc_implementation": {
       "path": "production/prediction/prediction_attck_label_poc_v3.py",
-      "sha256": "22f0ad5118fccde23690909e588582e97e51186d7455009c6e29882b4eeaf580"
+      "sha256": "3810e1fcf13fb92b67b32f4597cedd06d0c32fdac8cd90c90e6307157f324868"
     },
     "validator": {
       "path": "production/policies/validate_prediction_attck_label_poc_v3.py",
@@ -93,7 +93,7 @@
   "validation": {
     "policy_validator_passed": true,
     "focused_tests_passed": true,
-    "focused_test_count": 60,
+    "focused_test_count": 61,
     "v1_v2_regressions_passed": true,
     "runner_regression_tests_passed": true,
     "runner_regression_test_count": 65,
@@ -102,5 +102,5 @@
     "pip_check_passed": true,
     "deterministic_secret_scan_passed": true
   },
-  "receipt_sha256": "054b6a377b047b47992d52dc8828e40486b72851b4834abc05cd9b36d1b20063"
+  "receipt_sha256": "ebd767b277aada0336b1ea4aa0f50cc74bac3a74d4b7960d4e32ef26a8a24ea1"
 }
