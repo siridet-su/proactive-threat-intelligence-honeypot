@@ -10,6 +10,7 @@ from production.prediction.prediction_attck_label_poc_v3 import (
     POLICY_PATH,
     PredictionAttckLabelPocV3Error,
     load_prediction_attck_label_poc_policy,
+    validate_prediction_attck_label_poc_freeze_receipt,
     validate_prediction_attck_label_poc_policy,
 )
 
@@ -17,6 +18,7 @@ from production.prediction.prediction_attck_label_poc_v3 import (
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_FILE = ROOT / POLICY_PATH
 DATASET_FILE = ROOT / DATASET_PATH
+RECEIPT_FILE = ROOT / "configs" / "prediction_attck_label_poc_freeze_receipt.v1.json"
 
 
 def _policy() -> dict:
@@ -106,3 +108,10 @@ def test_load_rejects_missing_predecessor(tmp_path: Path) -> None:
     target.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(PredictionAttckLabelPocV3Error):
         load_prediction_attck_label_poc_policy(target, verify_external_receipts=False)
+
+
+def test_freeze_receipt_is_content_and_repository_bound() -> None:
+    receipt = json.loads(RECEIPT_FILE.read_text(encoding="utf-8"))
+    assert validate_prediction_attck_label_poc_freeze_receipt(
+        receipt, repository_root=ROOT
+    ) == []
