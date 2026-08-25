@@ -45,6 +45,10 @@ type Config struct {
 
 	MongoURI string
 	MongoDB  string
+
+	TIEnabled    bool
+	TIJobsStream string
+	TIJobsMaxLen int64
 }
 
 type LookupRecord struct {
@@ -113,6 +117,7 @@ func main() {
 
 func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
+	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "50000"), 10, 64)
 
 	return Config{
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
@@ -126,6 +131,10 @@ func loadConfig() Config {
 
 		MongoURI: getenv("MONGO_URI", ""),
 		MongoDB:  getenv("MONGO_DATABASE", "honeypot"),
+
+		TIEnabled:    strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
+		TIJobsStream: getenv("TI_JOBS_STREAM", "ti:jobs"),
+		TIJobsMaxLen: tiJobsMaxLen,
 	}
 }
 
@@ -242,11 +251,11 @@ func processMessage(
 	normalized := normalizeEvent(streamName, msg.ID, msg.Values, payload)
 	enriched := enrichEvent(normalized, lookups)
 
+	srcIP := getNestedString(enriched, "network.src_ip")
 	eventJSON := mustJSON(enriched)
 
 	eventID := getNestedString(enriched, "event_id")
 	eventType := getNestedString(enriched, "event_type")
-	srcIP := getNestedString(enriched, "network.src_ip")
 	dstIP := getNestedString(enriched, "network.dst_ip")
 	dstPort := getNestedString(enriched, "network.dst_port")
 
@@ -255,6 +264,13 @@ func processMessage(
 	// without duplicate documents.
 	if err := mw.upsertEvent(ctx, enriched); err != nil {
 		return fmt.Errorf("mongo upsert event failed: %w", err)
+	}
+
+	// Threat-intelligence calls must not delay or block ingestion. The worker
+	// receives one idempotent job per supported observable after MongoDB has the
+	// canonical event, and attaches its result later.
+	if err := enqueueThreatIntelJobs(ctx, rdb, cfg, source, eventID, eventType, srcIP, payload); err != nil {
+		return fmt.Errorf("enqueue threat-intelligence jobs: %w", err)
 	}
 
 	if _, err := rdb.XAdd(ctx, &redis.XAddArgs{

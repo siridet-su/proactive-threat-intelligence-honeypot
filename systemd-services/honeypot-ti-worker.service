@@ -1,0 +1,22 @@
+[Unit]
+Description=Honeypot asynchronous threat-intelligence worker
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cpe27
+Group=cpe27
+WorkingDirectory=/home/cpe27/proactive-threat-intelligence-honeypot/agents/ti-worker
+EnvironmentFile=/etc/honeypot/ti-worker.env
+ExecStart=/home/cpe27/proactive-threat-intelligence-honeypot/agents/ti-worker/ti-worker
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
