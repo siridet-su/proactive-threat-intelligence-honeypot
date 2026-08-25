@@ -47,12 +47,23 @@ export function LiveEventStream() {
                 <span className="text-purple-400">{event.protocol}</span>
                 <span className="text-slate-300">from</span>
                 <span className="text-amber-400">{event.sourceIp}</span>
+                {event.abuseipdb && event.abuseipdb.abuseConfidenceScore > 0 && (
+                  <span className={`text-[10px] px-1.5 rounded border ${event.abuseipdb.abuseConfidenceScore > 80 ? 'text-red-400 border-red-500/50 bg-red-500/10' : 'text-orange-400 border-orange-500/50 bg-orange-500/10'}`}>
+                    Risk: {event.abuseipdb.abuseConfidenceScore}%
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400 group-hover:text-slate-300 transition-colors truncate">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-slate-400 group-hover:text-slate-300 transition-colors truncate max-w-full">
                   <span className="text-slate-500 mr-2">&gt;</span>
                   {event.payloadPreview}
                 </span>
+                {event.virustotal?.attributes?.stats?.malicious > 0 && (
+                  <span className="text-red-400 text-[10px] ml-1 border border-red-500/50 bg-red-500/10 px-1.5 py-0.5 rounded flex items-center gap-1">
+                    <span className="text-xs">🦠</span> {event.virustotal.attributes.meaningful_name || 'Malware'}
+                    ({event.virustotal.attributes.stats.malicious} / {event.virustotal.attributes.stats.malicious + event.virustotal.attributes.stats.undetected})
+                  </span>
+                )}
               </div>
             </div>
             <div className="flex-shrink-0 mt-1 sm:mt-0">
