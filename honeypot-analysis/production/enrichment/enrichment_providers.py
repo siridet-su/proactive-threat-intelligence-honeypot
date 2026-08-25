@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,6 +17,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import (
+    redact_error_for_log,
+    redact_exception_for_log,
+    redact_for_api,
+)
 from production.utils.serialization import utc_now
 
 
@@ -27,19 +33,31 @@ class ProviderResult:
     ttl_seconds: int = 86400
     error: str = ""
     fetched_at: str = field(default_factory=utc_now)
+    latency_ms: float = 0.0
 
     def to_status(self) -> Dict[str, Any]:
+        try:
+            fetched = datetime.fromisoformat(self.fetched_at.replace("Z", "+00:00"))
+            if fetched.tzinfo is None:
+                fetched = fetched.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            fetched = datetime.now(timezone.utc)
         return {
             "status": self.status,
-            "error": self.error,
+            "error": redact_error_for_log(self.error) if self.error else "",
             "fetched_at": self.fetched_at,
             "ttl_seconds": self.ttl_seconds,
+            "latency_ms": round(max(float(self.latency_ms), 0.0), 3),
+            "expires_at": (
+                fetched + timedelta(seconds=max(int(self.ttl_seconds), 0))
+            ).isoformat(),
         }
 
 
 class EnrichmentProvider:
     name = "base"
     supported_types: set[str] = set()
+    external = False
 
     def supports(self, observable_type: str) -> bool:
         return observable_type in self.supported_types
@@ -71,10 +89,23 @@ class StaticProvider(EnrichmentProvider):
 class HTTPProvider(EnrichmentProvider):
     """Small stdlib HTTP helper for JSON enrichment APIs."""
 
-    def __init__(self, api_key: str = "", timeout: int = 20, ttl_seconds: int = 86400) -> None:
+    external = True
+
+    def __init__(
+        self,
+        api_key: str = "",
+        timeout: float = 20,
+        ttl_seconds: int = 86400,
+        max_response_bytes: int = 1024 * 1024,
+        retries: int = 1,
+        retry_delay_seconds: float = 0.25,
+    ) -> None:
         self.api_key = api_key
         self.timeout = timeout
         self.ttl_seconds = ttl_seconds
+        self.max_response_bytes = max(int(max_response_bytes), 1024)
+        self.retries = max(int(retries), 0)
+        self.retry_delay_seconds = max(float(retry_delay_seconds), 0.0)
 
     @property
     def enabled(self) -> bool:
@@ -82,19 +113,47 @@ class HTTPProvider(EnrichmentProvider):
 
     def _json_get(self, url: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         request = urllib.request.Request(url, headers=headers or {}, method="GET")
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            body = response.read().decode("utf-8")
-        return json.loads(body)
+        for attempt in range(self.retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    content_length = response.headers.get("Content-Length")
+                    if content_length and int(content_length) > self.max_response_bytes:
+                        raise ValueError("provider response exceeds configured limit")
+                    body = response.read(self.max_response_bytes + 1)
+                    if len(body) > self.max_response_bytes:
+                        raise ValueError("provider response exceeds configured limit")
+                decoded = json.loads(body.decode("utf-8"))
+                if not isinstance(decoded, dict):
+                    raise ValueError("provider response must contain a JSON object")
+                return decoded
+            except Exception as exc:
+                retryable = self._is_temporary_error(exc)
+                if not retryable or attempt >= self.retries:
+                    raise
+                time.sleep(self.retry_delay_seconds * (attempt + 1))
+        raise RuntimeError("provider request did not complete")
+
+    @staticmethod
+    def _is_temporary_error(exc: Exception) -> bool:
+        if isinstance(exc, urllib.error.HTTPError):
+            return exc.code in {408, 425, 429} or 500 <= exc.code <= 599
+        return isinstance(exc, (TimeoutError, ConnectionError, urllib.error.URLError))
 
     def _disabled(self) -> ProviderResult:
         return ProviderResult(self.name, "not_configured", ttl_seconds=min(self.ttl_seconds, 3600))
 
     def _error(self, exc: Exception) -> ProviderResult:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+            status = "rate_limited"
+        elif self._is_temporary_error(exc):
+            status = "temporary_error"
+        else:
+            status = "permanent_error"
         return ProviderResult(
             self.name,
-            "error",
+            status,
             ttl_seconds=min(self.ttl_seconds, 3600),
-            error=f"{type(exc).__name__}: {exc}",
+            error=redact_exception_for_log(exc),
         )
 
 
@@ -162,7 +221,7 @@ class ShodanProvider(HTTPProvider):
         try:
             data = self._json_get(url, headers={"Accept": "application/json", "User-Agent": "honeypot-shodan-internetdb/1.0"})
             data["_shodan_api"] = "internetdb"
-            data["_shodan_primary_error"] = f"{type(primary_error).__name__}: {primary_error}"
+            data["_shodan_primary_error"] = redact_exception_for_log(primary_error)
             return ProviderResult(self.name, "ok", data, self.ttl_seconds)
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
@@ -171,7 +230,7 @@ class ShodanProvider(HTTPProvider):
                     "not_found",
                     data={"_shodan_api": "internetdb"},
                     ttl_seconds=self.ttl_seconds,
-                    error=f"primary lookup failed; InternetDB has no record: {type(primary_error).__name__}: {primary_error}",
+                    error=redact_exception_for_log(primary_error),
                 )
             return self._error(exc)
         except Exception as exc:
@@ -214,8 +273,18 @@ class CensysProvider(HTTPProvider):
         organization_id: str = "",
         timeout: int = 20,
         ttl_seconds: int = 86400,
+        max_response_bytes: int = 1024 * 1024,
+        retries: int = 1,
+        retry_delay_seconds: float = 0.25,
     ) -> None:
-        super().__init__(api_key=api_secret, timeout=timeout, ttl_seconds=ttl_seconds)
+        super().__init__(
+            api_key=api_secret,
+            timeout=timeout,
+            ttl_seconds=ttl_seconds,
+            max_response_bytes=max_response_bytes,
+            retries=retries,
+            retry_delay_seconds=retry_delay_seconds,
+        )
         self.api_id = api_id
         self.platform_token = platform_token
         self.organization_id = organization_id
@@ -271,18 +340,25 @@ class CensysProvider(HTTPProvider):
 
 def build_default_providers(config: ProductionConfig) -> List[EnrichmentProvider]:
     ttl = int(config.enrichment_ttl_seconds)
+    provider_options = {
+        "timeout": config.enrichment_provider_timeout_seconds,
+        "ttl_seconds": ttl,
+        "max_response_bytes": config.enrichment_provider_max_response_bytes,
+        "retries": config.enrichment_provider_http_retries,
+        "retry_delay_seconds": config.enrichment_provider_retry_delay_seconds,
+    }
     return [
-        OTXProvider(config.otx_api_key, ttl_seconds=ttl),
-        AbuseIPDBProvider(config.abuseipdb_api_key, ttl_seconds=ttl),
-        ShodanProvider(config.shodan_api_key, ttl_seconds=ttl),
+        OTXProvider(config.otx_api_key, **provider_options),
+        AbuseIPDBProvider(config.abuseipdb_api_key, **provider_options),
+        ShodanProvider(config.shodan_api_key, **provider_options),
         CensysProvider(
             config.censys_api_id,
             config.censys_api_secret,
             platform_token=config.censys_platform_token,
             organization_id=config.censys_organization_id,
-            ttl_seconds=ttl,
+            **provider_options,
         ),
-        VirusTotalProvider(config.virustotal_api_key, ttl_seconds=ttl),
+        VirusTotalProvider(config.virustotal_api_key, **provider_options),
     ]
 
 
@@ -292,11 +368,34 @@ def _merge_tags(*values: Iterable[Any]) -> List[str]:
         for item in group or []:
             if item is None:
                 continue
-            text = str(item).strip()
+            text = str(item).strip()[:256]
             if text and text not in seen:
                 seen.add(text)
                 out.append(text)
+                if len(out) >= 256:
+                    return out
     return out
+
+
+def _bounded_value(value: Any, depth: int = 0) -> Any:
+    if depth >= 8:
+        return "[TRUNCATED]"
+    if isinstance(value, str):
+        return value[:4096]
+    if isinstance(value, dict):
+        return {
+            str(key)[:128]: _bounded_value(item, depth + 1)
+            for key, item in list(value.items())[:128]
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_bounded_value(item, depth + 1) for item in list(value)[:256]]
+    return value
+
+
+def _set_if_value(payload: Dict[str, Any], key: str, value: Any) -> None:
+    if key not in payload or payload[key] is None or payload[key] == "":
+        if value is not None and value != "":
+            payload[key] = value
 
 
 def _vt_stats(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -357,7 +456,9 @@ def _string_values(values: Iterable[Any]) -> List[str]:
     out: List[str] = []
     for value in values or []:
         if value:
-            out.append(str(value))
+            out.append(str(value)[:256])
+            if len(out) >= 256:
+                break
     return out
 
 
@@ -384,12 +485,14 @@ def merge_provider_results(
         data = result.data or {}
 
         if result.provider == "static":
-            payload.update(data)
+            bounded = redact_for_api(_bounded_value(data))
+            if isinstance(bounded, dict):
+                payload.update(bounded)
 
         elif result.provider == "otx":
             pulses = data.get("pulse_info", {}).get("pulses", []) or []
             if pulses:
-                payload.setdefault("raw_otx_pulse", pulses[0].get("name"))
+                _set_if_value(payload, "raw_otx_pulse", str(pulses[0].get("name") or "")[:4096])
                 payload["otx_tags"] = _merge_tags(
                     payload.get("otx_tags", []),
                     *(pulse.get("tags", []) for pulse in pulses),
@@ -397,8 +500,8 @@ def merge_provider_results(
             payload["otx_tags"] = _merge_tags(payload.get("otx_tags", []), data.get("tags", []))
 
         elif result.provider == "abuseipdb":
-            payload.setdefault("country", data.get("countryCode"))
-            payload.setdefault("isp", data.get("isp"))
+            _set_if_value(payload, "country", data.get("countryCode"))
+            _set_if_value(payload, "isp", data.get("isp"))
             payload["risk_score"] = data.get("abuseConfidenceScore", payload.get("risk_score", 0)) or 0
             payload["total_reports"] = data.get("totalReports", payload.get("total_reports", 0)) or 0
             categories = []
@@ -409,10 +512,10 @@ def merge_provider_results(
 
         elif result.provider == "shodan":
             payload["shodan_api"] = data.get("_shodan_api", payload.get("shodan_api", "host"))
-            payload.setdefault("asn", data.get("asn"))
-            payload.setdefault("country", data.get("country_code") or data.get("country_name"))
-            payload.setdefault("isp", data.get("isp") or data.get("org"))
-            payload["open_ports"] = sorted(set(data.get("ports", []) or []))
+            _set_if_value(payload, "asn", data.get("asn"))
+            _set_if_value(payload, "country", data.get("country_code") or data.get("country_name"))
+            _set_if_value(payload, "isp", data.get("isp") or data.get("org"))
+            payload["open_ports"] = sorted(set(data.get("ports", []) or []))[:256]
             payload["shodan_tags"] = _merge_tags(payload.get("shodan_tags", []), data.get("tags", []))
             payload["shodan_hostnames"] = _merge_tags(payload.get("shodan_hostnames", []), data.get("hostnames", []))
             payload["shodan_cpes"] = _merge_tags(payload.get("shodan_cpes", []), _string_values(data.get("cpes", [])))
@@ -431,16 +534,16 @@ def merge_provider_results(
             result_block = _censys_host_resource(data)
             payload["censys_api"] = data.get("_censys_api", payload.get("censys_api", "unknown"))
             services = result_block.get("services", []) or []
-            payload["open_ports"] = sorted(set(payload.get("open_ports", []) + [svc.get("port") for svc in services if svc.get("port")]))
+            payload["open_ports"] = sorted(set(payload.get("open_ports", []) + [svc.get("port") for svc in services if svc.get("port")]))[:256]
             payload["running_services"] = _merge_tags(
                 payload.get("running_services", []),
                 [_service_name(svc) for svc in services],
             )
             location = result_block.get("location", {}) or {}
             autonomous_system = result_block.get("autonomous_system", {}) or {}
-            payload.setdefault("country", location.get("country_code") or location.get("country"))
-            payload.setdefault("asn", autonomous_system.get("asn"))
-            payload.setdefault("isp", autonomous_system.get("name") or autonomous_system.get("description"))
+            _set_if_value(payload, "country", location.get("country_code") or location.get("country"))
+            _set_if_value(payload, "asn", autonomous_system.get("asn"))
+            _set_if_value(payload, "isp", autonomous_system.get("name") or autonomous_system.get("description"))
             payload["censys_labels"] = _merge_tags(
                 payload.get("censys_labels", []),
                 _label_values(result_block.get("labels", [])),
@@ -465,11 +568,26 @@ def merge_provider_results(
     payload.setdefault("is_vpn", False)
 
     status = payload["provider_status"]
+    statuses = {result.status for result in results}
+    successes = statuses & {"ok", "not_found"}
+    temporary = statuses & {"error", "temporary_error", "rate_limited"}
+    permanent = statuses & {"permanent_error"}
+    if successes and not (temporary or permanent or statuses & {"not_configured"}):
+        overall_status = "complete_success"
+    elif successes:
+        overall_status = "partial_success"
+    elif temporary:
+        overall_status = "temporary_failure"
+    elif permanent:
+        overall_status = "permanent_failure"
+    else:
+        overall_status = "unavailable"
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=max(ttl_seconds, 3600))).isoformat()
     payload["enrichment_cache"] = {
         "source": "storage",
         "status": "fresh",
         "fetched_at": utc_now(),
         "expires_at": expires_at,
+        "overall_status": overall_status,
     }
     return payload, status, expires_at

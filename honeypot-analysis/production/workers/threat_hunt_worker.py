@@ -1,23 +1,31 @@
-"""Cross-session observable threat hunting worker.
+"""Cross-session observable relationship worker.
 
-This worker closes the "session silo" gap. Session processing already records
-observable sightings; the threat-hunt worker consumes jobs created from a closed
-session's observables, finds other sessions that touched the same observable,
-stores durable session links, and alerts if a related session is still active.
+The worker stores evidence-linked relationships and observational signals. A
+shared observable does not establish actor identity and has no alert, guidance,
+or response authority.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
+from production.correlation.session_ttp_correlation import correlation_allows_influence
 from production.utils.config import ProductionConfig
+from production.policies.alert_authority_policy import load_alert_authority_policy
 from production.correlation.observable_sightings import extract_session_observable_sightings
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import stable_id, utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
 from production.storage import open_storage
+from production.workers.job_lifecycle import (
+    JobLeaseHeartbeat,
+    job_failure_identity,
+    job_retry_delay,
+    new_job_owner,
+)
 
 
 SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -32,7 +40,7 @@ def _policy(config_or_policy: ProductionConfig | Dict[str, Any]) -> Dict[str, An
     policy = dict(raw or {})
     policy.setdefault("enabled", True)
     policy.setdefault("enqueue_on_session_close", True)
-    policy.setdefault("alert_active_sessions", True)
+    policy.setdefault("signal_active_sessions", True)
     policy.setdefault("max_jobs_per_session", 50)
     policy.setdefault("max_related_sessions_per_job", 100)
     policy.setdefault("observable_types", ["ip", "url", "domain", "hash", "hassh", "ja3"])
@@ -79,7 +87,10 @@ def _login_success(session_payload: Dict[str, Any]) -> bool:
     return bool(session_payload.get("login_success") or session_payload.get("successful_login"))
 
 
-def _tactics(session_payload: Dict[str, Any]) -> List[str]:
+def _tactics(
+    session_payload: Dict[str, Any],
+    correlation_scope: str = "threat_hunt",
+) -> List[str]:
     output: List[str] = []
     classification_events = [
         event for event in session_payload.get("classification_events") or []
@@ -98,7 +109,10 @@ def _tactics(session_payload: Dict[str, Any]) -> List[str]:
             if text and text not in output:
                 output.append(text)
     for item in session_payload.get("session_ttp_correlations") or []:
-        if isinstance(item, dict):
+        if (
+            isinstance(item, dict)
+            and correlation_allows_influence(item, correlation_scope)
+        ):
             text = str(item.get("tactic") or "").strip()
             if text and text not in output:
                 output.append(text)
@@ -108,7 +122,10 @@ def _tactics(session_payload: Dict[str, Any]) -> List[str]:
 def _source_severity(policy: Dict[str, Any], observable_type: str, source_payload: Dict[str, Any]) -> str:
     base = str((policy.get("severity_by_observable_type") or {}).get(observable_type) or "medium")
     tactic_map = policy.get("tactic_severity") or {}
-    tactic_severities = [str(tactic_map.get(tactic) or "") for tactic in _tactics(source_payload)]
+    tactic_severities = [
+        str(tactic_map.get(tactic) or "")
+        for tactic in _tactics(source_payload, "alert")
+    ]
     return _severity_max(base, *tactic_severities)
 
 
@@ -201,52 +218,62 @@ class ThreatHuntWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
         self.policy = _policy(config)
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
+        self.worker_owner = new_job_owner("threat-hunt")
+        self.alert_authority_policy = load_alert_authority_policy(
+            config.alert_authority_policy_path
+        )
 
-    def _alert_payload(
+    def _correlation_signal(
         self,
         job: Dict[str, Any],
         related: Dict[str, Any],
         link_id: str,
-        severity: str,
         confidence: float,
-        source_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         observable_type = str(job.get("observable_type") or "")
         observable_value = str(job.get("observable_value") or "")
         related_session_id = str(related.get("session_id") or "unknown")
         source_session_id = str(job.get("session_id") or "unknown")
         return {
-            "alert_id": stable_id(
-                "threathuntalert",
+            "schema_version": "correlation_signal.v1",
+            "signal_id": stable_id(
+                "correlationsignal",
                 {
                     "source_session_id": source_session_id,
                     "related_session_id": related_session_id,
                     "observable_type": observable_type,
                     "observable_value": observable_value,
+                    "link_id": link_id,
+                    "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
                 },
             ),
             "session_id": related_session_id,
-            "severity": severity.upper(),
-            "reason": (
-                f"Threat hunt match: session shares {observable_type} observable "
-                f"with closed session {source_session_id}"
-            ),
-            "created_at": utc_now(),
-            "alert_type": "threat_hunt_match",
-            "payload": {
-                "alert_type": "threat_hunt_match",
-                "source_session_id": source_session_id,
-                "related_session_id": related_session_id,
-                "job_id": job.get("job_id") or "",
-                "link_id": link_id,
-                "observable_type": observable_type,
-                "observable_value": observable_value,
-                "confidence": confidence,
-                "source_tactics": _tactics(source_payload),
-                "related_sighting_count": related.get("sighting_count") or 0,
-                "related_first_seen": related.get("first_seen") or "",
-                "related_last_seen": related.get("last_seen") or "",
+            "signal_type": "shared_observable_relationship_observed",
+            "source_session_id": source_session_id,
+            "related_session_id": related_session_id,
+            "job_id": job.get("job_id") or "",
+            "link_id": link_id,
+            "observable_type": observable_type,
+            "observable_value": observable_value,
+            "relationship_confidence": confidence,
+            "related_sighting_count": related.get("sighting_count") or 0,
+            "related_first_seen": related.get("first_seen") or "",
+            "related_last_seen": related.get("last_seen") or "",
+            "authority": {
+                "semantics": "observation_only_non_authoritative",
+                "may_claim_actor_identity": False,
+                "may_create_alert": False,
+                "may_authorize_response": False,
+            },
+            "limitations": [
+                "a shared observable does not establish actor identity",
+                "the relationship may reflect shared infrastructure or common tooling",
+                "signal cannot authorize an alert, external delivery, or response",
+            ],
+            "provenance": {
+                "alert_authority_policy_id": self.alert_authority_policy.policy_id,
+                "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
             },
         }
 
@@ -254,8 +281,6 @@ class ThreatHuntWorker:
         source_session_id = str(job.get("session_id") or "unknown")
         observable_type = str(job.get("observable_type") or "").strip().lower()
         observable_value = str(job.get("observable_value") or "").strip()
-        source_row = self.storage.get_session(source_session_id) or {}
-        source_payload = source_row.get("payload") or {"session_id": source_session_id}
         max_related = int(self.policy.get("max_related_sessions_per_job") or 100)
         related_sessions = self.storage.find_sessions_by_observable(
             observable_type,
@@ -264,9 +289,8 @@ class ThreatHuntWorker:
             limit=max_related,
         )
         confidence = _confidence(self.policy, observable_type)
-        severity = _source_severity(self.policy, observable_type, source_payload)
         links: List[Dict[str, Any]] = []
-        alerts: List[str] = []
+        signals: List[Dict[str, Any]] = []
         for related in related_sessions:
             related_session_id = str(related.get("session_id") or "")
             if not related_session_id:
@@ -290,9 +314,12 @@ class ThreatHuntWorker:
             }
             link_id = self.storage.save_session_link(link_payload)
             links.append({"link_id": link_id, **link_payload})
-            if self.policy.get("alert_active_sessions", True) and not bool(related.get("ended")):
-                alert = self._alert_payload(job, related, link_id, severity, confidence, source_payload)
-                alerts.append(self.storage.store_alert(alert))
+            if self.policy.get("signal_active_sessions", True) and not bool(
+                related.get("ended")
+            ):
+                signals.append(
+                    self._correlation_signal(job, related, link_id, confidence)
+                )
         return {
             "status": "succeeded",
             "job_id": job.get("job_id") or "",
@@ -301,28 +328,101 @@ class ThreatHuntWorker:
             "observable_value": observable_value,
             "related_session_count": len(related_sessions),
             "links_created": len(links),
-            "alerts_created": len(alerts),
+            "signals_created": len(signals),
             "link_ids": [item["link_id"] for item in links],
-            "alert_ids": alerts,
-            "severity": severity,
+            "signal_ids": [item["signal_id"] for item in signals],
+            "correlation_signals": signals,
+            "alerts_created": 0,
+            "alert_ids": [],
+            "automatic_alerts": {
+                "status": "prohibited",
+                "authorized": False,
+                "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
+            },
             "confidence": confidence,
             "timestamp": utc_now(),
         }
 
-    def process_once(self) -> int:
+    def process_once(
+        self,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         if not self.policy.get("enabled", True):
             return 0
-        jobs = self.storage.claim_threat_hunt_jobs(self.config.threat_hunt_batch_size)
         processed = 0
-        for job in jobs:
-            try:
-                result = self._process_job(job)
-            except Exception as exc:
-                retry = int(job.get("attempts") or 0) < 3
-                self.storage.fail_threat_hunt_job(job.get("job_id", ""), f"{type(exc).__name__}: {exc}", retry=retry)
-                continue
-            self.storage.complete_threat_hunt_job(job.get("job_id", ""), result)
-            processed += 1
+        for _ in range(self.config.threat_hunt_batch_size):
+            if should_stop is not None and should_stop():
+                break
+            jobs = self.storage.claim_threat_hunt_jobs(
+                self.worker_owner,
+                1,
+                self.config.job_lease_seconds,
+                self.config.threat_hunt_max_attempts,
+            )
+            if not jobs:
+                break
+            job = jobs[0]
+            if should_stop is not None and should_stop():
+                self.storage.release_job_claim(
+                    "threat_hunt",
+                    job["job_id"],
+                    job["claim_owner"],
+                    job["claim_token"],
+                )
+                break
+            with JobLeaseHeartbeat(self.storage, self.config, "threat_hunt", job) as heartbeat:
+                try:
+                    result = self._process_job(job)
+                    heartbeat.check(renew=True)
+                    completed = self.storage.complete_threat_hunt_job(
+                        job.get("job_id", ""),
+                        job["claim_owner"],
+                        job["claim_token"],
+                        result,
+                    )
+                    processed += int(completed)
+                    print(
+                        json.dumps(
+                            {
+                                "service": "threat_hunt_worker",
+                                "job_id": job.get("job_id", ""),
+                                "correlation_id": job.get("job_id", ""),
+                                "status": "succeeded" if completed else "stale_claim",
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                except Exception as exc:
+                    error_code, error_type, retryable = job_failure_identity(
+                        "threat_hunt", exc
+                    )
+                    status = self.storage.fail_threat_hunt_job(
+                        job.get("job_id", ""),
+                        job["claim_owner"],
+                        job["claim_token"],
+                        error_code,
+                        error_type,
+                        retryable,
+                        self.config.threat_hunt_max_attempts,
+                        job_retry_delay(self.config, int(job.get("attempts") or 1)),
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "service": "threat_hunt_worker",
+                                "job_id": job.get("job_id", ""),
+                                "correlation_id": job.get("job_id", ""),
+                                "status": status,
+                                "error": redact_exception_for_log(exc),
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
         return processed
 
     def enqueue_existing_sessions(self, limit: int = 1000, ended_only: bool = True) -> Dict[str, Any]:
@@ -362,21 +462,24 @@ class ThreatHuntWorker:
             "timestamp": utc_now(),
         }
 
-    def run_forever(self) -> None:
-        while True:
-            processed = self.process_once()
-            print(
-                json.dumps(
-                    {
-                        "service": "threat_hunt_worker",
-                        "processed": processed,
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            time.sleep(self.config.threat_hunt_poll_seconds)
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
+        with control.signal_handlers():
+            while not control.stopping:
+                processed = self.process_once(should_stop=lambda: control.stopping)
+                if processed:
+                    print(
+                        json.dumps(
+                            {
+                                "service": "threat_hunt_worker",
+                                "processed": processed,
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                control.wait(self.config.threat_hunt_poll_seconds)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

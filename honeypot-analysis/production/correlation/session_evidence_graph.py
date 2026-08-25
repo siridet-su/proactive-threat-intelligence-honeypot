@@ -7,18 +7,23 @@ and future knowledge-pack importers can reason over the same stable contract.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional
 
 from production.classification.trust import (
     classification_audit_reason,
     is_trusted_classification_event,
 )
+from production.classification.classification_pipeline import split_compound_command
 from production.enrichment.enrichment_cache import iter_session_observables
 from production.utils.serialization import stable_id, utc_now
 from production.correlation.session_ttp_knowledge import main_ttp_id
+from production.correlation.session_behavior_relationships import (
+    build_session_behavior_relationships,
+)
 
 
-SCHEMA_VERSION = "session_evidence_graph.v1"
+SCHEMA_VERSION = "session_evidence_graph.v2"
 
 SENSITIVE_EVENT_FIELDS = {"password", "passwd", "token", "api_key", "authorization"}
 
@@ -48,6 +53,89 @@ def _unique(values: Iterable[Any]) -> List[str]:
             seen.add(text)
             output.append(text)
     return output
+
+
+def _ordered_behavior_chain(classification_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    indexed_events = list(enumerate(classification_events))
+    parsed_timestamps: Dict[int, datetime] = {}
+    for index, event in indexed_events:
+        timestamp = _clean_text(event.get("event_timestamp"))
+        if not timestamp:
+            continue
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed_timestamps[index] = parsed.astimezone(timezone.utc)
+
+    def fragment_position(event: Dict[str, Any]) -> int:
+        try:
+            return int(event.get("subcommand_index") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    if classification_events and len(parsed_timestamps) == len(classification_events):
+        indexed_events.sort(
+            key=lambda pair: (
+                parsed_timestamps[pair[0]],
+                fragment_position(pair[1]),
+                pair[0],
+            )
+        )
+
+    chain: List[Dict[str, Any]] = []
+    for original_index, event in indexed_events:
+        command = _clean_text(event.get("subcommand") or event.get("command"))
+        ttp = main_ttp_id(event.get("ttp"))
+        tactic = _clean_text(event.get("tactic"))
+        if not command or not ttp or ttp.lower() == "unknown" or not tactic or tactic.lower() == "unknown":
+            continue
+        evidence_id = _clean_text(event.get("evidence_id")) or stable_id(
+            "class",
+            {
+                "index": original_index,
+                "command": command,
+                "ttp": ttp,
+                "tactic": tactic,
+                "source": event.get("source"),
+            },
+        )
+        shell_fragments = split_compound_command(command, split_pipes=True)
+        chain.append({
+            "sequence_index": len(chain),
+            "evidence_id": evidence_id,
+            "command": command,
+            "original_command": _clean_text(event.get("original_command")),
+            "command_outcome": _clean_text(event.get("command_outcome")) or "legacy_outcome_unknown",
+            "outcome_scope": _clean_text(event.get("outcome_scope")) or "legacy_unknown",
+            "cowrie_eventid": _clean_text(event.get("cowrie_eventid")),
+            "timestamp": _clean_text(event.get("event_timestamp")),
+            "compound_command_index": event.get("compound_command_index"),
+            "fragment_index": event.get("subcommand_index"),
+            "fragment_count": event.get("subcommand_count"),
+            "operator_before": _clean_text(event.get("operator_before")),
+            "operator_after": _clean_text(event.get("operator_after")),
+            "shell_fragments": [
+                {
+                    "command": fragment.text,
+                    "fragment_index": fragment.index,
+                    "fragment_count": fragment.count,
+                    "operator_before": fragment.operator_before,
+                    "operator_after": fragment.operator_after,
+                }
+                for fragment in shell_fragments
+            ],
+            "ttp": ttp,
+            "tactic": tactic,
+            "source": _clean_text(event.get("source")) or "unknown",
+            "agreement_status": _clean_text(event.get("agreement_status")),
+            "confidence": event.get("confidence"),
+            "confidence_semantics": _clean_text(event.get("confidence_semantics")) or "legacy_unscoped_score",
+            "evidence_tier": "trusted_observation",
+        })
+    return chain
 
 
 def _safe_event_fields(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,12 +205,17 @@ def _audit_only_classification_candidates(
             continue
         candidates.append(
             {
+                "evidence_id": _clean_text(event.get("evidence_id")),
                 "command": _clean_text(event.get("command") or event.get("input")),
                 "candidate_ttp": _clean_text(event.get("ttp")),
                 "candidate_tactic": _clean_text(event.get("tactic")),
                 "source": _clean_text(event.get("source") or "unknown"),
+                "agreement_status": _clean_text(event.get("agreement_status")),
                 "confidence": event.get("confidence"),
+                "confidence_semantics": _clean_text(event.get("confidence_semantics")),
                 "high_confidence": event.get("high_confidence"),
+                "rule_policy_id": _clean_text(event.get("rule_policy_id")),
+                "rule_policy_version": _clean_text(event.get("rule_policy_version")),
                 "evidence_type": "audit_only_classification_candidate",
                 "reason": classification_audit_reason(event),
                 "excluded_from_strong_graph": True,
@@ -183,14 +276,26 @@ def _edges(
     observables: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     edges: List[Dict[str, Any]] = []
+    classification_occurrences: Dict[str, int] = {}
     for index, event in enumerate(classification_events):
         original_command = _clean_text(event.get("original_command"))
         command = _clean_text(event.get("command"))
         target_command = original_command or command
-        try:
-            command_index = commands.index(target_command)
-        except ValueError:
-            command_index = -1
+        command_index = -1
+        declared_index = event.get("compound_command_index")
+        if (
+            isinstance(declared_index, int)
+            and 0 <= declared_index < len(commands)
+            and commands[declared_index] == target_command
+        ):
+            command_index = declared_index
+        else:
+            start = classification_occurrences.get(target_command, 0)
+            for candidate in range(start, len(commands)):
+                if commands[candidate] == target_command:
+                    command_index = candidate
+                    classification_occurrences[target_command] = candidate + 1
+                    break
         if command_index >= 0:
             edges.append(
                 {
@@ -199,15 +304,23 @@ def _edges(
                     "relation": "classified_as",
                 }
             )
+    raw_occurrences: Dict[str, int] = {}
     for index, event in enumerate(raw_events):
         eventid = _clean_text(event.get("eventid"))
         if eventid.startswith("cowrie.command."):
             command_text = _clean_text(event.get("input"))
-            if command_text in commands:
+            command_index = -1
+            start = raw_occurrences.get(command_text, 0)
+            for candidate in range(start, len(commands)):
+                if commands[candidate] == command_text:
+                    command_index = candidate
+                    raw_occurrences[command_text] = candidate + 1
+                    break
+            if command_index >= 0:
                 edges.append(
                     {
                         "source": f"event:{index}",
-                        "target": f"command:{commands.index(command_text)}",
+                        "target": f"command:{command_index}",
                         "relation": "emitted_command",
                     }
                 )
@@ -222,7 +335,12 @@ def _edges(
     return edges
 
 
-def build_session_evidence_graph(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+def build_session_evidence_graph(
+    session_payload: Dict[str, Any],
+    *,
+    behavior_policy_document: Optional[Dict[str, Any]] = None,
+    behavior_policy_path: str = "",
+) -> Dict[str, Any]:
     """Return a compact, safe graph of commands, events, labels, and observables."""
 
     commands = [
@@ -261,6 +379,12 @@ def build_session_evidence_graph(session_payload: Dict[str, Any]) -> Dict[str, A
         for item in classification_events
         if _clean_text(item.get("tactic")) and _clean_text(item.get("tactic")) != "unknown"
     ]
+    ordered_behavior_chain = _ordered_behavior_chain(classification_events)
+    relationship_analysis = build_session_behavior_relationships({
+        **session_payload,
+        "classification_events": all_classification_events,
+        "raw_events": raw_events,
+    }, policy_document=behavior_policy_document, policy_path=behavior_policy_path)
     eventids = [
         _clean_text(item.get("eventid"))
         for item in raw_events
@@ -287,6 +411,14 @@ def build_session_evidence_graph(session_payload: Dict[str, Any]) -> Dict[str, A
         + event_nodes
         + observable_nodes,
         "audit_only_classification_candidates": audit_only_candidates,
+        "behavior_policy": relationship_analysis["behavior_policy"],
+        "ordered_behavior_chain": ordered_behavior_chain,
+        "ordered_command_observations": relationship_analysis["ordered_command_observations"],
+        "transfer_event_observations": relationship_analysis["transfer_event_observations"],
+        "normalized_entities": relationship_analysis["normalized_entities"],
+        "behavior_relationships": relationship_analysis["behavior_relationships"],
+        "connected_behavior_chains": relationship_analysis["connected_behavior_chains"],
+        "relationship_semantics": relationship_analysis["semantics"],
         "edges": _edges(commands, classification_events, raw_events, observable_nodes),
         "sequences": {
             "commands": commands,
@@ -297,6 +429,11 @@ def build_session_evidence_graph(session_payload: Dict[str, Any]) -> Dict[str, A
         "counts": {
             "commands": len(commands),
             "classification_events": len(classification_events),
+            "ordered_behavior_chain": len(ordered_behavior_chain),
+            "ordered_command_observations": len(relationship_analysis["ordered_command_observations"]),
+            "normalized_entities": len(relationship_analysis["normalized_entities"]),
+            "behavior_relationships": len(relationship_analysis["behavior_relationships"]),
+            "connected_behavior_chains": len(relationship_analysis["connected_behavior_chains"]),
             "audit_only_classification_events": len(audit_only_candidates),
             "raw_events": len(raw_events),
             "observables": len(observable_nodes),
@@ -328,6 +465,11 @@ def summarize_evidence_graph(graph: Dict[str, Any]) -> Dict[str, Any]:
         "session_id": graph.get("session_id") or "unknown",
         "command_count": counts.get("commands", 0),
         "classification_event_count": counts.get("classification_events", 0),
+        "ordered_behavior_chain_count": counts.get("ordered_behavior_chain", 0),
+        "ordered_command_observation_count": counts.get("ordered_command_observations", 0),
+        "normalized_entity_count": counts.get("normalized_entities", 0),
+        "behavior_relationship_count": counts.get("behavior_relationships", 0),
+        "connected_behavior_chain_count": counts.get("connected_behavior_chains", 0),
         "audit_only_classification_event_count": counts.get(
             "audit_only_classification_events", 0
         ),
@@ -337,5 +479,7 @@ def summarize_evidence_graph(graph: Dict[str, Any]) -> Dict[str, Any]:
         "ttp_sequence": _unique(sequences.get("ttps") or []),
         "tactic_sequence": _unique(sequences.get("tactics") or []),
         "eventid_sequence": _unique(sequences.get("eventids") or []),
+        "last_trusted_tactic": _clean_text((graph.get("ordered_behavior_chain") or [{}])[-1].get("tactic")),
+        "last_trusted_ttp": _clean_text((graph.get("ordered_behavior_chain") or [{}])[-1].get("ttp")),
         "evidence_flags": {k: v for k, v in flags.items() if v},
     }

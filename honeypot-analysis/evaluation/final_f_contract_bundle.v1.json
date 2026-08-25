@@ -1,0 +1,518 @@
+{
+  "schema_version": "final_f_contract_bundle.v1",
+  "architecture_id": "chronological_graph_grounded_analyst_synthesis_and_prioritization",
+  "status": "phase0_frozen_not_runtime_active",
+  "authority_model": {
+    "deterministic_owns": [
+      "canonical_evidence",
+      "typed_semantics",
+      "attck_mapping",
+      "semantic_graph",
+      "findings",
+      "relationships",
+      "hypotheses",
+      "manual_guidance",
+      "limitations",
+      "evidence_gaps"
+    ],
+    "external_ai_may": [
+      "select_existing_objects",
+      "rank_existing_objects",
+      "select_reviewed_templates",
+      "order_bounded_review_steps",
+      "abstain"
+    ],
+    "external_ai_must_not": [
+      "create_evidence",
+      "create_attck_mapping",
+      "create_relationship",
+      "create_chain",
+      "create_finding",
+      "create_hypothesis",
+      "create_action",
+      "create_factual_prose",
+      "create_alert",
+      "create_execution_instruction",
+      "influence_prediction"
+    ]
+  },
+  "versions": {
+    "assessment": "session_assessment.v6",
+    "guidance": "response_guidance.v4",
+    "projection": "ai_advisory_projection.v2",
+    "provider_output": "ai_provider_output.v2",
+    "validated_output": "ai_advisory_validated_output.v2",
+    "rendered_output": "ai_advisory_rendered.v2",
+    "record": "ai_advisory_record.v2",
+    "task": "ai_advisory_task.v2",
+    "vertex_request": "ai_vertex_request.v2",
+    "policy": "ai_advisory_policy.v2"
+  },
+  "projection_contract": {
+    "exact_keys": [
+      "schema_version",
+      "assessment_id",
+      "report_content_sha256",
+      "evidence_sha256",
+      "graph_sha256",
+      "typed_fact_set_sha256",
+      "guidance_content_sha256",
+      "provenance",
+      "authority",
+      "timeline_steps",
+      "facts",
+      "chains",
+      "relationships",
+      "findings",
+      "hypotheses",
+      "actions",
+      "limitations",
+      "evidence_gaps",
+      "allowed_output",
+      "abstention",
+      "projection_sha256"
+    ],
+    "nested_exact_keys": {
+      "provenance": [
+        "evaluator_git_revision",
+        "behavior_policy_sha256",
+        "classification_policy_sha256",
+        "typed_vocabulary_sha256",
+        "guidance_policy_sha256",
+        "ai_policy_sha256",
+        "projection_contract_sha256"
+      ],
+      "authority": [
+        "ai_canonical_authority",
+        "ai_finding_authority",
+        "ai_hypothesis_authority",
+        "ai_guidance_authority",
+        "ai_alert_authority",
+        "ai_prediction_authority",
+        "ai_execution_authority"
+      ],
+      "timeline_step": [
+        "ordinal",
+        "evidence_ids",
+        "fact_ids",
+        "semantic_families",
+        "operation_types",
+        "outcome_status",
+        "entity_ids",
+        "relationship_ids",
+        "chain_ids",
+        "finding_ids"
+      ],
+      "fact": [
+        "fact_id",
+        "causal_ordinal",
+        "semantic_family",
+        "operation_types",
+        "outcome_status",
+        "evidence_ids",
+        "entity_ids"
+      ],
+      "chain": [
+        "chain_id",
+        "status",
+        "fact_ids",
+        "relationship_ids",
+        "evidence_ids",
+        "entity_ids",
+        "limitation_codes",
+        "evidence_gap_codes",
+        "ai_eligible"
+      ],
+      "relationship": [
+        "relationship_id",
+        "relationship_type",
+        "status",
+        "source_fact_id",
+        "target_fact_id",
+        "entity_id",
+        "limitation_codes"
+      ],
+      "finding": [
+        "finding_id",
+        "finding_type",
+        "semantic_family",
+        "status",
+        "priority_band",
+        "chain_ids",
+        "relationship_ids",
+        "evidence_ids",
+        "limitation_codes"
+      ],
+      "hypothesis": [
+        "hypothesis_id",
+        "hypothesis_set_id",
+        "status",
+        "chain_ids",
+        "relationship_ids",
+        "fact_ids",
+        "evidence_ids",
+        "limitation_codes",
+        "evidence_gap_codes",
+        "falsifier_codes"
+      ],
+      "action": [
+        "action_id",
+        "action_category",
+        "rule_id",
+        "policy_order",
+        "finding_ids",
+        "evidence_ids",
+        "requires_manual_approval",
+        "safe_to_auto_execute",
+        "execution_integration"
+      ],
+      "allowed_output": [
+        "chain_ids",
+        "relationship_ids",
+        "finding_ids",
+        "hypothesis_ids",
+        "action_ids",
+        "limitation_codes",
+        "evidence_gap_codes",
+        "analyst_question_template_ids",
+        "explanation_template_ids",
+        "step_types",
+        "anchor_types",
+        "abstention_reason_codes"
+      ],
+      "abstention": [
+        "assessment_abstained",
+        "reason_codes"
+      ]
+    }
+  },
+  "provider_output_contract": {
+    "exact_keys": [
+      "schema_version",
+      "projection_sha256",
+      "policy_sha256",
+      "synthesis"
+    ],
+    "synthesis_exact_keys": [
+      "schema_version",
+      "abstained",
+      "abstention_reason_code",
+      "selected_chain_ids",
+      "selected_relationship_ids",
+      "ranked_finding_ids",
+      "selected_hypothesis_ids",
+      "ranked_action_ids",
+      "selected_limitation_codes",
+      "selected_evidence_gap_codes",
+      "analyst_question_selections",
+      "explanation_template_selections",
+      "review_plan"
+    ],
+    "question_selection_exact_keys": [
+      "template_id",
+      "anchor_type",
+      "anchor_id"
+    ],
+    "explanation_selection_exact_keys": [
+      "template_id",
+      "anchor_type",
+      "anchor_id"
+    ],
+    "review_plan_item_exact_keys": [
+      "order",
+      "step_type",
+      "anchor_type",
+      "anchor_id",
+      "related_chain_ids",
+      "related_finding_ids",
+      "related_hypothesis_ids",
+      "related_action_ids",
+      "limitation_codes",
+      "evidence_gap_codes",
+      "analyst_question_template_ids",
+      "explanation_template_id"
+    ],
+    "prohibited_keys": [
+      "action",
+      "alerts",
+      "attck",
+      "command",
+      "confidence",
+      "credential",
+      "description",
+      "entity_value",
+      "evidence",
+      "finding",
+      "free_text",
+      "guidance",
+      "hypothesis",
+      "intent",
+      "objective",
+      "payload",
+      "prose",
+      "rationale",
+      "response_action",
+      "severity",
+      "source_ip",
+      "statement",
+      "url",
+      "username"
+    ]
+  },
+  "envelope_contracts": {
+    "validated_output_exact_keys": [
+      "schema_version",
+      "projection_sha256",
+      "policy_sha256",
+      "synthesis",
+      "validation_sha256"
+    ],
+    "rendered_output_exact_keys": [
+      "schema_version",
+      "status",
+      "abstention_reason_code",
+      "sections",
+      "render_sha256"
+    ],
+    "record_exact_keys": [
+      "schema_version",
+      "status",
+      "authority",
+      "validation",
+      "validated_synthesis",
+      "rendered_advisory",
+      "safety",
+      "provenance"
+    ],
+    "task_exact_keys": [
+      "schema_version",
+      "report_id",
+      "session_id",
+      "assessment_id",
+      "report_content_sha256",
+      "advisory_contract_version"
+    ],
+    "vertex_request_exact_keys": [
+      "schema_version",
+      "projection",
+      "projection_sha256",
+      "policy_sha256",
+      "response_schema_sha256",
+      "request_options_sha256"
+    ]
+  },
+  "enum_bindings": {
+    "semantic_family": {
+      "mode": "hash_bound_deterministic_source",
+      "source": "typed_semantic_vocabulary_policy.v2",
+      "binding": "projection.provenance.typed_vocabulary_sha256"
+    },
+    "operation_type": {
+      "mode": "hash_bound_deterministic_source",
+      "source": "typed_semantic_vocabulary_policy.v2.operations",
+      "binding": "projection.provenance.typed_vocabulary_sha256"
+    },
+    "outcome_status": {
+      "mode": "hash_bound_deterministic_source",
+      "source": "typed_semantic_vocabulary_policy.v2.outcome_statuses",
+      "binding": "projection.provenance.typed_vocabulary_sha256"
+    },
+    "relationship_type": {
+      "mode": "validated_graph_source",
+      "source": "canonical_semantic_graph.v1.relationship_edges.relationship_type",
+      "binding": "projection.graph_sha256"
+    },
+    "chain_status": [
+      "supported",
+      "partial"
+    ],
+    "relationship_status": [
+      "supported",
+      "partial"
+    ],
+    "finding_status": [
+      "supported"
+    ],
+    "finding_priority_band": [
+      "not_applicable",
+      "reviewed_low",
+      "reviewed_medium",
+      "reviewed_high",
+      "reviewed_critical"
+    ],
+    "hypothesis_status": [
+      "bounded_unverified_alternative"
+    ],
+    "action_execution_integration": [
+      "not_implemented"
+    ],
+    "review_plan_step_type": [
+      "review_chain",
+      "review_finding",
+      "test_existing_hypothesis",
+      "perform_manual_check",
+      "resolve_evidence_gap"
+    ],
+    "review_plan_anchor_type": [
+      "chain",
+      "finding",
+      "hypothesis",
+      "action",
+      "evidence_gap"
+    ],
+    "rendered_status": [
+      "rendered",
+      "abstained"
+    ],
+    "record_status": [
+      "accepted",
+      "abstained",
+      "rejected",
+      "unavailable"
+    ],
+    "validation_status": [
+      "accepted",
+      "rejected"
+    ],
+    "completion_code": [
+      "accepted",
+      "rejected",
+      "cache_replayed",
+      "deterministic_abstention"
+    ]
+  },
+  "chronology": {
+    "sources": [
+      "canonical_semantic_graph.evidence_nodes.sequence_index",
+      "canonical_semantic_graph.relationship_edges.source_fact_ref",
+      "canonical_semantic_graph.relationship_edges.target_fact_ref"
+    ],
+    "chain_fact_list_is_chronology": false,
+    "classification_only_missing_sequence_creates_step": false,
+    "tie_breakers": [
+      "durable_sequence_index",
+      "directed_topological_order",
+      "stable_object_id"
+    ],
+    "invalid_conditions": [
+      "cycle",
+      "edge_contradicts_durable_order",
+      "unresolved_causal_placement",
+      "duplicate_ordinal",
+      "non_contiguous_dense_ordinal"
+    ],
+    "invalid_behavior": "affected_chain_ineligible_then_local_abstention_if_no_context"
+  },
+  "privacy": {
+    "alias_format": "^a_[0-9a-f]{32}$",
+    "alias_derivation": "HMAC-SHA256(alias_key, provider_id || assessment_id || object_kind || local_id), truncated to 32 hex after local collision check",
+    "allowed_value_classes": [
+      "assessment_scoped_alias",
+      "closed_enum",
+      "boolean",
+      "bounded_integer",
+      "sha256",
+      "reviewed_policy_id"
+    ],
+    "prohibited_fields": [
+      "raw_command",
+      "command_fragment",
+      "durable_event_ref",
+      "source_ip",
+      "destination_address",
+      "username",
+      "password",
+      "credential",
+      "url",
+      "payload",
+      "filename",
+      "entity_value",
+      "description",
+      "statement",
+      "previous_ai_prose"
+    ]
+  },
+  "eligibility": {
+    "required_all": [
+      "valid_current_session_assessment_v6",
+      "valid_graph_and_guidance_identities",
+      "chronology_internally_consistent"
+    ],
+    "primary_context_any": [
+      "at_least_one_ai_eligible_chain",
+      "at_least_two_trusted_findings"
+    ],
+    "secondary_context_any": [
+      "approved_manual_action",
+      "existing_bounded_hypothesis",
+      "additional_trusted_finding_or_chain",
+      "existing_limitation",
+      "existing_evidence_gap"
+    ],
+    "ineligible_behavior": "persist_local_non_provider_abstention",
+    "learned_router": false
+  },
+  "compatibility": {
+    "historical_read_only": [
+      "session_assessment.v4",
+      "session_assessment.v5",
+      "response_guidance.v3",
+      "ai_advisory_record.v1"
+    ],
+    "shadow_candidates": "historical_v1_read_only_not_present_in_v2",
+    "historical_rewrite": false,
+    "historical_requeue": false,
+    "database_migration_required": false,
+    "storage_reuse": [
+      "ai_advisory_outbox",
+      "ai_advisories"
+    ],
+    "prediction_contract_changed": false
+  },
+  "evaluation_protocol": {
+    "conditions": [
+      "deterministic_default_ordering",
+      "historical_flat_ai_selector_v1",
+      "final_f_chronological_graph_synthesis_v2"
+    ],
+    "case_count": 40,
+    "real_nonsealed_development_cases": 30,
+    "synthetic_contract_edge_cases": 10,
+    "strata": {
+      "simple_or_insufficient": 10,
+      "one_chain_multi_finding": 10,
+      "multi_chain_or_multi_action": 10,
+      "existing_hypothesis_limitation_or_gap": 10
+    },
+    "independent_reviewers_required_for_analyst_claims": 2,
+    "single_reviewer_claim_scope": "descriptive_only",
+    "repeat_stability_subset_cases": 12,
+    "repeat_calls_per_case": 3,
+    "metrics": [
+      "valid_reference_rate",
+      "prohibited_output_rate",
+      "grounding_consistency",
+      "top_k_finding_recall",
+      "finding_ndcg",
+      "action_rank_agreement",
+      "analyst_omission_rate",
+      "analyst_review_time",
+      "abstention_appropriateness",
+      "repeated_call_stability",
+      "provider_failure_containment",
+      "api_invocation_rate",
+      "latency",
+      "token_usage",
+      "cost"
+    ],
+    "prohibited_claims": [
+      "attck_accuracy",
+      "novel_threat_discovery",
+      "attacker_intent_inference",
+      "hypothesis_truth",
+      "soc_efficacy",
+      "autonomous_response"
+    ],
+    "prediction_sealed_data_used": false
+  }
+}

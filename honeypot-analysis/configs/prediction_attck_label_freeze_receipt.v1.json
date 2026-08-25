@@ -1,0 +1,60 @@
+{
+  "schema_version": "prediction_attck_label_freeze_receipt.v1",
+  "freeze_id": "predfreeze_20260816_prediction_only_next_tactic",
+  "status": "frozen_contract_only",
+  "authority": "prediction_weak_rule_label",
+  "repository": {
+    "implementation_commit": "1a290769c7fa671d24cfaf558c8c2c3886945474",
+    "implementation_tree": "fd7d1904295de37b060f5ba10bda5361f4c5e501"
+  },
+  "contracts": {
+    "policy": {
+      "path": "configs/prediction_attck_label_policy.v1.json",
+      "sha256": "2f7669d7aacfb4ffa59cc2d9c0b89be88e2b16dfd80b551944ee07db6e8b1cc6"
+    },
+    "rule_bindings": {
+      "path": "configs/prediction_attck_rule_bindings.v1.json",
+      "sha256": "9eec0ed41f27f98c3530887b7326063fbc6dd4012b4630ebb8e30d7c4bbe90df"
+    },
+    "implementation": {
+      "path": "production/prediction/prediction_attck_label.py",
+      "sha256": "28885527e05bd1711f39a798452435646c311054eef794186b8965ef938cdea9"
+    },
+    "environment": {
+      "path": "configs/prediction_attck_label_environment.v1.json",
+      "sha256": "200f209ce1385d10cd38fa8bf78c37773d163d43a9efcd8422a8a71738f3b815"
+    },
+    "known_answers": {
+      "path": "configs/prediction_attck_label_known_answers.v1.json",
+      "sha256": "00ef47ca1aa2eaef5d3031698d6fdc48ba5b0cf2000a6756a5488f79af91e42a"
+    },
+    "validator": {
+      "path": "production/policies/validate_prediction_attck_label.py",
+      "sha256": "3e4813e240729f76ffb6b54559d1931d938c104f73758537a76043a3fd60a792"
+    }
+  },
+  "support_policy": {
+    "policy_path": "configs/prediction_attck_label_policy.v1.json",
+    "policy_sha256": "2f7669d7aacfb4ffa59cc2d9c0b89be88e2b16dfd80b551944ee07db6e8b1cc6",
+    "support_policy_sha256": "d3eb1eb52e62771de7e2aa8a27ed4dc2205523813263bcc2df9778947be99dc3",
+    "analysis_status": "not_run"
+  },
+  "validation": {
+    "focused_tests_passed": true,
+    "focused_test_count": 28,
+    "existing_regression_tests_passed": true,
+    "existing_regression_count": 137,
+    "compileall_passed": true,
+    "git_diff_check_passed": true,
+    "pip_check_passed": true,
+    "deterministic_secret_scan_passed": true
+  },
+  "boundaries": {
+    "canonical_noninterference_proven": true,
+    "real_support_inspected": false,
+    "model_training": false,
+    "sealed_test_accessed": false,
+    "production_changed": false
+  },
+  "receipt_sha256": "348e1bad645d59a61d7aabad8a6dbe4d865174814a80bfc3dc1b42dd21bc41db"
+}

@@ -1,0 +1,35 @@
+{
+  "decision": "A new versioned localhost-only target can be additive; no ambiguous/default/shared resource is modified or deleted.",
+  "limitations": [
+    "This is a conflict check, not deployment authorization by itself.",
+    "Supplemental cloud inventories remain incomplete, but the proposed sidecar does not use those services."
+  ],
+  "observed": {
+    "ambiguous_gcp_resources_modified": false,
+    "port_18082_listener": false,
+    "production_listeners": [
+      "100.85.50.74:8080",
+      "127.0.0.1:8081",
+      "127.0.0.1:8090"
+    ],
+    "production_services_restarted": false,
+    "remote_final_poc_bundle_uploaded": false,
+    "root_available_gib": 100.42768478393555,
+    "track_b_or_final_poc_systemd_units": []
+  },
+  "repository_binding": {
+    "deployment_authorized": false,
+    "deployment_manifest": "honeypot-analysis/evaluation/receipts/gcp_final_poc_runtime_binding_resolution_20260823_retry3/deployment/final_poc_gcp_deployment_manifest.json",
+    "deployment_manifest_sha256": "62bc520cb8def86b65236de540fd81f9ae5876c6c3e0a7cfd03b36bcad764b68",
+    "zero_deletions_required": true
+  },
+  "schema_version": "gcp_non_destructive_deployment_conflict_check.v1",
+  "status": "PASS_NON_DESTRUCTIVE_SHADOW_DEPLOYMENT",
+  "target": {
+    "project": "project-dff4b23a-3010-4936-a02",
+    "proposed_listener": "127.0.0.1:18082",
+    "proposed_mode": "localhost-only shadow sidecar",
+    "vm": "capstone",
+    "zone": "asia-southeast1-b"
+  }
+}

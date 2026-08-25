@@ -1,0 +1,142 @@
+{
+  "schema_version": "next_behavior_source_selection.v1",
+  "selection_id": "corrected_target_calendar_selection.v1",
+  "preserved_source_manifest": {
+    "path": "configs/next_behavior_zenodo_source.v1.json",
+    "schema_version": "next_behavior_zenodo_source.v1",
+    "sha256": "a82f2c71251a241eac7294ced9dc41d6ca22e72e1358babc902c4eabcdc59e6f"
+  },
+  "source": {
+    "zenodo_record_id": 21260400,
+    "doi": "10.5281/zenodo.21260400"
+  },
+  "archive": {
+    "filename": "data_all.zip",
+    "size_bytes": 19372965772,
+    "checksum": "md5:5b6d6e77e5f7247ac400d2318cef7adb",
+    "download_url": "https://zenodo.org/api/records/21260400/files/data_all.zip/content"
+  },
+  "policy": {
+    "selection_basis": "collection_date_only",
+    "development_cutoff_date": "2025-08-07",
+    "embargo_dates": [
+      "2025-08-08"
+    ],
+    "final_window_start_date": "2025-08-09",
+    "final_window_end_date": "2025-08-16",
+    "development_rule": "fixed_weekly_members_from_preserved_v1_through_cutoff",
+    "final_rule": "all_daily_members_in_final_window_except_forbidden_dates",
+    "labels_used": false,
+    "member_sizes_used": false,
+    "substitution_allowed": false
+  },
+  "forbidden_final_members": [
+    "2025-06-27.json.gz",
+    "2025-06-29.json.gz",
+    "2025-07-03.json.gz",
+    "2025-07-10.json.gz",
+    "2025-07-17.json.gz",
+    "2025-07-24.json.gz",
+    "2025-07-31.json.gz",
+    "2025-08-07.json.gz",
+    "2025-08-14.json.gz",
+    "2025-08-17.json.gz"
+  ],
+  "members": [
+    {
+      "filename": "2025-07-03.json.gz",
+      "archive_path": "../logs_by_day/2025-07-03.json.gz",
+      "collection_date": "2025-07-03",
+      "chronological_order": 1,
+      "role": "development"
+    },
+    {
+      "filename": "2025-07-10.json.gz",
+      "archive_path": "../logs_by_day/2025-07-10.json.gz",
+      "collection_date": "2025-07-10",
+      "chronological_order": 2,
+      "role": "development"
+    },
+    {
+      "filename": "2025-07-17.json.gz",
+      "archive_path": "../logs_by_day/2025-07-17.json.gz",
+      "collection_date": "2025-07-17",
+      "chronological_order": 3,
+      "role": "development"
+    },
+    {
+      "filename": "2025-07-24.json.gz",
+      "archive_path": "../logs_by_day/2025-07-24.json.gz",
+      "collection_date": "2025-07-24",
+      "chronological_order": 4,
+      "role": "development"
+    },
+    {
+      "filename": "2025-07-31.json.gz",
+      "archive_path": "../logs_by_day/2025-07-31.json.gz",
+      "collection_date": "2025-07-31",
+      "chronological_order": 5,
+      "role": "development"
+    },
+    {
+      "filename": "2025-08-07.json.gz",
+      "archive_path": "../logs_by_day/2025-08-07.json.gz",
+      "collection_date": "2025-08-07",
+      "chronological_order": 6,
+      "role": "development"
+    },
+    {
+      "filename": "2025-08-09.json.gz",
+      "archive_path": "../logs_by_day/2025-08-09.json.gz",
+      "collection_date": "2025-08-09",
+      "chronological_order": 7,
+      "role": "final"
+    },
+    {
+      "filename": "2025-08-10.json.gz",
+      "archive_path": "../logs_by_day/2025-08-10.json.gz",
+      "collection_date": "2025-08-10",
+      "chronological_order": 8,
+      "role": "final"
+    },
+    {
+      "filename": "2025-08-11.json.gz",
+      "archive_path": "../logs_by_day/2025-08-11.json.gz",
+      "collection_date": "2025-08-11",
+      "chronological_order": 9,
+      "role": "final"
+    },
+    {
+      "filename": "2025-08-12.json.gz",
+      "archive_path": "../logs_by_day/2025-08-12.json.gz",
+      "collection_date": "2025-08-12",
+      "chronological_order": 10,
+      "role": "final"
+    },
+    {
+      "filename": "2025-08-13.json.gz",
+      "archive_path": "../logs_by_day/2025-08-13.json.gz",
+      "collection_date": "2025-08-13",
+      "chronological_order": 11,
+      "role": "final"
+    },
+    {
+      "filename": "2025-08-15.json.gz",
+      "archive_path": "../logs_by_day/2025-08-15.json.gz",
+      "collection_date": "2025-08-15",
+      "chronological_order": 12,
+      "role": "final"
+    },
+    {
+      "filename": "2025-08-16.json.gz",
+      "archive_path": "../logs_by_day/2025-08-16.json.gz",
+      "collection_date": "2025-08-16",
+      "chronological_order": 13,
+      "role": "final"
+    }
+  ],
+  "verification": {
+    "status": "pending_archive_verification",
+    "member_receipts": []
+  }
+}

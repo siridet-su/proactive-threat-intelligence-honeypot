@@ -1,0 +1,33 @@
+{
+  "schema_version": "prediction_attck_label_known_answers.v1",
+  "fixture_id": "prediction-only-next-tactic-known-answers-20260816.v1",
+  "authority": "prediction_weak_rule_label",
+  "cases": [
+    {"case_id": "reviewed_structural_rule", "expected": "eligible"},
+    {"case_id": "reviewed_regex_allowlist", "expected": "eligible"},
+    {"case_id": "unreviewed_rule", "expected": "excluded"},
+    {"case_id": "rule_model_agreement_rule_side", "expected": "eligible"},
+    {"case_id": "model_only", "expected": "excluded"},
+    {"case_id": "rule_model_disagreement_rule_side", "expected": "eligible"},
+    {"case_id": "rule_mapping_mismatch", "expected": "barrier"},
+    {"case_id": "ambiguous_mapping", "expected": "barrier"},
+    {"case_id": "parser_abstention", "expected": "barrier"},
+    {"case_id": "malformed_evidence", "expected": "barrier"},
+    {"case_id": "conditional_unproven", "expected": "barrier"},
+    {"case_id": "unresolved_value", "expected": "barrier"},
+    {"case_id": "inert_lexical_match", "expected": "excluded"},
+    {"case_id": "multi_pair_group", "expected": "exact_pair_set"},
+    {"case_id": "compatible_duplicate", "expected": "deduplicated"},
+    {"case_id": "conflicting_duplicate", "expected": "fail_closed"},
+    {"case_id": "repeated_same_tactic_group", "expected": "separate_groups"},
+    {"case_id": "changed_next_group", "expected": "continuation_changed"},
+    {"case_id": "same_next_tactic", "expected": "continuation_same"},
+    {"case_id": "explicit_close", "expected": "session_end"},
+    {"case_id": "active_final_group", "expected": "unresolved"},
+    {"case_id": "barrier_segment", "expected": "no_cross_segment_transition"},
+    {"case_id": "history_maximum_eight", "expected": "truncated"},
+    {"case_id": "target_input_disjoint", "expected": "no_leakage"},
+    {"case_id": "duplicate_replay", "expected": "deterministic"},
+    {"case_id": "canonical_noninterference", "expected": "unchanged"}
+  ]
+}

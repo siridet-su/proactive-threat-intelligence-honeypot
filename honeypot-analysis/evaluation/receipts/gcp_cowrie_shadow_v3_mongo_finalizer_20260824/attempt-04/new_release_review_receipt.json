@@ -1,0 +1,28 @@
+{
+  "active": false,
+  "base_candidate_release": "a5a9334cb36d5ceae5c98ef31185abcc42046992",
+  "base_candidate_release_sha256": "a5a9334cb36d5ceae5c98ef31185abcc420469928b57b0947277860e24caf838",
+  "base_candidate_tree_sha1": "bbc8b27dd9ce1744deb75f44412655f8562f5900",
+  "candidate_release_id": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+  "candidate_release_sha256": "403c989d9cfe7e7726610018345352e76bfd5d7fc75cc3952d3217a00e0c6669",
+  "candidate_release_tree_sha1": "71428a1735a9802f878931153d242cd1d2cf23ee",
+  "controlled_exclusion_preserved": true,
+  "prior_artifacts_preserved": true,
+  "promotion_attempted": false,
+  "release_manifest_sha256": "7a43ed039db5521c357c681dba5ca3e640b6c35dc544d669f77bc3481a3399ec",
+  "schema_version": "gcp_finalizer_v3_mongo_wrapper_repaired_review_receipt.v1",
+  "session_worker_sha256": "ef9e1c281fd88380a8c91d68129affab5f10b5c9ba42b288c10bb248276b7665",
+  "source_contract_repair_preserved": true,
+  "source_identity_sha256": "9493daa3ccc10ac8fbd17f3596bc9a0c5811a81d22beadee9ffa9c73053f3a93",
+  "status": "REVIEWED_OFFLINE_CANDIDATE_VALID_STAGED_NOT_ACTIVE",
+  "trusted_history_sha256": "6109fc9e12c718a093cf4752e117c6956b30954251414c33d932d5367693a9b6",
+  "wrapper_after_sha256": "a88eff72b3f46431622b03e307bc084fcd6707a90074fc344bc12eeacaf2ad48",
+  "wrapper_before_sha256": "c8771d3a4cefa990629402d4096ca2ec8834328752694a2b9a2af11b7dbaaaf5",
+  "wrapper_contract_repair": {
+    "change": "forward evidence_cutoff keyword through patched_close",
+    "controlled_exclusion_preserved": true,
+    "original_close_called_with_keyword": true,
+    "path": "production/controlled_provenance_runtime.py",
+    "reason": "session_worker terminal path now supplies evidence_cutoff"
+  }
+}

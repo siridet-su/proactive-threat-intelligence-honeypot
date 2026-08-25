@@ -1,0 +1,89 @@
+{
+  "schema_version": "prediction_attck_label_freeze_receipt.v2",
+  "freeze_id": "predfreeze_20260816_prediction_only_legacy_parity_v2",
+  "status": "frozen_contract_only",
+  "authority": "prediction_weak_rule_label",
+  "repository": {
+    "implementation_commit": "f5684f4c63e172fc787715a7b36a8e6cfc89e6ae",
+    "implementation_tree": "2c023cbb98e5338e9eeeb16a353fc56d00b33dd5"
+  },
+  "lineage": {
+    "predecessor_freeze_receipt_path": "configs/prediction_attck_label_freeze_receipt.v1.json",
+    "predecessor_freeze_receipt_sha256": "8ba835b6a7bc5b5ab342de23b60e417a3455476b03901f7f3dcd6123ab05e2f4",
+    "predecessor_evidence_immutable": true
+  },
+  "semantic_change": {
+    "only_change": "parser_context_over_restriction",
+    "admission_class": "reviewed_legacy_literal_invocation",
+    "canonical_trust_changed": false,
+    "attck_bindings_changed": false,
+    "target_contract_changed": false,
+    "support_thresholds_changed": false,
+    "model_authority_added": false
+  },
+  "contracts": {
+    "policy": {
+      "path": "configs/prediction_attck_label_policy.v2.json",
+      "sha256": "03160fd9fad7cbf9e3db652112c47e1b88242ecbe91c8884a6ddc7324d735a61"
+    },
+    "legacy_literal_bindings": {
+      "path": "configs/prediction_attck_legacy_literal_bindings.v2.json",
+      "sha256": "14db69d7650276f374852aee21b5dcfa90918cf8e49a4b4e9c80317e3862f967"
+    },
+    "implementation_v2": {
+      "path": "production/prediction/prediction_attck_label_v2.py",
+      "sha256": "45c456ac7c5834129a11d3559acee4371a3bac6f48883876be3dd1035bdcf11c"
+    },
+    "base_implementation_v1": {
+      "path": "production/prediction/prediction_attck_label.py",
+      "sha256": "28885527e05bd1711f39a798452435646c311054eef794186b8965ef938cdea9"
+    },
+    "environment": {
+      "path": "configs/prediction_attck_label_environment.v2.json",
+      "sha256": "4b60e27fecf4f5f1ef3614418b52987fad1444b6dabc23423ba9f9cd83236ac1"
+    },
+    "known_answers": {
+      "path": "configs/prediction_attck_label_known_answers.v2.json",
+      "sha256": "477fa4903f15ce230a4001afed5acc580696a1b5a069e53ef3b59d3f854a3902"
+    },
+    "known_answer_tests": {
+      "path": "tests/test_prediction_attck_label_v2.py",
+      "sha256": "d09181f5266b1fe26ed89a85877aa721ee4902f1e3a3beb0d5cf2960c0a3df51"
+    },
+    "validator": {
+      "path": "production/policies/validate_prediction_attck_label_v2.py",
+      "sha256": "5a7307b7afde633893297de6caddd62d1d924023d4a5dc431a08b601eeb505b1"
+    },
+    "canonical_trust": {
+      "path": "production/classification/trust.py",
+      "sha256": "22269cf5dff6c11bf1720b46bce56361b140678f1baff3150efe2806ebff2919"
+    }
+  },
+  "support_policy": {
+    "policy_path": "configs/prediction_attck_label_policy.v2.json",
+    "policy_sha256": "03160fd9fad7cbf9e3db652112c47e1b88242ecbe91c8884a6ddc7324d735a61",
+    "support_policy_sha256": "d3eb1eb52e62771de7e2aa8a27ed4dc2205523813263bcc2df9778947be99dc3",
+    "analysis_status": "not_run"
+  },
+  "validation": {
+    "focused_tests_passed": true,
+    "focused_test_count": 51,
+    "authority_replay_regressions_passed": true,
+    "authority_replay_regression_count": 139,
+    "v1_validator_passed": true,
+    "v2_validator_passed": true,
+    "compileall_passed": true,
+    "git_diff_check_passed": true,
+    "pip_check_passed": true,
+    "deterministic_secret_scan_passed": true
+  },
+  "boundaries": {
+    "canonical_noninterference_proven": true,
+    "large_corpus_support_inspected": false,
+    "model_training": false,
+    "sealed_test_accessed": false,
+    "canonical_trust_modified": false,
+    "production_changed": false
+  },
+  "receipt_sha256": "fe09e4569cab79da23314832658947dd0dd7318699b7b399ec9a1b52c3651437"
+}

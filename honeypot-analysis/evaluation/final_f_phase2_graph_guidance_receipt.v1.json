@@ -1,0 +1,63 @@
+{
+  "schema_version": "final_f_phase2_graph_guidance_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "phase": 2,
+  "implementation_commit": "cb6c80b8c3875ced1d2b16b1ee0958c56e1112b2",
+  "implementation_tree": "88698cb68abadf345244d30a0db711230cd3c6d8",
+  "phase_0_receipt_sha256": "54049763d13173f7e4cedb184b8ebd2f2c98fd7dd8325fcb05aea3a721efe194",
+  "phase_1_receipt_sha256": "72c204068519aa91dc4171bafdd811cde215ddbe3e6a7d16661b05952c50efb2",
+  "contracts": {
+    "assessment": "session_assessment.v6",
+    "guidance": "response_guidance.v4",
+    "graph_query_view": "canonical_graph_query_view.v1",
+    "canonical_graph": "canonical_semantic_graph.v1",
+    "guidance_authority": "deterministic_canonical_graph_policy",
+    "reviewed_policy_file_sha256": "f32aa0a45215b8f355dc540327c69dcb75d684bb9876692791e0568cceda5e7d",
+    "reviewed_policy_document_sha256": "1424c0436950ecc2eb682038cfad9abf639c662ffc6da5f6e9c1d7b24cc183af",
+    "selection_input": "validated_existing_canonical_graph_only",
+    "denormalized_session_selection": "fail_closed",
+    "separate_typed_fact_set_selection": "fail_closed",
+    "current_reevaluation": "validated_current_report_graph_required",
+    "assessment_content_binding": "complete_authoritative_content_sha256"
+  },
+  "files": [
+    {"path": "honeypot-analysis/production/api/dashboard_api.py", "sha256": "78b62b5d5224e530f72f89e3ae2c2923d1c2b95cd394ed542f8f3142b8dc7bdf"},
+    {"path": "honeypot-analysis/production/api/monitor_web.py", "sha256": "34d95298903747bed28a867aacd3feaf1e8479ba094e48111eff94ee9fff69c2"},
+    {"path": "honeypot-analysis/production/reporting/artifacts.py", "sha256": "20681b7b832d3ba46b8b20881fc13f1d1ea1e258576e5d88185a30764b5098a7"},
+    {"path": "honeypot-analysis/production/reporting/canonical_graph_queries.py", "sha256": "d9305e19026d2c7ca3a5ec8351217fd0a3ce24170aad08bb26aacc6e964ba3bc"},
+    {"path": "honeypot-analysis/production/reporting/canonical_pipeline.py", "sha256": "2030adf54f922be9330e2fefa8e2bd0dc9f0615c3b86c01466d41be08df6eec7"},
+    {"path": "honeypot-analysis/production/reporting/response_guidance_v4.py", "sha256": "92a3e26ba1b0d756adea27736899678f2e041ca25f1d3f25bf6cb7faece149b0"},
+    {"path": "honeypot-analysis/production/reporting/session_assessment_v6.py", "sha256": "c25a0c742fff6679d5531d303a348853fbadb761db906c40ff0b84addc3f9175"},
+    {"path": "honeypot-analysis/production/storage/backend.py", "sha256": "e0ab3c3d5058a9c69dc6523a18d32b54ce836d8b940cf3b743dda0671a72fbd6"},
+    {"path": "honeypot-analysis/production/storage/mongodb_operations.py", "sha256": "c748edb1946d794ecd0dd2b23c5d221b1047728ca133dbec675239187b1a46c9"},
+    {"path": "honeypot-analysis/production/workers/analysis_worker.py", "sha256": "05a3e6caa96194446251cfa988be714b6692fc876bf98c117a2be9bd5b6cb811"},
+    {"path": "honeypot-analysis/tests/test_authority_containment.py", "sha256": "57e705d915aa2384497f405bd1ccf7df4da3228cb0d6c77c8dd333eb1ef162c5"},
+    {"path": "honeypot-analysis/tests/test_canonical_runtime.py", "sha256": "0a5e879ab1d0f65c3997e31923ccec5b142508e9393165a26fa3f74a85c9bc7f"},
+    {"path": "honeypot-analysis/tests/test_final_f_phase1_authority.py", "sha256": "7ceb5c9f4de1c78e5309fc92229efad0e55e379da0437d91793a2009f722c41f"},
+    {"path": "honeypot-analysis/tests/test_final_f_phase2_graph_guidance.py", "sha256": "9001b3075d49cc06bf80acd043e5f73e10cedb4e567175cddcedbd2028d6bfc0"},
+    {"path": "honeypot-analysis/tests/test_production_e2e.py", "sha256": "6b792111081728defac246de888e7986c41b9dd57a398a8c620eff35bc1705e1"},
+    {"path": "honeypot-analysis/tests/test_report_secret_containment.py", "sha256": "4579f65fdc4f21a70518ae4548771dea2820f2340dae875fe3861a1a8619bdc6"},
+    {"path": "honeypot-analysis/tests/test_session_assessment_v4.py", "sha256": "9dfceaf5680e0c145f1a02ecc7b2ed9479fb0b11e52e1ef81544da962c85772f"},
+    {"path": "honeypot-analysis/tests/test_session_worker_event_lifecycle.py", "sha256": "a7fc1d7aeae44461a81b325f6498e520badc5f6adc09336cf1b74866a3185063"}
+  ],
+  "validation": {
+    "phase_2_focused_and_compatibility_suite": "138 passed, 1 skipped",
+    "localhost_end_to_end_suite": "2 passed",
+    "phase_0_phase_1_receipt_suite": "11 passed",
+    "response_guidance_policy_validation": "PASS",
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "pip_check": "PASS"
+  },
+  "compatibility": {
+    "historical_session_assessment_v4_v5": "read_only_original_validators",
+    "historical_response_guidance_v3": "read_only_original_validator",
+    "database_schema_migration": false,
+    "v6_storage_identity_support": "sqlite_mongodb_runtime_parity",
+    "historical_records_modified": false
+  },
+  "production_deployed": false,
+  "ai_runtime_changed": false,
+  "transformer_changed": false,
+  "receipt_sha256": "98a75fd82829417eed5c6757f9b2fdee6dc23a8d7f1196aa53234995946abd6e"
+}

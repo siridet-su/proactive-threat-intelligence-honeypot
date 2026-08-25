@@ -1,0 +1,191 @@
+{
+  "schema_version": "prediction_attck_label_policy.poc.v3",
+  "policy_id": "prediction-only-reviewed-rule-labels-experimental-poc-20260820.v3",
+  "authority": "prediction_weak_rule_label",
+  "predecessor_policy_path": "configs/prediction_attck_label_policy.v2.json",
+  "predecessor_policy_sha256": "03160fd9fad7cbf9e3db652112c47e1b88242ecbe91c8884a6ddc7324d735a61",
+  "target_contract_id": "next_prediction_attck_label_group_or_session_end.v1",
+  "target_policy_identity": {
+    "label_schema_version": "prediction_attck_label.v1",
+    "group_schema_version": "prediction_attck_label_group.v1",
+    "history_schema_version": "prediction_attck_label_history_manifest.v1",
+    "maximum_history_groups": 8,
+    "session_end_representation": "explicit_close_only",
+    "barrier_policy": "prediction_attck_causal_barrier.v1",
+    "no_transition_across_barrier": true
+  },
+  "preprocessing_identity": {
+    "environment_path": "configs/prediction_attck_label_environment.v2.json",
+    "environment_sha256": "4b60e27fecf4f5f1ef3614418b52987fad1444b6dabc23423ba9f9cd83236ac1",
+    "implementation_path": "production/prediction/prediction_attck_label_v2.py",
+    "implementation_sha256": "45c456ac7c5834129a11d3559acee4371a3bac6f48883876be3dd1035bdcf11c",
+    "base_contract_path": "production/prediction/prediction_attck_label.py",
+    "base_contract_sha256": "28885527e05bd1711f39a798452435646c311054eef794186b8965ef938cdea9",
+    "rule_bindings_sha256": "14db69d7650276f374852aee21b5dcfa90918cf8e49a4b4e9c80317e3862f967",
+    "runtime": "CPython-3.12.13"
+  },
+  "dataset_manifest": {
+    "path": "configs/prediction_attck_label_poc_dataset_manifest.v1.json",
+    "schema_version": "prediction_attck_poc_dataset_manifest.v1",
+    "membership_id": "predattckpocdataset_internal40_cyberlab101_20260820",
+    "membership_sha256": "3ec5f0cc9b44e7993d3724278cb964391b1995d2ff1284aa560f0ba2d25d3451",
+    "status": "membership_frozen_examples_not_materialized"
+  },
+  "support_evidence": {
+    "internal": {
+      "path": "/mnt/honeypot-data/prediction-attck-internal-40/v6-final-support/internal40-v6-support-receipt-resumed.v1.json",
+      "file_sha256": "cde51b36084d5e16ce35ed591c5602cd79eb750407b82fd2d4816489e3bf80f9",
+      "receipt_id": "predattcksupportrunnerv6_0bff2473922ebc291df36949d55d31e7",
+      "receipt_sha256": "5d9dd08e52e766fcb2b14f4915dfe363711450eb8a4f325c270f3302f5fc443b",
+      "status": "COMPLETE_VALID",
+      "sealed_test_accessed": false,
+      "training_performed": false
+    },
+    "cyberlab": {
+      "path": "/mnt/honeypot-data/prediction-attck-final-support-v4/cyberlab-101/receipts/cyberlab-101-support-retry2.v3.json",
+      "file_sha256": "1f0442c1a5201071a432a71475582feee17d5ed338bf12dcd507fb1e45f51eee",
+      "receipt_id": "predattcksupportrunnerv3_cd4909be7eeae088bf62a3c8c153b0d4",
+      "receipt_sha256": "4dc62fe7a5521e843079b47ea264ee1d51d68c6d450a032ff0bf2530a2501209",
+      "status": "COMPLETE_VALID",
+      "sealed_test_accessed": false,
+      "training_performed": false
+    },
+    "pooled": {
+      "path": "/mnt/honeypot-data/prediction-attck-final-support-v4/pooled/receipts/pooled-internal40-v6-cyberlab101-v3-support.v2.json",
+      "file_sha256": "fae9583f7c058b4c8f92f49706e4dd0dfa90220be6a6c6218b0f41bb4bb63f54",
+      "receipt_id": "predattckpooledinternal40v6cyberlab101v3_c61fdc4e82e2c7376db82bba0c6feb24",
+      "receipt_sha256": "6b4ab9c81278962bbda8dde9650d3cd8c0de979afc550baf5a691ea39c1a28f2",
+      "status": "SUPPORT_GATE_FAILED",
+      "support_gate_passed": false,
+      "gate_summary_sha256": "610af582b53b5658b7aab4460b625a2a01ac0dcbfd315de5f9dfba413b2d8de6",
+      "failed_gate_families": [
+        "conditional_tactic_support",
+        "execution_required_support",
+        "changed_from_current_support"
+      ],
+      "training_started": false,
+      "training_performed": false,
+      "sealed_test_accessed": false
+    }
+  },
+  "poc_training_authorization": {
+    "empirical_support_qualified": false,
+    "production_model_qualified": false,
+    "experimental_poc_training_authorized": true,
+    "scope": "offline_non_authoritative_experiment_only",
+    "does_not_override_failed_support_gates": true,
+    "does_not_authorize_sealed_test_access": true,
+    "does_not_authorize_production_deployment": true
+  },
+  "training_authorization": {
+    "support_analysis_only": false,
+    "model_training_authorized": false,
+    "production_prediction_authorized": false,
+    "sealed_test_access_authorized": false
+  },
+  "model_protocol": {
+    "model_family": "small_causal_transformer",
+    "architecture_source_path": "production/prediction/next_behavior_model.py",
+    "architecture_source_sha256": "67693946f96a6a30d86b8643ab817b05ad6ff6953c36cfc709299c2408707b16",
+    "architecture": {
+      "causal_layers": 1,
+      "d_model": 16,
+      "feedforward_dimension": 32,
+      "attention_heads": 4,
+      "dropout": 0.1,
+      "maximum_sequence_length": 8,
+      "activation": "gelu",
+      "batch_first": true,
+      "norm_first": false,
+      "device": "cpu"
+    },
+    "output": {
+      "target_contract_id": "next_prediction_attck_label_group_or_session_end.v1",
+      "terminal_head": "session_end",
+      "conditional_tactic_head": "exact_frozen_tactic_vocabulary",
+      "unknown_class_added": false
+    },
+    "candidates": {
+      "candidate_a": {
+        "name": "baseline_transformer",
+        "loss": "ordinary_cross_entropy",
+        "class_weighting": false,
+        "sampling": "uniform_training_examples_only",
+        "augmentation": false
+      },
+      "candidate_b": {
+        "name": "class_weighted_transformer",
+        "loss": "bounded_class_weighted_cross_entropy",
+        "weight_source": "training_role_only",
+        "weight_rule": "inverse_frequency_clipped_0.25_4.0",
+        "class_weighting": true,
+        "sampling": "uniform_training_examples_only",
+        "augmentation": false
+      },
+      "candidate_c": {
+        "status": "not_authorized_by_default",
+        "maximum_candidates": 1,
+        "requires_candidate_b_minority_collapse": true,
+        "training_role_only": true,
+        "augmentation": false
+      }
+    },
+    "training": {
+      "seed": 20260820,
+      "epochs": 6,
+      "batch_size": 2048,
+      "optimizer": "adam",
+      "learning_rate": 0.003,
+      "weight_decay": 0.0,
+      "deterministic_algorithms": true,
+      "device": "cpu",
+      "early_stopping": false
+    },
+    "selection": {
+      "role": "selection",
+      "primary_metric": "macro_f1",
+      "secondary_metrics": [
+        "top1_accuracy",
+        "weighted_f1",
+        "per_class_recall_f1",
+        "changed_from_current_performance",
+        "continuation_session_end_performance",
+        "minority_class_collapse"
+      ],
+      "overall_accuracy_alone_is_insufficient": true,
+      "discovery_majority_is_not_success": true
+    },
+    "calibration": {
+      "role": "calibration",
+      "method": "global_scalar_temperature_sigmoid.v1",
+      "class_specific_mapping_allowed": false,
+      "selection_or_test_used": false
+    }
+  },
+  "runtime_boundary": {
+    "display_name": "Predicted Next ATT&CK Tactic",
+    "status_label": "Experimental / PoC",
+    "authoritative": false,
+    "low_confidence_behavior": "unavailable",
+    "canonical_findings_affected": false,
+    "canonical_attck_truth_assigned": false,
+    "automatic_response_triggered": false,
+    "final_f_ai_advisory_input": false,
+    "controlled_synthetic_training_input": false,
+    "production_enabled": false
+  },
+  "claims": {
+    "supported": [
+      "technical feasibility of an offline Transformer PoC under frozen prediction semantics",
+      "non_authoritative next-tactic forecasting on the frozen development roles"
+    ],
+    "not_supported": [
+      "production model qualification",
+      "all-tactic generalization",
+      "attacker intent or proven execution",
+      "empirical support-gate passage",
+      "sealed-test performance"
+    ]
+  },
+  "policy_sha256": "128f5e028ba66af507d89824b715385633d34fdc6c5e2bc7b54e0e44f923b721"
+}

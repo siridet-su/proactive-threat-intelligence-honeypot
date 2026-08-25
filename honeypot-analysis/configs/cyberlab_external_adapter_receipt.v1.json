@@ -1,0 +1,16 @@
+{
+  "schema_version": "cyberlab_external_adapter_receipt.v1",
+  "adapter_schema_version": "cyberlab_cowrie_adapter.v1",
+  "source_policy_path": "configs/cyberlab_external_adapter.v1.json",
+  "adapter_path": "production/reproduction/cyberlab_adapter.py",
+  "documentation_path": "docs/CYBERLAB_ADAPTER.md",
+  "fixture_path": "tests/test_cyberlab_adapter.py",
+  "source_policy_sha256": "b78286aea96c0325cdab07614fc7b75b0ef792f89b40d7f4d43f478d676f05b6",
+  "adapter_sha256": "6efff462a682df128ea3fe27ad6b27b47ec6461ce0aae117c3d56b49083d444b",
+  "documentation_sha256": "9deccd01ad7c8af070d32daf1e8d41e172215822e9f3fe05f46f80fdf7c70e7a",
+  "fixture_sha256": "27b8941a4075d1ebaf7f595228541becc663d4cf42f83744adc3cc8e3d2d61a5",
+  "test_result": "10 passed",
+  "real_external_data_accessed": false,
+  "sealed_test_accessed": false,
+  "receipt_id": "cyberlabadapterreceipt_ddbb54bd13672eecaf1f51c1279d9eb9"
+}

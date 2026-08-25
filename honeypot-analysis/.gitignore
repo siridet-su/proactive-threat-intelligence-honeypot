@@ -6,6 +6,9 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+build/
+dist/
+*.egg-info/
 
 # Virtual environments and local editor state
 .venv/
@@ -31,6 +34,9 @@ Thumbs.db
 *.pfx
 *credentials*.json
 *service-account*.json
+*credential*hmac*keyring*.json
+*credential*keyring*.json
+CODEX_REMEDIATION_HANDOFF.md
 
 # Runtime databases, queues, logs, and reports
 *.db
@@ -45,6 +51,9 @@ logs/
 reports/
 downloads/
 tty/
+backups/
+*.bak
+*.backup
 
 # Generated models, review queues, and temporary evaluation output
 external_cowrie_seed_transition_model.json
@@ -56,6 +65,28 @@ data/models/external_seed_health*.json
 data/models/external_seed_minimal_events*
 data/classification_review_queue*.json
 evaluation/generated/
+evaluation/*.json
+!evaluation/canonical_final_evaluation.json
+!evaluation/typed_semantic_fixtures.v2.json
+evaluation/*.jsonl
+evaluation/*.csv
+configs/*generated*.json
+data/feeds/*_cache.json
+data/feeds/*.lock
+data/feeds/.*.tmp
+models/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Offline next-tactic benchmark runs are local, resumable bulk artifacts.
+evaluation/next_tactic_offline_benchmark_*/
+evaluation/next_tactic_benchmark_evidence/*.json
+!evaluation/next_tactic_benchmark_evidence/
+!evaluation/next_tactic_benchmark_evidence/*.json
+!evaluation/next_tactic_benchmark_evidence/*.sha256
+data/models/transformer_shadow_*.pt
 
 # Generated deployment bundles and local artifacts
 deployment/artifacts/
@@ -68,3 +99,63 @@ archives/deployments/*.tgz
 artifact-local_*.html
 review_cases.json
 reviewed_labels.json
+
+# Intentionally local immutable release materializations and promotion evidence
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/candidate_release/00d7e9594b11505c167f4e03bb3efffd9a90144b/
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/candidate_release/403c989d9cfe7e7726610018345352e76bfd5d7f/
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_final_promotion_20260825/
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_corrected_promotion_retry_20260825/
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_corrected_promotion_retry2_20260825/
+/evaluation/prediction_next_distinct_transformer_padding_fix_v1/artifacts-20260823/receipt.json
+/evaluation/prediction_next_distinct_transformer_refinement_v1_retry3/artifacts-20260823/receipt.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/build_duplicate_label_repaired_release.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/prepare_storage_binding.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/promotion_attempt_blocked_transfer.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/promotion_attempt_blocked_transfer.md
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/release_build_receipt.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/remote_state_probe.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_duplicate_label_repair_20260825/validate_duplicate_label_candidate.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/activate_a6.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/artifact_hash_manifest.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/build_a6_candidate.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/build_artifact_hash_manifest.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/canonical_session_validation.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/duplicate_suppression_validation.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/feeder_config.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/feeder_service.unit
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/final_controlled_e2e_report.md
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/initialize_a6_state.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/mongo_feeder_live_validation.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/predictor_live_validation.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/rebind_a6_storage.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/run_runtime_bound_preactivation.py
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/shadow_prediction_validation.json
+/evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/attempt-04/v3_manifest_validation.json
+
+# Retained cleanup-audit outputs are local evidence; current cleanup_audit source and tests remain trackable
+/cleanup_audit/active_403c_canonical_source_diff.json
+/cleanup_audit/active_403c_canonical_source_reconciliation.md
+/cleanup_audit/active_403c_canonical_source_reconciliation_final.md
+/cleanup_audit/btrfs_safe_to_delete_ext4_copy_retained_20260825.json
+/cleanup_audit/cross_filesystem_project_storage_audit_20260825.md
+/cleanup_audit/current_cleanup_deletion_preflight_20260825.tsv
+/cleanup_audit/current_local_only_deletion_preflight_20260825.tsv
+/cleanup_audit/current_promotion_storage_contract_resolution.md
+/cleanup_audit/current_sqlite_dependency_audit.json
+/cleanup_audit/current_sqlite_dependency_report.md
+/cleanup_audit/dependency_aware_cleanup_execution_receipt_20260825.json
+/cleanup_audit/dependency_aware_local_cleanup_audit_20260825.md
+/cleanup_audit/dependency_aware_local_keep_manifest_20260825.json
+/cleanup_audit/ext4_only_deletion_safety_audit_20260825.md
+/cleanup_audit/ext4_safe_deletion_execution_receipt_20260825.json
+/cleanup_audit/final_commit_manifest_after_defect_closure.json
+/cleanup_audit/final_repository_commit_manifest_20260825.json
+/cleanup_audit/final_runtime_defect_closure.json
+/cleanup_audit/final_runtime_defect_closure.md
+/cleanup_audit/focused_project_deletion_safety_audit_20260825.md
+/cleanup_audit/high_confidence_ext4_safe_deletion_list_20260825.json
+/cleanup_audit/high_confidence_safe_deletion_list_20260825.json
+/cleanup_audit/high_confidence_safe_deletion_manifest_postfinal_20260825.json
+/cleanup_audit/strict_final_commit_audit.md
+/cleanup_audit/strict_final_commit_manifest.json
+/cleanup_audit/strict_final_commit_manifest_after_reconciliation.json

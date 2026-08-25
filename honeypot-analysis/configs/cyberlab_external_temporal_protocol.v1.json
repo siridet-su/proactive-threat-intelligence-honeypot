@@ -1,0 +1,43 @@
+{
+  "schema_version": "cyberlab_external_temporal_protocol.v1",
+  "source_record_id": 3687527,
+  "source_doi": "10.5281/zenodo.3687527",
+  "high_interaction_sensor": "ubuntu_basic_pool",
+  "eligibility_rule": "all session events must have sensor exactly ubuntu_basic_pool",
+  "selection_is_label_blind": true,
+  "behavioral_inspection_before_freeze": false,
+  "roles": {
+    "train": {"start": "2019-11-09", "end": "2020-01-15"},
+    "selection": {"start": "2020-01-16", "end": "2020-02-07"},
+    "calibration": {"start": "2020-02-08", "end": "2020-02-18"},
+    "external_sealed_test": {"start": "2020-02-19", "end": "2020-02-29"}
+  },
+  "sealed_test": {
+    "behavioral_contents_opened": false,
+    "downloaded_in_development_preparation": false
+  },
+  "development_roles": ["train", "selection", "calibration"],
+  "date_selection_basis": "filename_date_only",
+  "substitution_allowed": false,
+  "role_counts": {
+    "train": 68,
+    "selection": 23,
+    "calibration": 11,
+    "external_sealed_test": 11
+  },
+  "role_compressed_bytes": {
+    "train": 3130297373,
+    "selection": 1019069902,
+    "calibration": 646714413,
+    "external_sealed_test": 340568716,
+    "development_total": 4796081688,
+    "all_candidate_total": 5136650404
+  },
+  "role_file_inventory_sha256": {
+    "train": "034957b8864a5c563b837dd080d96eb3144bccf05356fb3591f49d5aa7ee9b89",
+    "selection": "442e9a233013448c3d12c106dacdd377db77a43ddeb31c17ebdad05ea87e8d81",
+    "calibration": "aec616119fe4368a17b16904c86b6056dc83d3dfc8be89a7566289f1e0d6732b",
+    "external_sealed_test": "bc12c4ce6fbf5ef5d181a2d4e02b8f0db294ce00f5f82f58f5563da5e72d9488"
+  },
+  "official_file_inventory_sha256": "990127419d2794b6ecebd1e526244439dae9586817894ad7b4fe7dfbd0687878"
+}

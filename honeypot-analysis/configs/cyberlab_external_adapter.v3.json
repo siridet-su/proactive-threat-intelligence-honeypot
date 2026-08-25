@@ -1,0 +1,49 @@
+{
+  "schema_version": "cyberlab_cowrie_adapter.v3",
+  "previous_adapter_schema_version": "cyberlab_cowrie_adapter.v2",
+  "private_session_schema_version": "cyberlab_private_session.v1",
+  "source": {
+    "zenodo_record_id": 3687527,
+    "doi": "10.5281/zenodo.3687527",
+    "dataset": "CyberLab honeypot dataset",
+    "source_schema_version": "cyberlab_session_array.v1",
+    "member_pattern": "cyberlab_YYYY-MM-DD.json.gz",
+    "official_checksum_domain": "md5"
+  },
+  "eligibility_ordering": {
+    "stage": "before_event_semantic_validation",
+    "metadata_fields": ["sensor"],
+    "required_sensor": "ubuntu_basic_pool",
+    "wrong_sensor": "exclude_without_command_validation",
+    "mixed_or_missing_sensor": "exclude_without_command_validation",
+    "eligible_session": "run_v1_strict_event_validation_with_v3_quarantine",
+    "eligible_malformed_non_command": "fail_closed",
+    "command_content_used_for_eligibility": false,
+    "labels_or_tactics_used_for_eligibility": false
+  },
+  "quarantine_contract": {
+    "schema_version": "cyberlab_missing_evidence_quarantine.v1",
+    "missing_command_reason": "missing_command_text",
+    "trusted_label_emitted": false,
+    "attack_label_emitted": false,
+    "transition_across_barrier": false,
+    "segment_status_before_barrier": "active_unresolved",
+    "terminal_authority": "cowrie.session.closed"
+  },
+  "session_contract": {
+    "close_event": "cowrie.session.closed",
+    "missing_close": "active/unresolved; no fabricated terminal target",
+    "cross_file": "merge before quarantine segmentation; conflicting duplicates fail closed",
+    "segment_identity": "HMAC-derived from raw session identity and deterministic barrier segment index"
+  },
+  "privacy": {
+    "quarantine": "private metadata only; no raw command or source identifier in safe output",
+    "classifier_stream": "eligible non-quarantined events only",
+    "safe_output": "existing canonical privacy contract"
+  },
+  "provenance": {
+    "quarantine_counts_and_reasons": "required in development receipts",
+    "real_external_data_accessed_for_freeze": false,
+    "sealed_test_accessed": false
+  }
+}

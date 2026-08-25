@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-SCHEMA_VERSION = "classification_rule_policy.v1"
+SCHEMA_VERSION = "classification_rule_policy.v3"
+AUTHORITY_DECISION_SCHEMA = "command_authority_decision.v1"
 TTP_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
 ALLOWED_SOURCE_TYPES = {
     "human_curated_command_rule",
@@ -19,15 +20,25 @@ ALLOWED_SOURCE_TYPES = {
     "emergency_python_fallback",
 }
 ALLOWED_EVIDENCE_TYPES = {
+    "command_operation",
     "command_regex",
     "command_example",
     "external_dataset_command_pattern",
+}
+ALLOWED_OPERATION_PREDICATE_KEYS = {
+    "command_families",
+    "required_operation_types",
+    "operand_paths_any",
 }
 ALLOWED_RULE_REVIEW_MODES = {
     "reviewed_only",
     "all_enabled",
     "all",
     "include_unreviewed",
+}
+ALLOWED_REGEX_PROMOTION_CLASSES = {
+    "audit_only",
+    "trusted_literal_fallback",
 }
 
 
@@ -105,6 +116,25 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
         review_mode = body.get("rule_review_mode", policy.get("rule_review_mode", "reviewed_only"))
         if str(review_mode or "").lower() not in ALLOWED_RULE_REVIEW_MODES:
             errors.append(f"policy: unsupported rule_review_mode {review_mode!r}")
+        authority = body.get("runtime_authority")
+        if not isinstance(authority, dict):
+            errors.append("policy: missing runtime_authority metadata")
+        else:
+            if authority.get("schema_version") != AUTHORITY_DECISION_SCHEMA:
+                errors.append(
+                    "policy.runtime_authority.schema_version must be "
+                    f"{AUTHORITY_DECISION_SCHEMA}"
+                )
+            if authority.get("regex_default_promotion") != "audit_only":
+                errors.append(
+                    "policy.runtime_authority.regex_default_promotion must be audit_only"
+                )
+            ids = authority.get("trusted_literal_fallback_rule_ids")
+            if not isinstance(ids, list) or any(not str(item).strip() for item in ids):
+                errors.append(
+                    "policy.runtime_authority.trusted_literal_fallback_rule_ids "
+                    "must be a list of rule IDs"
+                )
     rules = _rules(policy)
     if not rules:
         errors.append("policy: at least one rule is required")
@@ -117,14 +147,65 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
         elif rule_id in seen_ids:
             errors.append(f"{path}: duplicate rule_id {rule_id!r}")
         seen_ids.add(rule_id)
+        evidence_type = str(rule.get("evidence_type") or "")
         pattern = str(rule.get("pattern") or "")
-        if not pattern:
-            errors.append(f"{path}: missing pattern")
+        predicate = rule.get("operation_predicate")
+        if evidence_type == "command_operation":
+            if pattern:
+                errors.append(f"{path}: structural rules must not include pattern")
+            if not isinstance(predicate, dict) or not predicate:
+                errors.append(f"{path}: structural rule requires operation_predicate")
+            else:
+                unknown = set(predicate) - ALLOWED_OPERATION_PREDICATE_KEYS
+                if unknown:
+                    errors.append(f"{path}: unsupported operation predicate fields")
+                for key, values in predicate.items():
+                    if (
+                        not isinstance(values, list)
+                        or not values
+                        or any(not isinstance(value, str) or not value.strip() for value in values)
+                    ):
+                        errors.append(f"{path}.operation_predicate.{key} must be a non-empty string list")
+        elif not pattern:
+            errors.append(f"{path}: regex rule is missing pattern")
         else:
             try:
                 re.compile(pattern, re.IGNORECASE)
-            except re.error as exc:
-                errors.append(f"{path}: invalid regex: {exc}")
+            except re.error:
+                errors.append(f"{path}: invalid regex")
+            rule_authority = rule.get("runtime_authority")
+            configured_ids = set()
+            if isinstance(body, dict) and isinstance(body.get("runtime_authority"), dict):
+                configured_ids = {
+                    str(item).strip()
+                    for item in body["runtime_authority"].get(
+                        "trusted_literal_fallback_rule_ids", []
+                    )
+                    if str(item).strip()
+                }
+            if rule_authority is not None:
+                if not isinstance(rule_authority, dict):
+                    errors.append(f"{path}.runtime_authority must be an object")
+                else:
+                    promotion = str(rule_authority.get("promotion_class") or "")
+                    if promotion not in ALLOWED_REGEX_PROMOTION_CLASSES:
+                        errors.append(
+                            f"{path}.runtime_authority.promotion_class is unsupported"
+                        )
+                    if promotion == "trusted_literal_fallback":
+                        if rule_authority.get("reviewed") is not True:
+                            errors.append(
+                                f"{path}.runtime_authority reviewed promotion must be true"
+                            )
+                        if rule_authority.get("safety_class") != "literal_unambiguous":
+                            errors.append(
+                                f"{path}.runtime_authority trusted promotion must be literal_unambiguous"
+                            )
+            elif rule_id not in configured_ids:
+                # The policy-level allow-list is explicit metadata for the
+                # reviewed rules.  Every other regex is intentionally audit-only.
+                # No error is needed for an omitted rule-level object.
+                pass
         ttp = str(rule.get("ttp") or "").strip().upper()
         if not TTP_RE.match(ttp):
             errors.append(f"{path}: invalid ttp {ttp!r}")
@@ -133,7 +214,6 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
         source_type = str(rule.get("source_type") or "")
         if source_type not in ALLOWED_SOURCE_TYPES:
             errors.append(f"{path}: unsupported source_type {source_type!r}")
-        evidence_type = str(rule.get("evidence_type") or "")
         if evidence_type not in ALLOWED_EVIDENCE_TYPES:
             errors.append(f"{path}: unsupported evidence_type {evidence_type!r}")
         confidence = rule.get("confidence")

@@ -1,0 +1,18 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_live_shadow_prediction.v1",
+  "status": "PASS_EXACTLY_ONE_ISOLATED_RECORD",
+  "shadow_root": "/var/lib/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d",
+  "records_sha256": "f1da1548b30ec35ea14cbc5a3d3bfa5aa54451dbc7d4c71c4f6635bc1b4ad99",
+  "record_count": 1,
+  "sequence_id_sha256": "76c113a3e3cd47fe2ab5053ec0d218f8a75ec69e6d413c832e0110a967b9d295",
+  "record_revision": 18,
+  "session_ended": true,
+  "progression_index": 1,
+  "history_length": 1,
+  "history_manifest_sha256": "9609d89a44e2052a04aeac61c7058a46ef68b7c059a181233bd3a66e0826d809",
+  "evidence_cutoff_sha256": "ea879a47b2d66affb4fb8c3fceebf0dee0ec1d01df4650fba85adcb8fa22745d",
+  "authority": "non_authoritative",
+  "canonical_write_allowed": false,
+  "raw_commands_stored_here": false
+}
+

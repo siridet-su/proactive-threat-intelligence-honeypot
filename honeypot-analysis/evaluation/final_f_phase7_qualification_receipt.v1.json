@@ -1,0 +1,85 @@
+{
+  "schema_version": "final_f_phase7_qualification_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "phase": 7,
+  "completed_at": "2026-08-19T12:06:14Z",
+  "qualification_commit_full": "2f322af882273a8f7c40613cad5a0637384f1cd3",
+  "qualification_tree": "60b4f62244ce76b102664e6fc2b9b77112f54b58",
+  "phase_receipts": [
+    {
+      "path": "honeypot-analysis/evaluation/final_f_phase1_canonical_authority_receipt.v1.json",
+      "sha256": "72c204068519aa91dc4171bafdd811cde215ddbe3e6a7d16661b05952c50efb2"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_phase2_graph_guidance_receipt.v1.json",
+      "sha256": "a4416c6d762f355af496d2d7b5e0b3630e0acebac8753d2ee7e9ae0daf574805"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_phase3_projection_receipt.v1.json",
+      "sha256": "0fd4cbac8cc2e417c36c701aa9694bd97f4165d0b5eed686928a1c26eb315531"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_phase4_contract_receipt.v1.json",
+      "sha256": "00874858334d31fcdd29e1c6f00dd477924e50e8ae4657d515202445220230d1"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_phase5_integration_receipt.v1.json",
+      "sha256": "7e987e37845383e8cea732f817edf619d0648fee4e35c5fc3538d824c38f406a"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_phase6_api_ui_receipt.v1.json",
+      "sha256": "bc67991a040d2541e5fc9b29bbc16b74fd06718d03cacd4c1566780dd2896d39"
+    }
+  ],
+  "qualification_scope": {
+    "canonical_authority": "trusted findings only; audit-only candidates remain non-canonical",
+    "graph_and_guidance": "chronology, graph binding, exact references, stale/mismatch rejection",
+    "projection_privacy": "allowlist/prohibited-field and assessment-scoped alias checks",
+    "ai_contract": "closed v2 grounding, duplicate/unknown/invented reference rejection",
+    "failure_isolation": "provider failure, malformed output, timeout, retry, cache, lease loss, restart, and deterministic no-call abstention",
+    "api_ui": "versioned v1/v2 dispatch, explicit non-authority, state separation, historical shadow labeling",
+    "persistence": "SQLite/Mongo contract compatibility and idempotent completion paths",
+    "transformer_noninterference": "trusted history, prediction inputs/snapshots, and prediction identity remain separate",
+    "historical_compatibility": "Phase 0–6 records and v1 advisory readers remain immutable/readable"
+  },
+  "validation": {
+    "full_repository_pytest_sandbox": "1946 passed, 57 skipped, 16 local-socket PermissionError failures caused by sandbox policy",
+    "socket_qualification_rerun": "26 passed",
+    "effective_full_repository_result": "1962 passed, 57 skipped, 0 assertion failures across 2019 collected tests",
+    "phase7_targeted_matrix": "496 passed, 1 skipped, 1 deselected",
+    "phase_receipt_and_contract_verifiers": "16 passed",
+    "policy_validators": {
+      "prediction_policy": "PASS",
+      "prediction_transformer_policy": "PASS",
+      "classification_rules": "PASS",
+      "session_ttp_correlation": "PASS",
+      "response_guidance": "PASS",
+      "threat_hypothesis_behavior": "PASS"
+    },
+    "compileall": "PASS",
+    "pip_check": "PASS",
+    "git_diff_check": "PASS",
+    "production_config_receipt_secret_scan": "PASS",
+    "synthetic_test_fixture_scan_note": "one intentional synthetic private-key marker remains in tests/test_sensitive_data_and_serialization.py; no production/config/receipt secret pattern was found",
+    "external_provider_calls": false,
+    "production_deployed": false,
+    "production_mutated": false,
+    "sealed_prediction_evidence_accessed": false
+  },
+  "qualification_result": {
+    "canonical_complete_under_ai_failure": true,
+    "ai_cannot_modify_canonical_authority": true,
+    "ai_cannot_modify_guidance": true,
+    "ai_cannot_modify_trusted_prediction_history": true,
+    "historical_v1_readability": true,
+    "release_identity_verified": true,
+    "tracked_worktree_clean_at_qualification": true,
+    "phase8_authorized": true
+  },
+  "source_changes": {
+    "runtime_source_changes": false,
+    "defect_corrections": [],
+    "qualification_artifacts_only": true
+  },
+  "receipt_sha256": "47665bd3f766a08f6248721a708d5278a65f4421db639dbf15a5f37052090c2c"
+}

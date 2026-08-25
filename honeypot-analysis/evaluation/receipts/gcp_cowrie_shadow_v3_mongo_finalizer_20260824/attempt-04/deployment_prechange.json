@@ -1,0 +1,35 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_deployment_prechange.v1",
+  "captured_at": "2026-08-24T14:44:34Z",
+  "active_release": "a5a9334cb36d5ceae5c98ef31185abcc42046992",
+  "active_release_sha256": "a5a9334cb36d5ceae5c98ef31185abcc420469928b57b0947277860e24caf838",
+  "epoch_file_sha256": "f08ec9e2636fa6f8a5f15e496629285bd24673f11f5023e1abdaf59130f2b74b",
+  "epoch_receipt_sha256": "787c2c75c6e8191dbec2551455540d1ace3830473ba35a71602691aed387aede",
+  "feeder_unit_sha256": "15f6eaab2ad3d847b3ead84634cadce2f4b49da8edc64fc09ca23284fff2f1dc",
+  "mongo_counts": {
+    "sessions": 76,
+    "events": 1121,
+    "prediction_snapshots": 686,
+    "prediction_outbox": 686,
+    "analysis_jobs": 68,
+    "reports": 67,
+    "alerts": 0,
+    "lifecycle_ledger": 1
+  },
+  "source_counts": {
+    "production_live": 71,
+    "e2e_test": 5
+  },
+  "highwater": {
+    "updated_at": "2026-08-24T14:22:19.523502+00:00",
+    "revision": 15,
+    "session_id_sha256": "4aa3a7c3db77b583b4a69d6c6dd10e32b19c6eb8023437f6610072ba026f41cd"
+  },
+  "services": {
+    "worker": "active/running/0",
+    "feeder": "active/running/0",
+    "predictor": "active/running/0"
+  },
+  "historical_replay": false
+}
+

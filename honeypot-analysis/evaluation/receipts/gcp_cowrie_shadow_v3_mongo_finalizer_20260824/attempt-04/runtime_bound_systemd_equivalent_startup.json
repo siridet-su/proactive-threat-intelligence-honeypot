@@ -1,0 +1,44 @@
+{
+  "candidate_release_id": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+  "candidate_release_sha256": "403c989d9cfe7e7726610018345352e76bfd5d7fc75cc3952d3217a00e0c6669",
+  "compileall": {
+    "returncode": 0,
+    "status": "PASS",
+    "stderr_present": false
+  },
+  "conclusion": "Candidate startup progressed through runtime-bound epoch, repaired lifecycle recording, Mongo-shaped initialization, V3 classifier-environment loading, classifier construction, SessionMonitor construction, and a zero-event loop using isolated fakes.",
+  "execution_contract": {
+    "credential_contents_printed": false,
+    "group": "honeypot",
+    "harness_interpreter": "/usr/bin/python3",
+    "harness_interpreter_version": "3.14.7",
+    "isolated_fake_storage": true,
+    "live_mongo_opened": false,
+    "production_interpreter_expected": "/opt/honeypot/.venv/bin/python",
+    "production_restart": false,
+    "user": "honeypot"
+  },
+  "probe": {
+    "active_release_unchanged": true,
+    "actual_lifecycle_loader": true,
+    "actual_repaired_lifecycle_caller": true,
+    "canonical_writes": false,
+    "classifier_construction": true,
+    "classifier_environment_loader": true,
+    "classifier_environment_schema": "next_behavior_classifier_environment.v3",
+    "lifecycle_call": {
+      "effective_path_differs_from_active": true,
+      "policy_id": "honeypot-thesis-data-lifecycle",
+      "policy_sha256": "5c7d76556310a913879c8a53f509f44d10b823213e0f8189eca32c0fcfa9e7f2",
+      "policy_version": "1.0.0"
+    },
+    "lifecycle_documents": 1,
+    "process_unprocessed": "PASS",
+    "processed": 0,
+    "recovered_active_sessions": 0,
+    "session_monitor_construction": true,
+    "storage_epoch_receipt_sha256": "da6397d615e5f2a0c9c89c5686fa83ed335299ec312214dc1b5d8ceb3d90abd0"
+  },
+  "schema_version": "gcp_finalizer_v3_runtime_bound_systemd_equivalent_startup.v1",
+  "status": "PASS_SAFE_ISOLATED_RUNTIME_BOUND_CANDIDATE"
+}

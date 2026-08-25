@@ -1,0 +1,254 @@
+{
+  "schema_version": "prediction_attck_legacy_literal_bindings.v2",
+  "policy_id": "prediction-only-reviewed-rule-labels-legacy-parity-20260816.v2",
+  "classification_rule_policy_sha256": "51cfae25ff39238bbb48ee7143fda675dcb22a2be369b3c558970759799f89ee",
+  "legacy_review_source_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+  "bindings": {
+    "cmd-rule-009-t1049-system-network-connections-discovery": {
+      "evidence_type": "command_regex",
+      "technique": "T1049",
+      "tactic": "discovery",
+      "current_pattern": "\\bnetstat\\b",
+      "current_pattern_sha256": "67a8a02d731695defcf68e026018c3dbc2181b75b7e8d2c999ebefdd71bb734c",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "netstat"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-010-t1057-process-discovery": {
+      "evidence_type": "command_regex",
+      "technique": "T1057",
+      "tactic": "discovery",
+      "current_pattern": "\\bps\\s+(aux|ef|-e)\\b",
+      "current_pattern_sha256": "fbe83464f52758ccffb4657c401e428eb40ed7e6757633cf238f43e11c16c9e2",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "ps"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-012-t1083-file-and-directory-discovery": {
+      "evidence_type": "command_regex",
+      "technique": "T1083",
+      "tactic": "discovery",
+      "current_pattern": "\\bls\\s+-la?\\b|\\bdir\\b",
+      "current_pattern_sha256": "b28711ea0b55b44ca0c7016e9474cfee2c40a3188c40ea9345c71518e317faf7",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "dir",
+        "ls"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-013-t1083-file-and-directory-discovery": {
+      "evidence_type": "command_regex",
+      "technique": "T1083",
+      "tactic": "discovery",
+      "current_pattern": "\\bfind\\s+/.*-name\\b",
+      "current_pattern_sha256": "f78dcb55c8ae4be8d2a3f56635c87875a1cc08831ddb5065c93a14f7a42317ef",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "find"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-021-t1136-create-account": {
+      "evidence_type": "command_regex",
+      "technique": "T1136",
+      "tactic": "persistence",
+      "current_pattern": "\\buseradd\\b|\\badduser\\b",
+      "current_pattern_sha256": "7e40276a56febd69b29774de44333bd100c6a4e7a2f9636e28131bab5d06962f",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "adduser",
+        "useradd"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-024-t1548-abuse-elevation-control-mechanism": {
+      "evidence_type": "command_regex",
+      "technique": "T1548",
+      "tactic": "privilege-escalation",
+      "current_pattern": "\\bsudo\\s+(su|-i|bash)\\b",
+      "current_pattern_sha256": "45ddb90bcbf6eaab4f22eada347b03c80ed21551fa67feae31aeaaacc89d3fb6",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "sudo"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-030-t1070-indicator-removal": {
+      "evidence_type": "command_regex",
+      "technique": "T1070",
+      "tactic": "defense-evasion",
+      "current_pattern": "\\bhistory\\s+-c\\b|\\brm\\b.*bash_history",
+      "current_pattern_sha256": "fd76437d8a7a329d8584a0cca4d6e9d770d345192cfe2fdbb5b623440389c88a",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "history",
+        "rm"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-034-t1059-command-and-scripting-interpreter": {
+      "evidence_type": "command_regex",
+      "technique": "T1059",
+      "tactic": "execution",
+      "current_pattern": "\\b(bash|sh)\\b.*-c\\b",
+      "current_pattern_sha256": "19bbdd6ab1cb3b005690368ad6393ddd981e070bc76de64389402edebc581308",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "bash",
+        "sh"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-046-t1105-ingress-tool-transfer": {
+      "evidence_type": "command_regex",
+      "technique": "T1105",
+      "tactic": "command-and-control",
+      "current_pattern": "\\b(curl|wget)\\b.*http",
+      "current_pattern_sha256": "0a3e64327e5c311971935d2ffc578491a636ad5ebe96422aee1095d918b1b020",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "curl",
+        "wget"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-089-t1222-file-permissions-modification-chmod": {
+      "evidence_type": "command_regex",
+      "technique": "T1222",
+      "tactic": "defense-evasion",
+      "current_pattern": "\\bchmod\\b\\s+(?:[ugoa]*\\+x|[0-7]{3,4})\\b\\s+\\S+",
+      "current_pattern_sha256": "00c1534180c2dc50d13041132b59a7bf5eb81232f15a428fb31ca299b545b64b",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "chmod"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-091-t1082-system-information-discovery-runtime-hardware": {
+      "evidence_type": "command_regex",
+      "technique": "T1082",
+      "tactic": "discovery",
+      "current_pattern": "\\b(lscpu|nproc|uptime)\\b|\\bcat\\b\\s+/proc/(cpuinfo|meminfo)\\b",
+      "current_pattern_sha256": "43c04faa5dad6db5c84858a3a80aefc72ef2394dc11e0df72fd4a16c85136db2",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "cat",
+        "lscpu",
+        "nproc",
+        "uptime"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-092-t1083-file-and-directory-discovery-basic-linux": {
+      "evidence_type": "command_regex",
+      "technique": "T1083",
+      "tactic": "discovery",
+      "current_pattern": "(^|[;&|]\\s*)(pwd|ls)(\\s|$)|(^|[;&|]\\s*)(find|locate|du)\\b",
+      "current_pattern_sha256": "8e41de86db1d14a73699e76a84779765e80595ffaf3577f2eb2dd650da3e8575",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "du",
+        "find",
+        "locate",
+        "ls",
+        "pwd"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-097-t1059-command-and-scripting-interpreter-explicit-execution": {
+      "evidence_type": "command_regex",
+      "technique": "T1059",
+      "tactic": "execution",
+      "current_pattern": "(^|[;&|]\\s*)(?:sh|bash|dash|zsh|ksh)\\s+\\S+|(^|[;&|]\\s*)\\./[^\\s;&|]+|(^|[;&|]\\s*)/(?:tmp|var/tmp|dev/shm)/[^\\s;&|]+|\\b(?:python3?|perl|php|ruby|lua|node)\\b\\s+\\S+\\.(?:py|pl|php|rb|lua|js)\\b|\\b(nohup|setsid)\\b\\s+\\S+",
+      "current_pattern_sha256": "39c12a3328ac7025e4b2907f1dd3982c8c4421a83e7f6730e49703212ae3a024",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "bash",
+        "dash",
+        "ksh",
+        "lua",
+        "node",
+        "nohup",
+        "perl",
+        "php",
+        "python",
+        "python2",
+        "python3",
+        "ruby",
+        "setsid",
+        "sh",
+        "zsh"
+      ],
+      "allows_literal_path_executable": true,
+      "historically_reviewed": true
+    },
+    "cmd-rule-098-t1070-indicator-removal-history-and-logs": {
+      "evidence_type": "command_regex",
+      "technique": "T1070",
+      "tactic": "defense-evasion",
+      "current_pattern": "\\b(history\\s+-c|unset\\s+HISTFILE|rm\\b.*(\\.bash_history|/var/log)|truncate\\b.*(/var/log|\\.bash_history)|shred\\b.*(/var/log|\\.bash_history))",
+      "current_pattern_sha256": "1255c720d764522d236ca12f63b469ae02b9535b9857192c2122f3ded50e463f",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "history",
+        "rm",
+        "shred",
+        "truncate",
+        "unset"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-109-t1082-linux-system-files": {
+      "evidence_type": "command_regex",
+      "technique": "T1082",
+      "tactic": "discovery",
+      "current_pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*(?:/proc/cpuinfo|/etc/(?:[^/\\s]*release|issue))\\b",
+      "current_pattern_sha256": "8c462dea5b0fcca74a40b701cb7cf461e90cce224917f20e8e81afd2da97f08b",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "awk",
+        "cat",
+        "grep",
+        "head",
+        "less",
+        "more",
+        "sed",
+        "tail"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    },
+    "cmd-rule-112-t1082-filesystem-capacity-discovery": {
+      "evidence_type": "command_regex",
+      "technique": "T1082",
+      "tactic": "discovery",
+      "current_pattern": "(^|[;&|]\\s*)df(?:\\s|$)",
+      "current_pattern_sha256": "b195ce4f0b7251ecf88f8fec8ee200214402f8272d20556dd51018cd2cd32077",
+      "predicate_id": "effective_executable_current_regex.v1",
+      "effective_executables": [
+        "df"
+      ],
+      "allows_literal_path_executable": false,
+      "historically_reviewed": true
+    }
+  }
+}
+

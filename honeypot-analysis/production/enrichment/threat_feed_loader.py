@@ -12,7 +12,7 @@ Feeds included:
   2. Sigma Rules (SigmaHQ community detection rules)
      - Source: https://github.com/SigmaHQ/sigma (rules/linux/*, rules/network/*)
      - Updates: continuous community contributions
-     - Use: replace/supplement hardcoded keyword lists in configs/threat_intel_config.json
+     - Use: provide contextual CISA/Sigma evidence without changing canonical findings
 
 Both feeds are cached locally and auto-refreshed on schedule.
 
@@ -33,11 +33,22 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import datetime
+import concurrent.futures
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-# â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if __package__ in {None, ""}:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from production.utils.sensitive_data import redact_exception_for_log
+from production.enrichment.cache_io import (
+    atomic_write_cache,
+    feed_refresh_lock,
+    load_cache_json,
+)
+
 CISA_KEV_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 )
@@ -57,6 +68,10 @@ SIGMA_CACHE_FILENAME = "sigma_rules_cache.json"
 CISA_MAX_AGE_DAYS    = 1    # KEV updates daily â€” refresh often
 SIGMA_MAX_AGE_DAYS   = 7    # Sigma rules: weekly refresh sufficient
 CACHE_SCHEMA_VERSION = "1"
+FEED_INDEX_MAX_BYTES = 16 * 1024 * 1024
+FEED_DOCUMENT_MAX_BYTES = 16 * 1024 * 1024
+SIGMA_RULE_MAX_BYTES = 1024 * 1024
+SIGMA_DOWNLOAD_WORKERS = 8
 
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 _COLAB_BASE  = "/content"
@@ -79,10 +94,7 @@ def _is_fresh(path: str, max_age_days: int) -> bool:
     if not os.path.exists(path):
         return False
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("_schema") != CACHE_SCHEMA_VERSION:
-            return False
+        data = load_cache_json(path, CACHE_SCHEMA_VERSION)
         fetched = datetime.datetime.fromisoformat(
             data.get("_fetched", "2000-01-01T00:00:00+00:00")
         )
@@ -93,20 +105,34 @@ def _is_fresh(path: str, max_age_days: int) -> bool:
 
 def _save_cache(path: str, data: dict) -> None:
     try:
-        data["_schema"]  = CACHE_SCHEMA_VERSION
-        data["_fetched"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        cache_data = dict(data)
+        cache_data["_schema"] = CACHE_SCHEMA_VERSION
+        cache_data["_fetched"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        atomic_write_cache(path, cache_data)
         size_kb = os.path.getsize(path) // 1024
         print(f"  [FeedLoader] Cache saved: {os.path.basename(path)} ({size_kb}KB)")
     except Exception as e:
-        print(f"  [FeedLoader] Cache save failed (non-fatal): {e}")
+        print(f"  [FeedLoader] Cache save failed (non-fatal): {redact_exception_for_log(e)}")
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+def _bounded_response_bytes(response: object, max_bytes: int) -> bytes:
+    headers = getattr(response, "headers", {}) or {}
+    content_length = headers.get("Content-Length")
+    if content_length and int(content_length) > max_bytes:
+        raise ValueError("feed response exceeds configured limit")
+    chunks: List[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=64 * 1024):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError("feed response exceeds configured limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 # Part 1: CISA Known Exploited Vulnerabilities (KEV)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @dataclass
 class KEVEntry:
@@ -164,9 +190,9 @@ def _fetch_cisa_kev() -> Optional[CisaKevDB]:
     try:
         import requests
         print("  [CISA KEV] Downloading from CISA...")
-        resp = requests.get(CISA_KEV_URL, timeout=30)
+        resp = requests.get(CISA_KEV_URL, timeout=30, stream=True)
         resp.raise_for_status()
-        data = resp.json()
+        data = json.loads(_bounded_response_bytes(resp, FEED_DOCUMENT_MAX_BYTES))
 
         entries: Dict[str, KEVEntry] = {}
         for vuln in data.get("vulnerabilities", []):
@@ -193,14 +219,13 @@ def _fetch_cisa_kev() -> Optional[CisaKevDB]:
         print("  [CISA KEV] requests not available")
         return None
     except Exception as e:
-        print(f"  [CISA KEV] Download failed: {type(e).__name__}: {e}")
+        print(f"  [CISA KEV] Download failed: {redact_exception_for_log(e)}")
         return None
 
 
 def _load_cisa_cache(path: str, label: str = "cache") -> Optional[CisaKevDB]:
     try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
+        raw = load_cache_json(path, CACHE_SCHEMA_VERSION)
         entries = {}
         for cve, v in raw.get("entries", {}).items():
             entries[cve] = KEVEntry(
@@ -217,11 +242,15 @@ def _load_cisa_cache(path: str, label: str = "cache") -> Optional[CisaKevDB]:
         print(f"  [CISA KEV] Loaded {db.count} CVEs from {label}")
         return db
     except Exception as e:
-        print(f"  [CISA KEV] Cache load failed: {e}")
+        print(f"  [CISA KEV] Cache load failed: {redact_exception_for_log(e)}")
         return None
 
 
-def load_cisa_kev(force_refresh: bool = False, cache_path: Optional[str] = None) -> CisaKevDB:
+def load_cisa_kev(
+    force_refresh: bool = False,
+    cache_path: Optional[str] = None,
+    allow_network_refresh: bool = True,
+) -> CisaKevDB:
     """Load CISA KEV catalog with daily auto-refresh."""
     path = cache_path or _cache_path(CISA_CACHE_FILENAME)
 
@@ -230,18 +259,33 @@ def load_cisa_kev(force_refresh: bool = False, cache_path: Optional[str] = None)
         if db:
             return db
 
+    if not allow_network_refresh:
+        if os.path.exists(path):
+            db = _load_cisa_cache(path, label="stale cache")
+            if db:
+                return db
+        return CisaKevDB({}, catalog_version="unavailable")
 
-    db = _fetch_cisa_kev()
-    if db:
-        cache_data = {
-            "catalog_version": db.catalog_version,
-            "entries": {
-                cve: entry.to_dict()
-                for cve, entry in db._entries.items()
-            },
-        }
-        _save_cache(path, cache_data)
-        return db
+
+    try:
+        with feed_refresh_lock(path):
+            if not force_refresh and _is_fresh(path, CISA_MAX_AGE_DAYS):
+                db = _load_cisa_cache(path)
+                if db:
+                    return db
+            db = _fetch_cisa_kev()
+            if db:
+                cache_data = {
+                    "catalog_version": db.catalog_version,
+                    "entries": {
+                        cve: entry.to_dict()
+                        for cve, entry in db._entries.items()
+                    },
+                }
+                _save_cache(path, cache_data)
+                return db
+    except TimeoutError:
+        print("  [CISA KEV] Refresh already in progress; using available cache")
 
     if os.path.exists(path):
         db = _load_cisa_cache(path, label="stale cache")
@@ -254,9 +298,7 @@ def load_cisa_kev(force_refresh: bool = False, cache_path: Optional[str] = None)
     return CisaKevDB({}, catalog_version="unavailable")
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # Part 2: Sigma Rules (SigmaHQ community detection keywords)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @dataclass
 class SigmaRule:
@@ -420,13 +462,13 @@ def _fetch_sigma_rules() -> Optional[SigmaRuleDB]:
 
         print("  [Sigma] Fetching rule index from SigmaHQ GitHub...")
         # Get tree of all files
-        resp = requests.get(SIGMA_RULES_INDEX_URL, timeout=30)
+        resp = requests.get(SIGMA_RULES_INDEX_URL, timeout=30, stream=True)
         if resp.status_code == 403:
             # Rate limited â€” use alternative approach
             print("  [Sigma] GitHub API rate limited â€” using direct file list")
             return _fetch_sigma_rules_direct(requests)
         resp.raise_for_status()
-        tree = resp.json().get("tree", [])
+        tree = json.loads(_bounded_response_bytes(resp, FEED_INDEX_MAX_BYTES)).get("tree", [])
 
         # Filter to relevant paths only
         relevant_files = [
@@ -437,18 +479,26 @@ def _fetch_sigma_rules() -> Optional[SigmaRuleDB]:
         ]
 
         print(f"  [Sigma] Found {len(relevant_files)} relevant rule files â€” downloading...")
-        rules: List[SigmaRule] = []
-
         base_url = "https://raw.githubusercontent.com/SigmaHQ/sigma/master/"
-        for item in relevant_files[:200]:  # cap at 200 to avoid rate limits
+
+        def fetch_rule(item: dict) -> Optional[SigmaRule]:
             try:
-                r = requests.get(base_url + item["path"], timeout=10)
+                r = requests.get(base_url + item["path"], timeout=10, stream=True)
                 if r.status_code == 200:
-                    rule = _parse_sigma_yaml_minimal(r.text, item["path"])
-                    if rule:
-                        rules.append(rule)
+                    text = _bounded_response_bytes(r, SIGMA_RULE_MAX_BYTES).decode(
+                        "utf-8", errors="replace"
+                    )
+                    return _parse_sigma_yaml_minimal(text, item["path"])
             except Exception:
-                continue
+                return None
+            return None
+
+        selected_files = relevant_files[:200]
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(SIGMA_DOWNLOAD_WORKERS, max(len(selected_files), 1)),
+            thread_name_prefix="sigma-feed",
+        ) as executor:
+            rules = [rule for rule in executor.map(fetch_rule, selected_files) if rule]
 
         db = SigmaRuleDB(rules)
         print(f"  [Sigma] {db.count} rules loaded")
@@ -458,7 +508,7 @@ def _fetch_sigma_rules() -> Optional[SigmaRuleDB]:
         print("  [Sigma] requests not available")
         return None
     except Exception as e:
-        print(f"  [Sigma] Download failed: {type(e).__name__}: {e}")
+        print(f"  [Sigma] Download failed: {redact_exception_for_log(e)}")
         return None
 
 
@@ -475,9 +525,12 @@ def _fetch_sigma_rules_direct(requests_module) -> Optional[SigmaRuleDB]:
     rules: List[SigmaRule] = []
     for path in CURATED_RULES:
         try:
-            r = requests_module.get(base_url + path, timeout=10)
+            r = requests_module.get(base_url + path, timeout=10, stream=True)
             if r.status_code == 200:
-                rule = _parse_sigma_yaml_minimal(r.text, path)
+                text = _bounded_response_bytes(r, SIGMA_RULE_MAX_BYTES).decode(
+                    "utf-8", errors="replace"
+                )
+                rule = _parse_sigma_yaml_minimal(text, path)
                 if rule:
                     rules.append(rule)
         except Exception:
@@ -489,8 +542,7 @@ def _fetch_sigma_rules_direct(requests_module) -> Optional[SigmaRuleDB]:
 
 def _load_sigma_cache(path: str, label: str = "cache") -> Optional[SigmaRuleDB]:
     try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
+        raw = load_cache_json(path, CACHE_SCHEMA_VERSION)
         rules = [
             SigmaRule(
                 rule_id=rule_id,
@@ -507,11 +559,15 @@ def _load_sigma_cache(path: str, label: str = "cache") -> Optional[SigmaRuleDB]:
         print(f"  [Sigma] Loaded {db.count} rules from {label}")
         return db
     except Exception as e:
-        print(f"  [Sigma] Cache load failed: {e}")
+        print(f"  [Sigma] Cache load failed: {redact_exception_for_log(e)}")
         return None
 
 
-def load_sigma_rules(force_refresh: bool = False, cache_path: Optional[str] = None) -> SigmaRuleDB:
+def load_sigma_rules(
+    force_refresh: bool = False,
+    cache_path: Optional[str] = None,
+    allow_network_refresh: bool = True,
+) -> SigmaRuleDB:
     """Load Sigma rules with weekly auto-refresh."""
     path = cache_path or _cache_path(SIGMA_CACHE_FILENAME)
 
@@ -520,16 +576,31 @@ def load_sigma_rules(force_refresh: bool = False, cache_path: Optional[str] = No
         if db:
             return db
 
-    db = _fetch_sigma_rules()
-    if db and db.count > 0:
-        cache_data = {
-            "rules": {
-                r.rule_id: r.to_dict()
-                for r in db._rules
-            }
-        }
-        _save_cache(path, cache_data)
-        return db
+    if not allow_network_refresh:
+        if os.path.exists(path):
+            db = _load_sigma_cache(path, label="stale cache")
+            if db:
+                return db
+        return SigmaRuleDB([])
+
+    try:
+        with feed_refresh_lock(path):
+            if not force_refresh and _is_fresh(path, SIGMA_MAX_AGE_DAYS):
+                db = _load_sigma_cache(path)
+                if db:
+                    return db
+            db = _fetch_sigma_rules()
+            if db and db.count > 0:
+                cache_data = {
+                    "rules": {
+                        r.rule_id: r.to_dict()
+                        for r in db._rules
+                    }
+                }
+                _save_cache(path, cache_data)
+                return db
+    except TimeoutError:
+        print("  [Sigma] Refresh already in progress; using available cache")
 
     if os.path.exists(path):
         db = _load_sigma_cache(path, label="stale cache")
@@ -541,9 +612,7 @@ def load_sigma_rules(force_refresh: bool = False, cache_path: Optional[str] = No
     return SigmaRuleDB([])
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # Part 3: Combined ThreatFeedDB facade
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class ThreatFeedDB:
     """
@@ -555,7 +624,6 @@ class ThreatFeedDB:
         self.kev   = kev
         self.sigma = sigma
 
-    # â”€â”€ KEV pass-throughs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def is_actively_exploited(self, cve_id: str) -> bool:
         return self.kev.is_actively_exploited(cve_id)
@@ -572,7 +640,6 @@ class ThreatFeedDB:
                 matches.append({"cve_id": cve, **details})
         return matches
 
-    # â”€â”€ Sigma pass-throughs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def get_bruteforce_keywords(self) -> List[str]:
         return self.sigma.get_ssh_bruteforce_keywords()
@@ -584,7 +651,6 @@ class ThreatFeedDB:
         return f"<ThreatFeedDB kev={self.kev} sigma={self.sigma}>"
 
 
-# â”€â”€ Module-level singletons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _GLOBAL_FEEDS: Optional[ThreatFeedDB] = None
 
 
@@ -592,6 +658,7 @@ def load_threat_feeds(
     force_refresh: bool = False,
     cisa_cache_path: Optional[str] = None,
     sigma_cache_path: Optional[str] = None,
+    allow_network_refresh: bool = True,
 ) -> ThreatFeedDB:
     """
     Load all threat feeds. Uses singletons per session.
@@ -604,11 +671,21 @@ def load_threat_feeds(
         return _GLOBAL_FEEDS
 
     print("  [ThreatFeeds] Initializing external threat intelligence feeds...")
-    kev   = load_cisa_kev(force_refresh=force_refresh, cache_path=cisa_cache_path)
-    sigma = load_sigma_rules(force_refresh=force_refresh, cache_path=sigma_cache_path)
-    _GLOBAL_FEEDS = ThreatFeedDB(kev, sigma)
-    print(f"  [ThreatFeeds] Ready: {_GLOBAL_FEEDS}")
-    return _GLOBAL_FEEDS
+    kev = load_cisa_kev(
+        force_refresh=force_refresh,
+        cache_path=cisa_cache_path,
+        allow_network_refresh=allow_network_refresh,
+    )
+    sigma = load_sigma_rules(
+        force_refresh=force_refresh,
+        cache_path=sigma_cache_path,
+        allow_network_refresh=allow_network_refresh,
+    )
+    feeds = ThreatFeedDB(kev, sigma)
+    if not cisa_cache_path and not sigma_cache_path:
+        _GLOBAL_FEEDS = feeds
+    print(f"  [ThreatFeeds] Ready: {feeds}")
+    return feeds
 
 
 def check_feeds_status() -> dict:
@@ -630,13 +707,11 @@ def check_feeds_status() -> dict:
     now = datetime.datetime.now(datetime.timezone.utc)
     result = {}
 
-    # â”€â”€ CISA KEV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kev_path = _cache_path(CISA_CACHE_FILENAME)
     kev_info: dict = {"status": "missing", "age_hours": None, "entries": 0}
     if os.path.exists(kev_path):
         try:
-            with open(kev_path, encoding="utf-8") as f:
-                raw = json.load(f)
+            raw = load_cache_json(kev_path, CACHE_SCHEMA_VERSION)
             fetched = datetime.datetime.fromisoformat(
                 raw.get("_fetched", "2000-01-01T00:00:00+00:00")
             )
@@ -648,16 +723,14 @@ def check_feeds_status() -> dict:
                 "catalog": raw.get("catalog_version", "unknown"),
             }
         except Exception as e:
-            kev_info = {"status": "corrupt", "error": str(e)}
+            kev_info = {"status": "corrupt", "error": redact_exception_for_log(e)}
     result["cisa_kev"] = kev_info
 
-    # â”€â”€ Sigma Rules â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     sigma_path = _cache_path(SIGMA_CACHE_FILENAME)
     sigma_info: dict = {"status": "missing", "age_days": None, "rules": 0}
     if os.path.exists(sigma_path):
         try:
-            with open(sigma_path, encoding="utf-8") as f:
-                raw = json.load(f)
+            raw = load_cache_json(sigma_path, CACHE_SCHEMA_VERSION)
             fetched = datetime.datetime.fromisoformat(
                 raw.get("_fetched", "2000-01-01T00:00:00+00:00")
             )
@@ -668,17 +741,15 @@ def check_feeds_status() -> dict:
                 "rules":  len(raw.get("rules", {})),
             }
         except Exception as e:
-            sigma_info = {"status": "corrupt", "error": str(e)}
+            sigma_info = {"status": "corrupt", "error": redact_exception_for_log(e)}
     result["sigma"] = sigma_info
 
-    # â”€â”€ MITRE ATT&CK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from production.enrichment.mitre_attack_loader import _cache_path as _mitre_cache_path, CACHE_FILENAME as _MITRE_CACHE_FILE
         mitre_path = _mitre_cache_path()
         mitre_info: dict = {"status": "missing", "age_days": None, "techniques": 0}
         if os.path.exists(mitre_path):
-            with open(mitre_path, encoding="utf-8") as f:
-                raw = json.load(f)
+            raw = load_cache_json(mitre_path, "2")
             fetched_str = raw.get("_fetched", "2000-01-01T00:00:00+00:00")
             fetched = datetime.datetime.fromisoformat(fetched_str)
             age_d = (now - fetched).total_seconds() / 86400
@@ -691,9 +762,11 @@ def check_feeds_status() -> dict:
             }
         result["mitre"] = mitre_info
     except Exception as _e:
-        result["mitre"] = {"status": "unavailable", "error": str(_e)}
+        result["mitre"] = {
+            "status": "unavailable",
+            "error": redact_exception_for_log(_e),
+        }
 
-    # â”€â”€ Summary line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kev_s   = f"KEV: {kev_info.get('entries', 0)} CVEs [{kev_info['status']}]"
     sigma_s = f"Sigma: {sigma_info.get('rules', 0)} rules [{sigma_info['status']}]"
     mitre_s = f"MITRE: {result['mitre'].get('techniques', 0)} techniques [{result['mitre']['status']}]"
@@ -793,7 +866,6 @@ def scan_history_for_new_kev(
     return hits
 
 
-# â”€â”€ CLI test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":
     import sys
     force = "--refresh" in sys.argv
@@ -816,4 +888,3 @@ if __name__ == "__main__":
     kws = feeds.get_bruteforce_keywords()
     print(f"  Total keywords: {len(kws)}")
     print(f"  Sample: {kws[:10]}")
-

@@ -1,0 +1,78 @@
+{
+  "schema_version": "final_f_phase4_contract_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "phase": 4,
+  "completed_at": "2026-08-19T09:14:28Z",
+  "implementation_commit": "5e689850efe54a41ed368afd020328dba6ae9096",
+  "implementation_tree": "bfc244335be054fdd426dfa89672d87396566e72",
+  "freeze_commit": "366259495c5707d2f2108a6a86a34cc3b177630c",
+  "freeze_tree": "8c8ba8b136b6376dd384b3e766614590fde6da92",
+  "phase_0_receipt_sha256": "54049763d13173f7e4cedb184b8ebd2f2c98fd7dd8325fcb05aea3a721efe194",
+  "phase_1_receipt_sha256": "72c204068519aa91dc4171bafdd811cde215ddbe3e6a7d16661b05952c50efb2",
+  "phase_2_receipt_sha256": "a4416c6d762f355af496d2d7b5e0b3630e0acebac8753d2ee7e9ae0daf574805",
+  "phase_3_receipt_sha256": "0fd4cbac8cc2e417c36c701aa9694bd97f4165d0b5eed686928a1c26eb315531",
+  "phase_3_compatibility_remediation": {
+    "status": "COMPLETE_VALID",
+    "commit": "17def2859e103b6dc8846aa2864ab05d6471b9a9",
+    "tree": "9686e91eedd62036570f3532d17c2100cd35cde7",
+    "proven_incompatibility": "canonical incomplete chain status was not projectable",
+    "smallest_correction": "map canonical incomplete to frozen projection partial",
+    "canonical_graph_changed": false,
+    "authority_changed": false,
+    "phase_3_complete_chain_known_answer_changed": false
+  },
+  "contracts": {
+    "provider_output": "ai_provider_output.v2",
+    "synthesis": "ai_advisory_synthesis_selection.v2",
+    "validated_output": "ai_advisory_validated_output.v2",
+    "policy": "ai_advisory_policy.v2",
+    "policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+    "provider_output_schema_sha256": "f181765e38a65de53bf1870c6d0b217dae9c508f66121164fbe5eb0017375a4c",
+    "selection_authority": "existing_projected_objects_only",
+    "free_form_factual_content": "prohibited",
+    "shadow_candidates": "absent_from_v2_contract",
+    "actions": "existing_manual_only_actions_only",
+    "provider_abstention": "empty_selection_with_allowlisted_reason",
+    "deterministic_abstention": "local_no_call_empty_selection_with_allowlisted_reason",
+    "validated_output_binding": "complete_content_sha256"
+  },
+  "known_answer": {
+    "path": "honeypot-analysis/evaluation/final_f_phase4_contract_known_answer.v2.json",
+    "file_sha256": "1ea502693f9d15f0a51a3547ebb247334769ee3202483f19a7389d52e5356e81",
+    "projection_sha256": "84ac6149c57e2518a0c82821bbfbe83e91de50089b1c3755bb1c07ddd6f59b02",
+    "validated_output_sha256": "5c5a9790e0618a2a742c4e6c34352969fc6da2b24e7f350aaf4a78742d0afc33",
+    "deterministic_rebuild": "PASS",
+    "grounding_validation": "PASS",
+    "shadow_candidate_absence": "PASS"
+  },
+  "files": [
+    {"path": "honeypot-analysis/configs/ai_advisory_policy.v2.json", "sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115"},
+    {"path": "honeypot-analysis/production/ai_advisory/contracts_v2.py", "sha256": "9256483c7ce6d81776f40eeec4ecec8eb454fdac33bee16c99caa12d0ea35fe6"},
+    {"path": "honeypot-analysis/production/policies/validate_ai_advisory_policy_v2.py", "sha256": "d1389a7d2457dab6217c0360b930040932f37ef0d174c9c48b9bb5e5044e8451"},
+    {"path": "honeypot-analysis/tests/test_final_f_phase4_contract_v2.py", "sha256": "d8770fe6b3999cd969b009580ab9ed96027e18ba66ea131dc6eb6005909425ca"},
+    {"path": "honeypot-analysis/evaluation/final_f_phase4_contract_known_answer.v2.json", "sha256": "1ea502693f9d15f0a51a3547ebb247334769ee3202483f19a7389d52e5356e81"}
+  ],
+  "validation": {
+    "phase_4_focused_and_compatibility_suite": "102 passed",
+    "phase_3_phase_4_projection_contract_suite": "33 passed",
+    "ai_advisory_policy_v2_validator": "PASS",
+    "phase_0_contract_validator": "PASS",
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "pip_check": "PASS"
+  },
+  "compatibility": {
+    "historical_v1_contracts": "unchanged_original_module_and_tests",
+    "historical_shadow_candidates": "readable_v1_only",
+    "provider_network_code_changed": false,
+    "worker_or_runtime_changed": false,
+    "storage_changed": false,
+    "api_or_ui_changed": false,
+    "canonical_analysis_changed": false,
+    "guidance_semantics_changed": false,
+    "transformer_changed": false
+  },
+  "production_deployed": false,
+  "external_provider_called": false,
+  "receipt_sha256": "1aa16bfbcf09faa4e177f08b3ba7d6023b749536a918a9622475c458c0dd6960"
+}

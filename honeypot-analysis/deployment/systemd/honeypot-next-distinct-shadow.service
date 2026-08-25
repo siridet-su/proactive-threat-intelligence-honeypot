@@ -1,0 +1,39 @@
+[Unit]
+Description=Honeypot Final F prediction-only localhost shadow POC
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot-shadow/prediction-next-distinct/shadow-20260823T143527Z
+Environment=PYTHONPATH=/opt/honeypot-shadow/runtimes/shadow-20260823T143527Z/site-packages
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONHOME=/opt/honeypot-shadow/runtimes/shadow-20260823T143527Z/python
+Environment=LD_LIBRARY_PATH=/opt/honeypot-shadow/runtimes/shadow-20260823T143527Z/python/lib
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPYCACHEPREFIX=/opt/honeypot-shadow/runtimes/shadow-20260823T143527Z/pycache
+ExecStart=/opt/honeypot-shadow/runtimes/shadow-20260823T143527Z/python/bin/python3.12 /opt/honeypot-shadow/prediction-next-distinct/shadow-20260823T143527Z/shadow_service.py --bundle /opt/honeypot-shadow/prediction-next-distinct/shadow-20260823T143527Z/bundle --bind 127.0.0.1 --port 18082
+Restart=no
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+InaccessiblePaths=/var/lib/honeypot /opt/honeypot /opt/honeypot-releases /opt/honeypot-model-bundles /etc/honeypot
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+UMask=0077
+ReadOnlyPaths=/opt/honeypot-shadow/prediction-next-distinct/shadow-20260823T143527Z /opt/honeypot-shadow/runtimes/shadow-20260823T143527Z
+ReadWritePaths=/opt/honeypot-shadow/prediction-next-distinct/shadow-20260823T143527Z/logs
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

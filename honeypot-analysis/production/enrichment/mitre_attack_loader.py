@@ -24,10 +24,21 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from production.utils.sensitive_data import redact_exception_for_log
+from production.enrichment.cache_io import (
+    atomic_write_cache,
+    feed_refresh_lock,
+    load_cache_json,
+)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 MITRE_STIX_URL = (
@@ -37,6 +48,7 @@ MITRE_STIX_URL = (
 CACHE_FILENAME      = "mitre_attack_cache.json"
 CACHE_MAX_AGE_DAYS  = 30   # industry standard: refresh monthly with ATT&CK quarterly updates
 CACHE_SCHEMA_VERSION = "2"  # bump to force refresh when cache format changes
+MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 
 # Colab uploads to /content/; local files stay beside this script
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -295,11 +307,7 @@ def _cache_is_fresh(path: str) -> bool:
     if not os.path.exists(path):
         return False
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("_schema") != CACHE_SCHEMA_VERSION:
-            print("  [MITRE] Cache schema outdated — refreshing")
-            return False
+        data = load_cache_json(path, CACHE_SCHEMA_VERSION)
         fetched_str = data.get("_fetched", "")
         if not fetched_str:
             return False
@@ -318,8 +326,7 @@ def _cache_is_fresh(path: str) -> bool:
 
 def _load_from_cache(path: str) -> Optional[MitreAttackDB]:
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_cache_json(path, CACHE_SCHEMA_VERSION)
         db = MitreAttackDB.from_cache_dict(data)
         raw_fetched = data.get("_fetched", "2000-01-01T00:00:00+00:00")
         fetched = datetime.datetime.fromisoformat(raw_fetched.rstrip("Z"))
@@ -330,19 +337,17 @@ def _load_from_cache(path: str) -> Optional[MitreAttackDB]:
               f"(version={db.version}, age={age_days}d)")
         return db
     except Exception as e:
-        print(f"  [MITRE] Cache load failed: {e}")
+        print(f"  [MITRE] Cache load failed: {redact_exception_for_log(e)}")
         return None
 
 
 def _save_to_cache(db: MitreAttackDB, path: str) -> None:
     try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(db.to_cache_dict(), f, ensure_ascii=False, separators=(",", ":"))
+        atomic_write_cache(path, db.to_cache_dict())
         size_kb = os.path.getsize(path) // 1024
         print(f"  [MITRE] Cache saved to {path} ({size_kb}KB)")
     except Exception as e:
-        print(f"  [MITRE] Cache save failed (non-fatal): {e}")
+        print(f"  [MITRE] Cache save failed (non-fatal): {redact_exception_for_log(e)}")
 
 
 def _fetch_from_mitre(url: str = MITRE_STIX_URL,
@@ -354,6 +359,9 @@ def _fetch_from_mitre(url: str = MITRE_STIX_URL,
         print(f"          (This happens once every {CACHE_MAX_AGE_DAYS} days)")
         resp = requests.get(url, timeout=timeout, stream=True)
         resp.raise_for_status()
+        content_length = resp.headers.get("Content-Length")
+        if content_length and int(content_length) > MAX_DOWNLOAD_BYTES:
+            raise ValueError("MITRE feed response exceeds configured limit")
 
         # Read with progress hint
         chunks = []
@@ -361,6 +369,8 @@ def _fetch_from_mitre(url: str = MITRE_STIX_URL,
         for chunk in resp.iter_content(chunk_size=1024 * 256):  # 256KB chunks
             chunks.append(chunk)
             total += len(chunk)
+            if total > MAX_DOWNLOAD_BYTES:
+                raise ValueError("MITRE feed response exceeds configured limit")
         raw = b"".join(chunks)
         print(f"  [MITRE] Downloaded {total // 1024 // 1024}MB — parsing...")
 
@@ -373,19 +383,21 @@ def _fetch_from_mitre(url: str = MITRE_STIX_URL,
         print("  [MITRE] requests not available — cannot download ATT&CK data")
         return None
     except Exception as e:
-        print(f"  [MITRE] Download failed: {type(e).__name__}: {e}")
+        print(f"  [MITRE] Download failed: {redact_exception_for_log(e)}")
         return None
 
 
 # ── Public Entry Point ─────────────────────────────────────────────────────────
 
 _GLOBAL_DB: Optional[MitreAttackDB] = None   # module-level singleton
+_GLOBAL_DB_PATH: Optional[str] = None
 
 
 def load_mitre_attack_db(
     cache_path: str = None,
     force_refresh: bool = False,
     silent: bool = False,
+    allow_network_refresh: bool = True,
 ) -> MitreAttackDB:
     """
     Load MITRE ATT&CK Enterprise database.
@@ -401,13 +413,18 @@ def load_mitre_attack_db(
         force_refresh:  Ignore cache and re-download. Useful after ATT&CK releases.
         silent:         Suppress progress messages.
     """
-    global _GLOBAL_DB
-
-    # Singleton — reuse within same Python session
-    if _GLOBAL_DB is not None and not force_refresh:
-        return _GLOBAL_DB
+    global _GLOBAL_DB, _GLOBAL_DB_PATH
 
     path = cache_path or _cache_path()
+    cache_identity = os.path.abspath(path)
+
+    # Singleton — reuse within same Python session
+    if (
+        _GLOBAL_DB is not None
+        and _GLOBAL_DB_PATH == cache_identity
+        and not force_refresh
+    ):
+        return _GLOBAL_DB
 
     if not silent:
         print(f"  [MITRE] Initializing ATT&CK database...")
@@ -417,14 +434,39 @@ def load_mitre_attack_db(
         db = _load_from_cache(path)
         if db:
             _GLOBAL_DB = db
+            _GLOBAL_DB_PATH = cache_identity
             return db
 
-    # Download from MITRE
-    db = _fetch_from_mitre()
-    if db:
-        _save_to_cache(db, path)
-        _GLOBAL_DB = db
-        return db
+    if not allow_network_refresh:
+        if os.path.exists(path):
+            db = _load_from_cache(path)
+            if db:
+                _GLOBAL_DB = db
+                _GLOBAL_DB_PATH = cache_identity
+                return db
+        empty = MitreAttackDB({}, version="unavailable")
+        _GLOBAL_DB = empty
+        _GLOBAL_DB_PATH = cache_identity
+        return empty
+
+    # Download from MITRE. The lock prevents overlapping scheduled/manual
+    # refreshes and the second freshness check avoids a duplicate download.
+    try:
+        with feed_refresh_lock(path):
+            if not force_refresh and _cache_is_fresh(path):
+                db = _load_from_cache(path)
+                if db:
+                    _GLOBAL_DB = db
+                    _GLOBAL_DB_PATH = cache_identity
+                    return db
+            db = _fetch_from_mitre()
+            if db:
+                _save_to_cache(db, path)
+                _GLOBAL_DB = db
+                _GLOBAL_DB_PATH = cache_identity
+                return db
+    except TimeoutError:
+        print("  [MITRE] Refresh already in progress; using available cache")
 
     # Graceful fallback — try stale cache before giving up
     if os.path.exists(path):
@@ -432,6 +474,7 @@ def load_mitre_attack_db(
         db = _load_from_cache(path)
         if db:
             _GLOBAL_DB = db
+            _GLOBAL_DB_PATH = cache_identity
             return db
 
     # Last resort — empty DB (pipeline works without ATT&CK enrichment)
@@ -439,13 +482,15 @@ def load_mitre_attack_db(
           "technique names will show as raw IDs")
     empty = MitreAttackDB({}, version="unavailable")
     _GLOBAL_DB = empty
+    _GLOBAL_DB_PATH = cache_identity
     return empty
 
 
 def clear_singleton() -> None:
     """Force reload on next call (useful in testing / after force_refresh)."""
-    global _GLOBAL_DB
+    global _GLOBAL_DB, _GLOBAL_DB_PATH
     _GLOBAL_DB = None
+    _GLOBAL_DB_PATH = None
 
 
 # ── CLI convenience ────────────────────────────────────────────────────────────

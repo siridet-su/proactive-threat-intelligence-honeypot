@@ -1,0 +1,75 @@
+{
+  "schema_version": "final_f_phase4_contract_known_answer.v2",
+  "status": "FROZEN",
+  "implementation_commit": "5e689850efe54a41ed368afd020328dba6ae9096",
+  "implementation_tree": "bfc244335be054fdd426dfa89672d87396566e72",
+  "case_id": "phase4-known-answer",
+  "assessment_id": "session_assessment_v6_ee473f2ba727f47a6abeb645f5fe3cfe",
+  "projection_sha256": "84ac6149c57e2518a0c82821bbfbe83e91de50089b1c3755bb1c07ddd6f59b02",
+  "policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+  "provider_output_schema_sha256": "f181765e38a65de53bf1870c6d0b217dae9c508f66121164fbe5eb0017375a4c",
+  "expected_validated_output_sha256": "5c5a9790e0618a2a742c4e6c34352969fc6da2b24e7f350aaf4a78742d0afc33",
+  "provider_output": {
+    "schema_version": "ai_provider_output.v2",
+    "projection_sha256": "84ac6149c57e2518a0c82821bbfbe83e91de50089b1c3755bb1c07ddd6f59b02",
+    "policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+    "synthesis": {
+      "schema_version": "ai_advisory_synthesis_selection.v2",
+      "abstained": false,
+      "abstention_reason_code": "",
+      "selected_chain_ids": ["a_61ccbe1b9d871177f99ebb5a08a049f5"],
+      "selected_relationship_ids": [
+        "a_c30efbcf1b182750528265a2b6ab1f98",
+        "a_e063c01ca1bc69d4c00f5e8493657304"
+      ],
+      "ranked_finding_ids": ["a_ba5333312ad85077991eed183d59e2e4"],
+      "selected_hypothesis_ids": [],
+      "ranked_action_ids": ["a_118cd91a887a41feabf442a709c95cb0"],
+      "selected_limitation_codes": ["relationship_not_causal_proof"],
+      "selected_evidence_gap_codes": [],
+      "analyst_question_selections": [],
+      "explanation_template_selections": [
+        {
+          "template_id": "explain_chain_and_limits",
+          "anchor_type": "chain",
+          "anchor_id": "a_61ccbe1b9d871177f99ebb5a08a049f5"
+        },
+        {
+          "template_id": "explain_manual_checks",
+          "anchor_type": "action",
+          "anchor_id": "a_118cd91a887a41feabf442a709c95cb0"
+        }
+      ],
+      "review_plan": [
+        {
+          "order": 1,
+          "step_type": "review_chain",
+          "anchor_type": "chain",
+          "anchor_id": "a_61ccbe1b9d871177f99ebb5a08a049f5",
+          "related_chain_ids": ["a_61ccbe1b9d871177f99ebb5a08a049f5"],
+          "related_finding_ids": ["a_ba5333312ad85077991eed183d59e2e4"],
+          "related_hypothesis_ids": [],
+          "related_action_ids": [],
+          "limitation_codes": ["relationship_not_causal_proof"],
+          "evidence_gap_codes": [],
+          "analyst_question_template_ids": [],
+          "explanation_template_id": "explain_chain_and_limits"
+        },
+        {
+          "order": 2,
+          "step_type": "perform_manual_check",
+          "anchor_type": "action",
+          "anchor_id": "a_118cd91a887a41feabf442a709c95cb0",
+          "related_chain_ids": ["a_61ccbe1b9d871177f99ebb5a08a049f5"],
+          "related_finding_ids": ["a_ba5333312ad85077991eed183d59e2e4"],
+          "related_hypothesis_ids": [],
+          "related_action_ids": ["a_118cd91a887a41feabf442a709c95cb0"],
+          "limitation_codes": [],
+          "evidence_gap_codes": [],
+          "analyst_question_template_ids": [],
+          "explanation_template_id": "explain_manual_checks"
+        }
+      ]
+    }
+  }
+}

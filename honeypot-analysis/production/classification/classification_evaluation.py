@@ -142,7 +142,7 @@ def load_session_payloads(
     session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE,
     external_only: bool = True,
 ) -> List[Dict[str, Any]]:
-    storage = open_storage(config.database_url)
+    storage = open_storage(config.database_settings())
     if hasattr(storage, "list_session_rows"):
         rows = storage.list_session_rows(limit=limit, session_source=session_source, external_only=external_only)
     else:
@@ -543,7 +543,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.database_url:
         config.database_url = args.database_url
     session_source = None if args.all_session_sources else normalize_session_source(args.session_source)
-    storage = open_storage(config.database_url)
+    storage = open_storage(config.database_settings())
     output: Dict[str, Any] = {}
 
     if args.export_review_cases:

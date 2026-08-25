@@ -1,0 +1,20 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_canonical_v3_tests.v1",
+  "status": "PASS",
+  "offline_preactivation": "PASS_SAFE_ISOLATED_RUNTIME_BOUND_CANDIDATE",
+  "compileall": "PASS",
+  "lifecycle_loader": "PASS",
+  "classifier_environment_loader": "PASS",
+  "classifier_construction": "PASS",
+  "session_monitor_construction": "PASS",
+  "zero_event_loop": "PASS",
+  "live_terminal_persistence": "PASS",
+  "live_terminal_event_processed": true,
+  "live_v3_manifest_present": true,
+  "live_evidence_cutoff_present": true,
+  "live_history_manifest_sha256": "9609d89a44e2052a04aeac61c7058a46ef68b7c059a181233bd3a66e0826d809",
+  "no_mongo_writes_in_offline_harness": true,
+  "production_interpreter_expected": "/opt/honeypot/.venv/bin/python",
+  "local_harness_interpreter": "/usr/bin/python3"
+}
+

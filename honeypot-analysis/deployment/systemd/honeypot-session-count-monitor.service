@@ -1,0 +1,21 @@
+[Unit]
+Description=Honeypot completed-session threshold monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=-/etc/honeypot/common.env
+EnvironmentFile=-/etc/honeypot/services/session-count-monitor.env
+LoadCredential=mongodb-uri
+Environment=MONGODB_URI_FILE=%d/mongodb-uri
+Environment=SESSION_COUNT_MONITOR_STATE_PATH=/var/lib/honeypot/session_count_monitor_state.json
+ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.session_count_monitor --config /etc/honeypot/production_config.json --no-syslog
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot

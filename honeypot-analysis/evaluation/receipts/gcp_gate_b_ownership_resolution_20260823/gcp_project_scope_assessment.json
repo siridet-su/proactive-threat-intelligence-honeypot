@@ -1,0 +1,26 @@
+{
+  "dedicated_exclusive_honeypot_project": false,
+  "evidence": [
+    "Project display name is generic: My First Project.",
+    "Project is under organization parent 908806208421; no dedicated-project label was visible.",
+    "Only one capstone VM was visible in Compute inventory, which does not prove exclusive project scope.",
+    "Default network, 42 default subnets, 43 default routes, and four standard default firewall rules are project-wide infrastructure.",
+    "Project IAM policy could not be read by the active principal (resourcemanager.projects.getIamPolicy denied).",
+    "Service-account, bucket, Artifact Registry, and Scheduler inventories remain unavailable or disabled."
+  ],
+  "limitations": [
+    "No claim that the project is shared with another workload was made; scope is unproven.",
+    "No deletion decision is derived from project naming or the presence of capstone alone."
+  ],
+  "project": "project-dff4b23a-3010-4936-a02",
+  "project_number": "97738468999",
+  "project_scope": "SHARED_OR_UNPROVEN",
+  "schema_version": "gcp_project_scope_assessment.v1",
+  "source_commands": [
+    "gcloud projects describe project-dff4b23a-3010-4936-a02",
+    "gcloud projects get-iam-policy project-dff4b23a-3010-4936-a02",
+    "gcloud services list --enabled",
+    "gcloud compute instances describe capstone --zone=asia-southeast1-b"
+  ],
+  "status": "COMPLETE_READ_ONLY_UNPROVEN"
+}

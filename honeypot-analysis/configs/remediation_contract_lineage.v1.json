@@ -1,0 +1,110 @@
+{
+  "schema_version": "remediation_contract_lineage.v1",
+  "baseline": {
+    "commit": "49f9b74fbe31c938d37767675d51ff863ce6902d",
+    "git_tree": "d66aa7859c0262024a55a2bae16cf950d4c72463",
+    "tracked_inventory_sha256": "f99e3044d94e5bc981df74ade3ffa948cf60a325dd48ee61f917b79e019f4db4",
+    "baseline_fingerprint": "9c0e870f464f355f90f0b856f1441ceeef34ba263d59d31bc40aedf6b26ca801"
+  },
+  "contracts": [
+    {
+      "contract_family": "classification_rule_policy",
+      "historical_schema": "classification_rule_policy.v3",
+      "historical_disposition": "readable_immutable_not_reinterpreted",
+      "planned_schema": "classification_rule_policy.v4",
+      "planned_phase": 1,
+      "producer": "production.classification.classification_pipeline",
+      "consumers": ["production.classification.authority", "production.workers.session_worker", "production.classification.durable_replay"]
+    },
+    {
+      "contract_family": "command_authority_decision",
+      "historical_schema": "command_authority_decision.v1",
+      "historical_disposition": "readable_immutable_not_newly_trusted",
+      "planned_schema": "command_authority_decision.v2",
+      "planned_phase": 1,
+      "producer": "production.classification.authority",
+      "consumers": ["production.classification.trust", "production.workers.session_monitor", "production.classification.durable_replay"]
+    },
+    {
+      "contract_family": "classification_event",
+      "historical_schema": "classification_event.v2",
+      "historical_disposition": "readable_immutable_not_reinterpreted",
+      "planned_schema": "classification_event.v3",
+      "planned_phase": 1,
+      "producer": "production.classification.classification_pipeline",
+      "consumers": ["production.workers.session_monitor", "production.classification.durable_replay", "production.prediction.next_behavior_label_policy"]
+    },
+    {
+      "contract_family": "typed_semantic_chain_selection",
+      "historical_schema": "typed_semantic_chain_selection.v2",
+      "historical_disposition": "readable_immutable",
+      "planned_schema": "typed_semantic_chain_selection.v3",
+      "planned_phase": 2,
+      "producer": "production.reporting.typed_semantic_chain_selection",
+      "consumers": ["production.reporting.threat_hypothesis", "production.reporting.session_assessment_v4", "production.reporting.canonical_semantic_graph"]
+    },
+    {
+      "contract_family": "session_assessment",
+      "historical_schema": "session_assessment.v4",
+      "historical_disposition": "readable_immutable_display_only",
+      "planned_schema": "session_assessment.v5",
+      "planned_phase": 3,
+      "producer": "production.reporting.session_assessment_v5",
+      "consumers": ["production.workers.analysis_worker", "production.api.monitor_web", "production.reporting.artifacts", "production.ai_advisory.projection"]
+    },
+    {
+      "contract_family": "threat_hypothesis_set",
+      "historical_schema": "session_assessment.v4.inline_hypothesis_sets",
+      "historical_disposition": "readable_immutable_reduced_provenance",
+      "planned_schema": "threat_hypothesis_set.v2",
+      "planned_phase": 3,
+      "producer": "production.reporting.threat_hypothesis_contract",
+      "consumers": ["production.reporting.session_assessment_v5", "production.api.monitor_web", "production.ai_advisory.projection"]
+    },
+    {
+      "contract_family": "prediction_trusted_history_manifest",
+      "historical_schema": "prediction_trusted_history_manifest.v2",
+      "historical_disposition": "readable_display_only_not_v3_inference_eligible",
+      "planned_schema": "prediction_trusted_history_manifest.v3",
+      "planned_phase": 4,
+      "producer": "production.prediction.trusted_history",
+      "consumers": ["production.prediction.next_behavior_runtime", "production.workers.session_worker", "production.classification.durable_replay"]
+    },
+    {
+      "contract_family": "next_behavior_target",
+      "historical_schema": "next_distinct_command_behavior_phase_or_session_end.v1",
+      "historical_disposition": "readable_historical_model_only",
+      "planned_schema": "next_distinct_trusted_behavior_phase_or_session_end.v2",
+      "planned_phase": 4,
+      "producer": "production.prediction.next_behavior_preprocessing",
+      "consumers": ["production.prediction.next_behavior_tensor", "production.prediction.next_behavior_runtime", "production.utils.feedback"]
+    },
+    {
+      "contract_family": "prediction_snapshot",
+      "historical_schema": "prediction_snapshot.v3",
+      "historical_disposition": "readable_immutable_display_only",
+      "planned_schema": "prediction_snapshot.v4",
+      "planned_phase": 4,
+      "producer": "production.prediction.next_behavior_runtime",
+      "consumers": ["production.storage.contract", "production.api.dashboard_api", "production.api.monitor_web"]
+    },
+    {
+      "contract_family": "response_guidance",
+      "historical_schema": "response_guidance.v3",
+      "historical_disposition": "readable_immutable_not_revalidated_as_v4",
+      "planned_schema": "response_guidance.v4",
+      "planned_phase": 5,
+      "producer": "production.reporting.response_guidance_v4",
+      "consumers": ["production.reporting.session_assessment_v5", "production.api.dashboard_api", "production.api.monitor_web", "production.reporting.artifacts"]
+    },
+    {
+      "contract_family": "behavioral_similarity_cluster",
+      "historical_schema": "campaign_similarity.v1",
+      "historical_disposition": "readable_legacy_non_authoritative",
+      "planned_schema": "behavioral_similarity_cluster.v2",
+      "planned_phase": 9,
+      "producer": "production.correlation.campaign_clustering",
+      "consumers": ["production.api.monitor_web", "production.reporting.artifacts"]
+    }
+  ]
+}

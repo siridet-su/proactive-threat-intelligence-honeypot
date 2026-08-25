@@ -1,0 +1,20 @@
+{
+  "schema_version": "ai_provider_output.v2",
+  "projection_sha256": "a398bfc82e46841b76bd70930e5f5749604a25d8493e3b006029496fe256092c",
+  "policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+  "synthesis": {
+    "schema_version": "ai_advisory_synthesis_selection.v2",
+    "abstained": true,
+    "abstention_reason_code": "insufficient_synthesis_context",
+    "selected_chain_ids": [],
+    "selected_relationship_ids": [],
+    "ranked_finding_ids": [],
+    "selected_hypothesis_ids": [],
+    "ranked_action_ids": [],
+    "selected_limitation_codes": [],
+    "selected_evidence_gap_codes": [],
+    "analyst_question_selections": [],
+    "explanation_template_selections": [],
+    "review_plan": []
+  }
+}

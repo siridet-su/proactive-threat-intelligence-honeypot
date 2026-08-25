@@ -1,0 +1,101 @@
+{
+  "schema_version": "prediction_attck_label_policy.v2",
+  "policy_id": "prediction-only-reviewed-rule-labels-legacy-parity-20260816.v2",
+  "authority": "prediction_weak_rule_label",
+  "predecessor_policy_path": "prediction_attck_label_policy.v1.json",
+  "predecessor_policy_sha256": "2f7669d7aacfb4ffa59cc2d9c0b89be88e2b16dfd80b551944ee07db6e8b1cc6",
+  "classification_rule_policy_path": "configs/classification_rules.trusted.json",
+  "classification_rule_policy_sha256": "51cfae25ff39238bbb48ee7143fda675dcb22a2be369b3c558970759799f89ee",
+  "legacy_review_source": {
+    "repository_commit": "9876c52399f1220dacaeb51e70f1653ad12798cf",
+    "path": "honeypot-analysis/configs/classification_rules.trusted.json",
+    "sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "reviewed_rule_count": 84,
+    "unreviewed_rule_count": 27,
+    "reviewed_only": true,
+    "unreviewed_rules_restored": false
+  },
+  "target_contract_id": "next_prediction_attck_label_group_or_session_end.v1",
+  "label_schema_version": "prediction_attck_label.v1",
+  "group_schema_version": "prediction_attck_label_group.v1",
+  "history_schema_version": "prediction_attck_label_history_manifest.v1",
+  "maximum_history_groups": 8,
+  "label_semantics": {
+    "meaning": "deterministic classifier-derived weak label for submitted command syntax",
+    "canonical_observed_attck_behavior": false,
+    "proven_execution": false,
+    "successful_execution": false,
+    "attacker_intent": false
+  },
+  "admission_class": {
+    "class_id": "reviewed_legacy_literal_invocation",
+    "semantics": "reviewed historical rule with current binding and literal effective executable",
+    "predicate_id": "effective_executable_current_regex.v1",
+    "rule_ids": [
+      "cmd-rule-009-t1049-system-network-connections-discovery",
+      "cmd-rule-010-t1057-process-discovery",
+      "cmd-rule-012-t1083-file-and-directory-discovery",
+      "cmd-rule-013-t1083-file-and-directory-discovery",
+      "cmd-rule-021-t1136-create-account",
+      "cmd-rule-024-t1548-abuse-elevation-control-mechanism",
+      "cmd-rule-030-t1070-indicator-removal",
+      "cmd-rule-034-t1059-command-and-scripting-interpreter",
+      "cmd-rule-046-t1105-ingress-tool-transfer",
+      "cmd-rule-089-t1222-file-permissions-modification-chmod",
+      "cmd-rule-091-t1082-system-information-discovery-runtime-hardware",
+      "cmd-rule-092-t1083-file-and-directory-discovery-basic-linux",
+      "cmd-rule-097-t1059-command-and-scripting-interpreter-explicit-execution",
+      "cmd-rule-098-t1070-indicator-removal-history-and-logs",
+      "cmd-rule-109-t1082-linux-system-files",
+      "cmd-rule-112-t1082-filesystem-capacity-discovery"
+    ],
+    "requires_historically_reviewed_rule": true,
+    "requires_current_pattern": true,
+    "requires_current_exact_tactic_technique_binding": true,
+    "requires_effective_executable_binding": true,
+    "requires_durable_order": true,
+    "parser_abstention_override_only": true
+  },
+  "legacy_literal_bindings_schema_version": "prediction_attck_legacy_literal_bindings.v2",
+  "legacy_literal_bindings_path": "prediction_attck_legacy_literal_bindings.v2.json",
+  "legacy_literal_bindings_sha256": "14db69d7650276f374852aee21b5dcfa90918cf8e49a4b4e9c80317e3862f967",
+  "barrier_invariants": {
+    "conditional_fragments": "barrier",
+    "model_only": "excluded",
+    "unreviewed_rule": "excluded",
+    "malformed_or_quarantined": "barrier",
+    "conflicting_duplicate": "barrier",
+    "unresolved_or_dynamic": "barrier",
+    "unsupported_or_unorderable_composition": "barrier",
+    "no_transition_across_barrier": true
+  },
+  "support_policy": {
+    "minimum_targets_per_role_and_class": 30,
+    "minimum_distinct_sessions_per_role_and_class": 30,
+    "required_binary_classes": [
+      "continuation",
+      "session_end"
+    ],
+    "minimum_conditional_tactic_classes": 2,
+    "execution_required_when_claimed": true,
+    "minimum_changed_targets_per_role_and_class": 30,
+    "minimum_changed_distinct_sessions_per_role_and_class": 30,
+    "unsupported_tactics_retained": true,
+    "posthoc_other_class": false
+  },
+  "privacy": {
+    "raw_commands_in_model_artifacts": false,
+    "original_session_ids_in_model_artifacts": false,
+    "network_identifiers_in_model_artifacts": false,
+    "credentials_in_model_artifacts": false,
+    "pseudonymization_policy_required": true,
+    "sanitizer_policy_required": true
+  },
+  "training_authorization": {
+    "support_analysis_only": true,
+    "model_training_authorized": false,
+    "production_prediction_authorized": false,
+    "sealed_test_access_authorized": false
+  }
+}
+

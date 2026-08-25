@@ -1,0 +1,45 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_pre_test_state.v1",
+  "status": "PASS_ACTIVE_A6_ZERO_METRICS",
+  "active_release": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+  "release_sha256": "403c989d9cfe7e7726610018345352e76bfd5d7fc75cc3952d3217a00e0c6669",
+  "epoch_file_sha256": "f155419ffbd43f6910223f0c9a3cd347d0385d475771d37e79174b51b60ad017",
+  "epoch_receipt_sha256": "7e3e415dd0de85a2645b16b8c2789cceb8859e65946f5ade1cc292ccbdc697c5",
+  "mongo_counts": {
+    "sessions": 76,
+    "events": 1121,
+    "prediction_snapshots": 686,
+    "prediction_outbox": 686,
+    "analysis_jobs": 68,
+    "reports": 67,
+    "alerts": 0,
+    "lifecycle_ledger": 1
+  },
+  "source_counts": {
+    "production_live": 71,
+    "e2e_test": 5
+  },
+  "feeder_state_sha256": "0fdfe20fc558b50d9a678c7f6a77ce956d7c4b878bb78a9236bce54a416fb0fa",
+  "feeder_metrics_sha256": "a12ba5417976598633b5c4cbc4e57d1168bf064455c4aec95dc74a613e23c20a",
+  "feeder_records_present": false,
+  "feeder_metrics": {
+    "rows_seen": 0,
+    "rows_eligible": 0,
+    "predictions_emitted": 0,
+    "duplicate_rows": 0,
+    "rejected_rows": 0,
+    "predictor_failures": 0,
+    "cursor_advanced": 0,
+    "transient_cursor_holds": 0
+  },
+  "predictor_checkpoint_sha256": "16506e962432f9921d18a514c3a31686a20f9734385ec49439ad2651e4cdd283",
+  "temperature": 0.6990670591704266,
+  "authority": "non_authoritative",
+  "canonical_write_allowed": false,
+  "services": {
+    "worker": "active/running/0",
+    "feeder": "active/running/0",
+    "predictor": "active/running/0"
+  }
+}
+

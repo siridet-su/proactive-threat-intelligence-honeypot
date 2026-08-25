@@ -1,0 +1,28 @@
+[Unit]
+Description=Honeypot session worker
+After=network-online.target honeypot-ingest-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=-/etc/honeypot/common.env
+EnvironmentFile=-/etc/honeypot/services/session-worker.env
+LoadCredential=credential-hmac-keyring.json:/etc/honeypot/credential-hmac-keyring.json
+LoadCredential=mongodb-uri
+Environment=MONGODB_URI_FILE=%d/mongodb-uri
+ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.session_worker --config /etc/honeypot/production_config.json
+Restart=always
+RestartSec=5
+TimeoutStopSec=120
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot
+
+[Install]
+WantedBy=multi-user.target

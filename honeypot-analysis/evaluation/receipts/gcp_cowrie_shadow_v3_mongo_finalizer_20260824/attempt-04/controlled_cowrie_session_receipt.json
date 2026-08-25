@@ -1,0 +1,7 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_artifact_alias.v1",
+  "status": "PASS_ALIAS",
+  "alias_of": "controlled_live_session_receipt.json",
+  "canonical_artifact_preserved": true
+}
+

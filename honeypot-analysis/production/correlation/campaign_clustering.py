@@ -1,9 +1,7 @@
-"""Live campaign clustering from honeypot session fingerprints.
+"""Live, non-authoritative similarity clustering from session fingerprints.
 
-This module is deliberately separate from known-actor attribution. Attribution
-asks "does this session overlap a named actor profile?". Campaign clustering asks
-"does this session look like the same actor/tooling cluster we have already
-seen in our own telemetry?".
+Similarity links observations in this deployment. It does not establish that
+two sessions share an actor, tooling identity, intent, or real-world campaign.
 """
 
 from __future__ import annotations
@@ -16,7 +14,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
+from production.correlation.session_ttp_correlation import correlation_allows_influence
 from production.utils.config import ProductionConfig
+from production.policies.alert_authority_policy import (
+    LoadedAlertAuthorityPolicy,
+    load_alert_authority_policy,
+)
 from production.utils.serialization import stable_id, utc_now
 from production.storage import open_storage
 
@@ -50,12 +53,14 @@ def _policy(config_or_policy: ProductionConfig | Dict[str, Any]) -> Dict[str, An
     policy.setdefault("min_commands_active", 1)
     policy.setdefault("min_commands_closed", 1)
     policy.setdefault("min_match_score", 0.35)
+    policy.setdefault("min_match_raw_score", 0.25)
+    policy.setdefault("min_independent_evidence_classes", 1)
+    policy.setdefault("allow_source_ip_only_match", False)
+    policy.setdefault("source_ip_only_confidence", 0.2)
     policy.setdefault("max_matches", 10)
     policy.setdefault("command_pattern_command_limit", 6)
     policy.setdefault("command_pattern_token_limit", 3)
-    policy.setdefault("known_actor_return_alerts", True)
-    policy.setdefault("known_actor_min_prior_severity", "high")
-    policy.setdefault("known_actor_alert_on_status", ["active", "closed"])
+    policy.setdefault("emit_observational_signals", True)
     policy.setdefault(
         "field_weights",
         {
@@ -137,7 +142,7 @@ def _confirmed_tactics(session_payload: Dict[str, Any]) -> List[str]:
         if tactic not in output:
             output.append(tactic)
     for item in session_payload.get("session_ttp_correlations") or []:
-        if isinstance(item, dict):
+        if isinstance(item, dict) and correlation_allows_influence(item, "campaign"):
             tactic = str(item.get("tactic") or "").strip().lower()
             if tactic and tactic != "unknown" and tactic not in output:
                 output.append(tactic)
@@ -261,12 +266,28 @@ def score_campaign_match(campaign: Dict[str, Any], fingerprint: Dict[str, Any], 
                 score += weight
                 reasons.append(f"matched {key}")
     normalized = score / total_possible if total_possible > 0 else 0.0
+    matched_fields = [reason.removeprefix("matched ") for reason in reasons]
+    source_ip_only = matched_fields == ["source_ip"]
+    if source_ip_only:
+        try:
+            source_ip_cap = float(policy.get("source_ip_only_confidence", 0.2))
+        except (TypeError, ValueError):
+            source_ip_cap = 0.2
+        normalized = min(normalized, max(0.0, min(source_ip_cap, 1.0)))
     return {
         "campaign_id": campaign.get("campaign_id") or "",
         "score": round(normalized, 4),
         "raw_score": round(score, 4),
         "total_possible": round(total_possible, 4),
         "match_reasons": reasons,
+        "matched_evidence_classes": matched_fields,
+        "independent_evidence_class_count": len(matched_fields),
+        "source_ip_only": source_ip_only,
+        "match_category": (
+            "source_ip_only_low_confidence"
+            if source_ip_only
+            else "multi_signal" if len(matched_fields) > 1 else "single_non_ip_signal"
+        ),
         "campaign": campaign,
     }
 
@@ -275,16 +296,31 @@ def find_matching_campaigns(storage: Any, fingerprint: Dict[str, Any], policy: D
     candidates = storage.find_matching_campaigns(fingerprint, limit=int(policy.get("max_matches") or 10) * 5)
     matches = [score_campaign_match(candidate, fingerprint, policy) for candidate in candidates]
     minimum = float(policy.get("min_match_score") or 0.0)
-    matches = [item for item in matches if item["score"] >= minimum]
+    minimum_raw = float(policy.get("min_match_raw_score") or 0.0)
+    minimum_classes = int(policy.get("min_independent_evidence_classes") or 1)
+    allow_source_ip_only = bool(policy.get("allow_source_ip_only_match", False))
+    matches = [
+        item
+        for item in matches
+        if item["score"] >= minimum
+        and item["raw_score"] >= minimum_raw
+        and item["independent_evidence_class_count"] >= minimum_classes
+        and (allow_source_ip_only or not item["source_ip_only"])
+    ]
     return sorted(matches, key=lambda item: item["score"], reverse=True)[: int(policy.get("max_matches") or 10)]
 
 
-def _campaign_id_for_fingerprint(fingerprint: Dict[str, Any]) -> str:
+def _campaign_id_for_fingerprint(
+    fingerprint: Dict[str, Any],
+    session_id: str = "",
+) -> str:
+    source_ip_only = fingerprint.get("primary_fingerprint_type") == "src_ip"
     return stable_id(
         "campaign",
         {
             "primary_fingerprint_type": fingerprint.get("primary_fingerprint_type") or "",
             "primary_fingerprint_value": fingerprint.get("primary_fingerprint_value") or "",
+            "source_ip_only_session_id": session_id if source_ip_only else "",
         },
     )
 
@@ -339,40 +375,50 @@ def _campaign_payload(
     return payload
 
 
-def _known_actor_return_alert(
+def _similar_session_pattern_signal(
     campaign: Dict[str, Any],
     session_payload: Dict[str, Any],
     match: Dict[str, Any],
     status: str,
     policy: Dict[str, Any],
+    alert_authority_policy: LoadedAlertAuthorityPolicy,
 ) -> Optional[Dict[str, Any]]:
-    if not policy.get("known_actor_return_alerts", True):
-        return None
-    allowed_status = {str(item).strip().lower() for item in policy.get("known_actor_alert_on_status") or []}
-    if allowed_status and status not in allowed_status:
-        return None
-    prior_severity = str(campaign.get("max_confirmed_severity") or "info").lower()
-    minimum = str(policy.get("known_actor_min_prior_severity") or "high").lower()
-    if SEVERITY_RANK.get(prior_severity, 0) < SEVERITY_RANK.get(minimum, 3):
+    if not policy.get("emit_observational_signals", True):
         return None
     session_id = str(session_payload.get("session_id") or "unknown")
     campaign_id = str(campaign.get("campaign_id") or "")
-    return {
-        "alert_id": stable_id("knownactorreturn", {"campaign_id": campaign_id, "session_id": session_id}),
+    policy_sha256 = alert_authority_policy.sha256
+    identity = {
+        "campaign_id": campaign_id,
         "session_id": session_id,
-        "severity": prior_severity.upper(),
-        "reason": f"Known campaign returned: session matched campaign {campaign_id}",
-        "created_at": utc_now(),
-        "alert_type": "known_actor_return",
-        "payload": {
-            "alert_type": "known_actor_return",
-            "campaign_id": campaign_id,
-            "session_id": session_id,
-            "session_status": status,
-            "prior_campaign_severity": prior_severity,
-            "match_score": match.get("score"),
-            "match_reasons": match.get("match_reasons") or [],
-            "campaign_session_count": campaign.get("session_count") or 0,
+        "match_score": match.get("score"),
+        "match_reasons": match.get("match_reasons") or [],
+        "alert_authority_policy_sha256": policy_sha256,
+    }
+    return {
+        "schema_version": "correlation_signal.v1",
+        "signal_id": stable_id("correlationsignal", identity),
+        "signal_type": "similar_session_pattern_observed",
+        "session_id": session_id,
+        "campaign_id": campaign_id,
+        "session_status": status,
+        "match_score": match.get("score"),
+        "match_reasons": match.get("match_reasons") or [],
+        "campaign_session_count": campaign.get("session_count") or 0,
+        "authority": {
+            "semantics": "observation_only_non_authoritative",
+            "may_claim_actor_identity": False,
+            "may_create_alert": False,
+            "may_authorize_response": False,
+        },
+        "limitations": [
+            "similarity does not establish actor identity",
+            "similarity does not establish shared tooling identity or intent",
+            "signal cannot authorize an alert, external delivery, or response",
+        ],
+        "provenance": {
+            "alert_authority_policy_sha256": policy_sha256,
+            "alert_authority_policy_id": alert_authority_policy.policy_id,
         },
     }
 
@@ -382,7 +428,8 @@ def create_or_update_campaign(
     session_payload: Dict[str, Any],
     policy: Dict[str, Any],
     status: str = "active",
-    emit_alerts: bool = True,
+    *,
+    alert_authority_policy: LoadedAlertAuthorityPolicy,
 ) -> Dict[str, Any]:
     policy = _policy(policy)
     session_id = str(session_payload.get("session_id") or "unknown")
@@ -400,7 +447,10 @@ def create_or_update_campaign(
     best_match = matches[0] if matches else {}
     existing_campaign = best_match.get("campaign") if best_match else None
     matched_existing = bool(existing_campaign)
-    campaign_id = str((existing_campaign or {}).get("campaign_id") or _campaign_id_for_fingerprint(fingerprint))
+    campaign_id = str(
+        (existing_campaign or {}).get("campaign_id")
+        or _campaign_id_for_fingerprint(fingerprint, session_id)
+    )
     prior_campaign_sessions = []
     if matched_existing:
         try:
@@ -416,7 +466,13 @@ def create_or_update_campaign(
     )
     campaign = _campaign_payload(campaign_id, fingerprint, session_payload, policy, existing_campaign)
     storage.save_campaign(campaign)
-    link_confidence = float(best_match.get("score") or (0.0 if matched_existing else 1.0))
+    source_ip_only = fingerprint.get("primary_fingerprint_type") == "src_ip"
+    if matched_existing:
+        link_confidence = float(best_match.get("score") or 0.0)
+    elif source_ip_only:
+        link_confidence = float(policy.get("source_ip_only_confidence", 0.2))
+    else:
+        link_confidence = 1.0
     link_id, inserted = storage.link_campaign_session(
         campaign_id,
         session_id,
@@ -435,16 +491,26 @@ def create_or_update_campaign(
     session_count = storage.count_campaign_sessions(campaign_id)
     campaign["session_count"] = session_count
     storage.save_campaign(campaign)
-    alert_id = ""
-    alert = (
-        _known_actor_return_alert(existing_campaign or {}, session_payload, best_match, status, policy)
-        if emit_alerts and matched_existing and prior_other_session_count > 0
+    correlation_signal = (
+        _similar_session_pattern_signal(
+            existing_campaign or {},
+            session_payload,
+            best_match,
+            status,
+            policy,
+            alert_authority_policy,
+        )
+        if matched_existing and prior_other_session_count > 0
         else None
     )
-    if alert:
-        alert_id = storage.store_alert(alert)
     return {
-        "status": "matched" if matched_existing else "created",
+        "status": (
+            "matched"
+            if matched_existing
+            else "created_source_ip_only_low_confidence"
+            if source_ip_only
+            else "created"
+        ),
         "session_id": session_id,
         "campaign_id": campaign_id,
         "matched_existing_campaign": matched_existing,
@@ -461,7 +527,15 @@ def create_or_update_campaign(
             }
             for item in matches
         ],
-        "known_actor_return_alert_id": alert_id,
+        "correlation_signal": correlation_signal or {},
+        "correlation_signal_id": (
+            correlation_signal.get("signal_id") if correlation_signal else ""
+        ),
+        "automatic_alerts": {
+            "status": "prohibited",
+            "authorized": False,
+            "alert_authority_policy_sha256": alert_authority_policy.sha256,
+        },
         "max_confirmed_severity": campaign.get("max_confirmed_severity") or "info",
     }
 
@@ -469,15 +543,18 @@ def create_or_update_campaign(
 class CampaignClusteringWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
         self.policy = _policy(config)
+        self.alert_authority_policy = load_alert_authority_policy(
+            config.alert_authority_policy_path
+        )
 
-    def backfill(self, limit: int = 1000, include_active: bool = False, emit_alerts: bool = False) -> Dict[str, Any]:
+    def backfill(self, limit: int = 1000, include_active: bool = False) -> Dict[str, Any]:
         rows = self.storage.list_rows("sessions", limit=max(int(limit), 1))
         processed = 0
         clustered = 0
         skipped = 0
-        alerts = 0
+        signals = 0
         for row in rows:
             payload = row.get("payload")
             if not isinstance(payload, dict):
@@ -499,14 +576,14 @@ class CampaignClusteringWorker:
                 payload,
                 self.policy,
                 status=status,
-                emit_alerts=emit_alerts,
+                alert_authority_policy=self.alert_authority_policy,
             )
             if summary.get("status") in {"created", "matched"}:
                 clustered += 1
             else:
                 skipped += 1
-            if summary.get("known_actor_return_alert_id"):
-                alerts += 1
+            if summary.get("correlation_signal_id"):
+                signals += 1
             payload["campaign_summary"] = summary
             self.storage.save_session(payload)
         return {
@@ -514,10 +591,11 @@ class CampaignClusteringWorker:
             "processed": processed,
             "clustered": clustered,
             "skipped": skipped,
-            "known_actor_return_alerts": alerts,
+            "correlation_signals": signals,
+            "automatic_alerts_created": 0,
             "limit": limit,
             "include_active": include_active,
-            "emit_alerts": emit_alerts,
+            "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
             "timestamp": utc_now(),
         }
 
@@ -528,7 +606,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backfill", action="store_true", help="Cluster existing stored sessions.")
     parser.add_argument("--limit", type=int, default=1000)
     parser.add_argument("--include-active", action="store_true")
-    parser.add_argument("--emit-alerts", action="store_true", help="Allow backfill to create known_actor_return alerts.")
     return parser
 
 
@@ -541,7 +618,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             json.dumps(
                 {
                     "service": "campaign_clustering",
-                    "backfill": worker.backfill(args.limit, args.include_active, args.emit_alerts),
+                    "backfill": worker.backfill(args.limit, args.include_active),
                 },
                 sort_keys=True,
             )

@@ -1,0 +1,53 @@
+{
+  "schema_version": "cyberlab_external_source_integrity_exclusion.v1",
+  "adapter_schema_version": "cyberlab_cowrie_adapter.v3",
+  "source": {
+    "record_id": 3687527,
+    "doi": "10.5281/zenodo.3687527",
+    "dataset": "CyberLab honeynet dataset"
+  },
+  "decision_rule": {
+    "objective_source_integrity_only": true,
+    "behavioral_content_used": false,
+    "labels_or_tactics_used": false,
+    "support_or_model_metrics_used": false,
+    "partial_prefix_salvage_allowed": false,
+    "replacement_or_role_shift_allowed": false,
+    "sealed_test_accessed": false
+  },
+  "exclusion": {
+    "reason_code": "upstream_truncated_source_member",
+    "required_conditions": [
+      "official_checksum_matches",
+      "complete_gzip_json_source_unreadable"
+    ],
+    "action": "exclude_entire_member",
+    "role_membership_remains_preregistered": true
+  },
+  "receipt_requirements": {
+    "schema_version": "cyberlab_external_source_integrity_exclusion_receipt.v1",
+    "required_evidence": [
+      "official_size",
+      "official_md5",
+      "local_sha256",
+      "independent_redownload_size",
+      "independent_redownload_md5",
+      "independent_redownload_sha256",
+      "gzip_integrity_failure",
+      "json_completeness_result",
+      "validation_commands"
+    ]
+  },
+  "role_accounting": {
+    "train_usable_members": 68,
+    "selection_usable_members": 22,
+    "calibration_usable_members": 11,
+    "development_usable_members": 101,
+    "excluded_member_does_not_change_role_dates": true
+  },
+  "lineage": {
+    "predecessor_adapter_receipt": "configs/cyberlab_external_adapter_receipt.v3.json",
+    "original_temporal_protocol": "configs/cyberlab_external_temporal_protocol.v1.json",
+    "original_download_receipt": "/mnt/honeypot-data/cyberlab-external-development-v1/development_download_receipt.v1.json"
+  }
+}

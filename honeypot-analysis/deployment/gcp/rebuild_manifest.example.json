@@ -1,0 +1,73 @@
+{
+  "schema_version": "gcp_vm_rebuild_manifest.v1",
+  "source_commit": "<40-HEX-GIT-COMMIT>",
+  "release": {
+    "root": "/opt/honeypot-releases/<40-HEX-GIT-COMMIT>",
+    "manifest_path": "/opt/honeypot-releases/<40-HEX-GIT-COMMIT>/DEPLOYMENT_MANIFEST.json",
+    "release_tree_sha256": "<64-HEX-RELEASE-TREE-SHA256>",
+    "files": [
+      {
+        "path": "/opt/honeypot-releases/<40-HEX-GIT-COMMIT>/production/entrypoint.py",
+        "sha256": "<64-HEX-FILE-SHA256>",
+        "bytes": 0
+      }
+    ]
+  },
+  "policies": [
+    {
+      "name": "classification_rules",
+      "path": "/opt/honeypot-releases/<40-HEX-GIT-COMMIT>/configs/classification_rules.trusted.json",
+      "sha256": "<64-HEX-POLICY-SHA256>"
+    },
+    {
+      "name": "prediction_policy",
+      "path": "/opt/honeypot-releases/<40-HEX-GIT-COMMIT>/configs/prediction_policy.transformer.json",
+      "sha256": "<64-HEX-POLICY-SHA256>"
+    },
+    {
+      "name": "response_guidance_v3",
+      "path": "/opt/honeypot-releases/<40-HEX-GIT-COMMIT>/configs/response_guidance.v3.json",
+      "sha256": "<64-HEX-POLICY-SHA256>"
+    }
+  ],
+  "model_bundle": {
+    "bundle_id": "frozen_model_bundle_<CONTENT_ID>",
+    "manifest_path": "/opt/honeypot-model-bundles/<BUNDLE_ID>/FROZEN_MODEL_BUNDLE_MANIFEST.json",
+    "manifest_sha256": "<64-HEX-BUNDLE-MANIFEST-SHA256>",
+    "artifacts": [
+      {
+        "name": "transformer_checkpoint",
+        "path": "/opt/honeypot-model-bundles/<BUNDLE_ID>/transformer/checkpoint.bin",
+        "sha256": "<64-HEX-ARTIFACT-SHA256>",
+        "bytes": 0
+      }
+    ]
+  },
+  "database": {
+    "backup_path": "/var/backups/honeypot/<TIMESTAMP>/production_pilot.db",
+    "backup_sha256": "<64-HEX-BACKUP-SHA256>",
+    "backup_manifest_path": "/var/backups/honeypot/<TIMESTAMP>/production_pilot.db.manifest.json",
+    "backup_manifest_sha256": "<64-HEX-BACKUP-MANIFEST-SHA256>",
+    "schema_version": 3
+  },
+  "services": {
+    "required_active": [
+      "honeypot-analysis-worker.service",
+      "honeypot-dashboard-api.service",
+      "honeypot-enrichment-worker.service",
+      "honeypot-ingest-api.service",
+      "honeypot-monitor-web.service",
+      "honeypot-session-worker.service",
+      "honeypot-threat-hunt-worker.service",
+      "honeypot-webhook-dispatcher.service"
+    ],
+    "required_timers": [
+      "honeypot-feed-refresh.timer",
+      "honeypot-session-count-monitor.timer"
+    ]
+  },
+  "network": {
+    "frontend_port": 2222,
+    "backend_role": "<PRIVATE_TAILSCALE_PI_BACKEND>"
+  }
+}

@@ -1,0 +1,1 @@
+{"expected":0,"invalid_final_slot_count":0,"representation":"left padded, final fixed-window slot out[:,-1]","schema_version":"prediction_next_distinct_readout_validity_audit.v1","train_cases":10186}

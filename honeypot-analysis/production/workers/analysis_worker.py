@@ -9,13 +9,20 @@ import io
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from production.classification.trust import (
     classification_audit_reason,
     is_trusted_classification_event,
 )
-from production.reporting.reporting_pipeline import ImprovedAsyncSwarmCoordinator, _build_session_correlation_hunting_context
+from production.classification.classification_pipeline import NotebookParityClassifier
+from production.classification.securebert_classifier import load_securebert_classifier
+from production.classification.environment import load_classifier_environment
+from production.classification.durable_replay import reclassify_durable_prefix
+from production.reporting.canonical_pipeline import (
+    CanonicalAssessmentCoordinator,
+    build_session_correlation_hunting_context,
+)
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 from production.workers.session_monitor import SessionState, build_pipeline_trigger
 from production.enrichment.threat_feed_loader import load_threat_feeds
@@ -23,12 +30,69 @@ from production.enrichment.threat_feed_loader import load_threat_feeds
 from production.reporting.actor_attribution import enrich_report_with_actor_attribution
 from production.reporting.analysis_policy import session_analysis_skip_reason
 from production.reporting.artifacts import attach_report_artifacts
+from production.policies.threat_hypothesis_behavior_policy import load_behavior_policy
+from production.reporting.session_assessment_v4 import (
+    SessionAssessmentV4Error,
+    build_session_assessment_v4,
+    canonical_assessment_id,
+    validate_session_assessment_v4,
+)
+from production.utils.credential_hmac import credential_metadata_for_provenance
 from production.utils.config import ProductionConfig
 from production.enrichment.enrichment_cache import load_combined_ip_enrichment
-from production.enrichment.feed_status import save_feed_status
+from production.enrichment.feed_status import collect_feed_status, save_feed_status
 from production.utils.runtime_context import attach_runtime_context
+from production.utils.sensitive_data import (
+    redact_error_for_log,
+    redact_exception_for_log,
+    redact_for_artifact,
+    redact_for_log,
+)
 from production.utils.serialization import command_observation_provenance, utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
+from production.utils.http_security import safe_correlation_id
+from production.utils.validation_diagnostics import diagnostic_from_exception
 from production.storage import open_storage
+from production.workers.job_lifecycle import (
+    JobLeaseHeartbeat,
+    job_failure_identity,
+    job_retry_delay,
+    new_job_owner,
+)
+
+
+def _safe_exception_text(exc: BaseException) -> str:
+    return redact_exception_for_log(exc)
+
+
+def _safe_error_text(value: Any) -> str:
+    return redact_error_for_log(value)
+
+
+def _safe_log_json(value: Any) -> str:
+    try:
+        redacted = redact_for_log(value, max_string_chars=1_000)
+        if isinstance(redacted, dict) and "error" in redacted:
+            redacted = dict(redacted)
+            redacted["error"] = redact_error_for_log(redacted["error"])
+        return json.dumps(
+            redacted,
+            sort_keys=True,
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except Exception:
+        return '{"service": "analysis_worker", "status": "log_redaction_failed"}'
+
+
+def _safe_report_mapping(value: Any) -> Dict[str, Any]:
+    try:
+        redacted = redact_for_artifact(value)
+    except Exception:
+        raise ValueError("report redaction failed") from None
+    if not isinstance(redacted, dict):
+        raise TypeError("report must redact to an object")
+    return redacted
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -129,11 +193,20 @@ def _direct_command_ttp_layer(session_payload: Dict[str, Any]) -> Dict[str, Any]
             confidence = None
         item["evidence"].append(
             {
+                "evidence_id": _clean_text(event.get("evidence_id")),
                 "command": command,
                 "original_command": original_command,
+                "command_outcome": _clean_text(event.get("command_outcome")) or "legacy_outcome_unknown",
+                "cowrie_eventid": _clean_text(event.get("cowrie_eventid")),
+                "timestamp": _clean_text(event.get("event_timestamp")),
                 "source": source,
+                "agreement_status": _clean_text(event.get("agreement_status")),
                 "confidence": confidence,
+                "confidence_semantics": _clean_text(event.get("confidence_semantics")) or "legacy_unscoped_score",
+                "rule_policy_id": _clean_text(event.get("rule_policy_id")),
+                "rule_policy_version": _clean_text(event.get("rule_policy_version")),
                 "subcommand_index": event.get("subcommand_index"),
+                "subcommand_count": event.get("subcommand_count"),
                 "technique_granularity": event.get("technique_granularity") or "parent",
             }
         )
@@ -257,7 +330,7 @@ def build_threat_evidence_layers(
     prediction_snapshot: Optional[Dict[str, Any]] = None,
     hunting_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    hunting = hunting_context or _build_session_correlation_hunting_context(
+    hunting = hunting_context or build_session_correlation_hunting_context(
         session_payload.get("session_ttp_correlations", []),
         session_payload.get("session_id", "unknown"),
     )
@@ -294,39 +367,26 @@ def attach_threat_evidence_layers(
     session_payload: Dict[str, Any],
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    hunting_context = report.get("threat_hunting_context")
-    if not isinstance(hunting_context, dict):
-        hunting_context = _build_session_correlation_hunting_context(
-            session_payload.get("session_ttp_correlations", []),
-            session_payload.get("session_id", "unknown"),
+    if report.get("schema_version") == "session_assessment.v4":
+        # Visualization is context only. It cannot become a sibling authority
+        # field or mutate canonical findings, hypotheses, status, or IDs.
+        context = report.setdefault("non_authoritative_context", {})
+        if not isinstance(context, dict):
+            raise SessionAssessmentV4Error(
+                "non_authoritative_context must be an object"
+            )
+        context["threat_evidence_layers"] = build_threat_evidence_layers(
+            session_payload,
+            prediction_snapshot=prediction_snapshot,
+            hunting_context=build_session_correlation_hunting_context(
+                session_payload.get("session_ttp_correlations", []),
+                session_payload.get("session_id", "unknown"),
+            ),
         )
-        report["threat_hunting_context"] = hunting_context
-    layers = build_threat_evidence_layers(
-        session_payload,
-        prediction_snapshot=prediction_snapshot,
-        hunting_context=hunting_context,
+        return report
+    raise SessionAssessmentV4Error(
+        "threat evidence layers can only attach to session_assessment.v4"
     )
-    report["threat_evidence_layers"] = layers
-    report.setdefault("evidence_confidence", layers["summary"])
-    hypothesis = report.get("threat_hypothesis")
-    if not isinstance(hypothesis, dict):
-        hypothesis = {"summary": _clean_text(hypothesis or report.get("summary") or "")}
-        report["threat_hypothesis"] = hypothesis
-    hypothesis["evidence_layer_summary"] = layers["summary"]
-    strength = hypothesis.get("analytical_evidence_strength") or hypothesis.get("analytical_confidence")
-    if isinstance(strength, dict):
-        strength.setdefault("metric_name", "analytical_evidence_strength")
-        strength.setdefault("calibrated_probability", False)
-        strength.setdefault(
-            "description",
-            "Heuristic evidence strength for post-session analysis; not a calibrated probability.",
-        )
-        hypothesis.setdefault("analytical_evidence_strength", strength)
-        hypothesis.setdefault("analytical_confidence", strength)
-    provenance = report.setdefault("data_provenance", {})
-    if isinstance(provenance, dict):
-        provenance["threat_evidence_layers"] = layers["summary"]
-    return report
 
 
 def session_state_from_payload(payload: Dict[str, Any]) -> SessionState:
@@ -345,134 +405,270 @@ def deterministic_baseline_report(
     session_payload: Dict[str, Any],
     error: str,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
+    config: Optional[ProductionConfig] = None,
 ) -> Dict[str, Any]:
-    commands = session_payload.get("commands", [])
-    trusted = _trusted_payload_views(session_payload)
-    ttps = trusted["ttps"]
-    raw_events = session_payload.get("raw_events", [])
-    hunting_context = _build_session_correlation_hunting_context(
-        session_payload.get("session_ttp_correlations", []),
-        session_payload.get("session_id", "unknown"),
-    )
-    report = {
-        "session_id": session_payload.get("session_id", "unknown"),
-        "created_at": utc_now(),
-        "worker": "analysis_worker",
-        "analysis_mode": "deterministic_fallback",
-        "confidence": "Low - heuristic evidence strength; deterministic fallback",
-        "confidence_semantics": "not_a_calibrated_probability",
-        "summary": (
-            f"AI analysis failed, so this report was generated from session facts only. "
-            f"Observed {len(commands)} commands and {len(ttps)} unique TTPs."
+    safe_error = _safe_error_text(error)
+    selected = config or ProductionConfig()
+    report = build_session_assessment_v4(
+        [session_payload],
+        raw_events=session_payload.get("raw_events") or [],
+        behavior_policy_path=selected.threat_hypothesis_behavior_policy_path,
+        classification_policy=selected.classification_policy,
+        classification_policy_path=selected.classification_rules_path,
+        model_artifact_provenance=selected.prediction_policy,
+        prediction_context=prediction_snapshot or {},
+        enrichment_context=session_payload.get("enrichment_status") or {},
+        correlation_context=session_payload.get("session_ttp_correlations") or [],
+        mitre_cache_path=selected.mitre_attack_path,
+        response_guidance_policy_path=selected.response_guidance_policy_path,
+        response_guidance_asset_profile_path=(
+            selected.response_guidance_asset_profile_path
         ),
-        "commands": commands,
-        "ttps": ttps,
-        "tactics": trusted["tactics"],
-        "session_ttp_correlations": session_payload.get("session_ttp_correlations", []),
-        "session_ttp_correlation_summary": session_payload.get("session_ttp_correlation_summary", {}),
-        "threat_hunting_context": hunting_context,
-        "session_correlations": hunting_context.get("session_correlations", []),
-        "correlation_rules_fired": hunting_context.get("correlation_rules_fired", []),
-        "kev_matches": session_payload.get("kev_matches", []),
-        "sigma_hits": session_payload.get("sigma_hits", []),
-        "ttp_command_map": trusted["ttp_command_map"],
-        "threat_hypothesis": {
-            "stated_intent": "Under analysis",
-            "predicted_next_action": "Insufficient evidence to construct a falsifiable follow-on hypothesis.",
-            "post_session_follow_on_hypothesis": "Insufficient evidence to construct a falsifiable follow-on hypothesis.",
-            "falsification_conditions": [],
-            "analytical_evidence_strength": {
-                "level": "Low",
-                "reason": "The analysis coordinator failed; only trusted observed evidence is retained.",
-                "metric_name": "analytical_evidence_strength",
-                "method": "heuristic_evidence_strength_v1",
-                "calibrated_probability": False,
-                "description": "Heuristic evidence strength; not a calibrated probability.",
-            },
-            "hypothesis_status": "insufficient_evidence",
-            "scope": "post_session_cowrie_observable_behavior",
-        },
-        "error": error,
-        "data_provenance": {
-            "session": {
-                "session_id": session_payload.get("session_id", "unknown"),
-                "src_ip": session_payload.get("src_ip", "unknown"),
-                "raw_event_count": len(raw_events),
-                **command_observation_provenance(
-                    commands,
-                    session_payload.get("commands_success", []),
-                    session_payload.get("commands_failed", []),
-                ),
-            },
-            "classification": {
-                "policy": session_payload.get("classification_policy", {}),
-                "event_count": len(session_payload.get("classification_events", [])),
-                "ttp_sources": session_payload.get("ttp_sources", {}),
-            },
-            "session_ttp_correlation": session_payload.get("session_ttp_correlation_summary", {}),
-            "credentials": session_payload.get("credential_metadata", {}),
-            "enrichment": session_payload.get("enrichment_status", {}),
-            "ai": {
-                "status": "failed",
-                "fallback": "deterministic_baseline",
-                "error": error,
-            },
-        },
+    )
+    report["status"] = "observation_only_abstention"
+    report["abstention"] = {
+        "abstained": True,
+        "reason": "analysis_pipeline_failed",
     }
-    return attach_threat_evidence_layers(report, session_payload, prediction_snapshot)
+    report["behavioral_findings"] = []
+    report["hypothesis_sets"] = []
+    report["assessment_id"] = canonical_assessment_id(report)
+    report["session_id"] = str(
+        (report.get("canonical_evidence") or {}).get("session_id")
+        or session_payload.get("session_id")
+        or "unknown"
+    ).strip()
+    context = report["non_authoritative_context"]
+    context["analysis_processing"] = {
+        "status": "failed",
+        "fallback": "canonical_observation_only_abstention",
+        "error": safe_error,
+    }
+    report = attach_threat_evidence_layers(
+        report, session_payload, prediction_snapshot
+    )
+    validate_session_assessment_v4(report, raise_on_error=True)
+    return _safe_report_mapping(report)
 
 
-def load_json_config(path: str) -> Dict[str, Any]:
-    if not path or not Path(path).exists():
-        return {}
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def load_analysis_context(config: ProductionConfig) -> Dict[str, Any]:
+def load_analysis_context(
+    config: ProductionConfig,
+    *,
+    storage: Any = None,
+) -> Dict[str, Any]:
     config.apply_environment()
-    storage = open_storage(config.database_url)
+    storage = storage or open_storage(config.database_settings())
     feeds = None
     mitre_attack = None
     if config.enable_feed_loading:
         feeds = load_threat_feeds(
             cisa_cache_path=config.cisa_cache_path or None,
             sigma_cache_path=config.sigma_cache_path or None,
+            allow_network_refresh=False,
         )
         mitre_attack = load_mitre_attack_db(
             cache_path=config.mitre_attack_path or None,
             silent=True,
+            allow_network_refresh=False,
         )
+        feed_status = collect_feed_status(config)
+        feed_status["status"] = "loaded"
+        feed_status["loading_enabled"] = True
+    else:
+        feed_status = {
+            "status": "disabled",
+            "loading_enabled": False,
+        }
     enrichment_db = load_combined_ip_enrichment(
         storage=storage,
         file_path=config.enrichment_db_path,
         allow_stale=config.enrichment_allow_stale,
+        local_max_bytes=config.local_enrichment_max_bytes,
+        local_max_records=config.local_enrichment_max_records,
     )
     return {
-        "config": load_json_config(config.threat_intel_config_path),
+        "storage": storage,
         "feeds": feeds,
         "mitre_attack": mitre_attack,
         "enrichment_db": enrichment_db,
+        "feed_status": feed_status,
+        "behavior_policy": load_behavior_policy(
+            config.threat_hypothesis_behavior_policy_path
+        ),
     }
+
+
+def reconstruct_canonical_session_events(
+    storage: Any,
+    session_payload: Dict[str, Any],
+    *,
+    max_events: int,
+) -> Dict[str, Any]:
+    """Rebuild canonical event-derived fields from the exact durable prefix."""
+
+    expected = session_payload.get("canonical_event_manifest")
+    if not isinstance(expected, dict):
+        raise SessionAssessmentV4Error(
+            "analysis job lacks a canonical durable event manifest"
+        )
+    required = {
+        "schema_version",
+        "session_id",
+        "through_event_id",
+        "event_count",
+        "manifest_sha256",
+    }
+    if set(expected) != required:
+        raise SessionAssessmentV4Error(
+            "analysis job canonical event manifest contract is invalid"
+        )
+    actual = storage.load_session_event_snapshot(
+        str(expected.get("session_id") or ""),
+        str(expected.get("through_event_id") or ""),
+        max_events,
+    )
+    actual_summary = {key: actual[key] for key in required}
+    if actual_summary != expected:
+        raise SessionAssessmentV4Error(
+            "durable session evidence does not match the analysis manifest"
+        )
+    selected_session_id = str(expected.get("session_id") or "")
+    events = list(actual["events"])
+    if len(events) != int(expected.get("event_count") or -1):
+        raise SessionAssessmentV4Error(
+            "durable session evidence count does not match the analysis manifest"
+        )
+    for event in events:
+        event_session_id = str(event.get("session") or "").strip()
+        if event_session_id and event_session_id != selected_session_id:
+            raise SessionAssessmentV4Error(
+                "durable session evidence contains a conflicting session identity"
+            )
+
+    commands: List[str] = []
+    commands_success: List[str] = []
+    commands_failed: List[str] = []
+    for event in events:
+        eventid = str(event.get("eventid") or "").strip()
+        if eventid not in {
+            "cowrie.command.input",
+            "cowrie.command.success",
+            "cowrie.command.failed",
+        }:
+            continue
+        command = str(event.get("input") or "").strip()
+        if not command:
+            continue
+        commands.append(command)
+        reported_success = (
+            event.get("success") == 1 or eventid == "cowrie.command.success"
+        )
+        reported_failure = (
+            event.get("success") == 0 or eventid == "cowrie.command.failed"
+        )
+        if reported_success:
+            commands_success.append(command)
+        elif reported_failure:
+            commands_failed.append(command)
+
+    reconstructed = dict(session_payload)
+    reconstructed["session_id"] = selected_session_id
+    reconstructed["raw_events"] = events
+    reconstructed["commands"] = commands
+    reconstructed["commands_success"] = commands_success
+    reconstructed["commands_failed"] = commands_failed
+    reconstructed["login_success"] = any(
+        str(event.get("eventid") or "") == "cowrie.login.success"
+        for event in events
+    )
+    reconstructed["login_attempts"] = sum(
+        1
+        for event in events
+        if str(event.get("eventid") or "") == "cowrie.login.failed"
+    )
+    # Cached graphs may have been built from the bounded monitor projection.
+    # The v4 builder deterministically reconstructs them from this exact event
+    # set and the pinned behavior policy.
+    reconstructed["session_evidence_graph"] = {}
+    reconstructed["session_evidence_graph_summary"] = {}
+    reconstructed["canonical_event_manifest"] = dict(expected)
+    return reconstructed
 
 
 async def analyze_job(
     job: Dict[str, Any],
     config: ProductionConfig,
-    coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator,
+    coordinator_class: Type[Any] = CanonicalAssessmentCoordinator,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
+    storage: Any = None,
 ) -> Dict[str, Any]:
     session_payload = job.get("session") or json.loads(job["payload_json"])
+    selected_storage = storage or open_storage(config.database_settings())
+    session_payload = reconstruct_canonical_session_events(
+        selected_storage,
+        session_payload,
+        max_events=config.canonical_evidence_max_events,
+    )
+    context = load_analysis_context(config, storage=selected_storage)
+    classifier_environment = load_classifier_environment(
+        getattr(config, "classifier_environment_path", ""),
+        verify_assets=True,
+    )
+    replay_classifier = NotebookParityClassifier(
+        bert_fn=load_securebert_classifier(config),
+        mitre_db=context["mitre_attack"],
+        high_confidence=float(
+            config.classification_policy.get("bert_min_confidence", 0.55)
+        ),
+        rule_policy_path=config.classification_rules_path,
+    )
+    replay_snapshot = selected_storage.load_session_event_snapshot(
+        str(session_payload.get("canonical_event_manifest", {}).get("session_id") or ""),
+        str(session_payload.get("canonical_event_manifest", {}).get("through_event_id") or ""),
+        config.canonical_evidence_max_events,
+    )
+    replay_manifest_keys = (
+        "schema_version",
+        "session_id",
+        "through_event_id",
+        "event_count",
+        "manifest_sha256",
+    )
+    if {
+        key: replay_snapshot.get(key) for key in replay_manifest_keys
+    } != {
+        key: session_payload.get("canonical_event_manifest", {}).get(key)
+        for key in replay_manifest_keys
+    }:
+        raise SessionAssessmentV4Error(
+            "durable prefix changed between manifest verification and classification replay"
+        )
+    session_payload = reclassify_durable_prefix(
+        session_payload,
+        replay_snapshot,
+        replay_classifier,
+        classifier_environment,
+    )
     state = session_state_from_payload(session_payload)
     if not getattr(state, "bpg_list", None) or not getattr(state, "ioc_summary", None):
         attach_runtime_context(state)
-    context = load_analysis_context(config)
     trigger = build_pipeline_trigger(
         coordinator_class=coordinator_class,
         feeds=context["feeds"],
         mitre_db=context["mitre_attack"],
-        config=context["config"],
         enrichment_db=context["enrichment_db"],
-        max_tokens=config.analysis_max_tokens,
+        feed_loading_enabled=config.enable_feed_loading,
+        feed_status=context["feed_status"],
+        behavior_policy_document=context["behavior_policy"],
+        behavior_policy_path=config.threat_hypothesis_behavior_policy_path,
+        classification_policy=config.classification_policy,
+        classification_rules_path=config.classification_rules_path,
+        prediction_policy=config.prediction_policy,
+        prediction_policy_path=config.prediction_policy_path,
+        prediction_context=prediction_snapshot,
+        response_guidance_policy_path=config.response_guidance_policy_path,
+        response_guidance_asset_profile_path=config.response_guidance_asset_profile_path,
+        mitre_cache_path=config.mitre_attack_path,
     )
     if config.analysis_suppress_stdout:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -480,150 +676,373 @@ async def analyze_job(
     else:
         result = trigger(state)
     if not result:
-        raise RuntimeError(getattr(state, "pipeline_error", "analysis pipeline returned no report"))
+        safe_pipeline_error = _safe_error_text(
+            getattr(
+                state,
+                "pipeline_error",
+                "analysis pipeline returned no report",
+            )
+        )
+        failure = RuntimeError(safe_pipeline_error)
+        diagnostic = getattr(
+            state,
+            "pipeline_validation_diagnostic",
+            None,
+        )
+        if isinstance(diagnostic, dict):
+            failure.validation_diagnostic = diagnostic
+        raise failure from None
+    if result.get("schema_version") != "session_assessment.v4":
+        raise SessionAssessmentV4Error(
+            "new analysis reports must use session_assessment.v4"
+        )
     result.setdefault("session_id", state.session_id)
     result.setdefault("created_at", utc_now())
     result.setdefault("worker", "analysis_worker")
-    hunting_context = _build_session_correlation_hunting_context(
+    result.setdefault(
+        "correlation_id",
+        safe_correlation_id(
+            session_payload.get("correlation_id"),
+            str(job.get("job_id") or ""),
+        ),
+    )
+    hunting_context = build_session_correlation_hunting_context(
         session_payload.get("session_ttp_correlations", []),
         session_payload.get("session_id", state.session_id),
     )
-    result.setdefault("threat_hunting_context", hunting_context)
-    result.setdefault("session_correlations", hunting_context.get("session_correlations", []))
-    result.setdefault("correlation_rules_fired", hunting_context.get("correlation_rules_fired", []))
-    if isinstance(result.get("threat_hypothesis"), dict):
-        result["threat_hypothesis"].setdefault(
-            "session_correlations",
-            hunting_context.get("session_correlations", []),
+    context_payload = result.setdefault("non_authoritative_context", {})
+    if not isinstance(context_payload, dict):
+        raise SessionAssessmentV4Error(
+            "non_authoritative_context must be an object"
         )
-        result["threat_hypothesis"].setdefault(
-            "correlation_rules_fired",
-            hunting_context.get("correlation_rules_fired", []),
-        )
-    if isinstance(result.get("honeypot_intelligence"), dict):
-        result["honeypot_intelligence"].setdefault("session_correlation_findings", hunting_context)
+    context_payload["threat_hunting"] = hunting_context
     result = attach_threat_evidence_layers(result, session_payload, prediction_snapshot)
     if config.enable_actor_attribution:
-        result = enrich_report_with_actor_attribution(
-            result,
+        attribution = enrich_report_with_actor_attribution(
+            {},
             session_payload,
             config.actor_db_path,
             mitre_db=context["mitre_attack"],
         )
-    return attach_report_artifacts(result, session_payload, config)
+        context_payload["actor_attribution"] = {
+            "authority": "non_authoritative_context_only",
+            "actor_matches": attribution.get("actor_matches") or [],
+        }
+    validate_session_assessment_v4(result, raise_on_error=True)
+    result = attach_report_artifacts(result, session_payload, config)
+    validate_session_assessment_v4(result, raise_on_error=True)
+    return result
 
 
 class AnalysisWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
+        self.worker_owner = new_job_owner("analysis")
 
-    async def process_once(self, coordinator_class: Type[Any] = ImprovedAsyncSwarmCoordinator) -> int:
+    def _fail_claim(self, job: Dict[str, Any], exc: Exception, *, retryable: bool) -> str:
+        error_code, error_type, classified_retryable = job_failure_identity(
+            "analysis", exc
+        )
+        return self.storage.fail_analysis_job(
+            job["job_id"],
+            job["claim_owner"],
+            job["claim_token"],
+            error_code,
+            error_type,
+            retryable and classified_retryable,
+            self.config.analysis_max_attempts,
+            job_retry_delay(self.config, int(job.get("attempts") or 1)),
+        )
+
+    async def process_once(
+        self,
+        coordinator_class: Type[Any] = CanonicalAssessmentCoordinator,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         save_feed_status(self.storage, self.config)
-        jobs = self.storage.claim_analysis_jobs(self.config.analysis_batch_size)
         processed = 0
-        for job in jobs:
+        for _ in range(self.config.analysis_batch_size):
+            if should_stop is not None and should_stop():
+                break
+            jobs = self.storage.claim_analysis_jobs(
+                self.worker_owner,
+                1,
+                self.config.job_lease_seconds,
+                self.config.analysis_max_attempts,
+            )
+            if not jobs:
+                break
+            job = jobs[0]
+            if should_stop is not None and should_stop():
+                self.storage.release_job_claim(
+                    "analysis",
+                    job["job_id"],
+                    job["claim_owner"],
+                    job["claim_token"],
+                )
+                break
+            started_at = time.monotonic()
             session_payload = job.get("session") or {}
             session_id = job.get("session_id") or session_payload.get("session_id", "unknown")
-            latest_prediction_row = self.storage.get_latest_prediction_snapshot(session_id)
+            correlation_id = safe_correlation_id(
+                session_payload.get("correlation_id"),
+                str(job["job_id"]),
+            )
+            latest_prediction_row = self.storage.get_current_prediction_snapshot(
+                session_id
+            )
             latest_prediction = (
                 latest_prediction_row.get("payload")
                 if isinstance(latest_prediction_row, dict)
                 else None
             )
-            skip_reason = ""
-            if self.config.analysis_skip_empty_sessions:
-                skip_reason = session_analysis_skip_reason(job["session"])
-            if skip_reason:
-                self.storage.skip_analysis_job(job["job_id"], skip_reason)
+            with JobLeaseHeartbeat(self.storage, self.config, "analysis", job) as heartbeat:
+                try:
+                    # Analysis jobs contain a bounded monitor projection. It is
+                    # never an authority input. Reconstruct and bind the exact
+                    # durable prefix before any skip decision or report path.
+                    canonical_session = reconstruct_canonical_session_events(
+                        self.storage,
+                        job["session"],
+                        max_events=self.config.canonical_evidence_max_events,
+                    )
+                except Exception as exc:
+                    retry = int(job["attempts"]) < self.config.analysis_max_attempts
+                    status = self._fail_claim(job, exc, retryable=retry)
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "job_id": job["job_id"],
+                                "correlation_id": correlation_id,
+                                "status": status,
+                                "error": _safe_exception_text(exc),
+                                "canonical_evidence_status": "unavailable",
+                                "partial_report_created": False,
+                                "timestamp": utc_now(),
+                            },
+                        ),
+                        flush=True,
+                    )
+                    continue
+
+                canonical_job = dict(job)
+                canonical_job["session"] = canonical_session
+                skip_reason = ""
+                if self.config.analysis_skip_empty_sessions:
+                    skip_reason = session_analysis_skip_reason(canonical_session)
+                if skip_reason:
+                    skipped = self.storage.skip_analysis_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                        skip_reason,
+                    )
+                    processed += int(skipped)
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "job_id": job["job_id"],
+                                "session_id": job.get("session_id", "unknown"),
+                                "correlation_id": correlation_id,
+                                "status": "skipped",
+                                "reason": skip_reason,
+                                "canonical_evidence_status": "verified",
+                                "timestamp": utc_now(),
+                            },
+                        ),
+                        flush=True,
+                    )
+                    continue
+
+                try:
+                    report = await analyze_job(
+                        canonical_job,
+                        self.config,
+                        coordinator_class=coordinator_class,
+                        prediction_snapshot=latest_prediction,
+                        storage=self.storage,
+                    )
+                except Exception as exc:
+                    safe_error = _safe_exception_text(exc)
+                    validation_diagnostic = diagnostic_from_exception(
+                        exc,
+                        job_id=job["job_id"],
+                        retry_attempt=job["attempts"],
+                    )
+                    retry = int(job["attempts"]) < self.config.analysis_max_attempts
+                    status = "retry" if retry else "failed"
+                    if retry or not self.config.analysis_fallback_on_failure:
+                        transition = self._fail_claim(job, exc, retryable=retry)
+                        status = transition
+                    else:
+                        try:
+                            # Re-read and re-verify the immutable durable prefix
+                            # for fallback. Never reuse the bounded queued
+                            # projection or create artifacts after a mismatch.
+                            fallback_session = reconstruct_canonical_session_events(
+                                self.storage,
+                                job["session"],
+                                max_events=(
+                                    self.config.canonical_evidence_max_events
+                                ),
+                            )
+                            fallback = deterministic_baseline_report(
+                                fallback_session,
+                                safe_error,
+                                prediction_snapshot=latest_prediction,
+                                config=self.config,
+                            )
+                            fallback.setdefault("correlation_id", correlation_id)
+                            validate_session_assessment_v4(
+                                fallback, raise_on_error=True
+                            )
+                            fallback = attach_report_artifacts(
+                                fallback,
+                                fallback_session,
+                                self.config,
+                            )
+                            validate_session_assessment_v4(
+                                fallback, raise_on_error=True
+                            )
+                            heartbeat.check(renew=True)
+                            report_id = self.storage.complete_analysis_job(
+                                job["job_id"],
+                                job["claim_owner"],
+                                job["claim_token"],
+                                fallback,
+                                enqueue_ai_advisory=(
+                                    self.config.enable_ai_advisory
+                                ),
+                                ai_advisory_max_queue_records=(
+                                    self.config.ai_advisory_max_queue_records
+                                ),
+                                ai_advisory_reconciliation_cutoff=(
+                                    self.config.ai_advisory_reconciliation_cutoff
+                                ),
+                            )
+                            if report_id is None:
+                                status = "stale_claim"
+                            else:
+                                processed += 1
+                                status = "fallback_reported"
+                        except Exception as fallback_exc:
+                            safe_error = _safe_exception_text(fallback_exc)
+                            fallback_diagnostic = diagnostic_from_exception(
+                                fallback_exc,
+                                job_id=job["job_id"],
+                                retry_attempt=job["attempts"],
+                            )
+                            if fallback_diagnostic is not None:
+                                validation_diagnostic = fallback_diagnostic
+                            status = self._fail_claim(
+                                job,
+                                fallback_exc,
+                                retryable=False,
+                            )
+                    log_record = {
+                        "service": "analysis_worker",
+                        "job_id": job["job_id"],
+                        "correlation_id": correlation_id,
+                        "status": status,
+                        "error": safe_error,
+                        "report_generation_latency_ms": round(
+                            max(time.monotonic() - started_at, 0.0) * 1000,
+                            3,
+                        ),
+                        "timestamp": utc_now(),
+                    }
+                    if validation_diagnostic is not None:
+                        log_record["validation_diagnostic"] = (
+                            validation_diagnostic
+                        )
+                    print(
+                        _safe_log_json(log_record),
+                        flush=True,
+                    )
+                    continue
+                try:
+                    report.setdefault("correlation_id", correlation_id)
+                    heartbeat.check(renew=True)
+                    report_id = self.storage.complete_analysis_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                        report,
+                        enqueue_ai_advisory=(
+                            self.config.enable_ai_advisory
+                        ),
+                        ai_advisory_max_queue_records=(
+                            self.config.ai_advisory_max_queue_records
+                        ),
+                        ai_advisory_reconciliation_cutoff=(
+                            self.config.ai_advisory_reconciliation_cutoff
+                        ),
+                    )
+                except Exception as exc:
+                    self._fail_claim(job, exc, retryable=True)
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "job_id": job["job_id"],
+                                "correlation_id": correlation_id,
+                                "status": "completion_failed",
+                                "error": _safe_exception_text(exc),
+                                "report_generation_latency_ms": round(
+                                    max(time.monotonic() - started_at, 0.0) * 1000,
+                                    3,
+                                ),
+                                "timestamp": utc_now(),
+                            }
+                        ),
+                        flush=True,
+                    )
+                    continue
+                if report_id is None:
+                    continue
                 processed += 1
                 print(
-                    json.dumps(
+                    _safe_log_json(
                         {
                             "service": "analysis_worker",
                             "job_id": job["job_id"],
                             "session_id": job.get("session_id", "unknown"),
-                            "status": "skipped",
-                            "reason": skip_reason,
+                            "correlation_id": correlation_id,
+                            "status": "succeeded",
+                            "report_generation_latency_ms": round(
+                                max(time.monotonic() - started_at, 0.0) * 1000,
+                                3,
+                            ),
                             "timestamp": utc_now(),
                         },
-                        sort_keys=True,
                     ),
                     flush=True,
                 )
-                continue
-            try:
-                report = await analyze_job(
-                    job,
-                    self.config,
-                    coordinator_class=coordinator_class,
-                    prediction_snapshot=latest_prediction,
-                )
-            except Exception as exc:
-                retry = int(job["attempts"]) < self.config.analysis_max_attempts
-                if retry or not self.config.analysis_fallback_on_failure:
-                    self.storage.fail_analysis_job(job["job_id"], str(exc), retry=retry)
-                else:
-                    fallback = deterministic_baseline_report(
-                        job["session"],
-                        str(exc),
-                        prediction_snapshot=latest_prediction,
-                    )
-                    if self.config.enable_actor_attribution:
-                        fallback = enrich_report_with_actor_attribution(
-                            fallback,
-                            job["session"],
-                            self.config.actor_db_path,
-                        )
-                    fallback = attach_report_artifacts(fallback, job["session"], self.config)
-                    self.storage.complete_analysis_job(job["job_id"], fallback)
-                    processed += 1
-                print(
-                    json.dumps(
-                        {
-                            "service": "analysis_worker",
-                            "job_id": job["job_id"],
-                            "status": "retry" if retry else ("fallback_reported" if self.config.analysis_fallback_on_failure else "failed"),
-                            "error": str(exc),
-                            "timestamp": utc_now(),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-                continue
-            self.storage.complete_analysis_job(job["job_id"], report)
-            processed += 1
-            print(
-                json.dumps(
-                    {
-                        "service": "analysis_worker",
-                        "job_id": job["job_id"],
-                        "session_id": job.get("session_id", "unknown"),
-                        "status": "succeeded",
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
         return processed
 
-    def run_forever(self) -> None:
-        while True:
-            processed = asyncio.run(self.process_once())
-            print(
-                json.dumps(
-                    {
-                        "service": "analysis_worker",
-                        "processed": processed,
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            time.sleep(self.config.worker_poll_seconds)
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
+        with control.signal_handlers():
+            while not control.stopping:
+                processed = asyncio.run(
+                    self.process_once(should_stop=lambda: control.stopping)
+                )
+                if processed:
+                    print(
+                        _safe_log_json(
+                            {
+                                "service": "analysis_worker",
+                                "processed": processed,
+                                "timestamp": utc_now(),
+                            },
+                        ),
+                        flush=True,
+                    )
+                control.wait(self.config.worker_poll_seconds)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -639,7 +1058,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     worker = AnalysisWorker(config)
     if args.once:
         processed = asyncio.run(worker.process_once())
-        print(json.dumps({"service": "analysis_worker", "processed": processed}, sort_keys=True))
+        print(_safe_log_json({"service": "analysis_worker", "processed": processed}))
         return 0
     worker.run_forever()
     return 0

@@ -1,0 +1,325 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from production.storage import (
+    CanonicalEventRecord,
+    DatabaseConfigurationError,
+    DatabaseSettings,
+    SQLiteStorage,
+    StorageBackend,
+    StorageError,
+    open_storage,
+    safe_database_descriptor,
+    safe_database_label,
+)
+from production.utils.config import ProductionConfig
+
+
+DATABASE_ENVIRONMENT_KEYS = (
+    "DATABASE_BACKEND",
+    "DATABASE_URL",
+    "SQLITE_DATABASE_PATH",
+    "MONGODB_URI_FILE",
+    "ROLLBACK_SQLITE_DATABASE_PATH",
+    "STORAGE_EPOCH_RECEIPT_PATH",
+    "HONEYPOT_CONFIG_FILE",
+)
+
+
+def _clear_database_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in DATABASE_ENVIRONMENT_KEYS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_default_config_selects_sqlite_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_database_environment(monkeypatch)
+    config = ProductionConfig.from_env()
+
+    assert config.database_backend == "sqlite"
+    assert config.sqlite_database_path == "production_state.db"
+    assert config.database_url == "sqlite:///production_state.db"
+    assert config.safe_database_descriptor() == {
+        "backend": "sqlite",
+        "database_path": "production_state.db",
+    }
+
+
+def test_explicit_sqlite_environment_overrides_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_database_environment(monkeypatch)
+    database_path = tmp_path / "state.db"
+    monkeypatch.setenv("DATABASE_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DATABASE_PATH", str(database_path))
+
+    config = ProductionConfig.from_env()
+
+    assert config.database_backend == "sqlite"
+    assert config.sqlite_database_path == str(database_path)
+    assert config.database_url == f"sqlite:///{database_path}"
+
+
+def test_legacy_database_url_still_selects_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_database_environment(monkeypatch)
+    database_path = tmp_path / "legacy.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+
+    config = ProductionConfig.from_env()
+
+    assert config.database_backend == "sqlite"
+    assert config.sqlite_database_path == str(database_path)
+
+
+def test_non_sqlite_url_fails_closed() -> None:
+    with pytest.raises(
+        DatabaseConfigurationError,
+        match="conflicts",
+    ):
+        DatabaseSettings.from_values(
+            database_backend="sqlite",
+            database_url="mongodb://database.internal/honeypot",
+            sqlite_database_path="state.db",
+        )
+
+
+def test_explicit_sqlite_path_conflict_with_legacy_url_fails() -> None:
+    with pytest.raises(
+        DatabaseConfigurationError,
+        match="SQLITE_DATABASE_PATH conflicts",
+    ):
+        DatabaseSettings.from_values(
+            database_backend="sqlite",
+            database_url="sqlite:///one.db",
+            sqlite_database_path="two.db",
+        )
+@pytest.mark.parametrize("backend", ["postgresql", "postgres"])
+def test_archived_database_backends_are_rejected(backend: str) -> None:
+    with pytest.raises(DatabaseConfigurationError, match="expected sqlite"):
+        DatabaseSettings.from_values(database_backend=backend)
+
+
+def test_unsupported_url_error_does_not_echo_credentials() -> None:
+    database_url = "mysql://unit-user:unit-password@database.internal/honeypot"
+
+    with pytest.raises(StorageError) as raised:
+        safe_database_descriptor(database_url)
+
+    assert "expected sqlite or MongoDB" in str(raised.value)
+    assert "unit-user" not in str(raised.value)
+    assert "unit-password" not in str(raised.value)
+
+
+def test_mongodb_requires_every_fail_closed_runtime_path(tmp_path: Path) -> None:
+    with pytest.raises(DatabaseConfigurationError, match="URI, rollback mirror"):
+        DatabaseSettings.from_values(database_backend="mongodb")
+    settings = DatabaseSettings.from_values(
+        database_backend="mongodb",
+        mongodb_uri_file=str(tmp_path / "uri"),
+        rollback_sqlite_database_path=str(tmp_path / "mirror.db"),
+        storage_epoch_receipt_path=str(tmp_path / "epoch.json"),
+    )
+    assert settings.backend == "mongodb"
+    assert "uri" not in settings.safe_descriptor()
+
+
+def test_specifically_configured_missing_file_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_database_environment(monkeypatch)
+    missing = tmp_path / "missing.json"
+
+    with pytest.raises(FileNotFoundError, match="production config file not found"):
+        ProductionConfig.from_env(str(missing))
+
+
+def test_sqlite_adapter_implements_contract_and_health_check(
+    tmp_path: Path,
+) -> None:
+    storage = open_storage(
+        DatabaseSettings.from_values(
+            database_backend="sqlite",
+            sqlite_database_path=str(tmp_path / "contract.db"),
+        )
+    )
+
+    assert isinstance(storage, SQLiteStorage)
+    assert isinstance(storage, StorageBackend)
+    assert storage.health_check() == {"ok": True, "backend": "sqlite"}
+
+
+def test_backend_neutral_event_record_preserves_bytes_identity_and_received_at(
+    tmp_path: Path,
+) -> None:
+    event = {
+        "eventid": "cowrie.command.input",
+        "session": "sensor-a:cowrie-session-a",
+        "src_ip": "192.0.2.10",
+        "timestamp": "2026-08-12T00:00:00Z",
+        "input": "id",
+    }
+    record = CanonicalEventRecord.create(
+        "sensor-a",
+        event,
+        received_at="2026-08-12T01:02:03+00:00",
+    )
+    storage = open_storage(f"sqlite:///{tmp_path / 'canonical-record.db'}")
+
+    first = storage.store_canonical_event(record)
+    second = storage.store_canonical_event(record)
+    row = storage.fetch_events(limit=1)[0]
+
+    assert first == (record.event_id, True)
+    assert second == (record.event_id, False)
+    assert record.received_at == "2026-08-12T01:02:03.000000+00:00"
+    assert row["received_at"] == record.received_at
+    assert row["payload_json"] == record.payload_json
+
+
+def test_backend_neutral_event_record_rejects_tampering(tmp_path: Path) -> None:
+    record = CanonicalEventRecord.create(
+        "sensor-a",
+        {
+            "eventid": "cowrie.login.failed",
+            "session": "sensor-a:cowrie-session-a",
+            "src_ip": "192.0.2.10",
+        },
+        received_at="2026-08-12T01:02:03Z",
+    )
+    tampered = CanonicalEventRecord(
+        **{**record.__dict__, "payload_sha256": "0" * 64}
+    )
+    storage = open_storage(f"sqlite:///{tmp_path / 'tampered-record.db'}")
+
+    with pytest.raises(StorageError, match="integrity validation"):
+        storage.store_canonical_event(tampered)
+
+
+def test_sqlite_health_check_is_read_only_and_does_not_reinitialize_schema(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "readiness.db"
+    storage = open_storage(f"sqlite:///{database_path}")
+    before_hash = hashlib.sha256(database_path.read_bytes()).hexdigest()
+
+    assert storage.health_check() == {"ok": True, "backend": "sqlite"}
+
+    assert hashlib.sha256(database_path.read_bytes()).hexdigest() == before_hash
+
+
+def test_safe_database_label_is_canonical_sqlite_path(tmp_path: Path) -> None:
+    database_path = tmp_path / "safe-label.db"
+    assert safe_database_label(f"sqlite:///{database_path}") == (
+        f"sqlite:///{database_path}"
+    )
+
+
+def test_sqlite_list_rows_for_session_matches_list_rows_shape_and_order(
+    tmp_path: Path,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'session-rows.db'}")
+    first_id, _ = storage.store_event(
+        "sensor",
+        {
+            "eventid": "cowrie.login.failed",
+            "session": "session-a",
+            "src_ip": "8.8.8.8",
+            "timestamp": "2026-07-16T00:00:01Z",
+        },
+    )
+    storage.store_event(
+        "sensor",
+        {
+            "eventid": "cowrie.login.failed",
+            "session": "session-b",
+            "src_ip": "1.1.1.1",
+            "timestamp": "2026-07-16T00:00:02Z",
+        },
+    )
+    latest_id, _ = storage.store_event(
+        "sensor",
+        {
+            "eventid": "cowrie.command.input",
+            "session": "session-a",
+            "src_ip": "8.8.8.8",
+            "timestamp": "2026-07-16T00:00:03Z",
+            "input": "id",
+        },
+    )
+
+    expected = [
+        row
+        for row in storage.list_rows("events", limit=10)
+        if row["session_id"] == "session-a"
+    ]
+    actual = storage.list_rows_for_session("events", "session-a", limit=10)
+
+    assert actual == expected
+    assert [row["event_id"] for row in actual] == [latest_id, first_id]
+    assert storage.list_rows_for_session("events", "session-a", limit=1) == [
+        expected[0]
+    ]
+
+
+def test_sqlite_list_rows_for_session_supports_explicit_table_allowlist(
+    tmp_path: Path,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'allowed-session-rows.db'}")
+    allowed_tables = (
+        "events",
+        "sessions",
+        "alerts",
+        "analysis_jobs",
+        "reports",
+        "enrichment_jobs",
+        "prediction_snapshots",
+        "analyst_feedback",
+        "classification_review_labels",
+        "observable_sightings",
+        "threat_hunt_jobs",
+        "campaign_sessions",
+    )
+
+    for table in allowed_tables:
+        assert storage.list_rows_for_session(table, "missing-session") == []
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        "feed_status",
+        "observables",
+        "webhook_deliveries",
+        "events WHERE session_id = 'session-a'",
+    ],
+)
+def test_sqlite_list_rows_for_session_rejects_non_allowlisted_tables(
+    tmp_path: Path,
+    table: str,
+) -> None:
+    storage = open_storage(f"sqlite:///{tmp_path / 'rejected-session-rows.db'}")
+
+    with pytest.raises(ValueError, match="unsupported session-scoped table"):
+        storage.list_rows_for_session(table, "session-a")
+
+
+def test_example_config_uses_explicit_backend_contract() -> None:
+    values = json.loads(
+        Path("configs/production_config.example.json").read_text(encoding="utf-8")
+    )
+    config = ProductionConfig(**values)
+
+    assert config.database_backend == "sqlite"
+    assert config.sqlite_database_path == "production_state.db"
+    assert "database_url" not in values

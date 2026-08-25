@@ -1,0 +1,38 @@
+{
+  "schema_version": "cowrie_public_connectivity_root_cause.v1",
+  "decision": "PUBLIC_COWRIE_CONNECTIVITY_RESTORED",
+  "gcp_public_ip": "34.124.181.196",
+  "instance_tag": "honeypot-test",
+  "listener": {
+    "address": "0.0.0.0",
+    "port": 2222,
+    "process": "haproxy",
+    "configuration_valid": true
+  },
+  "backend": {
+    "tailscale_address": "100.118.43.30",
+    "port": 2224,
+    "proxy_protocol": "send-proxy",
+    "ha_proxy_status": "UP"
+  },
+  "firewall_rule": {
+    "name": "allow-cowrie-relay-2222",
+    "before_disabled": true,
+    "after_disabled": false,
+    "source_ranges": ["0.0.0.0/0"],
+    "allowed": ["tcp:2222"],
+    "priority": 1000,
+    "target_tags": ["honeypot-test"],
+    "before_receipt_sha256": "0aa2ad1e6b0ad627fbcf4f9d7935c6b6cd3879a5218261b0a33681391e33355f",
+    "after_receipt_sha256": "d99832d058cb77d3cffc928b2407cbf4dfa96f6a4480dd888eb203c9957e557c"
+  },
+  "packet_evidence": {
+    "before_packets_captured": 0,
+    "after_syn": 2,
+    "after_syn_ack": 2,
+    "payload_capture_retained": false
+  },
+  "pi_release": "5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02",
+  "pi_modified": false,
+  "rollback_command": "gcloud compute firewall-rules update allow-cowrie-relay-2222 --disabled"
+}

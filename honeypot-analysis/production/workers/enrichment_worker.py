@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
+from production.policies.data_lifecycle_policy import load_data_lifecycle_policy
 from production.utils.config import ProductionConfig
 from production.enrichment.enrichment_providers import (
     EnrichmentProvider,
@@ -14,8 +16,16 @@ from production.enrichment.enrichment_providers import (
     build_default_providers,
     merge_provider_results,
 )
+from production.utils.sensitive_data import redact_exception_for_log
 from production.utils.serialization import utc_now
+from production.utils.service_lifecycle import ServiceLifecycle
 from production.storage import open_storage
+from production.workers.job_lifecycle import (
+    JobLeaseHeartbeat,
+    job_failure_identity,
+    job_retry_delay,
+    new_job_owner,
+)
 
 
 class EnrichmentWorker:
@@ -23,26 +33,86 @@ class EnrichmentWorker:
 
     def __init__(self, config: ProductionConfig, providers: Optional[List[EnrichmentProvider]] = None) -> None:
         self.config = config
-        self.storage = open_storage(config.database_url)
+        self.storage = open_storage(config.database_settings())
         self.providers = providers if providers is not None else build_default_providers(config)
+        self.data_lifecycle_policy = load_data_lifecycle_policy(
+            config.data_lifecycle_policy_path
+        )
+        self.worker_owner = new_job_owner("enrichment")
 
     def _run_providers(self, observable_type: str, observable_value: str) -> List[ProviderResult]:
-        results: List[ProviderResult] = []
-        for provider in self.providers:
-            if not provider.supports(observable_type):
+        supported = [
+            provider for provider in self.providers if provider.supports(observable_type)
+        ]
+        profile = getattr(self.config, "external_enrichment_profile", "disabled")
+        lifecycle = getattr(self, "data_lifecycle_policy", None)
+        source_ip_sharing_allowed = (
+            lifecycle is not None
+            and lifecycle.document["privacy"][
+                "source_ip_external_sharing_allowed"
+            ]
+            is True
+        )
+        selected: List[EnrichmentProvider] = []
+        blocked: List[EnrichmentProvider] = []
+        for provider in supported:
+            if not getattr(provider, "external", False):
+                selected.append(provider)
                 continue
+            allowed = profile == "non_ip_observables" and observable_type != "ip"
+            if observable_type == "ip" and not source_ip_sharing_allowed:
+                allowed = False
+            (selected if allowed else blocked).append(provider)
+
+        def run_provider(provider: EnrichmentProvider) -> ProviderResult:
+            started_at = time.monotonic()
             try:
-                results.append(provider.enrich(observable_type, observable_value))
-            except Exception as exc:
-                results.append(
-                    ProviderResult(
-                        provider=provider.name,
-                        status="error",
-                        error=f"{type(exc).__name__}: {exc}",
-                        ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
-                    )
+                result = provider.enrich(observable_type, observable_value)
+                result.latency_ms = round(
+                    max(time.monotonic() - started_at, 0.0) * 1000,
+                    3,
                 )
-        if not results:
+                return result
+            except Exception as exc:
+                return ProviderResult(
+                    provider=provider.name,
+                    # Compatibility alias for providers outside the built-in
+                    # adapters, whose exception type cannot be classified here.
+                    status="error",
+                    error=redact_exception_for_log(exc),
+                    ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
+                    latency_ms=round(
+                        max(time.monotonic() - started_at, 0.0) * 1000,
+                        3,
+                    ),
+                )
+
+        results: List[ProviderResult] = []
+        if selected:
+            max_workers = min(
+                len(selected),
+                max(int(getattr(self.config, "enrichment_provider_workers", 4)), 1),
+            )
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="enrichment-provider",
+            ) as executor:
+                # executor.map preserves configured provider order even though
+                # requests execute concurrently.
+                results = list(executor.map(run_provider, selected))
+        if not results and blocked:
+            results.append(
+                ProviderResult(
+                    provider="external_policy",
+                    status="policy_prohibited",
+                    data={
+                        "profile": profile,
+                        "observable_type": observable_type,
+                    },
+                    ttl_seconds=min(self.config.enrichment_ttl_seconds, 3600),
+                )
+            )
+        elif not results:
             results.append(
                 ProviderResult(
                     provider="none",
@@ -52,67 +122,146 @@ class EnrichmentWorker:
             )
         return results
 
-    def process_once(self) -> int:
-        jobs = self.storage.claim_enrichment_jobs(self.config.enrichment_batch_size)
+    def process_once(
+        self,
+        *,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         processed = 0
-        for job in jobs:
+        for _ in range(self.config.enrichment_batch_size):
+            if should_stop is not None and should_stop():
+                break
+            jobs = self.storage.claim_enrichment_jobs(
+                self.worker_owner,
+                1,
+                self.config.job_lease_seconds,
+                self.config.enrichment_max_attempts,
+            )
+            if not jobs:
+                break
+            job = jobs[0]
+            if should_stop is not None and should_stop():
+                self.storage.release_job_claim(
+                    "enrichment",
+                    job["job_id"],
+                    job["claim_owner"],
+                    job["claim_token"],
+                )
+                break
             observable_type = job["observable_type"]
             observable_value = job["observable_value"]
-            try:
-                results = self._run_providers(observable_type, observable_value)
-                payload, provider_status, expires_at = merge_provider_results(
-                    observable_type,
-                    observable_value,
-                    results,
-                    default_ttl_seconds=self.config.enrichment_ttl_seconds,
-                )
-                self.storage.save_enrichment_record(
-                    observable_type,
-                    observable_value,
-                    payload,
-                    provider_status,
-                    expires_at=expires_at,
-                )
-                self.storage.complete_enrichment_job(job["job_id"])
-                processed += 1
-            except Exception as exc:
-                retry = int(job["attempts"]) < self.config.enrichment_max_attempts
-                self.storage.fail_enrichment_job(
-                    job["job_id"],
-                    f"{type(exc).__name__}: {exc}",
-                    retry=retry,
-                    retry_seconds=self.config.enrichment_retry_seconds,
-                )
-                print(
-                    json.dumps(
-                        {
-                            "service": "enrichment_worker",
-                            "job_id": job["job_id"],
-                            "status": "retry" if retry else "failed",
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "timestamp": utc_now(),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
+            with JobLeaseHeartbeat(self.storage, self.config, "enrichment", job) as heartbeat:
+                try:
+                    results = self._run_providers(observable_type, observable_value)
+                    print(
+                        json.dumps(
+                            {
+                                "service": "enrichment_worker",
+                                "job_id": job["job_id"],
+                                "correlation_id": job["job_id"],
+                                "provider_results": [
+                                    {
+                                        "provider": result.provider,
+                                        "status": result.status,
+                                        "latency_ms": result.latency_ms,
+                                    }
+                                    for result in results
+                                ],
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                    payload, provider_status, expires_at = merge_provider_results(
+                        observable_type,
+                        observable_value,
+                        results,
+                        default_ttl_seconds=self.config.enrichment_ttl_seconds,
+                    )
+                    payload["enrichment_policy"] = {
+                        "external_profile": self.config.external_enrichment_profile,
+                        "data_lifecycle_policy_id": self.data_lifecycle_policy.policy_id,
+                        "data_lifecycle_policy_version": self.data_lifecycle_policy.version,
+                        "data_lifecycle_policy_sha256": self.data_lifecycle_policy.sha256,
+                        "source_ip_external_sharing_allowed": (
+                            self.data_lifecycle_policy.document["privacy"][
+                                "source_ip_external_sharing_allowed"
+                            ]
+                            is True
+                        ),
+                        "authority": "non_authoritative_context_only",
+                    }
+                    self.storage.save_enrichment_record(
+                        observable_type,
+                        observable_value,
+                        payload,
+                        provider_status,
+                        expires_at=expires_at,
+                    )
+                    if any(
+                        result.status in {"error", "temporary_error", "rate_limited"}
+                        for result in results
+                    ):
+                        # Preserve per-provider status in the cache, but keep the
+                        # durable job retryable instead of declaring a partial
+                        # provider outage to be complete enrichment success.
+                        raise ConnectionError("one or more enrichment providers failed")
+                    heartbeat.check(renew=True)
+                    completed = self.storage.complete_enrichment_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                    )
+                    processed += int(completed)
+                except Exception as exc:
+                    error_code, error_type, retryable = job_failure_identity(
+                        "enrichment", exc
+                    )
+                    status = self.storage.fail_enrichment_job(
+                        job["job_id"],
+                        job["claim_owner"],
+                        job["claim_token"],
+                        error_code,
+                        error_type,
+                        retryable,
+                        self.config.enrichment_max_attempts,
+                        job_retry_delay(self.config, int(job.get("attempts") or 1)),
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "service": "enrichment_worker",
+                                "job_id": job["job_id"],
+                                "correlation_id": job["job_id"],
+                                "status": status,
+                                "error": redact_exception_for_log(exc),
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
         return processed
 
-    def run_forever(self) -> None:
-        while True:
-            processed = self.process_once()
-            print(
-                json.dumps(
-                    {
-                        "service": "enrichment_worker",
-                        "processed": processed,
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            time.sleep(self.config.worker_poll_seconds)
+    def run_forever(self, lifecycle: Optional[ServiceLifecycle] = None) -> None:
+        control = lifecycle or ServiceLifecycle()
+        with control.signal_handlers():
+            while not control.stopping:
+                processed = self.process_once(should_stop=lambda: control.stopping)
+                if processed:
+                    print(
+                        json.dumps(
+                            {
+                                "service": "enrichment_worker",
+                                "processed": processed,
+                                "timestamp": utc_now(),
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                control.wait(self.config.worker_poll_seconds)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
