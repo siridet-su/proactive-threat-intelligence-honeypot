@@ -1,0 +1,43 @@
+{
+  "schema_version": "prediction_next_distinct_transformer_refinement_completion_addendum_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "created_at": "2026-08-23T10:47:40Z",
+  "completion_id": "prediction_next_distinct_transformer_refinement_v1_20260823_retry3_completion_addendum",
+  "base_receipt": {
+    "path": "receipt.json",
+    "self_sha256": "5faf7491b445ae0ea3352f84f20b9e3fe68bc5f1a0ed2b09b28d7fac68c82d0b",
+    "file_sha256": "1926fdd2e3c748507bfc2c6646771c9b7aaf1942bd58842e63b64c3514a8c9d1",
+    "unchanged": true
+  },
+  "supplemental_artifacts": {
+    "leakage_audit.json": {
+      "canonical_json_sha256": "f2dc282e6add4315726dd21903e326803636fb2b578c801f4ff5ed9ba2001dd8",
+      "file_sha256": "a5812bf090773b73b3f5e485294431701e11951cb42dc00c0823b3f360695c8d"
+    },
+    "leakage_audit.md": {
+      "file_sha256": "1d66cad68fa93b6b95e2dad91a4429ba00d0a87c65cdeacfe22114262b27f5cc"
+    }
+  },
+  "correction_binding": {
+    "adoption_decision_correction_receipt_path": "adoption_decision_correction_receipt.v1.json",
+    "adoption_decision_correction_receipt_self_sha256": "0c2cd4b00f914cee00ed7fadcdb528f331924c899b7052de36aa579e99cfa2bb",
+    "adoption_decision_correction_receipt_file_sha256": "93f427d9c2510dbee2ed2b0c4169e58e0d2bc7fe3b9e6d819b02e1d91bf76e56",
+    "metric_consistency_correction": "matching 3-seed/5-fold baseline and refined aggregates; frozen historical addendum preserved"
+  },
+  "study_state": {
+    "search_complete": true,
+    "candidate_frozen": true,
+    "post_selection_descriptive_complete": true,
+    "leakage_audit_complete": true,
+    "models_retrained": true,
+    "post_selection_retraining": false,
+    "sealed_data_accessed": false,
+    "external_ai_called": false,
+    "production_changed": false,
+    "prior_artifacts_preserved": true,
+    "existing_files_modified": [],
+    "existing_files_overwritten": []
+  },
+  "note": "Supplemental content-addressed completion evidence. It does not modify receipt.json or any prior experiment artifact.",
+  "receipt_sha256": "5c7cc43da78ad37607c8df248afb5ededb5ef8fa617cc9dbc5a8c149d565b607"
+}

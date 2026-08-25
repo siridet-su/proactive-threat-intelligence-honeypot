@@ -1,0 +1,58 @@
+{
+  "schema_version": "securebert_training_data_provenance_audit.v1",
+  "audit_id": "securebert-training-data-provenance-20260820-v1",
+  "status": "INCOMPLETE_TRAINING_DATA_PROVENANCE",
+  "scope": "Read-only audit of provenance available for the frozen SecureBERT checkpoint; no sealed data, training, or model mutation.",
+  "checkpoint": {
+    "checkpoint_id": "securebert_ttp_model_v2/checkpoint-6765",
+    "checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+    "environment_policy_path": "configs/next_behavior_classifier_environment.v1.json",
+    "environment_policy_sha256": "cbdef20f159b465bb62e25f0575a43b0ecc7caeacc55fb7978cb379c1b73edb4",
+    "raw_scores_are_probabilities": false,
+    "checkpoint_compatibility_status": "pending_phase7_deterministic_semantics_freeze"
+  },
+  "model_bundle_evidence": {
+    "manifest_path": "build/release-7194c0b4091c5acd234708b494f400cd901fcdc7/model-bundles/frozen_model_bundle_62a8ffe36cc4ee0561c3ae191d2e8733/FROZEN_MODEL_BUNDLE_MANIFEST.json",
+    "manifest_sha256": "ec27d2a4b3c75a36d343fac86d0f9c9fb29f380c2827c4aa39593cc408d749f7",
+    "bundle_id": "frozen_model_bundle_62a8ffe36cc4ee0561c3ae191d2e8733",
+    "bundle_identity_sha256": "62a8ffe36cc4ee0561c3ae191d2e8733434549761f1e842cc82031068e156c96",
+    "artifact_inventory_sha256": "fb9804a1beb3d62f31bc1fc031a54f031ab3201c062402723b2bf748c80195c7",
+    "available_files": [
+      {"path": "securebert_ttp/checkpoint-6765/config.json", "sha256": "5e8ceaf5a403d630e78d8c49982f97b519b227977f4880166d3168f38988b90b"},
+      {"path": "securebert_ttp/checkpoint-6765/model.safetensors", "sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b"},
+      {"path": "securebert_ttp/checkpoint-6765/tokenizer.json", "sha256": "e0a696f1fbf0f2c7d212e8b9e133250d19bd1c7e5bc34fc91c59d008894dc7b1"},
+      {"path": "securebert_ttp/checkpoint-6765/tokenizer_config.json", "sha256": "cbea6a0ec8bf4a66475f458a359223ec17f1ac36b2f5797036a76140daa065de"},
+      {"path": "securebert_ttp/label_mapping.json", "sha256": "53a6fca070ce44d15731cf654475e1e66a17d0c1f924021ab597d192ba22f16b"}
+    ]
+  },
+  "checked_local_sources": [
+    "configs/next_behavior_classifier_environment.v1.json",
+    "build/release-7194c0b4091c5acd234708b494f400cd901fcdc7/model-bundles/frozen_model_bundle_62a8ffe36cc4ee0561c3ae191d2e8733/FROZEN_MODEL_BUNDLE_MANIFEST.json",
+    "build/release-7194c0b4091c5acd234708b494f400cd901fcdc7/model-bundles/frozen_model_bundle_62a8ffe36cc4ee0561c3ae191d2e8733/securebert_ttp/",
+    "data/models/ (repository model paths checked for a separate SecureBERT training receipt)",
+    "evaluation/ and configs/ (local manifests checked for a SecureBERT dataset-membership receipt)"
+  ],
+  "available_training_provenance": [
+    "Checkpoint/model/tokenizer/label-mapping bytes and their content hashes.",
+    "Classifier environment identity, current rule policy, ATT&CK cache, authority/trust source hashes, and candidate/trusted score cutoffs.",
+    "Model-bundle identity and artifact inventory.",
+    "A bundle source_receipt containing temporary source-root paths; it does not identify a training corpus."
+  ],
+  "missing_training_provenance": [
+    "Authoritative training corpus/archive identity and immutable membership list.",
+    "Train/validation/test split membership and leakage/intersection receipt.",
+    "Per-example label-generation policy version, source evidence, confidence, and rule/model provenance.",
+    "Training-data licensing/consent/retention and collection provenance.",
+    "Training run configuration beyond the checkpoint artifact (seed, optimizer, schedule, preprocessing and dependency receipt).",
+    "Independent dataset-level evaluation receipt tied to the exact checkpoint and label domain."
+  ],
+  "constraints_verified": {
+    "sealed_data_accessed": false,
+    "securebert_retrained": false,
+    "transformer_materialization_resumed": false,
+    "production_changed": false,
+    "ai_provider_called": false
+  },
+  "conclusion": "The checkpoint has strong byte/model identity but incomplete training-data provenance. It must not be represented as independently reproducible or as canonical ATT&CK truth until the missing dataset and label-lineage evidence is supplied.",
+  "content_sha256": "d21fe2c41bacf0a121440872f0405a811063f0d9b93ec805f9b57c12144d3076"
+}

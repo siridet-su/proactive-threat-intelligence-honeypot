@@ -722,15 +722,9 @@ def _command_facts(
         if not isinstance(observation, dict):
             continue
         observed_cwd = _clean(observation.get("working_directory_observed"))
-        observed_cwd_status = _clean(observation.get("working_directory_status"))
         compound_index = int(observation.get("compound_command_index") or 0)
         if observed_cwd.startswith("/"):
-            effective = observed_cwd
-            cwd_status = (
-                "confirmed"
-                if observed_cwd_status == "confirmed"
-                else "observed"
-            )
+            effective, cwd_status = observed_cwd, "observed"
         elif candidates_by_compound.get(compound_index):
             effective = candidates_by_compound[compound_index]
             cwd_status = "conditional_candidate"

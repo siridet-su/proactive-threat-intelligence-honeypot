@@ -22,13 +22,9 @@ from production.reproduction.next_behavior.classifier_assets import (
 from production.utils.serialization import stable_json
 
 
-SCHEMA_VERSION = "classification_environment.v4"
+SCHEMA_VERSION = "classification_environment.v3"
 LEGACY_SCHEMA_VERSIONS = frozenset(
-    {
-        "next_behavior_classifier_environment.v1",
-        "next_behavior_classifier_environment.v2",
-        "next_behavior_classifier_environment.v3",
-    }
+    {"next_behavior_classifier_environment.v1", "next_behavior_classifier_environment.v2"}
 )
 DEFAULT_RECEIPT_PATH = "configs/next_behavior_classifier_environment.v1.json"
 
@@ -70,7 +66,7 @@ def load_classifier_environment(
         raise ClassifierAssetError("; ".join(errors))
     receipt_schema = _clean(receipt.get("schema_version"))
     if receipt_schema not in {
-        "next_behavior_classifier_environment.v4",
+        "next_behavior_classifier_environment.v3",
         *LEGACY_SCHEMA_VERSIONS,
     }:
         raise ClassifierAssetError("runtime classifier environment schema is unsupported")
@@ -117,7 +113,7 @@ def load_classifier_environment(
             raise ClassifierAssetError("classifier environment deployment revision mismatch")
         if receipt_schema in LEGACY_SCHEMA_VERSIONS and deployed_revision and deployed_revision.lower() != receipt_revision.lower():
             raise ClassifierAssetError("classifier environment deployment revision mismatch")
-        if receipt_schema == "next_behavior_classifier_environment.v4":
+        if receipt_schema == "next_behavior_classifier_environment.v3":
             binding = deployed.get("classifier_environment")
             if not isinstance(binding, dict):
                 raise ClassifierAssetError("classifier environment release binding is missing")
@@ -126,7 +122,7 @@ def load_classifier_environment(
             source_identity = receipt.get("source_identity") or {}
             if binding.get("source_identity_sha256") != source_identity.get("sha256"):
                 raise ClassifierAssetError("classifier environment release source identity mismatch")
-    elif receipt_schema == "next_behavior_classifier_environment.v4" and configured_revision:
+    elif receipt_schema == "next_behavior_classifier_environment.v3" and configured_revision:
         raise ClassifierAssetError("classifier environment release binding is unavailable")
 
     if verify_assets:
@@ -145,9 +141,6 @@ def load_classifier_environment(
             policy.get("rule_policy_path", ""): policy.get("rule_policy_sha256"),
             policy.get("trust_policy_path", ""): policy.get("trust_policy_sha256"),
             policy.get("mitre_cache_path", ""): policy.get("mitre_cache_sha256"),
-            policy.get("preprocessing_contract_path", ""): policy.get(
-                "preprocessing_contract_sha256"
-            ),
         }
         for relative, expected in checks.items():
             asset = root / str(relative)

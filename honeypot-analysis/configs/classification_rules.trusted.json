@@ -10,95 +10,10 @@
     "enabled": true,
     "rule_review_mode": "reviewed_only",
     "runtime_authority": {
-      "schema_version": "command_authority_decision.v2",
+      "schema_version": "command_authority_decision.v1",
       "regex_default_promotion": "audit_only",
-      "trusted_regex_operation_class": "reviewed_operation_context",
       "trusted_literal_fallback_rule_ids": [
-        "cmd-rule-001-t1033-system-owner-user-discovery",
-        "cmd-rule-002-t1082-system-information-discovery",
-        "cmd-rule-003-t1082-system-information-discovery",
-        "cmd-rule-004-t1003-os-credential-dumping",
-        "cmd-rule-005-t1087-account-discovery",
-        "cmd-rule-006-t1069-permission-groups-discovery",
-        "cmd-rule-007-t1016-system-network-configuration-discovery",
-        "cmd-rule-008-t1016-system-network-configuration-discovery",
-        "cmd-rule-009-t1049-system-network-connections-discovery",
-        "cmd-rule-010-t1057-process-discovery",
-        "cmd-rule-011-t1057-process-discovery",
-        "cmd-rule-012-t1083-file-and-directory-discovery",
-        "cmd-rule-013-t1083-file-and-directory-discovery",
-        "cmd-rule-014-t1053-scheduled-task-job",
-        "cmd-rule-015-t1053-scheduled-task-job",
-        "cmd-rule-017-t1547-boot-logon-autostart-execution",
-        "cmd-rule-018-t1543-create-or-modify-system-process",
-        "cmd-rule-019-t1543-create-or-modify-system-process",
-        "cmd-rule-020-t1136-create-account",
-        "cmd-rule-021-t1136-create-account",
-        "cmd-rule-022-t1098-account-manipulation",
-        "cmd-rule-023-t1098-account-manipulation",
-        "cmd-rule-024-t1548-abuse-elevation-control-mechanism",
-        "cmd-rule-025-t1548-abuse-elevation-control-mechanism",
-        "cmd-rule-026-t1548-abuse-elevation-control-mechanism",
-        "cmd-rule-027-t1140-deobfuscate-decode-files",
-        "cmd-rule-028-t1140-deobfuscate-decode-files",
-        "cmd-rule-029-t1027-obfuscated-files-or-information",
-        "cmd-rule-030-t1070-indicator-removal",
-        "cmd-rule-031-t1070-indicator-removal",
-        "cmd-rule-032-t1070-indicator-removal",
-        "cmd-rule-033-t1059-command-and-scripting-interpreter",
-        "cmd-rule-034-t1059-command-and-scripting-interpreter",
-        "cmd-rule-035-t1059-command-and-scripting-interpreter",
-        "cmd-rule-036-t1059-command-and-scripting-interpreter",
-        "cmd-rule-038-t1059-command-and-scripting-interpreter",
-        "cmd-rule-039-t1059-command-and-scripting-interpreter",
-        "cmd-rule-041-t1003-os-credential-dumping",
-        "cmd-rule-042-t1003-os-credential-dumping",
-        "cmd-rule-046-t1105-ingress-tool-transfer",
-        "cmd-rule-047-t1105-ingress-tool-transfer",
-        "cmd-rule-048-t1046-network-service-discovery",
-        "cmd-rule-049-t1018-remote-system-discovery",
-        "cmd-rule-052-t1222-file-permissions-modification",
-        "cmd-rule-054-t1036-masquerading",
-        "cmd-rule-058-t1070-indicator-removal",
-        "cmd-rule-059-t1098-account-manipulation",
-        "cmd-rule-060-t1098-account-manipulation",
-        "cmd-rule-068-t1083-file-and-directory-discovery",
-        "cmd-rule-069-t1552-unsecured-credentials",
-        "cmd-rule-070-t1083-file-and-directory-discovery",
-        "cmd-rule-071-t1552-unsecured-credentials",
-        "cmd-rule-072-t1057-process-discovery",
-        "cmd-rule-073-t1049-system-network-connections-discovery",
-        "cmd-rule-078-t1560-archive-collected-data",
-        "cmd-rule-079-t1560-archive-collected-data",
-        "cmd-rule-081-t1136-create-account",
-        "cmd-rule-082-t1098-account-manipulation",
-        "cmd-rule-084-t1053-scheduled-task-job",
-        "cmd-rule-086-t1070-indicator-removal",
-        "cmd-rule-088-t1552-unsecured-credentials-private-file-read",
-        "cmd-rule-089-t1222-file-permissions-modification-chmod",
-        "cmd-rule-090-t1033-system-owner-user-discovery-id",
-        "cmd-rule-091-t1082-system-information-discovery-runtime-hardware",
-        "cmd-rule-092-t1083-file-and-directory-discovery-basic-linux",
-        "cmd-rule-093-t1016-network-configuration-discovery-linux",
-        "cmd-rule-094-t1049-network-connections-discovery-linux",
-        "cmd-rule-095-t1057-process-discovery-linux",
-        "cmd-rule-096-t1105-ingress-tool-transfer-common-tools",
-        "cmd-rule-097-t1059-command-and-scripting-interpreter-explicit-execution",
-        "cmd-rule-098-t1070-indicator-removal-history-and-logs",
-        "cmd-rule-099-t1543-create-or-modify-system-process-systemd",
-        "cmd-rule-100-t1546-event-triggered-execution-shell-startup",
-        "cmd-rule-101-t1136-create-account-linux",
-        "cmd-rule-102-t1548-abuse-elevation-control-mechanism-sudo-su",
-        "cmd-rule-103-t1562-impair-defenses-kill-security-or-miner-processes",
-        "cmd-rule-105-t1021-remote-services-ssh-propagation",
-        "cmd-rule-106-t1496-resource-hijacking-miner-indicators",
-        "cmd-rule-107-t1552-ssh-credential-file-access",
-        "cmd-rule-108-t1083-mounted-filesystem-discovery",
-        "cmd-rule-109-t1082-linux-system-files",
-        "cmd-rule-110-t1083-executable-path-discovery",
-        "cmd-rule-111-t1033-logged-in-user-discovery",
-        "cmd-rule-112-t1082-filesystem-capacity-discovery",
-        "cmd-rule-v4-known-hosts-regex-t1018"
+        "cmd-rule-001-t1033-system-owner-user-discovery", "cmd-rule-002-t1082-system-information-discovery", "cmd-rule-003-t1082-system-information-discovery", "cmd-rule-004-t1003-os-credential-dumping", "cmd-rule-005-t1087-account-discovery", "cmd-rule-006-t1069-permission-groups-discovery", "cmd-rule-007-t1016-system-network-configuration-discovery", "cmd-rule-008-t1016-system-network-configuration-discovery", "cmd-rule-009-t1049-system-network-connections-discovery", "cmd-rule-010-t1057-process-discovery", "cmd-rule-011-t1057-process-discovery", "cmd-rule-012-t1083-file-and-directory-discovery", "cmd-rule-013-t1083-file-and-directory-discovery", "cmd-rule-014-t1053-scheduled-task-job", "cmd-rule-015-t1053-scheduled-task-job", "cmd-rule-017-t1547-boot-logon-autostart-execution", "cmd-rule-018-t1543-create-or-modify-system-process", "cmd-rule-019-t1543-create-or-modify-system-process", "cmd-rule-020-t1136-create-account", "cmd-rule-021-t1136-create-account", "cmd-rule-022-t1098-account-manipulation", "cmd-rule-023-t1098-account-manipulation", "cmd-rule-024-t1548-abuse-elevation-control-mechanism", "cmd-rule-025-t1548-abuse-elevation-control-mechanism", "cmd-rule-026-t1548-abuse-elevation-control-mechanism", "cmd-rule-027-t1140-deobfuscate-decode-files", "cmd-rule-028-t1140-deobfuscate-decode-files", "cmd-rule-029-t1027-obfuscated-files-or-information", "cmd-rule-030-t1070-indicator-removal", "cmd-rule-031-t1070-indicator-removal", "cmd-rule-032-t1070-indicator-removal", "cmd-rule-033-t1059-command-and-scripting-interpreter", "cmd-rule-034-t1059-command-and-scripting-interpreter", "cmd-rule-035-t1059-command-and-scripting-interpreter", "cmd-rule-036-t1059-command-and-scripting-interpreter", "cmd-rule-038-t1059-command-and-scripting-interpreter", "cmd-rule-039-t1059-command-and-scripting-interpreter", "cmd-rule-041-t1003-os-credential-dumping", "cmd-rule-042-t1003-os-credential-dumping", "cmd-rule-046-t1105-ingress-tool-transfer", "cmd-rule-047-t1105-ingress-tool-transfer", "cmd-rule-048-t1046-network-service-discovery", "cmd-rule-049-t1018-remote-system-discovery", "cmd-rule-052-t1222-file-permissions-modification", "cmd-rule-054-t1036-masquerading", "cmd-rule-058-t1070-indicator-removal", "cmd-rule-059-t1098-account-manipulation", "cmd-rule-060-t1098-account-manipulation", "cmd-rule-068-t1083-file-and-directory-discovery", "cmd-rule-069-t1552-unsecured-credentials", "cmd-rule-070-t1083-file-and-directory-discovery", "cmd-rule-071-t1552-unsecured-credentials", "cmd-rule-072-t1057-process-discovery", "cmd-rule-073-t1049-system-network-connections-discovery", "cmd-rule-078-t1560-archive-collected-data", "cmd-rule-079-t1560-archive-collected-data", "cmd-rule-081-t1136-create-account", "cmd-rule-082-t1098-account-manipulation", "cmd-rule-084-t1053-scheduled-task-job", "cmd-rule-086-t1070-indicator-removal", "cmd-rule-088-t1552-unsecured-credentials-private-file-read", "cmd-rule-089-t1222-file-permissions-modification-chmod", "cmd-rule-090-t1033-system-owner-user-discovery-id", "cmd-rule-091-t1082-system-information-discovery-runtime-hardware", "cmd-rule-092-t1083-file-and-directory-discovery-basic-linux", "cmd-rule-093-t1016-network-configuration-discovery-linux", "cmd-rule-094-t1049-network-connections-discovery-linux", "cmd-rule-095-t1057-process-discovery-linux", "cmd-rule-096-t1105-ingress-tool-transfer-common-tools", "cmd-rule-097-t1059-command-and-scripting-interpreter-explicit-execution", "cmd-rule-098-t1070-indicator-removal-history-and-logs", "cmd-rule-099-t1543-create-or-modify-system-process-systemd", "cmd-rule-100-t1546-event-triggered-execution-shell-startup", "cmd-rule-101-t1136-create-account-linux", "cmd-rule-102-t1548-abuse-elevation-control-mechanism-sudo-su", "cmd-rule-103-t1562-impair-defenses-kill-security-or-miner-processes", "cmd-rule-105-t1021-remote-services-ssh-propagation", "cmd-rule-106-t1496-resource-hijacking-miner-indicators", "cmd-rule-107-t1552-ssh-credential-file-access", "cmd-rule-108-t1083-mounted-filesystem-discovery", "cmd-rule-109-t1082-linux-system-files", "cmd-rule-110-t1083-executable-path-discovery", "cmd-rule-111-t1033-logged-in-user-discovery", "cmd-rule-112-t1082-filesystem-capacity-discovery"
       ]
     },
     "rules": [
@@ -107,12 +22,8 @@
         "enabled": true,
         "evidence_type": "command_operation",
         "operation_predicate": {
-          "command_families": [
-            "crontab"
-          ],
-          "required_operation_types": [
-            "schedule_inspect"
-          ]
+          "command_families": ["crontab"],
+          "required_operation_types": ["schedule_inspect"]
         },
         "provenance": {
           "method": "reviewed_structural_command_operation_mapping",
@@ -139,21 +50,15 @@
         "rule_id": "cmd-rule-v2-crontab-list-t1007",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Service Discovery",
-        "ttp": "T1007",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome"
+        "ttp": "T1007"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_operation",
         "operation_predicate": {
-          "command_families": [
-            "crontab"
-          ],
-          "required_operation_types": [
-            "schedule_modify"
-          ]
+          "command_families": ["crontab"],
+          "required_operation_types": ["schedule_modify"]
         },
         "provenance": {
           "method": "reviewed_structural_command_operation_mapping",
@@ -180,21 +85,15 @@
         "rule_id": "cmd-rule-v2-crontab-modify-t1053",
         "source_type": "human_curated_command_rule",
         "technique_name": "Scheduled Task/Job",
-        "ttp": "T1053",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome"
+        "ttp": "T1053"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_operation",
         "operation_predicate": {
-          "required_operation_types": [
-            "file_read"
-          ],
-          "operand_paths_any": [
-            "/etc/passwd"
-          ]
+          "required_operation_types": ["file_read"],
+          "operand_paths_any": ["/etc/passwd"]
         },
         "provenance": {
           "method": "reviewed_structural_command_operation_mapping",
@@ -221,21 +120,15 @@
         "rule_id": "cmd-rule-v2-passwd-account-discovery-t1087-001",
         "source_type": "human_curated_command_rule",
         "technique_name": "Account Discovery: Local Account",
-        "ttp": "T1087.001",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome"
+        "ttp": "T1087.001"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_operation",
         "operation_predicate": {
-          "required_operation_types": [
-            "file_read"
-          ],
-          "operand_paths_any": [
-            "/etc/shadow"
-          ]
+          "required_operation_types": ["file_read"],
+          "operand_paths_any": ["/etc/shadow"]
         },
         "provenance": {
           "method": "reviewed_structural_command_operation_mapping",
@@ -262,9 +155,7 @@
         "rule_id": "cmd-rule-v2-shadow-credential-material-t1003",
         "source_type": "human_curated_command_rule",
         "technique_name": "OS Credential Dumping",
-        "ttp": "T1003",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome"
+        "ttp": "T1003"
       },
       {
         "confidence": 1.0,
@@ -301,15 +192,7 @@
         "rule_id": "cmd-rule-001-t1033-system-owner-user-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Owner/User Discovery",
-        "ttp": "T1033",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1033"
       },
       {
         "confidence": 1.0,
@@ -346,15 +229,7 @@
         "rule_id": "cmd-rule-002-t1082-system-information-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Information Discovery",
-        "ttp": "T1082",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1082"
       },
       {
         "confidence": 1.0,
@@ -391,29 +266,20 @@
         "rule_id": "cmd-rule-003-t1082-system-information-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Information Discovery",
-        "ttp": "T1082",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1082"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_regex",
-        "pattern": "\\bcat\\s+/etc/shadow\\b",
+        "pattern": "\\bcat\\s+/etc/(passwd|shadow)\\b",
         "provenance": {
           "author": "developer",
           "basis": [
             "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
             "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
             "Approved only when the command pattern directly represents the mapped parent technique at command level.",
-            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data.",
-            "The passwd account database is excluded; only shadow credential material is covered by this fallback."
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
           ],
           "created": "2026-06-02",
           "generated": false,
@@ -437,15 +303,7 @@
         "rule_id": "cmd-rule-004-t1003-os-credential-dumping",
         "source_type": "human_curated_command_rule",
         "technique_name": "OS Credential Dumping",
-        "ttp": "T1003",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1003"
       },
       {
         "confidence": 1.0,
@@ -482,15 +340,7 @@
         "rule_id": "cmd-rule-005-t1087-account-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "Account Discovery",
-        "ttp": "T1087",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1087"
       },
       {
         "confidence": 1.0,
@@ -527,15 +377,7 @@
         "rule_id": "cmd-rule-006-t1069-permission-groups-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "Permission Groups Discovery",
-        "ttp": "T1069",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1069"
       },
       {
         "confidence": 1.0,
@@ -572,15 +414,7 @@
         "rule_id": "cmd-rule-007-t1016-system-network-configuration-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Network Configuration Discovery",
-        "ttp": "T1016",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1016"
       },
       {
         "confidence": 1.0,
@@ -617,15 +451,7 @@
         "rule_id": "cmd-rule-008-t1016-system-network-configuration-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Network Configuration Discovery",
-        "ttp": "T1016",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1016"
       },
       {
         "confidence": 1.0,
@@ -662,15 +488,7 @@
         "rule_id": "cmd-rule-009-t1049-system-network-connections-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Network Connections Discovery",
-        "ttp": "T1049",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1049"
       },
       {
         "confidence": 1.0,
@@ -707,15 +525,7 @@
         "rule_id": "cmd-rule-010-t1057-process-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "Process Discovery",
-        "ttp": "T1057",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1057"
       },
       {
         "confidence": 1.0,
@@ -752,15 +562,7 @@
         "rule_id": "cmd-rule-011-t1057-process-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "Process Discovery",
-        "ttp": "T1057",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1057"
       },
       {
         "confidence": 1.0,
@@ -797,15 +599,7 @@
         "rule_id": "cmd-rule-012-t1083-file-and-directory-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "File and Directory Discovery",
-        "ttp": "T1083",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1083"
       },
       {
         "confidence": 1.0,
@@ -842,15 +636,7 @@
         "rule_id": "cmd-rule-013-t1083-file-and-directory-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "File and Directory Discovery",
-        "ttp": "T1083",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1083"
       },
       {
         "confidence": 1.0,
@@ -887,21 +673,13 @@
         "rule_id": "cmd-rule-014-t1053-scheduled-task-job",
         "source_type": "human_curated_command_rule",
         "technique_name": "Scheduled Task/Job",
-        "ttp": "T1053",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1053"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_regex",
-        "pattern": "\\bcrontab\\b.*(?:-e|--edit)\\b",
+        "pattern": "\\bcrontab\\b.*-[le]\\b",
         "provenance": {
           "author": "developer",
           "basis": [
@@ -932,15 +710,7 @@
         "rule_id": "cmd-rule-015-t1053-scheduled-task-job",
         "source_type": "human_curated_command_rule",
         "technique_name": "Scheduled Task/Job",
-        "ttp": "T1053",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1053"
       },
       {
         "confidence": 1.0,
@@ -1012,15 +782,7 @@
         "rule_id": "cmd-rule-017-t1547-boot-logon-autostart-execution",
         "source_type": "human_curated_command_rule",
         "technique_name": "Boot or Logon Autostart Execution",
-        "ttp": "T1547",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1547"
       },
       {
         "confidence": 1.0,
@@ -1057,15 +819,7 @@
         "rule_id": "cmd-rule-018-t1543-create-or-modify-system-process",
         "source_type": "human_curated_command_rule",
         "technique_name": "Create or Modify System Process",
-        "ttp": "T1543",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1543"
       },
       {
         "confidence": 1.0,
@@ -1102,15 +856,7 @@
         "rule_id": "cmd-rule-019-t1543-create-or-modify-system-process",
         "source_type": "human_curated_command_rule",
         "technique_name": "Create or Modify System Process",
-        "ttp": "T1543",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1543"
       },
       {
         "confidence": 1.0,
@@ -1147,15 +893,7 @@
         "rule_id": "cmd-rule-020-t1136-create-account",
         "source_type": "human_curated_command_rule",
         "technique_name": "Create Account",
-        "ttp": "T1136",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1136"
       },
       {
         "confidence": 1.0,
@@ -1192,15 +930,7 @@
         "rule_id": "cmd-rule-021-t1136-create-account",
         "source_type": "human_curated_command_rule",
         "technique_name": "Create Account",
-        "ttp": "T1136",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1136"
       },
       {
         "confidence": 1.0,
@@ -1237,15 +967,7 @@
         "rule_id": "cmd-rule-022-t1098-account-manipulation",
         "source_type": "human_curated_command_rule",
         "technique_name": "Account Manipulation",
-        "ttp": "T1098",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1098"
       },
       {
         "confidence": 1.0,
@@ -1282,15 +1004,7 @@
         "rule_id": "cmd-rule-023-t1098-account-manipulation",
         "source_type": "human_curated_command_rule",
         "technique_name": "Account Manipulation",
-        "ttp": "T1098",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1098"
       },
       {
         "confidence": 1.0,
@@ -1327,15 +1041,7 @@
         "rule_id": "cmd-rule-024-t1548-abuse-elevation-control-mechanism",
         "source_type": "human_curated_command_rule",
         "technique_name": "Abuse Elevation Control Mechanism",
-        "ttp": "T1548",
-        "reviewed_tactic": "privilege-escalation",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1548"
       },
       {
         "confidence": 1.0,
@@ -1372,15 +1078,7 @@
         "rule_id": "cmd-rule-025-t1548-abuse-elevation-control-mechanism",
         "source_type": "human_curated_command_rule",
         "technique_name": "Abuse Elevation Control Mechanism",
-        "ttp": "T1548",
-        "reviewed_tactic": "privilege-escalation",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1548"
       },
       {
         "confidence": 1.0,
@@ -1417,15 +1115,7 @@
         "rule_id": "cmd-rule-026-t1548-abuse-elevation-control-mechanism",
         "source_type": "human_curated_command_rule",
         "technique_name": "Abuse Elevation Control Mechanism",
-        "ttp": "T1548",
-        "reviewed_tactic": "privilege-escalation",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1548"
       },
       {
         "confidence": 1.0,
@@ -1462,15 +1152,7 @@
         "rule_id": "cmd-rule-027-t1140-deobfuscate-decode-files",
         "source_type": "human_curated_command_rule",
         "technique_name": "Deobfuscate/Decode Files or Information",
-        "ttp": "T1140",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1140"
       },
       {
         "confidence": 1.0,
@@ -1507,15 +1189,7 @@
         "rule_id": "cmd-rule-028-t1140-deobfuscate-decode-files",
         "source_type": "human_curated_command_rule",
         "technique_name": "Deobfuscate/Decode Files or Information",
-        "ttp": "T1140",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1140"
       },
       {
         "confidence": 1.0,
@@ -1552,15 +1226,7 @@
         "rule_id": "cmd-rule-029-t1027-obfuscated-files-or-information",
         "source_type": "human_curated_command_rule",
         "technique_name": "Obfuscated Files or Information",
-        "ttp": "T1027",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1027"
       },
       {
         "confidence": 1.0,
@@ -1597,15 +1263,7 @@
         "rule_id": "cmd-rule-030-t1070-indicator-removal",
         "source_type": "human_curated_command_rule",
         "technique_name": "Indicator Removal",
-        "ttp": "T1070",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1070"
       },
       {
         "confidence": 1.0,
@@ -1642,15 +1300,7 @@
         "rule_id": "cmd-rule-031-t1070-indicator-removal",
         "source_type": "human_curated_command_rule",
         "technique_name": "Indicator Removal",
-        "ttp": "T1070",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1070"
       },
       {
         "confidence": 1.0,
@@ -1687,15 +1337,7 @@
         "rule_id": "cmd-rule-032-t1070-indicator-removal",
         "source_type": "human_curated_command_rule",
         "technique_name": "Indicator Removal",
-        "ttp": "T1070",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1070"
       },
       {
         "confidence": 1.0,
@@ -1732,15 +1374,7 @@
         "rule_id": "cmd-rule-033-t1059-command-and-scripting-interpreter",
         "source_type": "human_curated_command_rule",
         "technique_name": "Command and Scripting Interpreter",
-        "ttp": "T1059",
-        "reviewed_tactic": "execution",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1059"
       },
       {
         "confidence": 1.0,
@@ -1777,15 +1411,7 @@
         "rule_id": "cmd-rule-034-t1059-command-and-scripting-interpreter",
         "source_type": "human_curated_command_rule",
         "technique_name": "Command and Scripting Interpreter",
-        "ttp": "T1059",
-        "reviewed_tactic": "execution",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1059"
       },
       {
         "confidence": 1.0,
@@ -1822,15 +1448,7 @@
         "rule_id": "cmd-rule-035-t1059-command-and-scripting-interpreter",
         "source_type": "human_curated_command_rule",
         "technique_name": "Command and Scripting Interpreter",
-        "ttp": "T1059",
-        "reviewed_tactic": "execution",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1059"
       },
       {
         "confidence": 1.0,
@@ -1867,15 +1485,7 @@
         "rule_id": "cmd-rule-036-t1059-command-and-scripting-interpreter",
         "source_type": "human_curated_command_rule",
         "technique_name": "Command and Scripting Interpreter",
-        "ttp": "T1059",
-        "reviewed_tactic": "execution",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1059"
       },
       {
         "confidence": 1.0,
@@ -1947,15 +1557,7 @@
         "rule_id": "cmd-rule-038-t1059-command-and-scripting-interpreter",
         "source_type": "human_curated_command_rule",
         "technique_name": "Command and Scripting Interpreter",
-        "ttp": "T1059",
-        "reviewed_tactic": "execution",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1059"
       },
       {
         "confidence": 1.0,
@@ -1992,15 +1594,7 @@
         "rule_id": "cmd-rule-039-t1059-command-and-scripting-interpreter",
         "source_type": "human_curated_command_rule",
         "technique_name": "Command and Scripting Interpreter",
-        "ttp": "T1059",
-        "reviewed_tactic": "execution",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1059"
       },
       {
         "confidence": 1.0,
@@ -2072,15 +1666,7 @@
         "rule_id": "cmd-rule-041-t1003-os-credential-dumping",
         "source_type": "human_curated_command_rule",
         "technique_name": "OS Credential Dumping",
-        "ttp": "T1003",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1003"
       },
       {
         "confidence": 1.0,
@@ -2117,15 +1703,7 @@
         "rule_id": "cmd-rule-042-t1003-os-credential-dumping",
         "source_type": "human_curated_command_rule",
         "technique_name": "OS Credential Dumping",
-        "ttp": "T1003",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1003"
       },
       {
         "confidence": 1.0,
@@ -2267,21 +1845,13 @@
         "rule_id": "cmd-rule-046-t1105-ingress-tool-transfer",
         "source_type": "human_curated_command_rule",
         "technique_name": "Ingress Tool Transfer",
-        "ttp": "T1105",
-        "reviewed_tactic": "command-and-control",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1105"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_regex",
-        "pattern": "\\b(?:scp|rsync)\\b\\s+\\S+:\\S+\\s+[^:;&|\\s]+",
+        "pattern": "\\bscp\\b|\\brsync\\b",
         "provenance": {
           "author": "developer",
           "basis": [
@@ -2312,15 +1882,7 @@
         "rule_id": "cmd-rule-047-t1105-ingress-tool-transfer",
         "source_type": "human_curated_command_rule",
         "technique_name": "Ingress Tool Transfer",
-        "ttp": "T1105",
-        "reviewed_tactic": "command-and-control",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1105"
       },
       {
         "confidence": 1.0,
@@ -2357,15 +1919,7 @@
         "rule_id": "cmd-rule-048-t1046-network-service-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "Network Service Discovery",
-        "ttp": "T1046",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1046"
       },
       {
         "confidence": 1.0,
@@ -2402,15 +1956,7 @@
         "rule_id": "cmd-rule-049-t1018-remote-system-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "Remote System Discovery",
-        "ttp": "T1018",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1018"
       },
       {
         "confidence": 1.0,
@@ -2517,15 +2063,7 @@
         "rule_id": "cmd-rule-052-t1222-file-permissions-modification",
         "source_type": "human_curated_command_rule",
         "technique_name": "File and Directory Permissions Modification",
-        "ttp": "T1222",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1222"
       },
       {
         "confidence": 1.0,
@@ -2597,15 +2135,7 @@
         "rule_id": "cmd-rule-054-t1036-masquerading",
         "source_type": "human_curated_command_rule",
         "technique_name": "Masquerading",
-        "ttp": "T1036",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1036"
       },
       {
         "confidence": 1.0,
@@ -2747,15 +2277,7 @@
         "rule_id": "cmd-rule-058-t1070-indicator-removal",
         "source_type": "human_curated_command_rule",
         "technique_name": "Indicator Removal",
-        "ttp": "T1070",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1070"
       },
       {
         "confidence": 1.0,
@@ -2792,15 +2314,7 @@
         "rule_id": "cmd-rule-059-t1098-account-manipulation",
         "source_type": "human_curated_command_rule",
         "technique_name": "Account Manipulation",
-        "ttp": "T1098",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1098"
       },
       {
         "confidence": 1.0,
@@ -2837,15 +2351,7 @@
         "rule_id": "cmd-rule-060-t1098-account-manipulation",
         "source_type": "human_curated_command_rule",
         "technique_name": "Account Manipulation",
-        "ttp": "T1098",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1098"
       },
       {
         "confidence": 1.0,
@@ -3127,15 +2633,7 @@
         "rule_id": "cmd-rule-068-t1083-file-and-directory-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "File and Directory Discovery",
-        "ttp": "T1083",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1083"
       },
       {
         "confidence": 1.0,
@@ -3172,15 +2670,7 @@
         "rule_id": "cmd-rule-069-t1552-unsecured-credentials",
         "source_type": "human_curated_command_rule",
         "technique_name": "Unsecured Credentials",
-        "ttp": "T1552",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1552"
       },
       {
         "confidence": 1.0,
@@ -3217,15 +2707,7 @@
         "rule_id": "cmd-rule-070-t1083-file-and-directory-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "File and Directory Discovery",
-        "ttp": "T1083",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1083"
       },
       {
         "confidence": 1.0,
@@ -3262,15 +2744,7 @@
         "rule_id": "cmd-rule-071-t1552-unsecured-credentials",
         "source_type": "human_curated_command_rule",
         "technique_name": "Unsecured Credentials",
-        "ttp": "T1552",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1552"
       },
       {
         "confidence": 1.0,
@@ -3307,15 +2781,7 @@
         "rule_id": "cmd-rule-072-t1057-process-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "Process Discovery",
-        "ttp": "T1057",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1057"
       },
       {
         "confidence": 1.0,
@@ -3352,15 +2818,7 @@
         "rule_id": "cmd-rule-073-t1049-system-network-connections-discovery",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Network Connections Discovery",
-        "ttp": "T1049",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1049"
       },
       {
         "confidence": 1.0,
@@ -3512,7 +2970,8 @@
           "basis": [
             "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
             "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
-            "This maps a submitted archive-utility invocation attempt; it does not establish that collection or archive creation completed."
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
           ],
           "created": "2026-06-02",
           "generated": false,
@@ -3536,15 +2995,7 @@
         "rule_id": "cmd-rule-078-t1560-archive-collected-data",
         "source_type": "human_curated_command_rule",
         "technique_name": "Archive Collected Data",
-        "ttp": "T1560",
-        "reviewed_tactic": "collection",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1560"
       },
       {
         "confidence": 1.0,
@@ -3556,7 +3007,8 @@
           "basis": [
             "Reviewed command regex semantics against the referenced ATT&CK parent technique using local MITRE ATT&CK cache data/feeds/mitre_attack_cache.json version 14.1.",
             "Verified the rule regex compiles and the referenced ATT&CK technique ID exists in the local MITRE cache.",
-            "This maps a submitted archive-utility invocation attempt; it does not establish that collection or archive creation completed."
+            "Approved only when the command pattern directly represents the mapped parent technique at command level.",
+            "This review is a provenance and semantic-fit check; it is not statistical accuracy proof and should still be evaluated with live Cowrie data."
           ],
           "created": "2026-06-02",
           "generated": false,
@@ -3580,15 +3032,7 @@
         "rule_id": "cmd-rule-079-t1560-archive-collected-data",
         "source_type": "human_curated_command_rule",
         "technique_name": "Archive Collected Data",
-        "ttp": "T1560",
-        "reviewed_tactic": "collection",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1560"
       },
       {
         "confidence": 1.0,
@@ -3660,15 +3104,7 @@
         "rule_id": "cmd-rule-081-t1136-create-account",
         "source_type": "human_curated_command_rule",
         "technique_name": "Create Account",
-        "ttp": "T1136",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1136"
       },
       {
         "confidence": 1.0,
@@ -3705,15 +3141,7 @@
         "rule_id": "cmd-rule-082-t1098-account-manipulation",
         "source_type": "human_curated_command_rule",
         "technique_name": "Account Manipulation",
-        "ttp": "T1098",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1098"
       },
       {
         "confidence": 1.0,
@@ -3785,15 +3213,7 @@
         "rule_id": "cmd-rule-084-t1053-scheduled-task-job",
         "source_type": "human_curated_command_rule",
         "technique_name": "Scheduled Task/Job",
-        "ttp": "T1053",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1053"
       },
       {
         "confidence": 1.0,
@@ -3865,15 +3285,7 @@
         "rule_id": "cmd-rule-086-t1070-indicator-removal",
         "source_type": "human_curated_command_rule",
         "technique_name": "Indicator Removal",
-        "ttp": "T1070",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1070"
       },
       {
         "confidence": 1.0,
@@ -3946,15 +3358,7 @@
         "rule_id": "cmd-rule-088-t1552-unsecured-credentials-private-file-read",
         "source_type": "human_curated_command_rule",
         "technique_name": "Unsecured Credentials",
-        "ttp": "T1552",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1552"
       },
       {
         "confidence": 1.0,
@@ -3992,15 +3396,7 @@
         "rule_id": "cmd-rule-089-t1222-file-permissions-modification-chmod",
         "source_type": "human_curated_command_rule",
         "technique_name": "File and Directory Permissions Modification",
-        "ttp": "T1222",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1222"
       },
       {
         "confidence": 1.0,
@@ -4033,15 +3429,7 @@
         "rule_id": "cmd-rule-090-t1033-system-owner-user-discovery-id",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Owner/User Discovery",
-        "ttp": "T1033",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1033"
       },
       {
         "confidence": 1.0,
@@ -4074,15 +3462,7 @@
         "rule_id": "cmd-rule-091-t1082-system-information-discovery-runtime-hardware",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Information Discovery",
-        "ttp": "T1082",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1082"
       },
       {
         "confidence": 1.0,
@@ -4115,15 +3495,7 @@
         "rule_id": "cmd-rule-092-t1083-file-and-directory-discovery-basic-linux",
         "source_type": "human_curated_command_rule",
         "technique_name": "File and Directory Discovery",
-        "ttp": "T1083",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1083"
       },
       {
         "confidence": 1.0,
@@ -4156,15 +3528,7 @@
         "rule_id": "cmd-rule-093-t1016-network-configuration-discovery-linux",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Network Configuration Discovery",
-        "ttp": "T1016",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1016"
       },
       {
         "confidence": 1.0,
@@ -4197,25 +3561,17 @@
         "rule_id": "cmd-rule-094-t1049-network-connections-discovery-linux",
         "source_type": "human_curated_command_rule",
         "technique_name": "System Network Connections Discovery",
-        "ttp": "T1049",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1049"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_regex",
-        "pattern": "(^|[;&|]\\s*)(ps\\s+(aux|ef|x)|top\\b|pgrep\\b|pidof\\b)",
+        "pattern": "(^|[;&|]\\s*)(ps\\s+(aux|ef|x)|top\\b|pgrep\\b|pidof\\b|systemctl\\s+status\\b|service\\s+--status-all)",
         "provenance": {
           "method": "manual_attck_command_rule_review",
           "basis": [
-            "Process-listing commands submit a process-discovery request; service inspection is mapped separately.",
+            "Process listing and service-status commands enumerate running processes and services.",
             "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
           ],
           "author": "Codex-assisted policy update",
@@ -4238,21 +3594,13 @@
         "rule_id": "cmd-rule-095-t1057-process-discovery-linux",
         "source_type": "human_curated_command_rule",
         "technique_name": "Process Discovery",
-        "ttp": "T1057",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1057"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_regex",
-        "pattern": "\\b(busybox\\s+)?(wget|curl|ftpget|tftp)\\b\\s+.*https?://|\\bscp\\b\\s+\\S+:\\S+\\s+[^:;&|\\s]+|\\bpython(?:3)?\\b.*(urllib|requests).*https?://|\\b(perl|php|ruby)\\b.*https?://",
+        "pattern": "\\b(busybox\\s+)?(wget|curl|ftpget|tftp)\\b\\s+.*https?://|\\bscp\\b\\s+\\S+:\\S+|\\bpython(?:3)?\\b.*(urllib|requests).*https?://|\\b(perl|php|ruby)\\b.*https?://",
         "provenance": {
           "method": "manual_attck_command_rule_review",
           "basis": [
@@ -4279,15 +3627,7 @@
         "rule_id": "cmd-rule-096-t1105-ingress-tool-transfer-common-tools",
         "source_type": "human_curated_command_rule",
         "technique_name": "Ingress Tool Transfer",
-        "ttp": "T1105",
-        "reviewed_tactic": "command-and-control",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1105"
       },
       {
         "confidence": 1.0,
@@ -4320,15 +3660,7 @@
         "rule_id": "cmd-rule-097-t1059-command-and-scripting-interpreter-explicit-execution",
         "source_type": "human_curated_command_rule",
         "technique_name": "Command and Scripting Interpreter",
-        "ttp": "T1059",
-        "reviewed_tactic": "execution",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1059"
       },
       {
         "confidence": 1.0,
@@ -4361,15 +3693,7 @@
         "rule_id": "cmd-rule-098-t1070-indicator-removal-history-and-logs",
         "source_type": "human_curated_command_rule",
         "technique_name": "Indicator Removal",
-        "ttp": "T1070",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1070"
       },
       {
         "confidence": 1.0,
@@ -4402,15 +3726,7 @@
         "rule_id": "cmd-rule-099-t1543-create-or-modify-system-process-systemd",
         "source_type": "human_curated_command_rule",
         "technique_name": "Create or Modify System Process",
-        "ttp": "T1543",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1543"
       },
       {
         "confidence": 1.0,
@@ -4443,15 +3759,7 @@
         "rule_id": "cmd-rule-100-t1546-event-triggered-execution-shell-startup",
         "source_type": "human_curated_command_rule",
         "technique_name": "Event Triggered Execution",
-        "ttp": "T1546",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1546"
       },
       {
         "confidence": 1.0,
@@ -4484,25 +3792,17 @@
         "rule_id": "cmd-rule-101-t1136-create-account-linux",
         "source_type": "human_curated_command_rule",
         "technique_name": "Create Account",
-        "ttp": "T1136",
-        "reviewed_tactic": "persistence",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1136"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_regex",
-        "pattern": "(^|[;&|]\\s*)(sudo|su)\\b|(?:^|[\\s\\'\\\"])/etc/sudoers(?:$|[\\s\\'\\\"])",
+        "pattern": "(^|[;&|]\\s*)(sudo|su)\\b|\\b/etc/sudoers\\b|\\bNOPASSWD\\b",
         "provenance": {
           "method": "manual_attck_command_rule_review",
           "basis": [
-            "Direct sudo/su use or a parser-proven sudoers write is a submitted elevation-control attempt; read-only mentions remain audit-only.",
+            "sudo, su, sudoers, and NOPASSWD modifications are observable privilege-escalation mechanism use.",
             "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
           ],
           "author": "Codex-assisted policy update",
@@ -4525,15 +3825,7 @@
         "rule_id": "cmd-rule-102-t1548-abuse-elevation-control-mechanism-sudo-su",
         "source_type": "human_curated_command_rule",
         "technique_name": "Abuse Elevation Control Mechanism",
-        "ttp": "T1548",
-        "reviewed_tactic": "privilege-escalation",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1548"
       },
       {
         "confidence": 1.0,
@@ -4566,15 +3858,7 @@
         "rule_id": "cmd-rule-103-t1562-impair-defenses-kill-security-or-miner-processes",
         "source_type": "human_curated_command_rule",
         "technique_name": "Impair Defenses",
-        "ttp": "T1562",
-        "reviewed_tactic": "defense-evasion",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1562"
       },
       {
         "confidence": 1.0,
@@ -4584,7 +3868,7 @@
         "provenance": {
           "method": "manual_attck_command_rule_review",
           "basis": [
-            "SSH, sshpass, or SCP syntax directed at a remote IP is a submitted remote-service invocation; it does not establish propagation, access, intent, or host compromise.",
+            "SSH, sshpass, or SCP to remote IPs indicate attempted remote-service propagation from the compromised shell.",
             "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
           ],
           "author": "Codex-assisted policy update",
@@ -4607,15 +3891,7 @@
         "rule_id": "cmd-rule-105-t1021-remote-services-ssh-propagation",
         "source_type": "human_curated_command_rule",
         "technique_name": "Remote Services",
-        "ttp": "T1021",
-        "reviewed_tactic": "lateral-movement",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1021"
       },
       {
         "confidence": 1.0,
@@ -4648,25 +3924,17 @@
         "rule_id": "cmd-rule-106-t1496-resource-hijacking-miner-indicators",
         "source_type": "human_curated_command_rule",
         "technique_name": "Resource Hijacking",
-        "ttp": "T1496",
-        "reviewed_tactic": "impact",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1496"
       },
       {
         "confidence": 1.0,
         "enabled": true,
         "evidence_type": "command_regex",
-        "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*\\.ssh/(id_rsa|id_dsa|id_ecdsa|id_ed25519)\\b",
+        "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*\\.ssh/(id_rsa|id_dsa|id_ecdsa|id_ed25519|known_hosts)\\b",
         "provenance": {
           "method": "manual_attck_command_rule_review",
           "basis": [
-            "Reading SSH private-key files is credential-material access evidence; known_hosts is destination metadata and is mapped separately.",
+            "Reading SSH private keys or known_hosts files is credential-material access evidence.",
             "Rule added to improve coverage for common Cowrie SSH honeypot observables; it remains a command-level candidate mapping, not proof of full attacker intent."
           ],
           "author": "Codex-assisted policy update",
@@ -4689,15 +3957,7 @@
         "rule_id": "cmd-rule-107-t1552-ssh-credential-file-access",
         "source_type": "human_curated_command_rule",
         "technique_name": "Unsecured Credentials",
-        "ttp": "T1552",
-        "reviewed_tactic": "credential-access",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1552"
       },
       {
         "confidence": 1.0,
@@ -4730,15 +3990,7 @@
         "rule_id": "cmd-rule-108-t1083-mounted-filesystem-discovery",
         "source_type": "researcher_ai_assisted_command_rule",
         "technique_name": "File and Directory Discovery",
-        "ttp": "T1083",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1083"
       },
       {
         "confidence": 1.0,
@@ -4771,15 +4023,7 @@
         "rule_id": "cmd-rule-109-t1082-linux-system-files",
         "source_type": "researcher_ai_assisted_command_rule",
         "technique_name": "System Information Discovery",
-        "ttp": "T1082",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1082"
       },
       {
         "confidence": 1.0,
@@ -4812,15 +4056,7 @@
         "rule_id": "cmd-rule-110-t1083-executable-path-discovery",
         "source_type": "researcher_ai_assisted_command_rule",
         "technique_name": "File and Directory Discovery",
-        "ttp": "T1083",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1083"
       },
       {
         "confidence": 1.0,
@@ -4853,15 +4089,7 @@
         "rule_id": "cmd-rule-111-t1033-logged-in-user-discovery",
         "source_type": "researcher_ai_assisted_command_rule",
         "technique_name": "System Owner/User Discovery",
-        "ttp": "T1033",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1033"
       },
       {
         "confidence": 1.0,
@@ -4894,183 +4122,12 @@
         "rule_id": "cmd-rule-112-t1082-filesystem-capacity-discovery",
         "source_type": "researcher_ai_assisted_command_rule",
         "technique_name": "System Information Discovery",
-        "ttp": "T1082",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
-      },
-      {
-        "confidence": 1.0,
-        "enabled": true,
-        "evidence_type": "command_operation",
-        "operation_predicate": {
-          "required_operation_types": [
-            "service_inspect"
-          ]
-        },
-        "provenance": {
-          "method": "reviewed_structural_command_operation_mapping",
-          "basis": [
-            "A parser-proven service status inspection is system/service information discovery, not process discovery or service modification."
-          ],
-          "author": "project developer",
-          "reviewed": true,
-          "reviewer": "behavioral_intelligence_phase7_review",
-          "review_status": "approved_for_honeypot_observables",
-          "review_scope": "operation-aware ATT&CK tactic semantics",
-          "last_reviewed": "2026-08-13",
-          "generated": false,
-          "created": "2026-08-13",
-          "version": "2026-08-13-phase7"
-        },
-        "references": [
-          {
-            "name": "MITRE ATT&CK T1082 System Information Discovery",
-            "url": "https://attack.mitre.org/techniques/T1082/"
-          }
-        ],
-        "rule_id": "cmd-rule-v4-service-inspect-t1082",
-        "source_type": "human_curated_command_rule",
-        "technique_name": "System Information Discovery",
-        "ttp": "T1082",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome"
-      },
-      {
-        "confidence": 1.0,
-        "enabled": true,
-        "evidence_type": "command_operation",
-        "operation_predicate": {
-          "required_operation_types": [
-            "file_read"
-          ],
-          "operand_paths_any": [
-            "/root/.ssh/known_hosts"
-          ]
-        },
-        "provenance": {
-          "method": "reviewed_structural_command_operation_mapping",
-          "basis": [
-            "A parser-proven read of known_hosts observes remote-host destination metadata, not private credential material."
-          ],
-          "author": "project developer",
-          "reviewed": true,
-          "reviewer": "behavioral_intelligence_phase7_review",
-          "review_status": "approved_for_honeypot_observables",
-          "review_scope": "operation-aware ATT&CK tactic semantics",
-          "last_reviewed": "2026-08-13",
-          "generated": false,
-          "created": "2026-08-13",
-          "version": "2026-08-13-phase7"
-        },
-        "references": [
-          {
-            "name": "MITRE ATT&CK T1018 Remote System Discovery",
-            "url": "https://attack.mitre.org/techniques/T1018/"
-          }
-        ],
-        "rule_id": "cmd-rule-v4-known-hosts-t1018",
-        "source_type": "human_curated_command_rule",
-        "technique_name": "Remote System Discovery",
-        "ttp": "T1018",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome"
-      },
-      {
-        "confidence": 1.0,
-        "enabled": true,
-        "evidence_type": "command_operation",
-        "operation_predicate": {
-          "command_families": [
-            "scp",
-            "rsync"
-          ],
-          "required_operation_types": [
-            "remote_transfer_ingress_attempt"
-          ]
-        },
-        "provenance": {
-          "method": "reviewed_structural_command_operation_mapping",
-          "basis": [
-            "A parser-proven remote-source to local-destination copy is an ingress transfer attempt; completion is not established."
-          ],
-          "author": "project developer",
-          "reviewed": true,
-          "reviewer": "behavioral_intelligence_phase7_review",
-          "review_status": "approved_for_honeypot_observables",
-          "review_scope": "operation-aware ATT&CK tactic semantics",
-          "last_reviewed": "2026-08-13",
-          "generated": false,
-          "created": "2026-08-13",
-          "version": "2026-08-13-phase7"
-        },
-        "references": [
-          {
-            "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
-            "url": "https://attack.mitre.org/techniques/T1105/"
-          }
-        ],
-        "rule_id": "cmd-rule-v4-scp-ingress-t1105",
-        "source_type": "human_curated_command_rule",
-        "technique_name": "Ingress Tool Transfer",
-        "ttp": "T1105",
-        "reviewed_tactic": "command-and-control",
-        "observation_semantics": "submitted_command_attempt_not_outcome"
-      },
-      {
-        "confidence": 1.0,
-        "enabled": true,
-        "evidence_type": "command_regex",
-        "pattern": "\\b(cat|grep|awk|sed|less|more|tail|head)\\b.*\\.ssh/known_hosts\\b",
-        "provenance": {
-          "method": "manual_attck_command_rule_review",
-          "basis": [
-            "A read of .ssh/known_hosts is remote-system destination metadata discovery, not credential-material access.",
-            "The parser operation-context gate must bind the regex to a concrete read operand."
-          ],
-          "author": "project developer",
-          "reviewed": true,
-          "reviewer": "behavioral_intelligence_phase7_review",
-          "review_status": "approved_for_honeypot_observables",
-          "review_scope": "operation-aware ATT&CK tactic semantics",
-          "last_reviewed": "2026-08-13",
-          "generated": false,
-          "created": "2026-08-13",
-          "version": "2026-08-13-phase7"
-        },
-        "references": [
-          {
-            "name": "MITRE ATT&CK T1018 Remote System Discovery",
-            "url": "https://attack.mitre.org/techniques/T1018/"
-          }
-        ],
-        "rule_id": "cmd-rule-v4-known-hosts-regex-t1018",
-        "source_type": "human_curated_command_rule",
-        "technique_name": "Remote System Discovery",
-        "ttp": "T1018",
-        "reviewed_tactic": "discovery",
-        "observation_semantics": "submitted_command_attempt_not_outcome",
-        "runtime_authority": {
-          "promotion_class": "trusted_literal_fallback",
-          "reviewed": true,
-          "safety_class": "literal_unambiguous",
-          "operation_class": "reviewed_operation_context"
-        }
+        "ttp": "T1082"
       }
     ]
   },
   "policy_id": "honeypot-command-classification-rules",
-  "schema_version": "classification_rule_policy.v4",
-  "updated_at": "2026-08-13T00:00:00Z",
-  "version": "2026-08-13-tactic-context-v4",
-  "mitre_cache_binding": {
-    "path": "data/feeds/mitre_attack_cache.json",
-    "sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
-    "version": "14.1"
-  }
+  "schema_version": "classification_rule_policy.v3",
+  "updated_at": "2026-08-11T00:00:00Z",
+  "version": "2026-08-11-operation-aware-v3"
 }

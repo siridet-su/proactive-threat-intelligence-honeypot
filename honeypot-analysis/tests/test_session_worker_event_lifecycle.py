@@ -15,11 +15,6 @@ from production.utils.config import ProductionConfig
 from production.workers.session_monitor import SessionMonitor, SessionState
 from production.workers.analysis_worker import AnalysisWorker
 from production.workers.session_worker import SessionWorker, WorkerError
-from production.storage.session_provenance import (
-    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
-    SESSION_SOURCE_E2E_TEST,
-    SESSION_SOURCE_PRODUCTION_LIVE,
-)
 
 
 def _config(tmp_path: Path, *, batch_size: int = 10) -> ProductionConfig:
@@ -72,80 +67,6 @@ def _event(session: str, eventid: str, index: int, **extra: object) -> dict:
 def _event_row(storage: object, event_id: str) -> dict:
     rows = storage.list_rows("events", limit=100)
     return next(row for row in rows if row["event_id"] == event_id)
-
-
-def test_authenticated_controlled_source_is_persisted_and_excluded_from_prediction(
-    tmp_path: Path,
-) -> None:
-    config = _config(tmp_path)
-    config.controlled_synthetic_sensor_ids = ["test-sensor"]
-    config.controlled_synthetic_source_ips = ["100.85.50.74"]
-    storage = open_storage(config.database_url)
-    storage.store_event(
-        "test-sensor",
-        _event("synthetic-session", "cowrie.session.connect", 0, src_ip="100.85.50.74"),
-    )
-    storage.store_event(
-        "test-sensor",
-        _event("synthetic-session", "cowrie.command.input", 1, input="whoami", success=1, src_ip="100.85.50.74"),
-    )
-    storage.store_event(
-        "test-sensor",
-        _event("synthetic-session", "cowrie.session.closed", 2, duration=2.0, src_ip="100.85.50.74"),
-    )
-    worker = SessionWorker(config)
-    try:
-        assert worker.process_unprocessed() == 3
-    finally:
-        worker.close()
-    payload = json.loads(storage.get_session("synthetic-session")["payload_json"])
-    assert payload["session_source"] == SESSION_SOURCE_E2E_TEST
-    assert payload["provenance_marker"] == CONTROLLED_SYNTHETIC_PROVENANCE_MARKER
-    assert payload["prediction_exclusion"] == {
-        "excluded": True,
-        "reason": "controlled_synthetic_test_not_prediction_evidence",
-    }
-    assert payload["prediction_trusted_history"] == []
-    assert storage.list_prediction_snapshots_for_session("synthetic-session", limit=10) == []
-    assert storage.list_rows("alerts", limit=10) == []
-
-
-def test_unallowlisted_source_remains_production_live(tmp_path: Path) -> None:
-    config = _config(tmp_path)
-    config.controlled_synthetic_sensor_ids = ["test-sensor"]
-    config.controlled_synthetic_source_ips = ["100.85.50.74"]
-    storage = open_storage(config.database_url)
-    storage.store_event(
-        "test-sensor",
-        _event("real-session", "cowrie.session.connect", 0, src_ip="203.0.113.27"),
-    )
-    worker = SessionWorker(config)
-    try:
-        assert worker.process_unprocessed() == 1
-    finally:
-        worker.close()
-    payload = json.loads(storage.get_session("real-session")["payload_json"])
-    assert payload["session_source"] == SESSION_SOURCE_PRODUCTION_LIVE
-    assert "provenance_marker" not in payload
-    assert "prediction_exclusion" not in payload
-
-
-def test_production_environment_cannot_enable_global_synthetic_source(tmp_path: Path) -> None:
-    config = _config(tmp_path)
-    config.session_source = SESSION_SOURCE_E2E_TEST
-    storage = open_storage(config.database_url)
-    event_id, _ = storage.store_event(
-        "test-sensor",
-        _event("unsafe-session", "cowrie.session.connect", 0, src_ip="100.85.50.74"),
-    )
-    worker = SessionWorker(config)
-    try:
-        row = _event_row(storage, event_id)
-        event = json.loads(row["payload_json"])
-        with pytest.raises(WorkerError, match="provenance allowlists are required"):
-            worker._event_provenance(row, event)
-    finally:
-        worker.close()
 
 
 def test_worker_completes_claim_only_after_durable_session_save(
@@ -210,7 +131,6 @@ def test_prediction_snapshot_never_persists_response_guidance_or_creates_alert(
         src_ip="203.0.113.27",
         start_time="2026-07-27T00:00:00Z",
         commands=["whoami"],
-        prediction_trusted_history_revision=1,
     )
     try:
         assert worker._save_prediction_snapshot_unobserved(
@@ -236,7 +156,7 @@ def test_prediction_snapshot_never_persists_response_guidance_or_creates_alert(
         worker.close()
 
 
-def test_invalid_v4_prediction_is_rejected_and_recorded_in_outbox(
+def test_invalid_v3_prediction_is_rejected_and_recorded_in_outbox(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -245,7 +165,7 @@ def test_invalid_v4_prediction_is_rejected_and_recorded_in_outbox(
 
         def predict(self, _features: object, *, event_id: str = "") -> dict:
             return {
-                "schema_version": "prediction_snapshot.v4",
+                "schema_version": "prediction_snapshot.v3",
                 "snapshot_id": "prediction_corrupt",
                 "snapshot_sha256": "0" * 64,
                 "session_id": "integrity-session",
@@ -267,7 +187,6 @@ def test_invalid_v4_prediction_is_rejected_and_recorded_in_outbox(
         src_ip="203.0.113.27",
         start_time="2026-07-27T00:00:00Z",
         commands=["whoami"],
-        prediction_trusted_history_revision=1,
     )
     try:
         assert worker._save_prediction_snapshot_unobserved(
@@ -563,23 +482,13 @@ class _RecoveryCoordinator:
         pass
 
     async def analyze(self, _ioc_bundle: object, _tactic_summary: object, sessions: object, **kwargs: object) -> dict:
-        from production.reporting.session_assessment_v6 import (
-            build_session_assessment_v6,
+        from production.reporting.session_assessment_v4 import (
+            build_session_assessment_v4,
         )
 
-        config = ProductionConfig()
-        return build_session_assessment_v6(
+        return build_session_assessment_v4(
             sessions,
             raw_events=kwargs.get("raw_events", []),
-            behavior_policy_path=config.threat_hypothesis_behavior_policy_path,
-            classification_policy=config.classification_policy,
-            classification_policy_path=config.classification_rules_path,
-            model_artifact_provenance=config.prediction_policy,
-            mitre_cache_path=config.mitre_attack_path,
-            response_guidance_policy_path=config.response_guidance_policy_path,
-            response_guidance_asset_profile_path=(
-                config.response_guidance_asset_profile_path
-            ),
         )
 
 
@@ -636,7 +545,7 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
         recovered = restarted.monitor.get_session("session-restart")
         assert recovered is not None
         assert recovered.commands == ["whoami"]
-        assert "session-restart" not in restarted._session_prediction_snapshots
+        assert len(restarted._session_prediction_snapshots["session-restart"]) == 2
         assert restarted.process_unprocessed() == 2
     finally:
         restarted.close()
@@ -663,14 +572,22 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
         "session-restart",
         limit=20,
     )
-    assert snapshots == []
+    snapshot_event_ids = {row["event_id"] for row in snapshots}
+    assert first_event_ids[1] in snapshot_event_ids
+    assert first_event_ids[2] in snapshot_event_ids
+    assert second_command_id in snapshot_event_ids
+    assert close_id in snapshot_event_ids
     for row in snapshots:
         snapshot_payload = json.loads(row["payload_json"])
         cutoff = snapshot_payload["evidence_cutoff"]
         assert cutoff["event_id"] == row["event_id"]
 
     prediction_tasks = storage.list_rows("prediction_outbox", limit=20)
-    assert prediction_tasks == []
+    assert prediction_tasks
+    for row in prediction_tasks:
+        task = json.loads(row["payload_json"])
+        assert task["schema_version"] == "prediction_outbox_task.v2"
+        assert task["evidence_cutoff"]["event_id"] == task["event_id"]
 
     jobs = storage.list_rows("analysis_jobs", limit=10)
     assert len(jobs) == 1
@@ -683,7 +600,7 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
     ) == 1
     report = json.loads(storage.list_rows("reports", limit=1)[0]["payload_json"])
     assert report["session_id"] == "session-restart"
-    assert report["schema_version"] == "session_assessment.v6"
+    assert report["schema_version"] == "session_assessment.v4"
     assert report["canonical_evidence"]["source_evidence_sha256"]
 
 

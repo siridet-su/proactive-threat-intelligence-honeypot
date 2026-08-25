@@ -1,0 +1,32 @@
+[Unit]
+Description=Honeypot Finalizer a6 next-distinct passive shadow feeder (MongoDB v3 wrapper-compatible candidate)
+After=honeypot-session-worker.service honeypot-next-distinct-shadow.service
+Wants=honeypot-next-distinct-shadow.service
+
+[Service]
+Type=simple
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d
+EnvironmentFile=-/etc/honeypot/common.env
+LoadCredential=mongodb-uri
+ExecStart=/opt/honeypot/.venv/bin/python /opt/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d/mongodb_shadow_feeder_v1.py --config /opt/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d/feeder_config.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/var/lib/honeypot
+ReadWritePaths=/var/lib/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d
+
+[Install]
+WantedBy=multi-user.target
+

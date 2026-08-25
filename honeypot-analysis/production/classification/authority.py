@@ -13,47 +13,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 
-SCHEMA_VERSION = "command_authority_decision.v2"
-CLASSIFICATION_EVENT_SCHEMA_VERSION = "classification_event.v3"
-
-_CONDITIONAL_OPERATORS = frozenset({"&&", "||"})
-_INERT_TEXT_FAMILIES = frozenset({"echo", "printf"})
-_SEARCH_FAMILIES = frozenset({"grep", "egrep", "fgrep"})
-_MUTATION_TECHNIQUES = frozenset(
-    {
-        "T1053",  # scheduled task/job modification
-        "T1070",  # indicator removal
-        "T1098",  # account manipulation
-        "T1136",  # account creation
-        "T1222",  # file permission modification
-        "T1496",  # resource hijacking requires an actual miner invocation
-        "T1543",  # service creation/modification
-        "T1546",  # event-triggered execution configuration
-        "T1547",  # boot/logon autostart configuration
-        "T1548",  # elevation-control mechanism use/modification
-        "T1562",  # defense impairment
-    }
-)
-_DIRECT_MUTATION_FAMILIES = frozenset(
-    {
-        "chmod",
-        "chown",
-        "chgrp",
-        "crontab",
-        "kill",
-        "killall",
-        "pkill",
-        "rm",
-        "service",
-        "systemctl",
-        "useradd",
-        "adduser",
-        "usermod",
-        "passwd",
-        "sudo",
-        "su",
-    }
-)
+SCHEMA_VERSION = "command_authority_decision.v1"
+CLASSIFICATION_EVENT_SCHEMA_VERSION = "classification_event.v2"
 
 
 def _text(value: Any) -> str:
@@ -79,7 +40,6 @@ def command_authority_decision(
     parsed: Optional[Dict[str, Any]],
     *,
     structural_match: bool = False,
-    operator_before: str = "",
 ) -> Dict[str, Any]:
     """Return a deterministic parser safety decision.
 
@@ -91,11 +51,6 @@ def command_authority_decision(
     parsed = parsed if isinstance(parsed, dict) else {}
     status = _text(parsed.get("parse_status")) or "missing"
     reasons: list[str] = []
-    fragment_execution = (
-        "conditional_unproven"
-        if _text(operator_before) in _CONDITIONAL_OPERATORS
-        else "submitted_direct"
-    )
     if status != "parsed":
         reasons.append(_text(parsed.get("abstention_reason")) or "parser_abstention")
         return {
@@ -105,7 +60,6 @@ def command_authority_decision(
             "trusted_eligible": False,
             "command": _text(command),
             "parse_status": status,
-            "fragment_execution": fragment_execution,
             "reasons": sorted(set(reasons)),
         }
 
@@ -140,21 +94,7 @@ def command_authority_decision(
             "trusted_eligible": False,
             "command": _text(command),
             "parse_status": status,
-            "fragment_execution": fragment_execution,
             "reasons": sorted(set(reasons)),
-        }
-
-    if fragment_execution == "conditional_unproven":
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "decision": "audit_only",
-            "safety_class": "conditional_fragment_unproven",
-            "trusted_eligible": False,
-            "command": _text(command),
-            "parse_status": status,
-            "fragment_execution": fragment_execution,
-            "reasons": ["conditional_fragment_execution_not_proven"],
-            "operation_context": _operation_context(parsed),
         }
 
     if structural_match:
@@ -170,120 +110,8 @@ def command_authority_decision(
         "trusted_eligible": decision == "trusted",
         "command": _text(command),
         "parse_status": status,
-        "fragment_execution": fragment_execution,
-        "operation_context": _operation_context(parsed),
         "reasons": [],
     }
-
-
-def _normalized_paths(parsed: Dict[str, Any], entity_key: str) -> list[str]:
-    entities = parsed.get("entities") if isinstance(parsed.get("entities"), dict) else {}
-    values: list[str] = []
-    for item in _list(entities.get(entity_key)):
-        if isinstance(item, dict):
-            value = _text(item.get("normalized_value") or item.get("raw_value"))
-            if value:
-                values.append(value)
-    return values
-
-
-def _operation_context(parsed: Dict[str, Any]) -> Dict[str, Any]:
-    redirection_targets: list[str] = []
-    for item in _list(parsed.get("redirections")):
-        if not isinstance(item, dict):
-            continue
-        path = item.get("path") if isinstance(item.get("path"), dict) else {}
-        value = _text(path.get("normalized_value") or item.get("target"))
-        if value:
-            redirection_targets.append(value)
-    return {
-        "command_family": _text(parsed.get("command_family")).lower(),
-        "executable": _text(parsed.get("executable")),
-        "operation_types": sorted({_text(item) for item in _list(parsed.get("operation_types")) if _text(item)}),
-        "operands": [_text(item) for item in _list(parsed.get("operands")) if _text(item)],
-        "read_paths": sorted(set(_normalized_paths(parsed, "read_paths"))),
-        "write_paths": sorted(set(_normalized_paths(parsed, "write_paths"))),
-        "redirection_targets": sorted(set(redirection_targets)),
-    }
-
-
-def _span_overlaps_literal(command: str, start: int, end: int, literal: str) -> bool:
-    if not literal:
-        return False
-    cursor = 0
-    lowered = command.lower()
-    needle = literal.lower()
-    while True:
-        position = lowered.find(needle, cursor)
-        if position < 0:
-            return False
-        if start < position + len(needle) and end > position:
-            return True
-        cursor = position + 1
-
-
-def _regex_operation_context_allows(
-    parser_decision: Dict[str, Any],
-    metadata: Dict[str, Any],
-) -> tuple[bool, list[str]]:
-    """Prove that a regex match refers to an observed command operation.
-
-    A regex is allowed to locate reviewed syntax, but it cannot by itself prove
-    that an inert token was invoked or that a read modified a persistence
-    target.  The parser-owned context supplies that missing authority.
-    """
-
-    reasons: list[str] = []
-    promotion = metadata.get("runtime_authority")
-    promotion = promotion if isinstance(promotion, dict) else {}
-    if _text(promotion.get("operation_class")) != "reviewed_operation_context":
-        reasons.append("regex_operation_class_missing")
-        return False, reasons
-
-    context = parser_decision.get("operation_context")
-    context = context if isinstance(context, dict) else {}
-    family = _text(context.get("command_family")).lower()
-    executable = _text(context.get("executable"))
-    operations = {_text(item) for item in _list(context.get("operation_types"))}
-    read_paths = [_text(item) for item in _list(context.get("read_paths"))]
-    write_paths = [_text(item) for item in _list(context.get("write_paths"))]
-    redirect_paths = [_text(item) for item in _list(context.get("redirection_targets"))]
-    command = _text(parser_decision.get("command"))
-    match_start = metadata.get("regex_match_start")
-    match_end = metadata.get("regex_match_end")
-    if type(match_start) is not int or type(match_end) is not int:
-        reasons.append("regex_match_context_missing")
-        return False, reasons
-
-    ttp = _text(metadata.get("ttp")).upper()
-    overlaps_executable = _span_overlaps_literal(
-        command, match_start, match_end, executable
-    )
-    overlaps_read_path = any(
-        _span_overlaps_literal(command, match_start, match_end, path)
-        for path in read_paths
-    )
-    overlaps_write_path = any(
-        _span_overlaps_literal(command, match_start, match_end, path)
-        for path in [*write_paths, *redirect_paths]
-    )
-
-    if family in _INERT_TEXT_FAMILIES and not redirect_paths:
-        reasons.append("inert_text_mention_not_operation")
-    if family in _SEARCH_FAMILIES and ttp in _MUTATION_TECHNIQUES:
-        reasons.append("search_term_not_mutation_or_execution")
-    if ttp in _MUTATION_TECHNIQUES:
-        mutation_proven = overlaps_write_path or (
-            overlaps_executable and family in _DIRECT_MUTATION_FAMILIES
-        )
-        if "file_read" in operations and not overlaps_write_path:
-            mutation_proven = False
-        if not mutation_proven:
-            reasons.append("modification_or_execution_operation_not_proven")
-    elif not (overlaps_executable or overlaps_read_path or overlaps_write_path):
-        reasons.append("regex_match_not_bound_to_executable_or_operand")
-
-    return not reasons, reasons
 
 
 def candidate_authority_decision(
@@ -334,13 +162,6 @@ def candidate_authority_decision(
         if _text(promotion.get("safety_class")) != "literal_unambiguous":
             trusted = False
             reasons.append("regex_promotion_safety_class_missing")
-        context_allowed, context_reasons = _regex_operation_context_allows(
-            parser_decision,
-            metadata,
-        )
-        if not context_allowed:
-            trusted = False
-            reasons.extend(context_reasons)
         if not provenance.get("rule_policy_id") or not provenance.get("rule_policy_version"):
             trusted = False
             reasons.append("rule_policy_provenance_missing")

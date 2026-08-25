@@ -1,0 +1,23 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_live_mongo_feeder.v1",
+  "status": "PASS",
+  "deployment_id": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+  "source_filter": "production_live",
+  "manifest_required": "prediction_trusted_history_manifest.v3",
+  "endpoint": "http://127.0.0.1:18082/predict",
+  "feeder_source_sha256": "d179a253e6ef8877845649b16f517d3e10fa705ffedd0332f7399cefbe71d448",
+  "feeder_config_sha256": "2af49f6b1a967515de9e8b8e6c826fbff956a9e97409c540ddd2dad62caec1ef",
+  "seeded_watermark_session_id_sha256": "4aa3a7c3db77b583b4a69d6c6dd10e32b19c6eb8023437f6610072ba026f41cd",
+  "rows_seen": 7,
+  "rows_eligible": 1,
+  "rejected_rows": 5,
+  "duplicate_rows": 1,
+  "predictions_emitted": 1,
+  "predictor_failures": 0,
+  "records_lines": 1,
+  "records_sha256": "f1da1548b30ec35ea14cbc5a3d3bfa5aa54451dbc7d4c71c4f6635bc1b4ad99",
+  "canonical_mongo_mutation_methods": [],
+  "canonical_write_allowed": false,
+  "historical_replay": false
+}
+

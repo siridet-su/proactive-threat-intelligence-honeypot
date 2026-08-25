@@ -5,7 +5,6 @@ import hashlib
 import json
 
 from production.prediction.next_behavior_contract import (
-    MODEL_INPUT_SCHEMA_VERSION,
     TACTIC_VOCABULARY,
     TARGET_CONTRACT_ID,
     TERMINAL_OUTCOME,
@@ -36,7 +35,7 @@ def _vocabulary() -> dict:
     value = {
         "schema_version": VOCABULARY_SCHEMA_VERSION,
         "target_contract_id": TARGET_CONTRACT_ID,
-        "input_schema_version": MODEL_INPUT_SCHEMA_VERSION,
+        "input_schema_version": "next_behavior_input.v1",
         "tactics": sorted(TACTIC_VOCABULARY),
         "techniques": ["<UNK>", "T1059", "T1082", "T1547"],
         "label_sources": [

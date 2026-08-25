@@ -10,7 +10,6 @@ SESSION_SOURCE_E2E_TEST = "e2e_test"
 SESSION_SOURCE_SEED_DATA = "seed_data"
 SESSION_SOURCE_DEMO_FIXTURE = "demo_fixture"
 SESSION_SOURCE_UNKNOWN_LEGACY = "unknown_legacy"
-CONTROLLED_SYNTHETIC_PROVENANCE_MARKER = "CONTROLLED_SYNTHETIC_TEST"
 
 VALID_SESSION_SOURCES = {
     SESSION_SOURCE_PRODUCTION_LIVE,
@@ -19,42 +18,6 @@ VALID_SESSION_SOURCES = {
     SESSION_SOURCE_DEMO_FIXTURE,
     SESSION_SOURCE_UNKNOWN_LEGACY,
 }
-
-
-def controlled_synthetic_provenance(
-    *,
-    sensor_id: Any,
-    source_ip: Any,
-    allowed_sensor_ids: Iterable[Any] = (),
-    allowed_source_ips: Iterable[Any] = (),
-) -> Dict[str, str]:
-    """Derive controlled-test provenance from authenticated metadata only.
-
-    The sensor identity is bound by the ingest authentication layer and the
-    source address is emitted by the trusted Cowrie sensor.  No command text,
-    session identifier, or attacker-controlled marker participates in this
-    decision.  An empty or mismatched allowlist always yields production-live
-    provenance.
-    """
-
-    selected_sensor = str(sensor_id or "").strip()
-    selected_source_ip = str(source_ip or "").strip()
-    sensor_ids = {
-        str(value or "").strip()
-        for value in allowed_sensor_ids or ()
-        if str(value or "").strip()
-    }
-    source_ips = {
-        str(value or "").strip()
-        for value in allowed_source_ips or ()
-        if str(value or "").strip()
-    }
-    if selected_sensor and selected_sensor in sensor_ids and selected_source_ip in source_ips:
-        return {
-            "session_source": SESSION_SOURCE_E2E_TEST,
-            "provenance_marker": CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
-        }
-    return {"session_source": SESSION_SOURCE_PRODUCTION_LIVE, "provenance_marker": ""}
 
 _SEED_RE = re.compile(r"(sme-auto-evidence-seed|external-shrink-grid|external-seed|seed-)", re.I)
 _E2E_RE = re.compile(r"(controlled-test|codex-|tailscale-test|public-map-test|e2e)", re.I)

@@ -5,6 +5,7 @@ import hashlib
 
 import pytest
 
+from production.prediction.evidence_cutoff import make_evidence_cutoff
 from production.prediction.next_behavior_contract import (
     MODEL_INPUT_SCHEMA_VERSION,
     SESSION_SCHEMA_VERSION,
@@ -19,6 +20,13 @@ from production.prediction.next_behavior_preprocessing import (
     build_live_model_input,
     build_next_behavior_examples,
 )
+from production.prediction.trusted_history import (
+    build_prediction_trusted_history_manifest,
+    normalize_trusted_phases,
+    phase_sha256,
+    validate_prediction_trusted_history_manifest,
+)
+from production.utils.serialization import stable_json
 
 
 HASH_A = "a" * 64
@@ -169,6 +177,83 @@ def test_repeated_tactic_sets_form_one_phase_without_losing_run_information() ->
     assert len(phases[0]["evidence_refs"]) == 2
     assert phases[0]["label_agreement_statuses"] == ["rule_only"]
     assert phases[0]["audit_only_label_count"] == 0
+
+
+def test_v3_duplicate_semantic_labels_fail_closed_at_next_behavior_boundary() -> None:
+    """The producer collapses duplicates; a malformed boundary record still rejects them."""
+
+    manifest = build_prediction_trusted_history_manifest(
+        phases=[
+            {
+                "command_index": 0,
+                "event_id": "event-one",
+                "event_timestamp": "2026-08-13T00:00:00Z",
+                "labels": [
+                    {
+                        "tactic": "discovery",
+                        "technique": "T1033",
+                        "source": "reviewed_rule",
+                        "classification_evidence_id": "event-one",
+                    }
+                ],
+            }
+        ],
+        evidence_cutoff=make_evidence_cutoff(
+            "2026-08-13T00:00:00Z", "event-one"
+        ),
+        classifier_environment={"environment_sha256": "a" * 64},
+    )
+    phase = copy.deepcopy(manifest["ordered_trusted_phases"][0])
+    phase["labels"].append(copy.deepcopy(phase["labels"][0]))
+    phase["phase_sha256"] = phase_sha256(phase)
+    manifest["ordered_trusted_phases"] = [phase]
+    manifest["ordered_trusted_phases_sha256"] = hashlib.sha256(
+        stable_json(manifest["ordered_trusted_phases"]).encode("utf-8")
+    ).hexdigest()
+    basis = copy.deepcopy(manifest)
+    basis.pop("history_manifest_sha256")
+    manifest["history_manifest_sha256"] = hashlib.sha256(
+        stable_json(basis).encode("utf-8")
+    ).hexdigest()
+
+    assert validate_prediction_trusted_history_manifest(manifest) == []
+    record = _session([_group("one", 1, 0, ["discovery"])])
+    record["prediction_trusted_history_manifest"] = manifest
+    errors = validate_next_behavior_session(record)
+    assert "prediction trusted history phase 0 labels are duplicated" in errors
+
+
+def test_v3_producer_collapses_semantic_duplicates_and_retains_all_evidence() -> None:
+    phases = normalize_trusted_phases(
+        [
+            {
+                "command_index": 0,
+                "event_id": "event-id",
+                "event_timestamp": "2026-08-13T00:00:00Z",
+                "labels": [
+                    {
+                        "tactic": "discovery",
+                        "technique": "T1033",
+                        "source": "reviewed_rule",
+                        "classification_evidence_id": "event-id",
+                    },
+                    {
+                        "tactic": "discovery",
+                        "technique": "T1033",
+                        "source": "reviewed_rule",
+                        "classification_evidence_id": "event-whoami",
+                    },
+                ],
+            }
+        ],
+        cap=None,
+    )
+
+    assert len(phases) == 1
+    assert [(item["tactic"], item["technique"]) for item in phases[0]["labels"]] == [
+        ("discovery", "T1033")
+    ]
+    assert phases[0]["evidence_refs"] == ["event-id", "event-whoami"]
 
 
 def test_closed_session_emits_next_phase_and_terminal_examples() -> None:

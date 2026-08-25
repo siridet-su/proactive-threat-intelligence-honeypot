@@ -4,7 +4,6 @@ import hashlib
 import json
 import math
 import os
-import re
 import sqlite3
 import stat
 import uuid
@@ -40,9 +39,9 @@ from production.prediction.evidence_cutoff import (
     require_valid_evidence_cutoff,
 )
 from production.prediction.prediction_snapshot_contract import (
+    SNAPSHOT_SCHEMA_VERSION,
     PredictionSnapshotIntegrityError,
     canonical_prediction_content,
-    is_integrity_bound_prediction_snapshot,
     require_valid_prediction_snapshot,
     validate_prediction_snapshot_integrity,
 )
@@ -62,7 +61,6 @@ class StorageError(RuntimeError):
 
 SQLITE_SCHEMA_VERSION = 3
 AI_ADVISORY_SCHEMA_EXTENSION_ID = "non_authoritative_ai_advisory.v1"
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 AI_ADVISORY_RECONCILIATION_CURSOR_SCHEMA = (
     "ai_advisory_reconciliation_cursor.v1"
 )
@@ -265,7 +263,7 @@ def _prediction_row_order(
     """Return canonical currentness order; invalid declared cutoffs sort last."""
 
     payload = _prediction_row_payload(row)
-    if is_integrity_bound_prediction_snapshot(payload):
+    if payload.get("schema_version") == SNAPSHOT_SCHEMA_VERSION:
         if validate_prediction_snapshot_integrity(payload):
             return (-1, "", "", str(row.get("snapshot_id") or ""))
         if str(row.get("snapshot_id") or "") != str(
@@ -2840,18 +2838,14 @@ class SQLiteStorage:
     ) -> Optional[str]:
         assessment_id = str(report_payload.get("assessment_id") or "").strip()
         if (
-            report_payload.get("schema_version") in {
-                "session_assessment.v4",
-                "session_assessment.v5",
-                "session_assessment.v6",
-            }
+            report_payload.get("schema_version") == "session_assessment.v4"
             and assessment_id
         ):
             report_id = stable_id(
                 "report",
                 {
                     "job_id": job_id,
-                    "schema_version": report_payload.get("schema_version"),
+                    "schema_version": "session_assessment.v4",
                     "assessment_id": assessment_id,
                 },
             )
@@ -2865,11 +2859,7 @@ class SQLiteStorage:
         canonical_session_id = (
             canonical_evidence.get("session_id")
             if (
-                report_payload.get("schema_version") in {
-                    "session_assessment.v4",
-                    "session_assessment.v5",
-                    "session_assessment.v6",
-                }
+                report_payload.get("schema_version") == "session_assessment.v4"
                 and isinstance(canonical_evidence, dict)
             )
             else ""
@@ -2984,6 +2974,12 @@ class SQLiteStorage:
             "ai_advisory_job",
             {"report_id": report_key, "assessment_id": assessment_key},
         )
+        task = {
+            "schema_version": "ai_advisory_task.v1",
+            "report_id": report_key,
+            "session_id": session_key,
+            "assessment_id": assessment_key,
+        }
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             report = conn.execute(
@@ -2996,36 +2992,8 @@ class SQLiteStorage:
                 payload = json.loads(report["payload_json"] or "{}")
             except (TypeError, json.JSONDecodeError) as exc:
                 raise StorageError("committed report is not valid JSON") from exc
-            report_schema = payload.get("schema_version")
-            if report_schema in {"session_assessment.v4", "session_assessment.v5"}:
-                task = {
-                    "schema_version": "ai_advisory_task.v1",
-                    "report_id": report_key,
-                    "session_id": session_key,
-                    "assessment_id": assessment_key,
-                }
-            elif report_schema == "session_assessment.v6":
-                report_content_sha256 = str(
-                    payload.get("report_content_sha256") or ""
-                ).lower()
-                if not _SHA256_RE.fullmatch(report_content_sha256):
-                    raise StorageError("v6 report content identity is invalid")
-                task = {
-                    "schema_version": "ai_advisory_task.v2",
-                    "report_id": report_key,
-                    "session_id": session_key,
-                    "assessment_id": assessment_key,
-                    "report_content_sha256": report_content_sha256,
-                    "advisory_contract_version": "v2",
-                }
-            else:
-                raise StorageError("AI advisory enqueue report identity is invalid")
             if (
-                payload.get("schema_version") not in {
-                    "session_assessment.v4",
-                    "session_assessment.v5",
-                    "session_assessment.v6",
-                }
+                payload.get("schema_version") != "session_assessment.v4"
                 or str(payload.get("assessment_id") or "") != assessment_key
             ):
                 raise StorageError("AI advisory enqueue report identity is invalid")
@@ -3368,7 +3336,7 @@ class SQLiteStorage:
             except (TypeError, json.JSONDecodeError):
                 advanced_row = row
                 continue
-            if payload.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"}:
+            if payload.get("schema_version") != "session_assessment.v4":
                 advanced_row = row
                 continue
             assessment_id = str(payload.get("assessment_id") or "").strip()
@@ -3678,12 +3646,7 @@ class SQLiteStorage:
         advisory_id = _required_identity(
             advisory_record["advisory_id"], "advisory_id"
         )
-        if completion_code not in {
-            "accepted",
-            "rejected",
-            "cache_replayed",
-            "deterministic_abstention",
-        }:
+        if completion_code not in {"accepted", "rejected", "cache_replayed"}:
             raise ValueError("AI advisory completion_code is invalid")
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -4968,8 +4931,8 @@ class SQLiteStorage:
     def save_prediction_snapshot(self, snapshot: Dict[str, Any]) -> str:
         snapshot_id = snapshot.get("snapshot_id") or stable_id("predsnap", snapshot)
         now = snapshot.get("generated_at") or utc_now()
-        is_integrity_bound = is_integrity_bound_prediction_snapshot(snapshot)
-        if is_integrity_bound:
+        is_v3 = snapshot.get("schema_version") == SNAPSHOT_SCHEMA_VERSION
+        if is_v3:
             snapshot = require_valid_prediction_snapshot(snapshot)
             snapshot_id = snapshot["snapshot_id"]
         cutoff = snapshot.get("evidence_cutoff")
@@ -4990,7 +4953,7 @@ class SQLiteStorage:
                 """,
                 (snapshot_id,),
             ).fetchone()
-            if existing is not None and is_integrity_bound:
+            if existing is not None and is_v3:
                 try:
                     existing_payload = json.loads(
                         str(existing["payload_json"] or "{}")
@@ -5069,7 +5032,8 @@ class SQLiteStorage:
             item["payload"] = _prediction_row_payload(item)
             item["integrity_errors"] = (
                 validate_prediction_snapshot_integrity(item["payload"])
-                if is_integrity_bound_prediction_snapshot(item["payload"])
+                if item["payload"].get("schema_version")
+                == SNAPSHOT_SCHEMA_VERSION
                 else []
             )
             items.append(item)
@@ -5108,7 +5072,7 @@ class SQLiteStorage:
         item["payload"] = _prediction_row_payload(item)
         item["integrity_errors"] = (
             validate_prediction_snapshot_integrity(item["payload"])
-            if is_integrity_bound_prediction_snapshot(item["payload"])
+            if item["payload"].get("schema_version") == SNAPSHOT_SCHEMA_VERSION
             else []
         )
         return item

@@ -1,0 +1,17 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_controlled_exclusion.v1",
+  "status": "PASS_PRESERVED",
+  "controlled_source": "e2e_test",
+  "marker": "CONTROLLED_SYNTHETIC_TEST",
+  "ordinary_feeder_source_filter": "production_live",
+  "controlled_rows_promoted": false,
+  "controlled_prediction_history_manifest_created": false,
+  "controlled_findings_or_actions_created": false,
+  "prior_controlled_receipts_preserved": true,
+  "test_namespaces_preserved": [
+    "gcp_cowrie_shadow_controlled_enablement_20260823",
+    "gcp_cowrie_shadow_controlled_persistence_resolution_20260824",
+    "gcp_cowrie_shadow_v3_mongo_final_controlled_e2e_20260824"
+  ]
+}
+

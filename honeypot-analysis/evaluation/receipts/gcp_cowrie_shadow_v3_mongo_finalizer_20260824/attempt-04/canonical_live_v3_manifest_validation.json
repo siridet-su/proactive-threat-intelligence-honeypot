@@ -1,0 +1,28 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_canonical_live_v3_manifest.v1",
+  "status": "PASS",
+  "session_id_sha256": "76c113a3e3cd47fe2ab5053ec0d218f8a75ec69e6d413c832e0110a967b9d295",
+  "manifest_schema": "prediction_trusted_history_manifest.v3",
+  "target_contract_id": "next_distinct_trusted_behavior_phase_or_session_end.v2",
+  "history_manifest_sha256": "9609d89a44e2052a04aeac61c7058a46ef68b7c059a181233bd3a66e0826d809",
+  "ordered_trusted_phases_sha256": "a1f1e123b54db68957c953df241b59259af4af79eacf9104f547407742221302",
+  "phase_sha256": "7513b66b3367ec431674faaff23650c9cee2a336489e22012d49f19186085908",
+  "ordered_tactics": [
+    "discovery"
+  ],
+  "technique_ids": [
+    "T1033",
+    "T1082",
+    "T1083"
+  ],
+  "trusted_phase_count": 1,
+  "selected_distinct_phase_count": 1,
+  "original_distinct_phase_count": 1,
+  "truncated": false,
+  "upstream_truncated": false,
+  "evidence_cutoff_schema": "prediction_evidence_cutoff.v1",
+  "evidence_cutoff_event_id_sha256": "e6a376af6963151b2a873ab8fa8017fe3927ae4a24877e22161a7d854ebbf66f",
+  "evidence_cutoff_received_at": "2026-08-24T14:48:42.596035+00:00",
+  "raw_event_payloads_persisted_here": false
+}
+

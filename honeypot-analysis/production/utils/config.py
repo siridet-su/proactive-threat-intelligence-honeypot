@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import ipaddress
 import math
 import os
 import re
@@ -339,11 +338,6 @@ class ProductionConfig:
     environment: str = "pilot"
     sensor_id: str = "demo-sensor"
     session_source: str = SESSION_SOURCE_PRODUCTION_LIVE
-    # Server-side, authenticated metadata boundary for controlled Track-B
-    # sessions.  These values are never accepted from Cowrie command text or
-    # attacker-provided event fields.
-    controlled_synthetic_sensor_ids: List[str] = field(default_factory=list)
-    controlled_synthetic_source_ips: List[str] = field(default_factory=list)
     api_token: str = ""
     ingest_sensor_tokens: Dict[str, str] = field(default_factory=dict)
 
@@ -614,10 +608,8 @@ class ProductionConfig:
         },
     })
     prediction_policy: Dict[str, Any] = field(default_factory=lambda: {
-        # Fail closed unless a reviewed prediction-policy file is loaded.
-        # The legacy VOMM remains an explicit rollback artifact only.
-        "enabled": False,
-        "prediction_mode": "disabled_pending_reviewed_prediction_policy",
+        "enabled": True,
+        "prediction_mode": "external_hard_backoff_vomm",
         "compute_weighted_ensemble_baseline": False,
         "weight_influence_scope": "not_applicable_external_authority",
         "primary_transition": {
@@ -729,7 +721,7 @@ class ProductionConfig:
             "low_classification_cap": "low",
         },
         "prediction_triggers": {
-            "enabled": False,
+            "enabled": True,
             "eventids": [
                 "cowrie.login.success",
                 "cowrie.login.failed",
@@ -740,7 +732,7 @@ class ProductionConfig:
             "eventid_prefixes": ["cowrie.command."],
         },
         "predictive_alerts": {
-            "enabled": False,
+            "enabled": True,
             "min_confidence": "medium",
             "min_score": 0.50,
             "min_severity": "high",
@@ -797,31 +789,6 @@ class ProductionConfig:
 
     def validate_event_processing(self) -> None:
         """Reject unsafe event-processing lease and retry configuration."""
-        for field_name in (
-            "controlled_synthetic_sensor_ids",
-            "controlled_synthetic_source_ips",
-        ):
-            values = getattr(self, field_name)
-            if not isinstance(values, list) or any(
-                not isinstance(value, str)
-                or not value.strip()
-                or value != value.strip()
-                for value in values
-            ):
-                raise ValueError(f"{field_name} must be a list of non-empty strings")
-            if len(values) != len(set(values)):
-                raise ValueError(f"{field_name} must not contain duplicates")
-        for source_ip in self.controlled_synthetic_source_ips:
-            try:
-                parsed = ipaddress.ip_address(source_ip)
-            except ValueError as exc:
-                raise ValueError(
-                    "controlled_synthetic_source_ips must contain IP addresses"
-                ) from exc
-            if parsed.is_global:
-                raise ValueError(
-                    "controlled_synthetic_source_ips must not contain globally routable addresses"
-                )
         positive_durations = {
             "forwarder_poll_seconds": self.forwarder_poll_seconds,
             "forwarder_timeout_seconds": self.forwarder_timeout_seconds,

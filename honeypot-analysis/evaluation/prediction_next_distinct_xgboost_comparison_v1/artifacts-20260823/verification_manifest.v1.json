@@ -1,0 +1,37 @@
+{
+  "schema_version": "prediction_next_distinct_xgboost_verification_manifest.v1",
+  "status": "COMPLETE_VALID",
+  "comparison_id": "prediction_next_distinct_xgboost_comparison_v1_20260823",
+  "source_bindings": {
+    "runner_path": "honeypot-analysis/evaluation/prediction_next_distinct_xgboost_comparison_v1/run_xgboost.py",
+    "runner_sha256": "f15dd43e3cd05a539784375b516a848c51dc1fc1aafafbb8b18a6ebcae6c0f10",
+    "readme_path": "honeypot-analysis/evaluation/prediction_next_distinct_xgboost_comparison_v1/README.md",
+    "readme_sha256": "8cd36cc384ccf38b5587a4c3c5b7335096588f610152388d0879c42d07113874"
+  },
+  "frozen_v2_bindings": {
+    "dataset_manifest_sha256": "5b88e7410e4f2ba96ff578cb5e9da025b3028c2e12c6017f08e6bee0a177458d",
+    "v2_runner_sha256": "e7ee9f599d1d156a3bb891d7696ad86045e4834fdb6174ade64d9f5d70fcb488",
+    "v2_receipt_sha256": "a96d3577096e78d00df0d25eb6ef32a383b7a0c63f5a28f64ded9ec19446d922"
+  },
+  "output_receipt": {
+    "path": "xgboost_comparison_receipt.v1.json",
+    "receipt_sha256": "3424b8008be6b2b52072490f75085734cf6d19d5b69498b2d05ae2c6f0ee7894",
+    "final_results_sha256": "c5a5693051dfed883fdc62d4c1e7aea5335e6f4911f6a15f51a610920036c204",
+    "model_sha256": "798345f349d2ccceb6ce1611bb31c5ba27156fe7753921039d8e00bbdc17d759"
+  },
+  "validation": {
+    "frozen_v2_required_artifacts_revalidated": true,
+    "native_model_reload_and_selection_replay": true,
+    "selection_cases": 1983,
+    "calibration_cases": 2104,
+    "sealed_data_accessed": false,
+    "production_changed": false,
+    "v1_modified": false,
+    "v2_modified": false,
+    "existing_files_overwritten": [],
+    "part_files_remaining": false,
+    "json_and_jsonl_validation": "PASS",
+    "isolated_pip_check": "PASS",
+    "deterministic_secret_privacy_scan": "PASS"
+  }
+}

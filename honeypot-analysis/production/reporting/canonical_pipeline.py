@@ -1,7 +1,7 @@
 """Canonical new-report coordinator.
 
 This module is the only production bridge from reconstructed session state to
-``session_assessment.v6``.  It deliberately contains no v1/v2/v3/v4/v5 report
+``session_assessment.v4``.  It deliberately contains no v1/v2/v3 report
 generator, attacker-intent field, score, next-action prediction, recommendation
 engine, response execution, alert authority, or LLM client.
 """
@@ -12,7 +12,7 @@ from collections import Counter
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
-from production.reporting.session_assessment_v6 import build_session_assessment_v6
+from production.reporting.session_assessment_v4 import build_session_assessment_v4
 from production.utils.sensitive_data import redact_for_artifact
 
 
@@ -112,7 +112,7 @@ def build_session_correlation_hunting_context(
 
 
 class CanonicalAssessmentCoordinator:
-    """Build exactly one deterministic v6 assessment for a closed session."""
+    """Build exactly one deterministic v4 assessment for a closed session."""
 
     def __init__(
         self,
@@ -156,11 +156,11 @@ class CanonicalAssessmentCoordinator:
     ) -> Dict[str, Any]:
         del ttp_command_map
         # ``build_pipeline_trigger`` passes this documented public keyword.
-        # The graph is context-only here, but accepting it prevents a
+        # The graph is context-only in v4, but accepting it here prevents a
         # primary report from incorrectly falling through to the availability
         # fallback before canonical assessment can run.
         del bpg_list
-        report = build_session_assessment_v6(
+        report = build_session_assessment_v4(
             sessions,
             raw_events=raw_events or [],
             behavior_policy_document=self.behavior_policy_document,

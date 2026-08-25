@@ -1,0 +1,14 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_activation_verifier_repairs.v1",
+  "status": "PASS_VERIFIER_ONLY",
+  "corrections": [
+    "staged receipt filename aligned with staged asset",
+    "guard exception handling widened to include load-time fail-closed errors",
+    "old/new expected hashes corrected to active a5 and candidate a6 values"
+  ],
+  "candidate_runtime_source_changed": false,
+  "active_release_changed_only_by_guarded_switch": true,
+  "no_traffic_during_failed_attempts": true,
+  "rollback_on_failed_attempts": true
+}
+

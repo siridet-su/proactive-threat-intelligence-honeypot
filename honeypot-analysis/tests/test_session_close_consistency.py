@@ -193,7 +193,7 @@ def _prepare_worker(tmp_path: Path) -> tuple[ProductionConfig, Any, SessionWorke
     return config, storage, worker
 
 
-def test_close_resolves_without_forecast_and_final_session_precedes_jobs(
+def test_close_prediction_and_final_session_precede_jobs_and_event_completion(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,10 +208,16 @@ def test_close_resolves_without_forecast_and_final_session_precedes_jobs(
     )
     close_event_id, _ = storage.store_event("sensor-a", close_event)
 
+    original_prediction = worker.storage.save_prediction_snapshot
     original_session = worker.storage.save_session
     original_analysis = worker.storage.enqueue_analysis_job
     original_hunt = worker.storage.enqueue_threat_hunt_job
     original_complete = worker.storage.complete_event
+
+    def save_prediction(snapshot: dict[str, Any]) -> None:
+        original_prediction(snapshot)
+        if snapshot.get("event_id") == close_event_id:
+            order.append("close_prediction")
 
     def save_session(payload: dict[str, Any]) -> None:
         original_session(payload)
@@ -224,7 +230,7 @@ def test_close_resolves_without_forecast_and_final_session_precedes_jobs(
         snapshots = worker.storage.list_rows_for_session(
             "prediction_snapshots", "session-close", limit=20
         )
-        assert all(row.get("event_id") != close_event_id for row in snapshots)
+        assert any(row.get("event_id") == close_event_id for row in snapshots)
         order.append("analysis_job")
         return original_analysis(payload)
 
@@ -236,6 +242,7 @@ def test_close_resolves_without_forecast_and_final_session_precedes_jobs(
         order.append("event_completed")
         return original_complete(*args, **kwargs)
 
+    monkeypatch.setattr(worker.storage, "save_prediction_snapshot", save_prediction)
     monkeypatch.setattr(worker.storage, "save_session", save_session)
     monkeypatch.setattr(worker.storage, "enqueue_analysis_job", enqueue_analysis)
     monkeypatch.setattr(worker.storage, "enqueue_threat_hunt_job", enqueue_hunt)
@@ -245,7 +252,8 @@ def test_close_resolves_without_forecast_and_final_session_precedes_jobs(
     finally:
         worker.close()
 
-    assert order.index("event_persisted") < order.index("closed_session")
+    assert order.index("event_persisted") < order.index("close_prediction")
+    assert order.index("close_prediction") < order.index("closed_session")
     assert order.index("closed_session") < order.index("analysis_job")
     assert order.index("closed_session") < order.index("hunt_job")
     assert order.index("analysis_job") < order.index("event_completed")
@@ -272,8 +280,8 @@ def test_close_stage_failure_is_retryable_without_partial_analysis_job(
     def fail_after_final_session(_payload: dict[str, Any]) -> str:
         persisted = worker.storage.get_session("session-close")
         assert persisted is not None and persisted["payload"]["is_ended"] is True
-        assert all(
-            row.get("event_id") != close_event_id
+        assert any(
+            row.get("event_id") == close_event_id
             for row in worker.storage.list_rows_for_session(
                 "prediction_snapshots", "session-close", limit=20
             )
@@ -313,7 +321,7 @@ def test_close_stage_failure_is_retryable_without_partial_analysis_job(
         )
         if row.get("event_id") == close_event_id
     ]
-    assert close_snapshots == []
+    assert len(close_snapshots) == 1
     session = storage.get_session("session-close")
     assert session is not None
     assert session["payload"]["analysis_status"] == "queued"

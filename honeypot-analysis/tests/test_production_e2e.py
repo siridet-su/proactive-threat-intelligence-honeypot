@@ -20,9 +20,9 @@ from production.api.ingest_api import build_server
 from production.workers.sensor_forwarder import forward_once, post_events
 from production.workers.session_worker import SessionWorker
 from production.storage import open_storage
-from production.reporting.session_assessment_v6 import (
-    build_session_assessment_v6,
-    validate_session_assessment_v6,
+from production.reporting.session_assessment_v4 import (
+    build_session_assessment_v4,
+    validate_session_assessment_v4,
 )
 
 
@@ -126,19 +126,9 @@ class FakeCoordinator:
         self.max_tokens = max_tokens
 
     async def analyze(self, ioc_bundle, tactic_summary, sessions_obj, **kwargs):
-        config = ProductionConfig()
-        return build_session_assessment_v6(
+        return build_session_assessment_v4(
             sessions_obj,
             raw_events=kwargs.get("raw_events", []),
-            behavior_policy_path=config.threat_hypothesis_behavior_policy_path,
-            classification_policy=config.classification_policy,
-            classification_policy_path=config.classification_rules_path,
-            model_artifact_provenance=config.prediction_policy,
-            mitre_cache_path=config.mitre_attack_path,
-            response_guidance_policy_path=config.response_guidance_policy_path,
-            response_guidance_asset_profile_path=(
-                config.response_guidance_asset_profile_path
-            ),
         )
 
 
@@ -203,10 +193,10 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert processed == len(events)
         prediction_outbox = storage.list_rows("prediction_outbox")
         prediction_snapshots = storage.list_rows("prediction_snapshots")
-        # Phase 4 fails prediction closed until the post-Phase-7 checkpoint
-        # compatibility gate; deterministic analysis remains fully active.
-        assert prediction_outbox == []
-        assert prediction_snapshots == []
+        assert prediction_outbox
+        assert len(prediction_outbox) == len(prediction_snapshots)
+        assert all(row["status"] == "completed" for row in prediction_outbox)
+        assert all(row["snapshot_id"] for row in prediction_outbox)
 
         sessions = storage.list_rows("sessions")
         assert len(sessions) == 1
@@ -241,8 +231,8 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
             cfg.sensor_id,
             "e2e-session-1",
         )
-        assert report["schema_version"] == "session_assessment.v6"
-        assert validate_session_assessment_v6(report) == []
+        assert report["schema_version"] == "session_assessment.v4"
+        assert validate_session_assessment_v4(report) == []
         assert report["canonical_evidence"]["source_evidence_sha256"]
         assert report["authority"]["predictions_authoritative"] is False
         assert report["authority"]["automatic_response_authorized"] is False

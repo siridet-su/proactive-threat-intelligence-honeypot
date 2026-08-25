@@ -8,7 +8,6 @@ this module yet.
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from production.prediction.next_behavior_contract import (
@@ -97,28 +96,6 @@ def _phase_from_groups(
         for evidence_ref in group.get("evidence_refs") or []
     )
     group_ids = [_clean(group.get("group_id")) for group in groups]
-    exact_labels = {
-        (
-            _clean(item.get("tactic")),
-            _clean(item.get("technique")).upper(),
-            _clean(item.get("source")),
-            _clean(item.get("confidence_bucket")),
-            _clean(item.get("agreement_status")),
-            _clean(item.get("evidence_ref")),
-        ): {
-            "tactic": _clean(item.get("tactic")),
-            "technique": _clean(item.get("technique")).upper(),
-            "source": _clean(item.get("source")),
-            "confidence_bucket": _clean(item.get("confidence_bucket")),
-            "agreement_status": _clean(item.get("agreement_status")),
-            "classification_evidence_id": _clean(item.get("evidence_ref")),
-        }
-        for group in groups
-        for item in group.get("label_provenance") or []
-        if isinstance(item, dict)
-        and _clean(item.get("tactic"))
-        and _clean(item.get("technique"))
-    }
     return {
         "schema_version": PHASE_SCHEMA_VERSION,
         "phase_id": stable_id(
@@ -140,7 +117,6 @@ def _phase_from_groups(
         "repetition_bucket": repetition_bucket(len(groups)),
         "tactics": tactics,
         "techniques": techniques,
-        "labels": [exact_labels[key] for key in sorted(exact_labels)],
         "label_provenance_sources": provenance_sources,
         "label_confidence_buckets": confidence_buckets,
         "label_agreement_statuses": agreement_statuses,
@@ -198,8 +174,6 @@ def build_model_input(
     phase_sequence: Sequence[Mapping[str, Any]],
     *,
     max_sequence_length: int = 8,
-    original_phase_count: int | None = None,
-    upstream_truncated: bool = False,
 ) -> Dict[str, Any]:
     """Return the exact redacted model-visible prefix representation."""
 
@@ -208,21 +182,12 @@ def build_model_input(
     if not phase_sequence:
         raise NextBehaviorContractError("phase_sequence must not be empty")
     selected = list(phase_sequence)[-max_sequence_length:]
-    original_count = max(
-        len(phase_sequence),
-        int(original_phase_count) if original_phase_count is not None else 0,
-    )
-    omitted = max(original_count - len(selected), 0)
     context = deepcopy(selected[-1].get("session_context") or {})
     model_input = {
         "schema_version": MODEL_INPUT_SCHEMA_VERSION,
         "target_contract_id": TARGET_CONTRACT_ID,
         "max_sequence_length": max_sequence_length,
-        "truncated": omitted > 0 or bool(upstream_truncated),
-        "original_phase_count": original_count,
-        "selected_phase_count": len(selected),
-        "omitted_prefix_phase_count": omitted,
-        "upstream_truncated": bool(upstream_truncated),
+        "truncated": len(phase_sequence) > max_sequence_length,
         "phase_sequence": [_model_phase(phase) for phase in selected],
         "session_context": context,
         "input_evidence_refs": _unique_sorted(
@@ -233,60 +198,6 @@ def build_model_input(
     }
     model_input["input_hash"] = stable_id("nextbehaviorinput", model_input)
     return model_input
-
-
-def _duration_ms(start: Any, end: Any) -> float | None:
-    try:
-        first = datetime.fromisoformat(_clean(start).replace("Z", "+00:00"))
-        last = datetime.fromisoformat(_clean(end).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if first.tzinfo is None or last.tzinfo is None:
-        return None
-    return max((last - first).total_seconds() * 1000.0, 0.0)
-
-
-def build_model_input_from_trusted_history_manifest(
-    manifest: Mapping[str, Any],
-    *,
-    session_context: Mapping[str, Any],
-    evidence_ref_mapper=None,
-) -> Dict[str, Any]:
-    """Build the current model input directly from verified v3 phase data."""
-
-    from production.prediction.trusted_history import (
-        validate_prediction_trusted_history_manifest,
-    )
-
-    errors = validate_prediction_trusted_history_manifest(manifest)
-    if errors:
-        raise NextBehaviorContractError("trusted history manifest rejected: " + "; ".join(errors))
-    phases = []
-    for phase in manifest["ordered_trusted_phases"]:
-        refs = [
-            evidence_ref_mapper(ref) if evidence_ref_mapper else _clean(ref)
-            for ref in phase.get("evidence_refs") or []
-        ]
-        phases.append({
-            "tactics": deepcopy(phase["tactics"]),
-            "techniques": deepcopy(phase["techniques"]),
-            "repetition_bucket": repetition_bucket(int(phase["observation_count"])),
-            "elapsed_time_bucket": elapsed_time_bucket(
-                _duration_ms(phase["start_timestamp"], phase["end_timestamp"])
-            ),
-            "label_provenance_sources": deepcopy(phase["label_provenance_sources"]),
-            "label_confidence_buckets": deepcopy(phase["label_confidence_buckets"]),
-            "label_agreement_statuses": deepcopy(phase["label_agreement_statuses"]),
-            "audit_only_label_count": int(phase["audit_only_label_count"]),
-            "evidence_refs": _unique_sorted(refs),
-            "session_context": deepcopy(dict(session_context)),
-        })
-    return build_model_input(
-        phases,
-        max_sequence_length=int(manifest["maximum_trusted_phases"]),
-        original_phase_count=int(manifest["original_distinct_phase_count"]),
-        upstream_truncated=bool(manifest["upstream_truncated"]),
-    )
 
 
 def build_live_model_input(

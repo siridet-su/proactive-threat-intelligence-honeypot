@@ -1,0 +1,88 @@
+{
+  "schema_version": "prediction_next_distinct_transformer_refinement_adoption_correction.v1",
+  "status": "COMPLETE_VALID",
+  "correction_scope": "metric aggregation and adoption comparison only; no retraining or semantic change",
+  "supersedes_addendum_path": "adoption_decision.json",
+  "supersedes_addendum_sha256": "72377f239671a84dd1b91a8ece678c6ab3bd7b0c0748abc09e974f3b7ab8348b",
+  "base_receipt_path": "receipt.json",
+  "base_receipt_sha256": "5faf7491b445ae0ea3352f84f20b9e3fe68bc5f1a0ed2b09b28d7fac68c82d0b",
+  "issue_found": {
+    "status": "RESOLVED",
+    "description": "The prior adoption addendum used the matching 3-seed/5-fold baseline Macro-F1 but copied Balanced Accuracy and Top-1 from the seed-20260822 single-seed five-fold run. The frozen base receipt and all model/search artifacts remain unchanged.",
+    "affected_fields": [
+      "internal_grouped_cv.baseline_balanced_accuracy",
+      "internal_grouped_cv.baseline_top1",
+      "internal_grouped_cv.balanced_accuracy_delta",
+      "internal_grouped_cv.top1_delta"
+    ]
+  },
+  "aggregation_contract": {
+    "baseline": "baseline_cv_results.json aggregate over 3 required seeds x 5 grouped folds",
+    "refined": "robust_shortlist_results.json loss_inverse_sqrt aggregate over the same 3 seeds x 5 grouped folds",
+    "primary_metric": "mean grouped-CV Macro-F1",
+    "secondary_metrics": ["mean grouped-CV Balanced Accuracy", "mean Top-1", "mean Top-3", "mean Weighted-F1", "mean MRR"]
+  },
+  "source_bindings": {
+    "baseline_cv_results.json": "595748601e2943678af73f779fa5e67736f09b9973633d3964ef1e27f5062f6e",
+    "robust_shortlist_results.json": "c76e6502e079ec318c176b4e7179a897aa2656af9fc8ec45eeb09a7636e1696b",
+    "selected_candidate.json": "cf35f5836d046325a74ef105863c8047333ab48b6673376f8f1acce17bbf0c49",
+    "selection_post_refinement.json": "7a18e3c6567789a539811e22dfda862d2639540e119621b09c2b66f01c4f77c5",
+    "calibration_post_refinement.json": "599a4b461696d7625ae367179bf75077349ebcffa1a8342ef521450b2d2a3980",
+    "final_refined_transformer.pt": "16506e962432f9921d18a514c3a31686a20f9734385ec49439ad2651e4cdd283"
+  },
+  "corrected_internal_grouped_cv": {
+    "baseline": {
+      "macro_f1": 0.8171449001698665,
+      "balanced_accuracy": 0.794771016567667,
+      "top1": 0.9847188447301939,
+      "top3": 0.9987897253191987,
+      "weighted_f1": 0.9807112006986712,
+      "mrr": 0.9908635981275032,
+      "std_macro_f1": 0.006713853485228737,
+      "std_top1": 0.0019182266885654274
+    },
+    "refined": {
+      "macro_f1": 0.8756102579362857,
+      "balanced_accuracy": 0.9327515284268365,
+      "top1": 0.9774522862772136,
+      "top3": 0.9926370560623697,
+      "weighted_f1": 0.9822600089874958,
+      "mrr": 0.9851784828719824,
+      "std_macro_f1": 0.00644692453162943,
+      "std_top1": 0.0024909950650986957
+    },
+    "delta_refined_minus_baseline": {
+      "macro_f1": 0.058465357766419146,
+      "balanced_accuracy": 0.13798051185916949,
+      "top1": -0.0072665584529802985,
+      "top3": -0.006152669256829002,
+      "weighted_f1": 0.0015488082888245325,
+      "mrr": -0.005685115255520845
+    },
+    "top1_regression_guard": {
+      "absolute_regression": 0.0072665584529802985,
+      "threshold": 0.03,
+      "status": "PASS"
+    }
+  },
+  "common_class_guard": {
+    "status": "PASS",
+    "basis": "No common-class collapse; per-class F1 deltas are bound in baseline_cv_results.json and robust_shortlist_results.json.",
+    "per_class_f1_delta_refined_minus_baseline": {
+      "command-and-control": -0.0030924594708554576,
+      "credential-access": 0.41778831223786755,
+      "defense-evasion": 0.0,
+      "discovery": -0.0035153031468793117,
+      "execution": 0.001250057187449749,
+      "persistence": -0.0031731024426489007,
+      "privilege-escalation": 0.0
+    }
+  },
+  "corrected_decision": "REFINED TRANSFORMER ADOPTION SUPPORTED",
+  "decision_scope": "prediction-only POC/shadow component; no production activation, authority change, target change, policy change, or canonical-trust change",
+  "post_selection_status": "unchanged and descriptive only; Selection, Calibration, controlled, and OOD cohorts were not used for tuning",
+  "sealed_data_accessed": false,
+  "production_changed": false,
+  "external_ai_called": false,
+  "prior_artifacts_preserved": true
+}

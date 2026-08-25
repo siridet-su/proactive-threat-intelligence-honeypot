@@ -9,8 +9,6 @@ import pytest
 from production.classification.environment import load_classifier_environment
 from production.reproduction.next_behavior.classifier_assets import (
     ClassifierAssetError,
-    V3_SOURCE_IDENTITY_PATHS,
-    source_identity_sha256,
     verify_classifier_source_identity,
 )
 
@@ -41,18 +39,18 @@ def test_classifier_environment_receipt_matches_current_runtime_code() -> None:
     )
 
 
-def test_v4_classifier_source_identity_is_content_bound() -> None:
+def test_v3_classifier_source_identity_is_content_bound() -> None:
     receipt = json.loads(
         (ROOT / "configs/next_behavior_classifier_environment.v1.json").read_text(
             encoding="utf-8"
         )
     )
-    assert receipt["schema_version"] == "next_behavior_classifier_environment.v4"
+    assert receipt["schema_version"] == "next_behavior_classifier_environment.v3"
     identity = verify_classifier_source_identity(receipt, repository_root=ROOT)
     assert identity is not None
     assert identity["sha256"] == receipt["source_identity"]["sha256"]
     loaded = load_classifier_environment(verify_assets=True)
-    assert loaded["environment_schema_version"] == "classification_environment.v4"
+    assert loaded["environment_schema_version"] == "classification_environment.v3"
     assert loaded["source_identity"]["sha256"] == identity["sha256"]
 
 
@@ -82,41 +80,22 @@ def test_changed_classifier_source_identity_fails_closed(relative: str) -> None:
         verify_classifier_source_identity(receipt, repository_root=ROOT)
 
 
-def test_historical_v3_classifier_receipt_remains_readable(tmp_path: Path) -> None:
+def test_historical_v2_classifier_receipt_remains_readable(tmp_path: Path) -> None:
     receipt = json.loads(
         (ROOT / "configs/next_behavior_classifier_environment.v1.json").read_text(
             encoding="utf-8"
         )
     )
-    receipt["schema_version"] = "next_behavior_classifier_environment.v3"
-    for field in (
-        "target_contract_id",
-        "model_input_schema_version",
-        "prediction_snapshot_schema_version",
-        "feedback_contract_version",
-        "checkpoint_compatibility_status",
-        "preprocessing_contract_path",
-        "preprocessing_contract_sha256",
-    ):
-        receipt["classification_policy"].pop(field)
-    receipt["classification_policy"]["trusted_history_schema_version"] = (
-        "prediction_trusted_history_manifest.v2"
-    )
-    receipt["source_identity"]["files"] = {
-        path: digest
-        for path, digest in receipt["source_identity"]["files"].items()
-        if path in V3_SOURCE_IDENTITY_PATHS
-    }
-    receipt["source_identity"]["sha256"] = source_identity_sha256(
-        receipt["source_identity"]["files"]
-    )
-    path = tmp_path / "historical-v3.json"
+    receipt.pop("source_identity")
+    receipt["schema_version"] = "next_behavior_classifier_environment.v2"
+    receipt["freeze"]["release_revision"] = receipt["freeze"]["basis_commit"]
+    path = tmp_path / "historical-v2.json"
     path.write_text(json.dumps(receipt), encoding="utf-8")
-    loaded = load_classifier_environment(str(path), repository_root=ROOT, verify_assets=False)
-    assert loaded["environment_schema_version"] == "classification_environment.v4"
+    loaded = load_classifier_environment(str(path), repository_root=ROOT, verify_assets=True)
+    assert loaded["environment_schema_version"] == "classification_environment.v3"
 
 
-def test_v4_deployed_marker_requires_release_manifest_binding(
+def test_v3_deployed_marker_requires_release_manifest_binding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DEPLOYED_COMMIT", "a" * 40)

@@ -1,0 +1,17 @@
+{
+  "deletion_executed": false,
+  "entries": [],
+  "gate_b1_status": "PASS_EMPTY_ALLOWLIST_NO_CLEANUP_NEEDED",
+  "protected_classes": [
+    "VERIFIED_HONEYPOT_SOURCE_OF_RECORD",
+    "VERIFIED_HONEYPOT_BACKUP",
+    "VERIFIED_HONEYPOT_RESEARCH",
+    "GCP_PLATFORM_DEFAULT",
+    "SHARED_PROJECT_INFRASTRUCTURE",
+    "AMBIGUOUS_PRESERVE"
+  ],
+  "reason": "The proposed deployment is additive, localhost-only, shadow-only, and has no resource conflict. No deletion is required or authorized.",
+  "schema_version": "gcp_verified_deletion_allowlist.v2",
+  "source_classification_sha256": "66c486a8e5a6b3136d9b748917d939efd4106c397829cd20c20048a7c5fcbfb4",
+  "status": "PASS_EMPTY_ALLOWLIST_NO_CLEANUP_NEEDED"
+}

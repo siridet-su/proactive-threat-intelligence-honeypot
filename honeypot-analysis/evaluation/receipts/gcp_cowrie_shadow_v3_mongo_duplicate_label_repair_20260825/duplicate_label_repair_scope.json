@@ -1,0 +1,17 @@
+{
+  "schema_version": "post_ddd2_duplicate_label_repair_scope.v1",
+  "base_release": "ddd2dcb1d92d82b6cff655b147e0d6ce3b00ebc9",
+  "base_release_sha256": "ddd2dcb1d92d82b6cff655b147e0d6ce3b00ebc9e33a2774a17830fe76bdbe2a",
+  "runtime_source_identity": "fea95620eaadc9e5b35a3916356c5ad4100b47197b2996f0e404a0d4b96917ea",
+  "classifier_source_identity": "eef2c25304ffa2c8094d8a60c04672c50a4f4758f8e5255d81d4d1f0c0afad04",
+  "runtime_files": {
+    "configs/next_behavior_classifier_environment.v1.json": "9976d5141c1ab5229aa5cdd81765cf740a0d359a1c2d6caf553cf399790c5cf4",
+    "configs/prediction_policy.transformer_poc.trusted.json": "1aaae2aee0988b2c4f0733e29e15b2f0d47507f8cbd1d1925bac47efe88f2c3b",
+    "production/prediction/trusted_history.py": "531e0193f13d7238f8f200b2b6b5612578998f4932db42d84b52fcc879431772",
+    "production/workers/session_worker.py": "295054f0b3c22d466b22e3f2e826300e40db3ceb7c148e7f757e1bbc471b7be3"
+  },
+  "test_files": {
+    "tests/test_next_behavior_contract.py": "a4099165b011eb73c26d8aa3a86440fc24024f114e3ae68eaeab4bda99d4a38d"
+  },
+  "repair_boundary": "trusted_history semantic (tactic, technique) collapse with evidence/provenance retention; next-behavior duplicate rejection remains fail-closed"
+}

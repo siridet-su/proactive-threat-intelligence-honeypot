@@ -44,8 +44,6 @@ class TTPPrediction:
     rule_id: str = ""
     evidence_type: str = ""
     authority_decision: Optional[Dict[str, Any]] = None
-    reviewed_tactic: str = ""
-    observation_semantics: str = ""
 
     def to_event(self, command: str, tactic: str = "unknown") -> Dict[str, Any]:
         event = {
@@ -64,8 +62,6 @@ class TTPPrediction:
             event["evidence_type"] = self.evidence_type
         if self.authority_decision is not None:
             event["authority_decision"] = dict(self.authority_decision)
-        if self.observation_semantics:
-            event["observation_semantics"] = self.observation_semantics
         return event
 
 
@@ -110,7 +106,7 @@ class CommandFragment:
     operator_after: str = ""
 
 
-CLASSIFICATION_RULE_POLICY_SCHEMA = "classification_rule_policy.v4"
+CLASSIFICATION_RULE_POLICY_SCHEMA = "classification_rule_policy.v3"
 DEFAULT_CLASSIFICATION_RULE_POLICY = "configs/classification_rules.trusted.json"
 
 # Minimal emergency fallback only. Full command coverage lives in the versioned
@@ -250,11 +246,6 @@ def _rule_metadata_by_spec(document: Dict[str, Any]) -> Dict[Tuple[str, str, str
             for item in authority.get("trusted_literal_fallback_rule_ids", [])
             if _clean_text(item)
         }
-    operation_class = _clean_text(
-        authority.get("trusted_regex_operation_class")
-        if isinstance(authority, dict)
-        else ""
-    )
     for rule in _policy_rules(document):
         pattern = _clean_text(rule.get("pattern"))
         tid = _clean_text(rule.get("ttp")).upper()
@@ -272,11 +263,7 @@ def _rule_metadata_by_spec(document: Dict[str, Any]) -> Dict[Tuple[str, str, str
                 ),
                 "reviewed": _clean_text(item.get("rule_id")) in approved,
                 "safety_class": "literal_unambiguous",
-                "operation_class": operation_class,
             }
-        elif _clean_text(item.get("rule_id")) in approved:
-            runtime_authority = dict(runtime_authority)
-            runtime_authority.setdefault("operation_class", operation_class)
         item["runtime_authority"] = runtime_authority
         indexed[(pattern, tid, name)] = item
     return indexed
@@ -517,12 +504,8 @@ def _rule_based_ttp_with_rules(
     matched: List[TTPPrediction] = []
     seen = set()
     for pattern, tid, name in rules:
-        match = pattern.search(command)
-        if tid not in seen and match:
+        if tid not in seen and pattern.search(command):
             metadata = (metadata_by_spec or {}).get((pattern.pattern, tid, name), {})
-            metadata = dict(metadata)
-            metadata["regex_match_start"] = match.start()
-            metadata["regex_match_end"] = match.end()
             authority = candidate_authority_decision(
                 parser_decision=parser_decision or {},
                 evidence_type="command_regex",
@@ -540,8 +523,6 @@ def _rule_based_ttp_with_rules(
                     rule_id=_clean_text(metadata.get("rule_id")),
                     evidence_type="command_regex",
                     authority_decision=authority,
-                    reviewed_tactic=_clean_text(metadata.get("reviewed_tactic")).lower(),
-                    observation_semantics=_clean_text(metadata.get("observation_semantics")),
                 )
             )
             seen.add(tid)
@@ -555,15 +536,9 @@ def _operation_based_ttp(
     *,
     parsed: Optional[Dict[str, Any]] = None,
     policy_provenance: Optional[Dict[str, Any]] = None,
-    operator_before: str = "",
 ) -> List[TTPPrediction]:
     parsed = parsed if isinstance(parsed, dict) else parse_command_operation(command)
-    parser_decision = command_authority_decision(
-        command,
-        parsed,
-        structural_match=True,
-        operator_before=operator_before,
-    )
+    parser_decision = command_authority_decision(command, parsed, structural_match=True)
     matched: List[TTPPrediction] = []
     seen: set[str] = set()
     for rule in rules:
@@ -589,8 +564,6 @@ def _operation_based_ttp(
             rule_id=_clean_text(rule.get("rule_id")),
             evidence_type="command_operation",
             authority_decision=authority,
-            reviewed_tactic=_clean_text(rule.get("reviewed_tactic")).lower(),
-            observation_semantics=_clean_text(rule.get("observation_semantics")),
         ))
         seen.add(tid)
     return matched
@@ -615,7 +588,7 @@ def rule_based_ttp(command: str) -> List[TTPPrediction]:
         parsed=parsed,
         policy_provenance=policy_provenance,
     )
-    regex = _rule_based_ttp_with_rules(
+    return structural or _rule_based_ttp_with_rules(
         command,
         RULES,
         _COMBINED_PATTERN,
@@ -624,20 +597,6 @@ def rule_based_ttp(command: str) -> List[TTPPrediction]:
         parser_decision=parser_decision,
         policy_provenance=policy_provenance,
     )
-    return _deduplicate_predictions([*structural, *regex])
-
-
-def _deduplicate_predictions(predictions: Sequence[TTPPrediction]) -> List[TTPPrediction]:
-    """Retain independent exact techniques while removing duplicate mappings."""
-
-    output: List[TTPPrediction] = []
-    seen: set[str] = set()
-    for prediction in predictions:
-        key = _clean_text(prediction.tid).upper()
-        if key and key not in seen:
-            seen.add(key)
-            output.append(prediction)
-    return output
 
 
 def is_shell_noise(
@@ -773,12 +732,7 @@ class NotebookParityClassifier:
                 "securebert_error", evidence_type="securebert",
             )
 
-    def _classify_single(
-        self,
-        command: str,
-        *,
-        operator_before: str = "",
-    ) -> List[Dict[str, Any]]:
+    def _classify_single(self, command: str) -> List[Dict[str, Any]]:
         command = (command or "").strip()
         if not command:
             return []
@@ -788,7 +742,6 @@ class NotebookParityClassifier:
             command,
             parsed,
             structural_match=False,
-            operator_before=operator_before,
         )
         rule_predictions = _operation_based_ttp(
             command,
@@ -796,10 +749,15 @@ class NotebookParityClassifier:
             self.rule_evidence_source,
             parsed=parsed,
             policy_provenance=self._policy_provenance(),
-            operator_before=operator_before,
         )
-        structural_predictions = list(rule_predictions)
-        regex_predictions = _rule_based_ttp_with_rules(
+        if rule_predictions:
+            parser_decision = command_authority_decision(
+                command,
+                parsed,
+                structural_match=True,
+            )
+        else:
+            rule_predictions = _rule_based_ttp_with_rules(
             command,
             self.rules,
             self.combined_pattern,
@@ -808,16 +766,6 @@ class NotebookParityClassifier:
             parser_decision=parser_decision,
             policy_provenance=self._policy_provenance(),
         )
-        rule_predictions = _deduplicate_predictions(
-            [*structural_predictions, *regex_predictions]
-        )
-        if structural_predictions:
-            parser_decision = command_authority_decision(
-                command,
-                parsed,
-                structural_match=True,
-                operator_before=operator_before,
-            )
         if is_shell_noise(command, self.rules, self.combined_pattern) and not rule_predictions:
             return [{
                 "command": command,
@@ -847,7 +795,7 @@ class NotebookParityClassifier:
             bert_tactic = self._tactic(bert_prediction.tid) if bert_prediction.tid != "T0000_UNKNOWN" else "unknown"
             events: List[Dict[str, Any]] = []
             for prediction in rule_predictions:
-                rule_tactic = prediction.reviewed_tactic or self._tactic(prediction.tid)
+                rule_tactic = self._tactic(prediction.tid)
                 emergency_rule = prediction.source == "emergency_python_fallback"
                 source = prediction.source or "rule"
                 agreement_status = "emergency_rule_only" if emergency_rule else "rule_only"
@@ -930,10 +878,7 @@ class NotebookParityClassifier:
 
         events: List[Dict[str, Any]] = []
         for fragment in fragments:
-            for event in self._classify_single(
-                fragment.text,
-                operator_before=fragment.operator_before,
-            ):
+            for event in self._classify_single(fragment.text):
                 item = dict(event)
                 if fragment.count > 1:
                     item["original_command"] = original_command
@@ -942,11 +887,6 @@ class NotebookParityClassifier:
                     item["subcommand_count"] = fragment.count
                     item["operator_before"] = fragment.operator_before
                     item["operator_after"] = fragment.operator_after
-                    item["fragment_execution"] = (
-                        "conditional_unproven"
-                        if fragment.operator_before in {"&&", "||"}
-                        else "submitted_direct"
-                    )
                 events.append(item)
         return events
 

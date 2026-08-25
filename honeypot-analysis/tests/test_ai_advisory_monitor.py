@@ -112,10 +112,7 @@ def test_monitor_asset_uses_separate_endpoint_labels_and_text_content() -> None:
     ).read_text(encoding="utf-8")
     assert "/api/ai-advisory?session_id=" in html
     assert "AI-generated advisory — non-authoritative" in html
-    assert "Graph-grounded AI advisory — non-authoritative" in html
-    assert "Historical v1 shadow candidates — Unverified AI candidates" in html
-    assert "existing deterministic object; non-authoritative" in html
-    assert "rendered.sections" in html
+    assert "Unverified AI candidates" in html
     assert "item.textContent = String(paragraph?.text || '')" in html
     assert "renderAIAdvisoryPanel(aiResult)" in html
 

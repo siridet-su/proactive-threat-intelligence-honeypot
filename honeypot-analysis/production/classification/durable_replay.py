@@ -260,17 +260,22 @@ def reclassify_durable_prefix(
         })
     normalized_phases = normalize_trusted_phases(phases, cap=None)
     reconstructed["prediction_trusted_history"] = normalized_phases[-8:]
-    cutoff = make_evidence_cutoff(
-        durable_snapshot.get("through_received_at"),
-        durable_snapshot.get("through_event_id"),
-    )
+    try:
+        cutoff = make_evidence_cutoff(
+            durable_snapshot.get("through_received_at"),
+            durable_snapshot.get("through_event_id"),
+        )
+    except ValueError as exc:
+        raise ClassificationReplayError(
+            "durable replay evidence cutoff provenance is invalid"
+        ) from exc
     history_manifest = build_prediction_trusted_history_manifest(
-            phases=normalized_phases,
-            evidence_cutoff=cutoff,
-            classifier_environment=current_identity,
-            original_command_count=command_count,
-            original_trusted_label_count=trusted_count,
-            audit_only_label_count=len(classifications) - trusted_count,
+        phases=normalized_phases,
+        evidence_cutoff=cutoff,
+        classifier_environment=current_identity,
+        original_command_count=command_count,
+        original_trusted_label_count=trusted_count,
+        audit_only_label_count=len(classifications) - trusted_count,
     )
     manifest_errors = validate_prediction_trusted_history_manifest(
         history_manifest,

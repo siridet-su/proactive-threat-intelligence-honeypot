@@ -1,0 +1,131 @@
+{
+  "schema_version": "session_links_delta_reconciliation.v1",
+  "date": "2026-08-25",
+  "status": "PASS",
+  "controlled_session_id": "session_v1_c6b95688803b3afd472be748cc432498",
+  "classification": "LEGITIMATE_CURRENT_OUTPUT",
+  "classification_code": "A",
+  "determination": "The hard-coded expectation of 15 represented the immediately preceding canonical population. The controlled session produced 17 deterministic shared-observable links: nine IP-related targets and eight HASSH-related targets. The preceding controlled session became one additional valid target for each observable, accounting exactly for the two-row difference.",
+  "counts": {
+    "hard_coded_expected": 15,
+    "observed": 17,
+    "derived_expected": 17,
+    "extra_relative_to_stale_expectation": 2,
+    "missing_from_derived_contract": 0,
+    "unexpected_under_derived_contract": 0
+  },
+  "producer": {
+    "worker": "production.workers.threat_hunt_worker.ThreatHuntWorker._process_job",
+    "relationship_query": "production.storage.mongodb_operations.MongoOperations.find_related_sessions_by_observable",
+    "write_contract": "one deterministic shared_observable upsert per source/target/observable-type/value tuple",
+    "controlled_jobs": [
+      {
+        "job_id": "threathuntjob_f0dbdb2bdc6c6748d9618fa449c306a8",
+        "observable_type": "ip",
+        "observable_sha256": "929fd393e082eafd30286cf98c2a1a3e1a0d8c2279627764ff38f2ae5f3d5dcd",
+        "related_session_count": 9,
+        "created_link_count": 9,
+        "status": "succeeded"
+      },
+      {
+        "job_id": "threathuntjob_f27e68ac9476643e667f4d6d8b7a1232",
+        "observable_type": "hassh",
+        "observable_sha256": "06a17e7c6d5194e54bab552727442ccae564a76c042077426391527d33491a92",
+        "related_session_count": 8,
+        "created_link_count": 8,
+        "status": "succeeded"
+      }
+    ]
+  },
+  "observed_link_identities": [
+    {"link_id":"sessionlink_835b3fd863c8141854431ca2f1236740","observable_type":"hassh","target_session_id_prefix":"session_v1_06558"},
+    {"link_id":"sessionlink_b4aba04e7940d9ed68a5611b4e033e53","observable_type":"hassh","target_session_id_prefix":"session_v1_2a9d"},
+    {"link_id":"sessionlink_e394a03e165f37d8860c2c9244293552","observable_type":"hassh","target_session_id_prefix":"session_v1_60f0"},
+    {"link_id":"sessionlink_4a7a842728fad52b986670d1b4ede7eb","observable_type":"hassh","target_session_id_prefix":"session_v1_6e6d"},
+    {"link_id":"sessionlink_e2b709fc6e258481babbdfcbb87c52f8","observable_type":"hassh","target_session_id_prefix":"session_v1_6f60"},
+    {"link_id":"sessionlink_d7e1075207a3b28cbb50716d3022fac4","observable_type":"hassh","target_session_id_prefix":"session_v1_74bf"},
+    {"link_id":"sessionlink_50ddc4c3d3994e7397021e54d876e271","observable_type":"hassh","target_session_id_prefix":"session_v1_80e2"},
+    {"link_id":"sessionlink_54b8e17028992f9c70dbb1dcf5594d5c","observable_type":"hassh","target_session_id":"session_v1_b532d2052253c259311e3824d0a4888c","created_at":"2026-08-25T13:06:57.988447+00:00","difference_role":"EXTRA_RELATIVE_TO_STALE_15"},
+    {"link_id":"sessionlink_d2a4531b2b90aa9902479e8d50634e2a","observable_type":"ip","target_session_id_prefix":"session_v1_06558"},
+    {"link_id":"sessionlink_18e78ff206d34eaa5fe4bcae71ff61a8","observable_type":"ip","target_session_id_prefix":"session_v1_4b03"},
+    {"link_id":"sessionlink_71437e875e8311b70a67e4e81139b3bf","observable_type":"ip","target_session_id_prefix":"session_v1_60f0"},
+    {"link_id":"sessionlink_ee5a8928f6347348e3c5cd87fb81a4bc","observable_type":"ip","target_session_id_prefix":"session_v1_6e6d"},
+    {"link_id":"sessionlink_47e7f06e0ff27c6803c0a80030d75c12","observable_type":"ip","target_session_id_prefix":"session_v1_6f60"},
+    {"link_id":"sessionlink_ffeb722075e1f0c0ffcbd9c7716bcd9b","observable_type":"ip","target_session_id_prefix":"session_v1_74bf"},
+    {"link_id":"sessionlink_a8778a498e21d67c83bbe7a8dfa810df","observable_type":"ip","target_session_id_prefix":"session_v1_80e2"},
+    {"link_id":"sessionlink_df7041d1ec2caca1c212ca55d1b5e768","observable_type":"ip","target_session_id_prefix":"session_v1_a5fe"},
+    {"link_id":"sessionlink_9be4119d1d64c6fe3f078b1c730b3361","observable_type":"ip","target_session_id":"session_v1_b532d2052253c259311e3824d0a4888c","created_at":"2026-08-25T13:06:57.283882+00:00","difference_role":"EXTRA_RELATIVE_TO_STALE_15"}
+  ],
+  "write_semantics": {
+    "new_inserts": 17,
+    "updates_only": 0,
+    "reason": "The controlled source session was new, so none of its deterministic source-bound link IDs could pre-exist; the global session_links delta was exactly +17."
+  },
+  "rejected_classifications": {
+    "APPLICATION_DUPLICATE": "No: all 17 deterministic link IDs are unique and the two producer job results independently total 9 + 8.",
+    "HISTORICAL_REPLAY": "No: historical sessions are relationship targets, but both writers and the source are bounded controlled-session jobs and all 17 writes fall after the pre-cutover measurement.",
+    "MEASUREMENT_DEFECT": "No database measurement error was found; the defect was a stale hard-coded validator expectation.",
+    "UNRESOLVED": "No: the two-row difference is exactly explained by the immediately preceding controlled session becoming a valid IP and HASSH target."
+  },
+  "validation_repair": {
+    "application_candidate_changed": false,
+    "candidate_release_id": "00d7e9594b11505c167f4e03bb3efffd9a90144b",
+    "candidate_package_sha256": "4597c15dfbcc69030097d6fa2a0f55ab8f8df366d15f2a60445842dbe9945fae",
+    "validator_path": "cleanup_audit/remote_live_invariant_validator.py",
+    "validator_sha256": "612cdf287fd350ac5bb9ac4562dc1d85070d169e06a94fc0839b1f6c090ff8d9",
+    "test_path": "cleanup_audit/test_remote_live_invariant_validator.py",
+    "test_result": "9 passed",
+    "behavior": "Derives the exact expected session-link identity set from controlled-session threat-hunt jobs and current related-session query semantics; checks exact set equality, independently enforces historical-replay zero and canonical non-interference, and atomically writes terminal FAIL receipts."
+  },
+  "preserved_evidence_preflight": {
+    "status": "PASS_PREFLIGHT",
+    "checks_passed": 50,
+    "errors": [],
+    "expected_session_links": 17,
+    "actual_session_links": 17,
+    "receipt_path": "/var/lib/honeypot/validator_io_00d7_final_20260825/session_links_reconciled_preflight_receipt.json",
+    "receipt_sha256": "25a62ed66a18e72fd60ab32c66333150177d5b19cb49425ff18931f57c010f0d"
+  },
+  "final_live_validation": {
+    "status": "PASS",
+    "controlled_session_id": "session_v1_041963689ec3f6684ac0e6d30ea51705",
+    "cowrie_session_id": "ff3bd6e2660a",
+    "cowrie_endpoint": "100.118.43.30:22",
+    "expected_session_links": 19,
+    "actual_session_links": 19,
+    "unexpected_session_links": 0,
+    "checks_passed": 50,
+    "errors": [],
+    "receipt_path": "/var/lib/honeypot/validator_io_00d7_session_links_reconciled_20260825/final_live_invariant_receipt.json",
+    "receipt_sha256": "b4cf0da8f5839bf36be22203a220ff48e50cb72541901adc717f77fcba2254c5",
+    "activation_guard_path": "/var/lib/honeypot/promotion_00d7_session_links_reconciled_20260825/activation_guard.json",
+    "activation_guard_sha256": "497da5d384f69b6a1445cb93f4d996e19d2bdb43c54089a1708b982f70476dd5",
+    "activation_guard_state": "ACTIVATION_COMPLETED",
+    "canonical_deltas": {
+      "sessions": 1,
+      "events": 12,
+      "analysis_jobs": 1,
+      "reports": 1,
+      "canonical_assessments": 1,
+      "campaign_sessions": 1,
+      "observable_sightings": 18,
+      "prediction_snapshots": 6,
+      "prediction_outbox": 6,
+      "session_links": 19,
+      "threat_hunt_jobs": 2,
+      "alerts": 0,
+      "lifecycle_ledger": 0
+    }
+  },
+  "final_state": {
+    "active_release_id": "00d7e9594b11505c167f4e03bb3efffd9a90144b",
+    "active_tree": "d061bb3b0cbb73d348d2748ee98b0404138f5096",
+    "release_manifest_sha256": "e125c19c94dce085f276ae8d903e508b8c8574c89243182e03f62f9b36e0373e",
+    "storage_epoch_sha256": "7cb210b56b7fc9fddd2dad0bfce2f8fad4a9fd4da93ca5fe733ce398a7149580",
+    "rollback_mirror_path": "/var/lib/honeypot/mongodb_epoch_retry_49f9b74.db",
+    "rollback_mirror_identity": "ec6dac4fbd51eff43455382fe4ae6591083869e54c86e0ff0ca6319d67b75442",
+    "recovery_release_id": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+    "rollback_performed": false,
+    "remaining_blockers": []
+  }
+}

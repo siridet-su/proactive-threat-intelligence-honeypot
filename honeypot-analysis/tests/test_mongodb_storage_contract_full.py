@@ -73,6 +73,56 @@ def test_formal_contract_has_no_missing_or_placeholder_mongodb_method() -> None:
     )
 
 
+def test_mongodb_durable_prefix_preserves_canonical_received_at_without_live_mongo() -> None:
+    events = [
+        {
+            "eventid": "cowrie.command.input",
+            "session": "sensor-a:session-a",
+            "input": "id",
+        },
+        {
+            "eventid": "cowrie.session.closed",
+            "session": "sensor-a:session-a",
+        },
+    ]
+    rows = []
+    for index, event in enumerate(events):
+        payload_json = json.dumps(event, sort_keys=True, separators=(",", ":"))
+        rows.append({
+            "payload_sha256": hashlib.sha256(payload_json.encode()).hexdigest(),
+            "result": {
+                "event_id": f"event-{index}",
+                "received_at": f"2026-08-12T00:01:0{index}.000000+00:00",
+                "payload_json": payload_json,
+                "event": event,
+            },
+        })
+
+    class _Cursor:
+        def sort(self, _order):
+            return iter(rows)
+
+    class _Events:
+        def find(self, query):
+            assert query == {"session_id": "sensor-a:session-a"}
+            return _Cursor()
+
+    storage = object.__new__(MongoDBStorageBackend)
+    storage.database = type("_Database", (), {"events": _Events()})()
+    storage._event_result = lambda document: document["result"]
+
+    snapshot = storage.load_session_event_snapshot(
+        "sensor-a:session-a", "event-1", max_events=2
+    )
+    assert snapshot["through_received_at"] == (
+        "2026-08-12T00:01:01.000000+00:00"
+    )
+    assert [entry["received_at"] for entry in snapshot["event_entries"]] == [
+        "2026-08-12T00:01:00.000000+00:00",
+        "2026-08-12T00:01:01.000000+00:00",
+    ]
+
+
 def test_event_claim_retry_fencing_and_completion(full_mongo) -> None:
     record = _record()
     full_mongo.store_canonical_event(record)

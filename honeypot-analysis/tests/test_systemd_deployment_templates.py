@@ -37,6 +37,7 @@ def test_capstone_storage_services_receive_only_the_protected_mongodb_uri() -> N
         "honeypot-feed-refresh.service",
         "honeypot-ingest-api.service",
         "honeypot-monitor-web.service",
+        "honeypot-next-distinct-shadow-feeder.service",
         "honeypot-session-count-monitor.service",
         "honeypot-session-worker.service",
         "honeypot-threat-hunt-worker.service",
@@ -47,10 +48,18 @@ def test_capstone_storage_services_receive_only_the_protected_mongodb_uri() -> N
         document = path.read_text(encoding="utf-8")
         if "LoadCredential=mongodb-uri" in document:
             selected.add(path.name)
-            assert (
-                "LoadCredential=mongodb-uri" in document
-            )
-            assert "Environment=MONGODB_URI_FILE=%d/mongodb-uri" in document
+            if path.name == "honeypot-next-distinct-shadow-feeder.service":
+                feeder_source = (
+                    ROOT
+                    / "production"
+                    / "prediction_next_distinct_poc"
+                    / "mongodb_shadow_feeder.py"
+                ).read_text(encoding="utf-8")
+                assert 'os.environ.get("CREDENTIALS_DIRECTORY")' in feeder_source
+                assert 'Path(credential_dir) / "mongodb-uri"' in feeder_source
+                assert "ReadOnlyPaths=/var/lib/honeypot" in document
+            else:
+                assert "Environment=MONGODB_URI_FILE=%d/mongodb-uri" in document
     assert selected == expected
     assert "mongodb-uri" not in (
         SYSTEMD_DIR / "honeypot-sensor-forwarder.service"

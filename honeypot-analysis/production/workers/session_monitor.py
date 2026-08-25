@@ -42,11 +42,6 @@ from production.utils.sensitive_data import (
 )
 from production.utils.serialization import command_observation_provenance, stable_id
 from production.utils.sensor_identity import validate_sensor_session_id
-from production.storage.session_provenance import (
-    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
-    SESSION_SOURCE_E2E_TEST,
-    normalize_session_source,
-)
 from production.utils.validation_diagnostics import (
     build_validation_diagnostic,
 )
@@ -384,10 +379,10 @@ class SessionState:
     prediction_trusted_history: List[dict] = field(default_factory=list)
     prediction_trusted_history_manifest: dict = field(default_factory=dict)
     prediction_trusted_phase_count: int = 0
-    prediction_trusted_label_count: int = 0
-    prediction_audit_only_label_count: int = 0
-    prediction_trusted_history_revision: int = 0
-    prediction_last_forecast_revision: int = 0
+    prediction_trusted_label_count: int          = 0
+    prediction_audit_only_label_count: int      = 0
+    prediction_trusted_history_revision: int    = 0
+    prediction_last_forecast_revision: int      = 0
 
     @property
     def unique_tactics(self) -> List[str]:
@@ -561,8 +556,6 @@ class SessionMonitor:
         event: dict,
         *,
         durable_evidence_order: Optional[Dict[str, Any]] = None,
-        trusted_session_source: str = "",
-        trusted_provenance_marker: str = "",
     ) -> List[AlertEvent]:
         """
         Process one Cowrie event. Returns list of alerts fired (may be empty).
@@ -591,12 +584,6 @@ class SessionMonitor:
 
         # Ensure session exists
         state = self._get_or_create(session_id, src_ip, timestamp)
-        if trusted_session_source:
-            self.bind_trusted_session_provenance(
-                state,
-                trusted_session_source,
-                trusted_provenance_marker,
-            )
         state.raw_events.append(self._sanitize_event(event))
 
         if event.get("src_port"):   state.src_port     = int(event["src_port"])
@@ -658,7 +645,6 @@ class SessionMonitor:
                     command_outcome = "outcome_unknown"
 
                 # Classify command â†’ TTP
-                command_classifications: List[Dict[str, Any]] = []
                 for classification_index, classification in enumerate(self._classify_many_with_source(cmd)):
                     try:
                         classification = _safe_reporting_mapping(
@@ -679,7 +665,9 @@ class SessionMonitor:
                         or safe_cmd
                     )
                     classification["cowrie_eventid"] = eid
-                    classification["event_timestamp"] = str(timestamp).strip()
+                    classification["event_timestamp"] = str(
+                        source_timestamp or ""
+                    ).strip()
                     if durable_evidence_order is not None:
                         classification["durable_evidence_order"] = deepcopy(
                             durable_evidence_order
@@ -731,12 +719,7 @@ class SessionMonitor:
                             sources.append(source)
 
                     state.classification_events.append(classification)
-                    command_classifications.append(classification)
-
-                self._append_prediction_trusted_phase(
-                    state,
-                    command_classifications,
-                )
+                    self._append_prediction_trusted_phase(state, classification)
 
                 # Sigma keyword match
                 sigma_hits = self._sigma_match(cmd)
@@ -760,115 +743,66 @@ class SessionMonitor:
         return alerts
 
     @staticmethod
-    def bind_trusted_session_provenance(
-        state: SessionState,
-        session_source: str,
-        provenance_marker: str = "",
-    ) -> None:
-        """Bind server-derived session provenance before event semantics run."""
-
-        source = normalize_session_source(session_source)
-        metadata = state.session_metadata
-        previous = normalize_session_source(
-            metadata.get("_trusted_session_source"),
-            "",
-        )
-        if previous and previous != source:
-            raise ValueError("trusted session provenance mismatch")
-        metadata["_trusted_session_source"] = source
-        if source == SESSION_SOURCE_E2E_TEST:
-            if provenance_marker != CONTROLLED_SYNTHETIC_PROVENANCE_MARKER:
-                raise ValueError("controlled synthetic provenance marker is invalid")
-            metadata["_trusted_provenance_marker"] = (
-                CONTROLLED_SYNTHETIC_PROVENANCE_MARKER
-            )
-        elif provenance_marker:
-            raise ValueError("non-synthetic session cannot carry a provenance marker")
-
-    @staticmethod
     def _append_prediction_trusted_phase(
         state: SessionState,
-        classification: Dict[str, Any] | List[Dict[str, Any]],
+        classification: Dict[str, Any],
     ) -> None:
-        """Maintain a last-eight *distinct* trusted behavior-phase ring.
+        """Maintain the frozen v3 distinct trusted-phase ring.
 
-        Audit candidates are intentionally ignored before the ring is
-        updated, so high-volume model noise cannot evict a trusted phase.
-        All classifications for one compound command are aggregated before
-        deciding whether its tactic set starts a new phase.
+        The active release invokes this once per classified command.  The
+        phase normalizer performs adjacent tactic-set coalescing and v3 adds
+        timestamps/provenance needed for fail-closed live feeder eligibility.
         """
 
         from production.prediction.trusted_history import normalize_trusted_phases
 
-        candidates = (
-            [classification]
-            if isinstance(classification, dict)
-            else [item for item in classification if isinstance(item, dict)]
-        )
-        audit_count = sum(
-            not is_trusted_classification_event(item) for item in candidates
-        )
-        state.prediction_audit_only_label_count = int(
-            getattr(state, "prediction_audit_only_label_count", 0) or 0
-        ) + audit_count
-        trusted = [
-            item for item in candidates if is_trusted_classification_event(item)
-        ]
-        if not trusted:
+        audit_only = not is_trusted_classification_event(classification)
+        if audit_only:
+            state.prediction_audit_only_label_count = int(
+                getattr(state, "prediction_audit_only_label_count", 0) or 0
+            ) + 1
             return
-        first = trusted[0]
+        ttp = str(classification.get("ttp") or "").strip().upper()
+        tactic = str(classification.get("tactic") or "").strip()
+        if not tactic or tactic == "unknown" or not ttp or ttp == "T0000_UNKNOWN":
+            return
         try:
-            command_index = int(first.get("compound_command_index"))
+            command_index = int(classification.get("compound_command_index"))
         except (TypeError, ValueError):
             command_index = len(getattr(state, "commands", []) or []) - 1
-        labels = []
-        for item in trusted:
-            ttp = str(item.get("ttp") or "").strip().upper()
-            tactic = str(item.get("tactic") or "").strip()
-            if not tactic or tactic == "unknown" or not ttp or ttp == "T0000_UNKNOWN":
-                continue
-            label = {
-                "tactic": tactic,
-                "technique": ttp,
-                "source": item.get("source"),
-                "confidence": item.get("confidence"),
-                "agreement_status": item.get("agreement_status"),
-            }
-            evidence_id = str(
-                (item.get("durable_evidence_order") or {}).get("event_id")
-                or item.get("evidence_id")
-                or ""
-            ).strip()
-            if evidence_id:
-                label["classification_evidence_id"] = evidence_id
-            if label not in labels:
-                labels.append(label)
-        if not labels:
-            return
+        label = {
+            "tactic": tactic,
+            "technique": ttp,
+            "source": classification.get("source"),
+            "confidence": classification.get("confidence"),
+            "agreement_status": classification.get("agreement_status"),
+        }
+        evidence_id = str(
+            (classification.get("durable_evidence_order") or {}).get("event_id")
+            or classification.get("evidence_id")
+            or ""
+        ).strip()
+        if evidence_id:
+            label["classification_evidence_id"] = evidence_id
         history = getattr(state, "prediction_trusted_history", None)
         if not isinstance(history, list):
             history = []
-            state.prediction_trusted_history = history
         raw_phase = {
             "command_index": command_index,
-            "event_id": str(
-                (first.get("durable_evidence_order") or {}).get("event_id")
-                or first.get("evidence_id")
-                or ""
-            ),
-            "event_timestamp": str(first.get("event_timestamp") or "").strip(),
-            "labels": labels,
-            "audit_only_label_count": audit_count,
-            "command_outcome": first.get("command_outcome"),
-            "outcome_scope": first.get("outcome_scope"),
-            "fragment_execution": first.get("fragment_execution"),
+            "event_id": evidence_id,
+            "event_timestamp": str(classification.get("event_timestamp") or "").strip(),
+            "labels": [label],
+            "audit_only_label_count": 0,
+            "command_outcome": classification.get("command_outcome"),
+            "outcome_scope": classification.get("outcome_scope"),
+            "fragment_execution": classification.get("fragment_execution"),
         }
-        new_tactics = sorted({item["tactic"] for item in labels})
-        starts_distinct_phase = not history or history[-1].get("tactics") != new_tactics
+        previous_tactics = history[-1].get("tactics") if history else None
+        new_tactics = [tactic]
         state.prediction_trusted_history = normalize_trusted_phases(
             [*history, raw_phase], cap=8
         )
-        if starts_distinct_phase:
+        if previous_tactics != new_tactics:
             state.prediction_trusted_phase_count = int(
                 getattr(state, "prediction_trusted_phase_count", 0) or 0
             ) + 1
@@ -877,7 +811,7 @@ class SessionMonitor:
             ) + 1
         state.prediction_trusted_label_count = int(
             getattr(state, "prediction_trusted_label_count", 0) or 0
-        ) + len(labels)
+        ) + 1
 
     def _bound_session_history(self, state: SessionState) -> None:
         """Bound realtime evidence while durable raw events remain authoritative."""
@@ -1106,19 +1040,16 @@ class SessionMonitor:
         if not ttp:
             return fallback or "unknown"
         ttp = _main_ttp_id(ttp)
-        reviewed = str(fallback or "").strip().lower()
 
         if self.mitre_db and hasattr(self.mitre_db, "get_tactics"):
             try:
                 tactics = self.mitre_db.get_tactics(ttp) or []
-                if reviewed and reviewed != "unknown":
-                    return reviewed if reviewed in tactics else "unknown"
-                if len(tactics) == 1:
+                if tactics:
                     return tactics[0]
             except Exception:
                 pass
 
-        return reviewed or "unknown"
+        return fallback or "unknown"
 
     def _classify(self, cmd: str) -> tuple:
         """Returns (ttp_id, tactic). Uses the configured classification policy."""
@@ -1499,13 +1430,6 @@ class SessionMonitor:
     def _check_thresholds(self, state: SessionState) -> List[AlertEvent]:
         """Check all thresholds. Return new alerts not previously fired."""
         if not self.enable_alert_evaluation:
-            return []
-        if normalize_session_source(
-            (state.session_metadata or {}).get("_trusted_session_source"),
-            "",
-        ) == SESSION_SOURCE_E2E_TEST:
-            # Controlled Track-B sessions may exercise deterministic analysis,
-            # but can never create production incident/alert claims.
             return []
         alerts = []
         t = self.thresholds
@@ -2147,7 +2071,7 @@ def build_pipeline_trigger(
 
             if not isinstance(result, dict):
                 raise RuntimeError("Coordinator returned no report")
-            if result.get("schema_version") in {"session_assessment.v4", "session_assessment.v5"}:
+            if result.get("schema_version") == "session_assessment.v4":
                 non_authoritative = result.setdefault(
                     "non_authoritative_context", {}
                 )
@@ -2167,7 +2091,7 @@ def build_pipeline_trigger(
                     reporting_view.get("ioc_summary", {}),
                 )
                 result.setdefault("bpg_list", bpg_list)
-            if result.get("schema_version") not in {"session_assessment.v4", "session_assessment.v5"}:
+            if result.get("schema_version") != "session_assessment.v4":
                 result = _safe_reporting_mapping(result, "report")
             level = _extract_level(result)
             print(

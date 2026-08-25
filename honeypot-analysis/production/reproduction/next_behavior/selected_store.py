@@ -87,15 +87,6 @@ _CONTEXT_EVENTS = frozenset(
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _KEY_ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _BLOCK_SIZE = 8 * 1024 * 1024
-_CANONICAL_LABEL_ADAPTER_RELATIVE_PATH = Path(
-    "production/prediction/next_behavior_label_policy.py"
-)
-_CANONICAL_ZENODO_CORPUS_RELATIVE_PATH = Path(
-    "production/reproduction/next_behavior/zenodo_corpus.py"
-)
-_PREPROCESSING_SCHEMA_VERSION = "next_behavior_preprocessing.v2"
-_TRUSTED_HISTORY_SCHEMA_VERSION = "prediction_trusted_history_manifest.v3"
-_TRUSTED_HISTORY_MAXIMUM_PHASES = 8
 FINAL_PREPARATION_SCHEMA_VERSION = (
     "next_behavior_final_corpus_preparation.v1"
 )
@@ -183,47 +174,6 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(_BLOCK_SIZE), b""):
             digest.update(block)
     return digest.hexdigest()
-
-
-def _required_provenance_file_sha256(
-    repository_root: Path,
-    relative_path: Path,
-) -> str:
-    """Hash one exact, regular tracked implementation source fail closed."""
-
-    if relative_path.is_absolute() or ".." in relative_path.parts:
-        raise SelectedCorpusBuildError(
-            f"required provenance path is unsafe: {relative_path}"
-        )
-    path = repository_root / relative_path
-    try:
-        path.lstat()
-    except OSError as exc:
-        raise SelectedCorpusBuildError(
-            f"required provenance source is missing: {relative_path}"
-        ) from exc
-    if path.is_symlink() or not path.is_file():
-        raise SelectedCorpusBuildError(
-            f"required provenance source is not a regular file: {relative_path}"
-        )
-    return _sha256_file(path)
-
-
-def _selected_store_provenance_source_hashes(
-    repository_root: Path,
-) -> Dict[str, str]:
-    """Bind implementations actually used by classification-cache import."""
-
-    return {
-        "label_adapter_sha256": _required_provenance_file_sha256(
-            repository_root,
-            _CANONICAL_LABEL_ADAPTER_RELATIVE_PATH,
-        ),
-        "corpus_builder_sha256": _required_provenance_file_sha256(
-            repository_root,
-            _CANONICAL_ZENODO_CORPUS_RELATIVE_PATH,
-        ),
-    }
 
 
 def _file_identity(path: Path) -> tuple[int, str, str]:
@@ -343,92 +293,6 @@ def final_member_receipts_sha256(
     ).hexdigest()
 
 
-def _require_classifier_bound_preprocessing(
-    *,
-    policy: Mapping[str, Any],
-    repository_root: Path,
-    supplied_path: Path,
-) -> str:
-    """Verify the exact preprocessing bytes and semantic tuple in the classifier."""
-
-    bound_preprocessing_relative = Path(
-        _clean(policy.get("preprocessing_contract_path"))
-    )
-    if (
-        not str(bound_preprocessing_relative)
-        or bound_preprocessing_relative.is_absolute()
-        or ".." in bound_preprocessing_relative.parts
-    ):
-        raise SelectedCorpusBuildError(
-            "classifier preprocessing contract path is invalid"
-        )
-    bound_preprocessing_path = repository_root / bound_preprocessing_relative
-    try:
-        bound_metadata = bound_preprocessing_path.lstat()
-        supplied_metadata = supplied_path.lstat()
-    except OSError as exc:
-        raise SelectedCorpusBuildError("preprocessing manifest is missing") from exc
-    if (
-        bound_preprocessing_path.is_symlink()
-        or supplied_path.is_symlink()
-        or not bound_preprocessing_path.is_file()
-        or not supplied_path.is_file()
-        or not bound_metadata.st_size
-        or not supplied_metadata.st_size
-    ):
-        raise SelectedCorpusBuildError(
-            "preprocessing manifest must be a nonempty regular file"
-        )
-    try:
-        if (
-            bound_preprocessing_path.resolve(strict=True)
-            != supplied_path.resolve(strict=True)
-        ):
-            raise SelectedCorpusBuildError(
-                "preprocessing manifest path is not classifier-bound"
-            )
-    except OSError as exc:
-        raise SelectedCorpusBuildError("preprocessing manifest is missing") from exc
-    preprocessing_sha256 = _sha256_file(bound_preprocessing_path)
-    if preprocessing_sha256 != _clean(
-        policy.get("preprocessing_contract_sha256")
-    ).lower():
-        raise SelectedCorpusBuildError(
-            "preprocessing manifest SHA-256 mismatch"
-        )
-    try:
-        preprocessing = json.loads(
-            bound_preprocessing_path.read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise SelectedCorpusBuildError(
-            "preprocessing manifest is malformed"
-        ) from exc
-    phase_construction = (
-        preprocessing.get("phase_construction")
-        if isinstance(preprocessing, Mapping)
-        else None
-    )
-    if (
-        not isinstance(preprocessing, Mapping)
-        or preprocessing.get("schema_version")
-        != _PREPROCESSING_SCHEMA_VERSION
-        or preprocessing.get("target_contract_id") != TARGET_CONTRACT_ID
-        or not isinstance(phase_construction, Mapping)
-        or phase_construction.get("maximum_sequence_length")
-        != _TRUSTED_HISTORY_MAXIMUM_PHASES
-        or policy.get("target_contract_id") != TARGET_CONTRACT_ID
-        or policy.get("trusted_history_schema_version")
-        != _TRUSTED_HISTORY_SCHEMA_VERSION
-        or policy.get("trusted_history_maximum_phases")
-        != _TRUSTED_HISTORY_MAXIMUM_PHASES
-    ):
-        raise SelectedCorpusBuildError(
-            "preprocessing/classifier semantic binding is incompatible"
-        )
-    return preprocessing_sha256
-
-
 def _preparation_receipt_basis(
     *,
     completed_selection_path: Path,
@@ -488,11 +352,8 @@ def _preparation_receipt_basis(
     ):
         if not path.is_file() or _sha256_file(path) != expected:
             raise SelectedCorpusBuildError(f"{label} SHA-256 mismatch")
-    preprocessing_sha256 = _require_classifier_bound_preprocessing(
-        policy=policy,
-        repository_root=repository_root,
-        supplied_path=preprocessing_manifest_path,
-    )
+    if not preprocessing_manifest_path.is_file():
+        raise SelectedCorpusBuildError("preprocessing manifest is missing")
     return {
         "schema_version": FINAL_PREPARATION_SCHEMA_VERSION,
         "status": "frozen_for_blinded_preparation",
@@ -514,7 +375,7 @@ def _preparation_receipt_basis(
         "classification_pipeline_sha256": classifier["classifier"][
             "pipeline_sha256"
         ],
-        "preprocessing_sha256": preprocessing_sha256,
+        "preprocessing_sha256": _sha256_file(preprocessing_manifest_path),
         "environment_lock_sha256": dependency_lock["sha256"],
         "label_policy_sha256": policy["rule_policy_sha256"],
         "trust_policy_sha256": policy["trust_policy_sha256"],
@@ -726,7 +587,6 @@ def _normalize_timestamp(value: Any) -> str:
 def open_selected_database(path: Path) -> sqlite3.Connection:
     """Open a private selected-source store with an exact additive schema."""
 
-    fresh_store = not path.exists() or path.stat().st_size == 0
     path.parent.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(path)
     database.execute("PRAGMA foreign_keys=ON")
@@ -819,17 +679,6 @@ def open_selected_database(path: Path) -> sqlite3.Connection:
         );
         """
     )
-    # This index exists to make interrupted-member cleanup proportional to the
-    # member being recovered.  Limit its automatic creation to new stores so
-    # merely opening a large, preserved v1 store never triggers an unexpected
-    # index build or mutates its physical layout.
-    if fresh_store:
-        database.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_selected_session_sources_member
-                ON session_sources(source_member, raw_session_id)
-            """
-        )
     existing = database.execute(
         "SELECT value FROM metadata WHERE key = 'store_schema_version'"
     ).fetchone()
@@ -1316,47 +1165,18 @@ def record_final_preparation_generation(
 def _clear_partial_member(
     database: sqlite3.Connection,
     filename: str,
-    *,
-    instrumentation: Counter[str] | None = None,
-) -> bool:
-    """Remove only resumable rows for one incomplete member.
-
-    ``sessions`` is updated only in the atomic member-completion transaction,
-    so rows belonging to an incomplete member have never contributed to that
-    materialization.  Rebuilding every completed session during cleanup was
-    therefore redundant and made preparation quadratic in member count.
-
-    Return whether partial rows existed.  The optional private instrumentation
-    is used by the bounded equivalence/benchmark tests and never enters a
-    corpus receipt.
-    """
-
-    if instrumentation is not None:
-        instrumentation["partial_cleanup_checks"] += 1
-    has_partial_rows = any(
-        database.execute(
-            f"SELECT 1 FROM {table} WHERE source_member = ? LIMIT 1",
-            (filename,),
-        ).fetchone()
-        is not None
-        for table in ("command_events", "context_events", "session_sources")
+) -> None:
+    database.execute(
+        "DELETE FROM command_events WHERE source_member = ?", (filename,)
     )
-    if not has_partial_rows:
-        return False
-    if instrumentation is not None:
-        instrumentation["partial_members_cleared"] += 1
-    for table, metric in (
-        ("command_events", "partial_command_rows_deleted"),
-        ("context_events", "partial_context_rows_deleted"),
-        ("session_sources", "partial_session_source_rows_deleted"),
-    ):
-        cursor = database.execute(
-            f"DELETE FROM {table} WHERE source_member = ?", (filename,)
-        )
-        if instrumentation is not None:
-            instrumentation[metric] += max(cursor.rowcount, 0)
+    database.execute(
+        "DELETE FROM context_events WHERE source_member = ?", (filename,)
+    )
+    database.execute(
+        "DELETE FROM session_sources WHERE source_member = ?", (filename,)
+    )
+    _rebuild_sessions(database)
     database.commit()
-    return True
 
 
 _SESSION_SOURCE_UPSERT = """
@@ -1378,13 +1198,8 @@ ON CONFLICT(raw_session_id, source_member) DO UPDATE SET
 """
 
 
-def _rebuild_sessions_reference(database: sqlite3.Connection) -> None:
-    """Legacy full-store materialization retained as an equivalence oracle.
-
-    Production ingestion must use :func:`_reconcile_affected_sessions`.  This
-    implementation is intentionally kept byte-for-byte equivalent to the old
-    aggregate query so focused tests can prove the scoped result exactly.
-    """
+def _rebuild_sessions(database: sqlite3.Connection) -> None:
+    """Rebuild aggregate flags from resumable per-member observations."""
 
     database.execute("DELETE FROM sessions")
     database.execute(
@@ -1437,105 +1252,12 @@ def _rebuild_sessions_reference(database: sqlite3.Connection) -> None:
     )
 
 
-def _reconcile_affected_sessions(
-    database: sqlite3.Connection,
-    filename: str,
-    *,
-    instrumentation: Counter[str] | None = None,
-) -> int:
-    """Recompute only sessions touched by the completing source member.
-
-    The already durable, member-keyed ``session_sources`` rows are the bounded
-    affected-session tracker.  This avoids retaining a second, potentially
-    multi-million-ID set in Python or in SQLite's memory-backed temp store.
-    """
-
-    affected_count = int(
-        database.execute(
-            """
-            SELECT COUNT(*) FROM session_sources WHERE source_member = ?
-            """,
-            (filename,),
-        ).fetchone()[0]
-    )
-    if instrumentation is not None:
-        instrumentation["scoped_reconciliations"] += 1
-        instrumentation["affected_sessions_reconciled"] += affected_count
-    if affected_count == 0:
-        return 0
-    database.execute(
-        """
-        DELETE FROM sessions
-        WHERE raw_session_id IN (
-            SELECT raw_session_id FROM session_sources
-            WHERE source_member = ?
-        )
-        """,
-        (filename,),
-    )
-    database.execute(
-        """
-        INSERT INTO sessions(
-            raw_session_id, source_member, source_cohort, experiment_role,
-            first_seen, last_seen, protocol, configuration, connected, closed,
-            cross_member, cross_role
-        )
-        SELECT
-            first.raw_session_id,
-            first.source_member,
-            first.source_cohort,
-            first.experiment_role,
-            aggregate.first_seen,
-            aggregate.last_seen,
-            COALESCE(
-                NULLIF(MAX(first.protocol), ''),
-                NULLIF(MAX(any_source.protocol), ''),
-                ''
-            ),
-            COALESCE(
-                NULLIF(MAX(first.configuration), ''),
-                NULLIF(MAX(any_source.configuration), ''),
-                ''
-            ),
-            aggregate.connected,
-            aggregate.closed,
-            CASE WHEN aggregate.member_count > 1 THEN 1 ELSE 0 END,
-            CASE WHEN aggregate.role_count > 1 THEN 1 ELSE 0 END
-        FROM (
-            SELECT raw_session_id,
-                   MIN(first_seen) AS first_seen,
-                   MAX(last_seen) AS last_seen,
-                   MAX(connected) AS connected,
-                   MAX(closed) AS closed,
-                   COUNT(DISTINCT source_member) AS member_count,
-                   COUNT(DISTINCT experiment_role) AS role_count,
-                   MIN(chronological_order) AS first_order
-            FROM session_sources
-            WHERE raw_session_id IN (
-                SELECT raw_session_id FROM session_sources
-                WHERE source_member = ?
-            )
-            GROUP BY raw_session_id
-        ) AS aggregate
-        JOIN session_sources AS first
-          ON first.raw_session_id = aggregate.raw_session_id
-         AND first.chronological_order = aggregate.first_order
-        JOIN session_sources AS any_source
-          ON any_source.raw_session_id = aggregate.raw_session_id
-        GROUP BY first.raw_session_id
-        """,
-        (filename,),
-    )
-    return affected_count
-
-
 def _ingest_one_member(
     database: sqlite3.Connection,
     member: Mapping[str, Any],
     path: Path,
     *,
     flush_size: int,
-    instrumentation: Counter[str] | None = None,
 ) -> Dict[str, Any]:
     filename = member["filename"]
     stored = database.execute(
@@ -1568,11 +1290,7 @@ def _ingest_one_member(
             "stats": json.loads(str(stored[8])),
         }
 
-    _clear_partial_member(
-        database,
-        filename,
-        instrumentation=instrumentation,
-    )
+    _clear_partial_member(database, filename)
     stats: Counter[str] = Counter()
     event_ids: Counter[str] = Counter()
     collection_start = ""
@@ -1690,21 +1408,13 @@ def _ingest_one_member(
         flush()
     except (OSError, EOFError, sqlite3.Error) as exc:
         database.rollback()
-        _clear_partial_member(
-            database,
-            filename,
-            instrumentation=instrumentation,
-        )
+        _clear_partial_member(database, filename)
         raise SelectedCorpusBuildError(
             f"source member ingestion failed: {filename}: "
             f"{type(exc).__name__}"
         ) from exc
     if not collection_start or not collection_end:
-        _clear_partial_member(
-            database,
-            filename,
-            instrumentation=instrumentation,
-        )
+        _clear_partial_member(database, filename)
         raise SelectedCorpusBuildError(
             f"source member has no usable timestamps: {filename}"
         )
@@ -1715,45 +1425,29 @@ def _ingest_one_member(
             "both cowrie.session.connect and cowrie.session.closed required"
         ),
     }
-    try:
-        database.execute(
-            """
-            INSERT INTO source_members(
-                filename, source_sha256, source_size_bytes, archive_crc32,
-                chronological_order, source_cohort, experiment_role,
-                collection_start, collection_end, stats_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                filename,
-                member["sha256"],
-                member["size_bytes"],
-                member["archive_crc32"],
-                member["chronological_order"],
-                member["source_cohort"],
-                member["experiment_role"],
-                collection_start,
-                collection_end,
-                stable_json(summary),
-            ),
-        )
-        _reconcile_affected_sessions(
-            database,
+    database.execute(
+        """
+        INSERT INTO source_members(
+            filename, source_sha256, source_size_bytes, archive_crc32,
+            chronological_order, source_cohort, experiment_role,
+            collection_start, collection_end, stats_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
             filename,
-            instrumentation=instrumentation,
-        )
-        database.commit()
-    except sqlite3.Error as exc:
-        database.rollback()
-        _clear_partial_member(
-            database,
-            filename,
-            instrumentation=instrumentation,
-        )
-        raise SelectedCorpusBuildError(
-            f"source member completion failed: {filename}: "
-            f"{type(exc).__name__}"
-        ) from exc
+            member["sha256"],
+            member["size_bytes"],
+            member["archive_crc32"],
+            member["chronological_order"],
+            member["source_cohort"],
+            member["experiment_role"],
+            collection_start,
+            collection_end,
+            stable_json(summary),
+        ),
+    )
+    _rebuild_sessions(database)
+    database.commit()
     return {
         "status": "ingested",
         "filename": filename,
@@ -1978,9 +1672,6 @@ def _require_cache_donor_receipts(
             "classification cache donor receipt is malformed"
         ) from exc
     policy = classifier_manifest["classification_policy"]
-    provenance_source_hashes = _selected_store_provenance_source_hashes(
-        repository_root
-    )
     expected = {
         "schema_version": "next_behavior_zenodo_classification.v1",
         "status": "classified",
@@ -1999,7 +1690,14 @@ def _require_cache_donor_receipts(
         "drop_rule_securebert_disagreements": policy[
             "drop_rule_securebert_disagreements"
         ],
-        **provenance_source_hashes,
+        "label_adapter_sha256": _sha256_file(
+            repository_root
+            / "production/prediction/next_behavior_label_policy.py"
+        ),
+        "corpus_builder_sha256": _sha256_file(
+            repository_root
+            / "production/tools/build_next_behavior_zenodo_corpus.py"
+        ),
     }
     for field, value in expected.items():
         if receipt.get(field) != value:

@@ -286,7 +286,7 @@ def test_api_and_ui_expose_advisory_corrected_target_semantics() -> None:
     api = _current_prediction_payload({"payload": snapshot}, [])
     assert api["snapshot_sha256"] == snapshot["snapshot_sha256"]
     assert api["prediction_contract"] == (
-        "next_distinct_trusted_behavior_phase_or_session_end.v2"
+        "next_distinct_command_behavior_phase_or_session_end.v1"
     )
     assert api["active_model"]["model_type"] == "small_causal_transformer"
     assert api["authority"]["may_create_alert_alone"] is False

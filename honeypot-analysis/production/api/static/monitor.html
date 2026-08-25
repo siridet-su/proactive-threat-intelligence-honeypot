@@ -493,18 +493,12 @@
 
         const heading = document.createElement('h3');
         heading.className = 'text-xs font-semibold text-violet-300 uppercase tracking-wide';
-        const schemaVersion = String(result?.advisory_schema_version || result?.advisory?.schema_version || '');
-        const isV2 = schemaVersion === 'ai_advisory_record.v2';
-        heading.textContent = isV2
-            ? 'Graph-grounded AI advisory — non-authoritative'
-            : 'AI-generated advisory — non-authoritative';
+        heading.textContent = 'AI-generated advisory — non-authoritative';
         panel.appendChild(heading);
 
         const note = document.createElement('p');
         note.className = 'text-[11px] text-zinc-500 mt-1 mb-3';
-        note.textContent = isV2
-            ? 'AI may select and order existing deterministic objects only. It cannot create canonical findings, hypotheses, guidance, alerts, actions, or predictions.'
-            : 'Separate historical/v1 research output. It cannot change findings, hypotheses, guidance, alerts, actions, or predictions.';
+        note.textContent = 'Separate post-persistence research output. It cannot change findings, hypotheses, guidance, alerts, or actions.';
         panel.appendChild(note);
 
         if (!result?.ok || result?.status === 'unavailable') {
@@ -522,30 +516,6 @@
             return;
         }
 
-        if (result?.status === 'pending') {
-            const pending = document.createElement('p');
-            pending.className = 'text-xs text-amber-300 italic';
-            pending.textContent = 'AI advisory pending; deterministic analysis is already complete and authoritative.';
-            panel.appendChild(pending);
-            return;
-        }
-
-        if (result?.status === 'superseded') {
-            const superseded = document.createElement('p');
-            superseded.className = 'text-xs text-zinc-500 italic';
-            superseded.textContent = 'A prior AI advisory is superseded by the current canonical report and is not displayed.';
-            panel.appendChild(superseded);
-            return;
-        }
-
-        if (result?.status === 'rejected') {
-            const rejected = document.createElement('p');
-            rejected.className = 'text-xs text-amber-300 italic';
-            rejected.textContent = `AI output rejected locally: ${String(result?.advisory?.validation?.reason_code || 'validation_failed')}. Deterministic analysis is unaffected.`;
-            panel.appendChild(rejected);
-            return;
-        }
-
         const advisory = result.advisory || {};
         const rendered = advisory.rendered_advisory || {};
         const validation = advisory.validation || {};
@@ -560,27 +530,6 @@
             item.textContent = String(paragraph?.text || '');
             panel.appendChild(item);
         }
-
-        if (isV2) {
-            for (const section of arrayMaybe(rendered.sections)) {
-                const sectionHeading = document.createElement('h4');
-                sectionHeading.className = 'text-[11px] font-semibold text-violet-200 uppercase tracking-wide mt-4 mb-2';
-                sectionHeading.textContent = String(section?.heading || section?.section_id || 'AI-selected existing objects');
-                panel.appendChild(sectionHeading);
-                for (const selected of arrayMaybe(section?.items)) {
-                    const item = document.createElement('p');
-                    item.className = 'text-[11px] text-zinc-400 font-mono mb-1';
-                    item.textContent = `${String(selected?.object_type || 'object')} · ${String(selected?.object_id || '')} · existing deterministic object; non-authoritative`;
-                    panel.appendChild(item);
-                }
-            }
-            for (const step of arrayMaybe(rendered.review_plan)) {
-                const item = document.createElement('p');
-                item.className = 'text-[11px] text-zinc-400 leading-relaxed mb-1';
-                item.textContent = `Review step ${String(step?.order || '')}: ${String(step?.step_type || 'review')} · ${String(step?.anchor_type || 'object')} ${String(step?.anchor_id || '')}`;
-                panel.appendChild(item);
-            }
-        }
         if (rendered.status === 'abstained') {
             const abstained = document.createElement('p');
             abstained.className = 'text-xs text-zinc-500 italic';
@@ -588,18 +537,16 @@
             panel.appendChild(abstained);
         }
 
-        if (!isV2) {
-            const candidates = arrayMaybe(advisory.shadow_candidates?.candidates);
-            const shadowHeading = document.createElement('h4');
-            shadowHeading.className = 'text-[11px] font-semibold text-amber-300 uppercase tracking-wide mt-4 mb-2';
-            shadowHeading.textContent = `Historical v1 shadow candidates — Unverified AI candidates (${candidates.length}; not active v2)`;
-            panel.appendChild(shadowHeading);
-            for (const candidate of candidates) {
-                const item = document.createElement('p');
-                item.className = 'text-[11px] text-zinc-500 font-mono mb-1';
-                item.textContent = `${String(candidate?.candidate_type || 'unknown')} · ${String(candidate?.status || 'unverified_ai_candidate')} · ${String(candidate?.candidate_id || '')} · historical only`;
-                panel.appendChild(item);
-            }
+        const candidates = arrayMaybe(advisory.shadow_candidates?.candidates);
+        const shadowHeading = document.createElement('h4');
+        shadowHeading.className = 'text-[11px] font-semibold text-amber-300 uppercase tracking-wide mt-4 mb-2';
+        shadowHeading.textContent = `Unverified AI candidates (${candidates.length})`;
+        panel.appendChild(shadowHeading);
+        for (const candidate of candidates) {
+            const item = document.createElement('p');
+            item.className = 'text-[11px] text-zinc-500 font-mono mb-1';
+            item.textContent = `${String(candidate?.candidate_type || 'unknown')} · ${String(candidate?.status || 'unverified_ai_candidate')} · ${String(candidate?.candidate_id || '')}`;
+            panel.appendChild(item);
         }
     }
 

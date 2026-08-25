@@ -14,7 +14,6 @@ from production.reporting.session_assessment_v4 import (
     read_legacy_session_assessment,
     validate_session_assessment_v4,
 )
-from production.reporting.session_assessment_v6 import validate_session_assessment_v6
 from production.utils.sensitive_data import redact_for_artifact
 
 
@@ -441,12 +440,12 @@ def test_coordinator_new_report_path_never_calls_legacy_generation(monkeypatch) 
         [],
         raw_events=payload["raw_events"],
     ))
-    assert report["schema_version"] == "session_assessment.v6"
-    assert validate_session_assessment_v6(report) == []
+    assert report["schema_version"] == "session_assessment.v4"
+    assert validate_session_assessment_v4(report) == []
 
 
 def test_pipeline_trigger_invokes_canonical_coordinator_with_public_bpg_keyword() -> None:
-    """A closed live session must reach the primary v6 report path, not fallback."""
+    """A closed live session must reach the primary v4 report path, not fallback."""
 
     state = SessionState(
         session_id="canonical-pipeline-session",
@@ -471,8 +470,8 @@ def test_pipeline_trigger_invokes_canonical_coordinator_with_public_bpg_keyword(
         classification_rules_path=CLASSIFICATION_POLICY,
     )(state)
     assert report is not None
-    assert report["schema_version"] == "session_assessment.v6"
-    assert validate_session_assessment_v6(report) == []
+    assert report["schema_version"] == "session_assessment.v4"
+    assert validate_session_assessment_v4(report) == []
 
 
 def test_legacy_adapter_is_read_only_and_does_not_recompute() -> None:

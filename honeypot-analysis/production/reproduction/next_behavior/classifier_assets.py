@@ -18,10 +18,9 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
 
 
-SCHEMA_VERSION = "next_behavior_classifier_environment.v4"
-COMPATIBILITY_SCHEMA_VERSION = "next_behavior_classifier_environment.v3"
-LEGACY_SCHEMA_VERSION = "next_behavior_classifier_environment.v2"
-VERY_LEGACY_SCHEMA_VERSION = "next_behavior_classifier_environment.v1"
+SCHEMA_VERSION = "next_behavior_classifier_environment.v3"
+COMPATIBILITY_SCHEMA_VERSION = "next_behavior_classifier_environment.v2"
+LEGACY_SCHEMA_VERSION = "next_behavior_classifier_environment.v1"
 SOURCE_IDENTITY_SCHEMA_VERSION = "classifier_source_identity.v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LEGACY_TOP_LEVEL_FIELDS = frozenset(
@@ -77,15 +76,6 @@ _POLICY_FIELDS = frozenset(
         "trusted_history_maximum_phases",
     }
 )
-_V4_POLICY_FIELDS = _POLICY_FIELDS | frozenset({
-    "target_contract_id",
-    "model_input_schema_version",
-    "prediction_snapshot_schema_version",
-    "feedback_contract_version",
-    "checkpoint_compatibility_status",
-    "preprocessing_contract_path",
-    "preprocessing_contract_sha256",
-})
 _LEGACY_FREEZE_FIELDS = frozenset(
     {
         "basis_commit",
@@ -111,32 +101,9 @@ SOURCE_IDENTITY_PATHS = (
     "production/semantics/command_operations.py",
     "production/prediction/trusted_history.py",
     "production/prediction/next_behavior_runtime.py",
-    "production/prediction/next_behavior_contract.py",
-    "production/prediction/next_behavior_preprocessing.py",
-    "production/prediction/next_behavior_tensor.py",
-    "production/prediction/next_behavior_forecast_contract.py",
-    "production/prediction/prediction_snapshot_contract.py",
     "configs/classification_rules.trusted.json",
-    "configs/next_behavior_preprocessing.v2.json",
     "production/classification/trust.py",
-    "production/utils/feedback.py",
-    "production/workers/session_monitor.py",
-    "production/workers/session_worker.py",
     "data/feeds/mitre_attack_cache.json",
-)
-V3_SOURCE_IDENTITY_PATHS = tuple(
-    path for path in SOURCE_IDENTITY_PATHS
-    if path not in {
-        "production/prediction/next_behavior_contract.py",
-        "production/prediction/next_behavior_preprocessing.py",
-        "production/prediction/next_behavior_tensor.py",
-        "production/prediction/next_behavior_forecast_contract.py",
-        "production/prediction/prediction_snapshot_contract.py",
-        "configs/next_behavior_preprocessing.v2.json",
-        "production/utils/feedback.py",
-        "production/workers/session_monitor.py",
-        "production/workers/session_worker.py",
-    }
 )
 _MODEL_FILE_PATHS = frozenset(
     {
@@ -245,20 +212,15 @@ def validate_classifier_manifest(value: Any) -> list[str]:
         return ["classifier environment manifest must be an object"]
     errors: list[str] = []
     schema = value.get("schema_version")
-    expected_top_level = (
-        _TOP_LEVEL_FIELDS
-        if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION}
-        else _LEGACY_TOP_LEVEL_FIELDS
-    )
+    expected_top_level = _TOP_LEVEL_FIELDS if schema == SCHEMA_VERSION else _LEGACY_TOP_LEVEL_FIELDS
     if set(value) != expected_top_level:
         errors.append("classifier environment fields are invalid")
     if schema not in {
         SCHEMA_VERSION,
         COMPATIBILITY_SCHEMA_VERSION,
         LEGACY_SCHEMA_VERSION,
-        VERY_LEGACY_SCHEMA_VERSION,
     }:
-        errors.append("classifier environment schema is unsupported")
+        errors.append(f"schema_version must be one of {SCHEMA_VERSION}, {COMPATIBILITY_SCHEMA_VERSION}, {LEGACY_SCHEMA_VERSION}")
 
     python = value.get("python")
     if not isinstance(python, dict) or set(python) != _PYTHON_FIELDS:
@@ -279,7 +241,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
 
     classifier = value.get("classifier")
     classifier_fields = _CLASSIFIER_FIELDS
-    if schema == VERY_LEGACY_SCHEMA_VERSION:
+    if schema == LEGACY_SCHEMA_VERSION:
         classifier_fields = _CLASSIFIER_FIELDS - {"splitter_sha256"}
     if not isinstance(classifier, dict) or set(classifier) != classifier_fields:
         errors.append("classifier fields are invalid")
@@ -323,8 +285,8 @@ def validate_classifier_manifest(value: Any) -> list[str]:
                     errors.append("classifier.files contains an unsafe receipt")
 
     policy = value.get("classification_policy")
-    policy_fields = _V4_POLICY_FIELDS if schema == SCHEMA_VERSION else _POLICY_FIELDS
-    if schema == VERY_LEGACY_SCHEMA_VERSION:
+    policy_fields = _POLICY_FIELDS
+    if schema == LEGACY_SCHEMA_VERSION:
         policy_fields = _POLICY_FIELDS - {
             "rule_policy_id",
             "rule_policy_version",
@@ -355,17 +317,15 @@ def validate_classifier_manifest(value: Any) -> list[str]:
         ):
             if not _is_sha256(policy.get(hash_field)):
                 errors.append(f"classification_policy.{hash_field} is invalid")
-        if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION}:
-            if policy.get("authority_decision_contract_version") != "command_authority_decision.v2":
+        if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION}:
+            if policy.get("authority_decision_contract_version") != "command_authority_decision.v1":
                 errors.append("authority decision contract version is invalid")
             if not _is_sha256(policy.get("authority_decision_sha256")):
                 errors.append("authority decision contract hash is invalid")
-            expected_history = (
-                "prediction_trusted_history_manifest.v3"
-                if schema == SCHEMA_VERSION
-                else "prediction_trusted_history_manifest.v2"
-            )
-            if policy.get("trusted_history_schema_version") != expected_history:
+            if policy.get("trusted_history_schema_version") not in {
+                "prediction_trusted_history_manifest.v2",
+                "prediction_trusted_history_manifest.v3",
+            }:
                 errors.append("trusted-history manifest schema is invalid")
             for field in (
                 "trusted_history_builder_path",
@@ -389,20 +349,6 @@ def validate_classifier_manifest(value: Any) -> list[str]:
                 or policy.get("trusted_history_maximum_phases") != 8
             ):
                 errors.append("trusted-history maximum phases are not frozen")
-            if schema == SCHEMA_VERSION:
-                expected_v4 = {
-                    "target_contract_id": "next_distinct_trusted_behavior_phase_or_session_end.v2",
-                    "model_input_schema_version": "next_behavior_input.v2",
-                    "prediction_snapshot_schema_version": "prediction_snapshot.v4",
-                    "feedback_contract_version": "prediction_feedback.v2",
-                    "checkpoint_compatibility_status": "pending_phase7_deterministic_semantics_freeze",
-                    "preprocessing_contract_path": "configs/next_behavior_preprocessing.v2.json",
-                }
-                for field, expected in expected_v4.items():
-                    if policy.get(field) != expected:
-                        errors.append(f"classification_policy.{field} is invalid")
-                if not _is_sha256(policy.get("preprocessing_contract_sha256")):
-                    errors.append("classification_policy.preprocessing_contract_sha256 is invalid")
         candidate = policy.get("securebert_candidate_threshold")
         trusted = policy.get("trusted_model_only_threshold")
         if not isinstance(candidate, (int, float)) or isinstance(candidate, bool):
@@ -427,18 +373,14 @@ def validate_classifier_manifest(value: Any) -> list[str]:
             errors.append("compound command splitter is not frozen")
 
     source_identity = value.get("source_identity")
-    if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION}:
+    if schema == SCHEMA_VERSION:
         if not isinstance(source_identity, dict) or set(source_identity) != _SOURCE_IDENTITY_FIELDS:
             errors.append("classifier source identity fields are invalid")
         else:
             if source_identity.get("schema_version") != SOURCE_IDENTITY_SCHEMA_VERSION:
                 errors.append("classifier source identity schema is invalid")
             files = source_identity.get("files")
-            expected_source_paths = (
-                SOURCE_IDENTITY_PATHS
-                if schema == SCHEMA_VERSION else V3_SOURCE_IDENTITY_PATHS
-            )
-            if not isinstance(files, dict) or set(files) != set(expected_source_paths):
+            if not isinstance(files, dict) or set(files) != set(SOURCE_IDENTITY_PATHS):
                 errors.append("classifier source identity file set is invalid")
             else:
                 for relative, digest in files.items():
@@ -446,7 +388,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
                     if (
                         path.is_absolute()
                         or ".." in path.parts
-                        or relative not in expected_source_paths
+                        or relative not in SOURCE_IDENTITY_PATHS
                         or not _is_sha256(digest)
                     ):
                         errors.append("classifier source identity contains an unsafe file")
@@ -454,9 +396,9 @@ def validate_classifier_manifest(value: Any) -> list[str]:
                 errors.append("classifier source identity hash is invalid")
 
     freeze = value.get("freeze")
-    if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION}:
+    if schema == SCHEMA_VERSION:
         freeze_fields = _V3_FREEZE_FIELDS
-    elif schema == LEGACY_SCHEMA_VERSION:
+    elif schema == COMPATIBILITY_SCHEMA_VERSION:
         freeze_fields = _LEGACY_FREEZE_FIELDS
     else:
         freeze_fields = _LEGACY_FREEZE_FIELDS - {"release_revision"}
@@ -465,7 +407,7 @@ def validate_classifier_manifest(value: Any) -> list[str]:
     else:
         if not re.fullmatch(r"[0-9a-f]{40}", _clean(freeze.get("basis_commit"))):
             errors.append("freeze.basis_commit is invalid")
-        if schema == LEGACY_SCHEMA_VERSION and not re.fullmatch(
+        if schema == COMPATIBILITY_SCHEMA_VERSION and not re.fullmatch(
             r"[0-9a-f]{40}", _clean(freeze.get("release_revision"))
         ):
             errors.append("freeze.release_revision is invalid")

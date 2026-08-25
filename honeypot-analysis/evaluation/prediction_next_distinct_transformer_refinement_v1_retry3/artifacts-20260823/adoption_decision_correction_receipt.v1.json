@@ -1,0 +1,22 @@
+{
+  "schema_version": "prediction_next_distinct_transformer_refinement_adoption_correction_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "correction_path": "adoption_decision_correction.v1.json",
+  "correction_report_path": "adoption_decision_correction.md",
+  "correction_sha256": "646a03b36110ffab86cab4cb1b71f1dc7eaaf000e60b6695420a137b1627e6fc",
+  "correction_report_sha256": "d22f00dc3cf1259f61ae8868804453f3cae9103747bede8dc0db4c72a8cb5fec",
+  "base_receipt_path": "receipt.json",
+  "base_receipt_sha256": "5faf7491b445ae0ea3352f84f20b9e3fe68bc5f1a0ed2b09b28d7fac68c82d0b",
+  "historical_addendum_path": "adoption_decision_receipt.v1.json",
+  "historical_addendum_sha256": "d6a1d2d625a3cddeb4c239c0c084175beb741efc99d6007ca88e9c646cad8d5a",
+  "decision": "REFINED TRANSFORMER ADOPTION SUPPORTED",
+  "issue": "baseline aggregation mismatch in prior adoption addendum",
+  "issue_status": "RESOLVED",
+  "training_rerun": false,
+  "post_selection_rerun": false,
+  "sealed_data_accessed": false,
+  "production_changed": false,
+  "external_ai_called": false,
+  "prior_artifacts_preserved": true,
+  "receipt_sha256": "0c2cd4b00f914cee00ed7fadcdb528f331924c899b7052de36aa579e99cfa2bb"
+}

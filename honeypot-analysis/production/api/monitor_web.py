@@ -54,13 +54,6 @@ from production.reporting.response_guidance_v3 import (
     read_legacy_response_guidance,
     validate_response_guidance_v3,
 )
-from production.reporting.response_guidance_v4 import validate_response_guidance_v4
-from production.reporting.session_assessment_v6 import (
-    trusted_behavioral_findings_for_presentation,
-)
-from production.ai_advisory.integration_v2 import (
-    validate_ai_advisory_record_v2,
-)
 from production.storage import open_storage, safe_database_descriptor
 
 
@@ -404,12 +397,6 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         snapshot = storage.get_current_prediction_snapshot(session_id)
         if not snapshot:
             return HTTPStatus.NOT_FOUND, {"error": "prediction not found", "session_id": session_id, "timestamp": utc_now()}
-        if snapshot.get("integrity_errors"):
-            return HTTPStatus.CONFLICT, {
-                "error": "current prediction failed integrity validation",
-                "session_id": session_id,
-                "timestamp": utc_now(),
-            }
         feedback_rows = [
             row for row in storage.list_rows("analyst_feedback", limit=1000)
             if str(row.get("session_id") or "") == session_id
@@ -1418,18 +1405,12 @@ def _load_report_json_from_artifact(paths: Dict[str, str], reports_dir: str) -> 
         return {}
 
 
-def _authority_safe_behavioral_findings(
-    report: Dict[str, Any],
-) -> List[Dict[str, Any]]:
-    return trusted_behavioral_findings_for_presentation(report)
-
-
 def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> Dict[str, str]:
     merged = _merged_report_payload(report_payload, artifact_payload)
-    if merged.get("schema_version") in {
-        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
-    }:
-        findings = _authority_safe_behavioral_findings(merged)
+    if merged.get("schema_version") == "session_assessment.v4":
+        findings = [
+            item for item in merged.get("behavioral_findings") or [] if isinstance(item, dict)
+        ]
         hypothesis_sets = [
             item for item in merged.get("hypothesis_sets") or [] if isinstance(item, dict)
         ]
@@ -1437,17 +1418,17 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
         coverage = canonical_evidence.get("semantic_coverage") or {}
         graph = canonical_evidence.get("semantic_graph") or {}
         return {
-            "schema_version": _text(merged.get("schema_version")),
+            "schema_version": "session_assessment.v4",
             "campaign_name": "",
             "confidence": "Unscored",
-            "confidence_source": "no_global_scoring_in_canonical_assessment",
+            "confidence_source": "no_global_scoring_in_v4",
             "analytical_evidence_strength": _text(merged.get("status") or ""),
             "evidence_strength_reason": (
                 f"{len(findings)} canonical behavioral findings; "
                 f"{len(hypothesis_sets)} falsifiable hypothesis sets"
             ),
             "ai_enriched": "false",
-            "analysis_mode": f"deterministic_{_text(merged.get('schema_version'))}",
+            "analysis_mode": "deterministic_session_assessment_v4",
             "semantic_coverage": _text(
                 coverage.get("coverage_status") or "unavailable"
             ),
@@ -1732,17 +1713,10 @@ def _report_recommendations(
     session_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     merged = _merged_report_payload(report_payload, artifact_payload)
-    response_guidance = merged.get("response_guidance_v4") or merged.get(
-        "response_guidance_v3"
-    ) or {}
-    if not isinstance(response_guidance, dict):
-        response_guidance = {}
-    elif response_guidance.get("schema_version") == "response_guidance.v4":
-        graph = (merged.get("canonical_evidence") or {}).get("semantic_graph") or {}
-        if validate_response_guidance_v4(response_guidance, parent_graph=graph):
-            response_guidance = {}
-    elif (
-        response_guidance.get("schema_version") != "response_guidance.v3"
+    response_guidance = merged.get("response_guidance_v3") or {}
+    if (
+        not isinstance(response_guidance, dict)
+        or response_guidance.get("schema_version") != "response_guidance.v3"
         or validate_response_guidance_v3(response_guidance)
     ):
         response_guidance = {}
@@ -1755,10 +1729,7 @@ def _report_recommendations(
         _as_text_list(canonical_recommendations.get("context_notes"))
         if isinstance(canonical_recommendations, dict) else []
     )
-    policy_authoritative = response_guidance.get("authority") in {
-        "deterministic_observed_evidence_policy",
-        "deterministic_canonical_graph_policy",
-    }
+    policy_authoritative = response_guidance.get("authority") == "deterministic_observed_evidence_policy"
     recommended_actions = [
         str(item.get("description") or "").strip()
         for item in structured_actions
@@ -1805,24 +1776,6 @@ def _historical_response_guidance_payload(report_payload: Any) -> Dict[str, Any]
 
     if not isinstance(report_payload, dict):
         return {}
-    stored_v4 = report_payload.get("response_guidance_v4")
-    if isinstance(stored_v4, dict) and stored_v4.get("schema_version") == "response_guidance.v4":
-        graph = (report_payload.get("canonical_evidence") or {}).get("semantic_graph") or {}
-        validation_errors = validate_response_guidance_v4(
-            stored_v4, parent_graph=graph
-        )
-        if validation_errors:
-            return {
-                "schema_version": "response_guidance_legacy_adapter.v1",
-                "status": "invalid_stored_guidance",
-                "semantics": "Stored graph-bound guidance failed validation and is non-actionable.",
-                "source_schema_version": "response_guidance.v4",
-                "advisory_actions": [],
-                "validation_error_count": len(validation_errors),
-                "recomputed": False,
-                "authoritative_for_new_actions": False,
-            }
-        return copy.deepcopy(stored_v4)
     stored = report_payload.get("response_guidance_v3")
     if isinstance(stored, dict) and stored.get("schema_version") == "response_guidance.v3":
         validation_errors = validate_response_guidance_v3(stored)
@@ -2232,17 +2185,12 @@ def load_ai_advisory_detail(
             "session_id": clean_session_id,
             "timestamp": utc_now(),
         }
-    expected_schema = (
-        "ai_advisory_record.v2"
-        if report_payload.get("schema_version") == "session_assessment.v6"
-        else "ai_advisory_record.v1"
-    )
     if not row:
         outbox_status = str((outbox or {}).get("status") or "")
         if outbox_status in {"queued", "retry", "running"}:
             state = "pending"
         elif outbox_status == "failed":
-            state = "unavailable"
+            state = "failed"
         elif older:
             state = "superseded"
         else:
@@ -2253,80 +2201,10 @@ def load_ai_advisory_detail(
             "session_id": clean_session_id,
             "report_id": report_id,
             "assessment_id": assessment_id,
-            "advisory_schema_version": expected_schema,
-            "authority_label": "separate non-authoritative AI advisory",
             "advisory": {},
             "timestamp": utc_now(),
         }
     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    payload_schema = str(payload.get("schema_version") or "")
-    if payload_schema == "ai_advisory_record.v2":
-        try:
-            validate_ai_advisory_record_v2(payload)
-        except Exception:
-            return {
-                "ok": True,
-                "status": "unavailable",
-                "session_id": clean_session_id,
-                "report_id": report_id,
-                "assessment_id": assessment_id,
-                "advisory_schema_version": expected_schema,
-                "authority_label": "separate non-authoritative AI advisory",
-                "advisory": {},
-                "error": "stored v2 advisory failed local validation",
-                "timestamp": utc_now(),
-            }
-    elif payload_schema not in {"ai_advisory_record.v1", ""}:
-        return {
-            "ok": True,
-            "status": "unavailable",
-            "session_id": clean_session_id,
-            "report_id": report_id,
-            "assessment_id": assessment_id,
-            "advisory_schema_version": expected_schema,
-            "authority_label": "separate non-authoritative AI advisory",
-            "advisory": {},
-            "error": "stored advisory schema is unsupported",
-            "timestamp": utc_now(),
-        }
-    if payload_schema and payload_schema != expected_schema:
-        return {
-            "ok": True,
-            "status": "unavailable",
-            "session_id": clean_session_id,
-            "report_id": report_id,
-            "assessment_id": assessment_id,
-            "advisory_schema_version": expected_schema,
-            "authority_label": "separate non-authoritative AI advisory",
-            "advisory": {},
-            "error": "stored advisory version does not match the current report",
-            "timestamp": utc_now(),
-        }
-    is_v2 = payload_schema == "ai_advisory_record.v2"
-    advisory = {
-        "schema_version": payload.get("schema_version"),
-        "status": payload.get("status"),
-        "authority": payload.get("authority"),
-        "validation": payload.get("validation") or {},
-        "rendered_advisory": payload.get("rendered_advisory") or {},
-        "safety": payload.get("safety") or {},
-        "provenance": payload.get("provenance") or {},
-    }
-    if not is_v2:
-        # Shadow candidates remain readable only as historical v1 data. They
-        # are intentionally absent from the active v2 response shape.
-        advisory["shadow_candidates"] = payload.get("shadow_candidates") or {
-            "schema_version": "ai_shadow_candidate_set.v1",
-            "candidates": [],
-        }
-        advisory["shadow_candidates_scope"] = "historical_v1_only"
-        advisory["authority_label"] = (
-            "historical v1 shadow candidates — non-authoritative and not active v2"
-        )
-    else:
-        advisory["authority_label"] = (
-            "v2 graph-grounded AI selections — non-authoritative; existing objects only"
-        )
     return {
         "ok": True,
         "status": str(row.get("status") or "unavailable"),
@@ -2334,9 +2212,19 @@ def load_ai_advisory_detail(
         "advisory_id": str(row.get("advisory_id") or ""),
         "report_id": str(row.get("report_id") or ""),
         "assessment_id": str(row.get("assessment_id") or ""),
-        "advisory_schema_version": payload_schema or expected_schema,
-        "authority_label": advisory["authority_label"],
-        "advisory": advisory,
+        "advisory": {
+            "schema_version": payload.get("schema_version"),
+            "status": payload.get("status"),
+            "authority": payload.get("authority"),
+            "validation": payload.get("validation") or {},
+            "rendered_advisory": payload.get("rendered_advisory") or {},
+            "shadow_candidates": payload.get("shadow_candidates") or {
+                "schema_version": "ai_shadow_candidate_set.v1",
+                "candidates": [],
+            },
+            "safety": payload.get("safety") or {},
+            "provenance": payload.get("provenance") or {},
+        },
         "metrics": row.get("metrics") or {},
         "timestamp": utc_now(),
     }
@@ -4159,7 +4047,7 @@ def _render_reference_links(references: Iterable[Any], limit: int = 6) -> str:
 
 
 def _render_response_guidance(decision: Dict[str, Any]) -> str:
-    """Render only validated current/historical response-guidance contracts.
+    """Render only the v3 response-guidance contract.
 
     It renders no v1 immediate actions or v2 adapters.
     """
@@ -4167,9 +4055,7 @@ def _render_response_guidance(decision: Dict[str, Any]) -> str:
     if not decision:
         return ""
     guidance = decision
-    if isinstance(guidance, dict) and guidance.get("schema_version") in {
-        "response_guidance.v3", "response_guidance.v4"
-    }:
+    if isinstance(guidance, dict) and guidance.get("schema_version") == "response_guidance.v3":
         findings = [item for item in guidance.get("findings") or [] if isinstance(item, dict)]
         finding = findings[0] if findings else {}
         triage = guidance.get("triage") or {}
@@ -4194,14 +4080,13 @@ def _render_response_guidance(decision: Dict[str, Any]) -> str:
             else '<div class="empty">No policy-approved advisory action matched this session.</div>'
         )
         policy = (guidance.get("provenance") or {}).get("policy") or {}
-        policy_document = policy.get("document") or policy
         return (
             '<div class="decision-panel">'
             '<div class="overview-grid">'
             f'<div class="kv"><span>finding</span><strong>{_html(finding.get("severity") or "-")}</strong></div>'
             f'<div class="kv"><span>review urgency</span><strong>{_html(triage.get("urgency") or "-")}</strong></div>'
             f'<div class="kv"><span>guidance status</span><strong>{_html(guidance.get("status") or "-")}</strong></div>'
-            f'<div class="kv"><span>policy</span><strong>{_html(policy_document.get("policy_id") or "-")}</strong></div>'
+            f'<div class="kv"><span>policy</span><strong>{_html(policy.get("policy_id") or "-")}</strong></div>'
             "</div>"
             f'<p>{_html(finding.get("statement") or "")}</p>'
             "<h3>Advisory Actions</h3>"
@@ -4313,14 +4198,14 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         if reevaluated_decision:
             parts.extend([
                 "<h3>Current Policy Reevaluation</h3>",
-                '<p class="muted">Recomputed only from the validated current report graph and reviewed policy; it does not replace stored historical guidance.</p>',
+                '<p class="muted">Recomputed from current policy and context; it does not replace the stored historical guidance.</p>',
                 _render_response_guidance(reevaluated_decision),
             ])
         parts.append("<h3>Technical Prediction / Report Detail</h3>")
     elif reevaluated_decision:
         parts.extend([
             "<h3>Current Policy Reevaluation</h3>",
-            '<p class="muted">No stored report decision is available. Reevaluation requires a validated current canonical report graph.</p>',
+            '<p class="muted">No stored report decision is available. This guidance was recomputed from current policy and context.</p>',
             _render_response_guidance(reevaluated_decision),
             "<h3>Technical Prediction / Report Detail</h3>",
         ])
@@ -4334,7 +4219,7 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
         "</div>",
         '<p class="muted">Hypothesis alternatives are falsifiable analytical questions, not attacker intent or predicted next actions.</p>',
         "<h3>Response Guidance Actions</h3>",
-        '<p class="muted">Actions, when present, are rendered only in the validated response-guidance panel above.</p>',
+        '<p class="muted">Actions, when present, are rendered only in the v3 response-guidance panel above.</p>',
     ])
     if hypothesis_alternatives:
         parts.extend([
@@ -4403,17 +4288,15 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     summary_text = summary.get("summary") or "No compact report summary available yet."
     merged = _merged_report_payload(report_payload, artifact_payload)
     v4_detail = ""
-    if merged.get("schema_version") in {
-        "session_assessment.v4", "session_assessment.v5", "session_assessment.v6"
-    }:
-        canonical_findings = _authority_safe_behavioral_findings(merged)
+    if merged.get("schema_version") == "session_assessment.v4":
         finding_items = [
             (
                 f"[{item.get('status', '')}] {item.get('statement', '')} "
                 f"(finding {item.get('finding_id', '')}; evidence "
                 f"{', '.join(item.get('evidence_refs') or [])})"
             )
-            for item in canonical_findings
+            for item in merged.get("behavioral_findings") or []
+            if isinstance(item, dict)
         ]
         hypothesis_items = [
             (

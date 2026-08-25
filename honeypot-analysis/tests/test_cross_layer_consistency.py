@@ -147,6 +147,17 @@ def test_exact_durable_prefix_replay_is_deterministic_and_binds_environment() ->
         "trusted_classification_manifest"
     ]
     assert first["classification_events"] == second["classification_events"]
+    assert first["prediction_trusted_history_manifest"]["evidence_cutoff"] == {
+        "schema_version": "prediction_evidence_cutoff.v1",
+        "received_at": "2026-08-11T00:00:01.000000+00:00",
+        "event_id": "event-2",
+    }
+    assert first["classification_events"][0]["durable_evidence_order"] == {
+        "event_id": "event-1",
+        "received_at": "2026-08-11T00:00:00.000000+00:00",
+        "payload_sha256": "b" * 64,
+        "event_index": 0,
+    }
     mismatched = copy.deepcopy(first)
     mismatched["classification_environment"]["environment_sha256"] = "f" * 64
     with pytest.raises(ClassificationReplayError):
@@ -161,6 +172,32 @@ def test_tampered_durable_manifest_is_rejected_before_reclassification() -> None
         reclassify_durable_prefix(
             {"session_id": "replay-session"},
             tampered,
+            _classifier(),
+            environment,
+        )
+
+
+def test_missing_durable_received_at_provenance_fails_closed() -> None:
+    environment = load_classifier_environment()
+    missing = _snapshot()
+    missing["through_received_at"] = ""
+    missing["event_entries"][-1]["received_at"] = ""
+    missing["manifest_sha256"] = hashlib.sha256(
+        stable_json({
+            "schema_version": missing["schema_version"],
+            "session_id": missing["session_id"],
+            "through_event_id": missing["through_event_id"],
+            "through_received_at": missing["through_received_at"],
+            "event_entries": missing["event_entries"],
+        }).encode()
+    ).hexdigest()
+    with pytest.raises(
+        ClassificationReplayError,
+        match="evidence cutoff provenance is invalid",
+    ):
+        reclassify_durable_prefix(
+            {"session_id": "replay-session"},
+            missing,
             _classifier(),
             environment,
         )

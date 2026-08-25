@@ -107,7 +107,15 @@ def phase_sha256(phase: Mapping[str, Any]) -> str:
     return _sha(_phase_hash_basis(phase))
 
 
-def _labels(phase: Mapping[str, Any]) -> List[Dict[str, Any]]:
+def _canonical_label_records(phase: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Return all canonical trusted-label records before semantic collapse.
+
+    A command sequence can contain repeated observations of the same ATT&CK
+    pair (for example ``id`` and ``whoami`` both yielding ``discovery/T1033``).
+    Those observations remain represented by their evidence references and by
+    the original classification events, but the model-facing phase contract
+    has one label per semantic tactic/technique pair.
+    """
     raw_labels = phase.get("labels")
     if not isinstance(raw_labels, list):
         tactics = [
@@ -154,7 +162,20 @@ def _labels(phase: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return [labels[key] for key in sorted(labels)]
 
 
+def _labels(phase: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Return deterministic, semantically unique labels for one phase."""
+
+    representatives: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in _canonical_label_records(phase):
+        key = (item["tactic"], item["technique"])
+        current = representatives.get(key)
+        if current is None or stable_json(item) < stable_json(current):
+            representatives[key] = item
+    return [representatives[key] for key in sorted(representatives)]
+
+
 def _one_phase(raw: Mapping[str, Any], index: int) -> Dict[str, Any] | None:
+    all_label_records = _canonical_label_records(raw)
     labels = _labels(raw)
     if not labels:
         return None
@@ -168,7 +189,8 @@ def _one_phase(raw: Mapping[str, Any], index: int) -> Dict[str, Any] | None:
     end_timestamp = _timestamp(raw.get("end_timestamp") or raw.get("event_timestamp"))
     evidence_refs = sorted({
         _text(item.get("classification_evidence_id"))
-        for item in labels if _text(item.get("classification_evidence_id"))
+        for item in all_label_records
+        if _text(item.get("classification_evidence_id"))
     } | {
         _text(item) for item in raw.get("evidence_refs") or [] if _text(item)
     })
@@ -183,9 +205,9 @@ def _one_phase(raw: Mapping[str, Any], index: int) -> Dict[str, Any] | None:
         "tactics": sorted({item["tactic"] for item in labels}),
         "techniques": sorted({item["technique"] for item in labels}),
         "labels": labels,
-        "label_provenance_sources": sorted({item["source"] for item in labels}),
-        "label_confidence_buckets": sorted({item["confidence_bucket"] for item in labels}),
-        "label_agreement_statuses": sorted({item["agreement_status"] for item in labels}),
+        "label_provenance_sources": sorted({item["source"] for item in all_label_records}),
+        "label_confidence_buckets": sorted({item["confidence_bucket"] for item in all_label_records}),
+        "label_agreement_statuses": sorted({item["agreement_status"] for item in all_label_records}),
         "audit_only_label_count": max(int(raw.get("audit_only_label_count") or 0), 0),
         "command_outcomes": sorted({_text(item) for item in raw.get("command_outcomes") or [raw.get("command_outcome")] if _text(item)}),
         "outcome_scopes": sorted({_text(item) for item in raw.get("outcome_scopes") or [raw.get("outcome_scope")] if _text(item)}),
@@ -208,10 +230,17 @@ def _merge_phase(left: Dict[str, Any], right: Mapping[str, Any]) -> Dict[str, An
     ):
         values = [*merged.get(field, []), *deepcopy(list(right.get(field) or []))]
         if field == "labels":
-            keyed = {
-                stable_json(item): item for item in values if isinstance(item, Mapping)
-            }
-            merged[field] = [keyed[key] for key in sorted(keyed)]
+            keyed: dict[tuple[str, str], Mapping[str, Any]] = {}
+            for item in values:
+                if not isinstance(item, Mapping):
+                    continue
+                key = (_text(item.get("tactic")), _text(item.get("technique")).upper())
+                if not key[0] or not key[1]:
+                    continue
+                current = keyed.get(key)
+                if current is None or stable_json(item) < stable_json(current):
+                    keyed[key] = item
+            merged[field] = [deepcopy(keyed[key]) for key in sorted(keyed)]
         else:
             merged[field] = sorted({_text(item) for item in values if _text(item)})
     merged["audit_only_label_count"] += int(right.get("audit_only_label_count") or 0)

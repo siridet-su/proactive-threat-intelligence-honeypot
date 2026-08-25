@@ -360,18 +360,6 @@ def parse_command_operation(
         else:
             result["parse_status"] = "unsupported"
             result["abstention_reason"] = "unsupported_option"
-    elif executable in {"scp", "rsync"}:
-        operands = [value for value in arguments if not value.startswith("-")]
-        if len(operands) >= 2:
-            remote_source = ":" in operands[-2]
-            remote_destination = ":" in operands[-1]
-            if remote_source and not remote_destination:
-                operations.append("remote_transfer_ingress_attempt")
-            elif remote_destination and not remote_source:
-                operations.append("remote_transfer_egress_attempt")
-            else:
-                result["parse_status"] = "unsupported"
-                result["abstention_reason"] = "ambiguous_transfer_direction"
     elif executable == "rm":
         operands = [value for value in arguments if not value.startswith("-")]
         if operands:

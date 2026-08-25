@@ -72,10 +72,7 @@ from production.classification.securebert_classifier import load_securebert_clas
 from production.storage import open_storage
 from production.storage.contract import EVENT_FAILURE_TYPES
 from production.storage.session_provenance import (
-    CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
-    SESSION_SOURCE_E2E_TEST,
     SESSION_SOURCE_PRODUCTION_LIVE,
-    controlled_synthetic_provenance,
     normalize_session_source,
 )
 from production.utils.feedback import build_auto_evidence_feedback
@@ -88,8 +85,11 @@ from production.workers.threat_hunt_worker import enqueue_threat_hunts_for_sessi
 
 
 DEFAULT_PREDICTION_TRIGGER_EVENTIDS = [
+    "cowrie.login.success",
+    "cowrie.login.failed",
     "cowrie.session.file_download",
     "cowrie.session.file_upload",
+    "cowrie.session.closed",
 ]
 
 DEFAULT_PREDICTION_TRIGGER_PREFIXES = [
@@ -296,72 +296,12 @@ class SessionWorker:
             SESSION_SOURCE_PRODUCTION_LIVE,
         )
 
-    def _event_provenance(self, row: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, str]:
-        """Derive provenance from authenticated sensor metadata, never command text."""
-
-        if (
-            self._session_source() == SESSION_SOURCE_E2E_TEST
-            and not getattr(self.config, "controlled_synthetic_sensor_ids", [])
-            and not getattr(self.config, "controlled_synthetic_source_ips", [])
-        ):
-            # The local isolated fixture contract predates the authenticated
-            # sensor/source allowlists and is explicitly identified by its
-            # evaluation environment.  A production service must never be
-            # able to mark every event synthetic through a global config flag.
-            if getattr(self.config, "environment", "") == "final_f_track_b_synthetic":
-                return {
-                    "session_source": SESSION_SOURCE_E2E_TEST,
-                    "provenance_marker": CONTROLLED_SYNTHETIC_PROVENANCE_MARKER,
-                }
-            raise WorkerError(
-                "controlled synthetic provenance allowlists are required outside the isolated evaluation environment"
-            )
-        return controlled_synthetic_provenance(
-            sensor_id=str(row.get("sensor_id") or self.config.sensor_id),
-            source_ip=event.get("src_ip"),
-            allowed_sensor_ids=getattr(
-                self.config, "controlled_synthetic_sensor_ids", []
-            ),
-            allowed_source_ips=getattr(
-                self.config, "controlled_synthetic_source_ips", []
-            ),
-        )
-
-    @staticmethod
-    def _state_session_source(state: Any) -> str:
-        metadata = getattr(state, "session_metadata", {})
-        if not isinstance(metadata, dict):
-            return ""
-        return normalize_session_source(metadata.get("_trusted_session_source"), "")
-
-    def _is_controlled_synthetic_state(self, state: Any) -> bool:
-        return self._state_session_source(state) == SESSION_SOURCE_E2E_TEST
-
     def _session_payload(self, state: Any) -> Dict[str, Any]:
         payload = session_to_payload(state)
         payload["classification_environment"] = environment_identity(
             self.classifier_environment
         )
-        session_source = self._state_session_source(state) or self._session_source()
-        payload["session_source"] = session_source
-        if session_source == SESSION_SOURCE_E2E_TEST:
-            metadata = getattr(state, "session_metadata", {})
-            marker = metadata.get("_trusted_provenance_marker") if isinstance(metadata, dict) else ""
-            if marker != CONTROLLED_SYNTHETIC_PROVENANCE_MARKER:
-                raise WorkerError("controlled session provenance marker is missing")
-            payload["provenance_marker"] = CONTROLLED_SYNTHETIC_PROVENANCE_MARKER
-            payload["prediction_exclusion"] = {
-                "excluded": True,
-                "reason": "controlled_synthetic_test_not_prediction_evidence",
-            }
-            payload["prediction_trusted_history"] = []
-            payload["prediction_trusted_history_manifest"] = {}
-            payload["prediction_trusted_phase_count"] = 0
-            payload["prediction_trusted_label_count"] = 0
-            payload["prediction_audit_only_label_count"] = 0
-        else:
-            payload.pop("provenance_marker", None)
-            payload.pop("prediction_exclusion", None)
+        payload["session_source"] = self._session_source()
         correlation_id = str(payload.get("last_applied_event_id") or "").strip()
         if correlation_id:
             payload["correlation_id"] = safe_correlation_id(
@@ -833,14 +773,6 @@ class SessionWorker:
         events do not make the realtime prediction history noisy.
         """
         eventid = str(event.get("eventid") or "").strip()
-        if eventid == "cowrie.session.closed":
-            return {
-                "matched": False,
-                "eventid": eventid,
-                "reason": "session close resolves the final pre-close forecast; it never creates a forecast",
-                "filter_enabled": True,
-                "match_type": "terminal_resolution_only",
-            }
         policy = self.config.prediction_policy or {}
         trigger_policy = policy.get("prediction_triggers") or {}
         if not isinstance(trigger_policy, dict):
@@ -954,7 +886,7 @@ class SessionWorker:
         It deliberately does not store a snapshot; the normal event path stores
         the durable prediction immediately after SessionMonitor.on_event().
         """
-        if self._is_controlled_synthetic_state(state) or not self.prediction_engine.enabled:
+        if not self.prediction_engine.enabled:
             return []
         if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
             # The corrected-target PoC forecast is advisory and can never feed
@@ -974,6 +906,47 @@ class SessionWorker:
             if str(tactic or "").strip()
         ]
 
+    def _apply_prediction_trusted_history_contract(
+        self,
+        payload: Dict[str, Any],
+        evidence_cutoff: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Materialize the single V3 trusted-history contract for a payload.
+
+        Both prediction-outbox payloads and terminal canonical session rows
+        must carry the same manifest, ordered history, and evidence cutoff.
+        Keeping construction in one helper prevents the session-end path from
+        persisting a row that the read-only Mongo feeder cannot validate.
+        """
+
+        cutoff = require_valid_evidence_cutoff(evidence_cutoff)
+        original_trusted_label_count = payload.get("prediction_trusted_label_count")
+        if isinstance(original_trusted_label_count, bool):
+            original_trusted_label_count = None
+        elif original_trusted_label_count is not None:
+            try:
+                original_trusted_label_count = max(int(original_trusted_label_count), 0)
+            except (TypeError, ValueError):
+                original_trusted_label_count = None
+        manifest = build_prediction_trusted_history_manifest(
+            phases=payload.get("prediction_trusted_history") or [],
+            evidence_cutoff=cutoff,
+            classifier_environment=payload.get("classification_environment")
+            or {},
+            original_command_count=len(payload.get("commands") or []),
+            original_trusted_phase_count=payload.get(
+                "prediction_trusted_phase_count"
+            ),
+            original_trusted_label_count=original_trusted_label_count,
+            audit_only_label_count=max(
+                int(payload.get("prediction_audit_only_label_count") or 0), 0
+            ),
+        )
+        payload["prediction_trusted_history_manifest"] = manifest
+        payload["prediction_trusted_history"] = manifest["ordered_trusted_phases"]
+        payload["evidence_cutoff"] = cutoff
+        return cutoff
+
     def _save_prediction_snapshot_unobserved(
         self,
         state: Any,
@@ -982,17 +955,7 @@ class SessionWorker:
         trigger_info: Optional[Dict[str, Any]] = None,
         evidence_cutoff: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        if self._is_controlled_synthetic_state(state) or not self.prediction_engine.enabled:
-            return False
-        if bool(getattr(state, "is_ended", False)):
-            return False
-        history_revision = int(
-            getattr(state, "prediction_trusted_history_revision", 0) or 0
-        )
-        last_revision = int(
-            getattr(state, "prediction_last_forecast_revision", 0) or 0
-        )
-        if history_revision <= last_revision:
+        if not self.prediction_engine.enabled:
             return False
         if hasattr(self.monitor, "_apply_session_enrichment"):
             self.monitor._apply_session_enrichment(state)
@@ -1009,38 +972,8 @@ class SessionWorker:
             raise WorkerError(
                 "prediction trigger event does not match evidence cutoff"
             )
-        payload["prediction_trusted_history_manifest"] = (
-            build_prediction_trusted_history_manifest(
-                phases=payload.get("prediction_trusted_history") or [],
-                evidence_cutoff=cutoff,
-                classifier_environment=payload.get("classification_environment")
-                or {},
-                original_trusted_phase_count=payload.get(
-                    "prediction_trusted_phase_count"
-                ),
-                original_command_count=len(payload.get("commands") or []),
-                original_trusted_label_count=payload.get(
-                    "prediction_trusted_label_count"
-                ),
-                audit_only_label_count=payload.get(
-                    "prediction_audit_only_label_count", 0
-                ),
-                upstream_omitted_event_count=max(
-                    int(
-                        (payload.get("canonical_event_manifest") or {}).get(
-                            "event_count"
-                        )
-                        or 0
-                    ) - len(payload.get("raw_events") or []),
-                    0,
-                ),
-            )
-        )
-        payload["prediction_trusted_history"] = payload[
-            "prediction_trusted_history_manifest"
-        ]["ordered_trusted_phases"]
-        state.prediction_trusted_history_manifest = deepcopy(
-            payload["prediction_trusted_history_manifest"]
+        cutoff = self._apply_prediction_trusted_history_contract(
+            payload, cutoff
         )
         task = {
             "schema_version": "prediction_outbox_task.v2",
@@ -1057,7 +990,6 @@ class SessionWorker:
             ),
         }
         self.storage.enqueue_prediction_outbox(task)
-        state.prediction_last_forecast_revision = history_revision
         self._record_event_effect("prediction_outbox_enqueued")
         self._drain_prediction_outbox(limit=1)
         return True
@@ -1206,10 +1138,17 @@ class SessionWorker:
             )
             raise
 
-    def _on_session_end(self, state: Any) -> None:
+    def _on_session_end(
+        self,
+        state: Any,
+        evidence_cutoff: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if evidence_cutoff is None:
+            raise WorkerError(
+                "terminal session persistence requires an evidence cutoff"
+            )
         if self._processing_event_id:
             state.last_applied_event_id = self._processing_event_id
-        controlled_synthetic = self._is_controlled_synthetic_state(state)
         attach_runtime_context(state)
         self._apply_session_ttp_correlations(state)
         payload = self._session_payload(state)
@@ -1229,6 +1168,13 @@ class SessionWorker:
                 "manifest_sha256",
             )
         }
+        cutoff = self._apply_prediction_trusted_history_contract(
+            payload, evidence_cutoff
+        )
+        if cutoff["event_id"] != str(self._processing_event_id or ""):
+            raise WorkerError(
+                "terminal session event does not match evidence cutoff"
+            )
         mark_session_outcome(payload)
         self._apply_campaign_clustering(payload, "closed")
         self._record_event_effect(
@@ -1240,7 +1186,7 @@ class SessionWorker:
             enqueue_session_observables(
                 self.storage,
                 payload,
-                enabled=(self.config.enable_enrichment_jobs and not controlled_synthetic),
+                enabled=self.config.enable_enrichment_jobs,
             ),
         )
         skip_reason = ""
@@ -1283,17 +1229,11 @@ class SessionWorker:
                 job_id=job_id,
             )
 
-        if controlled_synthetic:
-            payload["threat_hunt_enqueue"] = {
-                "status": "excluded_controlled_synthetic_test",
-                "queued": 0,
-            }
-        else:
-            payload["threat_hunt_enqueue"] = enqueue_threat_hunts_for_session(
-                self.storage,
-                payload,
-                self.config.threat_hunt_policy,
-            )
+        payload["threat_hunt_enqueue"] = enqueue_threat_hunts_for_session(
+            self.storage,
+            payload,
+            self.config.threat_hunt_policy,
+        )
         self._record_event_effect(
             "threat_hunt_jobs_enqueued",
             int(payload["threat_hunt_enqueue"].get("queued") or 0),
@@ -1311,11 +1251,6 @@ class SessionWorker:
         Only generates a row when classification confidence meets the policy threshold.
         Errors are logged but never raise so session close is never blocked.
         """
-        if (
-            normalize_session_source(payload.get("session_source"), "")
-            == SESSION_SOURCE_E2E_TEST
-        ):
-            return
         try:
             session_id = str(payload.get("session_id") or "")
             self._recover_prediction_cache(session_id)
@@ -1423,7 +1358,6 @@ class SessionWorker:
                 identity["sensor_id"] = authenticated_sensor_id
                 identity["canonical_session_id"] = event.get("session")
                 event["_honeypot_identity"] = identity
-            event_provenance = self._event_provenance(row, event)
             evidence_cutoff = make_evidence_cutoff(
                 row.get("received_at"),
                 row["event_id"],
@@ -1450,11 +1384,7 @@ class SessionWorker:
                         enqueue_event_observables(
                             self.storage,
                             event,
-                            enabled=(
-                                self.config.enable_enrichment_jobs
-                                and event_provenance["session_source"]
-                                != SESSION_SOURCE_E2E_TEST
-                            ),
+                            enabled=self.config.enable_enrichment_jobs,
                         ),
                     )
                     self._renew_claim(row)
@@ -1465,12 +1395,6 @@ class SessionWorker:
                         row["event_id"],
                     )
                     if state is not None:
-                        provenance = event_provenance
-                        self.monitor.bind_trusted_session_provenance(
-                            state,
-                            provenance["session_source"],
-                            provenance["provenance_marker"],
-                        )
                         self.monitor._sessions[session_id] = state
                         self._recalculate_monitor_stats()
                         self._record_event_effect("event_applied")
@@ -1488,7 +1412,9 @@ class SessionWorker:
                                     trigger_info=trigger_info,
                                     evidence_cutoff=evidence_cutoff,
                                 )
-                            self._on_session_end(state)
+                            self._on_session_end(
+                                state, evidence_cutoff=evidence_cutoff
+                            )
                         else:
                             self._save_active_session(state)
                     else:
@@ -1496,22 +1422,7 @@ class SessionWorker:
                         monitor_event[
                             "_prediction_durable_evidence_order"
                         ] = evidence_cutoff
-                        provenance = event_provenance
-                        # Keep the legacy production call shape unchanged.  The
-                        # trusted provenance arguments are supplied only for a
-                        # server-derived controlled-synthetic session; this
-                        # preserves standalone/fixture monitor integrations
-                        # that intentionally accept the historical one-argument
-                        # callback while still binding the evaluation marker
-                        # before any command semantics are applied.
-                        if provenance["session_source"] == SESSION_SOURCE_E2E_TEST:
-                            self.monitor.on_event(
-                                monitor_event,
-                                trusted_session_source=provenance["session_source"],
-                                trusted_provenance_marker=provenance["provenance_marker"],
-                            )
-                        else:
-                            self.monitor.on_event(monitor_event)
+                        self.monitor.on_event(monitor_event)
                         self._record_event_effect("event_applied")
                         state = self.monitor.get_session(session_id)
                         if state is not None and not getattr(state, "is_ended", False):
@@ -1527,7 +1438,9 @@ class SessionWorker:
                             )
                         if state is not None:
                             if getattr(state, "is_ended", False):
-                                self._on_session_end(state)
+                                self._on_session_end(
+                                    state, evidence_cutoff=evidence_cutoff
+                                )
                             else:
                                 self._save_active_session(state)
                     self._renew_claim(row)

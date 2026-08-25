@@ -1,0 +1,1 @@
+{"evidence":"TRAIN OOF calibration plus previously observed descriptive cohorts; softmax scores are not asserted to be calibrated probabilities","policy":"TEMPERATURE_SCALED_PROBABILITIES_PREFERRED","schema_version":"prediction_next_distinct_probability_display_policy.v1"}

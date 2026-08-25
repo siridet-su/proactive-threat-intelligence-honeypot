@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from production.prediction.next_behavior_contract import (
-    MODEL_INPUT_SCHEMA_VERSION,
     TACTIC_VOCABULARY,
     TARGET_CONTRACT_ID,
     TERMINAL_OUTCOME,
@@ -44,7 +43,7 @@ def _vocabulary(*, preprocessing_sha256: str = HASH_A) -> dict:
     value = {
         "schema_version": VOCABULARY_SCHEMA_VERSION,
         "target_contract_id": TARGET_CONTRACT_ID,
-        "input_schema_version": MODEL_INPUT_SCHEMA_VERSION,
+        "input_schema_version": "next_behavior_input.v1",
         "tactics": [
             "collection",
             "command-and-control",

@@ -359,62 +359,6 @@ class ProviderAliasScope:
             raise ValueError("AI advisory alias is not mapped locally") from exc
 
 
-@dataclass
-class AssessmentAliasScope:
-    """Assessment-specific v2 aliases for provider-visible graph objects.
-
-    The provider and assessment identifiers are part of every HMAC input.
-    Aliases therefore cannot be correlated across assessments, even when the
-    same canonical entity or policy object appears in both reports.
-    """
-
-    key: bytes
-    provider_id: str
-    assessment_id: str
-    reverse: Dict[str, tuple[str, str]] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if len(self.key) < 32:
-            raise ValueError("AI advisory alias key must contain at least 32 bytes")
-        if not self.provider_id:
-            raise ValueError("AI advisory provider ID is required")
-        if not self.assessment_id:
-            raise ValueError("AI advisory assessment ID is required")
-
-    def alias(self, kind: str, value: Any) -> str:
-        object_kind = str(kind or "").strip()
-        local_id = str(value or "").strip()
-        if not object_kind or not local_id:
-            raise ValueError("AI advisory v2 alias input is required")
-        material = stable_json({
-            "schema_version": "ai_assessment_alias.v2",
-            "provider_id": self.provider_id,
-            "assessment_id": self.assessment_id,
-            "object_kind": object_kind,
-            "local_id": local_id,
-        }).encode("utf-8")
-        alias = "a_" + hmac.new(
-            self.key, material, hashlib.sha256
-        ).hexdigest()[:32]
-        existing = self.reverse.get(alias)
-        identity = (object_kind, local_id)
-        if existing is not None and existing != identity:
-            raise ValueError("AI advisory alias collision")
-        self.reverse[alias] = identity
-        return alias
-
-    def restore(self, kind: str, alias: Any) -> str:
-        object_kind = str(kind or "").strip()
-        value = str(alias or "").strip()
-        try:
-            stored_kind, local_id = self.reverse[value]
-        except KeyError as exc:
-            raise ValueError("AI advisory alias is not mapped locally") from exc
-        if stored_kind != object_kind:
-            raise ValueError("AI advisory alias kind is invalid")
-        return local_id
-
-
 def load_provider_alias_key(path_text: str) -> bytes:
     value = read_secure_file(
         path_text,

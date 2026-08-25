@@ -120,7 +120,7 @@ def test_large_session_report_uses_complete_durable_event_manifest(tmp_path) -> 
 
     assert asyncio.run(AnalysisWorker(config).process_once()) == 1
     report = json.loads(storage.list_rows("reports", limit=1)[0]["payload_json"])
-    assert report["schema_version"] == "session_assessment.v6"
+    assert report["schema_version"] == "session_assessment.v4"
     assert report["canonical_evidence"]["durable_event_manifest"] == (
         job_payload["canonical_event_manifest"]
     )
@@ -355,6 +355,10 @@ def test_duplicate_and_timestamp_reordered_events_reconstruct_once_in_durable_or
     snapshot = storage.load_session_event_snapshot(
         "durable-order", second_id, max_events=10
     )
+    assert snapshot["through_received_at"] == snapshot["event_entries"][-1][
+        "received_at"
+    ]
+    assert all(entry["received_at"] for entry in snapshot["event_entries"])
     manifest = {
         key: snapshot[key]
         for key in (

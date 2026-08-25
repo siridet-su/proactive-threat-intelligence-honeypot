@@ -1,0 +1,80 @@
+{
+  "active_principal": "97738468999-compute@developer.gserviceaccount.com",
+  "gaps": [
+    {
+      "command_or_api": "gcloud projects get-iam-policy PROJECT",
+      "minimum_read_only_role_or_permission": "roles/viewer or a custom project-scoped role containing resourcemanager.projects.getIamPolicy",
+      "needed_for": "independent project shared/dedicated membership proof",
+      "observed": "PERMISSION_DENIED",
+      "permission": "resourcemanager.projects.getIamPolicy",
+      "service": "Cloud Resource Manager / IAM policy"
+    },
+    {
+      "command_or_api": "gcloud iam service-accounts list --project PROJECT",
+      "minimum_read_only_role_or_permission": "roles/iam.serviceAccountViewer or custom role containing iam.serviceAccounts.list and iam.serviceAccounts.get",
+      "needed_for": "service-account ownership inventory",
+      "observed": "PERMISSION_DENIED",
+      "permission": "iam.serviceAccounts.list",
+      "service": "IAM service accounts"
+    },
+    {
+      "command_or_api": "gcloud storage buckets list --project PROJECT",
+      "minimum_read_only_role_or_permission": "roles/storage.viewer or custom role containing storage.buckets.list and storage.buckets.get",
+      "needed_for": "bucket ownership and source/backup classification",
+      "observed": "PERMISSION_DENIED",
+      "permission": "storage.buckets.list",
+      "service": "Cloud Storage"
+    },
+    {
+      "command_or_api": "gcloud artifacts repositories list --project PROJECT",
+      "minimum_read_only_role_or_permission": "roles/artifactregistry.reader or custom role containing artifactregistry.locations.list and artifactregistry.repositories.list",
+      "needed_for": "repository/image ownership inventory",
+      "observed": "PERMISSION_DENIED",
+      "permission": "artifactregistry.locations.list (before repository enumeration)",
+      "service": "Artifact Registry"
+    },
+    {
+      "command_or_api": "gcloud scheduler jobs list --project PROJECT --location LOCATION",
+      "minimum_read_only_role_or_permission": "roles/cloudscheduler.viewer after owner-approved API enablement; API enablement is not authorized here",
+      "needed_for": "scheduler target inventory",
+      "observed": "SERVICE_DISABLED / location required; cloudscheduler.googleapis.com was not enabled",
+      "permission": "cloudscheduler.jobs.list",
+      "service": "Cloud Scheduler"
+    },
+    {
+      "command_or_api": "gcloud run services/jobs list --project PROJECT",
+      "minimum_read_only_role_or_permission": "roles/run.viewer after owner-approved API enablement",
+      "needed_for": "Cloud Run supplemental inventory; not required for localhost-only B2 determination",
+      "observed": "SERVICE_DISABLED: run.googleapis.com",
+      "permission": "run.services.list and run.jobs.list (if API is enabled)",
+      "service": "Cloud Run"
+    },
+    {
+      "command_or_api": "gcloud functions list --project PROJECT",
+      "minimum_read_only_role_or_permission": "roles/cloudfunctions.viewer after owner-approved API enablement",
+      "needed_for": "Cloud Functions supplemental inventory; not required for localhost-only B2 determination",
+      "observed": "SERVICE_DISABLED: cloudfunctions.googleapis.com",
+      "permission": "cloudfunctions.functions.list (if API is enabled)",
+      "service": "Cloud Functions"
+    },
+    {
+      "command_or_api": "gcloud pubsub topics/subscriptions list --project PROJECT",
+      "minimum_read_only_role_or_permission": "roles/pubsub.viewer after owner-approved API enablement",
+      "needed_for": "Pub/Sub supplemental inventory; not required for localhost-only B2 determination",
+      "observed": "SERVICE_DISABLED: pubsub.googleapis.com",
+      "permission": "pubsub.topics.list and pubsub.subscriptions.list (if API is enabled)",
+      "service": "Pub/Sub"
+    },
+    {
+      "command_or_api": "gcloud secrets list --project PROJECT",
+      "minimum_read_only_role_or_permission": "roles/secretmanager.viewer after owner-approved API enablement",
+      "needed_for": "secret-name inventory only; secret values were not requested or printed",
+      "observed": "SERVICE_DISABLED: secretmanager.googleapis.com",
+      "permission": "secretmanager.secrets.list (if API is enabled)",
+      "service": "Secret Manager"
+    }
+  ],
+  "no_permission_expansion_requested": true,
+  "schema_version": "gcp_gate_b_read_permission_gaps.v1",
+  "status": "COMPLETE_READ_ONLY"
+}

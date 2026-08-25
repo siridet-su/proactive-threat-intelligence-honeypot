@@ -336,10 +336,7 @@ def _classifier_environment_receipt(path_text: str) -> dict[str, Any]:
         raise ValueError("classifier environment receipt is unreadable") from exc
     if not isinstance(value, dict):
         raise ValueError("classifier environment receipt is invalid")
-    if value.get("schema_version") not in {
-        "next_behavior_classifier_environment.v3",
-        "next_behavior_classifier_environment.v4",
-    }:
+    if value.get("schema_version") != "next_behavior_classifier_environment.v3":
         return {}
     source = value.get("source_identity")
     if not isinstance(source, dict) or not SHA256_PATTERN.fullmatch(

@@ -1,0 +1,24 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_canonical_live_session.v1",
+  "status": "PASS",
+  "session_id_sha256": "76c113a3e3cd47fe2ab5053ec0d218f8a75ec69e6d413c832e0110a967b9d295",
+  "session_source": "production_live",
+  "ended": true,
+  "revision": 19,
+  "history_length": 1,
+  "trusted_phase_count": 1,
+  "trusted_label_count": 4,
+  "audit_only_label_count": 3,
+  "event_count": 16,
+  "processed_count": 16,
+  "processing_outcomes": [
+    "succeeded"
+  ],
+  "dead_letter_count": 0,
+  "terminal_event": "cowrie.session.closed",
+  "terminal_event_processed": true,
+  "terminal_event_outcome": "succeeded",
+  "session_identity_canonical": true,
+  "historical_session_replayed": false
+}
+

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Classify and export the frozen selected next-behavior corpus safely.
 
-This is the post-ingest stage for the canonical selected-store
-implementation in ``production.reproduction.next_behavior.selected_store``.
-Raw command text and original
+This is the post-ingest stage for
+``build_next_behavior_selected_corpus``.  Raw command text and original
 session identifiers remain confined to the private SQLite store.  The public
 role artifacts contain only HMAC-pseudonymous identifiers, canonical labels,
 privacy-safe examples, and aggregate provenance receipts.
@@ -105,12 +104,6 @@ EXPECTED_MEMBER_COUNTS = {
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BLOCK_SIZE = 8 * 1024 * 1024
-_CANONICAL_SELECTED_STORE_RELATIVE_PATH = Path(
-    "production/reproduction/next_behavior/selected_store.py"
-)
-_CANONICAL_LABEL_ADAPTER_RELATIVE_PATH = Path(
-    "production/prediction/next_behavior_label_policy.py"
-)
 _FORBIDDEN_PUBLIC_FIELDS = frozenset(
     {
         "command",
@@ -256,54 +249,6 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _required_provenance_file_sha256(
-    path: Path,
-    *,
-    label: str,
-) -> str:
-    """Hash one required provenance source, failing closed if it is unsafe."""
-
-    if not path.is_file() or path.is_symlink():
-        raise SelectedSafeCorpusError(
-            f"required provenance source is missing or unsafe: {label}"
-        )
-    try:
-        return _sha256_file(path)
-    except OSError as exc:
-        raise SelectedSafeCorpusError(
-            f"required provenance source is unreadable: {label}"
-        ) from exc
-
-
-def _classification_provenance_source_hashes(
-    repository_root: Path,
-    *,
-    safe_export_path: Path | None = None,
-) -> Dict[str, str]:
-    """Bind classification provenance to the live canonical source modules.
-
-    ``selected_builder_sha256`` is retained as the receipt field name for
-    compatibility with the v1 classification receipt contract.  Its value is
-    deliberately sourced from the canonical ``selected_store.py`` module;
-    the deleted legacy builder path is never an acceptable substitute.
-    """
-
-    return {
-        "label_adapter_sha256": _required_provenance_file_sha256(
-            repository_root / _CANONICAL_LABEL_ADAPTER_RELATIVE_PATH,
-            label=str(_CANONICAL_LABEL_ADAPTER_RELATIVE_PATH),
-        ),
-        "selected_builder_sha256": _required_provenance_file_sha256(
-            repository_root / _CANONICAL_SELECTED_STORE_RELATIVE_PATH,
-            label=str(_CANONICAL_SELECTED_STORE_RELATIVE_PATH),
-        ),
-        "safe_builder_sha256": _required_provenance_file_sha256(
-            safe_export_path or Path(__file__),
-            label="production/reproduction/next_behavior/safe_export.py",
-        ),
-    }
-
-
 def _require_sha256(value: Any, label: str) -> str:
     digest = _clean(value).lower()
     if not _SHA256.fullmatch(digest):
@@ -446,7 +391,15 @@ def classify_missing_selected_commands(
         "checkpoint_sha256": manifest["classifier"]["checkpoint_sha256"],
         "rule_policy_sha256": policy["rule_policy_sha256"],
         "trust_policy_sha256": policy["trust_policy_sha256"],
-        **_classification_provenance_source_hashes(repository_root),
+        "label_adapter_sha256": _sha256_file(
+            repository_root
+            / "production/prediction/next_behavior_label_policy.py"
+        ),
+        "selected_builder_sha256": _sha256_file(
+            repository_root
+            / "production/tools/build_next_behavior_selected_corpus.py"
+        ),
+        "safe_builder_sha256": _sha256_file(Path(__file__)),
     }
 
     database = open_selected_database(private_database_path)
@@ -2431,7 +2384,6 @@ def build_selected_safe_corpus(
         else Path(__file__).resolve().parents[2]
     )
     commit = _require_repository_commit(root, code_commit)
-    provenance_source_hashes = _classification_provenance_source_hashes(root)
     if max_sequence_length < 1:
         raise SelectedSafeCorpusError("max_sequence_length must be positive")
     if (
@@ -2928,12 +2880,11 @@ def build_selected_safe_corpus(
             "classification_checkpoint_sha256": classifier_manifest[
                 "classifier"
             ]["checkpoint_sha256"],
-            "label_adapter_sha256": provenance_source_hashes[
-                "label_adapter_sha256"
-            ],
-            "safe_builder_sha256": provenance_source_hashes[
-                "safe_builder_sha256"
-            ],
+            "label_adapter_sha256": _sha256_file(
+                Path(__file__).parents[1]
+                / "prediction/next_behavior_label_policy.py"
+            ),
+            "safe_builder_sha256": _sha256_file(Path(__file__)),
             "pseudonymization_key_id": pseudonymization_key_id,
             "max_sequence_length": max_sequence_length,
             "safe_sessions": {

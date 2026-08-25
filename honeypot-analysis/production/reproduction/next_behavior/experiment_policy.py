@@ -9,19 +9,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict
 
-from production.prediction.next_behavior_contract import (
-    LEGACY_TARGET_CONTRACT_ID,
-    TARGET_CONTRACT_ID,
-)
+from production.prediction.next_behavior_contract import TARGET_CONTRACT_ID
 from production.prediction.next_behavior_model import ARCHITECTURE, MODEL_FAMILY
 from production.utils.serialization import stable_json
 
-LEGACY_EXPERIMENT_POLICY_SCHEMA_VERSION = "next_behavior_experiment_policy.v1"
-EXPERIMENT_POLICY_SCHEMA_VERSION = "next_behavior_experiment_policy.v2"
-_TARGET_CONTRACT_BY_POLICY_SCHEMA = {
-    LEGACY_EXPERIMENT_POLICY_SCHEMA_VERSION: LEGACY_TARGET_CONTRACT_ID,
-    EXPERIMENT_POLICY_SCHEMA_VERSION: TARGET_CONTRACT_ID,
-}
+EXPERIMENT_POLICY_SCHEMA_VERSION = "next_behavior_experiment_policy.v1"
 CALIBRATION_METHOD = "global_scalar_temperature_sigmoid.v1"
 DECLARED_SEEDS = (20260721, 20260722, 20260723, 20260724, 20260725)
 DECLARED_BASELINES = (
@@ -80,7 +72,7 @@ def _exact_list(value: Any, expected: tuple[Any, ...], path: str) -> bool:
 
 
 def require_valid_experiment_policy(value: Any) -> Dict[str, Any]:
-    """Validate one versioned policy without redefining historical v1."""
+    """Validate every choice that must be fixed before final-test access."""
 
     root = _require_exact_keys(
         value,
@@ -101,19 +93,14 @@ def require_valid_experiment_policy(value: Any) -> Dict[str, Any]:
         },
         "$",
     )
-    expected_target = _TARGET_CONTRACT_BY_POLICY_SCHEMA.get(
-        root["schema_version"]
-    )
-    if expected_target is None:
+    if root["schema_version"] != EXPERIMENT_POLICY_SCHEMA_VERSION:
         raise NextBehaviorExperimentPolicyError("policy schema_version is invalid")
     if not isinstance(root["policy_id"], str) or not _POLICY_ID.fullmatch(
         root["policy_id"]
     ):
         raise NextBehaviorExperimentPolicyError("policy_id is invalid")
-    if root["target_contract_id"] != expected_target:
-        raise NextBehaviorExperimentPolicyError(
-            "target contract does not match the policy schema version"
-        )
+    if root["target_contract_id"] != TARGET_CONTRACT_ID:
+        raise NextBehaviorExperimentPolicyError("target contract is invalid")
     if root["model_family"] != MODEL_FAMILY:
         raise NextBehaviorExperimentPolicyError("model family is invalid")
     if root["architecture"] != ARCHITECTURE:
@@ -332,17 +319,6 @@ def require_valid_experiment_policy(value: Any) -> Dict[str, Any]:
     }:
         raise NextBehaviorExperimentPolicyError("authority boundary changed")
     return deepcopy(root)
-
-
-def require_current_experiment_policy(value: Any) -> Dict[str, Any]:
-    """Require the tracked v2 policy at current experiment boundaries."""
-
-    policy = require_valid_experiment_policy(value)
-    if policy["schema_version"] != EXPERIMENT_POLICY_SCHEMA_VERSION:
-        raise NextBehaviorExperimentPolicyError(
-            "current experiment requires the v2 policy schema"
-        )
-    return policy
 
 
 def load_experiment_policy(path: str | Path) -> Dict[str, Any]:

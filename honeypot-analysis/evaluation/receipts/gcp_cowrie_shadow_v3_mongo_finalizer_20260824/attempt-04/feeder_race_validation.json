@@ -1,0 +1,22 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_feeder_race.v1",
+  "status": "PASS",
+  "activation_policy": "ignore_all_rows_at_or_before_seeded_watermark",
+  "seeded_watermark": {
+    "updated_at": "2026-08-24T14:22:19.523502+00:00",
+    "revision": 15,
+    "session_id_sha256": "4aa3a7c3db77b583b4a69d6c6dd10e32b19c6eb8023437f6610072ba026f41cd"
+  },
+  "rows_seen": 7,
+  "intermediate_rows_rejected_without_terminal_manifest": 5,
+  "terminal_row_eligible": 1,
+  "duplicate_rows": 1,
+  "predictions_emitted": 1,
+  "predictor_failures": 0,
+  "transient_cursor_holds": 0,
+  "records_persisted": 1,
+  "historical_rows_replayed": false,
+  "canonical_mongo_mutations": false,
+  "explanation": "The feeder observed intermediate revisions without a valid V3 manifest, rejected them, accepted the one terminal revision, and suppressed the later duplicate revision."
+}
+

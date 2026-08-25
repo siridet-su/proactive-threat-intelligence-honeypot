@@ -1,0 +1,21 @@
+{
+  "schema_version": "gcp_cowrie_shadow_mongo_feeder_config.v1",
+  "deployment_id": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+  "mongo_database": "honeypot_canonical_v1",
+  "mongo_collection": "sessions",
+  "mongo_uri_file": "",
+  "endpoint": "http://127.0.0.1:18082/predict",
+  "shadow_root": "/var/lib/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d",
+  "poll_interval_seconds": 2.0,
+  "poll_limit": 200,
+  "predict_timeout_seconds": 2.0,
+  "expected_checkpoint_sha256": "16506e962432f9921d18a514c3a31686a20f9734385ec49439ad2651e4cdd283",
+  "expected_temperature": 0.6990670591704266,
+  "canonical_write_allowed": false,
+  "authority": "non_authoritative",
+  "session_end_target": false,
+  "max_history": 8,
+  "source_session_source": "production_live",
+  "activation_policy": "ignore_all_rows_at_or_before_seeded_watermark"
+}
+
