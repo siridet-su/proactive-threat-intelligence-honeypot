@@ -119,6 +119,71 @@ def test_first_multi_label_command_is_one_phase_in_realtime_and_replay() -> None
     assert realtime_manifest == manifest
 
 
+def test_repeated_semantic_label_is_collapsed_without_losing_live_evidence() -> None:
+    """Reproduce the live ``id``/``whoami`` duplicate in one discovery phase."""
+
+    commands = ["id", "uname -a", "pwd", "whoami", "echo controlled-e2e-finalizer", "date -u", "exit"]
+    events = [
+        {
+            "eventid": "cowrie.command.input",
+            "session": "phase2-replay",
+            "src_ip": "203.0.113.20",
+            "timestamp": f"2026-08-13T00:00:{index:02d}Z",
+            "input": command,
+        }
+        for index, command in enumerate(commands)
+    ]
+    classifier = NotebookParityClassifier(bert_fn=None, mitre_db=_Mitre())
+    monitor = SessionMonitor(
+        mitre_db=_Mitre(),
+        classification_fn=classifier.classify,
+        classification_policy={"strategy": "notebook_merge"},
+    )
+    for index, event in enumerate(events):
+        monitor.on_event(
+            event,
+            durable_evidence_order={
+                "schema_version": "prediction_evidence_cutoff.v1",
+                "received_at": f"2026-08-13T00:00:{index:02d}.000000+00:00",
+                "event_id": f"event-{index}",
+            },
+        )
+
+    realtime = monitor.get_session("phase2-replay")
+    assert realtime is not None
+    phase = realtime.prediction_trusted_history[0]
+    assert [(item["tactic"], item["technique"]) for item in phase["labels"]] == [
+        ("discovery", "T1033"),
+        ("discovery", "T1082"),
+        ("discovery", "T1083"),
+    ]
+    assert phase["evidence_refs"] == ["event-0", "event-1", "event-2", "event-3"]
+
+    replay = reclassify_durable_prefix(
+        {"session_id": "phase2-replay", "classification_events": []},
+        _snapshot(events),
+        classifier,
+        load_classifier_environment(),
+    )
+    manifest = replay["prediction_trusted_history_manifest"]
+    assert manifest["original_trusted_label_count"] == 4
+    assert len(manifest["ordered_trusted_phases"][0]["labels"]) == 3
+    assert manifest["ordered_trusted_phases"][0]["evidence_refs"] == phase["evidence_refs"]
+    realtime_manifest = build_prediction_trusted_history_manifest(
+        phases=realtime.prediction_trusted_history,
+        evidence_cutoff={
+            "schema_version": "prediction_evidence_cutoff.v1",
+            "received_at": "2026-08-13T00:00:06.000000+00:00",
+            "event_id": "event-6",
+        },
+        classifier_environment=load_classifier_environment(),
+        original_trusted_label_count=realtime.prediction_trusted_label_count,
+        original_command_count=len(commands),
+        audit_only_label_count=realtime.prediction_audit_only_label_count,
+    )
+    assert realtime_manifest == manifest
+
+
 def test_retry_aware_selection_finds_later_complete_same_path_subsequence() -> None:
     fact_set, report = _build({
         "case_id": "phase2-retry",
