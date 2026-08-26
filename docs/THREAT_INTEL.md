@@ -2,6 +2,17 @@
 >
 > The current implementation uses a Redis-backed asynchronous worker; see [the TI design](design/threat-intelligence.md). Direct provider calls in the `processor-agent`, the in-memory cache, and the field layout below are historical only.
 >
+> **Current configuration boundary.**
+>
+> `/etc/honeypot-agent.env` is shared operational configuration and contains
+> no credentials. `MONGO_URI` and Redis authentication are provided to the
+> Processor through `/etc/honeypot/processor.env`; provider keys are provided
+> only to the TI worker through `/etc/honeypot/ti-worker.env`. The hardware
+> agent receives only its Redis authentication through
+> `/etc/honeypot/hardware.env`. These root-owned files are mode `0600`.
+>
+> The historical configuration section below is not an installation guide.
+>
 # Threat Intelligence Enrichment Pipeline
 
 This document outlines the architecture and implementation details for the automated Threat Intelligence (TI) enrichment pipeline integrated into the Honeypot's Go-based `processor-agent`.
