@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -25,17 +24,18 @@ type networkSample struct {
 	byName  map[string]net.IOCountersStat
 }
 
-func getenv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func requireEnv(key string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		log.Fatalf("%s must be set in the service environment", key)
 	}
-	return fallback
+	return value
 }
 
-func getenvPositiveInt(key string, fallback int) int {
-	value, err := strconv.Atoi(getenv(key, strconv.Itoa(fallback)))
+func requirePositiveIntEnv(key string) int {
+	value, err := strconv.Atoi(requireEnv(key))
 	if err != nil || value <= 0 {
-		return fallback
+		log.Fatalf("%s must be a positive integer", key)
 	}
 	return value
 }
@@ -77,12 +77,9 @@ func getTemp() float64 {
 }
 
 func main() {
-	_ = godotenv.Load("/etc/honeypot-agent.env")
-	_ = godotenv.Load()
-
-	redisAddr := getenv("REDIS_ADDR", "127.0.0.1:6379")
-	redisPass := getenv("REDIS_PASSWORD", "")
-	redisDBStr := getenv("REDIS_DB", "0")
+	redisAddr := requireEnv("REDIS_ADDR")
+	redisPass := os.Getenv("REDIS_PASSWORD")
+	redisDBStr := requireEnv("REDIS_DB")
 
 	db, _ := strconv.Atoi(redisDBStr)
 
@@ -97,9 +94,9 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 
-	interfaces := csvValues(getenv("NETWORK_INTERFACES", "wlan0,tailscale0"))
-	primaryInterface := getenv("NETWORK_PRIMARY_INTERFACE", "wlan0")
-	sampleSeconds := getenvPositiveInt("NETWORK_SAMPLE_SECONDS", 30)
+	interfaces := csvValues(requireEnv("NETWORK_INTERFACES"))
+	primaryInterface := requireEnv("NETWORK_PRIMARY_INTERFACE")
+	sampleSeconds := requirePositiveIntEnv("NETWORK_SAMPLE_SECONDS")
 
 	log.Printf(
 		"Hardware Agent started, stream=raw:hardware interval=%ds primary_interface=%s interfaces=%s",

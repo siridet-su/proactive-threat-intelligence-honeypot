@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -75,10 +74,6 @@ type MongoWriter struct {
 }
 
 func main() {
-	// โหลดไฟล์ .env
-	if err := godotenv.Load(); err != nil {
-		log.Println("⚠️ No .env file found or unable to load, using system env variables")
-	}
 
 	cfg := loadConfig()
 	ctx := context.Background()

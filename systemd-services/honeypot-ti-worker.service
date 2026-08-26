@@ -8,6 +8,7 @@ Type=simple
 User=cpe27
 Group=cpe27
 WorkingDirectory=/home/cpe27/proactive-threat-intelligence-honeypot/agents/ti-worker
+EnvironmentFile=/etc/honeypot-agent.env
 EnvironmentFile=/etc/honeypot/ti-worker.env
 ExecStart=/home/cpe27/proactive-threat-intelligence-honeypot/agents/ti-worker/ti-worker
 Restart=on-failure
