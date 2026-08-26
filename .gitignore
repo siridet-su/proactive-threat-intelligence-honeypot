@@ -18,6 +18,7 @@ credentials.json
 agents/collector-agent/collector-agent
 agents/processor-agent/processor-agent
 agents/hardware-agent/hardware-agent
+agents/ti-worker/ti-worker
 
 # IDE / OS files
 .vscode/

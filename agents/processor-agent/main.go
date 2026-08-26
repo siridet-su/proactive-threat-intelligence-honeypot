@@ -879,7 +879,7 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "session.id", Value: 1}, {Key: "timestamp", Value: 1}}, Options: options.Index().SetSparse(true)},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
-	if _, err := mw.db.Collection("events").Indexes().CreateMany(ctx, indexes); err != nil {
+	if err := ensureIndexModels(ctx, mw.db.Collection("events"), indexes); err != nil {
 		return err
 	}
 
@@ -887,8 +887,7 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
-	_, err := mw.db.Collection("hardware_metrics").Indexes().CreateMany(ctx, hardwareIndexes)
-	return err
+	return ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes)
 }
 
 func loadLookups(dir string) LookupStore {
