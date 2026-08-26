@@ -47,9 +47,10 @@ type Config struct {
 	EventRetention           time.Duration
 	HardwareMetricsRetention time.Duration
 
-	TIEnabled    bool
-	TIJobsStream string
-	TIJobsMaxLen int64
+	TIEnabled         bool
+	TIJobsStream      string
+	TIJobsMaxLen      int64
+	TIEnqueueDedupTTL time.Duration
 }
 
 type LookupRecord struct {
@@ -114,9 +115,10 @@ func main() {
 
 func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
-	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "50000"), 10, 64)
+	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "5000"), 10, 64)
 	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
 	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
+	tiEnqueueDedupTTL := getenvPositiveDuration("TI_ENQUEUE_DEDUP_TTL", time.Minute)
 
 	return Config{
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
@@ -133,9 +135,10 @@ func loadConfig() Config {
 		EventRetention:           eventRetention,
 		HardwareMetricsRetention: hardwareMetricsRetention,
 
-		TIEnabled:    strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
-		TIJobsStream: getenv("TI_JOBS_STREAM", "ti:jobs"),
-		TIJobsMaxLen: tiJobsMaxLen,
+		TIEnabled:         strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
+		TIJobsStream:      getenv("TI_JOBS_STREAM", "ti:jobs"),
+		TIJobsMaxLen:      tiJobsMaxLen,
+		TIEnqueueDedupTTL: tiEnqueueDedupTTL,
 	}
 }
 

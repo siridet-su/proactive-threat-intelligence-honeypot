@@ -139,10 +139,10 @@ func loadConfig() config {
 		AbuseIPDBKey:   strings.TrimSpace(os.Getenv("ABUSEIPDB_API_KEY")),
 		HTTPTimeout:    getenvDuration("TI_HTTP_TIMEOUT", 8*time.Second),
 		CacheTTL:       getenvDuration("TI_CACHE_TTL", defaultCacheTTL),
-		VTPerMinute:    getenvInt("VT_MAX_REQUESTS_PER_MINUTE", 3),
-		VTPerDay:       getenvInt("VT_MAX_REQUESTS_PER_DAY", 400),
-		AbusePerMinute: getenvInt("ABUSEIPDB_MAX_REQUESTS_PER_MINUTE", 10),
-		AbusePerDay:    getenvInt("ABUSEIPDB_MAX_REQUESTS_PER_DAY", 800),
+		VTPerMinute:    getenvInt("VT_MAX_REQUESTS_PER_MINUTE", 2),
+		VTPerDay:       getenvInt("VT_MAX_REQUESTS_PER_DAY", 200),
+		AbusePerMinute: getenvInt("ABUSEIPDB_MAX_REQUESTS_PER_MINUTE", 2),
+		AbusePerDay:    getenvInt("ABUSEIPDB_MAX_REQUESTS_PER_DAY", 200),
 	}
 }
 
@@ -311,6 +311,9 @@ func (w *worker) queryProvider(ctx context.Context, job threatIntelJob) (enrichm
 		return record, nil
 	}
 	if err := w.reserveBudget(ctx, job.Provider, perMinute, perDay); err != nil {
+		if deferred, ok := deferRecordForQuota(record, err); ok {
+			return deferred, nil
+		}
 		return record, retryableError{err}
 	}
 
@@ -324,6 +327,9 @@ func (w *worker) queryProvider(ctx context.Context, job threatIntelJob) (enrichm
 		status, summary, err = w.queryAbuseIPDB(ctx, job.Observable, apiKey)
 	}
 	if err != nil {
+		if deferred, ok := deferRecordForQuota(record, err); ok {
+			return deferred, nil
+		}
 		return record, err
 	}
 	record.Status = status
@@ -345,7 +351,10 @@ func (w *worker) queryVirusTotal(ctx context.Context, hash, apiKey string) (stri
 	if status == http.StatusNotFound {
 		return "not_found", map[string]any{"known_to_provider": false}, nil
 	}
-	if status == http.StatusTooManyRequests || status >= 500 {
+	if status == http.StatusTooManyRequests {
+		return "", nil, &quotaExhaustedError{provider: "virustotal", window: "provider", retryAfter: time.Minute}
+	}
+	if status >= 500 {
 		return "", nil, retryableError{fmt.Errorf("VirusTotal HTTP %d", status)}
 	}
 	if status != http.StatusOK {
@@ -390,7 +399,10 @@ func (w *worker) queryAbuseIPDB(ctx context.Context, ip, apiKey string) (string,
 	if err != nil {
 		return "", nil, err
 	}
-	if status == http.StatusTooManyRequests || status >= 500 {
+	if status == http.StatusTooManyRequests {
+		return "", nil, &quotaExhaustedError{provider: "abuseipdb", window: "provider", retryAfter: time.Minute}
+	}
+	if status >= 500 {
 		return "", nil, retryableError{fmt.Errorf("AbuseIPDB HTTP %d", status)}
 	}
 	if status != http.StatusOK {
@@ -445,7 +457,7 @@ func (w *worker) reserveBudget(ctx context.Context, provider string, perMinute, 
 			_ = w.redis.Expire(ctx, key, 2*time.Minute).Err()
 		}
 		if count > int64(perMinute) {
-			return fmt.Errorf("%s minute quota exhausted", provider)
+			return &quotaExhaustedError{provider: provider, window: "minute", retryAfter: untilNextMinute(time.Now().UTC())}
 		}
 	}
 	if perDay > 0 {
@@ -458,7 +470,7 @@ func (w *worker) reserveBudget(ctx context.Context, provider string, perMinute, 
 			_ = w.redis.Expire(ctx, key, 26*time.Hour).Err()
 		}
 		if count > int64(perDay) {
-			return fmt.Errorf("%s daily quota exhausted", provider)
+			return &quotaExhaustedError{provider: provider, window: "day", retryAfter: untilNextUTCDay(time.Now().UTC())}
 		}
 	}
 	return nil
