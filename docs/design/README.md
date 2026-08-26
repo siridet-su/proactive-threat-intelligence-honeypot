@@ -11,3 +11,4 @@ staging evidence belong in `../validation/`.
 | [Adaptive Cowrie boundary](adaptive-cowrie-boundary.md) | Target | Production boundary for the raw-command gateway. |
 | [Post-session analysis contract](post-session-analysis-contract.md) | Target | Atlas-to-cloud handoff and evidence-safe results. |
 | [Honeypot dashboard UX](honeypot-dashboard-ux.md) | Target | Investigation-first dashboard navigation, layouts, and TI presentation. |
+| [Atlas Free Tier data lifecycle](atlas-free-tier-data-lifecycle.md) | Target | Retention, TTL, index, and rollup constraints for the 512 MB tier. |

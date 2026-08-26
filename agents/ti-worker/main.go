@@ -134,7 +134,7 @@ func loadConfig() config {
 		Group:          getenv("TI_CONSUMER_GROUP", "ti-worker"),
 		Consumer:       getenv("TI_CONSUMER_NAME", hostnameOr("ti-worker-1")),
 		MongoURI:       getenv("MONGO_URI", ""),
-		MongoDB:        getenv("MONGO_DATABASE", "honeypot"),
+		MongoDB:        getenv("MONGO_DATABASE", "honeypot_db"),
 		VirusTotalKey:  strings.TrimSpace(os.Getenv("VIRUSTOTAL_API_KEY")),
 		AbuseIPDBKey:   strings.TrimSpace(os.Getenv("ABUSEIPDB_API_KEY")),
 		HTTPTimeout:    getenvDuration("TI_HTTP_TIMEOUT", 8*time.Second),

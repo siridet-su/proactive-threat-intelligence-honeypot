@@ -43,8 +43,10 @@ type Config struct {
 
 	LookupDir string
 
-	MongoURI string
-	MongoDB  string
+	MongoURI                 string
+	MongoDB                  string
+	EventRetention           time.Duration
+	HardwareMetricsRetention time.Duration
 
 	TIEnabled    bool
 	TIJobsStream string
@@ -118,6 +120,8 @@ func main() {
 func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
 	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "50000"), 10, 64)
+	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
+	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
 
 	return Config{
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
@@ -129,8 +133,10 @@ func loadConfig() Config {
 
 		LookupDir: getenv("LOOKUP_DIR", "/home/cpe27/honeypot-pipeline/lookups"),
 
-		MongoURI: getenv("MONGO_URI", ""),
-		MongoDB:  getenv("MONGO_DATABASE", "honeypot"),
+		MongoURI:                 getenv("MONGO_URI", ""),
+		MongoDB:                  getenv("MONGO_DATABASE", "honeypot_db"),
+		EventRetention:           eventRetention,
+		HardwareMetricsRetention: hardwareMetricsRetention,
 
 		TIEnabled:    strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
 		TIJobsStream: getenv("TI_JOBS_STREAM", "ti:jobs"),
@@ -227,9 +233,13 @@ func processMessage(
 				doc[k] = strVal
 			}
 		}
-		// Convert Unix timestamp to MongoDB DateTime if present
+		observedAt := time.Now().UTC()
 		if ts, ok := doc["timestamp"].(float64); ok {
-			doc["timestamp"] = time.Unix(int64(ts), 0)
+			observedAt = time.Unix(int64(ts), 0).UTC()
+		}
+		setHardwareMetricExpiry(doc, observedAt, cfg.HardwareMetricsRetention)
+		if !mw.enabled {
+			return fmt.Errorf("MongoDB is disabled; refusing to acknowledge hardware metric")
 		}
 		_, err := mw.db.Collection("hardware_metrics").InsertOne(ctx, doc)
 		return err
@@ -250,6 +260,7 @@ func processMessage(
 
 	normalized := normalizeEvent(streamName, msg.ID, msg.Values, payload)
 	enriched := enrichEvent(normalized, lookups)
+	setEventExpiry(enriched, cfg.EventRetention)
 
 	srcIP := getNestedString(enriched, "network.src_ip")
 	eventJSON := mustJSON(enriched)
@@ -871,8 +882,17 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "source", Value: 1}, {Key: "event_type", Value: 1}, {Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "network.src_ip", Value: 1}, {Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "session.id", Value: 1}, {Key: "timestamp", Value: 1}}, Options: options.Index().SetSparse(true)},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
-	_, err := mw.db.Collection("events").Indexes().CreateMany(ctx, indexes)
+	if _, err := mw.db.Collection("events").Indexes().CreateMany(ctx, indexes); err != nil {
+		return err
+	}
+
+	hardwareIndexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+	_, err := mw.db.Collection("hardware_metrics").Indexes().CreateMany(ctx, hardwareIndexes)
 	return err
 }
 
