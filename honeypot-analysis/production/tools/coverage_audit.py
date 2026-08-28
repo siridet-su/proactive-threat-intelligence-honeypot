@@ -2,7 +2,7 @@
 
 This module is intentionally read-only. It answers which ATT&CK techniques are
 covered by command rules, SecureBERT labels, session-correlation knowledge,
-prediction policy, and SMB recommendation policy. It does not change runtime
+and response-guidance policy. It does not change runtime
 classification or recommendation behavior.
 """
 
@@ -20,6 +20,7 @@ from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 
 from production.classification.classification_pipeline import RULE_POLICY, RULE_SPECS
 from production.utils.config import ProductionConfig
+from production.utils.sensitive_data import redact_exception_for_log
 from production.correlation.session_ttp_knowledge import load_correlation_knowledge, main_ttp_id, parse_path_list
 
 
@@ -113,7 +114,7 @@ def _session_correlation_ttps(policy_path: str, knowledge_pack_paths: Any) -> Di
     try:
         document = load_correlation_knowledge(policy_path, knowledge_pack_paths)
     except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}", "ttps": [], "summary": {}}
+        return {"error": redact_exception_for_log(exc), "ttps": [], "summary": {}}
     rules = ((document.get("policy") or {}).get("rules") or [])
     ttps = {
         main_ttp_id(rule.get("ttp"))
@@ -126,15 +127,9 @@ def _session_correlation_ttps(policy_path: str, knowledge_pack_paths: Any) -> Di
     }
 
 
-def _smb_policy_ttps(policy_path: str) -> Set[str]:
+def _guidance_policy_ttps(policy_path: str) -> Set[str]:
     policy = _load_json(policy_path)
     return _extract_ttps(policy)
-
-
-def _prediction_policy_ttps(policy_path: str, policy: Optional[Dict[str, Any]] = None) -> Set[str]:
-    loaded = _load_json(policy_path)
-    active = policy or loaded.get("policy") or loaded
-    return _extract_ttps(active)
 
 
 def _coverage_entry(name: str, covered: Iterable[str], universe: Iterable[str], *, notes: str = "") -> Dict[str, Any]:
@@ -186,16 +181,10 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
             notes="Combined trusted policy plus configured knowledge packs.",
         ),
         _coverage_entry(
-            "prediction_policy_ttp_references",
-            _prediction_policy_ttps(config.prediction_policy_path, config.prediction_policy),
+            "response_guidance_policy_ttp_references",
+            _guidance_policy_ttps(config.response_guidance_policy_path),
             mitre_universe,
-            notes="TTP references in realtime prediction policy. Tactic-only rules are not counted.",
-        ),
-        _coverage_entry(
-            "smb_action_policy_ttp_references",
-            _smb_policy_ttps(config.smb_action_policy_path),
-            mitre_universe,
-            notes="TTP references in SMB action playbooks/trusted source metadata.",
+            notes="TTP references in the canonical advisory-only v3 policy.",
         ),
     ]
     hardcoded_surfaces = [
@@ -210,19 +199,14 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
             "risk": "Legacy fallback classification and next-step text are manually bounded.",
         },
         {
-            "file": "production/prediction/realtime_prediction.py",
-            "symbol": "TACTIC_PROGRESSION / DEFAULT_TACTIC_COMBINATION_RULES",
-            "risk": "Fallback prediction priors are manual and should remain low-weight.",
-        },
-        {
             "file": "configs/session_ttp_correlation.trusted.json",
             "symbol": "policy.rules",
             "risk": "Base session-level correlations are curated subset unless generated knowledge packs are configured.",
         },
         {
-            "file": "configs/smb_action_playbooks.trusted.json",
-            "symbol": "risk_rules / goal_rules / action_playbooks",
-            "risk": "Curated SMB playbooks are trustworthy but do not contain per-technique coverage for the full ATT&CK space.",
+            "file": "configs/response_guidance_policy.v3.json",
+            "symbol": "finding_rules / action_playbooks",
+            "risk": "Curated advisory guidance does not cover the full ATT&CK space.",
         },
     ]
     return {
@@ -234,7 +218,7 @@ def build_coverage_audit(config: ProductionConfig) -> Dict[str, Any]:
         "coverage": entries,
         "hardcoded_surfaces": hardcoded_surfaces,
         "recommendations": [
-            "Use generated session TTP knowledge packs as the main expansion path; keep generated rules apply_to_prediction=false until reviewed.",
+            "Use generated session TTP knowledge packs for observed-evidence coverage; prediction remains advisory and consumes no generated correlation rules.",
             "Expand command coverage through versioned classification rule policy files, not Python tables.",
             "Use MITRE mitigations as reference guidance for uncovered techniques, not as automatic remediation authority.",
             "Keep AI outputs explanatory only; reject any AI-added operator action not backed by trusted policy.",

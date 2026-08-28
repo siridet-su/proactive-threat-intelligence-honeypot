@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import ipaddress
 import json
 import os
-import sqlite3
 from dataclasses import dataclass
 from html import escape
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -21,50 +21,71 @@ from production.api.dashboard_api import (
     _current_prediction_payload,
     _external_seed_health_payload,
 )
+from production.api.security import (
+    api_row_view,
+    authorize_read,
+    authorize_write,
+    count_command_events,
+    event_views,
+    log_payload,
+    public_payload,
+    sanitize_request_target,
+    session_detail_view,
+    validate_configured_bearer_tokens,
+)
 from production.classification.classification_evaluation import classification_metrics
 from production.utils.config import ProductionConfig
-from production.prediction.external_seed_health import infer_external_seed_paths, load_external_seed_health
-from production.tools.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
-from production.utils.feedback import normalize_feedback_payload
-from production.utils.serialization import stable_id, utc_now
-from production.reporting.smb_decision import build_smb_decision_from_paths
-from production.storage import open_storage
+from production.prediction.prediction_health import infer_prediction_paths, load_prediction_health
+from production.reporting.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
+from production.utils.feedback import normalize_submitted_feedback_payload
+from production.utils.http_security import (
+    BoundedThreadingHTTPServer,
+    HTTPBodyError,
+    decode_strict_json_body,
+    is_loopback_host,
+    read_bounded_http_body,
+    safe_request_id,
+    single_header_value,
+    validate_bind_auth,
+)
+from production.utils.serialization import html_script_json, stable_id, utc_now
+from production.utils.service_lifecycle import serve_http_until_stopped
+from production.reporting.response_guidance_v3 import (
+    read_legacy_response_guidance,
+    validate_response_guidance_v3,
+)
+from production.storage import open_storage, safe_database_descriptor
 
 
-DEFAULT_DB_PATH = "./runtime/production_pilot.db"
 DEFAULT_REPORTS_DIR = "./runtime/reports"
 DEFAULT_REFRESH_SECONDS = 5
 DEFAULT_SESSION_LIMIT = 500
 MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
+MONITOR_SUMMARY_SCAN_LIMIT = 100_000
+MONITOR_DETAIL_SCAN_LIMIT = 10_000
+MAX_FEEDBACK_JSON_BYTES = 1_000_000
+MAX_FEEDBACK_FORM_BYTES = 100_000
+FEEDBACK_REQUEST_TIMEOUT_SECONDS = 15.0
 STATIC_MONITOR_HTML = Path(__file__).with_name("static") / "monitor.html"
-SENSITIVE_KEYS = {
-    "authorization",
-    "api_token",
-    "honeypot_api_token",
-    "token",
-    "secret",
-    "api_key",
-    "password",
-    "passwd",
-    "login_password",
-}
 
 
 @dataclass
 class MonitorConfig:
     db_path: str
     reports_dir: str
+    bind_host: str = "127.0.0.1"
     database_url: str = ""
     external_seed_model_path: str = ""
     external_seed_validation_path: str = ""
     external_seed_review_path: str = ""
     external_seed_health_path: str = ""
-    smb_asset_profile_path: str = ""
-    smb_action_policy_path: str = ""
     mitre_attack_path: str = ""
-    enable_smb_decisions: bool = True
+    response_guidance_policy_path: str = ""
+    response_guidance_asset_profile_path: str = ""
+    threat_hypothesis_behavior_policy_path: str = ""
+    enable_response_guidance: bool = True
     refresh_seconds: int = DEFAULT_REFRESH_SECONDS
     production_config: Optional[ProductionConfig] = None
 
@@ -72,12 +93,12 @@ class MonitorConfig:
 def _sqlite_path(database_url: str) -> str:
     if database_url.startswith("sqlite:///"):
         return database_url.replace("sqlite:///", "", 1)
-    return DEFAULT_DB_PATH
+    return ""
 
 
 def _load_monitor_config(config_path: Optional[str] = None) -> MonitorConfig:
     cfg = ProductionConfig.from_env(config_path)
-    external_seed_paths = infer_external_seed_paths(cfg.prediction_policy)
+    external_seed_paths = infer_prediction_paths(cfg.prediction_policy)
     return MonitorConfig(
         database_url=cfg.database_url,
         db_path=_sqlite_path(cfg.database_url),
@@ -86,10 +107,13 @@ def _load_monitor_config(config_path: Optional[str] = None) -> MonitorConfig:
         external_seed_validation_path=external_seed_paths["validation"],
         external_seed_review_path=external_seed_paths["review"],
         external_seed_health_path=external_seed_paths["health"],
-        smb_asset_profile_path=cfg.smb_asset_profile_path,
-        smb_action_policy_path=cfg.smb_action_policy_path,
         mitre_attack_path=cfg.mitre_attack_path,
-        enable_smb_decisions=cfg.enable_smb_decisions,
+        response_guidance_policy_path=cfg.response_guidance_policy_path,
+        response_guidance_asset_profile_path=cfg.response_guidance_asset_profile_path,
+        threat_hypothesis_behavior_policy_path=(
+            cfg.threat_hypothesis_behavior_policy_path
+        ),
+        enable_response_guidance=cfg.enable_response_guidance,
         production_config=cfg,
     )
 
@@ -105,22 +129,13 @@ def _json_loads(value: Any, default: Any) -> Any:
         return default
 
 
-def _public_value(key: str, value: Any) -> Any:
-    key_l = key.lower()
-    if key_l.endswith("_hash") or key_l in {"password_hash", "login_password_hash"}:
-        return value
-    if key_l in SENSITIVE_KEYS or any(part in key_l for part in ("authorization", "api_key", "secret", "token")):
-        return "[REDACTED]" if value else value
-    return value
-
-
 def _sanitize_public(value: Any, key: str = "") -> Any:
-    value = _public_value(key, value)
-    if isinstance(value, dict):
-        return {str(k): _sanitize_public(v, str(k)) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_public(item, key) for item in value]
-    return value
+    """Compatibility shim delegating legacy HTML paths to the central policy."""
+
+    if key:
+        wrapped = public_payload({str(key): value})
+        return wrapped.get(str(key)) if isinstance(wrapped, dict) else wrapped
+    return public_payload(value)
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -137,18 +152,217 @@ def _short(value: Any, limit: int = 120) -> str:
 
 
 def _monitor_database_url(config: MonitorConfig) -> str:
-    return config.database_url or f"sqlite:///{config.db_path}"
+    if config.database_url:
+        return config.database_url
+    if config.db_path:
+        # Deprecated compatibility for callers that explicitly provide only a
+        # SQLite path. Ordinary configuration always supplies database_url.
+        return f"sqlite:///{config.db_path}"
+    raise ValueError(
+        "monitor database configuration is missing; configure DATABASE_BACKEND "
+        "or use the deprecated explicit --db-path SQLite override"
+    )
+
+
+def _monitor_database_descriptor(config: MonitorConfig) -> Dict[str, str]:
+    if config.production_config is not None:
+        return config.production_config.safe_database_descriptor()
+    return safe_database_descriptor(_monitor_database_url(config))
+
+
+def _monitor_database_display(config: MonitorConfig) -> str:
+    try:
+        descriptor = _monitor_database_descriptor(config)
+    except Exception:
+        return "unavailable"
+    if descriptor.get("backend") == "sqlite":
+        return descriptor.get("database_path") or "sqlite"
+    endpoint = descriptor.get("endpoint") or "private"
+    database = descriptor.get("database") or "default"
+    return f"{descriptor.get('backend')}://{endpoint}/{database}"
+
+
+def _open_monitor_storage(config: MonitorConfig) -> Any:
+    if config.production_config is not None:
+        return open_storage(config.production_config.database_settings())
+    return open_storage(_monitor_database_url(config))
 
 
 def _monitor_runtime_config(config: MonitorConfig) -> ProductionConfig:
-    cfg = config.production_config or ProductionConfig()
-    cfg.database_url = _monitor_database_url(config)
+    cfg = copy.copy(config.production_config or ProductionConfig())
+    if config.production_config is None:
+        cfg.database_url = _monitor_database_url(config)
     cfg.reports_dir = config.reports_dir
-    cfg.smb_asset_profile_path = config.smb_asset_profile_path or cfg.smb_asset_profile_path
-    cfg.smb_action_policy_path = config.smb_action_policy_path or cfg.smb_action_policy_path
     cfg.mitre_attack_path = config.mitre_attack_path or cfg.mitre_attack_path
-    cfg.enable_smb_decisions = config.enable_smb_decisions
+    cfg.response_guidance_policy_path = (
+        config.response_guidance_policy_path or cfg.response_guidance_policy_path
+    )
+    cfg.response_guidance_asset_profile_path = (
+        config.response_guidance_asset_profile_path
+        or cfg.response_guidance_asset_profile_path
+    )
+    cfg.enable_response_guidance = config.enable_response_guidance
     return cfg
+
+
+def _monitor_read_token(config: MonitorConfig) -> str:
+    return str(
+        getattr(config.production_config, "dashboard_read_token", "") or ""
+    )
+
+
+def _monitor_write_token(config: MonitorConfig) -> str:
+    return str(
+        getattr(config.production_config, "dashboard_write_token", "") or ""
+    )
+
+
+def _monitor_raw_commands_token(config: MonitorConfig) -> str:
+    return str(
+        getattr(config.production_config, "monitor_raw_commands_token", "") or ""
+    )
+
+
+def _is_loopback_management_address(value: Any) -> bool:
+    """Accept only numeric loopback request sources."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        return bool(ipaddress.ip_address(text).is_loopback)
+    except ValueError:
+        return False
+
+
+def _is_persisted_command_event(event_id: Any) -> bool:
+    normalized = str(event_id or "").strip().lower()
+    return normalized in {
+        "cowrie.command.input",
+        "cowrie.command.success",
+        "cowrie.command.failed",
+    } or (
+        normalized.startswith("cowrie.")
+        and normalized.endswith(".input")
+        and "[redacted]" in normalized
+    )
+
+
+def load_internal_command_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Return only persisted command fields for the authenticated admin view.
+
+    This function intentionally bypasses the public detail projection.  Its
+    result must only be sent by the private, separately authenticated route.
+    It never returns the event payload, source IP, separate credential fields,
+    or report data; command text itself is intentionally sensitive.
+    """
+    selected_session_id = str(session_id or "").strip()
+    if not selected_session_id or len(selected_session_id) > 256:
+        return {"ok": False, "error": "session_id is required"}
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        session_rows, session_error = _storage_session_rows(
+            storage, "sessions", selected_session_id, 1
+        )
+        if not session_rows:
+            return {
+                "ok": False,
+                "error": session_error or "session not found",
+                "session_id": selected_session_id,
+            }
+        event_rows, event_error = _storage_session_rows(
+            storage, "events", selected_session_id, MAX_SESSION_EVENTS
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": _storage_error("sensitive command query", exc),
+            "session_id": selected_session_id,
+        }
+
+    session_payload = _payload_from_row(session_rows[0])
+    classifications = [
+        item
+        for item in session_payload.get("classification_events") or []
+        if isinstance(item, dict)
+    ]
+    ordered_rows = sorted(
+        (dict(row) for row in event_rows or []),
+        key=lambda row: (
+            str(row.get("timestamp") or ""),
+            str(row.get("received_at") or ""),
+            str(row.get("event_id") or ""),
+        ),
+    )
+    commands: List[Dict[str, Any]] = []
+    for row in ordered_rows:
+        payload = _payload_from_row(row)
+        event_id = row.get("eventid") or payload.get("eventid")
+        if not _is_persisted_command_event(event_id):
+            continue
+        timestamp = str(row.get("timestamp") or payload.get("timestamp") or "")
+        matching_classifications = []
+        for item in classifications:
+            item_timestamp = str(item.get("event_timestamp") or "")
+            item_event_id = str(item.get("cowrie_eventid") or "").strip().lower()
+            event_id_text = str(event_id or "").strip().lower()
+            durable_order = item.get("durable_evidence_order")
+            durable_event_id = (
+                str(durable_order.get("event_id") or "")
+                if isinstance(durable_order, dict)
+                else ""
+            )
+            row_event_id = str(row.get("event_id") or "")
+            if durable_event_id:
+                if durable_event_id != row_event_id:
+                    continue
+            elif item_timestamp != timestamp:
+                continue
+            if item_event_id and item_event_id != event_id_text:
+                # A privacy-redacted event id can still be matched to the
+                # canonical command classification by its timestamp.
+                if not ("[redacted]" in event_id_text and item_event_id.endswith(".input")):
+                    continue
+            matching_classifications.append(
+                {
+                    "evidence_id": str(item.get("evidence_id") or ""),
+                    "ttp": str(item.get("ttp") or ""),
+                    "tactic": str(item.get("tactic") or ""),
+                    "source": str(item.get("source") or ""),
+                    "command_outcome": str(item.get("command_outcome") or ""),
+                    "evidence_tier": str(item.get("evidence_tier") or ""),
+                }
+            )
+        raw_input = payload.get("input")
+        commands.append(
+            {
+                "event_id": str(row.get("event_id") or ""),
+                "eventid": str(event_id or ""),
+                "timestamp": timestamp,
+                "input": str(raw_input) if raw_input is not None else "",
+                "classification": matching_classifications,
+            }
+        )
+    return {
+        "ok": True,
+        "schema_version": "monitor.internal_command_view.v1",
+        "session_id": selected_session_id,
+        "sensitive": True,
+        "content_scope": "persisted_cowrie_input_after_sensor_privacy",
+        "historical_originals": "unrecoverable_after_pre_persistence_redaction",
+        "commands": commands,
+        "event_error": event_error,
+    }
+
+
+def _monitor_feedback_enabled(config: MonitorConfig) -> bool:
+    return bool(
+        getattr(config.production_config, "monitor_allow_feedback", False)
+    )
 
 
 def _parse_limit(query: Dict[str, List[str]], default: int = 100, maximum: int = 1000) -> int:
@@ -174,13 +388,13 @@ def _decode_dashboard_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, List[str]]) -> Tuple[HTTPStatus, Optional[Dict[str, Any]]]:
     runtime_config = _monitor_runtime_config(config)
-    storage = open_storage(runtime_config.database_url)
+    storage = _open_monitor_storage(config)
 
     if path == "/predictions/current":
         session_id = query.get("session_id", [""])[0].strip()
         if not session_id:
             return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
-        snapshot = storage.get_latest_prediction_snapshot(session_id)
+        snapshot = storage.get_current_prediction_snapshot(session_id)
         if not snapshot:
             return HTTPStatus.NOT_FOUND, {"error": "prediction not found", "session_id": session_id, "timestamp": utc_now()}
         feedback_rows = [
@@ -188,9 +402,9 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
             if str(row.get("session_id") or "") == session_id
         ]
         return HTTPStatus.OK, {
-            "item": snapshot,
+            "item": api_row_view("prediction_snapshots", snapshot),
             "current_prediction": _current_prediction_payload(snapshot, feedback_rows),
-            "smb_decision": _current_decision_payload(runtime_config, storage, session_id, snapshot),
+            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
             "session_id": session_id,
             "timestamp": utc_now(),
         }
@@ -199,9 +413,9 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         session_id = query.get("session_id", [""])[0].strip()
         if not session_id:
             return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
-        snapshot = storage.get_latest_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
+        snapshot = storage.get_current_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
         return HTTPStatus.OK, {
-            "smb_decision": _current_decision_payload(runtime_config, storage, session_id, snapshot),
+            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
             "session_id": session_id,
             "timestamp": utc_now(),
         }
@@ -212,9 +426,13 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         if feedback_filter not in FEEDBACK_FILTERS:
             feedback_filter = "all"
         rows = storage.list_rows("analyst_feedback", limit=limit)
+        filtered_rows = filter_feedback_rows(rows, feedback_filter)[:100]
         return HTTPStatus.OK, {
             "filter": feedback_filter,
-            "items": filter_feedback_rows(rows, feedback_filter)[:100],
+            "items": [
+                api_row_view("analyst_feedback", row)
+                for row in filtered_rows
+            ],
             "review": build_feedback_review(rows),
             "timestamp": utc_now(),
         }
@@ -236,7 +454,10 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
     if table:
         limit = _parse_limit(query, default=100, maximum=1000)
         return HTTPStatus.OK, {
-            "items": [_decode_dashboard_row(row) for row in storage.list_rows(table, limit=limit)],
+            "items": [
+                api_row_view(table, _decode_dashboard_row(row))
+                for row in storage.list_rows(table, limit=limit)
+            ],
             "limit": limit,
             "table": table,
             "timestamp": utc_now(),
@@ -269,141 +490,133 @@ def _format_list(values: Iterable[Any], limit: int = 8) -> str:
     return ", ".join(display) + suffix
 
 
-def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (table,),
-    ).fetchone()
-    return bool(row)
+def _storage_error(label: str, exc: BaseException) -> str:
+    return f"{label} failed: {type(exc).__name__}"
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> List[str]:
-    if not _table_exists(conn, table):
-        return []
-    return [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-
-
-def _order_column(columns: List[str], preferred: Iterable[str]) -> str:
-    for column in preferred:
-        if column in columns:
-            return column
-    return "rowid"
-
-
-def _safe_select_rows(
-    conn: sqlite3.Connection,
+def _storage_list_rows(
+    storage: Any,
     table: str,
     limit: int,
-    preferred_order: Iterable[str],
-    offset: int = 0,
 ) -> Tuple[List[Dict[str, Any]], str]:
-    columns = _columns(conn, table)
-    if not columns:
-        return [], f"{table} table not available"
-    order_by = _order_column(columns, preferred_order)
     try:
-        rows = conn.execute(
-            f"SELECT rowid, * FROM {table} ORDER BY {order_by} DESC LIMIT ? OFFSET ?",
-            (limit, max(int(offset), 0)),
-        ).fetchall()
-        return [dict(row) for row in rows], ""
-    except sqlite3.Error as exc:
-        return [], f"{table} query failed: {type(exc).__name__}: {exc}"
+        rows = storage.list_rows(table, limit=max(int(limit), 1))
+        return [dict(row) for row in rows or []], ""
+    except Exception as exc:  # Monitor degrades individual panels independently.
+        return [], _storage_error(f"{table} query", exc)
 
 
-def _safe_select_session_rows(
-    conn: sqlite3.Connection,
+def _row_session_id(row: Dict[str, Any]) -> str:
+    payload = _payload_from_row(row)
+    return _text(
+        row.get("session_id")
+        or payload.get("session_id")
+        or payload.get("session")
+    )
+
+
+def _storage_session_rows(
+    storage: Any,
     table: str,
     session_id: str,
     limit: int,
-    preferred_order: Iterable[str],
 ) -> Tuple[List[Dict[str, Any]], str]:
-    columns = _columns(conn, table)
-    if not columns:
-        return [], f"{table} table not available"
-    order_by = _order_column(columns, preferred_order)
-    try:
-        if "session_id" in columns:
-            rows = conn.execute(
-                f"SELECT rowid, * FROM {table} WHERE session_id = ? ORDER BY {order_by} DESC LIMIT ?",
-                (session_id, limit),
-            ).fetchall()
-            return [dict(row) for row in rows], ""
-        if "payload_json" in columns:
-            rows = conn.execute(
-                f"SELECT rowid, * FROM {table} ORDER BY {order_by} DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            filtered = []
-            for row in rows:
-                item = dict(row)
-                payload = _json_loads(item.get("payload_json"), {})
-                if isinstance(payload, dict) and payload.get("session_id") == session_id:
-                    filtered.append(item)
-            return filtered, ""
-        return [], f"{table} has no session_id or payload_json column"
-    except sqlite3.Error as exc:
-        return [], f"{table} session query failed: {type(exc).__name__}: {exc}"
+    if table == "prediction_snapshots":
+        prediction_loader = getattr(
+            storage,
+            "list_prediction_snapshots_for_session",
+            None,
+        )
+        if prediction_loader is not None:
+            try:
+                rows = prediction_loader(session_id, limit=limit)
+            except Exception as exc:
+                return [], _storage_error(
+                    "prediction_snapshots session query",
+                    exc,
+                )
+            return [dict(row) for row in rows or []], ""
+    session_loader = getattr(storage, "list_rows_for_session", None)
+    if session_loader is not None:
+        try:
+            rows = session_loader(table, session_id, limit=limit)
+        except Exception as exc:
+            return [], _storage_error(f"{table} session query", exc)
+        return [dict(row) for row in rows or []], ""
+
+    # Bounded compatibility for injected legacy test doubles. Runtime adapters
+    # implement list_rows_for_session and do not scan unrelated records.
+    if table == "sessions":
+        try:
+            row = storage.get_session(session_id)
+        except Exception as exc:
+            return [], _storage_error("session query", exc)
+        return ([dict(row)] if row else []), (
+            "" if row else f"session not found: {session_id}"
+        )
+    rows, error = _storage_list_rows(
+        storage,
+        table,
+        max(int(limit), MONITOR_DETAIL_SCAN_LIMIT),
+    )
+    if error:
+        return [], error
+    filtered = [row for row in rows if _row_session_id(row) == session_id]
+    return filtered[:limit], ""
 
 
-def _safe_select_enrichment_rows(
-    conn: sqlite3.Connection,
+def _storage_enrichment_rows(
+    storage: Any,
     session_id: str,
     observables: Iterable[Tuple[str, str]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    records: List[Dict[str, Any]] = []
-    jobs: List[Dict[str, Any]] = []
-    errors: List[str] = []
     normalized = [(str(t), str(v)) for t, v in observables if t and v]
-
-    record_columns = _columns(conn, "enrichment_records")
-    if record_columns:
+    records: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    for observable_type, observable_value in normalized:
         try:
-            for observable_type, observable_value in normalized:
-                rows = conn.execute(
-                    """
-                    SELECT rowid, * FROM enrichment_records
-                    WHERE observable_type = ? AND observable_value = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 5
-                    """,
-                    (observable_type, observable_value),
-                ).fetchall()
-                records.extend(dict(row) for row in rows)
-        except sqlite3.Error as exc:
-            errors.append(f"enrichment_records query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("enrichment_records table not available")
+            record = storage.get_enrichment_record(
+                observable_type,
+                observable_value,
+                allow_stale=True,
+            )
+        except Exception as exc:
+            errors.append(
+                _storage_error(
+                    f"enrichment record {observable_type}",
+                    exc,
+                )
+            )
+            continue
+        if record:
+            records.append(dict(record))
 
-    job_columns = _columns(conn, "enrichment_jobs")
-    if job_columns:
-        try:
-            if "session_id" in job_columns:
-                rows = conn.execute(
-                    """
-                    SELECT rowid, * FROM enrichment_jobs
-                    WHERE session_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 100
-                    """,
-                    (session_id,),
-                ).fetchall()
-                jobs.extend(dict(row) for row in rows)
-            for observable_type, observable_value in normalized:
-                rows = conn.execute(
-                    """
-                    SELECT rowid, * FROM enrichment_jobs
-                    WHERE observable_type = ? AND observable_value = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 20
-                    """,
-                    (observable_type, observable_value),
-                ).fetchall()
-                jobs.extend(dict(row) for row in rows)
-        except sqlite3.Error as exc:
-            errors.append(f"enrichment_jobs query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("enrichment_jobs table not available")
+    session_jobs, session_jobs_error = _storage_session_rows(
+        storage,
+        "enrichment_jobs",
+        session_id,
+        100,
+    )
+    if session_jobs_error:
+        errors.append(session_jobs_error)
+    job_rows, jobs_error = _storage_list_rows(
+        storage,
+        "enrichment_jobs",
+        MONITOR_DETAIL_SCAN_LIMIT,
+    )
+    if jobs_error:
+        errors.append(jobs_error)
+    observable_set = set(normalized)
+    observable_jobs = [
+        row
+        for row in job_rows
+        if (
+            _text(row.get("observable_type")),
+            _text(row.get("observable_value")),
+        )
+        in observable_set
+    ]
+    jobs = session_jobs + observable_jobs
 
     def dedupe(rows: List[Dict[str, Any]], keys: Tuple[str, ...]) -> List[Dict[str, Any]]:
         seen = set()
@@ -418,200 +631,123 @@ def _safe_select_enrichment_rows(
 
     return (
         dedupe(records, ("observable_type", "observable_value", "updated_at")),
-        dedupe(jobs, ("job_id",)),
+        dedupe(jobs, ("job_id",))[:100],
         "; ".join(errors),
     )
 
 
-def _safe_select_observable_sightings(
-    conn: sqlite3.Connection,
+def _storage_observable_sightings(
+    storage: Any,
     session_id: str,
     observables: Iterable[Tuple[str, str]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    columns = _columns(conn, "observable_sightings")
-    if not columns:
-        return [], [], "observable_sightings table not available"
-
-    session_rows: List[Dict[str, Any]] = []
-    related_rows: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    normalized = [(str(t), str(v)) for t, v in observables if t and v]
-    try:
-        session_rows = [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT rowid, * FROM observable_sightings
-                WHERE session_id = ?
-                ORDER BY COALESCE(timestamp, created_at) DESC
-                LIMIT 200
-                """,
-                (session_id,),
-            ).fetchall()
-        ]
-        for observable_type, observable_value in normalized:
-            rows = conn.execute(
-                """
-                SELECT rowid, * FROM observable_sightings
-                WHERE observable_type = ? AND observable_value = ? AND session_id <> ?
-                ORDER BY COALESCE(timestamp, created_at) DESC
-                LIMIT 20
-                """,
-                (observable_type, observable_value, session_id),
-            ).fetchall()
-            related_rows.extend(dict(row) for row in rows)
-    except sqlite3.Error as exc:
-        errors.append(f"observable_sightings query failed: {type(exc).__name__}: {exc}")
-
-    def dedupe(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        seen = set()
-        output = []
-        for row in rows:
-            marker = row.get("sighting_id") or (
-                row.get("observable_type"),
-                row.get("observable_value"),
-                row.get("session_id"),
-                row.get("role"),
-                row.get("event_id"),
-            )
-            if marker in seen:
-                continue
-            seen.add(marker)
-            output.append(row)
-        return output
-
-    return dedupe(session_rows), dedupe(related_rows), "; ".join(errors)
+    session_rows, session_error = _storage_session_rows(
+        storage,
+        "observable_sightings",
+        session_id,
+        200,
+    )
+    rows, error = _storage_list_rows(
+        storage,
+        "observable_sightings",
+        MONITOR_DETAIL_SCAN_LIMIT,
+    )
+    errors = [message for message in (session_error, error) if message]
+    observable_set = {(str(t), str(v)) for t, v in observables if t and v}
+    related_rows = [
+        row
+        for row in rows
+        if _row_session_id(row) != session_id
+        and (
+            _text(row.get("observable_type")),
+            _text(row.get("observable_value")),
+        )
+        in observable_set
+    ][:200]
+    return session_rows, related_rows, "; ".join(errors)
 
 
-def _safe_select_session_links(
-    conn: sqlite3.Connection,
+def _storage_session_links_and_jobs(
+    storage: Any,
     session_id: str,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
     errors: List[str] = []
-    links: List[Dict[str, Any]] = []
-    jobs: List[Dict[str, Any]] = []
-    if _table_exists(conn, "session_links"):
-        try:
-            links = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    SELECT rowid, * FROM session_links
-                    WHERE session_id_a = ? OR session_id_b = ?
-                    ORDER BY created_at DESC
-                    LIMIT 100
-                    """,
-                    (session_id, session_id),
-                ).fetchall()
-            ]
-        except sqlite3.Error as exc:
-            errors.append(f"session_links query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("session_links table not available")
-
-    if _table_exists(conn, "threat_hunt_jobs"):
-        try:
-            jobs = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    SELECT rowid, * FROM threat_hunt_jobs
-                    WHERE session_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 100
-                    """,
-                    (session_id,),
-                ).fetchall()
-            ]
-        except sqlite3.Error as exc:
-            errors.append(f"threat_hunt_jobs query failed: {type(exc).__name__}: {exc}")
-    else:
-        errors.append("threat_hunt_jobs table not available")
-
+    try:
+        links = [
+            dict(row)
+            for row in storage.list_session_links(session_id, limit=100) or []
+        ]
+    except Exception as exc:
+        links = []
+        errors.append(_storage_error("session links query", exc))
+    jobs, jobs_error = _storage_session_rows(
+        storage,
+        "threat_hunt_jobs",
+        session_id,
+        100,
+    )
+    if jobs_error:
+        errors.append(jobs_error)
     return links, jobs, "; ".join(errors)
 
 
-def _safe_select_campaign_rows(
-    conn: sqlite3.Connection,
+def _storage_campaign_rows(
+    storage: Any,
     session_id: str,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    errors: List[str] = []
-    memberships: List[Dict[str, Any]] = []
-    campaigns: List[Dict[str, Any]] = []
-    if not _table_exists(conn, "campaign_sessions"):
-        return [], [], "campaign_sessions table not available"
     try:
         memberships = [
             dict(row)
-            for row in conn.execute(
-                """
-                SELECT rowid, * FROM campaign_sessions
-                WHERE session_id = ?
-                ORDER BY created_at DESC
-                LIMIT 50
-                """,
-                (session_id,),
-            ).fetchall()
+            for row in storage.list_session_campaigns(session_id, limit=50) or []
         ]
-    except sqlite3.Error as exc:
-        errors.append(f"campaign_sessions query failed: {type(exc).__name__}: {exc}")
-        memberships = []
-
-    campaign_ids = []
-    for row in memberships:
-        campaign_id = str(row.get("campaign_id") or "").strip()
-        if campaign_id and campaign_id not in campaign_ids:
-            campaign_ids.append(campaign_id)
-    if campaign_ids and _table_exists(conn, "campaigns"):
+    except Exception as exc:
+        return [], [], _storage_error("campaign memberships query", exc)
+    campaigns: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    seen = set()
+    for membership in memberships:
+        campaign_id = _text(membership.get("campaign_id"))
+        if not campaign_id or campaign_id in seen:
+            continue
+        seen.add(campaign_id)
         try:
-            placeholders = ",".join("?" for _ in campaign_ids)
-            campaigns = [
-                dict(row)
-                for row in conn.execute(
-                    f"""
-                    SELECT rowid, * FROM campaigns
-                    WHERE campaign_id IN ({placeholders})
-                    ORDER BY updated_at DESC
-                    LIMIT 50
-                    """,
-                    campaign_ids,
-                ).fetchall()
-            ]
-        except sqlite3.Error as exc:
-            errors.append(f"campaigns query failed: {type(exc).__name__}: {exc}")
-            campaigns = []
-    elif campaign_ids:
-        errors.append("campaigns table not available")
+            campaign = storage.get_campaign(campaign_id)
+        except Exception as exc:
+            errors.append(_storage_error(f"campaign {campaign_id} query", exc))
+            continue
+        if campaign:
+            campaigns.append(dict(campaign))
     return memberships, campaigns, "; ".join(errors)
 
 
-def _safe_count(conn: sqlite3.Connection, table: str, where: str = "", params: Tuple[Any, ...] = ()) -> int:
-    if not _table_exists(conn, table):
-        return 0
+def _storage_ip_enrichment_contexts(
+    storage: Any,
+    ips: Iterable[str],
+) -> Tuple[Dict[str, Dict[str, Any]], str]:
     try:
-        sql = f"SELECT COUNT(*) AS count FROM {table}"
-        if where:
-            sql += f" WHERE {where}"
-        row = conn.execute(sql, params).fetchone()
-        return int(row["count"]) if row else 0
-    except sqlite3.Error:
-        return 0
-
-
-def _connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _connect_write(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+        cache = storage.load_enrichment_cache("ip", allow_stale=True)
+    except Exception as exc:
+        return {}, _storage_error("IP enrichment cache query", exc)
+    contexts: Dict[str, Dict[str, Any]] = {}
+    for ip in sorted({str(item).strip() for item in ips if _is_public_ip(item)}):
+        payload = cache.get(ip)
+        if not isinstance(payload, dict):
+            continue
+        context = _extract_geo_context(payload)
+        if context:
+            contexts[ip] = _merge_geo_contexts(
+                context,
+                {
+                    "observable_type": "ip",
+                    "observable_value": ip,
+                    "source": context.get("source") or "enrichment_records",
+                },
+            )
+    return contexts, ""
 
 
 def _session_payload(row: Dict[str, Any]) -> Dict[str, Any]:
-    payload = _json_loads(row.get("payload_json"), {})
+    payload = _payload_from_row(row)
     if not isinstance(payload, dict):
         payload = {}
     payload.setdefault("session_id", row.get("session_id", "unknown"))
@@ -623,12 +759,12 @@ def _session_payload(row: Dict[str, Any]) -> Dict[str, Any]:
 def _report_payload(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not row:
         return {}
-    payload = _json_loads(row.get("payload_json"), {})
+    payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
 
 
 def _event_payload(row: Dict[str, Any]) -> Dict[str, Any]:
-    payload = _json_loads(row.get("payload_json"), {})
+    payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
 
 
@@ -946,52 +1082,13 @@ def _public_ips_from_rows(rows: Iterable[Dict[str, Any]], payload_loader) -> Lis
     return ips
 
 
-def _safe_select_ip_enrichment_contexts(
-    conn: sqlite3.Connection,
-    ips: Iterable[str],
-) -> Tuple[Dict[str, Dict[str, Any]], str]:
-    columns = _columns(conn, "enrichment_records")
-    if not columns:
-        return {}, "enrichment_records table not available"
-    contexts: Dict[str, Dict[str, Any]] = {}
-    errors: List[str] = []
-    for ip in sorted({str(item).strip() for item in ips if _is_public_ip(item)}):
-        try:
-            rows = conn.execute(
-                """
-                SELECT rowid, * FROM enrichment_records
-                WHERE observable_type = 'ip' AND observable_value = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (ip,),
-            ).fetchall()
-        except sqlite3.Error as exc:
-            errors.append(f"{ip}: {type(exc).__name__}: {exc}")
-            continue
-        if not rows:
-            continue
-        row = dict(rows[0])
-        payload = _json_loads(row.get("payload_json"), {})
-        context = _extract_geo_context(payload) if isinstance(payload, dict) else {}
-        if context:
-            context = _merge_geo_contexts(
-                context,
-                {
-                    "observable_type": "ip",
-                    "observable_value": ip,
-                    "updated_at": row.get("updated_at") or "",
-                    "expires_at": row.get("expires_at") or "",
-                    "source": context.get("source") or "enrichment_records",
-                },
-            )
-            contexts[ip] = context
-    return contexts, "; ".join(errors)
-
-
 def _row_with_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(row)
-    payload = _json_loads(item.get("payload_json"), {})
+    payload = (
+        item.get("payload")
+        if isinstance(item.get("payload"), dict)
+        else _json_loads(item.get("payload_json"), {})
+    )
     item.pop("payload_json", None)
     if isinstance(payload, dict):
         item["payload"] = payload
@@ -1011,19 +1108,35 @@ def _row_with_payload(row: Dict[str, Any]) -> Dict[str, Any]:
             geo_from_context = _geo_from_context(geo_context)
             if geo_from_context:
                 item["geo"] = geo_from_context
-    result = _json_loads(item.get("result_json"), {})
+    result = (
+        item.get("result")
+        if isinstance(item.get("result"), dict)
+        else _json_loads(item.get("result_json"), {})
+    )
     item.pop("result_json", None)
     if isinstance(result, dict):
         item["result"] = result
-    provider_status = _json_loads(item.get("provider_status_json"), {})
+    provider_status = (
+        item.get("provider_status")
+        if isinstance(item.get("provider_status"), dict)
+        else _json_loads(item.get("provider_status_json"), {})
+    )
     item.pop("provider_status_json", None)
     if isinstance(provider_status, dict):
         item["provider_status"] = provider_status
-    match_reasons = _json_loads(item.get("match_reasons_json"), [])
+    match_reasons = (
+        item.get("match_reasons")
+        if isinstance(item.get("match_reasons"), list)
+        else _json_loads(item.get("match_reasons_json"), [])
+    )
     item.pop("match_reasons_json", None)
     if isinstance(match_reasons, list):
         item["match_reasons"] = match_reasons
-    confirmed_tactics = _json_loads(item.get("confirmed_tactics_json"), [])
+    confirmed_tactics = (
+        item.get("confirmed_tactics")
+        if isinstance(item.get("confirmed_tactics"), list)
+        else _json_loads(item.get("confirmed_tactics_json"), [])
+    )
     item.pop("confirmed_tactics_json", None)
     if isinstance(confirmed_tactics, list):
         item["confirmed_tactics"] = confirmed_tactics
@@ -1209,166 +1322,39 @@ def _summarize_calibration_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _load_external_seed_health(config: MonitorConfig) -> Dict[str, Any]:
     try:
-        health = load_external_seed_health(
+        health = load_prediction_health(
             config.external_seed_health_path,
             model_path=config.external_seed_model_path,
             validation_path=config.external_seed_validation_path,
             review_path=config.external_seed_review_path,
             include_review=False,
+            mode=str(
+                (config.production_config.prediction_policy or {}).get(
+                    "prediction_mode"
+                )
+                if config.production_config
+                else ""
+            ),
         )
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return {
             "schema_version": "external_seed_health.v1",
             "generated_at": utc_now(),
             "available": False,
-            "warnings": [f"External seed health load failed: {type(exc).__name__}: {exc}"],
+            "warnings": [f"External seed health load failed: {type(exc).__name__}"],
         }
     return health if isinstance(health, dict) else {}
 
 
 def record_analyst_feedback(config: MonitorConfig, feedback: Dict[str, Any]) -> str:
-    payload = normalize_feedback_payload({
-        "session_id": str(feedback.get("session_id") or "").strip(),
-        "snapshot_id": str(feedback.get("snapshot_id") or "").strip(),
-        "label": str(feedback.get("label") or "").strip(),
-        "feedback_type": str(feedback.get("feedback_type") or "").strip(),
-        "evidence_origin": str(feedback.get("evidence_origin") or feedback.get("feedback_origin") or "").strip(),
-        "operator_signal": str(feedback.get("operator_signal") or "").strip(),
-        "action_status": str(feedback.get("action_status") or "").strip(),
-        "correct_next_tactic": str(feedback.get("correct_next_tactic") or "").strip(),
-        "observed_prefix": str(feedback.get("observed_prefix") or "").strip(),
-        "predicted_top_tactic": str(feedback.get("predicted_top_tactic") or "").strip(),
-        "predicted_ranking": str(feedback.get("predicted_ranking") or "").strip(),
-        "smb_decision_id": str(feedback.get("smb_decision_id") or "").strip(),
-        "smb_risk": str(feedback.get("smb_risk") or "").strip(),
-        "smb_top_actions": str(feedback.get("smb_top_actions") or "").strip(),
-        "final_actual_next_tactic": str(feedback.get("final_actual_next_tactic") or "").strip(),
-        "tactic_granularity": str(feedback.get("tactic_granularity") or "tactic").strip() or "tactic",
-        "notes": str(feedback.get("notes") or "").strip(),
-        "created_at": utc_now(),
-        "source": "monitor_web",
-    })
-    if not payload["session_id"]:
-        raise ValueError("session_id is required")
-    if not payload["label"]:
-        raise ValueError("label is required")
+    payload = normalize_submitted_feedback_payload(
+        feedback,
+        source="monitor_web",
+    )
     feedback_id = stable_id("feedback", payload)
     payload["feedback_id"] = feedback_id
-    conn = _connect_write(config.db_path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS analyst_feedback (
-                feedback_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                snapshot_id TEXT,
-                label TEXT NOT NULL,
-                feedback_type TEXT NOT NULL DEFAULT 'operator_usefulness',
-                operator_signal TEXT,
-                action_status TEXT,
-                label_authority TEXT,
-                evidence_confidence REAL,
-                evidence_origin TEXT NOT NULL DEFAULT 'live_cowrie',
-                weight_eligible INTEGER NOT NULL DEFAULT 0,
-                correct_next_tactic TEXT,
-                observed_prefix TEXT,
-                predicted_top_tactic TEXT,
-                predicted_ranking TEXT,
-                final_actual_next_tactic TEXT,
-                tactic_granularity TEXT NOT NULL DEFAULT 'tactic',
-                analyst_corrected_at TEXT,
-                notes TEXT,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        for column, ddl_type in (
-            ("feedback_type", "TEXT NOT NULL DEFAULT 'operator_usefulness'"),
-            ("operator_signal", "TEXT"),
-            ("action_status", "TEXT"),
-            ("label_authority", "TEXT"),
-            ("evidence_confidence", "REAL"),
-            ("evidence_origin", "TEXT NOT NULL DEFAULT 'live_cowrie'"),
-            ("weight_eligible", "INTEGER NOT NULL DEFAULT 0"),
-            ("observed_prefix", "TEXT"),
-            ("predicted_top_tactic", "TEXT"),
-            ("predicted_ranking", "TEXT"),
-            ("final_actual_next_tactic", "TEXT"),
-            ("tactic_granularity", "TEXT NOT NULL DEFAULT 'tactic'"),
-            ("analyst_corrected_at", "TEXT"),
-        ):
-            try:
-                conn.execute(f"ALTER TABLE analyst_feedback ADD COLUMN {column} {ddl_type}")
-            except sqlite3.OperationalError as exc:
-                if "duplicate column name" not in str(exc).lower():
-                    raise
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_analyst_feedback_session
-                ON analyst_feedback(session_id, created_at)
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO analyst_feedback
-            (feedback_id, session_id, snapshot_id, label, feedback_type,
-             operator_signal, action_status, label_authority, evidence_confidence,
-             evidence_origin, weight_eligible, correct_next_tactic,
-             observed_prefix, predicted_top_tactic, predicted_ranking,
-             final_actual_next_tactic, tactic_granularity, analyst_corrected_at,
-             notes, payload_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(feedback_id) DO UPDATE SET
-                session_id=excluded.session_id,
-                snapshot_id=excluded.snapshot_id,
-                label=excluded.label,
-                feedback_type=excluded.feedback_type,
-                operator_signal=excluded.operator_signal,
-                action_status=excluded.action_status,
-                label_authority=excluded.label_authority,
-                evidence_confidence=excluded.evidence_confidence,
-                evidence_origin=excluded.evidence_origin,
-                weight_eligible=excluded.weight_eligible,
-                correct_next_tactic=excluded.correct_next_tactic,
-                observed_prefix=excluded.observed_prefix,
-                predicted_top_tactic=excluded.predicted_top_tactic,
-                predicted_ranking=excluded.predicted_ranking,
-                final_actual_next_tactic=excluded.final_actual_next_tactic,
-                tactic_granularity=excluded.tactic_granularity,
-                analyst_corrected_at=excluded.analyst_corrected_at,
-                notes=excluded.notes,
-                payload_json=excluded.payload_json,
-                created_at=excluded.created_at
-            """,
-            (
-                feedback_id,
-                payload["session_id"],
-                payload["snapshot_id"] or None,
-                payload["label"],
-                payload.get("feedback_type") or "operator_usefulness",
-                payload.get("operator_signal") or None,
-                payload.get("action_status") or None,
-                payload.get("label_authority") or None,
-                payload.get("evidence_confidence") if payload.get("evidence_confidence") not in ("", None) else None,
-                payload.get("evidence_origin") or "live_cowrie",
-                1 if bool(payload.get("weight_eligible")) else 0,
-                payload["correct_next_tactic"] or None,
-                payload["observed_prefix"] or None,
-                payload["predicted_top_tactic"] or None,
-                payload["predicted_ranking"] or None,
-                payload["final_actual_next_tactic"] or None,
-                payload["tactic_granularity"],
-                payload.get("analyst_corrected_at") or None,
-                payload["notes"] or None,
-                json.dumps(payload, sort_keys=True),
-                payload["created_at"],
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return feedback_id
+    stored_id = _open_monitor_storage(config).record_analyst_feedback(payload)
+    return str(stored_id or feedback_id)
 
 
 def _index_by_latest(rows: List[Dict[str, Any]], key: str, time_key: str) -> Dict[str, Dict[str, Any]]:
@@ -1421,29 +1407,94 @@ def _load_report_json_from_artifact(paths: Dict[str, str], reports_dir: str) -> 
 
 def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> Dict[str, str]:
     merged = _merged_report_payload(report_payload, artifact_payload)
+    if merged.get("schema_version") == "session_assessment.v4":
+        findings = [
+            item for item in merged.get("behavioral_findings") or [] if isinstance(item, dict)
+        ]
+        hypothesis_sets = [
+            item for item in merged.get("hypothesis_sets") or [] if isinstance(item, dict)
+        ]
+        canonical_evidence = merged.get("canonical_evidence") or {}
+        coverage = canonical_evidence.get("semantic_coverage") or {}
+        graph = canonical_evidence.get("semantic_graph") or {}
+        return {
+            "schema_version": "session_assessment.v4",
+            "campaign_name": "",
+            "confidence": "Unscored",
+            "confidence_source": "no_global_scoring_in_v4",
+            "analytical_evidence_strength": _text(merged.get("status") or ""),
+            "evidence_strength_reason": (
+                f"{len(findings)} canonical behavioral findings; "
+                f"{len(hypothesis_sets)} falsifiable hypothesis sets"
+            ),
+            "ai_enriched": "false",
+            "analysis_mode": "deterministic_session_assessment_v4",
+            "semantic_coverage": _text(
+                coverage.get("coverage_status") or "unavailable"
+            ),
+            "semantic_omitted_count": _text(
+                coverage.get("omitted_count") or 0
+            ),
+            "semantic_graph_counts": (
+                f"{len(graph.get('evidence_nodes') or [])} evidence / "
+                f"{len(graph.get('fact_nodes') or [])} facts / "
+                f"{len(graph.get('relationship_edges') or [])} relationships / "
+                f"{len(graph.get('chain_nodes') or [])} chains"
+            ),
+            "post_session_follow_on_hypothesis": "; ".join(
+                _text(hypothesis.get("statement"))
+                for hypothesis_set in hypothesis_sets
+                for hypothesis in hypothesis_set.get("hypotheses") or []
+                if isinstance(hypothesis, dict) and _text(hypothesis.get("statement"))
+            ),
+            "summary": "; ".join(
+                _text(item.get("statement")) for item in findings if _text(item.get("statement"))
+            ) or "No policy-supported behavioral finding.",
+        }
+    assessment = merged.get("supported_assessment") or {}
+    follow_on = merged.get("follow_on_hypothesis") or {}
+    presentation = merged.get("presentation") or {}
+    claim_summary = merged.get("claim_evidence_summary") or {}
+    is_v2 = merged.get("schema_version") == "threat_hypothesis.v2"
     threat = merged.get("threat_hypothesis") or {}
     if not isinstance(threat, dict):
         threat = {}
     evidence_strength = threat.get("analytical_evidence_strength") or threat.get("analytical_confidence") or {}
     if not isinstance(evidence_strength, dict):
         evidence_strength = {}
+    canonical_follow_on = "; ".join(
+        _text(item.get("text"))
+        for item in follow_on.get("claims") or []
+        if isinstance(item, dict) and _text(item.get("text"))
+    )
     return {
+        "schema_version": _text(merged.get("schema_version") or "legacy"),
         "campaign_name": _text(merged.get("campaign_name") or merged.get("title") or ""),
-        "confidence": _text(merged.get("confidence") or ""),
+        "confidence": "Unscored" if is_v2 else _text(merged.get("confidence") or ""),
         "confidence_source": _text(merged.get("confidence_source") or ""),
-        "analytical_evidence_strength": _text(evidence_strength.get("level") or ""),
-        "evidence_strength_reason": _text(evidence_strength.get("reason") or ""),
+        "analytical_evidence_strength": _text(
+            assessment.get("assessment_status")
+            if is_v2 else evidence_strength.get("level") or ""
+        ),
+        "evidence_strength_reason": _text(
+            claim_summary.get("description")
+            if is_v2 else evidence_strength.get("reason") or ""
+        ),
         "ai_enriched": _text(merged.get("ai_enriched") if "ai_enriched" in merged else ""),
         "analysis_mode": _text(merged.get("analysis_mode") or ""),
         "post_session_follow_on_hypothesis": _text(
-            threat.get("post_session_follow_on_hypothesis")
+            canonical_follow_on
+            or follow_on.get("abstention_reason")
+            or threat.get("post_session_follow_on_hypothesis")
             or merged.get("post_session_follow_on_hypothesis")
             or threat.get("predicted_next_action")
             or merged.get("predicted_next_action")
             or ""
         ),
         "summary": _text(
-            merged.get("executive_summary")
+            presentation.get("summary")
+            or assessment.get("behavior_summary")
+            or merged.get("executive_summary")
             or merged.get("summary")
             or merged.get("threat_hypothesis")
             or merged.get("hypothesis")
@@ -1455,8 +1506,16 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
 def _render_ai_validation_warnings(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> str:
     merged = _merged_report_payload(report_payload, artifact_payload)
     warnings = merged.get("ai_validation_warnings") or []
+    presentation = merged.get("presentation") or {}
+    vertex_validation = presentation.get("vertex_validation") if isinstance(presentation, dict) else {}
+    if not warnings and isinstance(vertex_validation, dict) and vertex_validation.get("status") == "rejected":
+        return (
+            '<div class="warning-box"><strong>Vertex presentation rejected.</strong> '
+            f'{_html(vertex_validation.get("reason") or "grounding validation failed")}. '
+            'Deterministic canonical claims were retained unchanged.</div>'
+        )
     if not isinstance(warnings, list) or not warnings:
-        return '<div class="empty">No unsupported AI narrative claims were accepted.</div>'
+        return '<div class="empty">No unsupported generated-narrative claims were accepted.</div>'
     rows = []
     for warning in warnings[:20]:
         if not isinstance(warning, dict):
@@ -1475,10 +1534,10 @@ def _render_ai_validation_warnings(report_payload: Dict[str, Any], artifact_payl
             )
         )
     if not rows:
-        return '<div class="empty">AI validation warnings were present but could not be displayed.</div>'
+        return '<div class="empty">Generated-narrative validation warnings were present but could not be displayed.</div>'
     return (
         '<div class="warning-box">'
-        '<strong>AI validation guardrail activated.</strong> These claims were removed or replaced with deterministic fallback text.'
+        '<strong>Non-authoritative narrative guardrail activated.</strong> These claims were removed or replaced with deterministic fallback text.'
         '</div>'
         '<table><thead><tr><th>field</th><th>reason</th><th>removed claim</th></tr></thead><tbody>'
         + "\n".join(rows)
@@ -1654,80 +1713,111 @@ def _report_recommendations(
     session_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     merged = _merged_report_payload(report_payload, artifact_payload)
-    threat = merged.get("threat_hypothesis") or {}
-    if not isinstance(threat, dict):
-        threat = {}
-
-    predicted = _text(
-        threat.get("post_session_follow_on_hypothesis")
-        or merged.get("post_session_follow_on_hypothesis")
-        or threat.get("predicted_next_action")
-        or merged.get("predicted_next_action")
-        or ""
-    )
+    response_guidance = merged.get("response_guidance_v3") or {}
+    if (
+        not isinstance(response_guidance, dict)
+        or response_guidance.get("schema_version") != "response_guidance.v3"
+        or validate_response_guidance_v3(response_guidance)
+    ):
+        response_guidance = {}
     structured_actions = [
-        item for item in (merged.get("recommended_actions_structured") or [])
+        item for item in response_guidance.get("advisory_actions") or []
         if isinstance(item, dict)
     ]
-    trusted_decision = merged.get("trusted_recommendation_decision") or {}
-    if not structured_actions and isinstance(trusted_decision, dict):
-        structured_actions = [
-            item for item in (trusted_decision.get("immediate_actions") or [])
-            if isinstance(item, dict)
-        ]
-    provenance = merged.get("recommendation_provenance") or {}
-    policy_authoritative = (
-        isinstance(provenance, dict)
-        and provenance.get("authority") == "trusted_policy_engine"
-    ) or (
-        isinstance(trusted_decision, dict)
-        and trusted_decision.get("authority") == "trusted_policy_engine"
+    canonical_recommendations = merged.get("recommendations") or {}
+    context_notes = (
+        _as_text_list(canonical_recommendations.get("context_notes"))
+        if isinstance(canonical_recommendations, dict) else []
     )
+    policy_authoritative = response_guidance.get("authority") == "deterministic_observed_evidence_policy"
     recommended_actions = [
-        str(item.get("action") or "").strip()
+        str(item.get("description") or "").strip()
         for item in structured_actions
-        if str(item.get("action") or "").strip()
+        if str(item.get("description") or "").strip()
     ]
-    strategic = _as_text_list(merged.get("strategic_recommendations"))
-    falsification = _as_text_list(
-        threat.get("falsification_conditions")
-        or merged.get("falsification_conditions")
-    )
-    source = "trusted_policy_engine" if policy_authoritative else "policy_unavailable"
+    hypothesis_alternatives = [
+        _text(hypothesis.get("statement"))
+        for hypothesis_set in merged.get("hypothesis_sets") or []
+        if isinstance(hypothesis_set, dict)
+        for hypothesis in hypothesis_set.get("hypotheses") or []
+        if isinstance(hypothesis, dict) and _text(hypothesis.get("statement"))
+    ]
+    falsification = [
+        _text(item)
+        for hypothesis_set in merged.get("hypothesis_sets") or []
+        if isinstance(hypothesis_set, dict)
+        for hypothesis in hypothesis_set.get("hypotheses") or []
+        if isinstance(hypothesis, dict)
+        for item in hypothesis.get("falsification_conditions") or []
+        if _text(item)
+    ]
+    source = response_guidance.get("authority") or "policy_unavailable"
     return {
         "source": source,
-        "post_session_follow_on_hypothesis": predicted,
-        "predicted_next_action": predicted,
+        "hypothesis_alternatives": hypothesis_alternatives,
         "recommended_actions": recommended_actions,
         "recommended_actions_structured": structured_actions,
-        "trusted_recommendation_decision": trusted_decision if isinstance(trusted_decision, dict) else {},
-        "recommendation_provenance": provenance if isinstance(provenance, dict) else {},
+        "response_guidance": copy.deepcopy(response_guidance),
         "policy_authoritative": policy_authoritative,
         "policy_action_count": len(structured_actions),
-        "strategic_recommendations": strategic,
+        "context_notes": context_notes,
         "falsification_conditions": falsification,
-        "rule_based_likely_next_steps": _likely_next_steps(session_payload),
+        "evidence_gaps": [],
+        "external_validation_suggestions": [],
     }
 
 
-def _likely_next_steps(session_payload: Dict[str, Any]) -> List[str]:
-    commands = session_payload.get("commands") or []
-    tactics = {str(t).lower() for t in session_payload.get("tactics") or [] if t}
-    if not commands:
-        return ["Likely scanner/no-command session. Keep for volume tracking, but no post-compromise behavior was observed."]
+def _historical_response_guidance_payload(report_payload: Any) -> Dict[str, Any]:
+    """Return stored v3 guidance without recomputation.
 
-    steps = []
-    if {"discovery", "credential-access"}.issubset(tactics):
-        steps.append("Likely reconnaissance has moved into credential interest; possible next steps include payload download or persistence setup.")
-    if {"command-and-control", "execution"}.issubset(tactics):
-        steps.append("Command-and-control plus execution suggests possible persistence, staging, or defense evasion activity.")
-    if "defense-evasion" in tactics:
-        steps.append("Defense evasion is present; possible next steps include log cleanup, hiding activity, or removing command history.")
-    if "execution" in tactics and "command-and-control" not in tactics:
-        steps.append("Execution is present; watch for follow-on download, privilege checks, or persistence commands.")
-    if not steps:
-        steps.append("No strong follow-on pattern yet. Continue watching for download, persistence, credential, or cleanup commands.")
-    return steps
+    Old v1/v2 records are adapted as non-actionable, read-only historical
+    evidence rather than being re-evaluated or promoted to v3 tasks.
+    """
+
+    if not isinstance(report_payload, dict):
+        return {}
+    stored = report_payload.get("response_guidance_v3")
+    if isinstance(stored, dict) and stored.get("schema_version") == "response_guidance.v3":
+        validation_errors = validate_response_guidance_v3(stored)
+        if validation_errors:
+            return {
+                "schema_version": "response_guidance_legacy_adapter.v1",
+                "status": "invalid_stored_guidance",
+                "semantics": (
+                    "Stored response guidance failed current whole-contract "
+                    "validation and is non-actionable."
+                ),
+                "source_schema_version": "response_guidance.v3",
+                "advisory_actions": [],
+                "validation_error_count": len(validation_errors),
+                "recomputed": False,
+                "authoritative_for_new_actions": False,
+            }
+        guidance = copy.deepcopy(stored)
+    else:
+        legacy = report_payload.get("response_guidance_v2") or report_payload.get("trusted_recommendation_decision")
+        if not isinstance(legacy, dict):
+            return {}
+        guidance = read_legacy_response_guidance(legacy)
+    guidance["presentation_semantics"] = {
+        "mode": "point_in_time_stored_decision",
+        "historical_record": True,
+        "replaces_stored_historical_guidance": False,
+        "description": (
+            "Stored with the historical report and displayed without current-policy recomputation."
+        ),
+    }
+    return guidance
+
+
+def _historical_decision_payload(report_payload: Any) -> Dict[str, Any]:
+    """Compatibility reader for callers using the former helper name.
+
+    It returns the same read-only v3/legacy-adapter payload and performs no
+    decision evaluation.
+    """
+
+    return _historical_response_guidance_payload(report_payload)
 
 
 def _summarize_session(
@@ -1802,7 +1892,11 @@ def _session_overview(session: Dict[str, Any]) -> Dict[str, Any]:
         "client_version": payload.get("client_version") or "",
         "hassh": payload.get("hassh") or "",
         "ja3": payload.get("ja3") or "",
-        "command_count": len(payload.get("commands") or []),
+        "command_count": (
+            session.get("command_count")
+            if isinstance(session.get("command_count"), int)
+            else len(payload.get("commands") or [])
+        ),
         "commands": payload.get("commands") or [],
         "tactics": payload.get("tactics") or [],
         "ttps": payload.get("ttps") or [],
@@ -1848,32 +1942,88 @@ def _session_observables(payload: Dict[str, Any], session_id: str) -> List[Tuple
     return observables
 
 
-def load_session_detail(config: MonitorConfig, session_id: str) -> Dict[str, Any]:
+def load_session_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
     if not session_id:
         return {"ok": False, "error": "session_id is required", "timestamp": utc_now()}
-    if not Path(config.db_path).exists():
-        return {"ok": False, "error": f"SQLite database not found: {config.db_path}", "timestamp": utc_now()}
     try:
-        conn = _connect(config.db_path)
-    except sqlite3.Error as exc:
-        return {"ok": False, "error": f"SQLite open failed: {type(exc).__name__}: {exc}", "timestamp": utc_now()}
+        storage = _storage or _open_monitor_storage(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": _storage_error("storage open", exc),
+            "session_id": session_id,
+            "timestamp": utc_now(),
+        }
 
-    try:
-        session_rows, session_error = _safe_select_session_rows(conn, "sessions", session_id, 1, ["updated_at", "start_time"])
-        payload_for_observables = _session_payload(session_rows[0]) if session_rows else {}
-        observables = _session_observables(payload_for_observables, session_id)
-        job_rows, jobs_error = _safe_select_session_rows(conn, "analysis_jobs", session_id, 50, ["updated_at", "created_at"])
-        report_rows, reports_error = _safe_select_session_rows(conn, "reports", session_id, 50, ["created_at"])
-        event_rows, events_error = _safe_select_session_rows(conn, "events", session_id, MAX_SESSION_EVENTS, ["received_at", "timestamp"])
-        alert_rows, alerts_error = _safe_select_session_rows(conn, "alerts", session_id, 50, ["created_at"])
-        prediction_rows, predictions_error = _safe_select_session_rows(conn, "prediction_snapshots", session_id, 50, ["created_at"])
-        feedback_rows, feedback_error = _safe_select_session_rows(conn, "analyst_feedback", session_id, 50, ["created_at"])
-        sighting_rows, related_sighting_rows, sightings_error = _safe_select_observable_sightings(conn, session_id, observables)
-        session_link_rows, threat_hunt_job_rows, threat_hunt_error = _safe_select_session_links(conn, session_id)
-        campaign_membership_rows, campaign_rows, campaigns_error = _safe_select_campaign_rows(conn, session_id)
-        enrichment_record_rows, enrichment_job_rows, enrichment_error = _safe_select_enrichment_rows(conn, session_id, observables)
-    finally:
-        conn.close()
+    session_rows, session_error = _storage_session_rows(
+        storage,
+        "sessions",
+        session_id,
+        1,
+    )
+    payload_for_observables = _session_payload(session_rows[0]) if session_rows else {}
+    observables = _session_observables(payload_for_observables, session_id)
+    job_rows, jobs_error = _storage_session_rows(
+        storage,
+        "analysis_jobs",
+        session_id,
+        50,
+    )
+    report_rows, reports_error = _storage_session_rows(
+        storage,
+        "reports",
+        session_id,
+        50,
+    )
+    event_rows, events_error = _storage_session_rows(
+        storage,
+        "events",
+        session_id,
+        MAX_SESSION_EVENTS,
+    )
+    alert_rows, alerts_error = _storage_session_rows(
+        storage,
+        "alerts",
+        session_id,
+        50,
+    )
+    prediction_rows, predictions_error = _storage_session_rows(
+        storage,
+        "prediction_snapshots",
+        session_id,
+        50,
+    )
+    feedback_rows, feedback_error = _storage_session_rows(
+        storage,
+        "analyst_feedback",
+        session_id,
+        50,
+    )
+    (
+        sighting_rows,
+        related_sighting_rows,
+        sightings_error,
+    ) = _storage_observable_sightings(storage, session_id, observables)
+    (
+        session_link_rows,
+        threat_hunt_job_rows,
+        threat_hunt_error,
+    ) = _storage_session_links_and_jobs(storage, session_id)
+    (
+        campaign_membership_rows,
+        campaign_rows,
+        campaigns_error,
+    ) = _storage_campaign_rows(storage, session_id)
+    (
+        enrichment_record_rows,
+        enrichment_job_rows,
+        enrichment_error,
+    ) = _storage_enrichment_rows(storage, session_id, observables)
 
     if not session_rows:
         return {
@@ -1886,6 +2036,9 @@ def load_session_detail(config: MonitorConfig, session_id: str) -> Dict[str, Any
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
+    # Event rows are the durable source of command evidence. The session
+    # payload may have no denormalized ``commands`` list after ingestion.
+    selected["command_count"] = count_command_events(event_rows)
     payload = selected["payload"]
     decoded_enrichment_records = [_row_with_payload(row) for row in enrichment_record_rows]
     src_ip = payload.get("src_ip") or selected.get("src_ip")
@@ -1909,16 +2062,19 @@ def load_session_detail(config: MonitorConfig, session_id: str) -> Dict[str, Any
     artifact_payload = _load_report_json_from_artifact(artifact_paths, config.reports_dir)
     latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
     report_recommendations = _report_recommendations(report_payload, artifact_payload, payload)
-    smb_decision: Dict[str, Any] = {}
-    if config.enable_smb_decisions:
-        smb_decision = build_smb_decision_from_paths(
-            session_payload=payload,
-            prediction_snapshot=latest_prediction,
+    current_policy_reevaluation: Dict[str, Any] = {}
+    if config.enable_response_guidance:
+        current_policy_reevaluation = _current_decision_payload(
+            config,
+            storage,
+            session_id,
+            latest_prediction,
             report_recommendations=report_recommendations,
-            asset_profile_path=config.smb_asset_profile_path,
-            action_policy_path=config.smb_action_policy_path,
-            mitre_attack_path=config.mitre_attack_path,
         )
+    historical_response_guidance = _historical_response_guidance_payload(
+        _merged_report_payload(report_payload, artifact_payload)
+    )
+    primary_response_guidance = historical_response_guidance or current_policy_reevaluation
     detail = {
         "ok": True,
         "timestamp": utc_now(),
@@ -1927,7 +2083,6 @@ def load_session_detail(config: MonitorConfig, session_id: str) -> Dict[str, Any
         "source_geo": selected.get("geo") or (_extract_geo(payload) if selected.get("src_ip_is_public") else {}),
         "source_geo_context": selected.get("source_geo_context") or selected.get("geo_context") or {},
         "observables": [{"type": t, "value": v} for t, v in _session_observables(payload, session_id)],
-        "likely_next_steps": _likely_next_steps(payload),
         "commands": payload.get("commands") or [],
         "classification_events": payload.get("classification_events") or [],
         "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
@@ -1956,7 +2111,19 @@ def load_session_detail(config: MonitorConfig, session_id: str) -> Dict[str, Any
         "reports": [_row_with_payload(row) for row in report_rows],
         "report_summary": _report_summary(report_payload, artifact_payload),
         "report_recommendations": report_recommendations,
-        "smb_decision": smb_decision,
+        "response_guidance": primary_response_guidance,
+        "historical_response_guidance": historical_response_guidance,
+        "current_policy_reevaluation": current_policy_reevaluation,
+        "response_guidance_semantics": {
+            "primary": (
+                "point_in_time_stored_guidance"
+                if historical_response_guidance
+                else "current_policy_reevaluation"
+            ),
+            "historical_available": bool(historical_response_guidance),
+            "current_reevaluation_available": bool(current_policy_reevaluation),
+            "current_reevaluation_replaces_historical": False,
+        },
         "report_artifacts": artifact_paths,
         "errors": {
             "jobs": jobs_error,
@@ -1974,16 +2141,107 @@ def load_session_detail(config: MonitorConfig, session_id: str) -> Dict[str, Any
     return _sanitize_public(detail)
 
 
+def load_ai_advisory_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Load the separate non-authoritative AI record, never the v4 report."""
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {
+            "ok": False,
+            "error": "session_id is required",
+            "timestamp": utc_now(),
+        }
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        report = storage.get_current_report_for_session(clean_session_id)
+        if not report:
+            return {
+                "ok": True,
+                "status": "not_available",
+                "session_id": clean_session_id,
+                "advisory": {},
+                "timestamp": utc_now(),
+            }
+        report_id = str(report.get("report_id") or "")
+        report_payload = (
+            report.get("payload") if isinstance(report.get("payload"), dict) else {}
+        )
+        assessment_id = str(report_payload.get("assessment_id") or "")
+        if not report_id or not assessment_id:
+            raise ValueError("current canonical report identity is invalid")
+        row = storage.get_ai_advisory_for_report(report_id, assessment_id)
+        outbox = storage.get_ai_advisory_outbox_for_report(report_id, assessment_id)
+        older = storage.get_ai_advisory_for_session(clean_session_id)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "error": _storage_error("AI advisory read", exc),
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+    if not row:
+        outbox_status = str((outbox or {}).get("status") or "")
+        if outbox_status in {"queued", "retry", "running"}:
+            state = "pending"
+        elif outbox_status == "failed":
+            state = "failed"
+        elif older:
+            state = "superseded"
+        else:
+            state = "unavailable"
+        return {
+            "ok": True,
+            "status": state,
+            "session_id": clean_session_id,
+            "report_id": report_id,
+            "assessment_id": assessment_id,
+            "advisory": {},
+            "timestamp": utc_now(),
+        }
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    return {
+        "ok": True,
+        "status": str(row.get("status") or "unavailable"),
+        "session_id": clean_session_id,
+        "advisory_id": str(row.get("advisory_id") or ""),
+        "report_id": str(row.get("report_id") or ""),
+        "assessment_id": str(row.get("assessment_id") or ""),
+        "advisory": {
+            "schema_version": payload.get("schema_version"),
+            "status": payload.get("status"),
+            "authority": payload.get("authority"),
+            "validation": payload.get("validation") or {},
+            "rendered_advisory": payload.get("rendered_advisory") or {},
+            "shadow_candidates": payload.get("shadow_candidates") or {
+                "schema_version": "ai_shadow_candidate_set.v1",
+                "candidates": [],
+            },
+            "safety": payload.get("safety") or {},
+            "provenance": payload.get("provenance") or {},
+        },
+        "metrics": row.get("metrics") or {},
+        "timestamp": utc_now(),
+    }
+
+
 def load_snapshot(
     config: MonitorConfig,
     selected_session_id: str = "",
     session_limit: int = DEFAULT_SESSION_LIMIT,
     session_offset: int = 0,
 ) -> Dict[str, Any]:
-    if not Path(config.db_path).exists():
+    try:
+        storage = _open_monitor_storage(config)
+    except Exception as exc:
         return {
             "ok": False,
-            "error": f"SQLite database not found: {config.db_path}",
+            "error": _storage_error("storage open", exc),
             "sessions": [],
             "selected": None,
             "events": [],
@@ -1992,41 +2250,83 @@ def load_snapshot(
             "timestamp": utc_now(),
         }
 
+    session_limit = min(max(int(session_limit), 1), MAX_SESSIONS)
+    session_offset = max(int(session_offset), 0)
     try:
-        conn = _connect(config.db_path)
-    except sqlite3.Error as exc:
-        return {
-            "ok": False,
-            "error": f"SQLite open failed: {type(exc).__name__}: {exc}",
-            "sessions": [],
-            "selected": None,
-            "events": [],
-            "events_error": "events table not available",
-            "summary": {},
-            "timestamp": utc_now(),
-        }
-
-    try:
-        session_limit = min(max(int(session_limit), 1), MAX_SESSIONS)
-        session_offset = max(int(session_offset), 0)
-        session_rows, sessions_error = _safe_select_rows(conn, "sessions", session_limit, ["updated_at", "start_time"], offset=session_offset)
-        job_rows, _ = _safe_select_rows(conn, "analysis_jobs", 500, ["updated_at", "created_at"])
-        report_rows, _ = _safe_select_rows(conn, "reports", 500, ["created_at"])
-        event_rows, events_error = _safe_select_rows(conn, "events", MAX_EVENTS, ["received_at", "timestamp"])
-        backtest_rows, backtests_error = _safe_select_rows(conn, "prediction_backtest_runs", 10, ["created_at"])
-        calibration_rows, calibration_error = _safe_select_rows(conn, "prediction_calibration_runs", 10, ["created_at"])
-        feedback_rows, feedback_error = _safe_select_rows(conn, "analyst_feedback", 500, ["created_at"])
-        classification_review_rows, classification_review_error = _safe_select_rows(conn, "classification_review_labels", 500, ["created_at"])
-        public_ips = _public_ips_from_rows(session_rows, _session_payload)
-        for ip in _public_ips_from_rows(event_rows, _event_payload):
-            if ip not in public_ips:
-                public_ips.append(ip)
-        ip_geo_contexts, ip_geo_context_error = _safe_select_ip_enrichment_contexts(conn, public_ips)
-        total_sessions = _safe_count(conn, "sessions")
-        succeeded_reports = _safe_count(conn, "reports")
-        queued_jobs = _safe_count(conn, "analysis_jobs", "status IN ('queued', 'running', 'retry')")
-    finally:
-        conn.close()
+        all_session_rows = [
+            dict(row)
+            for row in storage.list_session_rows(
+                limit=max(
+                    MONITOR_SUMMARY_SCAN_LIMIT,
+                    session_offset + session_limit,
+                ),
+                session_source=None,
+                external_only=False,
+            )
+            or []
+        ]
+        sessions_error = ""
+    except Exception as exc:
+        all_session_rows = []
+        sessions_error = _storage_error("sessions query", exc)
+    session_rows = all_session_rows[
+        session_offset : session_offset + session_limit
+    ]
+    all_job_rows, _jobs_error = _storage_list_rows(
+        storage,
+        "analysis_jobs",
+        MONITOR_SUMMARY_SCAN_LIMIT,
+    )
+    job_rows = all_job_rows[:500]
+    all_report_rows, _reports_error = _storage_list_rows(
+        storage,
+        "reports",
+        MONITOR_SUMMARY_SCAN_LIMIT,
+    )
+    report_rows = all_report_rows[:500]
+    event_rows, events_error = _storage_list_rows(
+        storage,
+        "events",
+        MAX_EVENTS,
+    )
+    backtest_rows, backtests_error = _storage_list_rows(
+        storage,
+        "prediction_backtest_runs",
+        10,
+    )
+    calibration_rows, calibration_error = _storage_list_rows(
+        storage,
+        "prediction_calibration_runs",
+        10,
+    )
+    feedback_rows, feedback_error = _storage_list_rows(
+        storage,
+        "analyst_feedback",
+        500,
+    )
+    (
+        classification_review_rows,
+        classification_review_error,
+    ) = _storage_list_rows(
+        storage,
+        "classification_review_labels",
+        500,
+    )
+    public_ips = _public_ips_from_rows(session_rows, _session_payload)
+    for ip in _public_ips_from_rows(event_rows, _event_payload):
+        if ip not in public_ips:
+            public_ips.append(ip)
+    (
+        ip_geo_contexts,
+        ip_geo_context_error,
+    ) = _storage_ip_enrichment_contexts(storage, public_ips)
+    total_sessions = len(all_session_rows)
+    succeeded_reports = len(all_report_rows)
+    queued_jobs = sum(
+        1
+        for row in all_job_rows
+        if _text(row.get("status")).lower() in {"queued", "running", "retry"}
+    )
 
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
@@ -2102,7 +2402,15 @@ def load_snapshot(
                 break
     if not selected and sessions:
         selected = sessions[0]
-    selected_detail = load_session_detail(config, selected["session_id"]) if selected else {}
+    selected_detail = (
+        load_session_detail(
+            config,
+            selected["session_id"],
+            _storage=storage,
+        )
+        if selected
+        else {}
+    )
     feedback_decoded = [_row_with_payload(row) for row in feedback_rows]
     feedback_review = build_feedback_review(feedback_decoded)
 
@@ -2917,13 +3225,13 @@ def _render_cross_session_hunting(detail: Dict[str, Any]) -> str:
                 f"<td>{_html(row.get('attempts') or 0)}</td>"
                 f"<td>{_html(result.get('related_session_count') if result else '-')}</td>"
                 f"<td>{_html(result.get('links_created') if result else '-')}</td>"
-                f"<td>{_html(result.get('alerts_created') if result else '-')}</td>"
+                f"<td>{_html(result.get('signals_created') if result else '-')}</td>"
                 f"<td>{_html(row.get('updated_at') or '-')}</td>"
                 f"<td>{_html(row.get('error') or '')}</td>"
                 "</tr>"
             )
         parts.append(
-            "<table><thead><tr><th>status</th><th>type</th><th>value</th><th>attempts</th><th>related</th><th>links</th><th>alerts</th><th>updated</th><th>error</th></tr></thead><tbody>"
+            "<table><thead><tr><th>status</th><th>type</th><th>value</th><th>attempts</th><th>related</th><th>links</th><th>observational signals</th><th>updated</th><th>error</th></tr></thead><tbody>"
             + "\n".join(rows)
             + "</tbody></table>"
         )
@@ -2953,7 +3261,16 @@ def _render_campaign_panel(detail: Dict[str, Any]) -> str:
             ("prior_other_sessions", summary.get("prior_other_session_count")),
             ("max_severity", summary.get("max_confirmed_severity")),
             ("primary_fingerprint", f"{fingerprint.get('primary_fingerprint_type') or '-'}:{fingerprint.get('primary_fingerprint_value') or '-'}"),
-            ("known_actor_alert", summary.get("known_actor_return_alert_id") or "-"),
+            (
+                "correlation_signal",
+                summary.get("correlation_signal_id")
+                or (
+                    "historical legacy alert: "
+                    + str(summary.get("known_actor_return_alert_id"))
+                    if summary.get("known_actor_return_alert_id")
+                    else "-"
+                ),
+            ),
         ):
             parts.append(f'<div class="kv"><span>{_html(label)}</span><strong>{_html(value if value not in (None, "") else "-")}</strong></div>')
         parts.append("</div>")
@@ -3013,7 +3330,7 @@ def _render_raw_api_panel(detail: Dict[str, Any]) -> str:
         return '<div class="empty">No API detail available.</div>'
     session_id = detail.get("session_id", "")
     api_url = f"/api/session?{urlencode({'session_id': session_id})}"
-    payload = json.dumps(detail, indent=2, sort_keys=True)
+    payload = json.dumps(public_payload(detail), indent=2, sort_keys=True)
     return (
         f'<p>JSON API: <a href="{_html(api_url)}">{_html(api_url)}</a></p>'
         f'<details><summary>Full sanitized session detail JSON</summary><pre>{_html(payload)}</pre></details>'
@@ -3180,6 +3497,7 @@ def _render_alerts_panel(detail: Dict[str, Any]) -> str:
         rows.append(
             "<tr>"
             f"<td>{_html(alert.get('created_at') or payload.get('created_at') or '-')}</td>"
+            "<td>historical/legacy</td>"
             f"<td>{_html(alert_type)}</td>"
             f"<td>{_badge(str(severity).lower())}</td>"
             f"<td>{_html(predicted_tactic)}</td>"
@@ -3193,7 +3511,8 @@ def _render_alerts_panel(detail: Dict[str, Any]) -> str:
             "</details>"
         )
     return (
-        "<table><thead><tr><th>created_at</th><th>type</th><th>severity</th><th>predicted tactic</th><th>reason</th><th>snapshot</th></tr></thead><tbody>"
+        '<p class="muted">Stored alert rows are historical legacy records. Current policy prohibits automatic alert creation and external delivery.</p>'
+        "<table><thead><tr><th>created_at</th><th>authority</th><th>type</th><th>severity</th><th>predicted tactic</th><th>reason</th><th>snapshot</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table>"
         + "<h3>Alert Payloads</h3>"
@@ -3248,6 +3567,7 @@ def _classification_quality_warnings(classification_quality: Dict[str, Any]) -> 
 def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     if not detail or not detail.get("ok"):
         return '<div class="empty">No selected session.</div>'
+    detail = public_payload(detail)
     latest = detail.get("latest_prediction_snapshot") or {}
     payload = latest.get("payload") or {}
     if not payload:
@@ -3255,16 +3575,84 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         suffix = f" {_html(error)}" if error else ""
         return f'<div class="empty">No prediction snapshot recorded for this session yet.{suffix}</div>'
 
+    if payload.get("prediction_mode") == "professor_approved_corrected_target_transformer_poc":
+        model = payload.get("active_model") or {}
+        output = payload.get("next_behavior_output") or {}
+        runtime = payload.get("runtime") or {}
+        status = payload.get("prediction_status") or "model_unavailable"
+        rows = [
+            ("snapshot_role", "primary experimental PoC forecast"),
+            (
+                "snapshot_id",
+                payload.get("snapshot_id") or latest.get("snapshot_id") or "-",
+            ),
+            ("snapshot_sha256", payload.get("snapshot_sha256") or "-"),
+            ("target_contract", payload.get("prediction_contract") or "-"),
+            ("status", status),
+            ("status_reason", payload.get("prediction_status_reason") or "-"),
+            ("model_type", model.get("model_type") or "-"),
+            ("checkpoint_sha256", model.get("checkpoint_sha256") or "-"),
+            ("seed", model.get("seed")),
+            ("vocabulary_sha256", model.get("vocabulary_sha256") or "-"),
+            ("preprocessing_sha256", model.get("preprocessing_sha256") or "-"),
+            ("outcome_type", output.get("outcome_type") or "-"),
+            ("prediction_set", _format_list(output.get("prediction_set") or [], limit=14)),
+            ("inference_latency_ms", runtime.get("inference_latency_ms")),
+            ("authority", "advisory / non-authoritative"),
+            ("original_selection_status", payload.get("original_selection_status") or "-"),
+        ]
+        meta = '<div class="overview-grid prediction-meta">' + "\n".join(
+            f'<div class="kv"><span>{_html(label)}</span><strong>{_html(value if value not in (None, "") else "-")}</strong></div>'
+            for label, value in rows
+        ) + "</div>"
+        warning = (
+            '<div class="warning"><strong>Experimental PoC:</strong> '
+            + _html(
+                payload.get("deployment_decision")
+                or "This statistical forecast is advisory and cannot authorize alerts, hypotheses, guidance, recommendations, or actions."
+            )
+            + "</div>"
+        )
+        ranked = output.get("ranked_tactics") or []
+        if ranked and status == "predicted":
+            table_rows = "\n".join(
+                "<tr>"
+                f"<td class=\"num\">{_html(item.get('rank'))}</td>"
+                f"<td><strong>{_html(item.get('tactic'))}</strong></td>"
+                f"<td class=\"num\">{_html(item.get('calibrated_probability'))}</td>"
+                f"<td class=\"num\">{_html(item.get('raw_score'))}</td>"
+                "</tr>"
+                for item in ranked
+                if isinstance(item, dict)
+            )
+            body = (
+                "<table><thead><tr><th>#</th><th>tactic</th>"
+                "<th>calibrated probability</th><th>raw logit</th></tr></thead><tbody>"
+                + table_rows
+                + "</tbody></table>"
+            )
+        else:
+            body = (
+                f'<div class="empty">Transformer forecast {_html(status)}: '
+                f'{_html(payload.get("prediction_status_reason") or "unavailable")}</div>'
+            )
+        return warning + meta + body
+
     ranking = payload.get("final_ranking") or []
+    prediction_status = str(payload.get("prediction_status") or ("predicted" if ranking else "abstained"))
+    prediction_status_reason = str(payload.get("prediction_status_reason") or "")
     features = payload.get("features") or {}
     engine = payload.get("engine") or {}
     weights = payload.get("weights") or {}
     effective_weights = payload.get("effective_weights") or {}
+    weight_influence_scope = str(payload.get("weight_influence_scope") or "")
     active_weights = payload.get("active_weights") or {}
     external_weight_policy = payload.get("external_seed_weight_policy") or {}
     coverage = payload.get("coverage") or {}
     damping = payload.get("confidence_damping") or {}
     maturity = payload.get("model_maturity") or {}
+    local_maturity = maturity.get("local_shadow") if isinstance(maturity.get("local_shadow"), dict) else maturity
+    authority_maturity = maturity.get("authority") if isinstance(maturity.get("authority"), dict) else {}
     local_model = payload.get("local_transition_model") or {}
     external_seed = payload.get("external_seed_model") or {}
     classification_quality = payload.get("classification_quality") or {}
@@ -3274,10 +3662,15 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     agreement = payload.get("agreement") or {}
     trigger = payload.get("prediction_trigger") or {}
     predictive_alert = payload.get("predictive_alert") or {}
+    external_artifact = payload.get("external_artifact") or {}
+    generic_prior = payload.get("generic_progression_prior") or {}
+    local_shadow = payload.get("local_shadow_prediction") or {}
     rows = [
         ("snapshot_role", "current prediction"),
         ("snapshot_id", payload.get("snapshot_id") or latest.get("snapshot_id") or "-"),
         ("generated_at", payload.get("generated_at") or latest.get("created_at") or "-"),
+        ("prediction_status", prediction_status),
+        ("prediction_status_reason", prediction_status_reason or "-"),
         ("engine", f"{engine.get('name', 'unknown')} {engine.get('version', '')}".strip()),
         ("session_status", payload.get("session_status") or "-"),
         ("event_id", payload.get("event_id") or "-"),
@@ -3294,18 +3687,33 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         ("trust_status", trust_status.get("status") or "-"),
         ("evidence_posture", trust_status.get("evidence_posture") or "-"),
         ("dominant_source", trust_status.get("dominant_source") or "-"),
-        ("local_model_maturity", maturity.get("maturity") or "-"),
-        ("local_transition_sessions", maturity.get("local_transition_sessions")),
-        ("local_transition_transitions", maturity.get("local_transition_transitions")),
+        ("authority_model_maturity", authority_maturity.get("maturity") or "-"),
+        ("local_shadow_maturity", local_maturity.get("maturity") or "-"),
+        ("local_transition_sessions", local_maturity.get("local_transition_sessions")),
+        ("local_transition_transitions", local_maturity.get("local_transition_transitions")),
         ("local_model_id", local_model.get("model_id") or "-"),
-        ("local_model_source", local_model.get("source_database") or "-"),
+        (
+            "local_model_source",
+            _sanitize_public(
+                local_model.get("source_database") or "-",
+                "source_database",
+            ),
+        ),
         ("local_recency_decay_half_life", local_model.get("recency_decay_half_life_sessions")),
-        ("prior_dominated", maturity.get("prior_dominated")),
+        ("local_prior_dominated", local_maturity.get("prior_dominated")),
         ("external_seed_enabled", external_seed.get("enabled")),
         ("external_seed_sessions", external_seed.get("usable_sessions")),
         ("external_seed_transitions", external_seed.get("transition_count")),
         ("external_seed_source", external_seed.get("dataset_handle") or external_seed.get("source_type") or "-"),
         ("external_seed_model_id", external_seed.get("model_id") or "-"),
+        ("external_artifact_status", external_artifact.get("status") or "-"),
+        ("external_artifact_model_id", external_artifact.get("model_id") or "-"),
+        ("external_artifact_manifest_id", external_artifact.get("manifest_id") or "-"),
+        ("external_artifact_sha256", external_artifact.get("artifact_sha256") or "-"),
+        ("external_artifact_context", payload.get("transition_context") or "-"),
+        ("external_artifact_support", payload.get("evidence_count")),
+        ("local_shadow_status", local_shadow.get("status") or "-"),
+        ("generic_progression_prior", "offline planning only" if generic_prior else "-"),
         ("external_seed_decay", f"{external_weight_policy.get('maturity', '-')} x{external_weight_policy.get('multiplier', '-')}"),
         ("external_seed_effective_weight", external_weight_policy.get("effective_weight")),
         ("classification_validation", classification_quality.get("validation_status") or "-"),
@@ -3317,6 +3725,7 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         ("calibration", calibration_status.get("status") or "-"),
         ("calibration_ready_bins", f"{calibration_status.get('ready_bin_count', 0)}/{calibration_status.get('bin_count', 0)}"),
         ("weight_calibration", weight_calibration.get("status") or "-"),
+        ("weight_influence_scope", weight_influence_scope or "-"),
         ("weight_calibration_run", weight_calibration.get("run_id") or "-"),
         ("scorer_disagreement", agreement.get("disagreement")),
         ("divergent_scorers", _format_list(agreement.get("divergent_scorers") or [], limit=8)),
@@ -3328,8 +3737,8 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         for label, value in rows
     ) + "</div>"
     warning_parts = []
-    if maturity.get("warning"):
-        warning_parts.append(f'<div class="warning"><strong>Model maturity:</strong> {_html(maturity.get("warning"))}</div>')
+    if local_maturity.get("warning"):
+        warning_parts.append(f'<div class="warning"><strong>Local shadow model:</strong> {_html(local_maturity.get("warning"))}</div>')
     if external_seed.get("warning"):
         warning_parts.append(f'<div class="warning"><strong>External seed:</strong> {_html(external_seed.get("warning"))}</div>')
     if agreement.get("warning"):
@@ -3369,7 +3778,8 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
             + "</tbody></table>"
         )
     else:
-        ranking_html = '<div class="empty">Prediction engine returned no ranked hypotheses for this state.</div>'
+        label = "model unavailable" if prediction_status == "model_unavailable" else "explicitly abstained"
+        ranking_html = f'<div class="empty">External hard-backoff VOMM {label}: {_html(prediction_status_reason or "no empirically supported context")}</div>'
 
     scorer_outputs = payload.get("scorer_outputs") or {}
     scorer_sections = []
@@ -3411,6 +3821,15 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         f'<span class="chip">{_html(name)}={_html(weight)}</span>'
         for name, weight in sorted(effective_weights.items())
     ) + "</div>"
+    prior_items = generic_prior.get("tactics") if isinstance(generic_prior, dict) else []
+    prior_html = (
+        '<div class="empty">No generic progression prior applies.</div>'
+        if not prior_items else
+        '<div class="weights">' + " ".join(
+            f'<span class="chip">{_html(item.get("ordinal"))}. {_html(item.get("tactic"))}</span>'
+            for item in prior_items if isinstance(item, dict)
+        ) + '</div>'
+    )
 
     commands = features.get("commands") or []
     command_rows = "\n".join(
@@ -3458,10 +3877,22 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         + warnings_html
         + "<h3>Ranked Next-Step Hypotheses</h3>"
         + ranking_html
+        + "<h3>Generic Progression Prior (Non-empirical, Offline Planning Only)</h3>"
+        + prior_html
         + why_html
-        + "<h3>Configured Weights</h3>"
+        + (
+            "<h3>Configured Weights (Diagnostic Baseline Only)</h3>"
+            if weight_influence_scope == "diagnostic_only"
+            else "<h3>Configured Production Weights</h3>"
+            if weight_influence_scope == "production_ranking"
+            else "<h3>Weights (Not Applicable to External-Only Authority)</h3>"
+        )
         + weights_html
-        + "<h3>Effective Weights After Maturity Policy</h3>"
+        + (
+            "<h3>Effective Diagnostic Weights After Maturity Policy</h3>"
+            if weight_influence_scope == "diagnostic_only"
+            else "<h3>Effective Production Weights After Maturity Policy</h3>"
+        )
         + effective_weights_html
         + "<h3>Normalized Active Weights</h3>"
         + active_weights_html
@@ -3470,7 +3901,10 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     )
 
 
-def _render_feedback_panel(detail: Dict[str, Any]) -> str:
+def _render_feedback_panel(
+    detail: Dict[str, Any],
+    allow_feedback: bool = True,
+) -> str:
     if not detail or not detail.get("ok"):
         return '<div class="empty">No selected session.</div>'
     session_id = detail.get("session_id") or ""
@@ -3483,12 +3917,12 @@ def _render_feedback_panel(detail: Dict[str, Any]) -> str:
     predicted_top_tactic = str((ranking[0] or {}).get("tactic") or "") if ranking else ""
     predicted_ranking = json.dumps(_compact_prediction_ranking(ranking), sort_keys=True)
     rows = detail.get("analyst_feedback") or []
-    smb_decision = detail.get("smb_decision") or {}
-    smb_risk = (smb_decision.get("risk") or {}).get("severity") or ""
-    smb_top_actions = json.dumps(
+    response_guidance = detail.get("response_guidance") or {}
+    guidance_priority = (response_guidance.get("triage") or {}).get("review_priority") or ""
+    guidance_actions = json.dumps(
         [
             item.get("action_id")
-            for item in (smb_decision.get("immediate_actions") or [])[:5]
+            for item in (response_guidance.get("advisory_actions") or [])[:5]
             if isinstance(item, dict)
         ],
         sort_keys=True,
@@ -3500,9 +3934,9 @@ def _render_feedback_panel(detail: Dict[str, Any]) -> str:
   <input type="hidden" name="observed_prefix" value="{_html(observed_prefix)}">
   <input type="hidden" name="predicted_top_tactic" value="{_html(predicted_top_tactic)}">
   <input type="hidden" name="predicted_ranking" value="{_html(predicted_ranking)}">
-  <input type="hidden" name="smb_decision_id" value="{_html(smb_decision.get('decision_id') or '')}">
-  <input type="hidden" name="smb_risk" value="{_html(smb_risk)}">
-  <input type="hidden" name="smb_top_actions" value="{_html(smb_top_actions)}">
+  <input type="hidden" name="response_guidance_id" value="{_html(response_guidance.get('guidance_id') or '')}">
+  <input type="hidden" name="response_guidance_priority" value="{_html(guidance_priority)}">
+  <input type="hidden" name="response_guidance_actions" value="{_html(guidance_actions)}">
 """
     history = ""
     if error:
@@ -3554,7 +3988,9 @@ def _render_feedback_panel(detail: Dict[str, Any]) -> str:
     else:
         history = '<div class="empty">No analyst feedback recorded for this session yet.</div>'
 
-    return f"""
+    forms = ""
+    if allow_feedback:
+        forms = f"""
 <form class="feedback-form" method="post" action="/feedback">
   {common_hidden}
   <input type="hidden" name="feedback_type" value="operator_usefulness">
@@ -3579,6 +4015,14 @@ def _render_feedback_panel(detail: Dict[str, Any]) -> str:
     <textarea name="notes" rows="2" placeholder="Optional action note"></textarea>
   </label>
 </form>
+"""
+    else:
+        forms = (
+            '<div class="empty">Monitor feedback is disabled; this deployment '
+            "is operating in read-only mode.</div>"
+        )
+    return f"""
+{forms}
 <h3>Feedback History</h3>
 {history}
 """
@@ -3602,52 +4046,62 @@ def _render_reference_links(references: Iterable[Any], limit: int = 6) -> str:
     return "<ul>" + "\n".join(refs) + "</ul>"
 
 
-def _render_smb_decision(decision: Dict[str, Any]) -> str:
+def _render_response_guidance(decision: Dict[str, Any]) -> str:
+    """Render only the v3 response-guidance contract.
+
+    It renders no v1 immediate actions or v2 adapters.
+    """
+
     if not decision:
         return ""
-    risk = decision.get("risk") or {}
-    goal = decision.get("likely_goal") or {}
-    next_step = decision.get("likely_next_step") or {}
-    trust = decision.get("trust") or {}
-    policy = trust.get("policy") or {}
-    actions = [item for item in decision.get("immediate_actions") or [] if isinstance(item, dict)]
-    reference_guidance = [item for item in decision.get("reference_guidance") or [] if isinstance(item, dict)]
-    action_html = (
-        _render_structured_report_actions(actions)
-        if actions
-        else '<div class="empty">No immediate SMB action matched this session.</div>'
-    )
-    guidance_html = _render_mitre_reference_guidance(reference_guidance) if reference_guidance else ""
-    references: List[Any] = []
-    for item in [risk, goal] + actions + reference_guidance:
-        references.extend(item.get("references") or [])
-    assets = ((decision.get("asset_context") or {}).get("matched_assets") or [])
-    asset_text = ", ".join(
-        str(asset.get("display_name") or asset.get("asset_id") or "")
-        for asset in assets
-        if isinstance(asset, dict)
-    )
-    limitations = trust.get("limitations") or []
+    guidance = decision
+    if isinstance(guidance, dict) and guidance.get("schema_version") == "response_guidance.v3":
+        findings = [item for item in guidance.get("findings") or [] if isinstance(item, dict)]
+        finding = findings[0] if findings else {}
+        triage = guidance.get("triage") or {}
+        actions = [item for item in guidance.get("advisory_actions") or [] if isinstance(item, dict)]
+        rendered_actions = []
+        for action in actions[:8]:
+            refs = ", ".join(str(ref) for ref in action.get("evidence_refs") or [])
+            rendered_actions.append(
+                "<li>"
+                f"<strong>{_html(action.get('description') or '-')}</strong>"
+                f"<br><span class=\"muted\">{_html(action.get('rationale') or '')}</span>"
+                f"<div class=\"muted\">rule: {_html(action.get('rule_id') or '-')} | "
+                f"canonical evidence: {_html(refs or '-')} | manual approval: required</div>"
+                f"<details><summary>Preconditions</summary>{_render_list_items(action.get('preconditions') or [])}</details>"
+                f"<details><summary>Verification</summary>{_render_list_items(action.get('verification_steps') or [])}</details>"
+                f"<details><summary>Rollback guidance</summary><p>{_html(action.get('rollback_guidance') or '')}</p></details>"
+                "</li>"
+            )
+        action_html = (
+            "<ol>" + "\n".join(rendered_actions) + "</ol>"
+            if rendered_actions
+            else '<div class="empty">No policy-approved advisory action matched this session.</div>'
+        )
+        policy = (guidance.get("provenance") or {}).get("policy") or {}
+        return (
+            '<div class="decision-panel">'
+            '<div class="overview-grid">'
+            f'<div class="kv"><span>finding</span><strong>{_html(finding.get("severity") or "-")}</strong></div>'
+            f'<div class="kv"><span>review urgency</span><strong>{_html(triage.get("urgency") or "-")}</strong></div>'
+            f'<div class="kv"><span>guidance status</span><strong>{_html(guidance.get("status") or "-")}</strong></div>'
+            f'<div class="kv"><span>policy</span><strong>{_html(policy.get("policy_id") or "-")}</strong></div>'
+            "</div>"
+            f'<p>{_html(finding.get("statement") or "")}</p>'
+            "<h3>Advisory Actions</h3>"
+            + action_html
+            + '<p class="muted">This guidance has no execution authority; a human must approve and verify any action.</p>'
+            + "</div>"
+        )
+    if guidance.get("schema_version") == "response_guidance_legacy_adapter.v1":
+        return (
+            '<div class="decision-panel"><div class="empty">'
+            f'{_html(guidance.get("semantics") or "Historical guidance is read-only.")}'
+            "</div></div>"
+        )
     return (
-        '<div class="decision-panel">'
-        '<div class="overview-grid">'
-        f'<div class="kv"><span>risk</span><strong>{_html(str(risk.get("severity") or "-").upper())}</strong></div>'
-        f'<div class="kv"><span>likely_goal</span><strong>{_html(goal.get("likely_goal") or "-")}</strong></div>'
-        f'<div class="kv"><span>predicted_next_tactic</span><strong>{_html(next_step.get("tactic") or "-")}</strong></div>'
-        f'<div class="kv"><span>confidence</span><strong>{_html(next_step.get("confidence") or "-")}</strong></div>'
-        f'<div class="kv"><span>asset_context</span><strong>{_html(asset_text or "-")}</strong></div>'
-        f'<div class="kv"><span>policy</span><strong>{_html(policy.get("policy_id") or policy.get("source_path") or "-")}</strong></div>'
-        "</div>"
-        "<h3>Do Now</h3>"
-        + action_html
-        + ("<h3>MITRE Reference Guidance</h3>" + guidance_html if guidance_html else "")
-        + "<h3>Why This Was Shown</h3>"
-        + _render_list_items((risk.get("evidence") or []) + (goal.get("evidence") or []))
-        + "<h3>Trusted Source References</h3>"
-        + _render_reference_links(references)
-        + "<h3>Trust Notes</h3>"
-        + _render_list_items(limitations)
-        + "</div>"
+        '<div class="decision-panel"><div class="empty">Response guidance is unavailable.</div></div>'
     )
 
 
@@ -3714,53 +4168,82 @@ def _render_next_steps(selected: Optional[Dict[str, Any]], detail: Optional[Dict
     if not selected and not detail:
         return '<div class="empty">No selected session.</div>'
     payload = selected["payload"] if selected else (detail or {}).get("session_payload", {})
-    smb_decision = (detail or {}).get("smb_decision") or {}
+    response_guidance = (detail or {}).get("response_guidance") or {}
+    historical_decision = (
+        (detail or {}).get("historical_response_guidance")
+        # Read-only compatibility with callers holding the pre-v3 key.  New
+        # detail responses expose only historical_response_guidance.
+        or (detail or {}).get("historical_smb_decision")
+        or {}
+    )
+    reevaluated_decision = (detail or {}).get("current_policy_reevaluation") or {}
     recommendations = (detail or {}).get("report_recommendations") or {}
     latest_prediction = (detail or {}).get("latest_prediction_snapshot") or {}
     prediction_payload = latest_prediction.get("payload") or {}
     realtime_ranking = prediction_payload.get("final_ranking") or []
     source = recommendations.get("source") or "policy_unavailable"
-    predicted = (
-        recommendations.get("post_session_follow_on_hypothesis")
-        or recommendations.get("predicted_next_action")
-        or ""
-    )
+    hypothesis_alternatives = recommendations.get("hypothesis_alternatives") or []
     operator_actions = recommendations.get("recommended_actions") or []
-    strategic = recommendations.get("strategic_recommendations") or []
-    structured_report_actions = recommendations.get("recommended_actions_structured") or []
+    context_notes = recommendations.get("context_notes") or []
     falsification = recommendations.get("falsification_conditions") or []
-    likely_steps = recommendations.get("rule_based_likely_next_steps") or _likely_next_steps(payload)
-    if realtime_ranking and source == "rule_based_fallback":
-        source = "realtime_prediction"
-        likely_steps = [
-            f"{item.get('tactic', 'unknown')} ({item.get('confidence', 'low')}, score={item.get('score', 0)}): "
-            + "; ".join((item.get("reasons") or [])[:2])
-            for item in realtime_ranking
-        ]
-
+    evidence_gaps = recommendations.get("evidence_gaps") or []
+    external_suggestions = recommendations.get("external_validation_suggestions") or []
     parts = []
-    if smb_decision:
-        parts.extend(["<h3>SMB Proactive CTI Decision</h3>", _render_smb_decision(smb_decision)])
+    if historical_decision:
+        parts.extend([
+            "<h3>Point-in-Time Stored Advisory Response Guidance</h3>",
+            '<p class="muted">Historical report decision; it is not recomputed under the current policy.</p>',
+            _render_response_guidance(historical_decision),
+        ])
+        if reevaluated_decision:
+            parts.extend([
+                "<h3>Current Policy Reevaluation</h3>",
+                '<p class="muted">Recomputed from current policy and context; it does not replace the stored historical guidance.</p>',
+                _render_response_guidance(reevaluated_decision),
+            ])
+        parts.append("<h3>Technical Prediction / Report Detail</h3>")
+    elif reevaluated_decision:
+        parts.extend([
+            "<h3>Current Policy Reevaluation</h3>",
+            '<p class="muted">No stored report decision is available. This guidance was recomputed from current policy and context.</p>',
+            _render_response_guidance(reevaluated_decision),
+            "<h3>Technical Prediction / Report Detail</h3>",
+        ])
+    elif response_guidance:
+        parts.extend(["<h3>Advisory Response Guidance</h3>", _render_response_guidance(response_guidance)])
         parts.append("<h3>Technical Prediction / Report Detail</h3>")
     parts.extend([
         '<div class="overview-grid">',
         f'<div class="kv"><span>source</span><strong>{_html(source)}</strong></div>',
-        f'<div class="kv"><span>post_session_follow_on_hypothesis</span><strong>{_html(predicted or "Report pending; using rule-based session inference.")}</strong></div>',
+        f'<div class="kv"><span>hypothesis alternatives</span><strong>{_html(len(hypothesis_alternatives))}</strong></div>',
         "</div>",
-        '<p class="muted">This field is the post-session report hypothesis. It is separate from the live realtime prediction engine above.</p>',
-        "<h3>Recommended Operator Actions</h3>",
-        (
-            _render_structured_report_actions(structured_report_actions)
-            or _render_list_items(operator_actions)
-            or '<div class="empty">No policy-approved operator actions are available for this report.</div>'
-        ),
-        "<h3>Likely Attacker Next Step</h3>",
-        _render_list_items(likely_steps),
+        '<p class="muted">Hypothesis alternatives are falsifiable analytical questions, not attacker intent or predicted next actions.</p>',
+        "<h3>Response Guidance Actions</h3>",
+        '<p class="muted">Actions, when present, are rendered only in the v3 response-guidance panel above.</p>',
     ])
-    if strategic:
-        parts.extend(["<h3>Strategic Recommendations</h3>", _render_list_items(strategic)])
+    if hypothesis_alternatives:
+        parts.extend([
+            "<h3>Falsifiable Hypothesis Alternatives</h3>",
+            _render_list_items(hypothesis_alternatives),
+        ])
+    if realtime_ranking and not response_guidance:
+        parts.extend([
+            "<h3>Statistical Next-Tactic Forecast</h3>",
+            '<p class="muted">Advisory model output; not observed evidence or factual confidence.</p>',
+            _render_list_items([
+                f"{item.get('tactic', 'unknown')} ({item.get('confidence', 'low')}): "
+                + "; ".join((item.get("reasons") or [])[:2])
+                for item in realtime_ranking
+            ]),
+        ])
+    if context_notes:
+        parts.extend(["<h3>Non-Authoritative Context Notes</h3>", _render_list_items(context_notes)])
     if falsification:
         parts.extend(["<h3>What To Check Next</h3>", _render_list_items(falsification)])
+    if evidence_gaps:
+        parts.extend(["<h3>Evidence Gaps Within Cowrie Visibility</h3>", _render_list_items(evidence_gaps)])
+    if external_suggestions:
+        parts.extend(["<h3>External Validation Suggestions</h3>", _render_list_items(external_suggestions)])
     return "\n".join(parts)
 
 
@@ -3772,6 +4255,7 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     artifact_payload = _load_report_json_from_artifact(paths, reports_dir)
     summary = _report_summary(report_payload, artifact_payload)
     job = selected.get("job") or {}
+    is_v2 = summary.get("schema_version") == "threat_hypothesis.v2"
     lines = [
         ("job status", job.get("status") or selected.get("analysis_status") or "pending"),
         ("report_id", job.get("report_id") or selected.get("report_id") or ""),
@@ -3779,11 +4263,17 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
         ("updated_at", job.get("updated_at") or selected.get("updated_at") or ""),
         ("ai_enriched", summary.get("ai_enriched")),
         ("confidence_source", summary.get("confidence_source")),
-        ("analytical evidence strength", summary.get("analytical_evidence_strength") or summary.get("confidence")),
-        ("evidence strength semantics", "heuristic, not a calibrated probability"),
+        (
+            "claim evidence status" if is_v2 else "analytical evidence strength",
+            summary.get("analytical_evidence_strength") or summary.get("confidence"),
+        ),
+        (
+            "evidence semantics",
+            "per-claim categorical status; no global probability"
+            if is_v2 else "heuristic, not a calibrated probability",
+        ),
         ("analysis_mode", summary.get("analysis_mode")),
         ("campaign", summary.get("campaign_name")),
-        ("post_session_follow_on_hypothesis", summary.get("post_session_follow_on_hypothesis")),
     ]
     meta = "\n".join(
         f"<div class=\"kv\"><span>{_html(label)}</span><strong>{_html(value or '-')}</strong></div>"
@@ -3796,10 +4286,57 @@ def _render_report_panel(selected: Optional[Dict[str, Any]], reports_dir: str) -
     else:
         artifacts = '<div class="empty">No report artifact paths recorded yet.</div>'
     summary_text = summary.get("summary") or "No compact report summary available yet."
+    merged = _merged_report_payload(report_payload, artifact_payload)
+    v4_detail = ""
+    if merged.get("schema_version") == "session_assessment.v4":
+        finding_items = [
+            (
+                f"[{item.get('status', '')}] {item.get('statement', '')} "
+                f"(finding {item.get('finding_id', '')}; evidence "
+                f"{', '.join(item.get('evidence_refs') or [])})"
+            )
+            for item in merged.get("behavioral_findings") or []
+            if isinstance(item, dict)
+        ]
+        hypothesis_items = [
+            (
+                f"{hypothesis.get('statement', '')} "
+                f"(hypothesis {hypothesis.get('hypothesis_id', '')}; evidence "
+                f"{', '.join(hypothesis.get('supporting_evidence_refs') or []) or 'none'})"
+            )
+            for hypothesis_set in merged.get("hypothesis_sets") or []
+            if isinstance(hypothesis_set, dict)
+            for hypothesis in hypothesis_set.get("hypotheses") or []
+            if isinstance(hypothesis, dict)
+        ]
+        provenance = merged.get("provenance") or {}
+        v4_detail = (
+            "<h3>Canonical Behavioral Findings</h3>"
+            + _render_list_items(finding_items)
+            + "<h3>Falsifiable Hypothesis Alternatives</h3>"
+            + _render_list_items(hypothesis_items)
+            + "<h3>Canonical Provenance</h3>"
+            + _render_list_items([
+                f"Evidence SHA-256: {provenance.get('evidence_sha256', '')}",
+                "Behavior policy SHA-256: "
+                f"{(provenance.get('behavior_policy') or {}).get('sha256', '')}",
+                "Classification policy SHA-256: "
+                f"{(provenance.get('classification_policy') or {}).get('sha256', '')}",
+                f"Evaluator Git revision: {provenance.get('evaluator_git_revision', '')}",
+                "Semantic coverage: "
+                f"{(merged.get('canonical_evidence') or {}).get('semantic_coverage', {}).get('coverage_status', 'unavailable')} "
+                f"(omitted {(merged.get('canonical_evidence') or {}).get('semantic_coverage', {}).get('omitted_count', 0)})",
+                "Canonical semantic graph: "
+                f"{len((merged.get('canonical_evidence') or {}).get('semantic_graph', {}).get('evidence_nodes') or [])} evidence nodes, "
+                f"{len((merged.get('canonical_evidence') or {}).get('semantic_graph', {}).get('relationship_edges') or [])} relationship edges, "
+                f"{len((merged.get('canonical_evidence') or {}).get('semantic_graph', {}).get('chain_nodes') or [])} chain nodes",
+            ])
+        )
     return (
         meta
-        + f"<h3>Threat hypothesis summary</h3><p>{_html(summary_text)}</p>"
-        + "<h3>AI Validation Warnings</h3>"
+        + f"<h3>Session assessment summary</h3><p>{_html(summary_text)}</p>"
+        + v4_detail
+        + "<h3>Generated Narrative Validation</h3>"
         + _render_ai_validation_warnings(report_payload, artifact_payload)
         + "<h3>Evidence Layers</h3>"
         + _render_report_evidence_layers(report_payload, artifact_payload)
@@ -3832,653 +4369,19 @@ def _render_events(events: List[Dict[str, Any]], error: str) -> str:
     )
 
 
-def render_html(snapshot: Dict[str, Any], config: MonitorConfig, selected_session_id: str, feedback_filter: str = "all") -> str:  # noqa: PLR0914
-    selected = snapshot.get("selected")
-    selected_detail = snapshot.get("selected_detail") or {}
-    selected_id = selected["session_id"] if selected else ""
-    error = snapshot.get("error") or ""
-    title = "Cyber Threat Intelligence Dashboard"
-    db_info = f"{config.db_path}"
-    summary = snapshot.get("summary", {})
-
-    _js_sessions = []
-    for s in snapshot.get("sessions", []):
-        _js_sessions.append({
-            "id": s.get("session_id", ""),
-            "ip": s.get("src_ip", ""),
-            "at": s.get("updated_at", ""),
-            "t": s.get("tactics", []),
-            "c": s.get("command_count", 0),
-            "st": s.get("analysis_status", ""),
-        })
-    _js_events = []
-    for e in snapshot.get("events", [])[:50]:
-        _js_events.append({
-            "ts": e.get("timestamp", ""),
-            "ip": e.get("src_ip", ""),
-            "ev": e.get("eventid", ""),
-            "d": e.get("detail", ""),
-            "s": e.get("sensor", ""),
-        })
-    sessions_json = json.dumps(_js_sessions, sort_keys=True)
-    events_json = json.dumps(_js_events, sort_keys=True)
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="{max(int(config.refresh_seconds), 5)}">
-  <title>{title}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <style>
-    *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-    :root{{
-      --bg:#070b14;--surface:#0d1526;--surface2:#111d34;--surface3:#162244;
-      --border:#1a2d50;--border-glow:rgba(6,182,212,.22);
-      --text:#dde6f5;--text-muted:#5a7499;--text-dim:#3d5070;
-      --cyan:#06b6d4;--cyan-dim:rgba(6,182,212,.14);--cyan-glow:rgba(6,182,212,.38);
-      --emerald:#10b981;--emerald-dim:rgba(16,185,129,.14);
-      --amber:#f59e0b;--amber-dim:rgba(245,158,11,.14);
-      --rose:#ef4444;--rose-dim:rgba(239,68,68,.14);
-      --purple:#8b5cf6;--purple-dim:rgba(139,92,246,.14);
-      --blue:#3b82f6;--blue-dim:rgba(59,130,246,.14);
-      --gradient:linear-gradient(135deg,#06b6d4 0%,#8b5cf6 100%);
-      --font:'Inter',system-ui,-apple-system,sans-serif;
-      --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Consolas,monospace;
-    }}
-    html{{scroll-behavior:smooth}}
-    body{{font-family:var(--font);font-size:13px;line-height:1.55;color:var(--text);background:var(--bg);min-height:100vh}}
-    a{{color:var(--cyan);text-decoration:none;font-weight:600;transition:color .18s}}
-    a:hover{{color:#22d3ee;text-decoration:underline}}
-    code{{font-family:var(--mono);font-size:11.5px;background:var(--surface2);padding:1px 5px;border-radius:4px;color:#7dd3fc;white-space:pre-wrap;word-break:break-word}}
-    .cti-header{{background:linear-gradient(135deg,#09111f 0%,#0c1828 55%,#09111f 100%);border-bottom:1px solid var(--border);padding:12px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;backdrop-filter:blur(14px)}}
-    .cti-header .logo{{display:flex;align-items:center;gap:14px}}
-    .logo-icon{{width:38px;height:38px;border-radius:10px;background:var(--gradient);display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:900;color:#fff;flex-shrink:0;box-shadow:0 0 18px var(--cyan-glow)}}
-    .logo-text h1{{font-size:16px;font-weight:800;background:var(--gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.3px}}
-    .logo-text .sub{{font-size:10px;color:var(--text-dim);letter-spacing:.3px;text-transform:uppercase}}
-    .header-meta{{color:var(--text-muted);font-size:11px;display:flex;gap:18px;align-items:center}}
-    .pulse-dot{{width:8px;height:8px;border-radius:50%;background:var(--emerald);animation:pulse-anim 2s infinite;box-shadow:0 0 10px var(--emerald);flex-shrink:0}}
-    .live-label{{color:var(--emerald);font-weight:800;letter-spacing:.3px;font-size:11px}}
-    @keyframes pulse-anim{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.45;transform:scale(1.35)}}}}
-    .cti-main{{max-width:1700px;margin:0 auto;padding:18px 24px 32px}}
-    .section{{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:18px;overflow:hidden;transition:border-color .3s,box-shadow .3s}}
-    .section:hover{{border-color:var(--border-glow);box-shadow:0 4px 32px rgba(0,0,0,.25)}}
-    .sec-header{{padding:11px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:linear-gradient(180deg,rgba(255,255,255,.025) 0%,transparent 100%)}}
-    .sec-header h2{{font-size:11.5px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.55px}}
-    .sec-icon{{font-size:14px;line-height:1}}
-    .sec-badge{{margin-left:auto;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid var(--border);color:var(--text-dim);background:var(--surface2);letter-spacing:.2px}}
-    .section h3{{margin:14px 18px 8px;font-size:10.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px}}
-    .section p{{margin:8px 18px 12px;color:var(--text-muted);font-size:12.5px}}
-    .map-wrap{{position:relative;height:360px;background:radial-gradient(ellipse at 52% 30%,#071828 0%,#040a12 100%);overflow:hidden;border-radius:14px;margin-bottom:18px;border:1px solid var(--border);box-shadow:inset 0 0 80px rgba(6,182,212,.04)}}
-    .map-wrap canvas{{position:absolute;top:0;left:0;width:100%;height:100%}}
-    .map-overlay{{position:absolute;top:16px;left:20px;z-index:10;pointer-events:none}}
-    .map-overlay .map-title{{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.9px;color:var(--cyan);text-shadow:0 0 24px var(--cyan-glow)}}
-    .map-overlay .map-sub{{font-size:10.5px;color:var(--text-dim);margin-top:3px}}
-    .map-legend{{position:absolute;bottom:14px;right:20px;display:flex;gap:16px;z-index:10;pointer-events:none}}
-    .map-legend span{{font-size:10px;color:var(--text-muted);display:flex;align-items:center;gap:5px}}
-    .map-legend .dot{{width:7px;height:7px;border-radius:50%;flex-shrink:0}}
-    .map-stats{{position:absolute;top:14px;right:20px;z-index:10;display:flex;flex-direction:column;align-items:flex-end;gap:4px;pointer-events:none}}
-    .map-stat-pill{{background:rgba(6,182,212,.10);border:1px solid rgba(6,182,212,.2);border-radius:8px;padding:3px 10px;font-size:10.5px;color:var(--cyan);font-weight:600;font-family:var(--mono)}}
-    .stat-row{{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:18px}}
-    .stat-card{{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:17px 16px;position:relative;overflow:hidden;transition:transform .2s,border-color .3s,box-shadow .3s}}
-    .stat-card:hover{{transform:translateY(-3px);border-color:var(--border-glow);box-shadow:0 10px 36px rgba(0,0,0,.38)}}
-    .stat-card::after{{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:2px 2px 0 0}}
-    .stat-card:nth-child(1)::after{{background:var(--cyan)}}
-    .stat-card:nth-child(2)::after{{background:var(--emerald)}}
-    .stat-card:nth-child(3)::after{{background:var(--amber)}}
-    .stat-card:nth-child(4)::after{{background:var(--purple)}}
-    .stat-card:nth-child(5)::after{{background:var(--rose)}}
-    .stat-card:nth-child(6)::after{{background:var(--blue)}}
-    .stat-label{{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:9px}}
-    .stat-value{{font-size:28px;font-weight:900;letter-spacing:-.7px;line-height:1}}
-    .stat-card:nth-child(1) .stat-value{{color:var(--cyan)}}
-    .stat-card:nth-child(2) .stat-value{{color:var(--emerald)}}
-    .stat-card:nth-child(3) .stat-value{{color:var(--amber)}}
-    .stat-card:nth-child(4) .stat-value{{color:var(--purple)}}
-    .stat-card:nth-child(5) .stat-value{{color:var(--rose)}}
-    .stat-card:nth-child(6) .stat-value{{color:var(--blue)}}
-    .stat-trend{{font-size:10px;color:var(--text-dim);margin-top:4px}}
-    .charts-row{{display:grid;grid-template-columns:1.7fr 1fr 1fr;gap:14px;margin-bottom:18px}}
-    .chart-box{{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:16px 16px 12px;overflow:hidden;transition:border-color .3s}}
-    .chart-box:hover{{border-color:var(--border-glow)}}
-    .chart-box h3{{font-size:10.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin:0 0 14px}}
-    .chart-box canvas{{display:block}}
-    .live-feed{{background:var(--surface);border:1px solid var(--border);border-radius:13px;margin-bottom:18px;overflow:hidden;transition:border-color .3s}}
-    .live-feed:hover{{border-color:var(--border-glow)}}
-    .feed-header{{padding:11px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}}
-    .feed-header h2{{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.55px;color:var(--text)}}
-    .feed-header .live-dot{{width:8px;height:8px;border-radius:50%;background:var(--rose);animation:pulse-anim 1.4s infinite;flex-shrink:0}}
-    .feed-count{{margin-left:auto;font-size:10px;color:var(--text-dim);font-family:var(--mono)}}
-    .feed-list{{max-height:200px;overflow-y:auto;font-family:var(--mono);font-size:11px}}
-    .feed-cols{{display:grid;grid-template-columns:168px 120px 100px 1fr;gap:8px;padding:5px 18px 4px;border-bottom:1px solid rgba(26,45,80,.5);font-size:9.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;background:var(--surface2)}}
-    .feed-item{{padding:5px 18px;border-bottom:1px solid rgba(26,45,80,.35);display:grid;grid-template-columns:168px 120px 100px 1fr;gap:8px;transition:background .12s}}
-    .feed-item:hover{{background:var(--surface2)}}
-    .feed-item .ts{{color:var(--text-dim)}}
-    .feed-item .ip{{color:var(--cyan);font-weight:600}}
-    .feed-item .ev{{color:var(--amber)}}
-    .feed-item .det{{color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-    table{{width:100%;border-collapse:collapse}}
-    th,td{{border-bottom:1px solid var(--border);padding:7px 13px;text-align:left;vertical-align:top}}
-    th{{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.45px;background:rgba(255,255,255,.018);white-space:nowrap}}
-    td{{font-size:12px;color:var(--text)}}
-    tr:hover td{{background:rgba(6,182,212,.03)}}
-    .selected td{{background:rgba(6,182,212,.08)!important;border-left:2px solid var(--cyan)}}
-    .num{{text-align:right;font-family:var(--mono)}}
-    .badge{{display:inline-block;border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;border:1px solid var(--border);color:var(--text-muted);background:var(--surface2);letter-spacing:.1px}}
-    .badge.succeeded{{color:var(--emerald);background:var(--emerald-dim);border-color:rgba(16,185,129,.3)}}
-    .badge.queued,.badge.running{{color:var(--amber);background:var(--amber-dim);border-color:rgba(245,158,11,.3)}}
-    .badge.failed{{color:var(--rose);background:var(--rose-dim);border-color:rgba(239,68,68,.3)}}
-    .badge.skipped{{color:var(--text-dim);background:var(--surface2);border-color:var(--border)}}
-    .badge.high{{color:var(--emerald);background:var(--emerald-dim);border-color:rgba(16,185,129,.3)}}
-    .badge.medium{{color:var(--amber);background:var(--amber-dim);border-color:rgba(245,158,11,.3)}}
-    .badge.low{{color:var(--text-dim);background:var(--surface2);border-color:var(--border)}}
-    .detail-grid{{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,.7fr);gap:18px;align-items:start}}
-    .kv{{display:grid;grid-template-columns:148px minmax(0,1fr);gap:8px;padding:6px 18px;border-bottom:1px solid rgba(26,45,80,.4)}}
-    .kv span{{color:var(--text-muted);font-size:11px;font-weight:500}}
-    .kv strong{{font-weight:600;word-break:break-word;font-size:12px}}
-    .overview-grid{{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr))}}
-    .overview-grid .kv{{grid-template-columns:158px minmax(0,1fr)}}
-    .activity{{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr))}}
-    .activity .kv{{grid-template-columns:148px minmax(0,1fr)}}
-    .empty{{padding:13px 18px;color:var(--text-dim);font-style:italic;font-size:12px}}
-    .warning{{margin:8px 18px;padding:10px 14px;border:1px solid rgba(245,158,11,.25);background:rgba(245,158,11,.07);color:var(--amber);border-radius:9px;font-size:12px}}
-    .warning-box{{margin:10px 18px;padding:10px 14px;border:1px solid rgba(245,158,11,.25);background:rgba(245,158,11,.07);color:var(--amber);border-radius:9px;font-size:12px}}
-    .hint{{grid-column:1/-1;color:var(--text-dim);background:var(--surface2);border-top:1px solid var(--border);margin:0;padding:9px 18px;font-size:11px}}
-    details{{margin:0}}
-    summary{{cursor:pointer;color:var(--cyan);font-weight:650;font-size:12px}}
-    pre{{margin:8px 0 0;max-height:380px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#040810;color:#8faabf;padding:12px;border-radius:9px;font-family:var(--mono);font-size:11px;border:1px solid var(--border)}}
-    .chip{{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:999px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;font-weight:600}}
-    ul{{margin:10px 18px 12px 30px;padding:0;color:var(--text-muted)}}
-    .commands{{margin:10px 18px 12px 30px;padding:0}}
-    .commands li{{margin:4px 0;color:var(--text-muted)}}
-    .filter-bar{{display:flex;flex-wrap:wrap;gap:8px;padding:11px 18px;border-bottom:1px solid var(--border)}}
-    .filter-chip{{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--border);border-radius:999px;padding:4px 10px;color:var(--text-muted);background:var(--surface2);font-size:11px;font-weight:700;transition:all .2s;cursor:pointer;text-decoration:none}}
-    .filter-chip:hover{{border-color:var(--cyan);color:var(--cyan);text-decoration:none}}
-    .filter-chip span{{color:var(--text-dim);font-weight:600}}
-    .filter-chip.active{{border-color:var(--cyan);background:var(--cyan-dim);color:var(--cyan)}}
-    .weights{{padding:4px 18px 12px}}
-    .scorer{{margin:8px 18px 12px}}
-    .scorer table{{margin-top:8px}}
-    .feedback-form{{padding:14px 18px;display:grid;gap:10px}}
-    .feedback-form label{{display:grid;gap:4px;color:var(--text-muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}}
-    .feedback-form input,.feedback-form select,.feedback-form textarea{{width:100%;border:1px solid var(--border);border-radius:8px;padding:7px 10px;font:inherit;color:var(--text);background:var(--surface2);transition:border-color .2s}}
-    .feedback-form input:focus,.feedback-form textarea:focus{{border-color:var(--cyan);outline:none;box-shadow:0 0 0 2px var(--cyan-dim)}}
-    .feedback-form button{{justify-self:start;border:none;background:var(--gradient);color:#fff;border-radius:8px;padding:8px 18px;font-weight:700;cursor:pointer;font-size:12px;transition:transform .15s,box-shadow .15s}}
-    .feedback-form button:hover{{transform:translateY(-1px);box-shadow:0 4px 18px var(--cyan-glow)}}
-    .feedback-button-row{{display:flex;flex-wrap:wrap;gap:8px}}
-    .prediction-meta .kv strong{{font-family:var(--mono);font-size:11px}}
-    .artifacts li{{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;margin-bottom:6px}}
-    .metrics{{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:14px}}
-    .metric{{border:1px solid var(--border);border-radius:11px;padding:12px;background:var(--surface2);min-height:68px;transition:transform .15s,border-color .2s}}
-    .metric:hover{{transform:translateY(-1px);border-color:var(--border-glow)}}
-    .metric-label{{color:var(--text-dim);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.35px;margin-bottom:5px}}
-    .metric-value{{font-size:22px;font-weight:900;color:var(--cyan);letter-spacing:-.4px}}
-    .decision-panel .overview-grid .kv strong{{color:var(--text)}}
-    .muted{{color:var(--text-muted)!important}}
-    footer{{color:var(--text-dim);font-size:11px;padding:6px 4px 24px;text-align:center}}
-    ::-webkit-scrollbar{{width:5px;height:5px}}
-    ::-webkit-scrollbar-track{{background:var(--surface)}}
-    ::-webkit-scrollbar-thumb{{background:var(--border);border-radius:3px}}
-    ::-webkit-scrollbar-thumb:hover{{background:var(--text-dim)}}
-    @keyframes fadeUp{{from{{opacity:0;transform:translateY(10px)}}to{{opacity:1;transform:translateY(0)}}}}
-    .map-wrap{{animation:fadeUp .5s ease-out both}}
-    .stat-row .stat-card:nth-child(1){{animation:fadeUp .42s .00s ease-out both}}
-    .stat-row .stat-card:nth-child(2){{animation:fadeUp .42s .05s ease-out both}}
-    .stat-row .stat-card:nth-child(3){{animation:fadeUp .42s .10s ease-out both}}
-    .stat-row .stat-card:nth-child(4){{animation:fadeUp .42s .15s ease-out both}}
-    .stat-row .stat-card:nth-child(5){{animation:fadeUp .42s .20s ease-out both}}
-    .stat-row .stat-card:nth-child(6){{animation:fadeUp .42s .25s ease-out both}}
-    @media(max-width:1300px){{.stat-row{{grid-template-columns:repeat(3,1fr)}}.charts-row{{grid-template-columns:1fr 1fr}}.detail-grid{{grid-template-columns:1fr}}.cti-main{{padding:12px}}.metrics{{grid-template-columns:repeat(3,1fr)}}}}
-    @media(max-width:800px){{.stat-row{{grid-template-columns:repeat(2,1fr)}}.charts-row{{grid-template-columns:1fr}}.feed-item{{grid-template-columns:100px 95px 1fr;font-size:10.5px}}.feed-item .ev{{display:none}}.map-wrap{{height:260px}}.overview-grid{{grid-template-columns:1fr}}.activity{{grid-template-columns:1fr}}}}
-  </style>
-</head>
-<body>
-
-<header class="cti-header">
-  <div class="logo">
-    <div class="logo-icon">&#x26a1;</div>
-    <div class="logo-text">
-      <h1>{title}</h1>
-      <div class="sub">Honeypot Analysis Pipeline &bull; Production</div>
-    </div>
-  </div>
-  <div class="header-meta">
-    <div class="pulse-dot"></div>
-    <span class="live-label">LIVE</span>
-    <span>DB: {_html(_short(db_info, 50))}</span>
-    <span>{_html(snapshot.get("timestamp", ""))}</span>
-    <span>Refresh: {int(config.refresh_seconds)}s</span>
-  </div>
-</header>
-
-<div class="cti-main">
-  {'<div class="warning" style="margin:0 0 16px">' + _html(error) + '</div>' if error else ''}
-
-  <!-- SECTION 1: GLOBAL THREAT MAP -->
-  <div class="map-wrap">
-    <canvas id="threatMap"></canvas>
-    <div class="map-overlay">
-      <div class="map-title">&#x1f30d;&nbsp; Global Threat Map</div>
-      <div class="map-sub">Real-time attack trajectory &mdash; honeypot pipeline sensors</div>
-    </div>
-    <div class="map-stats">
-      <div class="map-stat-pill">{_html(summary.get("total_sessions", 0))} sessions</div>
-      <div class="map-stat-pill">{_html(summary.get("active_sessions", 0))} active</div>
-    </div>
-    <div class="map-legend">
-      <span><span class="dot" style="background:#06b6d4"></span>Attack source</span>
-      <span><span class="dot" style="background:#ef4444"></span>In-flight</span>
-      <span><span class="dot" style="background:#10b981"></span>Honeypot</span>
-    </div>
-  </div>
-
-  <!-- SECTION 2: STAT CARDS -->
-  <div class="stat-row">
-    <div class="stat-card">
-      <div class="stat-label">Total Sessions</div>
-      <div class="stat-value">{_html(summary.get("total_sessions", 0))}</div>
-      <div class="stat-trend">All-time sessions captured</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Active Sessions</div>
-      <div class="stat-value">{_html(summary.get("active_sessions", 0))}</div>
-      <div class="stat-trend">Currently in-progress</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Queued Jobs</div>
-      <div class="stat-value">{_html(summary.get("queued_jobs", 0))}</div>
-      <div class="stat-trend">Queued + running</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Reports Done</div>
-      <div class="stat-value">{_html(summary.get("succeeded_reports", 0))}</div>
-      <div class="stat-trend">Analysis completed</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Skipped</div>
-      <div class="stat-value">{_html(summary.get("skipped_no_command_sessions", 0))}</div>
-      <div class="stat-trend">No-command sessions</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Last Update</div>
-      <div class="stat-value" style="font-size:14px;font-weight:700;padding-top:6px">{_html(_short(str(summary.get("latest_updated", "-")), 20))}</div>
-      <div class="stat-trend">UTC timestamp</div>
-    </div>
-  </div>
-
-  <!-- SECTION 3: CHARTS ROW -->
-  <div class="charts-row">
-    <div class="chart-box">
-      <h3>&#x1f4ca;&nbsp; Daily Attack Volume &mdash; Last 14 Days</h3>
-      <canvas id="dailyChart" style="height:210px"></canvas>
-    </div>
-    <div class="chart-box">
-      <h3>&#x1f3af;&nbsp; Attack Type Distribution</h3>
-      <canvas id="tacticsChart" style="height:210px"></canvas>
-    </div>
-    <div class="chart-box">
-      <h3>&#x23f0;&nbsp; Events by Hour (Today)</h3>
-      <canvas id="hourlyChart" style="height:210px"></canvas>
-    </div>
-  </div>
-
-  <!-- SECTION 4: LIVE FEED -->
-  <div class="live-feed">
-    <div class="feed-header">
-      <div class="live-dot"></div>
-      <h2>&#x26a1;&nbsp; Live Attack Feed</h2>
-      <span class="feed-count" id="feedCount">&mdash;</span>
-    </div>
-    <div class="feed-cols">
-      <span>Timestamp</span><span>Source IP</span><span>Event</span><span>Detail / Input</span>
-    </div>
-    <div class="feed-list" id="feedList">
-      <div class="empty">Loading events&hellip;</div>
-    </div>
-  </div>
-
-  <!-- SECTION 5: PREDICTION EVIDENCE -->
-  <div class="section">
-    <div class="sec-header"><span class="sec-icon">&#x1f9e0;</span><h2>Prediction Evidence Status</h2></div>
-    {_render_prediction_evidence(snapshot)}
-  </div>
-
-  <!-- SECTION 6: EXTERNAL SEED HEALTH -->
-  <div class="section">
-    <div class="sec-header"><span class="sec-icon">&#x1f331;</span><h2>External Seed &amp; Classifier Health</h2></div>
-    {_render_external_seed_health(snapshot)}
-  </div>
-
-  <!-- SECTION 7: FEEDBACK REVIEW -->
-  <div class="section">
-    <div class="sec-header"><span class="sec-icon">&#x1f50d;</span><h2>Feedback Review</h2></div>
-    {_render_feedback_review_panel(snapshot, selected_id or selected_session_id, feedback_filter)}
-  </div>
-
-  <!-- SECTION 8: LATEST ACTIVITY -->
-  <div class="section">
-    <div class="sec-header"><span class="sec-icon">&#x1f4e1;</span><h2>Latest Activity Match</h2></div>
-    {_render_latest_activity(snapshot)}
-  </div>
-
-  <!-- SECTION 9: RECENT SESSIONS -->
-  <div class="section">
-    <div class="sec-header">
-      <span class="sec-icon">&#x1f4cb;</span>
-      <h2>Recent Sessions</h2>
-      <span class="sec-badge">{len(snapshot.get("sessions", []))} shown</span>
-    </div>
-    {_render_sessions(snapshot.get("sessions", []), selected_id)}
-  </div>
-
-  <!-- SECTION 10: SESSION DETAIL (two-column grid) -->
-  <div class="detail-grid">
-    <div>
-      <div class="section">
-        <div class="sec-header">
-          <span class="sec-icon">&#x1f50e;</span>
-          <h2>Session Detail &mdash; {_html(selected_id or selected_session_id or "latest")}</h2>
-        </div>
-        <h3>Overview</h3>
-        {_render_overview(selected_detail)}
-        <h3>Commands</h3>
-        {_render_commands(selected)}
-        <h3>Command Classifications</h3>
-        {_render_classifications(selected)}
-        <h3>Session-Level TTP Correlations</h3>
-        {_render_session_ttp_correlations(selected)}
-        <h3>Enrichment</h3>
-        {_render_enrichment(selected_detail)}
-        <h3>Observable Sightings</h3>
-        {_render_observable_sightings(selected_detail)}
-        <h3>Cross-Session Threat Hunting</h3>
-        {_render_cross_session_hunting(selected_detail)}
-        <h3>Campaign / Actor Cluster</h3>
-        {_render_campaign_panel(selected_detail)}
-        <h3>Stored Events For This Session</h3>
-        {_render_session_events(selected_detail)}
-        <h3>Full Detail API</h3>
-        {_render_raw_api_panel(selected_detail)}
-      </div>
-      <div class="section">
-        <div class="sec-header"><span class="sec-icon">&#x1f4dc;</span><h2>Recent Events</h2></div>
-        {_render_events(snapshot.get("events", []), snapshot.get("events_error", ""))}
-      </div>
-    </div>
-    <div>
-      <div class="section">
-        <div class="sec-header"><span class="sec-icon">&#x1f52e;</span><h2>Real-Time Prediction</h2></div>
-        {_render_prediction_panel(selected_detail)}
-      </div>
-      <div class="section">
-        <div class="sec-header"><span class="sec-icon">&#x1f6a8;</span><h2>Alerts</h2></div>
-        {_render_alerts_panel(selected_detail)}
-      </div>
-      <div class="section">
-        <div class="sec-header"><span class="sec-icon">&#x1f4dd;</span><h2>Analyst Feedback</h2></div>
-        {_render_feedback_panel(selected_detail)}
-      </div>
-      <div class="section">
-        <div class="sec-header"><span class="sec-icon">&#x26a1;</span><h2>Recommendations &amp; Next Actions</h2></div>
-        {_render_next_steps(selected, selected_detail)}
-      </div>
-      <div class="section">
-        <div class="sec-header"><span class="sec-icon">&#x1f4c4;</span><h2>Threat Hypothesis / Report</h2></div>
-        {_render_report_panel(selected, config.reports_dir)}
-      </div>
-    </div>
-  </div>
-
-  <footer>Honeypot CTI Dashboard &bull; {_html(db_info)} &bull; {_html(snapshot.get("timestamp"))}</footer>
-</div>
-
-<script>
-(function(){{
-  "use strict";
-  var S={sessions_json};
-  var E={events_json};
-
-  function ipCoords(ip){{
-    if(!ip||ip==="unknown")return null;
-    var p=ip.split(".").map(Number);if(p.length<2)return null;
-    var a=p[0],b=p[1];
-    var tbl=[
-      [0,9,.17,.30],[10,15,.15,.34],[16,30,.19,.28],[31,60,.21,.33],
-      [61,80,.44,.19],[81,100,.49,.22],[101,120,.72,.29],[121,140,.80,.26],
-      [141,160,.75,.33],[161,180,.51,.33],[181,200,.46,.19],[201,220,.52,.31],
-      [221,240,.27,.63]
-    ];
-    for(var i=0;i<tbl.length;i++){{
-      if(a>=tbl[i][0]&&a<=tbl[i][1])return{{x:tbl[i][2]+b*.00038,y:tbl[i][3]+b*.00028}};
-    }}
-    return{{x:.30+((a*7+b*3)%100)*.005,y:.24+((a*11+b*5)%100)*.004}};
-  }}
-
-  /* === THREAT MAP === */
-  var mc=document.getElementById("threatMap");
-  if(mc){{
-    var ctx=mc.getContext("2d"),tick=0;
-    var dpr=window.devicePixelRatio||1;
-    function rsz(){{
-      var r=mc.parentElement.getBoundingClientRect();
-      mc.width=r.width*dpr;mc.height=r.height*dpr;
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-    }}
-    rsz();window.addEventListener("resize",rsz);
-    var atks=[];
-    for(var i=0;i<S.length&&i<120;i++){{
-      var co=ipCoords(S[i].ip);
-      if(co)atks.push({{x:co.x,y:co.y,ph:Math.random()*Math.PI*2,sp:.18+Math.random()*.5,sz:2.2+Math.random()*1.8}});
-    }}
-    if(atks.length<8){{
-      ["192.0.2.11","192.0.2.21","192.0.2.31","198.51.100.41","198.51.100.51","203.0.113.61","203.0.113.71","203.0.113.81"].forEach(function(ip,di){{
-        var dc=ipCoords(ip);if(dc)atks.push({{x:dc.x,y:dc.y,ph:di*.9,sp:.25+di*.04,sz:2.5}});
-      }});
-    }}
-    var conts=[
-      [[.06,.17],[.25,.13],[.29,.21],[.26,.30],[.20,.38],[.13,.45],[.08,.39],[.06,.27]],
-      [[.20,.52],[.28,.48],[.33,.57],[.31,.70],[.26,.80],[.20,.75],[.19,.60]],
-      [[.43,.13],[.54,.11],[.58,.17],[.55,.27],[.49,.31],[.43,.27],[.41,.20]],
-      [[.43,.35],[.53,.31],[.57,.40],[.54,.59],[.49,.64],[.43,.60],[.40,.44]],
-      [[.55,.12],[.68,.09],[.80,.14],[.86,.23],[.84,.38],[.77,.42],[.68,.39],[.57,.28]],
-      [[.79,.57],[.87,.55],[.90,.63],[.86,.71],[.79,.66]]
-    ];
-    function draw(){{
-      tick+=.013;
-      var W=mc.width/dpr,H=mc.height/dpr;
-      var hx=W*.52,hy=H*.30;
-      ctx.clearRect(0,0,W,H);
-      ctx.strokeStyle="rgba(6,182,212,.028)";ctx.lineWidth=.5;
-      for(var gx=0;gx<W;gx+=44){{ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,H);ctx.stroke();}}
-      for(var gy2=0;gy2<H;gy2+=44){{ctx.beginPath();ctx.moveTo(0,gy2);ctx.lineTo(W,gy2);ctx.stroke();}}
-      ctx.strokeStyle="rgba(6,182,212,.045)";ctx.lineWidth=.7;
-      for(var lat=0;lat<5;lat++){{var ly=H*(.15+lat*.17);ctx.beginPath();ctx.moveTo(0,ly);ctx.lineTo(W,ly);ctx.stroke();}}
-      ctx.fillStyle="rgba(6,182,212,.06)";ctx.strokeStyle="rgba(6,182,212,.18)";ctx.lineWidth=.9;
-      conts.forEach(function(pts){{
-        ctx.beginPath();ctx.moveTo(pts[0][0]*W,pts[0][1]*H);
-        for(var pi=1;pi<pts.length;pi++)ctx.lineTo(pts[pi][0]*W,pts[pi][1]*H);
-        ctx.closePath();ctx.fill();ctx.stroke();
-      }});
-      var hp=Math.sin(tick*2.2)*5;
-      var hg=ctx.createRadialGradient(hx,hy,0,hx,hy,28+hp);
-      hg.addColorStop(0,"rgba(16,185,129,.9)");hg.addColorStop(.45,"rgba(16,185,129,.22)");hg.addColorStop(1,"rgba(16,185,129,0)");
-      ctx.fillStyle=hg;ctx.beginPath();ctx.arc(hx,hy,28+hp,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle="#10b981";ctx.beginPath();ctx.arc(hx,hy,5,0,Math.PI*2);ctx.fill();
-      ctx.strokeStyle="rgba(16,185,129,.5)";ctx.lineWidth=1.2;
-      ctx.beginPath();ctx.arc(hx,hy,14+hp*.5,0,Math.PI*2);ctx.stroke();
-      atks.forEach(function(a){{
-        var ax=a.x*W,ay=a.y*H;
-        var prog=(Math.sin(tick*a.sp+a.ph)*.5+.5);
-        ctx.fillStyle="rgba(6,182,212,"+(0.28+Math.sin(tick*2.8+a.ph)*.22)+")";
-        ctx.beginPath();ctx.arc(ax,ay,a.sz+Math.sin(tick*2+a.ph)*.8,0,Math.PI*2);ctx.fill();
-        var cpx=(ax+hx)/2,cpy=Math.min(ay,hy)-42-Math.abs(ax-hx)*.09;
-        ctx.strokeStyle="rgba(239,68,68,"+(0.055+prog*.10)+")";ctx.lineWidth=.85;
-        ctx.beginPath();ctx.moveTo(ax,ay);ctx.quadraticCurveTo(cpx,cpy,hx,hy);ctx.stroke();
-        var tt=prog;
-        var dx=(1-tt)*(1-tt)*ax+2*(1-tt)*tt*cpx+tt*tt*hx;
-        var dy=(1-tt)*(1-tt)*ay+2*(1-tt)*tt*cpy+tt*tt*hy;
-        var dg=ctx.createRadialGradient(dx,dy,0,dx,dy,7);
-        dg.addColorStop(0,"rgba(239,68,68,.92)");dg.addColorStop(.5,"rgba(239,68,68,.35)");dg.addColorStop(1,"rgba(239,68,68,0)");
-        ctx.fillStyle=dg;ctx.beginPath();ctx.arc(dx,dy,7,0,Math.PI*2);ctx.fill();
-      }});
-      requestAnimationFrame(draw);
-    }}
-    draw();
-  }}
-
-  /* === DAILY BAR CHART (14 days) === */
-  var dc=document.getElementById("dailyChart");
-  if(dc){{
-    var ct=dc.getContext("2d"),dpr2=window.devicePixelRatio||1;
-    var pr=dc.parentElement.getBoundingClientRect();
-    dc.width=pr.width*dpr2;dc.height=210*dpr2;
-    dc.style.width=pr.width+"px";dc.style.height="210px";
-    ct.setTransform(dpr2,0,0,dpr2,0,0);
-    var dW=pr.width,dH=210;
-    var cnt={{}},now=new Date();
-    for(var d=13;d>=0;d--){{var dd=new Date(now);dd.setDate(dd.getDate()-d);cnt[dd.toISOString().slice(0,10)]=0;}}
-    S.forEach(function(s){{if(s.at){{var dk=s.at.slice(0,10);if(dk in cnt)cnt[dk]++;}}  }});
-    var days=Object.keys(cnt).sort(),vals=days.map(function(k){{return cnt[k];}});
-    var mx=Math.max.apply(null,vals.concat([1]));
-    var pd={{l:42,r:12,t:16,b:34}},cW=dW-pd.l-pd.r,cH=dH-pd.t-pd.b;
-    var bW=cW/days.length*.62,gap=cW/days.length*.38;
-    var todayStr=now.toISOString().slice(0,10);
-    ct.strokeStyle="rgba(90,116,153,.14)";ct.lineWidth=.6;
-    for(var gl=0;gl<=4;gl++){{
-      var gy=pd.t+cH-cH*(gl/4);
-      ct.beginPath();ct.moveTo(pd.l,gy);ct.lineTo(dW-pd.r,gy);ct.stroke();
-      ct.fillStyle="#3d5070";ct.font="8.5px Inter,sans-serif";ct.textAlign="right";
-      ct.fillText(Math.round(mx*gl/4),pd.l-5,gy+3);
-    }}
-    days.forEach(function(day,bi){{
-      var bx=pd.l+bi*(bW+gap)+gap/2,bh=Math.max(vals[bi]/mx*cH,1),by=pd.t+cH-bh;
-      var isT=(day===todayStr);
-      var bg=ct.createLinearGradient(bx,by,bx,pd.t+cH);
-      if(isT){{bg.addColorStop(0,"rgba(16,185,129,.98)");bg.addColorStop(1,"rgba(16,185,129,.28)");}}
-      else{{bg.addColorStop(0,"rgba(6,182,212,.90)");bg.addColorStop(1,"rgba(6,182,212,.22)");}}
-      ct.fillStyle=bg;
-      var r=Math.min(3,bW/2);
-      ct.beginPath();ct.moveTo(bx,pd.t+cH);ct.lineTo(bx,by+r);ct.quadraticCurveTo(bx,by,bx+r,by);ct.lineTo(bx+bW-r,by);ct.quadraticCurveTo(bx+bW,by,bx+bW,by+r);ct.lineTo(bx+bW,pd.t+cH);ct.closePath();
-      ct.shadowColor=isT?"rgba(16,185,129,.3)":"rgba(6,182,212,.22)";ct.shadowBlur=6;ct.fill();ct.shadowBlur=0;
-      if(vals[bi]>0){{ct.fillStyle=isT?"#10b981":"#06b6d4";ct.font="bold 9px Inter,sans-serif";ct.textAlign="center";ct.fillText(vals[bi],bx+bW/2,by-4);}}
-      ct.fillStyle=isT?"#10b981":"#3d5070";ct.font=(isT?"bold ":"")+"8px Inter,sans-serif";ct.textAlign="center";
-      ct.fillText(day.slice(5),bx+bW/2,dH-pd.b+13);
-    }});
-    var todayIdx=days.indexOf(todayStr);
-    if(todayIdx>=0){{
-      var tx=pd.l+todayIdx*(bW+gap)+gap/2+bW/2;
-      ct.fillStyle="rgba(16,185,129,.75)";ct.font="bold 8px Inter,sans-serif";ct.textAlign="center";ct.fillText("TODAY",tx,dH-pd.b+23);
-    }}
-  }}
-
-  /* === TACTICS DONUT === */
-  var tc=document.getElementById("tacticsChart");
-  if(tc){{
-    var tct=tc.getContext("2d"),dpr3=window.devicePixelRatio||1;
-    var tr2=tc.parentElement.getBoundingClientRect();
-    tc.width=tr2.width*dpr3;tc.height=210*dpr3;
-    tc.style.width=tr2.width+"px";tc.style.height="210px";
-    tct.setTransform(dpr3,0,0,dpr3,0,0);
-    var tW=tr2.width,tH=210;
-    var tacMap={{}};
-    S.forEach(function(s){{(s.t||[]).forEach(function(tac){{tacMap[tac||"unknown"]=(tacMap[tac||"unknown"]||0)+1;}});  }});
-    var tNames=Object.keys(tacMap).sort(function(a,b){{return tacMap[b]-tacMap[a];}});
-    var tVals=tNames.map(function(k){{return tacMap[k];}});
-    var tot=tVals.reduce(function(a,b){{return a+b;}},0)||1;
-    var cols=["#06b6d4","#10b981","#f59e0b","#ef4444","#8b5cf6","#3b82f6","#ec4899","#14b8a6","#f97316","#6366f1"];
-    if(!tNames.length){{
-      tct.strokeStyle="rgba(6,182,212,.15)";tct.lineWidth=28;tct.beginPath();tct.arc(tW*.38,tH/2,Math.min(tW*.28,tH*.38),0,Math.PI*2);tct.stroke();
-      tct.fillStyle="#3d5070";tct.font="11px Inter,sans-serif";tct.textAlign="center";tct.textBaseline="middle";tct.fillText("No tactic data",tW*.38,tH/2);
-    }}else{{
-      var cx2=tW*.38,cy2=tH/2,OR=Math.min(cx2-6,cy2-6)*.9,IR=OR*.54,ang=-Math.PI/2;
-      tNames.slice(0,10).forEach(function(n,di){{
-        var sl=tVals[di]/tot*Math.PI*2;
-        tct.fillStyle=cols[di%10];tct.beginPath();
-        tct.moveTo(cx2+Math.cos(ang)*IR,cy2+Math.sin(ang)*IR);tct.arc(cx2,cy2,OR,ang,ang+sl);tct.arc(cx2,cy2,IR,ang+sl,ang,true);
-        tct.closePath();tct.fill();tct.strokeStyle="rgba(7,11,20,.9)";tct.lineWidth=2;tct.stroke();
-        ang+=sl;
-      }});
-      tct.fillStyle="#dde6f5";tct.font="bold 22px Inter,sans-serif";tct.textAlign="center";tct.textBaseline="middle";tct.fillText(tot,cx2,cy2-7);
-      tct.fillStyle="#5a7499";tct.font="9.5px Inter,sans-serif";tct.fillText("total attacks",cx2,cy2+11);
-      var lx=tW*.68,ly=8;tct.textBaseline="top";
-      tNames.slice(0,9).forEach(function(n,li){{
-        tct.fillStyle=cols[li%10];tct.fillRect(lx,ly,8,8);
-        tct.fillStyle="#94a3b8";tct.font="9.5px Inter,sans-serif";tct.textAlign="left";
-        var pct=Math.round(tVals[li]/tot*100);
-        tct.fillText((n.length>14?n.slice(0,13)+"…":n)+" ("+pct+"%)",lx+13,ly+.5);
-        ly+=19;
-      }});
-    }}
-  }}
-
-  /* === HOURLY BAR CHART (today) === */
-  var hc=document.getElementById("hourlyChart");
-  if(hc){{
-    var hct=hc.getContext("2d"),dpr4=window.devicePixelRatio||1;
-    var hr2=hc.parentElement.getBoundingClientRect();
-    hc.width=hr2.width*dpr4;hc.height=210*dpr4;
-    hc.style.width=hr2.width+"px";hc.style.height="210px";
-    hct.setTransform(dpr4,0,0,dpr4,0,0);
-    var hW=hr2.width,hH=210;
-    var todayPfx=(new Date()).toISOString().slice(0,10);
-    var hourCnt=new Array(24).fill(0);
-    var currentHour=(new Date()).getUTCHours();
-    E.forEach(function(ev){{
-      if(ev.ts&&ev.ts.slice(0,10)===todayPfx){{var hh=parseInt(ev.ts.slice(11,13),10);if(!isNaN(hh)&&hh<24)hourCnt[hh]++;}}
-    }});
-    S.forEach(function(s){{
-      if(s.at&&s.at.slice(0,10)===todayPfx){{var hh=parseInt(s.at.slice(11,13),10);if(!isNaN(hh)&&hh<24)hourCnt[hh]++;}}
-    }});
-    var hmax=Math.max.apply(null,hourCnt.concat([1]));
-    var hpd={{l:36,r:8,t:16,b:26}};
-    var hcW=hW-hpd.l-hpd.r,hcH=hH-hpd.t-hpd.b;
-    var hbW=hcW/24*.72,hgap=hcW/24*.28;
-    hct.strokeStyle="rgba(90,116,153,.12)";hct.lineWidth=.5;
-    for(var gl2=0;gl2<=3;gl2++){{
-      var hgy=hpd.t+hcH-hcH*(gl2/3);
-      hct.beginPath();hct.moveTo(hpd.l,hgy);hct.lineTo(hW-hpd.r,hgy);hct.stroke();
-      hct.fillStyle="#3d5070";hct.font="8px Inter,sans-serif";hct.textAlign="right";
-      hct.fillText(Math.round(hmax*gl2/3),hpd.l-4,hgy+3);
-    }}
-    for(var bi2=0;bi2<24;bi2++){{
-      var hbx=hpd.l+bi2*(hbW+hgap)+hgap/2,hbh=Math.max(hourCnt[bi2]/hmax*hcH,1),hby=hpd.t+hcH-hbh;
-      var isC=(bi2===currentHour);
-      var hbg=hct.createLinearGradient(hbx,hby,hbx,hpd.t+hcH);
-      if(isC){{hbg.addColorStop(0,"rgba(245,158,11,.98)");hbg.addColorStop(1,"rgba(245,158,11,.25)");}}
-      else{{hbg.addColorStop(0,"rgba(139,92,246,.85)");hbg.addColorStop(1,"rgba(139,92,246,.20)");}}
-      hct.fillStyle=hbg;
-      var hr=Math.min(2,hbW/2);
-      hct.beginPath();hct.moveTo(hbx,hpd.t+hcH);hct.lineTo(hbx,hby+hr);hct.quadraticCurveTo(hbx,hby,hbx+hr,hby);hct.lineTo(hbx+hbW-hr,hby);hct.quadraticCurveTo(hbx+hbW,hby,hbx+hbW,hby+hr);hct.lineTo(hbx+hbW,hpd.t+hcH);hct.closePath();hct.fill();
-      if(bi2%4===0||isC){{
-        hct.fillStyle=isC?"#f59e0b":"#3d5070";hct.font=(isC?"bold ":"")+"8px Inter,sans-serif";hct.textAlign="center";
-        hct.fillText(String(bi2).padStart(2,"0"),hbx+hbW/2,hH-hpd.b+12);
-      }}
-    }}
-  }}
-
-  /* === LIVE FEED === */
-  var feedEl=document.getElementById("feedList");
-  var feedCntEl=document.getElementById("feedCount");
-  if(feedEl){{
-    if(feedCntEl)feedCntEl.textContent=E.length+" events";
-    if(!E.length){{feedEl.innerHTML='<div class="empty">No events captured yet.</div>';}}
-    else{{
-      feedEl.innerHTML=E.map(function(ev){{
-        return'<div class="feed-item"><span class="ts">'+(ev.ts||"-").slice(0,23)+'</span><span class="ip">'+(ev.ip||"-")+'</span><span class="ev">'+(ev.ev||"-")+'</span><span class="det">'+(ev.d||"")+'</span></div>';
-      }}).join("");
-    }}
-  }}
-}})();
-</script>
-</body>
-</html>"""
-
-
 class MonitorHandler(BaseHTTPRequestHandler):
     monitor_config: MonitorConfig
+
+    def _request_id(self) -> str:
+        current = getattr(self, "_monitor_request_id", "")
+        if current:
+            return str(current)
+        headers = getattr(self, "headers", None)
+        request_id = safe_request_id(
+            headers.get("X-Request-ID") if headers is not None else None
+        )
+        self._monitor_request_id = request_id
+        return request_id
 
     def _send(self, status: HTTPStatus, body: str, content_type: str = "text/html; charset=utf-8") -> None:
         data = body.encode("utf-8")
@@ -4486,11 +4389,104 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
+            "object-src 'none'; form-action 'self'; img-src 'self' data: https:; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+            "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com "
+            "https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self'",
+        )
+        self.send_header("X-Request-ID", self._request_id())
         self.end_headers()
         self.wfile.write(data)
 
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
-        self._send(status, json.dumps(_sanitize_public(payload), sort_keys=True), "application/json")
+        self._send(
+            status,
+            json.dumps(public_payload(payload), ensure_ascii=False, sort_keys=True),
+            "application/json",
+        )
+
+    def _send_sensitive_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
+        """Send the private admin projection without the public redactor."""
+        self._send(
+            status,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            "application/json",
+        )
+
+    def _require_read(self) -> bool:
+        read_token = _monitor_read_token(self.monitor_config)
+        decision = authorize_read(
+            single_header_value(self.headers, "Authorization"),
+            read_token,
+            allow_anonymous=(
+                not read_token
+                and is_loopback_host(self.monitor_config.bind_host)
+            ),
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
+
+    def _require_raw_command_admin(self) -> bool:
+        """Require both loopback transport and the dedicated admin token."""
+        bind_loopback = self.monitor_config.bind_host == "127.0.0.1"
+        client_host = self.client_address[0] if self.client_address else ""
+        client_loopback = _is_loopback_management_address(client_host)
+        if not bind_loopback or not client_loopback:
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "sensitive command view requires loopback access",
+                    "request_id": self._request_id(),
+                },
+            )
+            return False
+        decision = authorize_read(
+            single_header_value(self.headers, "Authorization"),
+            _monitor_raw_commands_token(self.monitor_config),
+            allow_anonymous=False,
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
+
+    def _require_feedback_write(self) -> bool:
+        if not _monitor_feedback_enabled(self.monitor_config):
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "monitor feedback is disabled",
+                    "request_id": self._request_id(),
+                },
+            )
+            return False
+        decision = authorize_write(
+            single_header_value(self.headers, "Authorization"),
+            _monitor_read_token(self.monitor_config),
+            _monitor_write_token(self.monitor_config),
+        )
+        if decision.allowed:
+            return True
+        self._send_json(
+            decision.status,
+            {"error": decision.error, "request_id": self._request_id()},
+        )
+        return False
 
     def _redirect(self, location: str) -> None:
         self.send_response(HTTPStatus.SEE_OTHER.value)
@@ -4500,42 +4496,116 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
+        try:
+            MonitorHandler._do_POST(self)
+        except Exception as exc:
+            MonitorHandler._handle_unexpected_error(self, "post_failed", exc)
+
+    def _do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path not in {"/analyst-feedback", "/feedback"}:
+            self._send(HTTPStatus.NOT_FOUND, "not found", "text/plain; charset=utf-8")
+            return
+        if not self._require_feedback_write():
+            return
+        connection = getattr(self, "connection", None)
+        if connection is not None and hasattr(connection, "settimeout"):
+            connection.settimeout(FEEDBACK_REQUEST_TIMEOUT_SECONDS)
         if parsed.path == "/analyst-feedback":
             try:
-                length = min(int(self.headers.get("Content-Length", "0")), 1_000_000)
-            except ValueError:
-                length = 0
-            raw = self.rfile.read(length) if length else b"{}"
+                raw = read_bounded_http_body(
+                    self.headers,
+                    self.rfile,
+                    max_body_bytes=MAX_FEEDBACK_JSON_BYTES,
+                    expected_content_type="application/json",
+                    timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+                    timeout_setter=getattr(connection, "settimeout", None),
+                )
+            except HTTPBodyError as exc:
+                self._send_json(
+                    exc.status,
+                    {"error": exc.public_message, "error_code": exc.code},
+                )
+                return
             try:
-                payload = json.loads(raw.decode("utf-8"))
-            except json.JSONDecodeError:
-                payload = {}
+                payload = decode_strict_json_body(raw)
+            except HTTPBodyError as exc:
+                self._send_json(
+                    exc.status,
+                    {"error": exc.public_message, "error_code": exc.code},
+                )
+                return
             if not isinstance(payload, dict):
-                payload = {}
-            storage = open_storage(_monitor_database_url(self.monitor_config))
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "request body must contain a JSON object", "error_code": "invalid_json_object"},
+                )
+                return
             try:
-                feedback_id = storage.record_analyst_feedback(payload)
-            except ValueError as exc:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                feedback_id = record_analyst_feedback(
+                    self.monitor_config,
+                    payload,
+                )
+            except ValueError:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid feedback payload"})
                 return
             self._send_json(HTTPStatus.CREATED, {"feedback_id": feedback_id, "status": "recorded", "timestamp": utc_now()})
             return
-        if parsed.path != "/feedback":
-            self._send(HTTPStatus.NOT_FOUND, "not found", "text/plain; charset=utf-8")
+        try:
+            raw_form = read_bounded_http_body(
+                self.headers,
+                self.rfile,
+                max_body_bytes=MAX_FEEDBACK_FORM_BYTES,
+                expected_content_type="application/x-www-form-urlencoded",
+                timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+                timeout_setter=getattr(connection, "settimeout", None),
+            )
+        except HTTPBodyError as exc:
+            self._send_json(
+                exc.status,
+                {"error": exc.public_message, "error_code": exc.code},
+            )
             return
         try:
-            length = min(int(self.headers.get("Content-Length", "0")), 100_000)
-        except ValueError:
-            length = 0
-        form = parse_qs(self.rfile.read(length).decode("utf-8")) if length else {}
+            form = parse_qs(
+                raw_form.decode("utf-8"),
+                max_num_fields=200,
+            )
+        except (UnicodeDecodeError, ValueError):
+            self._send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid feedback form", "error_code": "invalid_form"},
+            )
+            return
         feedback = {key: values[0] for key, values in form.items() if values}
         try:
             record_analyst_feedback(self.monitor_config, feedback)
-        except (OSError, sqlite3.Error, ValueError) as exc:
+        except ValueError:
             self._send(
                 HTTPStatus.BAD_REQUEST,
-                f"feedback failed: {type(exc).__name__}: {exc}",
+                "invalid feedback payload",
+                "text/plain; charset=utf-8",
+            )
+            return
+        except Exception as exc:
+            print(
+                json.dumps(
+                    log_payload(
+                        {
+                            "service": "monitor_web",
+                            "event": "feedback_write_failed",
+                            "exception": exc,
+                            "request_id": self._request_id(),
+                            "timestamp": utc_now(),
+                        }
+                    ),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            self._send(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "feedback storage failed",
                 "text/plain; charset=utf-8",
             )
             return
@@ -4546,18 +4616,73 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self._redirect(target)
 
     def do_GET(self) -> None:
+        try:
+            MonitorHandler._do_GET(self)
+        except Exception as exc:
+            MonitorHandler._handle_unexpected_error(self, "get_failed", exc)
+
+    def _do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/health":
+        if parsed.path in {"/health", "/health/live", "/live"}:
             self._send_json(
                 HTTPStatus.OK,
                 {"ok": True, "service": "monitor_web", "timestamp": utc_now()},
+            )
+            return
+        if parsed.path in {"/health/ready", "/ready"}:
+            try:
+                ready = bool(
+                    _open_monitor_storage(self.monitor_config)
+                    .health_check()
+                    .get("ok")
+                )
+            except Exception:
+                ready = False
+            self._send_json(
+                HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "ok": ready,
+                    "service": "monitor_web",
+                    "timestamp": utc_now(),
+                },
+            )
+            return
+        if parsed.path == "/api/internal/session-commands":
+            if not self._require_raw_command_admin():
+                return
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_internal_command_detail(
+                self.monitor_config,
+                session_id,
+            )
+            self._send_sensitive_json(
+                HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
+                detail,
+            )
+            return
+        if not self._require_read():
+            return
+        if parsed.path == "/api/ai-advisory":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_ai_advisory_detail(
+                self.monitor_config,
+                session_id,
+            )
+            self._send_json(
+                HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
+                detail,
             )
             return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)
             session_id = query.get("session_id", [""])[0]
             detail = load_session_detail(self.monitor_config, session_id=session_id)
-            self._send_json(HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND, detail)
+            self._send_json(
+                HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
+                session_detail_view(detail),
+            )
             return
         if parsed.path == "/api/sessions":
             query = parse_qs(parsed.query)
@@ -4567,7 +4692,6 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 session_offset = max(int(query.get("offset", ["0"])[0]), 0)
             except (TypeError, ValueError):
                 session_offset = 0
-            include_full = query.get("include_full", ["0"])[0].lower() in {"1", "true", "yes"}
             snapshot = load_snapshot(
                 self.monitor_config,
                 selected_session_id=selected_session_id,
@@ -4575,8 +4699,11 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 session_offset=session_offset,
             )
             sessions = snapshot.get("sessions") or []
-            if not include_full:
-                sessions = [_session_overview(item) for item in sessions if isinstance(item, dict)]
+            sessions = [
+                _session_overview(item)
+                for item in sessions
+                if isinstance(item, dict)
+            ]
             payload = {
                 "ok": snapshot.get("ok"),
                 "timestamp": snapshot.get("timestamp"),
@@ -4595,7 +4722,11 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 payload = {
                     "ok": detail.get("ok"),
                     "session_id": session_id,
-                    "events": detail.get("events_table_rows") or detail.get("raw_events_from_session_payload") or [],
+                    "events": event_views(
+                        detail.get("events_table_rows")
+                        or detail.get("raw_events_from_session_payload")
+                        or []
+                    ),
                     "error": (detail.get("errors") or {}).get("events") or detail.get("error") or "",
                     "timestamp": utc_now(),
                 }
@@ -4604,7 +4735,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             snapshot = load_snapshot(self.monitor_config)
             payload = {
                 "ok": snapshot.get("ok"),
-                "events": snapshot.get("events"),
+                "events": event_views(snapshot.get("events") or []),
                 "error": snapshot.get("events_error") or snapshot.get("error") or "",
                 "timestamp": snapshot.get("timestamp"),
             }
@@ -4623,12 +4754,6 @@ class MonitorHandler(BaseHTTPRequestHandler):
             status, dashboard_payload = _dashboard_get_payload(self.monitor_config, parsed.path, query)
             self._send_json(status, dashboard_payload or {"error": "not found"})
             return
-        if parsed.path == "/legacy":
-            selected_session_id = query.get("session_id", [""])[0]
-            feedback_filter = query.get("feedback_filter", ["all"])[0]
-            snapshot = load_snapshot(self.monitor_config, selected_session_id=selected_session_id)
-            self._send(HTTPStatus.OK, render_html(snapshot, self.monitor_config, selected_session_id, feedback_filter))
-            return
         if parsed.path not in {"", "/", "/monitor.html"}:
             self._send(HTTPStatus.NOT_FOUND, "not found", "text/plain; charset=utf-8")
             return
@@ -4636,29 +4761,81 @@ class MonitorHandler(BaseHTTPRequestHandler):
         if static_html:
             self._send(HTTPStatus.OK, static_html)
             return
-        selected_session_id = query.get("session_id", [""])[0]
-        feedback_filter = query.get("feedback_filter", ["all"])[0]
-        snapshot = load_snapshot(self.monitor_config, selected_session_id=selected_session_id)
-        self._send(HTTPStatus.OK, render_html(snapshot, self.monitor_config, selected_session_id, feedback_filter))
+        self._send(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            "canonical monitor asset unavailable",
+            "text/plain; charset=utf-8",
+        )
 
-    def log_message(self, fmt: str, *args: Any) -> None:
+    def _handle_unexpected_error(self, event: str, exc: BaseException) -> None:
         print(
             json.dumps(
-                {
+                log_payload(
+                    {
+                        "service": "monitor_web",
+                        "event": event,
+                        "exception": exc,
+                        "request_id": self._request_id(),
+                        "timestamp": utc_now(),
+                    }
+                ),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        self._send_json(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "service temporarily unavailable",
+                "request_id": self._request_id(),
+            },
+        )
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        del fmt
+        status = ""
+        if len(args) > 1 and str(args[1]).isdigit():
+            status = str(args[1])
+        print(
+            json.dumps(
+                log_payload({
                     "service": "monitor_web",
-                    "client": self.address_string(),
-                    "message": fmt % args,
+                    "client": str(self.client_address[0]) if self.client_address else "",
+                    "method": str(getattr(self, "command", "") or ""),
+                    "path": sanitize_request_target(str(getattr(self, "path", "") or "")),
+                    "status": status,
+                    "request_id": self._request_id(),
                     "timestamp": utc_now(),
-                },
+                }),
                 sort_keys=True,
             ),
             flush=True,
         )
 
 
-def build_server(host: str, port: int, config: MonitorConfig) -> ThreadingHTTPServer:
+def build_server(host: str, port: int, config: MonitorConfig) -> BoundedThreadingHTTPServer:
+    if host != "127.0.0.1":
+        raise ValueError(
+            "monitor_web must bind to 127.0.0.1 for loopback-only command access"
+        )
+    validate_configured_bearer_tokens(
+        read_token=_monitor_read_token(config),
+        write_token=_monitor_write_token(config),
+        admin_token=_monitor_raw_commands_token(config),
+        service_name="monitor_web",
+    )
+    validate_bind_auth(
+        host,
+        auth_configured=bool(_monitor_read_token(config)),
+        service_name="monitor_web",
+    )
+    config.bind_host = host
     MonitorHandler.monitor_config = config
-    return ThreadingHTTPServer((host, port), MonitorHandler)
+    return BoundedThreadingHTTPServer(
+        (host, port),
+        MonitorHandler,
+        request_timeout_seconds=FEEDBACK_REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -4666,7 +4843,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", help="Path to production JSON config.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host. Default: 127.0.0.1")
     parser.add_argument("--port", type=int, default=8090, help="Bind port. Default: 8090")
-    parser.add_argument("--db-path", help="Override SQLite database path.")
+    parser.add_argument(
+        "--db-path",
+        help="Deprecated: explicitly override the configured backend with a SQLite database path.",
+    )
     parser.add_argument("--reports-dir", help="Override reports directory.")
     parser.add_argument("--refresh-seconds", type=int, default=DEFAULT_REFRESH_SECONDS)
     parser.add_argument("--check", action="store_true", help="Load one snapshot and print a compact health summary.")
@@ -4676,11 +4856,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config = _load_monitor_config(args.config)
+    config.bind_host = args.host
     if args.db_path:
         config.db_path = args.db_path
         config.database_url = f"sqlite:///{args.db_path}"
-        if config.production_config:
-            config.production_config.database_url = config.database_url
     if args.reports_dir:
         config.reports_dir = args.reports_dir
         if config.production_config:
@@ -4695,6 +4874,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "ok": bool(snapshot.get("ok")),
                     "service": "monitor_web",
                     "db_path": config.db_path,
+                    "database": _monitor_database_descriptor(config),
                     "sessions": len(snapshot.get("sessions", [])),
                     "selected_session": (snapshot.get("selected") or {}).get("session_id"),
                     "events": len(snapshot.get("events", [])),
@@ -4715,13 +4895,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "host": args.host,
                 "port": args.port,
                 "db_path": config.db_path,
+                "database": _monitor_database_descriptor(config),
                 "reports_dir": config.reports_dir,
             },
             sort_keys=True,
         ),
         flush=True,
     )
-    server.serve_forever()
+    serve_http_until_stopped(server)
     return 0
 
 

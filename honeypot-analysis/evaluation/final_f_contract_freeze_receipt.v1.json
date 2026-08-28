@@ -1,0 +1,50 @@
+{
+  "schema_version": "final_f_contract_freeze_receipt.v1",
+  "status": "COMPLETE_VALID",
+  "phase": 0,
+  "architecture_id": "chronological_graph_grounded_analyst_synthesis_and_prioritization",
+  "contract_commit": "773689958e7be287e6579ff574aa88546e0c4880",
+  "contract_tree": "94615e9e3daee967d303dc9703467a2c8c9fa34e",
+  "files": [
+    {
+      "path": "honeypot-analysis/plan.md",
+      "sha256": "d12f72112c4e270f6173dae74d958029d41bc4b2aa0955c01b7affc680cc691b"
+    },
+    {
+      "path": "honeypot-analysis/docs/FINAL_F_CONTRACT_FREEZE.md",
+      "sha256": "cdef2989dfddc2aebd9700dfccd65abcab45e67d14c05de738c1b68947750112"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_ai_advisory_policy.v2.proposed.json",
+      "sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_contract_bundle.v1.json",
+      "sha256": "acf6e3a017af771a24cc936e94ccf2edee1bb1612ae3896f6f491c207292e611"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_projection_known_answer.v2.json",
+      "sha256": "01129f4d7bec13b71474a69f61ae197840b5c8963c667e420f4cdda750be3b4b"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_provider_abstention_known_answer.v2.json",
+      "sha256": "eb48759ff49f61274204632f17330303e2477edcaa525077624e35115f8cfc19"
+    },
+    {
+      "path": "honeypot-analysis/evaluation/final_f_provider_output_known_answer.v2.json",
+      "sha256": "eef6d55fe8fca3267cc8cd73113e9cf4c88f372ce3e33c8b088cf034b07438d7"
+    },
+    {
+      "path": "honeypot-analysis/production/tools/validate_final_f_contract_freeze.py",
+      "sha256": "e516f384dba494d118109386e1b56535bf354835e684800e0696b9b89d1d7b25"
+    },
+    {
+      "path": "honeypot-analysis/tests/test_final_f_contract_freeze.py",
+      "sha256": "2a703d07083f7a0ed20f8bb434e10cee37f33159645ed16034ea43cb31e4187b"
+    }
+  ],
+  "runtime_behavior_changed": false,
+  "production_changed": false,
+  "transformer_changed": false,
+  "receipt_sha256": "df9ba7f267c3033a52b2576e087bdb3f1b023b45dd9f4ba1c1f52bf3761e2ae5"
+}

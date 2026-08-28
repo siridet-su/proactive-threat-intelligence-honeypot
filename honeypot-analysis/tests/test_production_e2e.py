@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -13,14 +15,37 @@ if str(ROOT) not in sys.path:
 
 from production.workers.analysis_worker import AnalysisWorker
 from production.utils.config import ProductionConfig
+from production.utils.sensor_identity import canonical_session_id
 from production.api.ingest_api import build_server
 from production.workers.sensor_forwarder import forward_once, post_events
 from production.workers.session_worker import SessionWorker
 from production.storage import open_storage
+from production.reporting.session_assessment_v4 import (
+    build_session_assessment_v4,
+    validate_session_assessment_v4,
+)
 
 
 def _config(tmp: str) -> ProductionConfig:
     root = Path(tmp)
+    keyring_path = root / "credential-hmac-keyring.json"
+    keyring_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "credential_hmac_keyring.v1",
+                "active_key_id": "e2e-test-key",
+                "keys": {
+                    "e2e-test-key": base64.b64encode(b"e2e-test-key-material-32-bytes!!").decode(
+                        "ascii"
+                    )
+                },
+                "correlation_key_ids": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(keyring_path, 0o600)
     return ProductionConfig(
         sensor_id="pi5-test-sensor",
         api_token="dev-token",
@@ -39,6 +64,7 @@ def _config(tmp: str) -> ProductionConfig:
         enable_securebert=False,
         enable_actor_attribution=False,
         webhook_url="",
+        credential_hmac_keyring_file=str(keyring_path),
     )
 
 
@@ -100,24 +126,10 @@ class FakeCoordinator:
         self.max_tokens = max_tokens
 
     async def analyze(self, ioc_bundle, tactic_summary, sessions_obj, **kwargs):
-        return {
-            "campaign_name": "E2E Deterministic Test",
-            "confidence": "High - local e2e",
-            "executive_summary": "Local production e2e test report.",
-            "tactic_summary": tactic_summary,
-            "raw_event_count": len(kwargs.get("raw_events", [])),
-            "ioc_summary": {
-                "total": 1,
-                "urls": [
-                    {
-                        "type": "url",
-                        "value": "http://evil.example.com/dropper.sh",
-                        "confidence": "high",
-                        "first_seen": "2026-05-12T00:00:09Z",
-                    }
-                ],
-            },
-        }
+        return build_session_assessment_v4(
+            sessions_obj,
+            raw_events=kwargs.get("raw_events", []),
+        )
 
 
 def test_forwarder_spool_replay_to_analysis_report() -> None:
@@ -161,10 +173,30 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
             server.server_close()
             thread.join(timeout=5)
 
-        assert len(storage.list_rows("events", limit=100)) == len(events)
+        stored_events = storage.list_rows("events", limit=100)
+        assert len(stored_events) == len(events)
+        serialized_events = json.dumps(stored_events)
+        assert "1234" not in serialized_events
+        login_events = [
+            json.loads(row["payload_json"])
+            for row in stored_events
+            if row["eventid"].startswith("cowrie.login.")
+        ]
+        assert login_events
+        assert all(
+            event.get("username") == "[REDACTED]"
+            and event.get("password") == "[REDACTED]"
+            for event in login_events
+        )
 
         processed = SessionWorker(cfg).process_unprocessed()
         assert processed == len(events)
+        prediction_outbox = storage.list_rows("prediction_outbox")
+        prediction_snapshots = storage.list_rows("prediction_snapshots")
+        assert prediction_outbox
+        assert len(prediction_outbox) == len(prediction_snapshots)
+        assert all(row["status"] == "completed" for row in prediction_outbox)
+        assert all(row["snapshot_id"] for row in prediction_outbox)
 
         sessions = storage.list_rows("sessions")
         assert len(sessions) == 1
@@ -172,7 +204,9 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         serialized_session = json.dumps(session_payload)
         assert session_payload["is_ended"] is True
         assert session_payload["login_password"] == "[REDACTED]"
-        assert session_payload["login_password_hash"].startswith("sha256:")
+        assert session_payload["login_password_hash"] == ""
+        assert session_payload["credential_metadata"]["credential_observed"] is True
+        assert session_payload["credential_metadata"]["raw_password_stored"] is False
         assert "real-secret" not in serialized_session
         assert session_payload["hassh"] == "hassh-test-value"
         assert session_payload["client_version"] == "SSH-2.0-libssh"
@@ -180,8 +214,8 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert session_payload["bpg_list"]
 
         alerts = storage.list_rows("alerts")
-        assert any(alert["severity"] == "MEDIUM" and "Brute force" in alert["reason"] for alert in alerts)
-        assert any(alert["severity"] == "HIGH" and "Dropper pattern" in alert["reason"] for alert in alerts)
+        assert alerts == []
+        assert session_payload["alerts_fired"] == []
 
         jobs = storage.list_rows("analysis_jobs")
         assert len(jobs) == 1
@@ -193,14 +227,22 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         reports = storage.list_rows("reports")
         assert len(reports) == 1
         report = json.loads(reports[0]["payload_json"])
-        assert report["session_id"] == "e2e-session-1"
-        assert report["raw_event_count"] == len(events)
-        assert report["data_provenance"]["session"]["raw_event_count"] == len(events)
-        assert report["data_provenance"]["credentials"]["raw_password_stored"] is False
-        assert report["data_provenance"]["behavior_graph"]["bpg_count"] >= 1
+        assert report["session_id"] == canonical_session_id(
+            cfg.sensor_id,
+            "e2e-session-1",
+        )
+        assert report["schema_version"] == "session_assessment.v4"
+        assert validate_session_assessment_v4(report) == []
+        assert report["canonical_evidence"]["source_evidence_sha256"]
+        assert report["authority"]["predictions_authoritative"] is False
+        assert report["authority"]["automatic_response_authorized"] is False
         assert report["artifacts"]["json"]
         assert report["artifacts"]["stix"]
-        assert report["artifacts"]["pdf"]
+        rendered_report = (
+            report["artifacts"].get("pdf")
+            or report["artifacts"].get("pdf_fallback_markdown")
+        )
+        assert rendered_report
         for artifact_path in report["artifacts"].values():
             assert Path(artifact_path).exists()
 
@@ -212,7 +254,7 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert refreshed_session["analysis_updated_at"]
 
 
-def test_forwarder_removes_acknowledged_events_and_retains_only_rejected_events() -> None:
+def test_forwarder_removes_acknowledged_events_and_quarantines_rejected_events() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _config(tmp)
         valid = {
@@ -243,18 +285,22 @@ def test_forwarder_removes_acknowledged_events_and_retains_only_rejected_events(
         assert result.sent == 1
         assert result.duplicates == 0
         assert result.rejected == 1
-        assert result.remaining == 1
-        assert "rejected by ingest" in result.error
+        assert result.quarantined == 1
+        assert result.remaining == 0
+        assert "quarantined" in result.error
+        assert not Path(cfg.spool_path).exists()
 
-        retained = [
+        quarantine_path = Path(f"{cfg.spool_path}.quarantine.ndjson")
+        quarantined = [
             json.loads(line)
-            for line in Path(cfg.spool_path).read_text(encoding="utf-8").splitlines()
+            for line in quarantine_path.read_text(encoding="utf-8").splitlines()
         ]
-        assert retained == [invalid]
+        assert len(quarantined) == 1
+        assert quarantined[0]["event"] == invalid
         assert len(open_storage(cfg.database_url).list_rows("events", limit=10)) == 1
 
 
 if __name__ == "__main__":
     test_forwarder_spool_replay_to_analysis_report()
-    test_forwarder_removes_acknowledged_events_and_retains_only_rejected_events()
+    test_forwarder_removes_acknowledged_events_and_quarantines_rejected_events()
     print("production e2e tests passed")

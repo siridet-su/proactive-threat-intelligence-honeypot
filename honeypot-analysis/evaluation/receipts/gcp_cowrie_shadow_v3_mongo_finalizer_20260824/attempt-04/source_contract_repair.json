@@ -1,0 +1,31 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_source_contract_repair.v1",
+  "status": "PASS_NARROW_ACTIVE_RELEASE_COMPATIBILITY_REPAIR",
+  "root_cause": {
+    "case": "ACTIVE_WRAPPER_SIGNATURE_DRIFT",
+    "prior_release": "a5a9334cb36d5ceae5c98ef31185abcc42046992",
+    "observed_effect": "cowrie.session.closed dead-lettered as event_processing_invalid/ValidationError",
+    "mechanism": "session_worker calls _on_session_end(state, evidence_cutoff=...) while controlled_provenance_runtime.patched_close accepted only (self, state)",
+    "historical_failed_session_id_sha256": "4aa3a7c3db77b583b4a69d6c6dd10e32b19c6eb8023437f6610072ba026f41cd"
+  },
+  "repair": {
+    "candidate_release": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+    "changed_file": "production/controlled_provenance_runtime.py",
+    "before_sha256": "c8771d3a4cefa990629402d4096ca2ec8834328752694a2b9a2af11b7dbaaaf5",
+    "after_sha256": "a88eff72b3f46431622b03e307bc084fcd6707a90074fc344bc12eeacaf2ad48",
+    "new_signature": "patched_close(self, state, evidence_cutoff=None)",
+    "forwards_keyword": "evidence_cutoff",
+    "controlled_exclusion_preserved": true,
+    "session_worker_unchanged_sha256": "ef9e1c281fd88380a8c91d68129affab5f10b5c9ba42b288c10bb248276b7665"
+  },
+  "boundaries": {
+    "old_release_modified": false,
+    "historical_session_backfilled": false,
+    "failed_session_replayed": false,
+    "model_retrained": false,
+    "temperature_refit": false,
+    "policy_changed": false,
+    "storage_lineage_changed": false
+  }
+}
+

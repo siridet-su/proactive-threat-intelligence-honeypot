@@ -1,0 +1,420 @@
+{
+  "schema_version": "response_guidance_policy.v3",
+  "policy_id": "cowrie-observed-evidence-response-guidance",
+  "version": "3.7.0",
+  "updated_at": "2026-08-11",
+  "review_expires_at": "2027-07-16",
+  "owner": "honeypot-production",
+  "automatic_execution": false,
+  "migration": {
+    "replaces_new_writes_from": ["smb_action_policy.v1", "response_guidance.v2"],
+    "legacy_policy_sha256": "3f07b615dc63b01bdefd69ee3bd5d9fad1ee08030d6861d0f675362df5ab7fab",
+    "semantics": "Only immutable observed Cowrie evidence may select findings, triage, or advisory tasks. Forecast and enrichment are context only."
+  },
+  "trusted_sources": {
+    "cisa-small-business": {
+      "name": "CISA Cyber Guidance for Small Businesses",
+      "type": "government_guidance",
+      "url": "https://www.cisa.gov/cyber-guidance-small-businesses",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "nist-small-business": {
+      "name": "NIST Small Business Cybersecurity Corner",
+      "type": "government_guidance",
+      "url": "https://www.nist.gov/itl/smallbusinesscyber",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1552": {
+      "name": "MITRE ATT&CK T1552 Unsecured Credentials",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1552/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1105": {
+      "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1105/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1059": {
+      "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1059/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1053": {
+      "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1053/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    },
+    "mitre-t1070": {
+      "name": "MITRE ATT&CK T1070 Indicator Removal",
+      "type": "attack_technique",
+      "url": "https://attack.mitre.org/techniques/T1070/",
+      "source_version": "referenced-2026-07-16",
+      "accessed_at": "2026-07-16"
+    }
+  },
+  "finding_rules": [
+    {
+      "rule_id": "observed-interactive-command",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "severity": "low",
+      "statement": "One or more interactive commands were observed inside Cowrie. This is honeypot evidence, not evidence of activity on a real system.",
+      "applies_when": {"min_command_count": 1},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Migrated from reviewed SMB policy guidance", "Limited to canonical Cowrie command observations"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-inspection-command",
+      "semantic_family": "inspection",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "severity": "low",
+      "statement": "Cowrie reported success for a parsed, supported inspection command in its simulated shell; result contents, malicious intent, compromise, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["inspection"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires exactly one supported typed inspection operation with successful fragment outcome", "All referenced paths and entities must resolve", "ATT&CK candidates, predictions, enrichment, and hypotheses cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.3.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-filesystem-change-command",
+      "semantic_family": "filesystem",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "severity": "medium",
+      "statement": "Cowrie reported success for a parsed, supported filesystem-change command in its simulated shell; the resulting filesystem state, malicious intent, persistence, cleanup, compromise, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["filesystem"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires one supported typed filesystem-change operation with successful fragment outcome", "Every mutation target and path identity must resolve", "ATT&CK candidates, predictions, enrichment, hypotheses, and generic command labels cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.4.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-execution-attempt-command",
+      "semantic_family": "execution",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1059", "cisa-small-business"],
+      "severity": "medium",
+      "statement": "Cowrie reported success for a parsed, supported execution-attempt command in its simulated shell; program existence, completed execution, program effects, malicious intent, compromise, persistence, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["execution"],
+        "required_operation_types": ["execution_attempt"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires one supported typed execution-attempt operation with successful fragment outcome", "Every referenced script path or inline-program entity must resolve", "ATT&CK candidates, predictions, enrichment, hypotheses, and generic command labels cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.5.0"
+      }
+    },
+    {
+      "rule_id": "observed-credential-access-candidate",
+      "semantic_family": "sensitive_read",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1552", "cisa-small-business"],
+      "severity": "high",
+      "statement": "Cowrie reported success for a parsed file-read command targeting a resolved credential-related path; acquisition and real-host use are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["sensitive_read"],
+        "required_operation_types": ["credential_material_read", "file_read"],
+        "required_evidence_classes": ["password_hash_store", "private_key_material", "token_cloud_credentials"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Migrated from reviewed credential-access rule", "Requires same-entity typed file-read and credential-path-read operations with resolved identity"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-29",
+        "review_expires_at": "2027-07-16",
+        "version": "3.1.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-transfer-event",
+      "semantic_family": "transfer",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "cisa-small-business"],
+      "severity": "medium",
+      "statement": "Cowrie recorded a direct file-transfer event for the resolved artifact SHA-256 {artifact_hashes}; execution and any real-host effect are not established.",
+      "applies_when": {"activated_semantic_families": ["transfer"], "required_operation_types": ["transfer_observed"], "required_outcome_statuses": ["event_observed"], "required_effect_statuses": ["event_observed"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Migrated from reviewed transfer rule", "Requires a typed direct Cowrie transfer observation and exact artifact SHA-256", "ATT&CK candidates and transfer commands cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.2.0"
+      }
+    },
+    {
+      "rule_id": "observed-cowrie-command-transfer-attempt",
+      "semantic_family": "transfer_attempt",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "cisa-small-business"],
+      "severity": "medium",
+      "statement": "Cowrie reported success for a parsed, supported command that attempted HTTP(S) remote-content access; received bytes, a completed transfer, a created destination, artifact identity, execution, and real-host effects are not established.",
+      "applies_when": {
+        "activated_semantic_families": ["transfer_attempt"],
+        "required_operation_types": ["remote_content_access", "transfer_attempt"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Requires same-URL typed remote-content-access and transfer-attempt operations with successful fragment outcome", "Direct Cowrie transfer events remain a separate authority family", "ATT&CK candidates, predictions, enrichment, hypotheses, and generic downloader labels cannot select this finding"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "project developer",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-30",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.6.0"
+      }
+    }
+  ],
+  "action_playbooks": [
+    {
+      "rule_id": "observed-command-corroboration",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {"min_command_count": 1},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Observed Cowrie commands support corroboration only", "No source reputation or prediction eligibility"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-27",
+        "review_expires_at": "2027-07-16",
+        "version": "3.0.0"
+      },
+      "actions": [
+        {
+          "action_id": "review-observed-source-in-real-auth-logs",
+          "priority": 20,
+          "action": "Check authorized SSH, VPN, and authentication logs for source {src_ip} in the Cowrie session time window.",
+          "rationale": "Observed Cowrie interaction is useful correlation context but does not establish activity on real systems.",
+          "source_type": "trusted_control_guidance",
+          "references": ["cisa-small-business", "nist-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from remote-access corroboration guidance", "No real-system action is executed"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-27",
+            "review_expires_at": "2027-07-16",
+            "version": "3.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "observed-credential-access-corroboration",
+      "semantic_family": "sensitive_read",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1552", "cisa-small-business"],
+      "applies_when": {
+        "activated_semantic_families": ["sensitive_read"],
+        "required_operation_types": ["credential_material_read", "file_read"],
+        "required_evidence_classes": ["password_hash_store", "private_key_material", "token_cloud_credentials"],
+        "required_outcome_statuses": ["reported_success"],
+        "required_effect_statuses": ["reported_completed"]
+      },
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Resolved successful Cowrie credential-path read observation", "Corroboration is conditional on authorized real-system telemetry"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-29",
+        "review_expires_at": "2027-07-16",
+        "version": "3.1.0"
+      },
+      "actions": [
+        {
+          "action_id": "review-credential-exposure-and-reuse",
+          "priority": 10,
+          "action": "Review authorized deployment records and telemetry for possible exposure or reuse associated with the observed credential paths: {credential_paths}.",
+          "rationale": "The resolved Cowrie read observation supports a bounded human review, not a claim that credentials were acquired or reused.",
+          "source_type": "trusted_control_guidance",
+          "references": ["mitre-t1552", "cisa-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from credential-access response", "Limited to resolved paths supported by typed read facts", "No credential rotation is automatically authorized"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-29",
+            "review_expires_at": "2027-07-16",
+            "version": "3.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "observed-transfer-event-corroboration",
+      "semantic_family": "transfer",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "cisa-small-business"],
+      "applies_when": {"activated_semantic_families": ["transfer"], "required_operation_types": ["transfer_observed"], "required_outcome_statuses": ["event_observed"], "required_effect_statuses": ["event_observed"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Direct Cowrie transfer event with a resolved artifact SHA-256", "No transfer command, prediction, enrichment, or ATT&CK mapping can select this playbook"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-30",
+        "review_expires_at": "2027-07-16",
+        "version": "3.2.0"
+      },
+      "actions": [
+        {
+          "action_id": "hunt-observed-transfer-indicators",
+          "priority": 15,
+          "action": "Search authorized proxy, file, and endpoint telemetry for the exact artifact SHA-256 observed by Cowrie: {artifact_hashes}.",
+          "rationale": "A direct Cowrie transfer event supports a bounded hash-correlation review; it does not establish execution or an effect on a real host.",
+          "source_type": "trusted_control_guidance",
+          "references": ["mitre-t1105", "cisa-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Migrated from transfer response", "Limited to an exact artifact hash from a direct Cowrie transfer event", "No network block is automatically authorized"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-30",
+            "review_expires_at": "2027-07-16",
+            "version": "3.2.0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "observed-execution-corroboration",
+      "semantic_family": "execution",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1059", "cisa-small-business"],
+      "applies_when": {"activated_semantic_families": ["execution"], "required_operation_types": ["execution_attempt"], "required_outcome_statuses": ["reported_success"], "required_effect_statuses": ["reported_completed"]},
+      "provenance": {
+        "method": "reviewed_observed_evidence_policy_migration",
+        "basis": ["Exact activated typed execution-attempt observation", "Resolved script path or explicit inline-program identity", "Cowrie command outcome does not prove completed or real-host execution"],
+        "author": "honeypot-policy-maintainer",
+        "reviewer": "reviewed-policy-record-preserved",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-07-27",
+        "last_reviewed": "2026-07-29",
+        "review_expires_at": "2027-07-16",
+        "version": "3.5.0"
+      },
+      "actions": [
+        {
+          "action_id": "correlate-observed-execution-attempt",
+          "priority": 12,
+          "action": "Check authorized process and audit telemetry for activity matching the resolved script path or explicit inline-program observation and the Cowrie session time window: {executed_paths}.",
+          "rationale": "An exact typed Cowrie execution-attempt observation supports only a bounded, manual corroboration check.",
+          "source_type": "trusted_control_guidance",
+          "references": ["mitre-t1059", "cisa-small-business"],
+          "requires_manual_approval": true,
+          "safe_to_auto_execute": false,
+          "execution_integration": "not_implemented",
+          "provenance": {
+            "method": "reviewed_observed_evidence_policy_migration",
+            "basis": ["Selected independently from the activated typed execution fact", "No containment or host change is automatically authorized"],
+            "author": "honeypot-policy-maintainer",
+            "reviewer": "reviewed-policy-record-preserved",
+            "reviewed": true,
+            "generated": false,
+            "created": "2026-07-27",
+            "last_reviewed": "2026-07-27",
+            "review_expires_at": "2027-07-16",
+            "version": "3.5.0"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -43,8 +42,14 @@ type Config struct {
 
 	LookupDir string
 
-	MongoURI string
-	MongoDB  string
+	MongoURI                 string
+	MongoDB                  string
+	EventRetention           time.Duration
+	HardwareMetricsRetention time.Duration
+
+	TIEnabled    bool
+	TIJobsStream string
+	TIJobsMaxLen int64
 }
 
 type LookupRecord struct {
@@ -69,10 +74,6 @@ type MongoWriter struct {
 }
 
 func main() {
-	// โหลดไฟล์ .env
-	if err := godotenv.Load(); err != nil {
-		log.Println("⚠️ No .env file found or unable to load, using system env variables")
-	}
 
 	cfg := loadConfig()
 	ctx := context.Background()
@@ -113,6 +114,9 @@ func main() {
 
 func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
+	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "50000"), 10, 64)
+	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
+	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
 
 	return Config{
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
@@ -124,8 +128,14 @@ func loadConfig() Config {
 
 		LookupDir: getenv("LOOKUP_DIR", "/home/cpe27/honeypot-pipeline/lookups"),
 
-		MongoURI: getenv("MONGO_URI", ""),
-		MongoDB:  getenv("MONGO_DATABASE", "honeypot"),
+		MongoURI:                 getenv("MONGO_URI", ""),
+		MongoDB:                  getenv("MONGO_DATABASE", "honeypot_db"),
+		EventRetention:           eventRetention,
+		HardwareMetricsRetention: hardwareMetricsRetention,
+
+		TIEnabled:    strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
+		TIJobsStream: getenv("TI_JOBS_STREAM", "ti:jobs"),
+		TIJobsMaxLen: tiJobsMaxLen,
 	}
 }
 
@@ -218,9 +228,13 @@ func processMessage(
 				doc[k] = strVal
 			}
 		}
-		// Convert Unix timestamp to MongoDB DateTime if present
+		observedAt := time.Now().UTC()
 		if ts, ok := doc["timestamp"].(float64); ok {
-			doc["timestamp"] = time.Unix(int64(ts), 0)
+			observedAt = time.Unix(int64(ts), 0).UTC()
+		}
+		setHardwareMetricExpiry(doc, observedAt, cfg.HardwareMetricsRetention)
+		if !mw.enabled {
+			return fmt.Errorf("MongoDB is disabled; refusing to acknowledge hardware metric")
 		}
 		_, err := mw.db.Collection("hardware_metrics").InsertOne(ctx, doc)
 		return err
@@ -241,12 +255,13 @@ func processMessage(
 
 	normalized := normalizeEvent(streamName, msg.ID, msg.Values, payload)
 	enriched := enrichEvent(normalized, lookups)
+	setEventExpiry(enriched, cfg.EventRetention)
 
+	srcIP := getNestedString(enriched, "network.src_ip")
 	eventJSON := mustJSON(enriched)
 
 	eventID := getNestedString(enriched, "event_id")
 	eventType := getNestedString(enriched, "event_type")
-	srcIP := getNestedString(enriched, "network.src_ip")
 	dstIP := getNestedString(enriched, "network.dst_ip")
 	dstPort := getNestedString(enriched, "network.dst_port")
 
@@ -255,6 +270,13 @@ func processMessage(
 	// without duplicate documents.
 	if err := mw.upsertEvent(ctx, enriched); err != nil {
 		return fmt.Errorf("mongo upsert event failed: %w", err)
+	}
+
+	// Threat-intelligence calls must not delay or block ingestion. The worker
+	// receives one idempotent job per supported observable after MongoDB has the
+	// canonical event, and attaches its result later.
+	if err := enqueueThreatIntelJobs(ctx, rdb, cfg, source, eventID, eventType, srcIP, payload); err != nil {
+		return fmt.Errorf("enqueue threat-intelligence jobs: %w", err)
 	}
 
 	if _, err := rdb.XAdd(ctx, &redis.XAddArgs{
@@ -855,8 +877,17 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "source", Value: 1}, {Key: "event_type", Value: 1}, {Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "network.src_ip", Value: 1}, {Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "session.id", Value: 1}, {Key: "timestamp", Value: 1}}, Options: options.Index().SetSparse(true)},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
-	_, err := mw.db.Collection("events").Indexes().CreateMany(ctx, indexes)
+	if _, err := mw.db.Collection("events").Indexes().CreateMany(ctx, indexes); err != nil {
+		return err
+	}
+
+	hardwareIndexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+	_, err := mw.db.Collection("hardware_metrics").Indexes().CreateMany(ctx, hardwareIndexes)
 	return err
 }
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run honeypot completed-session threshold monitor daily
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1d
+Persistent=true
+Unit=honeypot-session-count-monitor.service
+
+[Install]
+WantedBy=timers.target

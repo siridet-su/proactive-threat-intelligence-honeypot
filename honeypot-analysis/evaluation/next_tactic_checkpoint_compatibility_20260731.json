@@ -1,0 +1,97 @@
+{
+  "schema_version": "next_tactic_checkpoint_compatibility_receipt.v1",
+  "status": "complete",
+  "decision": "COMPATIBLE_WITH_DISCLOSED_LIMITATIONS",
+  "retraining_required_for_correction": false,
+  "evaluator_git_revision": "638f51e77331bf1d7875e228830da7f6862f90a4",
+  "target_contract_id": "next_distinct_command_behavior_phase_or_session_end.v1",
+  "evaluation_role": "test",
+  "evaluation": {
+    "logical_sha256": "0c0569962857de73184f613b5704da9f6fd3e1bb2d2b8d8d8104235bac608d15",
+    "evaluation_json_sha256": "20d50e17d9797747a08e9e1f43b0ad48b0de98232922d83461f425511f506e87",
+    "sha256sums_json_sha256": "8dbfdc56dc5143364f6eab8fe84a48b4b728ceb19b10ae443d5f47c4086ca101",
+    "contract_sha256": "34e2e9fbe19d66041ce2c951fdb870eaf116c28166efdaa9a82bf66422997dad",
+    "baseline_receipt_sha256": "3f130135d8fc116ecaf2ea9ea65dd498651dad616aec33b18ecafa2648d7f1d1",
+    "elapsed_seconds": 2949.0558722019196,
+    "torch_version": "2.13.0+cpu",
+    "device": "cpu"
+  },
+  "artifacts": {
+    "checkpoint_sha256": "7fbd73c4bd071336fa52a589bf41e39f5a3122a67aee398dfb8e6dd9cfdfb04a",
+    "model_spec_file_sha256": "2f4ea5531ce08adbd78f53832d7a6e23ba34617549c56aa50f04d069dee6ccc6",
+    "model_spec_semantic_sha256": "82b1a15ec96f5165878ee03639daa61e319f06c4376e0a9a8018f3e1a2b3e512",
+    "vocabulary_file_sha256": "1b46db302d2a92f80f1385e63fa01968cc23a9ce50cb77ef24f20ce8a9e494e9",
+    "vocabulary_semantic_sha256": "527a65c6d6cee94a3bbb0af6d5df95981a6438cf703e053484c9e7e116f0306f",
+    "calibration_file_sha256": "528bbdd8f21d7e0a5f4446657639ccbc994b9d469876e8f026eb716e9a8d7cc9",
+    "calibration_semantic_sha256": "aa27813af96eaa2674b07d76f41565e71835bfa1a5bba8a3232eaa0a396a4e2d",
+    "classifier_checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+    "classification_rules_sha256": "33f332946c53578f2e609a3a039dda712355b9e209721bcc073c61a623d6342b",
+    "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
+    "preprocessing_sha256": "890569a4597df2f300d7c885a2cf0bd34a9fd9fbdd0ab0938141a8f13f4a25c1"
+  },
+  "corpus": {
+    "retained_safe_session_count": 237514,
+    "current_safe_session_count": 237117,
+    "excluded_session_count": 397,
+    "old_example_count": 336089,
+    "current_example_count": 335293,
+    "demoted_model_only_label_count": 1183,
+    "phase_sequence_change_count": 932,
+    "target_change_count": 291,
+    "target_change_rate": 0.0008678976298342047,
+    "safe_sessions_sha256": "c2c1b66c67eeca5b9649142b3743e017025ce727f7f747f440e45b9033a11d3e",
+    "examples_sha256": "4b81000e29e3e382815ed37c660a27e94a6464a841cff18135f174fdaf28ae53"
+  },
+  "corrected_current_policy_metrics": {
+    "coverage": 1.0,
+    "top1_accuracy": 0.9938375977835724,
+    "top3_accuracy": 0.9958645697522817,
+    "mrr": 0.9952389596281689,
+    "exact_set_accuracy": 0.805936896982639,
+    "mean_jaccard": 0.8060335785914609,
+    "hamming_loss": 0.02589118571914137,
+    "brier_score": 0.009191864755635503,
+    "log_loss": 0.026938242132381347,
+    "expected_calibration_error_10_bin": 0.009177320882187024,
+    "weighted_f1": 0.7788733879268427,
+    "macro_f1_all_classes": 0.18828354267119354,
+    "terminal_f1": 0.842118089741965,
+    "terminal_recall": 0.7286445088289747
+  },
+  "trust_policy_comparison": {
+    "common_example_count": 335293,
+    "tensor_change_count": 616,
+    "tensor_change_rate": 0.001837199106453162,
+    "prediction_change_count": 54,
+    "prediction_change_rate": 0.0001610531684228421,
+    "top1_change_count": 56,
+    "top1_change_rate": 0.00016701810058665107
+  },
+  "audit_ablation": {
+    "tensor_change_count": 197488,
+    "tensor_change_rate": 0.5890012615831527,
+    "prediction_change_count": 86685,
+    "prediction_change_rate": 0.25853507230989015,
+    "top1_change_count": 24898,
+    "top1_change_rate": 0.07425744050725783
+  },
+  "determinism": {
+    "exact_match": true,
+    "replay_sample_count": 1024,
+    "current_prediction_sha256": "55883ba56d4a72973f2ef80d9fdfdb19f0ebf17858425d6229a55dab1add3316",
+    "old_policy_prediction_sha256": "b760125c2fa84506e58faae2e39f5ad7860746252834635511652c01818513b3",
+    "zero_audit_prediction_sha256": "17b9c637960b3772ce313c8bfe6578d771f254d3b7cc491d4e34f5b738898bed"
+  },
+  "limitations": [
+    "The privacy-safe retained role artifact cannot reconstruct original durable-arrival late-timestamp counts.",
+    "Defense-evasion and privilege-escalation are reportable under the declared support thresholds but have zero recall.",
+    "Eight tactic classes have no current-policy test support; command-and-control has only 28 targets and is non-reportable.",
+    "The compatibility evaluation validates the frozen checkpoint offline and does not authorize deployment."
+  ],
+  "readiness": {
+    "controlled_local_demo": "READY",
+    "thesis_secondary_experimental_poc": "READY_WITH_DISCLOSED_LIMITATIONS",
+    "isolated_deployment_test": "READY",
+    "live_candidate_redeployment": "BLOCKED_BY_SEPARATE_DEPLOYMENT_RECOVERY_AND_STARTUP_GATES"
+  }
+}

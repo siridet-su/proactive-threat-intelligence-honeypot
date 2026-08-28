@@ -1,0 +1,648 @@
+{
+  "schema_version": "typed_semantic_vocabulary_policy.v2",
+  "policy_id": "honeypot-typed-semantic-vocabulary",
+  "version": "2.0.0",
+  "semantic_extractor_version": "typed-shell-subset.v2.4",
+  "authority": {
+    "mode": "family_scoped_policy_input",
+    "may_select_findings": true,
+    "may_select_hypotheses": false,
+    "may_select_guidance": true,
+    "may_authorize_actions": false
+  },
+  "review": {
+    "method": "developer-authored closed semantic vocabulary",
+    "reviewed": true,
+    "last_reviewed": "2026-08-11",
+    "scope": "bounded Cowrie SSH shell evidence with direct transfer-event policy input"
+  },
+  "contract": {
+    "fact_set_schema": "typed_semantic_fact_set.v2",
+    "fact_schema": "typed_semantic_fact.v2",
+    "relationship_schema": "typed_semantic_relationship.v1",
+    "chain_schema": "typed_semantic_chain.v1",
+    "shadow_result_schema": "typed_semantic_shadow_result.v2",
+    "shadow_diff_schema": "typed_semantic_shadow_diff.v1"
+  },
+  "sensitive_path_policy": {
+    "schema_version": "typed_sensitive_path_policy.v2",
+    "match_scope": "complete_parsed_path_operand",
+    "default_class": "generic_configuration",
+    "classes": {
+      "account_metadata": {
+        "sensitivity": "account_enumeration",
+        "exact_absolute_paths": ["/etc/passwd"],
+        "suffix_path_segments": []
+      },
+      "password_hash_store": {
+        "sensitivity": "credential_material",
+        "exact_absolute_paths": ["/etc/shadow"],
+        "suffix_path_segments": []
+      },
+      "private_key_material": {
+        "sensitivity": "credential_material",
+        "exact_absolute_paths": [],
+        "suffix_path_segments": [
+          [".ssh", "id_dsa"],
+          [".ssh", "id_ecdsa"],
+          [".ssh", "id_ed25519"],
+          [".ssh", "id_rsa"]
+        ]
+      },
+      "token_cloud_credentials": {
+        "sensitivity": "credential_material",
+        "exact_absolute_paths": [],
+        "suffix_path_segments": [
+          [".aws", "credentials"],
+          [".config", "gcloud", "application_default_credentials.json"]
+        ]
+      },
+      "generic_configuration": {
+        "sensitivity": "ordinary_configuration",
+        "exact_absolute_paths": [],
+        "suffix_path_segments": []
+      }
+    }
+  },
+  "operations": {
+    "unknown": {
+      "family": "unknown",
+      "effect": "unknown"
+    },
+    "host_uptime_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "filesystem_capacity_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "system_identity_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "account_identity_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "network_route_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "process_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "network_socket_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "account_database_inspection": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "filesystem_search": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "file_read": {
+      "family": "filesystem",
+      "effect": "read"
+    },
+    "literal_data_emission": {
+      "family": "transformation",
+      "effect": "emit"
+    },
+    "decode_transform": {
+      "family": "transformation",
+      "effect": "decode"
+    },
+    "file_write": {
+      "family": "filesystem",
+      "effect": "create_or_truncate"
+    },
+    "file_append": {
+      "family": "filesystem",
+      "effect": "append_or_create"
+    },
+    "file_modify": {
+      "family": "filesystem",
+      "effect": "modify"
+    },
+    "file_delete": {
+      "family": "filesystem",
+      "effect": "delete"
+    },
+    "permission_modify": {
+      "family": "filesystem",
+      "effect": "modify_metadata"
+    },
+    "directory_create": {
+      "family": "filesystem",
+      "effect": "create_directory"
+    },
+    "file_move": {
+      "family": "filesystem",
+      "effect": "move"
+    },
+    "archive_create": {
+      "family": "collection",
+      "effect": "create_archive"
+    },
+    "schedule_inspect": {
+      "family": "scheduled_task",
+      "effect": "read"
+    },
+    "schedule_modify": {
+      "family": "scheduled_task",
+      "effect": "modify"
+    },
+    "schedule_delete": {
+      "family": "scheduled_task",
+      "effect": "delete"
+    },
+    "service_inspect": {
+      "family": "service",
+      "effect": "read"
+    },
+    "service_modify": {
+      "family": "service",
+      "effect": "modify"
+    },
+    "working_directory_change": {
+      "family": "context",
+      "effect": "change_context"
+    },
+    "remote_content_access": {
+      "family": "transfer_attempt",
+      "effect": "read_remote"
+    },
+    "remote_content_pipe_source": {
+      "family": "transfer_attempt",
+      "effect": "pipe_remote_content"
+    },
+    "transfer_attempt": {
+      "family": "transfer_attempt",
+      "effect": "attempt_transfer"
+    },
+    "transfer_observed": {
+      "family": "transfer",
+      "effect": "observed_transfer"
+    },
+    "execution_attempt": {
+      "family": "execution",
+      "effect": "attempt_execution"
+    },
+    "shell_pipe_execution_attempt": {
+      "family": "execution",
+      "effect": "attempt_execution"
+    },
+    "credential_path_read": {
+      "family": "sensitive_read",
+      "effect": "read"
+    },
+    "credential_material_read": {
+      "family": "sensitive_read",
+      "effect": "read"
+    },
+    "account_metadata_read": {
+      "family": "inspection",
+      "effect": "read"
+    },
+    "account_modify": {
+      "family": "identity",
+      "effect": "modify"
+    }
+  },
+  "literal_action_map": {
+    "cowrie_file_transfer_observed": "transfer_observed",
+    "account_modification_attempt": "account_modify",
+    "permission_modification_attempt": "permission_modify",
+    "deletion_attempt": "file_delete",
+    "execution_attempt": "execution_attempt",
+    "shell_pipe_consumer": "shell_pipe_execution_attempt",
+    "transfer_attempt": "transfer_attempt",
+    "remote_content_pipe_source": "remote_content_pipe_source",
+    "credential_path_access": "credential_path_read",
+    "remote_content_access": "remote_content_access"
+  },
+  "entity_role_types": {
+    "urls": "url",
+    "source_paths": "path",
+    "destination_paths": "path",
+    "executed_paths": "path",
+    "modified_paths": "path",
+    "deleted_paths": "path",
+    "created_paths": "path",
+    "appended_paths": "path",
+    "read_paths": "path",
+    "archive_paths": "path",
+    "account_names": "account",
+    "credential_paths": "path",
+    "artifact_hashes": "hash",
+    "service_names": "service",
+    "schedule_targets": "schedule",
+    "host_targets": "host",
+    "network_targets": "network",
+    "process_targets": "process",
+    "literal_values": "literal"
+  },
+  "vocabulary": {
+    "operation_families": [
+      "unknown",
+      "inspection",
+      "filesystem",
+      "transformation",
+      "collection",
+      "scheduled_task",
+      "service",
+      "context",
+      "transfer",
+      "transfer_attempt",
+      "execution",
+      "sensitive_read",
+      "identity"
+    ],
+    "effects": [
+      "unknown",
+      "read",
+      "emit",
+      "decode",
+      "create_or_truncate",
+      "append_or_create",
+      "modify",
+      "delete",
+      "modify_metadata",
+      "create_directory",
+      "move",
+      "create_archive",
+      "change_context",
+      "read_remote",
+      "pipe_remote_content",
+      "attempt_transfer",
+      "observed_transfer",
+      "attempt_execution"
+    ],
+    "proof_scopes": [
+      "unresolved",
+      "literal_command",
+      "general_command_semantics",
+      "shell_syntax",
+      "fragment_outcome",
+      "compound_outcome",
+      "direct_cowrie_event",
+      "observed_context",
+      "confirmed_context",
+      "conditional_context",
+      "shared_resolved_identity",
+      "shared_conditional_identity",
+      "classification_candidate"
+    ],
+    "effect_statuses": [
+      "abstained",
+      "attempted_unconfirmed",
+      "reported_completed",
+      "reported_failed",
+      "compound_unconfirmed",
+      "conditional_not_observed",
+      "event_observed"
+    ],
+    "outcome_statuses": [
+      "outcome_unknown",
+      "reported_success",
+      "reported_failure",
+      "compound_outcome_not_fragment_proof",
+      "conditional_not_observed",
+      "event_observed"
+    ],
+    "outcome_scopes": [
+      "fragment",
+      "compound_event",
+      "legacy_unknown",
+      "direct_cowrie_event"
+    ],
+    "parse_statuses": [
+      "parsed",
+      "malformed",
+      "unsupported",
+      "empty"
+    ],
+    "abstention_reasons": [
+      "missing_operand",
+      "unsupported_executable",
+      "unsupported_option",
+      "unsupported_shell_syntax",
+      "malformed_quoting",
+      "expansion_unresolved",
+      "ambiguous_operand",
+      "condition_not_satisfied",
+      "identity_unresolved",
+      "source_effect_unconfirmed",
+      "target_effect_unconfirmed",
+      "mapping_scope_unresolved",
+      "relationship_limit",
+      "resource_limit"
+    ],
+    "entity_types": [
+      "path",
+      "url",
+      "hash",
+      "account",
+      "service",
+      "schedule",
+      "host",
+      "network",
+      "process",
+      "literal"
+    ],
+    "entity_uncertainty_reasons": [
+      "none",
+      "empty_path",
+      "shell_expansion_not_resolved",
+      "home_directory_not_resolved",
+      "wildcard_path_not_resolved",
+      "conditional_working_directory",
+      "working_directory_unknown"
+    ],
+    "entity_roles": [
+      "urls",
+      "source_paths",
+      "destination_paths",
+      "executed_paths",
+      "modified_paths",
+      "deleted_paths",
+      "created_paths",
+      "appended_paths",
+      "read_paths",
+      "archive_paths",
+      "account_names",
+      "credential_paths",
+      "artifact_hashes",
+      "service_names",
+      "schedule_targets",
+      "host_targets",
+      "network_targets",
+      "process_targets",
+      "literal_values"
+    ],
+    "path_resolution_statuses": [
+      "recorded_resolved",
+      "context_resolved",
+      "conditional_candidate",
+      "unresolved"
+    ],
+    "working_directory_statuses": [
+      "observed",
+      "confirmed",
+      "conditional_candidate",
+      "unknown"
+    ],
+    "directory_change_statuses": [
+      "none",
+      "confirmed",
+      "failed",
+      "conditional_candidate",
+      "unresolved"
+    ],
+    "relationship_types": [
+      "piped_to",
+      "conditional_successor",
+      "conditional_failure_successor",
+      "explicit_sequence",
+      "same_path_transition",
+      "transfer_observation_confirmation"
+    ],
+    "relationship_statuses": [
+      "supported",
+      "partial",
+      "blocked"
+    ],
+    "relationship_bases": [
+      "explicit_pipe_operator",
+      "explicit_shell_operator",
+      "explicit_sequence_operator",
+      "adjacent_fragments",
+      "same_session",
+      "chronological_order",
+      "shared_resolved_path",
+      "shared_conditional_path_candidate"
+    ],
+    "chain_statuses": [
+      "supported",
+      "partial"
+    ],
+    "evidence_reference_types": [
+      "source_observation",
+      "direct_cowrie_event",
+      "trusted_classification",
+      "duplicate_observation"
+    ],
+    "evidence_types": [
+      "direct_cowrie_command_observation",
+      "direct_cowrie_transfer_event"
+    ],
+    "attck_mapping_scopes": [
+      "fragment_exact",
+      "compound_command",
+      "unresolved_command"
+    ]
+  },
+  "limits": {
+    "max_facts": 2048,
+    "max_entities": 8192,
+    "max_relationships": 8192,
+    "max_chains": 2048,
+    "max_command_length": 8192,
+    "max_total_command_bytes": 1048576
+  },
+  "activation": {
+    "default": "not_activated",
+    "family_states": {
+      "unknown": "not_eligible",
+      "inspection": "activated",
+      "filesystem": "activated",
+      "transformation": "not_activated",
+      "collection": "not_activated",
+      "scheduled_task": "not_activated",
+      "service": "not_activated",
+      "context": "not_activated",
+      "transfer": "activated",
+      "transfer_attempt": "activated",
+      "execution": "activated",
+      "sensitive_read": "activated",
+      "identity": "not_activated"
+    },
+    "family_requirements": {
+      "sensitive_read": {
+        "required_operation_types": [
+          "file_read",
+          "credential_material_read"
+        ],
+      "allowed_operation_types": [
+        "file_read",
+        "credential_material_read",
+        "account_metadata_read"
+        ],
+        "operation_match_mode": "all_required",
+        "required_entity_role": "credential_paths",
+        "required_entity_type": "path",
+        "entity_match_mode": "shared_required",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [
+          "recorded_resolved",
+          "context_resolved"
+        ],
+        "require_same_entity": true,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "transfer": {
+        "required_operation_types": [
+          "transfer_observed"
+        ],
+        "allowed_operation_types": [
+          "transfer_observed"
+        ],
+        "operation_match_mode": "all_required",
+        "required_entity_role": "artifact_hashes",
+        "required_entity_type": "hash",
+        "entity_match_mode": "shared_required",
+        "required_outcome_status": "event_observed",
+        "required_outcome_scope": "direct_cowrie_event",
+        "required_effect_status": "event_observed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [],
+        "require_same_entity": true,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "transfer_attempt": {
+        "required_operation_types": [
+          "remote_content_access",
+          "transfer_attempt"
+        ],
+        "allowed_operation_types": [
+          "remote_content_access",
+          "transfer_attempt"
+        ],
+        "operation_match_mode": "all_required",
+        "required_entity_role": "urls",
+        "required_entity_type": "url",
+        "entity_match_mode": "shared_required",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [],
+        "require_same_entity": true,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "inspection": {
+        "required_operation_types": [
+          "host_uptime_inspection",
+          "filesystem_capacity_inspection",
+          "system_identity_inspection",
+          "account_identity_inspection",
+          "network_route_inspection",
+          "process_inspection",
+          "network_socket_inspection",
+          "account_database_inspection",
+          "account_metadata_read",
+          "filesystem_search"
+        ],
+        "allowed_operation_types": [
+          "file_read",
+          "host_uptime_inspection",
+          "filesystem_capacity_inspection",
+          "system_identity_inspection",
+          "account_identity_inspection",
+          "network_route_inspection",
+          "process_inspection",
+          "network_socket_inspection",
+          "account_database_inspection",
+          "account_metadata_read",
+          "filesystem_search"
+        ],
+        "operation_match_mode": "exactly_one_required",
+        "required_entity_role": null,
+        "required_entity_type": null,
+        "entity_match_mode": "referenced_if_present",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [
+          "recorded_resolved",
+          "context_resolved"
+        ],
+        "require_same_entity": false,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "filesystem": {
+        "required_operation_types": [
+          "file_write",
+          "file_append",
+          "file_modify",
+          "permission_modify",
+          "directory_create",
+          "file_move",
+          "file_delete"
+        ],
+        "allowed_operation_types": [
+          "file_write",
+          "file_append",
+          "file_modify",
+          "permission_modify",
+          "directory_create",
+          "file_move",
+          "file_delete",
+          "file_read",
+          "literal_data_emission"
+        ],
+        "operation_match_mode": "exactly_one_required",
+        "required_entity_role": null,
+        "required_entity_type": null,
+        "entity_match_mode": "referenced_required",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [
+          "recorded_resolved",
+          "context_resolved"
+        ],
+        "require_same_entity": false,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      },
+      "execution": {
+        "required_operation_types": [
+          "execution_attempt"
+        ],
+        "allowed_operation_types": [
+          "execution_attempt"
+        ],
+        "operation_match_mode": "all_required",
+        "required_entity_role": null,
+        "required_entity_type": null,
+        "entity_match_mode": "referenced_required",
+        "required_outcome_status": "reported_success",
+        "required_outcome_scope": "fragment",
+        "required_effect_status": "reported_completed",
+        "required_parse_status": "parsed",
+        "allowed_path_resolution_statuses": [
+          "recorded_resolved",
+          "context_resolved"
+        ],
+        "require_same_entity": false,
+        "require_linkable_identity": true,
+        "require_empty_abstention_reasons": true
+      }
+    }
+  }
+}

@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+from production.classification.trust import is_trusted_classification_event
+
 
 @dataclass
 class ActorMatch:
@@ -98,6 +100,7 @@ def enrich_report_with_actor_attribution(
     actor_db_path: str,
     mitre_db: Any = None,
 ) -> Dict[str, Any]:
+    context = report.setdefault("contextual_intelligence", {})
     campaign_summary = session_payload.get("campaign_summary") or {}
     if isinstance(campaign_summary, dict) and campaign_summary:
         report["campaign_context"] = {
@@ -108,16 +111,55 @@ def enrich_report_with_actor_attribution(
             "max_confirmed_severity": campaign_summary.get("max_confirmed_severity") or "",
             "fingerprint": campaign_summary.get("fingerprint") or {},
         }
+        context["behavioral_cluster"] = {
+            **report["campaign_context"],
+            "semantics": "local_behavioral_similarity_not_named_attribution",
+        }
     actor_db, tactic_map = load_actor_db(actor_db_path)
     if not actor_db:
-        report.setdefault("actor_attribution", {"status": "skipped", "reason": "actor_db_unavailable"})
+        context["ttp_similarity"] = {
+            "status": "skipped",
+            "reason": "actor_db_unavailable",
+            "not_attribution": True,
+        }
         return report
-    matches, tactic_summary = attribute_actor(session_payload.get("ttps", []), actor_db, tactic_map, mitre_db=mitre_db)
-    report["actor_matches"] = [match.to_dict() for match in matches]
-    report["tactic_summary"] = tactic_summary
-    report["actor_attribution"] = {
+
+    all_classification_events = [
+        item
+        for item in session_payload.get("classification_events") or []
+        if isinstance(item, dict)
+    ]
+    classification_events = [
+        item
+        for item in all_classification_events
+        if is_trusted_classification_event(item)
+    ]
+    trusted_ttps = {
+        str(item.get("ttp") or "").split(".", 1)[0]
+        for item in classification_events
+        if str(item.get("ttp") or "").strip()
+    }
+    if not all_classification_events:
+        trusted_ttps = {
+            str(value).split(".", 1)[0]
+            for value in session_payload.get("ttps") or []
+            if str(value).strip()
+        }
+    matches, tactic_summary = attribute_actor(
+        trusted_ttps,
+        actor_db,
+        tactic_map,
+        mitre_db=mitre_db,
+    )
+    context["ttp_similarity"] = {
         "status": "matched" if matches else "no_specific_actor",
         "match_count": len(matches),
-        "actor_db_path": actor_db_path,
+        "matches": [match.to_dict() for match in matches],
+        "tactic_summary": tactic_summary,
+        "not_attribution": True,
+        "semantics": (
+            "Technique overlap is contextual similarity only and must not be interpreted "
+            "as named-actor attribution."
+        ),
     }
     return report

@@ -1,4 +1,8 @@
 # Honeypot Pipeline Setup & Fixes (Documentation)
+
+> **Historical record.** This log describes the configuration at the date of
+> the change. Refer to the current security policy for the live configuration.
+
 **Date:** July 13-15, 2026
 
 This document summarizes the configurations, fixes, and optimizations applied to the Honeypot Data Pipeline to ensure stability, correctness, and performance.
@@ -59,3 +63,17 @@ This document summarizes the configurations, fixes, and optimizations applied to
     `sudo iptables -I OUTPUT 1 -m owner --uid-owner cowrie -j DROP`
     This traps any hacker trying to download malware from inside the Cowrie shell, even if they escape the Python environment to a bash shell.
   * Saved the rule persistently via `iptables-persistent`.
+
+## 10. Credential separation (2026-08-26)
+
+* **Change:** Moved `MONGO_URI`, Redis authentication, and provider API keys
+  out of `/etc/honeypot-agent.env`.
+* **Current layout:** The shared file contains non-secret operational values.
+  Root-only, mode `0600` private files provide each service only the
+  credentials it requires:
+  * `/etc/honeypot/hardware.env` — Redis authentication.
+  * `/etc/honeypot/processor.env` — Redis authentication and `MONGO_URI`.
+  * `/etc/honeypot/ti-worker.env` — Redis authentication, `MONGO_URI`, and
+    VirusTotal/AbuseIPDB API keys.
+* **Result:** Hardware and Processor were restarted successfully after their
+  systemd units loaded the new private files. The TI worker remained stopped.

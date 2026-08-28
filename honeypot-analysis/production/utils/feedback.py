@@ -11,6 +11,7 @@ import json
 from typing import Any, Dict, Iterable, List, Tuple
 
 from production.classification.trust import is_trusted_classification_event
+from production.utils.sensitive_data import redact_for_api, redact_for_artifact
 from production.utils.serialization import stable_json, utc_now
 
 
@@ -31,6 +32,27 @@ OPERATOR_ACTION_STATUSES = {"done", "ignored", "need_help"}
 DEFAULT_WEIGHT_FEEDBACK_TYPES = {AUTO_EVIDENCE, EXPERT_REVIEW}
 DEFAULT_PRODUCTION_CALIBRATION_ORIGINS = {LIVE_COWRIE, EXPERT_REVIEW_ORIGIN}
 DEFAULT_AUTO_EVIDENCE_CONFIDENCE = 0.90
+MAX_SUBMITTED_FEEDBACK_STRING_CHARS = 16_384
+
+SUBMITTED_FEEDBACK_FIELDS = (
+    "session_id",
+    "snapshot_id",
+    "label",
+    "feedback_type",
+    "evidence_origin",
+    "operator_signal",
+    "action_status",
+    "correct_next_tactic",
+    "observed_prefix",
+    "predicted_top_tactic",
+    "predicted_ranking",
+    "response_guidance_id",
+    "response_guidance_priority",
+    "response_guidance_actions",
+    "final_actual_next_tactic",
+    "tactic_granularity",
+    "notes",
+)
 
 
 def _text(value: Any) -> str:
@@ -138,7 +160,7 @@ def normalize_feedback_payload(
     authority for whether a row can be used by calibration.
     """
 
-    payload = dict(feedback)
+    payload = redact_for_artifact(dict(feedback))
     current_time = now or _text(payload.get("created_at")) or utc_now()
     payload.setdefault("created_at", current_time)
     payload["session_id"] = _text(payload.get("session_id"))
@@ -187,6 +209,38 @@ def normalize_feedback_payload(
         if isinstance(payload.get(key), (dict, list)):
             payload[key] = stable_json(payload[key])
 
+    return payload
+
+
+def normalize_submitted_feedback_payload(
+    feedback: Dict[str, Any],
+    *,
+    source: str,
+    now: str | None = None,
+) -> Dict[str, Any]:
+    """Allowlist and redact feedback received at an HTTP trust boundary."""
+
+    if not isinstance(feedback, dict):
+        raise ValueError("feedback must be an object")
+    selected = {
+        key: feedback.get(key)
+        for key in SUBMITTED_FEEDBACK_FIELDS
+        if key in feedback
+    }
+    if "evidence_origin" not in selected and "feedback_origin" in feedback:
+        selected["evidence_origin"] = feedback.get("feedback_origin")
+    current_time = now or utc_now()
+    selected["created_at"] = current_time
+    selected["source"] = str(source or "http_feedback")
+    redacted = redact_for_api(
+        selected,
+        max_string_chars=MAX_SUBMITTED_FEEDBACK_STRING_CHARS,
+    )
+    payload = normalize_feedback_payload(redacted, now=current_time)
+    if not payload["session_id"]:
+        raise ValueError("session_id is required")
+    if not payload["label"]:
+        raise ValueError("label is required")
     return payload
 
 

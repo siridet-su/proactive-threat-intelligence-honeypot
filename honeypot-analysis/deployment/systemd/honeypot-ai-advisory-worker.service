@@ -1,0 +1,38 @@
+[Unit]
+Description=Honeypot optional non-authoritative AI advisory worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=-/etc/honeypot/common.env
+EnvironmentFile=-/etc/honeypot/services/ai-advisory-worker.env
+LoadCredential=mongodb-uri
+Environment=MONGODB_URI_FILE=%d/mongodb-uri
+ExecStart=/opt/honeypot/.venv/bin/python -m production.workers.ai_advisory_worker --config /etc/honeypot/production_config.json
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/honeypot
+MemoryMax=512M
+CPUQuota=50%
+CPUWeight=10
+IOWeight=10
+TasksMax=64
+
+# Deliberately static: installation does not activate hosted AI. A reviewed
+# activation procedure must validate the short-lived activation receipt and
+# explicitly start this unit.

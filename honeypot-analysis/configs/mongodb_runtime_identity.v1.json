@@ -1,0 +1,42 @@
+{
+  "schema_version": "mongodb_runtime_identity.v1",
+  "username": "10k",
+  "authentication": "SCRAM-SHA-256",
+  "database": "honeypot_canonical_v1",
+  "custom_role": {
+    "name": "honeypotCanonicalRuntimeV1",
+    "privileges": [
+      "find",
+      "insert",
+      "update",
+      "remove",
+      "listCollections",
+      "listIndexes",
+      "collStats",
+      "dbStats"
+    ],
+    "resource": {
+      "database": "honeypot_canonical_v1",
+      "collection": ""
+    }
+  },
+  "cluster_scope": "Honeypot-Canonical",
+  "prohibited_roles": [
+    "atlasAdmin",
+    "clusterAdmin",
+    "userAdmin",
+    "dbAdmin",
+    "readWriteAnyDatabase"
+  ],
+  "prohibited_actions": [
+    "bypassDocumentValidation",
+    "createCollection",
+    "createIndex",
+    "dropCollection",
+    "dropDatabase",
+    "dropIndex",
+    "collMod"
+  ],
+  "credential_delivery": "owner_only_systemd_credential_file",
+  "secret_material_present": false
+}

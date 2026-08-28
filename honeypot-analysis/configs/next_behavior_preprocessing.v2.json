@@ -1,0 +1,59 @@
+{
+  "schema_version": "next_behavior_preprocessing.v2",
+  "target_contract_id": "next_distinct_trusted_behavior_phase_or_session_end.v2",
+  "input_schema_version": "next_behavior_input.v2",
+  "session_schema_version": "next_behavior_session.v2",
+  "phase_schema_version": "next_behavior_phase.v2",
+  "example_schema_version": "next_behavior_example.v2",
+  "phase_construction": {
+    "simultaneous_tactics": "unordered_exact_tactic_technique_pairs",
+    "consecutive_equal_tactic_sets": "collapse_before_bounded_selection",
+    "maximum_sequence_length": 8,
+    "truncation": "retain_most_recent_distinct_phases_with_explicit_counts",
+    "padding": "left_zero_padding_with_attention_mask"
+  },
+  "target_semantics": {
+    "trusted_submitted_or_attempted_behavior": true,
+    "failed_command": "eligible_as_attempt_when_the_classification_is_trusted",
+    "conditional_fragment": "excluded_without_fragment_execution_proof",
+    "next_phase": "next_distinct_unordered_multilabel_tactic_set",
+    "terminal_outcome": "session_end_no_further_trusted_behavior"
+  },
+  "features": {
+    "phase": [
+      "tactics",
+      "techniques",
+      "repetition_bucket",
+      "elapsed_time_bucket",
+      "label_provenance_sources",
+      "label_confidence_buckets",
+      "label_agreement_statuses",
+      "audit_only_label_count",
+      "evidence_refs"
+    ],
+    "history_integrity": [
+      "original_phase_count",
+      "selected_phase_count",
+      "omitted_prefix_phase_count",
+      "upstream_truncated"
+    ],
+    "session_context": [
+      "login_outcome",
+      "command_count_bucket",
+      "session_age_bucket",
+      "confirmed_transfer_observed"
+    ],
+    "excluded": [
+      "raw_command",
+      "source_ip",
+      "username",
+      "credential",
+      "threat_intelligence",
+      "campaign_fingerprint",
+      "future_session_state"
+    ]
+  },
+  "score_semantics": "raw_model_scores_not_probabilities",
+  "authority": "experimental_statistical_forecast_only",
+  "checkpoint_compatibility_status": "pending_phase7_deterministic_semantics_freeze"
+}

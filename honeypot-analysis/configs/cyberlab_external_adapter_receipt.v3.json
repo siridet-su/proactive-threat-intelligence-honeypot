@@ -1,0 +1,28 @@
+{
+  "adapter_path": "production/reproduction/cyberlab_adapter_v3.py",
+  "adapter_schema_version": "cyberlab_cowrie_adapter.v3",
+  "adapter_sha256": "0961d98fcfb19bb3a052e87f2f518ba186537ecdddc1c3e81352dcf98aa0d007",
+  "documentation_path": "docs/CYBERLAB_ADAPTER_V3.md",
+  "documentation_sha256": "b1c8841272519045a66615d5a7465025a6343d96dbceda3196ec0ce9aef55c3b",
+  "fixture_path": "tests/test_cyberlab_adapter_v3.py",
+  "fixture_sha256": "5ba882db68d5fad9dbfee0a68c3e5e649d547b01fc7f0b060516edc8e040b760",
+  "previous_adapter_schema_version": "cyberlab_cowrie_adapter.v2",
+  "previous_receipt_path": "configs/cyberlab_external_adapter_receipt.v2.json",
+  "previous_receipt_sha256": "9b8f55f6a3a7f7f80fb56ef2cfdaf235a636eb92aa32540ad21ac66d45ade801",
+  "quarantine_contract": {
+    "attack_label_emitted": false,
+    "missing_command_reason": "missing_command_text",
+    "schema_version": "cyberlab_missing_evidence_quarantine.v1",
+    "segment_status_before_barrier": "active_unresolved",
+    "terminal_authority": "cowrie.session.closed",
+    "transition_across_barrier": false,
+    "trusted_label_emitted": false
+  },
+  "real_external_data_accessed": false,
+  "receipt_id": "cyberlabadapterreceiptv3_d32a78d9f9e40c9a6a95398bf0ea1596",
+  "schema_version": "cyberlab_external_adapter_receipt.v3",
+  "sealed_test_accessed": false,
+  "source_policy_path": "configs/cyberlab_external_adapter.v3.json",
+  "source_policy_sha256": "1cd2151a762327e55ac1707d2fb7648d404bc455a18b5380d2c80b2d3455b741",
+  "test_result": "36 passed"
+}

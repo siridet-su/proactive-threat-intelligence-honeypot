@@ -1,0 +1,1156 @@
+{
+  "acceptance_boundaries": [
+    "Predictions remain advisory and cannot create findings, hypotheses, guidance, alerts, or actions.",
+    "Typed semantic facts and observed Cowrie evidence remain authoritative.",
+    "Historical records remain readable and unchanged.",
+    "No claim in this aggregate establishes attacker intent, compromise, real-host effect, or model accuracy beyond its disclosed evaluation scope."
+  ],
+  "claims": [
+    {
+      "claim_id": "next_tactic.historical_single_checkpoint",
+      "dataset": {
+        "path": "evaluation/next_tactic_zenodo_7day_session_payload.jsonl",
+        "sessions": 12235,
+        "sha256": "c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb",
+        "split_method": "preassigned_whole_session_split",
+        "test_membership_sha256": "1227dad42a6097facd518310f0958c741a6665e8b3a0290317df4360c1177844"
+      },
+      "generation_commands": [
+        "PYTHONPATH=. python -m production.tools.evaluate_frozen_transformer_candidate"
+      ],
+      "limitations": [
+        "Targets are classifier-derived weak labels, not independent analyst adjudications.",
+        "The privacy-minimized external corpus omits source template identifiers and per-session timestamps.",
+        "The test set has only two credential-access targets and no impact targets.",
+        "This held-out corpus is not a production-local chronological evaluation.",
+        "Transformer softmax outputs are raw scores and are not calibrated probabilities."
+      ],
+      "metrics": {
+        "hard_backoff_vomm": {
+          "abstention_rate": 0.0,
+          "balanced_accuracy": 0.39961646684349,
+          "coverage": 1.0,
+          "covered_examples": 12235,
+          "evaluated_examples": 12235,
+          "expected_calibration_error": 0.11406462131728033,
+          "macro_f1": 0.39687385915623946,
+          "macro_precision": 0.7061326329547957,
+          "macro_recall": 0.39961646684349,
+          "mean_reciprocal_rank": 0.893328565590519,
+          "per_tactic": {
+            "command-and-control": {
+              "f1": 0.16,
+              "precision": 1.0,
+              "recall": 0.08695652173913043,
+              "reportable": true,
+              "support": 46,
+              "support_status": "sufficient_support"
+            },
+            "credential-access": {
+              "f1": 0.0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "reportable": false,
+              "support": 2,
+              "support_status": "low_support_descriptive_only"
+            },
+            "defense-evasion": {
+              "f1": 0.8068459657701712,
+              "precision": 0.9482758620689655,
+              "recall": 0.7021276595744681,
+              "reportable": true,
+              "support": 235,
+              "support_status": "sufficient_support"
+            },
+            "discovery": {
+              "f1": 0.9563456031291471,
+              "precision": 0.9173254723301622,
+              "recall": 0.9988327983659178,
+              "reportable": true,
+              "support": 6854,
+              "support_status": "sufficient_support"
+            },
+            "execution": {
+              "f1": 0.742715777899945,
+              "precision": 0.6097946287519748,
+              "recall": 0.9497363796133568,
+              "reportable": true,
+              "support": 2845,
+              "support_status": "sufficient_support"
+            },
+            "impact": {
+              "f1": 0.0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "reportable": false,
+              "support": 0,
+              "support_status": "no_heldout_support"
+            },
+            "persistence": {
+              "f1": 0.07407407407407407,
+              "precision": 0.4675324675324675,
+              "recall": 0.04022346368715084,
+              "reportable": true,
+              "support": 1790,
+              "support_status": "sufficient_support"
+            },
+            "privilege-escalation": {
+              "f1": 0.038135593220338986,
+              "precision": 1.0,
+              "recall": 0.019438444924406047,
+              "reportable": true,
+              "support": 463,
+              "support_status": "sufficient_support"
+            }
+          },
+          "raw_brier_score": 0.2509298801806036,
+          "raw_log_loss": 0.5539544137675534,
+          "selective_top1_accuracy": 0.8008173273395995,
+          "top1_accuracy": 0.8008173273395995,
+          "top3_accuracy": 0.9987740089906008,
+          "weighted_f1": 0.7368236474198706
+        },
+        "transformer_seed_20260723": {
+          "abstention_rate": 0.0,
+          "balanced_accuracy": 0.5113150216471959,
+          "coverage": 1.0,
+          "covered_examples": 12235,
+          "evaluated_examples": 12235,
+          "expected_calibration_error": 0.03427951953021103,
+          "macro_f1": 0.509713492345294,
+          "macro_precision": 0.6424691161916434,
+          "macro_recall": 0.5113150216471959,
+          "mean_reciprocal_rank": 0.9416000155681399,
+          "per_tactic": {
+            "command-and-control": {
+              "f1": 0.12244897959183672,
+              "precision": 1.0,
+              "recall": 0.06521739130434782,
+              "reportable": true,
+              "support": 46,
+              "support_status": "sufficient_support"
+            },
+            "credential-access": {
+              "f1": 0.0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "reportable": false,
+              "support": 2,
+              "support_status": "low_support_descriptive_only"
+            },
+            "defense-evasion": {
+              "f1": 0.849438202247191,
+              "precision": 0.9,
+              "recall": 0.8042553191489362,
+              "reportable": true,
+              "support": 235,
+              "support_status": "sufficient_support"
+            },
+            "discovery": {
+              "f1": 0.9665112335735482,
+              "precision": 0.936986301369863,
+              "recall": 0.997957397140356,
+              "reportable": true,
+              "support": 6854,
+              "support_status": "sufficient_support"
+            },
+            "execution": {
+              "f1": 0.8292383292383292,
+              "precision": 0.9931338891613536,
+              "recall": 0.7117750439367311,
+              "reportable": true,
+              "support": 2845,
+              "support_status": "sufficient_support"
+            },
+            "impact": {
+              "f1": 0.0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "reportable": false,
+              "support": 0,
+              "support_status": "no_heldout_support"
+            },
+            "persistence": {
+              "f1": 0.8003577017661525,
+              "precision": 0.667163622810287,
+              "recall": 1.0,
+              "reportable": true,
+              "support": 1790,
+              "support_status": "sufficient_support"
+            },
+            "privilege-escalation": {
+              "f1": 0.0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "reportable": true,
+              "support": 463,
+              "support_status": "sufficient_support"
+            }
+          },
+          "raw_brier_score": 0.17400899763775557,
+          "raw_log_loss": 0.29846777372846395,
+          "selective_top1_accuracy": 0.886554965263588,
+          "top1_accuracy": 0.886554965263588,
+          "top3_accuracy": 0.9959950960359624,
+          "weighted_f1": 0.8681276631260215
+        }
+      },
+      "model": {
+        "authority": "retain_external_hard_backoff_vomm",
+        "transformer_checkpoint_sha256": "d9b316d76e63b15b175668aa0bf69cfe4172bbd812d6b19743a628cd0ec8073d",
+        "transformer_seed": 20260723
+      },
+      "promotion_gate": {
+        "criterion_1_primary_metrics": {
+          "pass": true,
+          "requirement": "Transformer exceeds VOMM in Top-1, macro-F1, and balanced accuracy"
+        },
+        "criterion_2_paired_wins": {
+          "candidate_wins": 1887,
+          "pass": true,
+          "requirement": "candidate wins exceed 1.25x VOMM wins",
+          "vomm_wins": 838
+        },
+        "criterion_3_confidence_intervals": {
+          "pass": true,
+          "requirement": "paired whole-session 95% CI lower bounds exceed zero for all primary metrics"
+        },
+        "criterion_4_tactic_safety": {
+          "execution_recall_regression": 0.2379613356766257,
+          "pass": false,
+          "rare_tactic_collapses": [],
+          "requirement": "Execution recall regression <= 0.10 absolute and no >0.10 collapse for held-out tactics with support 1-99"
+        },
+        "criterion_5_integrity": {
+          "pass": true,
+          "requirement": "all checkpoint, vocabulary, preprocessing, membership, and provenance checks pass"
+        },
+        "criterion_6_operational": {
+          "pass": true,
+          "requirement": "p95 <= 25 ms, Python allocation <= 64 MiB, deterministic reload/inference"
+        },
+        "criterion_7_prediction_authority_boundary": {
+          "basis": "evaluation is offline-only; current canonical evidence validation remains unchanged",
+          "pass": true,
+          "requirement": "prediction alone remains insufficient for guidance or action eligibility"
+        }
+      },
+      "source_artifacts": [
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+          "role": "authoritative historical single-checkpoint promotion and comparison result",
+          "sha256": "3e2b5a55ed7f8f52dbbaf6c6a2834f38173fd3f425a9c8f3a00c5173751c2c4d",
+          "status": "retained"
+        }
+      ],
+      "statement": "On the external classifier-derived weak-label held-out corpus, the seed-20260723 Transformer comparison is retained as offline evidence; the predeclared tactic-safety promotion gate failed and the external hard-backoff VOMM remains the recorded PoC authority.",
+      "status": "retained"
+    },
+    {
+      "claim_id": "next_tactic.external_vomm_reference",
+      "dataset": {
+        "path": "evaluation/next_tactic_zenodo_7day_session_payload.jsonl",
+        "sessions": 219336,
+        "sha256": "c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb",
+        "source_scope": "external_classifier_derived_weak_labels",
+        "split_method": "preassigned_whole_session_split",
+        "split_sessions": {
+          "calibration": 32900,
+          "test": 32901,
+          "train": 153535
+        },
+        "transition_cases": {
+          "calibration": 14865,
+          "test": 12235,
+          "train": 151822
+        }
+      },
+      "generation_commands": [
+        "recorded external-only evaluation receipt; no local regeneration command is claimed"
+      ],
+      "limitations": [
+        "evaluated_external_proxy_only",
+        "external classifier-derived weak-label scope"
+      ],
+      "model_authority": {
+        "conclusion": "not_established_without_clean_production_live_external_source_holdout",
+        "local_override_summary": {
+          "by_actual_tactic": {
+            "command-and-control": {
+              "both_incorrect_or_abstained": 42,
+              "local_override_loss": 3
+            },
+            "credential-access": {
+              "both_incorrect_or_abstained": 2
+            },
+            "defense-evasion": {
+              "both_correct": 104,
+              "both_incorrect_or_abstained": 55,
+              "local_override_win": 15
+            },
+            "discovery": {
+              "both_correct": 6839,
+              "local_override_loss": 5,
+              "local_override_win": 8
+            },
+            "execution": {
+              "both_correct": 2689,
+              "both_incorrect_or_abstained": 1,
+              "local_override_win": 142
+            },
+            "persistence": {
+              "both_correct": 14,
+              "both_incorrect_or_abstained": 1718,
+              "local_override_loss": 58
+            },
+            "privilege-escalation": {
+              "both_incorrect_or_abstained": 454,
+              "local_override_loss": 9
+            }
+          },
+          "outcomes": {
+            "both_correct": 9646,
+            "both_incorrect_or_abstained": 2272,
+            "local_override_loss": 75,
+            "local_override_win": 165
+          },
+          "override_count": 12158,
+          "override_rate": 0.993707,
+          "transition_total": {
+            "max": 82.3937,
+            "median": 44.7066,
+            "min": 2.1546
+          }
+        },
+        "paired_current_vs_external": {
+          "by_actual_tactic": {
+            "command-and-control": {
+              "both_correct": 1,
+              "both_incorrect_or_abstained": 42,
+              "external_authoritative_win": 3
+            },
+            "credential-access": {
+              "both_incorrect_or_abstained": 2
+            },
+            "defense-evasion": {
+              "both_correct": 165,
+              "both_incorrect_or_abstained": 55,
+              "current_local_first_win": 15
+            },
+            "discovery": {
+              "both_correct": 6841,
+              "current_local_first_win": 8,
+              "external_authoritative_win": 5
+            },
+            "execution": {
+              "both_correct": 2702,
+              "both_incorrect_or_abstained": 1,
+              "current_local_first_win": 142
+            },
+            "persistence": {
+              "both_correct": 14,
+              "both_incorrect_or_abstained": 1718,
+              "external_authoritative_win": 58
+            },
+            "privilege-escalation": {
+              "both_incorrect_or_abstained": 454,
+              "external_authoritative_win": 9
+            }
+          },
+          "case_count": 12235,
+          "outcomes": {
+            "both_correct": 9723,
+            "both_incorrect_or_abstained": 2272,
+            "current_local_first_win": 165,
+            "external_authoritative_win": 75
+          }
+        },
+        "scope": "external_corpus_proxy_not_production_local"
+      },
+      "promotion_gate": {
+        "architecture": "external_only_authority",
+        "local_holdout_limitation": "No production-local holdout is available; local scoring remains shadow/offline only.",
+        "predeclared_rule": "For an external-only authority change: require a valid manifest-bound artifact, exact non-overlapping held-out membership proof, chronological windows, at least 0.80 coverage, and no more than 0.15 all-case Top-1 regression against the incumbent. For a local-authority change: additionally require clean production_live external-source evidence.",
+        "reasons": [],
+        "status": "supported_for_production_change",
+        "thresholds": {
+          "max_all_case_regression": 0.15,
+          "min_external_coverage": 0.8
+        }
+      },
+      "source_artifacts": [
+        {
+          "path": "evaluation/authoritative_external_vomm_zenodo7_20260721/authoritative_external_vomm_evaluation.json",
+          "role": "external-only VOMM reference evaluation",
+          "sha256": "1fe3dfb4a4b760f4dccd91b0ccf194783ce745df3f2cbb65a0ea99dd878a4f76",
+          "status": "retained"
+        },
+        {
+          "path": "evaluation/next_tactic_zenodo_7day_session_payload.jsonl",
+          "role": "unique sanitized reproduction input",
+          "sha256": "c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb",
+          "status": "retained"
+        }
+      ],
+      "statement": "The externally evaluated hard-backoff VOMM is retained as an explicit rollback/reference model and is not implicitly blended into Transformer output.",
+      "status": "retained"
+    },
+    {
+      "claim_id": "typed_semantic_authority.v2",
+      "consolidated_source_members": [
+        {
+          "case_count": 12,
+          "family": "collection",
+          "path": "evaluation/collection_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_collection_shadow_evaluation.v1",
+          "sha256": "895ea455bcfb609d0b102c22925a30f5f022f4d9c1a79fd1f6d25a03cbe2c5ef",
+          "size_bytes": 2010
+        },
+        {
+          "case_count": 6,
+          "family": "collection",
+          "path": "evaluation/collection_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_collection_shadow_holdout.v1",
+          "sha256": "a5fc97a0434e45de2bf91e1240eede0b567b9ab3bc4d140895878284e5de9ec3",
+          "size_bytes": 1202
+        },
+        {
+          "case_count": 24,
+          "family": "command_transfer_attempt",
+          "path": "evaluation/command_transfer_attempt_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_command_transfer_attempt_evaluation.v1",
+          "sha256": "921085c33c903338668b82d9b6479e0e6ae8adf3e60be443a8c4a57b8aaa98ab",
+          "size_bytes": 5579
+        },
+        {
+          "case_count": 14,
+          "family": "command_transfer_attempt",
+          "path": "evaluation/command_transfer_attempt_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_command_transfer_attempt_holdout.v1",
+          "sha256": "b7b811aa6a4fe2bf5f08220090a7c293742996cbc158adb02eec402a5b819f5b",
+          "size_bytes": 3929
+        },
+        {
+          "case_count": 8,
+          "family": "cross_family_relationship",
+          "path": "evaluation/cross_family_relationship_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_cross_family_relationship_evaluation.v1",
+          "sha256": "943a96e0dd1f796c90ed625e952905b40fc1199050312429dedea3fe7ab79822",
+          "size_bytes": 3581
+        },
+        {
+          "case_count": 4,
+          "family": "cross_family_relationship",
+          "path": "evaluation/cross_family_relationship_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_cross_family_relationship_holdout.v1",
+          "sha256": "bf681044edffb5c663b7b85702f19dc8e632e0df0b1d03c4d0a7ed38cb9ef161",
+          "size_bytes": 1881
+        },
+        {
+          "case_count": 24,
+          "family": "execution_attempt",
+          "path": "evaluation/execution_attempt_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_execution_attempt_evaluation.v1",
+          "sha256": "d3a4df7312b455cc1cae93d930102012368a2632d7cf28eeac503707c576bcfc",
+          "size_bytes": 6494
+        },
+        {
+          "case_count": 12,
+          "family": "execution_attempt",
+          "path": "evaluation/execution_attempt_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_execution_attempt_holdout.v1",
+          "sha256": "930561045adb67f8943c0ddca1a74647ce4ffc4572feaf0daf55b2e9c56c2e8a",
+          "size_bytes": 3559
+        },
+        {
+          "case_count": 24,
+          "family": "filesystem_change",
+          "path": "evaluation/filesystem_change_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_filesystem_change_evaluation.v1",
+          "sha256": "4afd707762dd80379a05228aa7cbe96d1a271a57979304be121d57f414485c24",
+          "size_bytes": 6873
+        },
+        {
+          "case_count": 16,
+          "family": "filesystem_change",
+          "path": "evaluation/filesystem_change_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_filesystem_change_holdout.v1",
+          "sha256": "a273e0f0aa67bdcb81004b858e8c6a7bc79e85482954e87b6771bbfeaf99afac",
+          "size_bytes": 4723
+        },
+        {
+          "case_count": 45,
+          "family": "inspection",
+          "path": "evaluation/inspection_family_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_inspection_independent_evaluation.v1",
+          "sha256": "ef6254418ba8971eb591f424e9cbd9dd1a123b90692d65bd9da1b8424dcf9cf9",
+          "size_bytes": 17927
+        },
+        {
+          "case_count": 34,
+          "family": "inspection",
+          "path": "evaluation/inspection_family_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_inspection_holdout.v1",
+          "sha256": "f14acf430b8449d985895d59fd494a2ad1f8deac4380f6bce67fae24592518ec",
+          "size_bytes": 13944
+        },
+        {
+          "case_count": 12,
+          "family": "scheduled_task",
+          "path": "evaluation/scheduled_task_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_scheduled_task_shadow_evaluation.v1",
+          "sha256": "58ee45986f455fa9273511094033e602bfffce927a95650cdbdcbdd74e782fbf",
+          "size_bytes": 1705
+        },
+        {
+          "case_count": 6,
+          "family": "scheduled_task",
+          "path": "evaluation/scheduled_task_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_scheduled_task_shadow_holdout.v1",
+          "sha256": "f96dc470e6547d6fa63639d18f2626c8a83c94d2573a9530f3ba9a7b696dba0a",
+          "size_bytes": 944
+        },
+        {
+          "case_count": 50,
+          "family": "sensitive_read",
+          "path": "evaluation/sensitive_read_frozen_50_replay.v1.json",
+          "role": "replay",
+          "schema_version": "sensitive_read_frozen_replay.v1",
+          "sha256": "0a838aa30016e985202c0ca0327861bb7b5cd6b788a24b38dadb3ae35f0598f1",
+          "size_bytes": 7581
+        },
+        {
+          "case_count": 24,
+          "family": "sensitive_read",
+          "path": "evaluation/sensitive_read_holdout.v1.json",
+          "role": "holdout",
+          "schema_version": "sensitive_read_holdout.v1",
+          "sha256": "be7aed354c18e8174e419e47bccbd8c84a8e2a4a1a37129beec73c9501d805d5",
+          "size_bytes": 3573
+        },
+        {
+          "case_count": 12,
+          "family": "service",
+          "path": "evaluation/service_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_service_shadow_evaluation.v1",
+          "sha256": "90620bfa3441873c01950a4b9af337fb4585070cd0509a7db5a7e4e00ee48a6c",
+          "size_bytes": 1839
+        },
+        {
+          "case_count": 6,
+          "family": "service",
+          "path": "evaluation/service_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_service_shadow_holdout.v1",
+          "sha256": "905cb17e33fe88061973a5344b8bbbca1869096e4c3f484019925fcd4725f728",
+          "size_bytes": 974
+        },
+        {
+          "case_count": 34,
+          "family": "transfer",
+          "path": "evaluation/transfer_family_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_transfer_independent_evaluation.v1",
+          "sha256": "3b235d4f247f7506079452c8da869c9dc21eb26fb57c5a235850aa2b2ec20cd9",
+          "size_bytes": 24455
+        },
+        {
+          "case_count": 21,
+          "family": "transfer",
+          "path": "evaluation/transfer_family_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_transfer_holdout.v1",
+          "sha256": "6050f6c0c6cf23b8cf47729cdcf94510dbf30858f2cf50d90a292237516e545a",
+          "size_bytes": 16050
+        },
+        {
+          "case_count": 12,
+          "family": "transformation",
+          "path": "evaluation/transformation_shadow_independent_frozen.v1.json",
+          "role": "independent",
+          "schema_version": "typed_transformation_shadow_evaluation.v1",
+          "sha256": "759b485fd471bad75abef787ec747ff9e2369c76fcfe9ccbfc69d722024c8518",
+          "size_bytes": 2870
+        },
+        {
+          "case_count": 6,
+          "family": "transformation",
+          "path": "evaluation/transformation_shadow_holdout_frozen.v1.json",
+          "role": "holdout",
+          "schema_version": "typed_transformation_shadow_holdout.v1",
+          "sha256": "8dc32288c153c29d711b3e3091ca9be49086ed26deb099f1e2a5873391baf7fa",
+          "size_bytes": 1714
+        },
+        {
+          "case_count": 18,
+          "family": "typed_semantic_poc_combined",
+          "path": "evaluation/typed_semantic_poc_combined_frozen.v1.json",
+          "role": "combined",
+          "schema_version": "typed_semantic_poc_combined_evaluation.v1",
+          "sha256": "c619e3ba294a567115e50b85cc6207cbb2aedcf0e691db2868c5ab0268430ca1",
+          "size_bytes": 8167
+        },
+        {
+          "case_count": null,
+          "family": "inspection",
+          "path": "evaluation/inspection_family_holdout_provenance_correction.v1.json",
+          "role": "provenance_correction",
+          "schema_version": "evaluation_provenance_correction.v1",
+          "sha256": "8c98c07686f70bf394e12399d43efdbdef5060d9664ec2e3b9eb114000ac001f",
+          "size_bytes": 1045
+        }
+      ],
+      "current_consumers": [
+        "tests/test_sensitive_read_evaluation_replay.py",
+        "tests/test_transfer_family_independent_evaluation.py",
+        "tests/test_inspection_family_independent_evaluation.py",
+        "tests/test_execution_attempt_family.py",
+        "tests/test_filesystem_change_family.py",
+        "tests/test_command_transfer_attempt_family.py",
+        "tests/test_deferred_semantic_family_evaluations.py",
+        "tests/test_typed_semantic_poc_combined.py",
+        "tests/test_cross_family_relationship_evaluation.py",
+        "tests/test_transformation_shadow_evaluation.py"
+      ],
+      "limitations": [
+        "Expected labels are frozen contract cases, not independent production prevalence estimates."
+      ],
+      "source_artifacts": [
+        {
+          "path": "evaluation/typed_semantic_fixtures.v2.json",
+          "role": "canonical lossless family/role fixture bundle",
+          "sha256": "b62a6062a91c31dd3cb7310e926d7d700c9f420f6863b676ec63f66dd7866b7a",
+          "size_bytes": 214048,
+          "status": "retained"
+        }
+      ],
+      "statement": "Current typed-semantic family fixtures are frozen inputs for active and shadow-only semantic-family tests; they do not activate deferred families.",
+      "status": "active_tests"
+    },
+    {
+      "claim_id": "selection_status.original_generation",
+      "limitations": {
+        "calibration_status": "NOT_DETERMINABLE",
+        "experimental_poc_status": "BLOCKED_AT_SELECTION",
+        "final_test_status": "SEALED_UNOPENED",
+        "policy_changed_after_selection": false,
+        "runtime_benchmark_status": "NOT_DETERMINABLE_NO_SELECTED_CHECKPOINT",
+        "selected_checkpoint": null
+      },
+      "removed_presentation_derivatives": [
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_STATUS.md",
+          "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json"
+        },
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_TABLE.md",
+          "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json"
+        },
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_gate.svg",
+          "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json"
+        }
+      ],
+      "source_artifacts": [
+        {
+          "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
+          "role": "compact blocked-selection summary",
+          "sha256": "b74a23434f6f64c059de3e288fd0f366b0b7aed189897d2a7d3e197269b1efd3",
+          "status": "retained"
+        }
+      ],
+      "statement": "The original corrected-target selection generation is truthfully recorded as BLOCKED_AT_SELECTION; no selected checkpoint was authorized by that gate.",
+      "status": "retained"
+    },
+    {
+      "claim_id": "current_production_acceptance",
+      "limitations": [
+        "These are repository records, not live probes."
+      ],
+      "source_artifacts": [
+        {
+          "path": "evaluation/cowrie_public_connectivity_root_cause_20260802.json",
+          "role": "final production or contract acceptance record",
+          "sha256": "d8c34dc8edb2c3ad144bf9b00aa2e715bc6a80850315e697f1f2ce7d8b1a39b4",
+          "status": "retained"
+        },
+        {
+          "path": "evaluation/next_tactic_checkpoint_compatibility_20260731.json",
+          "role": "final production or contract acceptance record",
+          "sha256": "f9d9cd533ef18510b97a8e3da733bb9f42d25b35476468519fdb01c37a6a2629",
+          "status": "retained"
+        },
+        {
+          "path": "evaluation/next_tactic_final_production_activation_20260802.json",
+          "role": "final production or contract acceptance record",
+          "sha256": "df425e767263b8bcf644c8a887005dce41d994e758775e0a3f9eca76b09045fd",
+          "status": "retained"
+        },
+        {
+          "path": "evaluation/session_assessment_v4_acceptance.json",
+          "role": "final production or contract acceptance record",
+          "sha256": "1e50b053c706c9a035f2f3b9129ee3e739e2cd06d64d79e431a6676fd9f4d124",
+          "status": "retained"
+        }
+      ],
+      "statement": "Recorded final acceptance covers Cowrie connectivity, checkpoint compatibility, successful activation, and session_assessment.v4 authority.",
+      "status": "final_production_acceptance"
+    }
+  ],
+  "metric_definitions": {
+    "abstention_rate": "fraction of cases abstained by the evaluated model",
+    "balanced_accuracy": "mean per-tactic recall under the recorded support policy",
+    "coverage": "fraction of cases with a non-abstained prediction",
+    "macro_f1": "unweighted mean per-tactic F1 under the recorded support policy",
+    "mean_reciprocal_rank": "mean reciprocal rank of the held-out target",
+    "top1_accuracy": "fraction of evaluated cases whose first prediction equals the held-out target",
+    "top3_accuracy": "fraction whose target appears in the first three predictions"
+  },
+  "provenance": {
+    "created_at": "2026-08-02",
+    "deterministic": true,
+    "evaluation_structure": {
+      "canonical_fixture_bundle": "evaluation/typed_semantic_fixtures.v2.json",
+      "canonical_fixture_bundle_sha256": "b62a6062a91c31dd3cb7310e926d7d700c9f420f6863b676ec63f66dd7866b7a",
+      "large_reproduction_input_preserved": true,
+      "removed_presentation_outputs": "No repository thesis or presentation source cites the removed PDFs or selection derivatives.",
+      "schema_version": "final_evaluation_structure.v1"
+    },
+    "generated_by": "evidence-minimization audit",
+    "generation_command": "python -m production.tools.evaluate_frozen_transformer_candidate (historical recorded command; no evaluation was rerun)",
+    "source_repository_head": "c9f37faff1fcf4e7d2d2dee3476c7d5038f426c9"
+  },
+  "retained_raw_inputs": [
+    {
+      "path": "evaluation/next_tactic_zenodo_7day_session_payload.jsonl",
+      "role": "unique deterministic reproduction input",
+      "sha256": "c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb",
+      "status": "retained"
+    }
+  ],
+  "schema_version": "canonical_final_evaluation.v1",
+  "status": "complete_with_disclosed_limitations",
+  "superseded_artifacts": [
+    {
+      "path": "evaluation/collection_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "a5fc97a0434e45de2bf91e1240eede0b567b9ab3bc4d140895878284e5de9ec3",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/collection_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "895ea455bcfb609d0b102c22925a30f5f022f4d9c1a79fd1f6d25a03cbe2c5ef",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/command_transfer_attempt_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "b7b811aa6a4fe2bf5f08220090a7c293742996cbc158adb02eec402a5b819f5b",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/command_transfer_attempt_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "921085c33c903338668b82d9b6479e0e6ae8adf3e60be443a8c4a57b8aaa98ab",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/cross_family_relationship_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "bf681044edffb5c663b7b85702f19dc8e632e0df0b1d03c4d0a7ed38cb9ef161",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/cross_family_relationship_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "943a96e0dd1f796c90ed625e952905b40fc1199050312429dedea3fe7ab79822",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/execution_attempt_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "930561045adb67f8943c0ddca1a74647ce4ffc4572feaf0daf55b2e9c56c2e8a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/execution_attempt_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "d3a4df7312b455cc1cae93d930102012368a2632d7cf28eeac503707c576bcfc",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/filesystem_change_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "a273e0f0aa67bdcb81004b858e8c6a7bc79e85482954e87b6771bbfeaf99afac",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/filesystem_change_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "4afd707762dd80379a05228aa7cbe96d1a271a57979304be121d57f414485c24",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/inspection_family_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "f14acf430b8449d985895d59fd494a2ad1f8deac4380f6bce67fae24592518ec",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/inspection_family_holdout_provenance_correction.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "8c98c07686f70bf394e12399d43efdbdef5060d9664ec2e3b9eb114000ac001f",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/inspection_family_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "ef6254418ba8971eb591f424e9cbd9dd1a123b90692d65bd9da1b8424dcf9cf9",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/ARTIFACT_POLICY.md",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "39195f9e7806aa9b5220e0e21cf3a2230b922ac6953b6dc11f75c09d5defdfe7",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/calibration.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "f583a6b8ac29ddfcd21a04ef05683dd37553d42778e5cc85c3a74f6ddb96e9d8",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/confidence_intervals.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "5be1c47608a089fb08ffe3a2baf80aa421bc09f63e690e215c056c86326b1da0",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/confusion_matrices.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "7a696d631ff157e887c60837b11ba7d1dcb1b1681fa7d15ede056a1bdd62cef2",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/efficiency.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "b207b50a0ebf7db1ff195dfe4ee8f0527ee0c25efbfa0a177a8baf55bdff6183",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/01_overall_metrics.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "166446c41e1d2fda57388b01ae8678fc1abe8805bb605e0524ac7426f156b6ce",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/02_paired_outcomes.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "0fd334045302f2aa960db0c840a1a2fd916f446c146183fc9fa1a08487a0b0f0",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/03_promotion_gate.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "57abd792df2e8a78c5a2d4aafc59ef8f063cba0c5c117515262f2c2b82f2adf1",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/04_per_tactic_metrics.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "a03c0015ffb6ccd5075404727e8178b526d5187012b469647bff727a5363e86c",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/05_persistence_execution_tradeoff.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "07ccfde9fc0fba2dea661d467564df9c9f0cbe1d00e9160af4910f9a03ed4ef9",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/06_execution_persistence_confusion.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "035a7168267a2b364944894584c4aaf3bca9f4f3ae1b1433523abd59161ae240",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/07_why_not_promoted.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "6f4808f7d89d2b30dc1ec8921c1528cbf6a3cb412a6a172874540b6ee2dbe47d",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/08_chronological_stability.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "fcb3961586020511a810de1cde512ca283454ade947428182ed805ce4306b55e",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/09_repeated_pattern_warning.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "ad20f064e98641bec72bd6541339d2ad3ff81d82041e625a8ccbad60d135d177",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/10_executive_summary.pdf",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "a3f8feb573eb6a290f10e2dd5504fdb9a75927c871820ec5fd3b5c8787d0d9ab",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/FIGURE_SUMMARY.md",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "c62b8c9e82ee20a033c2bd1952d41e9e3701e44b9282e899b3fa808145e44d7c",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/figures/figures_manifest.json",
+      "reason": "Unused presentation derivative; no current thesis or presentation source cites this file and source metrics remain in the canonical raw result.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/single_checkpoint_evaluation.json",
+      "sha256": "64d4b200c9178da2e545bea64602c308a9ec3892fb1cbed4690e3d79ad768914",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_decision.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "93959f1c48480659e06bf349dd7c41b2f6e039d46508f00864a5adeda5f1aca3",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_STATUS.md",
+      "reason": "Presentation derivative of the blocked selection conclusion; compact machine-readable status is retained.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
+      "sha256": "5241f2de65b6e9962c637192f8730116f0f7a6f18eb83f5d71ebe29851821a78",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/CORRECTED_TARGET_SELECTION_TABLE.md",
+      "reason": "Presentation derivative of the blocked selection conclusion; compact machine-readable status is retained.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
+      "sha256": "05d1d1c8b1797b34fa36ea0750f041a302d02dba1cbb0a177bbf1652f62cf47e",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/build_receipt.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "55b938d30a5fbe86982bcc0867c0fb04bf693b047a4850da1e1d567bb825d528",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/corpus_inventory_summary.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "bd5997ea1737b181b266f88c7a550915c71f5fa1f13c973386e88360904bd09a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/corpus_receipt.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "08ebb176fa8076866f1e9ecd86606d229a8ed9f9772bfd3139d72365aab25f16",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_corpus/source_member_receipts.json",
+      "reason": "Intermediate private-corpus provenance receipt; the compact blocked-selection summary and final presentation derivatives retain the current status claim.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "156850596682febb6a4a84944fcc47685992f01a6f4055ee88e37728588b144d",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_gate.svg",
+      "reason": "Presentation derivative of the blocked selection conclusion; compact machine-readable status is retained.",
+      "replacement": "evaluation/next_tactic_benchmark_evidence/final_prediction_subsystem_design/corrected_target_selection_blocked.json",
+      "sha256": "99e17b4d984e6aa567122feab2e7d346daa56f3e51bee5c1cacac39b797d15ca",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/model_configurations.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "b672abe37eeea1f39052592f7a31b89d8eb8e663ef5b9da771c614b7090387c0",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/overall_metrics.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "9bb84670de9fe94aae25afa97d45d2041d3fdc92f2dba39e0b5cc4dfbcf87cb5",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/paired_comparisons.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "dd794a0294080b83613174c474a5bcfa9b247f3af783964b7d84907708a0cff7",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/per_tactic_metrics.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "bc676de1f251b011882d1957870d463744a09b97454b1a031e268f9b58b7b5fa",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/selected_transformer_metadata.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "5a3d1a2ce63646153a55c395681f1057912e72d93e25c2ff4b45568d3c6c2d48",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_benchmark_evidence/validation_only_transformer_selection.json",
+      "reason": "Duplicate or superseded benchmark projection; its values are represented by single_checkpoint_evaluation.json or are not part of the active runtime identity.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "5949ed65b2d9f213e4af6fec73381fa6b6f87a9304955309ba3a09457411766f",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/next_tactic_zenodo_7day_model_comparison.json",
+      "reason": "Superseded by the authoritative external-VOMM evaluation and the single-checkpoint result; no active consumer.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "1fb00d46d60997c2cef1117603ab92afdc0c3bb79d785db643d69b54e8deec59",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/scheduled_task_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "f96dc470e6547d6fa63639d18f2626c8a83c94d2573a9530f3ba9a7b696dba0a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/scheduled_task_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "58ee45986f455fa9273511094033e602bfffce927a95650cdbdcbdd74e782fbf",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/sensitive_read_frozen_50_replay.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "0a838aa30016e985202c0ca0327861bb7b5cd6b788a24b38dadb3ae35f0598f1",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/sensitive_read_holdout.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "be7aed354c18e8174e419e47bccbd8c84a8e2a4a1a37129beec73c9501d805d5",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/service_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "905cb17e33fe88061973a5344b8bbbca1869096e4c3f484019925fcd4725f728",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/service_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "90620bfa3441873c01950a4b9af337fb4585070cd0509a7db5a7e4e00ee48a6c",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/session_correlation_review.json",
+      "reason": "Historical review output from a report-only generator; no active test, claim, or runtime consumer.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "d58efe5cb283bea1f106caabb3d57f4eec00b6eaad1e0942f9176632265fd7b0",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/threat_hypothesis_relationship_evaluation.json",
+      "reason": "Historical developer-authored evaluation; active semantic tests are self-contained and no current claim consumes this file.",
+      "replacement": "evaluation/canonical_final_evaluation.json",
+      "sha256": "785e4b3cc633f4b69838724a0d4f824dfe4974bf268b109963332b9b8355ca49",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transfer_family_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "6050f6c0c6cf23b8cf47729cdcf94510dbf30858f2cf50d90a292237516e545a",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transfer_family_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "3b235d4f247f7506079452c8da869c9dc21eb26fb57c5a235850aa2b2ec20cd9",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transformation_shadow_holdout_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "8dc32288c153c29d711b3e3091ca9be49086ed26deb099f1e2a5873391baf7fa",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/transformation_shadow_independent_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "759b485fd471bad75abef787ec747ff9e2369c76fcfe9ccbfc69d722024c8518",
+      "status": "superseded"
+    },
+    {
+      "path": "evaluation/typed_semantic_poc_combined_frozen.v1.json",
+      "reason": "Lossless family/role member consolidated into the canonical typed-semantic fixture bundle with its original SHA-256 recorded.",
+      "replacement": "evaluation/typed_semantic_fixtures.v2.json",
+      "sha256": "c619e3ba294a567115e50b85cc6207cbb2aedcf0e691db2868c5ab0268430ca1",
+      "status": "superseded"
+    }
+  ]
+}

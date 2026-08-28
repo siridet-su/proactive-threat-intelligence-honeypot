@@ -1,0 +1,43 @@
+{
+  "schema_version": "cyberlab_cowrie_adapter.v2",
+  "previous_adapter_schema_version": "cyberlab_cowrie_adapter.v1",
+  "private_session_schema_version": "cyberlab_private_session.v1",
+  "source": {
+    "zenodo_record_id": 3687527,
+    "doi": "10.5281/zenodo.3687527",
+    "dataset": "CyberLab honeynet dataset",
+    "source_schema_version": "cyberlab_session_array.v1",
+    "member_pattern": "cyberlab_YYYY-MM-DD.json.gz",
+    "official_checksum_domain": "md5"
+  },
+  "eligibility_ordering": {
+    "stage": "before_event_semantic_validation",
+    "metadata_fields": ["sensor"],
+    "required_sensor": "ubuntu_basic_pool",
+    "wrong_sensor": "exclude_without_command_validation",
+    "mixed_or_missing_sensor": "exclude_without_command_validation",
+    "eligible_session": "run_v1_strict_event_validation",
+    "eligible_malformed_event": "fail_closed",
+    "command_content_used_for_eligibility": false,
+    "labels_or_tactics_used_for_eligibility": false
+  },
+  "session_contract": {
+    "array_item": "single session-id key mapped to a non-empty event array",
+    "required_event_fields": ["session_id", "eventid", "timestamp", "sensor"],
+    "timestamp": "timezone-aware ISO-8601 normalized to UTC Z for eligible sessions",
+    "ordering": "v1 canonical ordering and source-event tie-break are unchanged",
+    "close_event": "cowrie.session.closed",
+    "missing_close": "active/unresolved; no fabricated terminal target",
+    "cross_file": "v1-compatible private records; v1 multi-member merge rejects any excluded contribution"
+  },
+  "privacy": {
+    "excluded_record": "metadata-only counters/reason; no normalized command or raw identifier in published output",
+    "private_classifier_stream": "eligible sessions only and ephemeral",
+    "safe_output": "unchanged cyberlab_private_session.v1/canonical contracts"
+  },
+  "provenance": {
+    "real_external_data_accessed_for_freeze": false,
+    "sealed_test_accessed": false,
+    "exclusion_counters_and_reasons": "required in v2 development receipt"
+  }
+}

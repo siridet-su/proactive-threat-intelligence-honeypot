@@ -1,0 +1,14 @@
+{
+  "base_release": "a5a9334cb36d5ceae5c98ef31185abcc42046992",
+  "changed_files": [
+    "production/controlled_provenance_runtime.py"
+  ],
+  "new_block_sha256": "f2b5c74b353af16633b4f1f304a30330f2a631b13008eadcfecc5bb5820f9f7e",
+  "old_block_sha256": "91b33ce698103b914c5630c53368e2c58aaf06323100107b3a17bbfe2382699c",
+  "old_release": "ebe69a4f6f88ae290feba872505787a31869f4e1",
+  "old_release_modified": false,
+  "session_worker_unchanged_sha256": "ef9e1c281fd88380a8c91d68129affab5f10b5c9ba42b288c10bb248276b7665",
+  "status": "PASS_EXACT_SINGLE_FUNCTION_REPAIR",
+  "wrapper_after_sha256": "a88eff72b3f46431622b03e307bc084fcd6707a90074fc344bc12eeacaf2ad48",
+  "wrapper_before_sha256": "c8771d3a4cefa990629402d4096ca2ec8834328752694a2b9a2af11b7dbaaaf5"
+}

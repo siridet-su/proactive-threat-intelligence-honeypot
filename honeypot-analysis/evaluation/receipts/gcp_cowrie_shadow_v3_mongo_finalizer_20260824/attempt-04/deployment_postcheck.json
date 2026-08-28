@@ -1,0 +1,24 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_deployment_postcheck.v1",
+  "status": "PASS_ACTIVE_HEALTHY",
+  "active_release": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+  "release_sha256": "403c989d9cfe7e7726610018345352e76bfd5d7fc75cc3952d3217a00e0c6669",
+  "tree_sha1": "71428a1735a9802f878931153d242cd1d2cf23ee",
+  "manifest_sha256": "7a43ed039db5521c357c681dba5ca3e640b6c35dc544d669f77bc3481a3399ec",
+  "epoch_file_sha256": "f155419ffbd43f6910223f0c9a3cd347d0385d475771d37e79174b51b60ad017",
+  "epoch_receipt_sha256": "7e3e415dd0de85a2645b16b8c2789cceb8859e65946f5ade1cc292ccbdc697c5",
+  "feeder_unit_sha256": "f4b89e130ff3cab2dcb63dcedd3e81a2b713fe81088008089c096b933268932e",
+  "wrapper_sha256": "a88eff72b3f46431622b03e307bc084fcd6707a90074fc344bc12eeacaf2ad48",
+  "session_worker_sha256": "ef9e1c281fd88380a8c91d68129affab5f10b5c9ba42b288c10bb248276b7665",
+  "feeder_source_sha256": "d179a253e6ef8877845649b16f517d3e10fa705ffedd0332f7399cefbe71d448",
+  "feeder_config_sha256": "2af49f6b1a967515de9e8b8e6c826fbff956a9e97409c540ddd2dad62caec1ef",
+  "source_identity_sha256": "9493daa3ccc10ac8fbd17f3596bc9a0c5811a81d22beadee9ffa9c73053f3a93",
+  "services": {
+    "worker": "active/running/0",
+    "feeder": "active/running/0",
+    "predictor": "active/running/0"
+  },
+  "predictor_status": "READY",
+  "active_release_modified_in_place": false
+}
+

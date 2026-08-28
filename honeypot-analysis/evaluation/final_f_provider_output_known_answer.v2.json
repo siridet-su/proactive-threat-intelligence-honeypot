@@ -1,0 +1,99 @@
+{
+  "schema_version": "ai_provider_output.v2",
+  "projection_sha256": "a398bfc82e46841b76bd70930e5f5749604a25d8493e3b006029496fe256092c",
+  "policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+  "synthesis": {
+    "schema_version": "ai_advisory_synthesis_selection.v2",
+    "abstained": false,
+    "abstention_reason_code": "",
+    "selected_chain_ids": ["a_77777777777777777777777777777777"],
+    "selected_relationship_ids": ["a_66666666666666666666666666666666"],
+    "ranked_finding_ids": ["a_88888888888888888888888888888888", "a_99999999999999999999999999999999"],
+    "selected_hypothesis_ids": ["a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+    "ranked_action_ids": ["a_cccccccccccccccccccccccccccccccc"],
+    "selected_limitation_codes": ["real_host_effect_not_established", "execution_not_established"],
+    "selected_evidence_gap_codes": ["execution_observation_missing"],
+    "analyst_question_selections": [
+      {
+        "template_id": "ask_for_execution_corroboration",
+        "anchor_type": "evidence_gap",
+        "anchor_id": "execution_observation_missing"
+      }
+    ],
+    "explanation_template_selections": [
+      {
+        "template_id": "explain_chain_and_limits",
+        "anchor_type": "chain",
+        "anchor_id": "a_77777777777777777777777777777777"
+      },
+      {
+        "template_id": "explain_hypothesis_test",
+        "anchor_type": "hypothesis",
+        "anchor_id": "a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "template_id": "explain_manual_checks",
+        "anchor_type": "action",
+        "anchor_id": "a_cccccccccccccccccccccccccccccccc"
+      }
+    ],
+    "review_plan": [
+      {
+        "order": 1,
+        "step_type": "review_chain",
+        "anchor_type": "chain",
+        "anchor_id": "a_77777777777777777777777777777777",
+        "related_chain_ids": ["a_77777777777777777777777777777777"],
+        "related_finding_ids": ["a_88888888888888888888888888888888", "a_99999999999999999999999999999999"],
+        "related_hypothesis_ids": ["a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+        "related_action_ids": [],
+        "limitation_codes": ["real_host_effect_not_established"],
+        "evidence_gap_codes": ["execution_observation_missing"],
+        "analyst_question_template_ids": [],
+        "explanation_template_id": "explain_chain_and_limits"
+      },
+      {
+        "order": 2,
+        "step_type": "review_finding",
+        "anchor_type": "finding",
+        "anchor_id": "a_88888888888888888888888888888888",
+        "related_chain_ids": ["a_77777777777777777777777777777777"],
+        "related_finding_ids": ["a_88888888888888888888888888888888"],
+        "related_hypothesis_ids": [],
+        "related_action_ids": [],
+        "limitation_codes": ["real_host_effect_not_established"],
+        "evidence_gap_codes": [],
+        "analyst_question_template_ids": [],
+        "explanation_template_id": ""
+      },
+      {
+        "order": 3,
+        "step_type": "test_existing_hypothesis",
+        "anchor_type": "hypothesis",
+        "anchor_id": "a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "related_chain_ids": ["a_77777777777777777777777777777777"],
+        "related_finding_ids": ["a_88888888888888888888888888888888"],
+        "related_hypothesis_ids": ["a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+        "related_action_ids": [],
+        "limitation_codes": ["real_host_effect_not_established"],
+        "evidence_gap_codes": ["execution_observation_missing"],
+        "analyst_question_template_ids": ["ask_for_execution_corroboration"],
+        "explanation_template_id": "explain_hypothesis_test"
+      },
+      {
+        "order": 4,
+        "step_type": "perform_manual_check",
+        "anchor_type": "action",
+        "anchor_id": "a_cccccccccccccccccccccccccccccccc",
+        "related_chain_ids": ["a_77777777777777777777777777777777"],
+        "related_finding_ids": ["a_88888888888888888888888888888888", "a_99999999999999999999999999999999"],
+        "related_hypothesis_ids": [],
+        "related_action_ids": ["a_cccccccccccccccccccccccccccccccc"],
+        "limitation_codes": ["execution_not_established"],
+        "evidence_gap_codes": ["execution_observation_missing"],
+        "analyst_question_template_ids": ["ask_for_execution_corroboration"],
+        "explanation_template_id": "explain_manual_checks"
+      }
+    ]
+  }
+}

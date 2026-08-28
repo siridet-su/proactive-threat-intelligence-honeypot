@@ -1,0 +1,60 @@
+{
+  "schema_version": "cyberlab_cowrie_adapter.v1",
+  "source": {
+    "zenodo_record_id": 3687527,
+    "doi": "10.5281/zenodo.3687527",
+    "dataset": "CyberLab honeynet dataset",
+    "source_schema_version": "cyberlab_session_array.v1",
+    "member_pattern": "cyberlab_YYYY-MM-DD.json.gz",
+    "official_checksum_domain": "md5"
+  },
+  "session_contract": {
+    "array_item": "single session-id key mapped to a non-empty event array",
+    "required_event_fields": [
+      "session_id",
+      "eventid",
+      "timestamp",
+      "sensor"
+    ],
+    "timestamp": "timezone-aware ISO-8601 normalized to UTC Z",
+    "ordering": "source event order is durable tie-break; canonical order is timestamp, durable order, event identity",
+    "close_event": "cowrie.session.closed",
+    "missing_close": "active/unresolved; no fabricated terminal target",
+    "cross_file": "merge by exact session_id with source-member provenance; conflicting duplicates fail closed"
+  },
+  "high_interaction_policy": {
+    "sensor_field": "sensor",
+    "required_value": "ubuntu_basic_pool",
+    "eligibility": "all events in a session must have the exact value",
+    "mixed_or_missing": "exclude with explicit reason"
+  },
+  "command_events": {
+    "input": "cowrie.command.input",
+    "success": "cowrie.command.success",
+    "failed": "cowrie.command.failed",
+    "outcome_pairing": "contextual_unpaired_only; no authoritative pairing without source event identity",
+    "input_extraction": "event.input when present, otherwise exact CMD: message prefix",
+    "outcome_extraction": "Command found:/Command not found: message is retained only as contextual digest"
+  },
+  "privacy": {
+    "scheme": "hmac-sha256-v1",
+    "forbidden": [
+      "raw session identifiers",
+      "source IPs",
+      "geolocation",
+      "credentials",
+      "raw command text in safe output",
+      "unnecessary source payload fields"
+    ],
+    "private_classifier_stream": "ephemeral only; never publish or persist"
+  },
+  "fail_closed": [
+    "malformed JSON/session/event",
+    "invalid or timezone-less timestamp",
+    "session identity mismatch",
+    "conflicting protocol",
+    "conflicting duplicate event",
+    "ambiguous command outcome association",
+    "missing or mixed sensor eligibility"
+  ]
+}

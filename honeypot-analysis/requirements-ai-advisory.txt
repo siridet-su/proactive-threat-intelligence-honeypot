@@ -1,0 +1,3 @@
+-c requirements-runtime.lock.txt
+-r requirements.txt
+google-genai>=2.13,<3

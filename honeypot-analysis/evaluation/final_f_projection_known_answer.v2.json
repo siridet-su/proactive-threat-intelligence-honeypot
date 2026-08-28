@@ -1,0 +1,169 @@
+{
+  "schema_version": "ai_advisory_projection.v2",
+  "assessment_id": "session_assessment_example_v6",
+  "report_content_sha256": "1010101010101010101010101010101010101010101010101010101010101010",
+  "evidence_sha256": "2020202020202020202020202020202020202020202020202020202020202020",
+  "graph_sha256": "3030303030303030303030303030303030303030303030303030303030303030",
+  "typed_fact_set_sha256": "4040404040404040404040404040404040404040404040404040404040404040",
+  "guidance_content_sha256": "5050505050505050505050505050505050505050505050505050505050505050",
+  "provenance": {
+    "evaluator_git_revision": "phase0-known-answer",
+    "behavior_policy_sha256": "6060606060606060606060606060606060606060606060606060606060606060",
+    "classification_policy_sha256": "7070707070707070707070707070707070707070707070707070707070707070",
+    "typed_vocabulary_sha256": "8080808080808080808080808080808080808080808080808080808080808080",
+    "guidance_policy_sha256": "9090909090909090909090909090909090909090909090909090909090909090",
+    "ai_policy_sha256": "521d6222f7bfaddb5617a93a03d22a490770dbbcd57c1fc7310496403e3be115",
+    "projection_contract_sha256": "acf6e3a017af771a24cc936e94ccf2edee1bb1612ae3896f6f491c207292e611"
+  },
+  "authority": {
+    "ai_canonical_authority": false,
+    "ai_finding_authority": false,
+    "ai_hypothesis_authority": false,
+    "ai_guidance_authority": false,
+    "ai_alert_authority": false,
+    "ai_prediction_authority": false,
+    "ai_execution_authority": false
+  },
+  "timeline_steps": [
+    {
+      "ordinal": 1,
+      "evidence_ids": ["a_11111111111111111111111111111111"],
+      "fact_ids": ["a_33333333333333333333333333333333"],
+      "semantic_families": ["file_transfer"],
+      "operation_types": ["transfer_attempt"],
+      "outcome_status": "reported_success",
+      "entity_ids": ["a_55555555555555555555555555555555"],
+      "relationship_ids": ["a_66666666666666666666666666666666"],
+      "chain_ids": ["a_77777777777777777777777777777777"],
+      "finding_ids": ["a_88888888888888888888888888888888"]
+    },
+    {
+      "ordinal": 2,
+      "evidence_ids": ["a_22222222222222222222222222222222"],
+      "fact_ids": ["a_44444444444444444444444444444444"],
+      "semantic_families": ["execution"],
+      "operation_types": ["execution_attempt"],
+      "outcome_status": "reported_success",
+      "entity_ids": ["a_55555555555555555555555555555555"],
+      "relationship_ids": ["a_66666666666666666666666666666666"],
+      "chain_ids": ["a_77777777777777777777777777777777"],
+      "finding_ids": ["a_88888888888888888888888888888888", "a_99999999999999999999999999999999"]
+    }
+  ],
+  "facts": [
+    {
+      "fact_id": "a_33333333333333333333333333333333",
+      "causal_ordinal": 1,
+      "semantic_family": "file_transfer",
+      "operation_types": ["transfer_attempt"],
+      "outcome_status": "reported_success",
+      "evidence_ids": ["a_11111111111111111111111111111111"],
+      "entity_ids": ["a_55555555555555555555555555555555"]
+    },
+    {
+      "fact_id": "a_44444444444444444444444444444444",
+      "causal_ordinal": 2,
+      "semantic_family": "execution",
+      "operation_types": ["execution_attempt"],
+      "outcome_status": "reported_success",
+      "evidence_ids": ["a_22222222222222222222222222222222"],
+      "entity_ids": ["a_55555555555555555555555555555555"]
+    }
+  ],
+  "chains": [
+    {
+      "chain_id": "a_77777777777777777777777777777777",
+      "status": "supported",
+      "fact_ids": ["a_33333333333333333333333333333333", "a_44444444444444444444444444444444"],
+      "relationship_ids": ["a_66666666666666666666666666666666"],
+      "evidence_ids": ["a_11111111111111111111111111111111", "a_22222222222222222222222222222222"],
+      "entity_ids": ["a_55555555555555555555555555555555"],
+      "limitation_codes": ["real_host_effect_not_established"],
+      "evidence_gap_codes": ["execution_observation_missing"],
+      "ai_eligible": true
+    }
+  ],
+  "relationships": [
+    {
+      "relationship_id": "a_66666666666666666666666666666666",
+      "relationship_type": "same_entity_followed_by",
+      "status": "supported",
+      "source_fact_id": "a_33333333333333333333333333333333",
+      "target_fact_id": "a_44444444444444444444444444444444",
+      "entity_id": "a_55555555555555555555555555555555",
+      "limitation_codes": ["relationship_not_causal_proof"]
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "a_88888888888888888888888888888888",
+      "finding_type": "connected_transfer_execution_attempt",
+      "semantic_family": "execution",
+      "status": "supported",
+      "priority_band": "reviewed_high",
+      "chain_ids": ["a_77777777777777777777777777777777"],
+      "relationship_ids": ["a_66666666666666666666666666666666"],
+      "evidence_ids": ["a_11111111111111111111111111111111", "a_22222222222222222222222222222222"],
+      "limitation_codes": ["real_host_effect_not_established"]
+    },
+    {
+      "finding_id": "a_99999999999999999999999999999999",
+      "finding_type": "execution_attempt_observed",
+      "semantic_family": "execution",
+      "status": "supported",
+      "priority_band": "reviewed_medium",
+      "chain_ids": ["a_77777777777777777777777777777777"],
+      "relationship_ids": ["a_66666666666666666666666666666666"],
+      "evidence_ids": ["a_22222222222222222222222222222222"],
+      "limitation_codes": ["execution_not_established"]
+    }
+  ],
+  "hypotheses": [
+    {
+      "hypothesis_id": "a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "hypothesis_set_id": "a_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "bounded_unverified_alternative",
+      "chain_ids": ["a_77777777777777777777777777777777"],
+      "relationship_ids": ["a_66666666666666666666666666666666"],
+      "fact_ids": ["a_33333333333333333333333333333333", "a_44444444444444444444444444444444"],
+      "evidence_ids": ["a_11111111111111111111111111111111", "a_22222222222222222222222222222222"],
+      "limitation_codes": ["real_host_effect_not_established"],
+      "evidence_gap_codes": ["execution_observation_missing"],
+      "falsifier_codes": ["direct_event_absent"]
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "a_cccccccccccccccccccccccccccccccc",
+      "action_category": "manual_execution_corroboration",
+      "rule_id": "review-execution-observation",
+      "policy_order": 20,
+      "finding_ids": ["a_88888888888888888888888888888888", "a_99999999999999999999999999999999"],
+      "evidence_ids": ["a_22222222222222222222222222222222"],
+      "requires_manual_approval": true,
+      "safe_to_auto_execute": false,
+      "execution_integration": "not_implemented"
+    }
+  ],
+  "limitations": ["execution_not_established", "real_host_effect_not_established", "relationship_not_causal_proof"],
+  "evidence_gaps": ["execution_observation_missing"],
+  "allowed_output": {
+    "chain_ids": ["a_77777777777777777777777777777777"],
+    "relationship_ids": ["a_66666666666666666666666666666666"],
+    "finding_ids": ["a_88888888888888888888888888888888", "a_99999999999999999999999999999999"],
+    "hypothesis_ids": ["a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+    "action_ids": ["a_cccccccccccccccccccccccccccccccc"],
+    "limitation_codes": ["execution_not_established", "real_host_effect_not_established", "relationship_not_causal_proof"],
+    "evidence_gap_codes": ["execution_observation_missing"],
+    "analyst_question_template_ids": ["ask_for_execution_corroboration"],
+    "explanation_template_ids": ["explain_chain_and_limits", "explain_hypothesis_test", "explain_manual_checks"],
+    "step_types": ["review_chain", "review_finding", "test_existing_hypothesis", "perform_manual_check", "resolve_evidence_gap"],
+    "anchor_types": ["chain", "finding", "hypothesis", "action", "evidence_gap"],
+    "abstention_reason_codes": ["insufficient_synthesis_context", "chronology_unavailable", "canonical_abstention_only", "policy_requires_abstention", "no_eligible_selection"]
+  },
+  "abstention": {
+    "assessment_abstained": false,
+    "reason_codes": []
+  },
+  "projection_sha256": "a398bfc82e46841b76bd70930e5f5749604a25d8493e3b006029496fe256092c"
+}

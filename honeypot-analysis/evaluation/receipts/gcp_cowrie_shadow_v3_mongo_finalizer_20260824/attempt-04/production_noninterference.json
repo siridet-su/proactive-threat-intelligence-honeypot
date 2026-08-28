@@ -1,0 +1,53 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_production_noninterference.v1",
+  "status": "PASS_EXPECTED_DELTA_ONLY",
+  "before": {
+    "sessions": 76,
+    "events": 1121,
+    "prediction_snapshots": 686,
+    "prediction_outbox": 686,
+    "analysis_jobs": 68,
+    "reports": 67,
+    "alerts": 0,
+    "lifecycle_ledger": 1,
+    "production_live": 71,
+    "e2e_test": 5
+  },
+  "after": {
+    "sessions": 77,
+    "events": 1137,
+    "prediction_snapshots": 696,
+    "prediction_outbox": 696,
+    "analysis_jobs": 69,
+    "reports": 67,
+    "alerts": 0,
+    "lifecycle_ledger": 1,
+    "production_live": 72,
+    "e2e_test": 5
+  },
+  "expected_delta": {
+    "sessions": 1,
+    "events": 16,
+    "prediction_snapshots": 10,
+    "prediction_outbox": 10,
+    "analysis_jobs": 1,
+    "reports": 0,
+    "alerts": 0,
+    "lifecycle_ledger": 0,
+    "production_live": 1,
+    "e2e_test": 0
+  },
+  "feeder_canonical_mongo_writes": false,
+  "historical_rows_replayed": false,
+  "failed_session_backfilled": false,
+  "controlled_source_promoted": false,
+  "production_model_changed": false,
+  "policy_changed": false,
+  "lifecycle_ledger_changed": false,
+  "mirror_rewritten": false,
+  "firewall_changed": false,
+  "public_predictor_endpoint_created": false,
+  "predictor_checkpoint_changed": false,
+  "temperature_refit": false
+}
+

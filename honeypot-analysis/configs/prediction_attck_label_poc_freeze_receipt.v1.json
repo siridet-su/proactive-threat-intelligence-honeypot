@@ -1,0 +1,106 @@
+{
+  "schema_version": "prediction_attck_label_poc_freeze_receipt.v1",
+  "freeze_id": "predfreeze_20260820_prediction_attck_experimental_poc_v3",
+  "status": "frozen_poc_policy_membership_training_not_started",
+  "repository": {
+    "implementation_commit": "3d375d93d4e0587ea407b20238c2cbc50b633369",
+    "implementation_tree": "baee0c0eadda7a68b6d9ed68c9084abeaf7556f6"
+  },
+  "lineage": {
+    "predecessor_policy_path": "configs/prediction_attck_label_policy.v2.json",
+    "predecessor_policy_sha256": "03160fd9fad7cbf9e3db652112c47e1b88242ecbe91c8884a6ddc7324d735a61",
+    "predecessor_immutable": true
+  },
+  "contracts": {
+    "policy": {
+      "path": "configs/prediction_attck_label_policy.poc.v3.json",
+      "sha256": "efc928d9e294a4dad026fa62c123c0b907467642f59cadb2df7d078d2b7faa02"
+    },
+    "dataset_manifest": {
+      "path": "configs/prediction_attck_label_poc_dataset_manifest.v1.json",
+      "sha256": "3ec5f0cc9b44e7993d3724278cb964391b1995d2ff1284aa560f0ba2d25d3451"
+    },
+    "poc_implementation": {
+      "path": "production/prediction/prediction_attck_label_poc_v3.py",
+      "sha256": "3810e1fcf13fb92b67b32f4597cedd06d0c32fdac8cd90c90e6307157f324868"
+    },
+    "validator": {
+      "path": "production/policies/validate_prediction_attck_label_poc_v3.py",
+      "sha256": "85fe324ff5bf5272ddd79622f91e42ffa4646ad22e10e39443bf810cbe2d86fd"
+    },
+    "v2_policy": {
+      "path": "configs/prediction_attck_label_policy.v2.json",
+      "sha256": "03160fd9fad7cbf9e3db652112c47e1b88242ecbe91c8884a6ddc7324d735a61"
+    },
+    "v2_implementation": {
+      "path": "production/prediction/prediction_attck_label_v2.py",
+      "sha256": "45c456ac7c5834129a11d3559acee4371a3bac6f48883876be3dd1035bdcf11c"
+    },
+    "v2_environment": {
+      "path": "configs/prediction_attck_label_environment.v2.json",
+      "sha256": "4b60e27fecf4f5f1ef3614418b52987fad1444b6dabc23423ba9f9cd83236ac1"
+    }
+  },
+  "support_evidence": {
+    "internal": {
+      "path": "/mnt/honeypot-data/prediction-attck-internal-40/v6-final-support/internal40-v6-support-receipt-resumed.v1.json",
+      "file_sha256": "cde51b36084d5e16ce35ed591c5602cd79eb750407b82fd2d4816489e3bf80f9",
+      "receipt_sha256": "5d9dd08e52e766fcb2b14f4915dfe363711450eb8a4f325c270f3302f5fc443b",
+      "status": "COMPLETE_VALID"
+    },
+    "cyberlab": {
+      "path": "/mnt/honeypot-data/prediction-attck-final-support-v4/cyberlab-101/receipts/cyberlab-101-support-retry2.v3.json",
+      "file_sha256": "1f0442c1a5201071a432a71475582feee17d5ed338bf12dcd507fb1e45f51eee",
+      "receipt_sha256": "4dc62fe7a5521e843079b47ea264ee1d51d68c6d450a032ff0bf2530a2501209",
+      "status": "COMPLETE_VALID"
+    },
+    "pooled": {
+      "path": "/mnt/honeypot-data/prediction-attck-final-support-v4/pooled/receipts/pooled-internal40-v6-cyberlab101-v3-support.v2.json",
+      "file_sha256": "fae9583f7c058b4c8f92f49706e4dd0dfa90220be6a6c6218b0f41bb4bb63f54",
+      "receipt_sha256": "6b4ab9c81278962bbda8dde9650d3cd8c0de979afc550baf5a691ea39c1a28f2",
+      "status": "SUPPORT_GATE_FAILED"
+    }
+  },
+  "dataset": {
+    "manifest_path": "configs/prediction_attck_label_poc_dataset_manifest.v1.json",
+    "manifest_sha256": "3ec5f0cc9b44e7993d3724278cb964391b1995d2ff1284aa560f0ba2d25d3451",
+    "status": "membership_frozen_examples_not_materialized",
+    "examples_present": false
+  },
+  "poc_training_authorization": {
+    "empirical_support_qualified": false,
+    "production_model_qualified": false,
+    "experimental_poc_training_authorized": true
+  },
+  "training_state": {
+    "status": "BLOCKED_EXAMPLE_CORPUS_NOT_MATERIALIZED",
+    "training_started": false,
+    "candidate_a": "not_started",
+    "candidate_b": "not_started",
+    "candidate_c": "not_authorized",
+    "checkpoint": "not_created",
+    "calibration": "not_created"
+  },
+  "boundaries": {
+    "support_reprocessed": false,
+    "pooled_recomputed": false,
+    "sealed_data_accessed": false,
+    "synthetic_data_accessed": false,
+    "training_started": false,
+    "production_changed": false,
+    "prediction_semantics_changed": false
+  },
+  "validation": {
+    "policy_validator_passed": true,
+    "focused_tests_passed": true,
+    "focused_test_count": 61,
+    "v1_v2_regressions_passed": true,
+    "runner_regression_tests_passed": true,
+    "runner_regression_test_count": 65,
+    "compileall_passed": true,
+    "git_diff_check_passed": true,
+    "pip_check_passed": true,
+    "deterministic_secret_scan_passed": true
+  },
+  "receipt_sha256": "ebd767b277aada0336b1ea4aa0f50cc74bac3a74d4b7960d4e32ef26a8a24ea1"
+}

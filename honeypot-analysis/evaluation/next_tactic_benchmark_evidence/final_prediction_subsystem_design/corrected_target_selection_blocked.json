@@ -1,0 +1,174 @@
+{
+  "schema_version": "next_behavior_corrected_target_selection_status.v1",
+  "status": "BLOCKED_AT_SELECTION",
+  "formal_completion_status": "BLOCKED_AT_SELECTION",
+  "reason_code": "no_eligible_complete_seed",
+  "test_opened": false,
+  "calibration_opened": false,
+  "final_metrics_status": "NOT_DETERMINABLE",
+  "downstream_status": {
+    "selected_checkpoint": "NOT_DETERMINABLE",
+    "calibration": "NOT_DETERMINABLE",
+    "pre_test_manifest": "NOT_DETERMINABLE",
+    "final_test_evaluation": "NOT_DETERMINABLE",
+    "final_confidence_intervals": "NOT_DETERMINABLE",
+    "final_error_analysis": "NOT_DETERMINABLE",
+    "selected_checkpoint_runtime": "NOT_DETERMINABLE"
+  },
+  "execution_commit": "624e7e91f20517f0379d48ddd3296c38d87b8587",
+  "private_evidence_receipt": {
+    "relative_path_from_experiment_root": "training.selection_blocked/SELECTION_BLOCKED.json",
+    "file_sha256": "fea344c71e9757a8f6794f7e7e0290f24ac80d9ccefebd0dbded917a5ae75da8",
+    "semantic_receipt_sha256": "1845249166196898fd2f50a15bcc2e828b584b61189a526ef97c56e7bf12b379",
+    "verified_artifact_count": 51
+  },
+  "published_selection_artifacts": {
+    "status_markdown": {
+      "path": "CORRECTED_TARGET_SELECTION_STATUS.md",
+      "sha256": "5241f2de65b6e9962c637192f8730116f0f7a6f18eb83f5d71ebe29851821a78"
+    },
+    "selection_table": {
+      "path": "CORRECTED_TARGET_SELECTION_TABLE.md",
+      "sha256": "05d1d1c8b1797b34fa36ea0750f041a302d02dba1cbb0a177bbf1652f62cf47e"
+    },
+    "selection_gate_figure": {
+      "path": "corrected_target_selection_gate.svg",
+      "sha256": "99e17b4d984e6aa567122feab2e7d346daa56f3e51bee5c1cacac39b797d15ca"
+    }
+  },
+  "frozen_inputs": {
+    "generation_id": "nextbehaviorfinalpreparationgeneration_315d1d905162275df9fe4279a33dd4df",
+    "generation_sha256": "e56be48e6d351497f4e0cf991fa9dcbd275aaf8e6cb26e199584aadf0e084361",
+    "partition_manifest_id": "nextbehaviorpartition_396031467e845253499d4afb5e2378dd",
+    "vocabulary_sha256": "1b46db302d2a92f80f1385e63fa01968cc23a9ce50cb77ef24f20ce8a9e494e9",
+    "model_spec_sha256": "2f4ea5531ce08adbd78f53832d7a6e23ba34617549c56aa50f04d069dee6ccc6",
+    "baseline_manifest_sha256": "9b9f84ab4ef5b87dbcb64c4c4a505eac6a436d637749b0744813622e54000f52",
+    "experiment_policy_sha256": "d27b177989e52073635a876695db8e2ea378c141df9adfbcfb2f56ac34a9fdc2",
+    "environment_lock_sha256": "468db1f2f4dad879b6cd4cc60402117f8ec77bce6d0b64266760e5ce0e4d5ace"
+  },
+  "roles": {
+    "train": {
+      "session_count": 109068,
+      "example_count": 188968
+    },
+    "selection": {
+      "session_count": 35442,
+      "example_count": 58721
+    },
+    "calibration": {
+      "session_count": 38507,
+      "example_count": 54756
+    },
+    "final_test_sealed": {
+      "session_count": 237514,
+      "example_count": 336089
+    }
+  },
+  "frozen_selection_rule": {
+    "primary_metric": "macro_f1_reportable_tactics_plus_terminal_with_whole_session_cluster_bootstrap",
+    "reject_reportable_class_zero_recall_collapse": true,
+    "high_consequence_tactics": [
+      "execution"
+    ],
+    "maximum_high_consequence_recall_regression": 0.1
+  },
+  "hard_backoff_vomm_selection": {
+    "macro_f1": 0.46350966331217336,
+    "balanced_accuracy": 0.724735963959648,
+    "terminal_f1": 0.7057601166605906,
+    "top1_accuracy": 0.8430774517805748,
+    "top3_accuracy": 0.9992267709094034,
+    "coverage": 0.999948910951789,
+    "defense_evasion": {
+      "support": 44,
+      "target_session_count": 44,
+      "precision": 1.0,
+      "recall": 0.13636363636363635,
+      "f1": 0.24000000000000002,
+      "reportable": true
+    },
+    "execution": {
+      "support": 4898,
+      "target_session_count": 4879,
+      "precision": 0.5685750783881083,
+      "recall": 0.9995916700694161,
+      "f1": 0.7248500999333778,
+      "reportable": true
+    }
+  },
+  "transformer_seeds": [
+    {
+      "seed": 20260721,
+      "checkpoint_sha256": "7fbd73c4bd071336fa52a589bf41e39f5a3122a67aee398dfb8e6dd9cfdfb04a",
+      "macro_f1": 0.667059352711773,
+      "balanced_accuracy": 0.8170294337530123,
+      "terminal_f1": 0.7056510340809787,
+      "p95_single_case_cpu_latency_ms": 1.984538,
+      "execution_recall_regression": 0.002654144548795423,
+      "eligible": false,
+      "blockers": [
+        "reportable_zero_recall:defense-evasion"
+      ]
+    },
+    {
+      "seed": 20260722,
+      "checkpoint_sha256": "fe145cc252c1ec80c511bbf8db7c1c71fb21d9947ae9dc9c10a29d4c06b70f23",
+      "macro_f1": 0.6662089537157992,
+      "balanced_accuracy": 0.8164447260972114,
+      "terminal_f1": 0.7054191502160004,
+      "p95_single_case_cpu_latency_ms": 1.959556,
+      "execution_recall_regression": 0.0075541037158023405,
+      "eligible": false,
+      "blockers": [
+        "reportable_zero_recall:defense-evasion"
+      ]
+    },
+    {
+      "seed": 20260723,
+      "checkpoint_sha256": "34a3722d5e9d1e4f7962f54997a0274375660a0413e8f020a6215690be97ccab",
+      "macro_f1": 0.6661493080282053,
+      "balanced_accuracy": 0.8167846067309241,
+      "terminal_f1": 0.7057837384744342,
+      "p95_single_case_cpu_latency_ms": 1.964729,
+      "execution_recall_regression": 0.005308289097590846,
+      "eligible": false,
+      "blockers": [
+        "reportable_zero_recall:defense-evasion"
+      ]
+    },
+    {
+      "seed": 20260724,
+      "checkpoint_sha256": "700973b306c42ff61421710256b00614e1918c2e76d7945a536203780e5d8597",
+      "macro_f1": 0.6668550499611493,
+      "balanced_accuracy": 0.8169243060033683,
+      "terminal_f1": 0.7059016393442623,
+      "p95_single_case_cpu_latency_ms": 2.3527,
+      "execution_recall_regression": 0.0036749693752552437,
+      "eligible": false,
+      "blockers": [
+        "reportable_zero_recall:defense-evasion"
+      ]
+    },
+    {
+      "seed": 20260725,
+      "checkpoint_sha256": "a0aee8dd3d2d1d15182b821f4f674f6c2d6d376aaa6efbe5f125bc2fbdfb8097",
+      "macro_f1": 0.6670085670294112,
+      "balanced_accuracy": 0.8166028846349926,
+      "terminal_f1": 0.7059123529197479,
+      "p95_single_case_cpu_latency_ms": 2.071443,
+      "execution_recall_regression": 0.0075541037158023405,
+      "eligible": false,
+      "blockers": [
+        "reportable_zero_recall:defense-evasion"
+      ]
+    }
+  ],
+  "decision": {
+    "selected_checkpoint": null,
+    "calibration_status": "NOT_DETERMINABLE",
+    "final_test_status": "SEALED_UNOPENED",
+    "runtime_benchmark_status": "NOT_DETERMINABLE_NO_SELECTED_CHECKPOINT",
+    "experimental_poc_status": "BLOCKED_AT_SELECTION",
+    "policy_changed_after_selection": false
+  }
+}

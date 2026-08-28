@@ -1,0 +1,75 @@
+{
+  "schema_version": "prediction_attck_poc_dataset_manifest.v1",
+  "manifest_id": "predattckpocdataset_internal40_cyberlab101_20260820",
+  "status": "membership_frozen_examples_not_materialized",
+  "target_contract_id": "next_prediction_attck_label_group_or_session_end.v1",
+  "policy_id": "prediction-only-reviewed-rule-labels-legacy-parity-20260816.v2",
+  "domains": [
+    {
+      "domain_id": "internal",
+      "source_manifest_path": "evaluation/manifests/prediction_attck_internal_40_manifest.v1.json",
+      "source_manifest_sha256": "92c96b7e4f731e07cc88f13d5c2ecbcd68e84c514354e058c21228f4066b21a9",
+      "support_receipt_path": "/mnt/honeypot-data/prediction-attck-internal-40/v6-final-support/internal40-v6-support-receipt-resumed.v1.json",
+      "support_receipt_sha256": "cde51b36084d5e16ce35ed591c5602cd79eb750407b82fd2d4816489e3bf80f9",
+      "support_receipt_id": "predattcksupportrunnerv6_0bff2473922ebc291df36949d55d31e7",
+      "role_member_counts": {
+        "train": 26,
+        "selection": 7,
+        "calibration": 7
+      },
+      "sealed_or_excluded_accessed": false
+    },
+    {
+      "domain_id": "cyberlab",
+      "source_manifest_path": "evaluation/manifests/prediction_attck_cyberlab_101_manifest.v1.json",
+      "source_manifest_sha256": "7280b7ce9bc4601906f79f7886dadbf7246aa100eeea62c9eb3438a8cd0fe5ef",
+      "support_receipt_path": "/mnt/honeypot-data/prediction-attck-final-support-v4/cyberlab-101/receipts/cyberlab-101-support-retry2.v3.json",
+      "support_receipt_sha256": "1f0442c1a5201071a432a71475582feee17d5ed338bf12dcd507fb1e45f51eee",
+      "support_receipt_id": "predattcksupportrunnerv3_cd4909be7eeae088bf62a3c8c153b0d4",
+      "role_member_counts": {
+        "train": 68,
+        "selection": 22,
+        "calibration": 11
+      },
+      "sealed_or_excluded_accessed": false
+    }
+  ],
+  "role_protocol": {
+    "train": ["internal", "cyberlab"],
+    "selection": ["internal", "cyberlab"],
+    "calibration": ["internal", "cyberlab"],
+    "member_boundaries_preserved": true,
+    "domain_session_merge": false,
+    "cross_domain_transitions": false,
+    "chronological_order_preserved": true,
+    "trusted_history_preserved": true,
+    "barriers_preserved": true,
+    "quarantine_preserved": true,
+    "role_reassignment": false,
+    "sealed_test_access": false
+  },
+  "support_evidence": {
+    "pooled_receipt_path": "/mnt/honeypot-data/prediction-attck-final-support-v4/pooled/receipts/pooled-internal40-v6-cyberlab101-v3-support.v2.json",
+    "pooled_receipt_sha256": "fae9583f7c058b4c8f92f49706e4dd0dfa90220be6a6c6218b0f41bb4bb63f54",
+    "pooled_receipt_id": "predattckpooledinternal40v6cyberlab101v3_c61fdc4e82e2c7376db82bba0c6feb24",
+    "pooled_status": "SUPPORT_GATE_FAILED",
+    "gate_summary_sha256": "610af582b53b5658b7aab4460b625a2a01ac0dcbfd315de5f9dfba413b2d8de6",
+    "support_gate_passed": false,
+    "training_started": false
+  },
+  "example_corpus": {
+    "schema_version": "prediction_attck_training_examples.v1",
+    "status": "not_materialized",
+    "examples_present": false,
+    "support_checkpoints_contain_examples": false,
+    "raw_replay_required_for_materialization": true,
+    "raw_replay_authorized_by_this_manifest": false,
+    "training_started": false
+  },
+  "sealed_boundary": {
+    "sealed_internal_accessed": false,
+    "sealed_cyberlab_accessed": false,
+    "embargoed_or_excluded_accessed": false,
+    "controlled_synthetic_test_accessed": false
+  }
+}

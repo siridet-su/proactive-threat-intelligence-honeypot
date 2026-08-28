@@ -1,0 +1,75 @@
+{
+  "schema_version": "next_behavior_preprocessing.v1",
+  "target_contract_id": "next_distinct_command_behavior_phase_or_session_end.v1",
+  "input_schema_version": "next_behavior_input.v1",
+  "session_schema_version": "next_behavior_session.v1",
+  "phase_schema_version": "next_behavior_phase.v1",
+  "example_schema_version": "next_behavior_example.v1",
+  "phase_construction": {
+    "simultaneous_tactics": "unordered_set",
+    "consecutive_equal_tactic_sets": "collapse_with_run_length",
+    "maximum_sequence_length": 8,
+    "truncation": "retain_most_recent_phases",
+    "padding": "left_zero_padding_with_attention_mask"
+  },
+  "terminal_outcome": "session_end_no_further_trusted_behavior",
+  "features": {
+    "phase": [
+      "tactics",
+      "techniques",
+      "repetition_bucket",
+      "elapsed_time_bucket",
+      "label_provenance_sources",
+      "label_confidence_buckets",
+      "label_agreement_statuses",
+      "audit_only_label_count",
+      "evidence_refs"
+    ],
+    "session_context": [
+      "login_outcome",
+      "command_count_bucket",
+      "session_age_bucket",
+      "confirmed_transfer_observed"
+    ],
+    "excluded": [
+      "raw_command",
+      "source_ip",
+      "username",
+      "credential",
+      "threat_intelligence",
+      "campaign_fingerprint",
+      "future_session_state"
+    ]
+  },
+  "buckets": {
+    "repetition": [
+      "1",
+      "2",
+      "3-5",
+      "6+"
+    ],
+    "elapsed_time": [
+      "unknown",
+      "under_1s",
+      "1_to_10s",
+      "10_to_60s",
+      "over_60s"
+    ],
+    "command_count": [
+      "0",
+      "1",
+      "2-5",
+      "6-20",
+      "21+"
+    ],
+    "session_age": [
+      "under_10s",
+      "10_to_60s",
+      "1_to_5m",
+      "over_5m",
+      "unknown"
+    ]
+  },
+  "score_semantics": "raw_model_scores_not_probabilities",
+  "authority": "experimental_statistical_forecast_only"
+}

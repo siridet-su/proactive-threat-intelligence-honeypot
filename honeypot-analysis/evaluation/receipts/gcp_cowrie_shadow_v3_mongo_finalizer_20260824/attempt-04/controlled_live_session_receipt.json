@@ -1,0 +1,29 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_controlled_live_session.v1",
+  "status": "PASS_ONE_AUTHENTICATED_BENIGN_SESSION",
+  "source_host": "fedora",
+  "source_identity_sha256": "7386530c730433e396f54a469ef60677ec4df2bfc3fc0359502def0e74f07a9d",
+  "target_pi_listener": "100.118.43.30:22",
+  "management_port_used": false,
+  "relay_port_used": false,
+  "session_id_sha256": "76c113a3e3cd47fe2ab5053ec0d218f8a75ec69e6d413c832e0110a967b9d295",
+  "authenticated": true,
+  "session_source": "production_live",
+  "benign_commands": [
+    "id",
+    "uname -a",
+    "pwd",
+    "whoami",
+    "echo controlled-e2e-finalizer",
+    "date -u",
+    "exit"
+  ],
+  "raw_commands_persisted_in_artifact": false,
+  "event_count": 16,
+  "start_observation": "2026-08-24T14:48:40.639905Z",
+  "terminal_evidence_cutoff_received_at": "2026-08-24T14:48:42.596035+00:00",
+  "canonical_terminal_updated_at": "2026-08-24T14:48:56.137896+00:00",
+  "return_code": 0,
+  "prior_failed_session_not_reused": true
+}
+

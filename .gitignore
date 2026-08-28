@@ -33,5 +33,31 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+<<<<<<< HEAD
 
 migrate-data/
+=======
+# Retained project preparation/recovery artifacts are intentionally local
+/gate-phase7-reprepared/classification.json
+/gate-phase7-reprepared/current_semantics.sqlite
+/gate-phase7-reprepared/development_ingest.json
+/gate-phase7-reprepared/final_ingest.json
+/gate-phase7-reprepared/final_preparation_receipt.json
+/gate-phase7-reprepared/model-gate/deterministic_semantics_freeze_evidence.json
+/gate-phase7-reprepared/model-gate/next_behavior_experiment_policy.v2.isolated.json
+/gate-phase7-reprepared/model-gate/partition_manifest.v2.json
+/gate-phase7-reprepared/model-gate/training_v2.stderr.log
+/gate-phase7-reprepared/model-gate/training_v2.stdout.log
+/gate-phase7-reprepared/model-gate/transformer_compatibility_gate_evidence.json
+/gate-phase7-reprepared/model-gate/transformer_retraining_attempt.json
+/gate-phase7-reprepared/roles/selection/source_receipts.json
+/gate-phase7-reprepared/roles/test/source_receipts.json
+/gate-phase7/final_ingest.json
+/gate-phase7/final_preparation_receipt.json
+/honeypot-analysis-stage/honeypot-analysis/configs/classification_rules.trusted.json
+/honeypot-analysis-stage/honeypot-analysis/configs/next_behavior_classifier_environment.v1.json
+/honeypot-analysis-stage/honeypot-analysis/configs/prediction_policy.transformer_poc.trusted.json
+/honeypot-analysis-stage/honeypot-analysis/production/classification/classification_pipeline.py
+/honeypot-analysis-stage/honeypot-analysis/production/classification/trust.py
+/honeypot-analysis-stage/honeypot-analysis/production/semantics/command_operations.py
+>>>>>>> origin/main

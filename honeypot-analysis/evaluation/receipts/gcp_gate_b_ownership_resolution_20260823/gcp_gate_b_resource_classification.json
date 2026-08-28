@@ -1,0 +1,3861 @@
+{
+  "classification_counts_after_resolution": {
+    "AMBIGUOUS_PRESERVE": 4,
+    "GCP_PLATFORM_DEFAULT": 90,
+    "SHARED_PROJECT_INFRASTRUCTURE": 0,
+    "UNRELATED": 0,
+    "VERIFIED_HONEYPOT_BACKUP": 15,
+    "VERIFIED_HONEYPOT_RESEARCH": 0,
+    "VERIFIED_HONEYPOT_RUNTIME": 2,
+    "VERIFIED_HONEYPOT_SOURCE_OF_RECORD": 1
+  },
+  "previous_allowlist_sha256": "7e40245aa4b34bd611736b91652616db37e701c50a2a55476fdc0d059e785d62",
+  "prior_ambiguous_count": 94,
+  "records": [
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "name follows standard default-allow-* rule naming",
+          "network is the project default network",
+          "description is the standard GCP default rule description",
+          "creation time is 2026-08-07T05:46:42Z"
+        ],
+        "dependency_reference": "default-network infrastructure; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "direction": "INGRESS",
+          "name": "default-allow-icmp",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Generic default-network rule with project-wide scope",
+          "Dedicated/shared project ownership is not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-allow-icmp",
+      "resource_name": "default-allow-icmp",
+      "resource_type": "compute.firewall",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "name follows standard default-allow-* rule naming",
+          "network is the project default network",
+          "description is the standard GCP default rule description",
+          "creation time is 2026-08-07T05:46:42Z"
+        ],
+        "dependency_reference": "default-network infrastructure; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "direction": "INGRESS",
+          "name": "default-allow-internal",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Generic default-network rule with project-wide scope",
+          "Dedicated/shared project ownership is not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-allow-internal",
+      "resource_name": "default-allow-internal",
+      "resource_type": "compute.firewall",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "name follows standard default-allow-* rule naming",
+          "network is the project default network",
+          "description is the standard GCP default rule description",
+          "creation time is 2026-08-07T05:46:42Z"
+        ],
+        "dependency_reference": "default-network infrastructure; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "direction": "INGRESS",
+          "name": "default-allow-rdp",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Generic default-network rule with project-wide scope",
+          "Dedicated/shared project ownership is not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-allow-rdp",
+      "resource_name": "default-allow-rdp",
+      "resource_type": "compute.firewall",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "name follows standard default-allow-* rule naming",
+          "network is the project default network",
+          "description is the standard GCP default rule description",
+          "creation time is 2026-08-07T05:46:42Z"
+        ],
+        "dependency_reference": "default-network infrastructure; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "direction": "INGRESS",
+          "name": "default-allow-ssh",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Generic default-network rule with project-wide scope",
+          "Dedicated/shared project ownership is not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-allow-ssh",
+      "resource_name": "default-allow-ssh",
+      "resource_type": "compute.firewall",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": true,
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "network name is default",
+          "description is 'Default network for the project'",
+          "autoCreateSubnetworks=true",
+          "created 2026-08-07T05:46:08.511-07:00"
+        ],
+        "dependency_reference": "capstone NIC references the default network",
+        "labels": {},
+        "metadata": {
+          "autoCreateSubnetworks": true,
+          "name": "default"
+        },
+        "other_evidence": [
+          "Default auto-created network with project-wide scope",
+          "Dedicated/shared project status is not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [
+            "capstone networkInterfaces[0].network"
+          ],
+          "referenced_by_vm": true
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default",
+      "resource_name": "default",
+      "resource_type": "compute.network",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-central1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-central1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-central1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-west1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-east1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-east1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-east1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-east1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-east1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-east1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-northeast1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-northeast1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-northeast1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-southeast1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-southeast1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-southeast1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-east4",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-east4",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-east4",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "australia-southeast1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/australia-southeast1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/australia-southeast1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west3",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west3",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west3",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "southamerica-east1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/southamerica-east1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/southamerica-east1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-south1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-south1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-south1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "northamerica-northeast1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/northamerica-northeast1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/northamerica-northeast1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west4",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west4",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west4",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-north1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-north1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-north1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-west2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-east2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-east2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-east2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west6",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west6",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west6",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-northeast2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-northeast2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-northeast2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-northeast3",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-northeast3",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-northeast3",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-west3",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west3",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west3",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-west4",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west4",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-west4",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-southeast2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-southeast2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-southeast2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-central2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-central2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-central2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "northamerica-northeast2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/northamerica-northeast2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/northamerica-northeast2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-south2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-south2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-south2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "australia-southeast2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/australia-southeast2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/australia-southeast2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "southamerica-west1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/southamerica-west1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/southamerica-west1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west8",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west8",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west8",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west9",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west9",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west9",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-east5",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-east5",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-east5",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-southwest1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-southwest1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-southwest1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "us-south1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-south1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/us-south1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "me-west1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/me-west1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/me-west1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west12",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west12",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west12",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "me-central1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/me-central1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/me-central1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-west10",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west10",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-west10",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "africa-south1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/africa-south1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/africa-south1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "northamerica-south1",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/northamerica-south1",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/northamerica-south1",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "europe-north2",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-north2",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/europe-north2",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": "asia-southeast3",
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "subnetwork name is default",
+          "network is default",
+          "42 regions were created together on 2026-08-07",
+          "CIDRs follow the standard auto-created default-network sequence"
+        ],
+        "dependency_reference": "default-network regional subnet; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "name": "default",
+          "network": "default"
+        },
+        "other_evidence": [
+          "Default auto-created subnetwork in default network",
+          "No independent proof this network is honeypot-exclusive"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-southeast3",
+      "resource_name": "default@https://www.googleapis.com/compute/v1/projects/project-dff4b23a-3010-4936-a02/regions/asia-southeast3",
+      "resource_type": "compute.subnetwork",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-00ed4ca1b8694404"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-00ed4ca1b8694404",
+      "resource_name": "default-route-00ed4ca1b8694404",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-0348fa5f5e592650"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-0348fa5f5e592650",
+      "resource_name": "default-route-r-0348fa5f5e592650",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-09da46c6772e7d47"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-09da46c6772e7d47",
+      "resource_name": "default-route-r-09da46c6772e7d47",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-1625ee957d3d8b37"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-1625ee957d3d8b37",
+      "resource_name": "default-route-r-1625ee957d3d8b37",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-19bcd21c4038c0cb"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-19bcd21c4038c0cb",
+      "resource_name": "default-route-r-19bcd21c4038c0cb",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-1b78d1626cfc8e87"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-1b78d1626cfc8e87",
+      "resource_name": "default-route-r-1b78d1626cfc8e87",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-221174191c43dfad"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-221174191c43dfad",
+      "resource_name": "default-route-r-221174191c43dfad",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-26be79ba10f37557"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-26be79ba10f37557",
+      "resource_name": "default-route-r-26be79ba10f37557",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-27382a8aae6cf5a0"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-27382a8aae6cf5a0",
+      "resource_name": "default-route-r-27382a8aae6cf5a0",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-33db9f7c0aa4aec2"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-33db9f7c0aa4aec2",
+      "resource_name": "default-route-r-33db9f7c0aa4aec2",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-34d67fb2e6cdc3a7"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-34d67fb2e6cdc3a7",
+      "resource_name": "default-route-r-34d67fb2e6cdc3a7",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-43c7dafade1b00f0"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-43c7dafade1b00f0",
+      "resource_name": "default-route-r-43c7dafade1b00f0",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-4aa7b83735eaedb7"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-4aa7b83735eaedb7",
+      "resource_name": "default-route-r-4aa7b83735eaedb7",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-4de9278320cb2234"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-4de9278320cb2234",
+      "resource_name": "default-route-r-4de9278320cb2234",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-5c3e92ff4d7e8258"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-5c3e92ff4d7e8258",
+      "resource_name": "default-route-r-5c3e92ff4d7e8258",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-64bcaa6c11183063"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-64bcaa6c11183063",
+      "resource_name": "default-route-r-64bcaa6c11183063",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-74759f8933742c1a"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-74759f8933742c1a",
+      "resource_name": "default-route-r-74759f8933742c1a",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-75c30af8bc45e5d1"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-75c30af8bc45e5d1",
+      "resource_name": "default-route-r-75c30af8bc45e5d1",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-813acdb4968b5da9"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-813acdb4968b5da9",
+      "resource_name": "default-route-r-813acdb4968b5da9",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-83ae6424947c3237"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-83ae6424947c3237",
+      "resource_name": "default-route-r-83ae6424947c3237",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-95ac3ca7ae084921"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-95ac3ca7ae084921",
+      "resource_name": "default-route-r-95ac3ca7ae084921",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-a16f28f61bdba97a"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-a16f28f61bdba97a",
+      "resource_name": "default-route-r-a16f28f61bdba97a",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-a9d536d914d88098"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-a9d536d914d88098",
+      "resource_name": "default-route-r-a9d536d914d88098",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-aae21799a60bfefe"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-aae21799a60bfefe",
+      "resource_name": "default-route-r-aae21799a60bfefe",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-b297767cc3b128c4"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-b297767cc3b128c4",
+      "resource_name": "default-route-r-b297767cc3b128c4",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-b36cefd2fab000c5"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-b36cefd2fab000c5",
+      "resource_name": "default-route-r-b36cefd2fab000c5",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-be8d3daf68cdd413"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-be8d3daf68cdd413",
+      "resource_name": "default-route-r-be8d3daf68cdd413",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-c0435b001ea8c0e4"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-c0435b001ea8c0e4",
+      "resource_name": "default-route-r-c0435b001ea8c0e4",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-c3fe24d850fc6d60"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-c3fe24d850fc6d60",
+      "resource_name": "default-route-r-c3fe24d850fc6d60",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-c429acddcac86b5a"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-c429acddcac86b5a",
+      "resource_name": "default-route-r-c429acddcac86b5a",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-c8a9572d9a2175d8"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-c8a9572d9a2175d8",
+      "resource_name": "default-route-r-c8a9572d9a2175d8",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-ca4a333c132b83ad"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-ca4a333c132b83ad",
+      "resource_name": "default-route-r-ca4a333c132b83ad",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-cd0b83097eb32184"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-cd0b83097eb32184",
+      "resource_name": "default-route-r-cd0b83097eb32184",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-cfc6765dccbe6b46"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-cfc6765dccbe6b46",
+      "resource_name": "default-route-r-cfc6765dccbe6b46",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-d3c44b3bf72917ef"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-d3c44b3bf72917ef",
+      "resource_name": "default-route-r-d3c44b3bf72917ef",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-dafcaf3e46474abe"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-dafcaf3e46474abe",
+      "resource_name": "default-route-r-dafcaf3e46474abe",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-dd5d9af70e87e7b3"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-dd5d9af70e87e7b3",
+      "resource_name": "default-route-r-dd5d9af70e87e7b3",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-ddcfb389a5a8c4bc"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-ddcfb389a5a8c4bc",
+      "resource_name": "default-route-r-ddcfb389a5a8c4bc",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-e1e4691a37c409b9"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-e1e4691a37c409b9",
+      "resource_name": "default-route-r-e1e4691a37c409b9",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-e2130929452542d1"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-e2130929452542d1",
+      "resource_name": "default-route-r-e2130929452542d1",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-e25b91b99bfb40f4"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-e25b91b99bfb40f4",
+      "resource_name": "default-route-r-e25b91b99bfb40f4",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-e8bab5909ad891fd"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-e8bab5909ad891fd",
+      "resource_name": "default-route-r-e8bab5909ad891fd",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "HIGH",
+      "currently_referenced": "preserve_default_infrastructure",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "GCP_PLATFORM_DEFAULT",
+      "ownership_evidence": {
+        "default_platform_signature": [
+          "route name follows default-route-* naming",
+          "network is default",
+          "destinations correspond to auto-created default subnet CIDRs",
+          "routes were created on 2026-08-07"
+        ],
+        "dependency_reference": "default-network route; no Track-B dependency",
+        "labels": {},
+        "metadata": {
+          "network": "default",
+          "route_name": "default-route-r-eb18e48b6bc61037"
+        },
+        "other_evidence": [
+          "Default network route",
+          "Network/project sharing and ownership are not independently proven"
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": "2026-08-07 creation cohort for default Compute/network resources",
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "default-route-r-eb18e48b6bc61037",
+      "resource_name": "default-route-r-eb18e48b6bc61037",
+      "resource_type": "compute.route",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "LOW",
+      "currently_referenced": "UNVERIFIED",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "AMBIGUOUS_PRESERVE",
+      "ownership_evidence": {
+        "default_platform_signature": null,
+        "dependency_reference": null,
+        "labels": {},
+        "metadata": null,
+        "other_evidence": [
+          "Supplemental inventory query was not accessible to active principal",
+          {
+            "permission": "iam.serviceAccounts.list",
+            "status": "DENIED"
+          }
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": null,
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "<unverified:service_accounts>",
+      "resource_name": "<unverified:service_accounts>",
+      "resource_type": "service_accounts",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "LOW",
+      "currently_referenced": "UNVERIFIED",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "AMBIGUOUS_PRESERVE",
+      "ownership_evidence": {
+        "default_platform_signature": null,
+        "dependency_reference": null,
+        "labels": {},
+        "metadata": null,
+        "other_evidence": [
+          "Supplemental inventory query was not accessible to active principal",
+          {
+            "permission": "storage.buckets.list",
+            "status": "DENIED"
+          }
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": null,
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "<unverified:buckets>",
+      "resource_name": "<unverified:buckets>",
+      "resource_type": "buckets",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "LOW",
+      "currently_referenced": "UNVERIFIED",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "AMBIGUOUS_PRESERVE",
+      "ownership_evidence": {
+        "default_platform_signature": null,
+        "dependency_reference": null,
+        "labels": {},
+        "metadata": null,
+        "other_evidence": [
+          "Supplemental inventory query was not accessible to active principal",
+          {
+            "permission": "artifactregistry.repositories.list",
+            "status": "DENIED"
+          }
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": null,
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "<unverified:artifact_repositories>",
+      "resource_name": "<unverified:artifact_repositories>",
+      "resource_type": "artifact_repositories",
+      "safe_to_preserve": true
+    },
+    {
+      "confidence": "LOW",
+      "currently_referenced": "UNVERIFIED",
+      "decision": "preserve; never a deletion candidate",
+      "deletion_candidate": false,
+      "location": null,
+      "new_classification": "AMBIGUOUS_PRESERVE",
+      "ownership_evidence": {
+        "default_platform_signature": null,
+        "dependency_reference": null,
+        "labels": {},
+        "metadata": null,
+        "other_evidence": [
+          "Supplemental inventory query was not accessible to active principal",
+          {
+            "reason": "SERVICE_DISABLED",
+            "status": "UNAVAILABLE"
+          }
+        ],
+        "repository_reference": {
+          "note": "No resource-specific deletion reference found; repository evidence is not used as deletion authority.",
+          "paths": [],
+          "referenced_by_repo": false
+        },
+        "timestamp_evidence": null,
+        "vm_reference": {
+          "paths_or_fields": [],
+          "referenced_by_vm": false
+        }
+      },
+      "prior_classification": "AMBIGUOUS",
+      "resource_id": "<unverified:scheduler_jobs>",
+      "resource_name": "<unverified:scheduler_jobs>",
+      "resource_type": "scheduler_jobs",
+      "safe_to_preserve": true
+    }
+  ],
+  "remaining_ambiguous_preserve": 4,
+  "resolved_to_platform_default": 90,
+  "schema_version": "gcp_gate_b_resource_classification.v1",
+  "source_inventory_sha256": "d94af7d81f26ba89b802e24d668647475f7947b51c7eb471e85c92e352e69b2f",
+  "status": "COMPLETE_VALID_READ_ONLY"
+}

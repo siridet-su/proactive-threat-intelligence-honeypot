@@ -1,0 +1,24 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_live_predictor_call.v1",
+  "status": "PASS_ONE_SUCCESSFUL_CALL",
+  "endpoint": "http://127.0.0.1:18082/predict",
+  "checkpoint_sha256": "16506e962432f9921d18a514c3a31686a20f9734385ec49439ad2651e4cdd283",
+  "temperature": 0.6990670591704266,
+  "calibration_method": "temperature_scaled_softmax.v1",
+  "authority": "non_authoritative",
+  "canonical_write_allowed": false,
+  "task": "next_observed_distinct_tactic",
+  "model_identifier": "finalf_refined_v1_prediction_only",
+  "top1": "credential-access",
+  "top3": [
+    "credential-access",
+    "command-and-control",
+    "execution"
+  ],
+  "probability_vector_length": 7,
+  "probability_vector_sha256": "d062e4f25bdee9c6938a9f090ea70dda028e4e03b761c9a4ff7273b1a7d77e80",
+  "predictor_failures": 0,
+  "health_status": "READY",
+  "golden_fixtures_replayed": 6
+}
+

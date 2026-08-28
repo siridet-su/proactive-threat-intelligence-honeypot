@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh honeypot threat-intelligence feeds daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30min
+Persistent=true
+Unit=honeypot-feed-refresh.service
+
+[Install]
+WantedBy=timers.target

@@ -1,1 +1,1 @@
-"""Production subpackage."""
+"""Operator-facing verification and recovery tools."""

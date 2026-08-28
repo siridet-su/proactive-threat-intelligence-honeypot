@@ -1,0 +1,26 @@
+{
+  "artifacts": {
+    "gcp_gate_b_ownership_resolution.json": "086417b51602ca124621372f6a08b3344424b6e8df2a7f186e8c80f4a8be01eb",
+    "gcp_gate_b_read_permission_gaps.json": "0db8b2c2371300399cff99e0fe35fb835229e2c77e31c5f6ea7eb501ae883820",
+    "gcp_gate_b_resolution_report.md": "71e344bff7057b78a9a101ab8631d3b78a84bb5212b2b705110d37cbc94947e3",
+    "gcp_gate_b_resource_classification.json": "66c486a8e5a6b3136d9b748917d939efd4106c397829cd20c20048a7c5fcbfb4",
+    "gcp_non_destructive_deployment_conflict_check.json": "49bf93d7f20d03bb809f85f21cf75967361f68058328c2f2f36ee487c169b31f",
+    "gcp_project_scope_assessment.json": "aed6a34eb87c196d1fe940057d70c160a562c5cc36499b288b3450833589fcc8",
+    "gcp_verified_deletion_allowlist_v2.json": "7c76bca946a45977554a2d0cbbd4d1422727232d195e334d4bd8eeab463dec78"
+  },
+  "preservation": {
+    "disk_modified": false,
+    "gcp_resources_created": false,
+    "gcp_resources_deleted": false,
+    "gcp_resources_modified": false,
+    "iam_modified": false,
+    "model_retrained": false,
+    "production_modified": false,
+    "sealed_data_accessed": false,
+    "temperature_refit": false
+  },
+  "previous_allowlist_sha256": "7e40245aa4b34bd611736b91652616db37e701c50a2a55476fdc0d059e785d62",
+  "schema_version": "gcp_gate_b_ownership_resolution_manifest.v1",
+  "source_inventory_sha256": "d94af7d81f26ba89b802e24d668647475f7947b51c7eb471e85c92e352e69b2f",
+  "status": "COMPLETE_VALID_READ_ONLY"
+}

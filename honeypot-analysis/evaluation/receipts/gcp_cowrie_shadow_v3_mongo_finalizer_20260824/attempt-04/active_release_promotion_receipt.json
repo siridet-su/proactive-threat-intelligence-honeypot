@@ -1,0 +1,18 @@
+{
+  "schema_version": "gcp_cowrie_shadow_v3_mongo_finalizer_active_release_promotion_receipt.v1",
+  "status": "PASS_GUARDED_PROMOTION_COMPLETE",
+  "review_receipt": "new_release_review_receipt.json",
+  "review_status": "REVIEWED_OFFLINE_CANDIDATE_VALID_STAGED_NOT_ACTIVE",
+  "activation_receipt": "deployment_activation.json",
+  "active_release": "403c989d9cfe7e7726610018345352e76bfd5d7f",
+  "active_release_sha256": "403c989d9cfe7e7726610018345352e76bfd5d7fc75cc3952d3217a00e0c6669",
+  "runtime_guard_pass": true,
+  "source_identity_guard_pass": true,
+  "storage_guard_pass": true,
+  "worker_health_pass": true,
+  "feeder_health_pass": true,
+  "predictor_health_pass": true,
+  "rollback_available": true,
+  "prior_review_receipt_modified": false
+}
+

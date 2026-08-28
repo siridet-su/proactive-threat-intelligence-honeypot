@@ -227,7 +227,6 @@
 </head>
 <body class="min-h-screen flex">
 
-    <!-- ─── Sidebar ─── -->
     <aside class="fixed inset-y-0 left-0 w-56 bg-zinc-950 border-r flex flex-col z-50" style="border-color:#1f1f23">
         <!-- Brand -->
         <div class="h-14 flex items-center px-5 border-b" style="border-color:#1f1f23">
@@ -259,12 +258,11 @@
                 <i data-lucide="flask-conical" class="nav-icon"></i> Classification
             </a>
             <a href="#" onclick="navigateTo('prediction');return false;" id="nav-prediction" class="nav-item">
-                <i data-lucide="trending-up" class="nav-icon"></i> Prediction
+                <i data-lucide="trending-up" class="nav-icon"></i> Prediction Context
             </a>
             <a href="#" onclick="navigateTo('seedhealth');return false;" id="nav-seedhealth" class="nav-item">
                 <i data-lucide="database-zap" class="nav-icon"></i> Seed Health
             </a>
-            <!-- ── NEW: Threat Intelligence nav section ── -->
             <div class="section-label mt-5 mb-3">Threat Intel</div>
             <a href="#" onclick="navigateTo('opscenter');return false;" id="nav-opscenter" class="nav-item">
                 <i data-lucide="radio" class="nav-icon"></i> Ops Center
@@ -300,7 +298,6 @@
         </div>
     </aside>
 
-    <!-- ─── Main ─── -->
     <main class="flex-1 ml-56 min-h-screen flex flex-col">
         <!-- Topbar -->
         <header class="h-14 sticky top-0 bg-zinc-950/90 backdrop-blur-xl border-b z-40 flex items-center justify-between px-7" style="border-color:#1f1f23">
@@ -338,9 +335,9 @@
      *   /predictions/current        dashboard_api.py → predictive_alert, trust_status,
      *                               confidence_damping, agreement, coverage,
      *                               effective_weights, external_seed_weight_policy,
-     *                               session_ttp_correlations, smb_decision,
+     *                               session_ttp_correlations, response_guidance,
      *                               source_breakdown, feedback_summary
-     *   /decisions/current          dashboard_api.py → smb_decision
+     *   /decisions/current          dashboard_api.py → response_guidance.v3
      *   /feedback-review            dashboard_api.py → labels, operator_signals,
      *                               action_statuses, weight_eligible, feedback_types
      *   /classification-evaluation  dashboard_api.py → report
@@ -361,6 +358,8 @@
         charts: {},
         intelCache: {},       // keyed by session_id
         miniMap: null,        // Leaflet mini-map for session detail
+        detailSessionId: '',  // current detail page, never persisted
+        detailEvents: [],     // current public/redacted event rows only
         globalAlerts: [],     // predictive_alert objects surfaced across sessions
         feedbackData: null,
         classificationData: null,
@@ -405,14 +404,19 @@
     }
     window.openSession = openSession;
 
-    // ─── Clock ───────────────────────────────────────────────────
+    document.addEventListener('click', event => {
+        const row = event.target.closest('[data-open-session]');
+        if (!row) return;
+        const sessionId = row.dataset.openSession;
+        if (sessionId) openSession(sessionId);
+    });
+
     function startClock() {
         const el = document.getElementById('clock-display');
         const tick = () => { if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
         tick(); setInterval(tick, 1000);
     }
 
-    // ─── API helpers ─────────────────────────────────────────────
     function escapeHtmlString(value) {
         return String(value)
             .replace(/&/g, '&amp;')
@@ -474,6 +478,206 @@
         return d || { ok: false, session_id: id, overview: { session_id: id }, events_table_rows: [], prediction_snapshots: [], errors: { api: 'Session detail unavailable' } };
     }
 
+    async function fetchAIAdvisory(id) {
+        const d = await apiFetch(
+            `/api/ai-advisory?session_id=${encodeURIComponent(id)}`,
+            { sanitize: false },
+        );
+        return d || { ok: false, status: 'unavailable', advisory: {} };
+    }
+
+    function renderAIAdvisoryPanel(result) {
+        const panel = document.getElementById('ai-advisory-panel');
+        if (!panel) return;
+        panel.replaceChildren();
+
+        const heading = document.createElement('h3');
+        heading.className = 'text-xs font-semibold text-violet-300 uppercase tracking-wide';
+        heading.textContent = 'AI-generated advisory — non-authoritative';
+        panel.appendChild(heading);
+
+        const note = document.createElement('p');
+        note.className = 'text-[11px] text-zinc-500 mt-1 mb-3';
+        note.textContent = 'Separate post-persistence research output. It cannot change findings, hypotheses, guidance, alerts, or actions.';
+        panel.appendChild(note);
+
+        if (!result?.ok || result?.status === 'unavailable') {
+            const unavailable = document.createElement('p');
+            unavailable.className = 'text-xs text-zinc-600 italic';
+            unavailable.textContent = 'AI advisory unavailable; deterministic analysis is unaffected.';
+            panel.appendChild(unavailable);
+            return;
+        }
+        if (result?.status === 'not_available') {
+            const absent = document.createElement('p');
+            absent.className = 'text-xs text-zinc-600 italic';
+            absent.textContent = 'No AI advisory was requested or accepted for this report.';
+            panel.appendChild(absent);
+            return;
+        }
+
+        const advisory = result.advisory || {};
+        const rendered = advisory.rendered_advisory || {};
+        const validation = advisory.validation || {};
+        const status = document.createElement('p');
+        status.className = 'text-xs text-zinc-400 mb-3';
+        status.textContent = `Status: ${String(advisory.status || result.status || 'unknown')} · validation: ${String(validation.status || 'unknown')}`;
+        panel.appendChild(status);
+
+        for (const paragraph of arrayMaybe(rendered.paragraphs)) {
+            const item = document.createElement('p');
+            item.className = 'text-xs text-zinc-300 leading-relaxed mb-2';
+            item.textContent = String(paragraph?.text || '');
+            panel.appendChild(item);
+        }
+        if (rendered.status === 'abstained') {
+            const abstained = document.createElement('p');
+            abstained.className = 'text-xs text-zinc-500 italic';
+            abstained.textContent = `AI abstained: ${String(rendered.abstention_reason_code || 'unspecified')}`;
+            panel.appendChild(abstained);
+        }
+
+        const candidates = arrayMaybe(advisory.shadow_candidates?.candidates);
+        const shadowHeading = document.createElement('h4');
+        shadowHeading.className = 'text-[11px] font-semibold text-amber-300 uppercase tracking-wide mt-4 mb-2';
+        shadowHeading.textContent = `Unverified AI candidates (${candidates.length})`;
+        panel.appendChild(shadowHeading);
+        for (const candidate of candidates) {
+            const item = document.createElement('p');
+            item.className = 'text-[11px] text-zinc-500 font-mono mb-1';
+            item.textContent = `${String(candidate?.candidate_type || 'unknown')} · ${String(candidate?.status || 'unverified_ai_candidate')} · ${String(candidate?.candidate_id || '')}`;
+            panel.appendChild(item);
+        }
+    }
+
+    async function loadInternalCommands(adminToken, requestedSessionId = state.detailSessionId) {
+        const sessionId = String(requestedSessionId || '').trim();
+        const token = String(adminToken || '').trim();
+        if (!sessionId || !token) return;
+        const panel = document.getElementById('raw-command-chain');
+        if (panel) panel.innerHTML = '<p class="text-xs text-amber-300">Loading sensitive command text…</p>';
+        try {
+            const response = await fetch(`/api/internal/session-commands?session_id=${encodeURIComponent(sessionId)}`, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: {
+                    'Accept': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+            const payload = await response.json();
+            if (!response.ok || payload?.ok !== true) {
+                throw new Error(payload?.error || `request failed (${response.status})`);
+            }
+            if (String(state.detailSessionId || '').trim() !== sessionId) return;
+            const mapping = mapSensitiveCommands(state.detailEvents, payload.commands);
+            const mappedCommands = mapping.matches.map(item => item.command);
+            const updated = applySensitiveCommandsToExecutionChain(mapping.matches);
+            if (payload.commands?.length && (!mappedCommands.length || updated !== mappedCommands.length)) {
+                if (panel) panel.innerHTML = '<p class="text-xs text-amber-200">Sensitive command text was not mapped to a stable public event reference; privacy placeholders were retained.</p>';
+                return;
+            }
+            if (panel) panel.innerHTML = renderSensitiveCommandChain({...payload, commands: mappedCommands});
+        } catch (error) {
+            if (panel) panel.innerHTML = `<p class="text-xs text-red-300">Sensitive command view unavailable: ${escapeHtmlString(error?.message || 'authorization failed')}</p>`;
+        }
+    }
+
+    function normalizedEventType(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function stableEventReference(value) {
+        const item = value || {};
+        return {
+            eventId: String(item.event_id || '').trim(),
+            timestamp: String(item.timestamp || item.payload?.timestamp || '').trim(),
+            eventType: normalizedEventType(item.eventid || item.payload?.eventid),
+        };
+    }
+
+    function sensitiveCommandMatchesEvent(event, command) {
+        const left = stableEventReference(event);
+        const right = stableEventReference(command);
+        if (left.eventId && right.eventId) {
+            return left.eventId === right.eventId
+                && (!left.timestamp || !right.timestamp || left.timestamp === right.timestamp);
+        }
+        if (!left.timestamp || !right.timestamp || left.timestamp !== right.timestamp) return false;
+        return !left.eventType || !right.eventType || left.eventType === right.eventType;
+    }
+
+    function mapSensitiveCommands(events, commands) {
+        const publicEvents = arrayMaybe(events);
+        const sensitiveCommands = arrayMaybe(commands);
+        const matches = [];
+        const unmatched = [];
+        const usedEventKeys = new Set();
+        for (const command of sensitiveCommands) {
+            const commandRef = stableEventReference(command);
+            const candidates = publicEvents.filter(candidate => sensitiveCommandMatchesEvent(candidate, command));
+            // Event IDs are the durable identity. Timestamp/type fallback is
+            // accepted only when it is unambiguous; never guess between rows.
+            const event = commandRef.eventId
+                ? candidates.find(candidate => stableEventReference(candidate).eventId === commandRef.eventId)
+                : candidates.length === 1 ? candidates[0] : null;
+            const eventRef = event ? stableEventReference(event) : null;
+            const eventKey = eventRef?.eventId || `${eventRef?.timestamp || ''}\u0000${eventRef?.eventType || ''}`;
+            if (event && !usedEventKeys.has(eventKey)) {
+                usedEventKeys.add(eventKey);
+                matches.push({event, command});
+            }
+            else unmatched.push(command);
+        }
+        return {matches, unmatched};
+    }
+
+    function applySensitiveCommandsToExecutionChain(matches, root = document) {
+        let updated = 0;
+        for (const match of arrayMaybe(matches)) {
+            const reference = stableEventReference(match.event);
+            const nodes = Array.from(root.querySelectorAll('.execution-command-text'));
+            const node = nodes.find(candidate => (
+                String(candidate.dataset.commandEventId || '') === reference.eventId
+                && (!reference.timestamp || String(candidate.dataset.commandTimestamp || '') === reference.timestamp)
+            )) || nodes.find(candidate => (
+                !reference.eventId
+                && String(candidate.dataset.commandTimestamp || '') === reference.timestamp
+                && (!reference.eventType || String(candidate.dataset.commandEventType || '').toLowerCase() === reference.eventType)
+            ));
+            if (!node) continue;
+            node.textContent = String(match.command?.input ?? '');
+            node.dataset.sensitive = 'true';
+            updated += 1;
+        }
+        return updated;
+    }
+
+    function renderSensitiveCommandChain(payload) {
+        const commands = arrayMaybe(payload?.commands);
+        if (!commands.length) return '<p class="text-xs text-zinc-500 italic">No persisted command text is available for this session.</p>';
+        return `<div class="space-y-3">
+            <div class="flex items-center justify-between gap-3 text-[10px] uppercase tracking-widest text-amber-300">
+                <span> sensitive administrator view · persisted Cowrie input</span>
+                <span class="chip" style="color:#fbbf24;background:rgba(245,158,11,0.1)">DO NOT EXPORT</span>
+            </div>
+            ${commands.map((command, index) => {
+                const classifications = arrayMaybe(command.classification);
+                const classification = classifications.length
+                    ? classifications.map(item => `${escapeHtmlString(item.ttp || 'unmapped')} · ${escapeHtmlString(item.tactic || 'unknown')} · ${escapeHtmlString(item.source || 'unknown')}`).join('<br>')
+                    : 'no trusted classification recorded';
+                return `<div class="rounded-lg p-3" style="background:#17120a;border:1px solid rgba(245,158,11,0.25)">
+                    <div class="flex flex-wrap items-center gap-2 text-[10px] text-amber-200 mb-2">
+                        <span>#${index + 1}</span><span>${escapeHtmlString(command.timestamp || 'time unavailable')}</span><span>${escapeHtmlString(command.eventid || 'event id unavailable')}</span>
+                    </div>
+                    <div class="text-xs text-amber-100 font-mono whitespace-pre-wrap break-words">${escapeHtmlString(command.input || '[no persisted command text]')}</div>
+                    <div class="mt-2 pt-2 border-t text-[10px] text-zinc-400" style="border-color:rgba(245,158,11,0.15)"><span class="text-zinc-500">classification:</span><br>${classification}</div>
+                </div>`;
+            }).join('')}
+            <p class="text-[10px] text-amber-200/70">Sensitive: text is the persisted Cowrie input after the sensor privacy boundary. Values scrubbed before persistence cannot be recovered. This view is not part of public API, reports, artifacts, webhooks, or prediction data.</p>
+        </div>`;
+    }
+
     async function fetchPredictionCurrent(sessionId) {
         return await apiFetch(`/predictions/current?session_id=${encodeURIComponent(sessionId)}`);
     }
@@ -498,13 +702,11 @@
         return await apiFetch('/health');
     }
 
-    // ─── Production data policy ──────────────────────────────────
     // This production monitor intentionally does not fabricate fallback sessions,
     // predictions, enrichment, campaigns, actors, or feed metrics. Missing API data
     // is rendered as an empty/unavailable state so demo artifacts cannot be confused
     // with real threat intelligence.
 
-    // ─── Derived analytics ───────────────────────────────────────
     function deriveStats(sessions) {
         const statusCounts = { completed: 0, running: 0, queued: 0, failed: 0 };
         const tacticFreq = {};
@@ -604,7 +806,6 @@
         else renderDashboard();
     }
 
-    // ─── Formatting helpers ──────────────────────────────────────
     function toFiniteNumber(value) {
         if (value === null || value === undefined || value === '') return null;
         const n = Number(value);
@@ -956,7 +1157,6 @@
         </div>`;
     }
 
-    // ─── Signal quality meter (agreement + coverage) ─────────────
     // Fields: agreement.score, coverage.score [2]
     function signalQualityMeter(agreement, coverage) {
         const ag = agreement?.score ?? null;
@@ -1005,7 +1205,6 @@
         </div>`;
     }
 
-    // ─── Predictive alert banner ─────────────────────────────────
     // Field: predictive_alert [2]
     function predictiveAlertBanner(alert) {
         if (!alert || !alert.active) return '';
@@ -1019,7 +1218,7 @@
             </div>
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-xs font-semibold" style="color:${iconColor}">Predictive Alert · ${(sev).toUpperCase()}</span>
+                    <span class="text-xs font-semibold" style="color:${iconColor}">Advisory Model Signal · ${(sev).toUpperCase()}</span>
                     <span class="chip text-[10px]">${relativeTime(alert.triggered_at)}</span>
                 </div>
                 <p class="text-xs text-zinc-400 mt-1">${alert.reason || 'Threshold breach detected.'}</p>
@@ -1027,7 +1226,6 @@
         </div>`;
     }
 
-    // ─── Trust status indicator ──────────────────────────────────
     // Fields: trust_status, confidence_damping [2]
     function trustIndicator(trustStatus, confidenceDamping) {
         if (!trustStatus) return '';
@@ -1055,7 +1253,6 @@
         </div>`;
     }
 
-    // --- Operator recommendation helpers ----------------------------
     function decisionSeverityColor(severity) {
         const s = String(severity || 'info').toLowerCase();
         if (s === 'critical') return '#ef4444';
@@ -1065,23 +1262,9 @@
         return '#71717a';
     }
 
-    function decisionActions(smb) {
-        if (!smb) return [];
-        const actions = arrayMaybe(smb.immediate_actions);
-        if (actions.length) return actions;
-        if (smb.action) {
-            return [{
-                action: smb.action,
-                reason: smb.rationale || smb.reason || '',
-                confidence: smb.confidence,
-                source_type: smb.policy_matched || 'legacy_policy_decision',
-                references: arrayMaybe(smb.mitre_refs).map(r => ({ name: r, url: '' })),
-                evidence: arrayMaybe(smb.evidence),
-                automation_safety: { requires_manual_approval: true, safe_to_auto_execute: false },
-                approved_by_policy: Boolean(smb.policy_matched),
-            }];
-        }
-        return [];
+    function decisionActions(guidance) {
+        return guidance?.schema_version === 'response_guidance.v3'
+            ? arrayMaybe(guidance.advisory_actions) : [];
     }
 
     function referenceLabel(ref) {
@@ -1109,49 +1292,44 @@
     }
 
     function actionApprovalBadge(action) {
-        const safety = action?.automation_safety || {};
-        const manual = action?.requires_manual_approval === true || safety.requires_manual_approval === true || safety.safe_to_auto_execute === false;
-        const color = manual ? '#f59e0b' : '#34d399';
-        const label = manual ? 'manual approval' : 'automation allowed';
-        return `<span class="chip text-[10px]" style="color:${color};background:${color}12;border-color:${color}2a">${label}</span>`;
+        return '<span class="chip text-[10px]" style="color:#f59e0b;background:#f59e0b12;border-color:#f59e0b2a">manual approval required</span>';
     }
 
     function actionAuthorityLabel(action) {
-        return action?.authority || action?.source_type || action?.source || 'trusted_policy_engine';
+        return 'deterministic_observed_evidence_policy';
     }
 
     function decisionFromSnapshot(snapshot) {
-        const payload = snapshot?.payload || {};
-        return payload.smb_decision || snapshot?.smb_decision || payload.decision || null;
+        // Guidance is never embedded in prediction snapshots.
+        return null;
     }
 
-    function policyLabelFromDecision(smb) {
-        const policy = smb?.trust?.policy || smb?.policy || {};
-        return policy.policy_id || policy.version || smb?.decision_id || 'trusted policy';
+    function policyLabelFromDecision(guidance) {
+        const policy = guidance?.provenance?.policy || {};
+        return policy.policy_id || policy.version || guidance?.guidance_id || 'trusted policy';
     }
 
-    // --- SMB Decision card ------------------------------------------
-    // Fields: smb_decision [2] from /predictions/current or /decisions/current
+    // Fields: response_guidance [2] from /predictions/current or /decisions/current
     function smbDecisionCard(smb) {
         if (!smb || smb.enabled === false) {
             return `<div class="card p-5"><h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">Recommended Operator Actions</h3><p class="text-xs text-zinc-600 italic">No recommendation decision is available for this session.</p></div>`;
         }
 
-        const risk = smb.risk || {};
-        const goal = smb.likely_goal || {};
-        const next = smb.likely_next_step || {};
+        if (smb.schema_version !== 'response_guidance.v3') {
+            return `<div class="card p-5"><h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">Advisory Response Guidance</h3><p class="text-xs text-zinc-600 italic">No v3 guidance is available for this session.</p></div>`;
+        }
+        const finding = arrayMaybe(smb.findings)[0] || {};
+        const triage = smb.triage || {};
         const actions = decisionActions(smb);
-        const guidance = arrayMaybe(smb.reference_guidance);
-        const trust = smb.trust || {};
-        const severity = String(risk.severity || smb.severity || 'info').toLowerCase();
+        const severity = String(triage.review_priority || finding.severity || 'info').toLowerCase();
         const sevColor = decisionSeverityColor(severity);
         const policyLabel = policyLabelFromDecision(smb);
 
         return `<div class="card p-5">
             <div class="flex items-center justify-between mb-4">
                 <div>
-                    <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Recommended Operator Actions</h3>
-                    <p class="text-[11px] text-zinc-600 mt-0.5">Policy-approved remediation guidance</p>
+                    <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Advisory Response Guidance</h3>
+                    <p class="text-[11px] text-zinc-600 mt-0.5">Canonical observed-evidence guidance; no execution authority</p>
                 </div>
                 <i data-lucide="list-checks" style="width:13px;height:13px;color:#52525b"></i>
             </div>
@@ -1165,46 +1343,38 @@
                         ${severityBadge(severity)}
                         <span class="chip text-[10px]">${escapeHtmlString(policyLabel)}</span>
                     </div>
-                    ${risk.reason ? `<div class="text-[11px] text-zinc-600 mt-1">${escapeHtmlString(risk.reason)}</div>` : ''}
+                    ${finding.statement ? `<div class="text-[11px] text-zinc-600 mt-1">${escapeHtmlString(finding.statement)}</div>` : ''}
                 </div>
             </div>
 
             <dl class="space-y-2 mb-4">
-                ${goal.label || goal.summary ? metaRow('Likely goal', `<span class="text-xs text-zinc-300">${escapeHtmlString(goal.label || goal.summary)}</span>`) : ''}
-                ${next.tactic || next.label ? metaRow('Predicted next step', `<span class="text-xs text-zinc-300">${escapeHtmlString(next.tactic || next.label)}</span>${next.confidence ? ` ${confidenceBadge(next.confidence)}` : ''}`) : ''}
-                ${trust.authority ? metaRow('Authority', `<span class="font-mono text-xs text-zinc-400">${escapeHtmlString(trust.authority)}</span>`) : ''}
+                ${metaRow('Review urgency', `<span class="text-xs text-zinc-300">${escapeHtmlString(triage.urgency || 'routine_review')}</span>`)}
+                ${metaRow('Authority', '<span class="font-mono text-xs text-zinc-400">deterministic observed evidence policy</span>')}
             </dl>
 
             <div class="divider mb-4"></div>
             <div class="space-y-3">
                 ${actions.length ? actions.slice(0, 4).map((a, idx) => {
-                    const conf = a.confidence !== undefined ? String(a.confidence) : '—';
-                    const source = a.source_type || a.rule_id || a.authority || 'trusted_policy_engine';
+                    const source = a.rule_id || 'response_guidance.v3';
                     return `<div class="rounded-lg p-3" style="background:#09090b;border:1px solid #1f1f23">
                         <div class="flex items-start justify-between gap-3">
-                            <div class="text-xs font-medium text-zinc-200 leading-relaxed">${escapeHtmlString(a.action || a.title || `Action ${idx + 1}`)}</div>
+                            <div class="text-xs font-medium text-zinc-200 leading-relaxed">${escapeHtmlString(a.description || `Action ${idx + 1}`)}</div>
                             ${actionApprovalBadge(a)}
                         </div>
-                        ${a.reason || a.why ? `<p class="text-[11px] text-zinc-600 mt-2 leading-relaxed">${escapeHtmlString(a.reason || a.why)}</p>` : ''}
+                        ${a.rationale ? `<p class="text-[11px] text-zinc-600 mt-2 leading-relaxed">${escapeHtmlString(a.rationale)}</p>` : ''}
                         <div class="flex items-center gap-2 flex-wrap mt-2">
                             <span class="chip text-[10px]">${escapeHtmlString(source)}</span>
-                            <span class="chip text-[10px]">confidence ${escapeHtmlString(conf)}</span>
-                            ${a.approved_by_policy === true ? '<span class="chip text-[10px]" style="color:#34d399;background:rgba(52,211,153,0.08);border-color:rgba(52,211,153,0.18)">policy approved</span>' : ''}
+                            <span class="chip text-[10px]">canonical observed evidence</span>
                         </div>
-                        <div class="mt-2 flex flex-wrap gap-1.5">${renderEvidenceChips(a.evidence, 3)}</div>
+                        <div class="mt-2 flex flex-wrap gap-1.5">${renderEvidenceChips(a.evidence_refs, 3)}</div>
                         <div class="mt-2 flex flex-wrap gap-1.5">${renderReferenceChips(a.references, 3)}</div>
                     </div>`;
                 }).join('') : `<p class="text-xs text-zinc-600 italic">No policy-approved immediate action matched this session.</p>`}
             </div>
 
-            ${guidance.length ? `<div class="mt-4 pt-4 border-t" style="border-color:#1f1f23">
-                <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">Reference guidance</div>
-                <div class="space-y-2">${guidance.slice(0, 2).map(g => `<div class="text-[11px] text-zinc-500 leading-relaxed">${escapeHtmlString(g.action || g.summary || g.title || referenceLabel(g))}</div>`).join('')}</div>
-            </div>` : ''}
         </div>`;
     }
 
-    // ─── TTP Correlation panel ────────────────────────────────────
     // Fields: session_ttp_correlations, session_ttp_correlation_summary [2]
     function ttpCorrelationPanel(correlations, summary) {
         if (!correlations?.length) {
@@ -1246,18 +1416,19 @@
         </div>`;
     }
 
-    // ─── Effective weights panel ─────────────────────────────────
-    // Fields: effective_weights, external_seed_weight_policy, source_breakdown [2]
-    function modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown) {
+    // Fields: effective_weights, weight_influence_scope, external_seed_weight_policy, source_breakdown [2]
+    function modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown, influenceScope) {
         const ew = effectiveWeights || {};
         const entries = Object.entries(ew);
         if (!entries.length) return '';
         const total = entries.reduce((s,[,v])=>s+(v||0),0)||1;
+        const diagnosticOnly = influenceScope === 'diagnostic_only';
         return `<div class="card p-5">
             <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Model Composition</h3>
+                <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">${diagnosticOnly?'Diagnostic Weighted Baseline':'Production Model Composition'}</h3>
                 <i data-lucide="layers" style="width:13px;height:13px;color:#52525b"></i>
             </div>
+            ${diagnosticOnly?'<p class="text-[10px] text-amber-400 mb-3">These weights do not affect the production final ranking in primary-transition mode.</p>':''}
             <div class="space-y-3">
                 ${entries.map(([name,w])=>{
                     const pctVal = Math.round((w/total)*100);
@@ -1290,7 +1461,6 @@
         </div>`;
     }
 
-    // ─── Event type breakdown panel (right sidebar) ──────────────
     function eventTypeBreakdownPanel(eventTypeCounts, events) {
         const entries = Object.entries(eventTypeCounts).sort((a,b)=>b[1]-a[1]);
         if (!entries.length) return '';
@@ -1325,7 +1495,6 @@
         </div>`;
     }
 
-    // ─── Aggregated signal sources card (right sidebar) ──────────
     function signalSourcesCard(finalRanking) {
         if (!finalRanking?.length) return '';
         const srcMap = {};
@@ -1366,7 +1535,6 @@
         </div>`;
     }
 
-    // ─── Session geo card (mini Leaflet map, right sidebar) ───────
     function sessionGeoCard(session) {
         const geo = sourceGeo(session);
         const context = sourceGeoContext(session);
@@ -1401,7 +1569,6 @@
         </div>`;
     }
 
-    // ─── Command timing chart (ECharts bar, inline in left col) ───
     function initCommandTimingChart(cmdEvents, avgDelta) {
         const el = document.getElementById('chart-cmd-timing');
         if (!el || cmdEvents.length < 2) {
@@ -1460,7 +1627,6 @@
         state.charts.cmdTiming = c;
     }
 
-    // ─── Session mini-map init (Leaflet, single marker) ──────────
     function initSessionMiniMap(session) {
         const el = document.getElementById('session-mini-map');
         if (!el) return;
@@ -1501,7 +1667,6 @@
         state.miniMap = map;
     }
 
-    // ─── Charts (destroyable) ────────────────────────────────────
     function destroyCharts() {
         for (const k of Object.keys(state.charts)) {
             try { state.charts[k].dispose(); } catch {}
@@ -1555,7 +1720,6 @@
         state.charts.tactics = c;
     }
 
-    // ─── Tactic velocity chart (new) ─────────────────────────────
     // Derived from tactics[] + updated_at across sessions [1]
     function initVelocityChart(sessions) {
         const el = document.getElementById('chart-velocity');
@@ -1581,7 +1745,6 @@
         state.charts.velocity = c;
     }
 
-    // ─── Feedback chart ──────────────────────────────────────────
     // Fields: labels, operator_signals from /feedback-review [2]
     function initFeedbackCharts(review) {
         const elLabels = document.getElementById('chart-feedback-labels');
@@ -1614,7 +1777,6 @@
         }
     }
 
-    // ─── Classification chart ─────────────────────────────────────
     // Current API fields: report.by_tactic / tactic_accuracy. Older builds used report.per_class.
     function classificationRows(report) {
         const source = report?.per_class || report?.by_tactic || {};
@@ -1762,15 +1924,13 @@
         state.charts.classification = c;
     }
 
-    // ─── Session rows ─────────────────────────────────────────────
     function renderSessionRows(sessions) {
         if (!sessions.length) return `<tr><td colspan="6" class="px-6 py-10 text-center text-sm text-zinc-600 italic">No sessions match.</td></tr>`;
         return sessions.map(s => {
             const tactics = (s.tactics||[]).slice(0,2).map(t=>`<span class="chip" style="font-size:10px">${t}</span>`).join('');
             const more = (s.tactics||[]).length>2?`<span class="chip" style="font-size:10px">+${s.tactics.length-2}</span>`:'';
-            // Use openSession(id) — safe in HTML onclick; avoids JSON double-quote escaping issues
-            const sid = (s.session_id||'').replace(/'/g, "\\'");
-            return `<tr class="data-row" onclick="openSession('${sid}')">
+            const sid = escapeHtmlString(s.session_id || '');
+            return `<tr class="data-row" data-open-session="${sid}">
                 <td class="px-5 py-3.5 font-mono text-xs text-zinc-300 hover:text-zinc-100 transition-colors">${s.session_id}</td>
                 <td class="px-5 py-3.5 font-mono text-xs text-zinc-400">${s.src_ip}</td>
                 <td class="px-5 py-3.5">${statusBadge(s.analysis_status)}</td>
@@ -1871,7 +2031,6 @@
         </div>`;
     }
 
-    // ─── Dashboard ────────────────────────────────────────────────
     async function renderDashboard() {
         state.view = 'dashboard';
         updateNav('dashboard');
@@ -2011,9 +2170,9 @@
         }, 40);
     }
 
-    // ─── Session Detail (enriched with all prediction fields) ─────
     async function renderDetail(session) {
         state.view = 'detail';
+        state.detailSessionId = String(session.session_id || '');
         updateNav('sessions');
         document.getElementById('breadcrumb').innerHTML = `
             <a href="#" onclick="navigateTo('dashboard');return false;" class="hover:text-zinc-100 transition-colors">Overview</a>
@@ -2027,9 +2186,10 @@
         lucide.createIcons();
 
         // Parallel fetch of all detail data
-        const [detail, predResult] = await Promise.all([
+        const [detail, predResult, aiResult] = await Promise.all([
             fetchSessionDetail(session.session_id),
             fetchPredictionCurrent(session.session_id),
+            fetchAIAdvisory(session.session_id),
         ]);
 
         const ov = (detail && detail.overview) || {};
@@ -2042,11 +2202,16 @@
             payload: { ...(session.payload || {}), ...(detail?.session_payload || {}) },
             overview: ov,
         };
-        const events = (detail && detail.events_table_rows) || [];
+        // ``events`` is canonical; retain the legacy alias for older API
+        // responses while the deployment rolls forward.
+        const canonicalEvents = arrayMaybe(detail?.events);
+        const legacyEvents = arrayMaybe(detail?.events_table_rows);
+        const events = canonicalEvents.length ? canonicalEvents : legacyEvents;
+        state.detailEvents = events;
         const snapshots = (detail && detail.prediction_snapshots) || [];
         const ranking = snapshots[0]?.payload?.final_ranking || [];
         const cp = predResult?.current_prediction || {};
-        const smb = predResult?.smb_decision || {};
+        const smb = predResult?.response_guidance || {};
 
         // Fields from /predictions/current [2]
         const predictiveAlert = cp.predictive_alert || {};
@@ -2055,6 +2220,7 @@
         const agreement = cp.agreement || {};
         const coverage = cp.coverage || {};
         const effectiveWeights = cp.effective_weights || {};
+        const weightInfluenceScope = cp.weight_influence_scope || '';
         const weightPolicy = cp.external_seed_weight_policy || {};
         const sourceBreakdown = cp.source_breakdown || {};
         const ttpCorrelations = cp.session_ttp_correlations || [];
@@ -2062,10 +2228,27 @@
         const feedbackSummary = cp.feedback_summary || {};
         const calibrationStatus = cp.calibration_status || {};
         const weightCalibration = cp.weight_calibration || {};
+        const predictionStatus = cp.prediction_status || (cp.final_ranking?.length ? 'predicted' : 'abstained');
+        const predictionStatusReason = cp.prediction_status_reason || '';
+        const externalArtifact = cp.external_artifact || {};
+        const genericProgressionPrior = cp.generic_progression_prior || {};
 
         const finalRanking = cp.final_ranking?.length ? cp.final_ranking : ranking;
 
-        const cmdEvents = events.filter(e=>(e.eventid||'').includes('command'));
+        // Prefer the privacy-safe semantic marker from the API. Older API
+        // responses remain compatible when their event id is available.
+        const isCommandEvent = e => e?.command_event === true
+            || String(e?.eventid||'').toLowerCase()==='cowrie.command.input'
+            || (String(e?.eventid||'').toLowerCase().startsWith('cowrie.')
+                && String(e?.eventid||'').toLowerCase().endsWith('.input')
+                && String(e?.eventid||'').toLowerCase().includes('[redacted]'));
+        const cmdEvents = events.filter(isCommandEvent);
+        const commandCount = cmdEvents.length || Number(ov.command_count) || 0;
+        // If a legacy response exposes only an aggregate count, preserve the
+        // chain shape without inventing command text or event timestamps.
+        const chainEvents = cmdEvents.length ? cmdEvents : Array.from(
+            {length: commandCount}, () => ({command_event: true, payload: {}})
+        );
         const eventTypeCounts = {};
         for (const e of events) {
             const type = (e.eventid||'unknown').split('.').slice(-1)[0];
@@ -2083,7 +2266,7 @@
         document.getElementById('app-content').innerHTML = `
         <div class="p-7 space-y-6 animate-slide-up">
 
-            <!-- Predictive alert banner (field: predictive_alert [2]) -->
+            <!-- Legacy-named predictive_alert field, rendered as context only. -->
             ${predictiveAlert.active ? predictiveAlertBanner(predictiveAlert) : ''}
 
             <!-- Page header -->
@@ -2122,7 +2305,7 @@
             <!-- Stat pills -->
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 ${statPill('Duration',ov.duration||'—','clock')}
-                ${statPill('Commands',ov.command_count??cmdEvents.length,'terminal')}
+                ${statPill('Commands',commandCount,'terminal')}
                 ${statPill('Events',events.length,'activity')}
                 ${statPill('Username',ov.login_username||'—','user')}
                 ${statPill('Avg Interval',avgDelta?`${avgDelta}s`:'—','timer')}
@@ -2140,16 +2323,16 @@
                         <div class="card-header">
                             <div>
                                 <h3 class="text-sm font-semibold text-zinc-100 tracking-tight">Execution Chain</h3>
-                                <p class="text-xs text-zinc-600 mt-0.5">${cmdEvents.length} commands in sequence</p>
+                                <p class="text-xs text-zinc-600 mt-0.5">${commandCount} commands in sequence</p>
                             </div>
                             <div class="flex items-center gap-2 text-xs text-zinc-600">
                                 ${isRunning?`<span class="pulse-dot"></span><span class="text-blue-400">Recording</span>`:isFailed?`<span style="width:6px;height:6px;border-radius:50%;background:#f87171;display:inline-block"></span><span class="text-red-400">Halted</span>`:`<span style="width:6px;height:6px;border-radius:50%;background:#52525b;display:inline-block"></span><span>Static</span>`}
                             </div>
                         </div>
                         <div class="p-5 scroll-panel" style="max-height:440px">
-                            ${cmdEvents.length?`<div class="space-y-0">${cmdEvents.map((e,i)=>{
-                                const isLast=i===cmdEvents.length-1;
-                                const dt=i>0?Math.max(0,(new Date(e.timestamp)-new Date(cmdEvents[i-1].timestamp))/1000).toFixed(1):null;
+                            ${commandCount?`<div class="space-y-0">${chainEvents.map((e,i)=>{
+                                const isLast=i===chainEvents.length-1;
+                                const dt=i>0 && e.timestamp && chainEvents[i-1].timestamp?Math.max(0,(new Date(e.timestamp)-new Date(chainEvents[i-1].timestamp))/1000).toFixed(1):null;
                                 const isSlow=dt&&parseFloat(dt)>parseFloat(avgDelta)*1.5;
                                 const nc=isFailed&&isLast?'chain-node-failed':isRunning&&isLast?'chain-node-active':'';
                                 return `<div class="flex gap-3 relative">
@@ -2159,16 +2342,20 @@
                                     </div>
                                     <div class="flex-1 pb-3" style="${isLast?'padding-bottom:0':''}">
                                         <div class="flex items-center gap-2 mb-1.5 flex-wrap">
-                                            <span class="text-[10px] font-mono text-zinc-600">${new Date(e.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                                            <span class="text-[10px] font-mono text-zinc-600">${e.timestamp?new Date(e.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'time unavailable'}</span>
                                             ${dt?`<span class="chip text-[10px]" style="${isSlow?'color:#f59e0b;background:rgba(245,158,11,0.1)':''}">${isSlow?'⚠ ':''}+${dt}s</span>`:''}
                                             ${isRunning&&isLast?`<span class="pulse-dot" style="width:5px;height:5px"></span>`:''}
                                         </div>
-                                        <div style="background:#09090b;border:1px solid #1f1f23;border-radius:8px;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:${isFailed&&isLast?'#f87171':'#a1a1aa'};word-break:break-all">
-                                            ${e.payload?.input||'<span style="color:#3f3f46;font-style:italic">no input</span>'}
+                                        <div class="execution-command-text" data-command-event-id="${escapeHtmlString(e.event_id || '')}" data-command-timestamp="${escapeHtmlString(e.timestamp || e.payload?.timestamp || '')}" data-command-event-type="${escapeHtmlString(e.eventid || e.payload?.eventid || '')}" style="background:#09090b;border:1px solid #1f1f23;border-radius:8px;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:${isFailed&&isLast?'#f87171':'#a1a1aa'};word-break:break-all">
+                                            ${e.payload?.input||'<span style="color:#3f3f46;font-style:italic">command content withheld by privacy policy</span>'}
                                         </div>
                                     </div>
                                 </div>`;
                             }).join('')}</div>`:`<p class="text-sm text-zinc-600 italic">No command events recorded.</p>`}
+                            <div id="raw-command-chain" class="mt-5 pt-4" style="border-top:1px solid #27272a">
+                                <button id="raw-command-reveal" type="button" class="text-xs font-semibold text-amber-300 underline">Reveal with admin token</button>
+                                <p class="text-[10px] text-zinc-600 mt-0.5">Requires localhost access and the dedicated raw-command Bearer token; public APIs remain redacted.</p>
+                            </div>
                         </div>
                     </div>
 
@@ -2221,8 +2408,12 @@
                     <!-- Session geo origin map -->
                     ${sessionGeoCard(detailContext)}
 
-                    <!-- SMB decision card (smb_decision from /predictions/current [2]) -->
+                    <!-- Response guidance v3 card -->
                     ${smbDecisionCard(smb)}
+
+                    <div id="ai-advisory-panel" class="card p-5" style="background:rgba(139,92,246,0.03);border-color:rgba(139,92,246,0.18)">
+                        <p class="text-xs text-zinc-600 italic">Loading separate non-authoritative AI advisory…</p>
+                    </div>
 
 
                     <!-- Predictive alert inline (if not shown top) -->
@@ -2242,7 +2433,8 @@
                     <!-- Predicted tactics -->
                     <div class="card p-5">
                         <div class="flex items-center justify-between mb-4">
-                            <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Predicted Tactics</h3>
+                            <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Non-Authoritative Next-Tactic Forecast</h3>
+                            <p class="text-[11px] text-zinc-600 mt-1">Model context only; it cannot create findings, alerts, guidance, or actions.</p>
                             ${finalRanking.length?`<span class="chip">${finalRanking.length}</span>`:''}
                         </div>
                         ${finalRanking.length?`<div class="space-y-3">${finalRanking.map((t,i)=>{
@@ -2261,8 +2453,15 @@
                                 </div>
                                 <div class="score-bar-track"><div class="score-bar-fill" style="width:${p2}%;background:${bc}"></div></div>
                             </div>`;
-                        }).join('')}</div>`:`<p class="text-xs text-zinc-600 italic">No prediction data.</p>`}
+                        }).join('')}</div>`:`<p class="text-xs text-zinc-600 italic">${predictionStatus==='model_unavailable'?'External model unavailable':predictionStatus==='abstained'?'External model explicitly abstained':'No prediction data.'}${predictionStatusReason?`: ${predictionStatusReason}`:''}</p>`}
+                        ${externalArtifact.model_id?`<div class="mt-4 pt-3 border-t text-[10px] text-zinc-600 font-mono" style="border-color:#1f1f23">external artifact ${externalArtifact.model_id} · manifest ${externalArtifact.manifest_id||'—'} · ${externalArtifact.status||'unknown'}</div>`:''}
                     </div>
+
+                    ${genericProgressionPrior.not_empirical_prediction?`<div class="card p-5">
+                        <div class="flex items-center justify-between mb-3"><h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Generic Progression Prior</h3><span class="chip">non-empirical</span></div>
+                        <p class="text-xs text-zinc-500 mb-3">Offline planning context only. It does not create a forecast, alert, guidance, or action.</p>
+                        <div class="flex flex-wrap gap-1.5">${(genericProgressionPrior.tactics||[]).map(t=>`<span class="chip">${t.ordinal||'—'}. ${t.tactic||'unknown'}</span>`).join('')||'<span class="text-xs text-zinc-600">No applicable progression.</span>'}</div>
+                    </div>`:''}
 
                     <!-- Trust indicator (trust_status + confidence_damping [2]) -->
                     ${trustIndicator(trustStatus, confidenceDamping)}
@@ -2271,19 +2470,20 @@
                     ${signalQualityMeter(agreement, coverage)}
 
                     <!-- Model composition (effective_weights + source_breakdown [2]) -->
-                    ${modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown)}
+                    ${modelWeightPanel(effectiveWeights, weightPolicy, sourceBreakdown, weightInfluenceScope)}
 
-                    <!-- Calibration status (calibration_status + weight_calibration [2]) -->
+                    <!-- Historical calibration record; never runtime authority. -->
                     ${(calibrationStatus.calibrated!==undefined||weightCalibration.status)?`
                     <div class="card p-5">
                         <div class="flex items-center justify-between mb-3">
-                            <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Calibration</h3>
+                            <h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Historical Calibration Record</h3>
                             ${calibrationStatus.calibrated!==undefined?healthBadge(calibrationStatus.calibrated?'passed':'failed'):''}
                         </div>
                         <dl class="space-y-2">
                             ${calibrationStatus.method?metaRow('Method',`<span class="font-mono text-xs">${calibrationStatus.method}</span>`):''}
                             ${calibrationStatus.last_run?metaRow('Last run',relativeTime(calibrationStatus.last_run)):''}
                             ${weightCalibration.status?metaRow('Weight status',`<span class="font-mono text-xs">${weightCalibration.status}</span>`):''}
+                            ${weightCalibration.influence_scope?metaRow('Weight influence',`<span class="font-mono text-xs">${weightCalibration.influence_scope}</span>`):''}
                             ${weightCalibration.drift!==undefined?metaRow('Drift',`<span class="font-mono text-xs ${weightCalibration.drift>0.1?'text-amber-400':'text-zinc-400'}">${weightCalibration.drift}</span>`):''}
                         </dl>
                     </div>`:''}
@@ -2329,7 +2529,7 @@
                             ${metaRow('Username',`<span class="font-mono">${ov.login_username||'—'}</span>`)}
                             ${metaRow('Client',`<span class="font-mono text-[11px] truncate max-w-[120px] block">${ov.client_version||'Unknown'}</span>`)}
                             ${metaRow('Duration',ov.duration||'—')}
-                            ${metaRow('Commands',`<span class="font-mono">${ov.command_count ?? cmdEvents.length}</span>`)}
+                            ${metaRow('Commands',`<span class="font-mono">${commandCount}</span>`)}
                             ${metaRow('Events',`<span class="font-mono">${events.length}</span>`)}
                             ${metaRow('Avg Interval',avgDelta?`<span class="font-mono">${avgDelta}s</span>`:'—')}
                             ${metaRow('Started',ov.start_time?relativeTime(ov.start_time):'—')}
@@ -2342,6 +2542,11 @@
 
 
         lucide.createIcons();
+        renderAIAdvisoryPanel(aiResult);
+        document.getElementById('raw-command-reveal')?.addEventListener('click', () => {
+            const adminToken = window.prompt('Enter the raw-command administrator token');
+            if (adminToken) void loadInternalCommands(adminToken, state.detailSessionId);
+        });
         setTimeout(() => {
             // Animate score bars
             document.querySelectorAll('.score-bar-fill').forEach(el => {
@@ -2371,7 +2576,6 @@
         </div>`;
     }
 
-    // ─── Intelligence page ───────────────────────────────────────
     // Aggregates /feedback-review + /classification-evaluation + /external-seed-health
     async function renderIntelligence() {
         state.view = 'intelligence';
@@ -2571,7 +2775,6 @@
         }, 50);
     }
 
-    // ─── Feedback page ───────────────────────────────────────────
     async function renderFeedback() {
         state.view = 'feedback';
         updateNav('feedback');
@@ -2653,7 +2856,6 @@
         setTimeout(()=>{ lucide.createIcons(); document.querySelectorAll('.score-bar-fill').forEach(el=>{const w=el.style.width;el.style.width='0';setTimeout(()=>{el.style.width=w;},60);}); },50);
     }
 
-    // ─── Classification page ─────────────────────────────────────
     async function renderClassification() {
         state.view = 'classification';
         updateNav('classification');
@@ -2726,7 +2928,6 @@
         setTimeout(()=>{ lucide.createIcons(); document.querySelectorAll('.score-bar-fill').forEach(el=>{const w=el.style.width;el.style.width='0';setTimeout(()=>{el.style.width=w;},60);}); },50);
     }
 
-    // ─── Seed health page ─────────────────────────────────────────
     async function renderSeedHealth() {
         state.view = 'seedhealth';
         updateNav('seedhealth');
@@ -2791,7 +2992,6 @@
         setTimeout(()=>lucide.createIcons(),40);
     }
 
-    // ─── Sessions page ───────────────────────────────────────────
     async function renderSessionsPage() {
         state.view = 'sessions';
         updateNav('sessions');
@@ -2845,11 +3045,7 @@
         setTimeout(()=>lucide.createIcons(),40);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // ─── NEW: Extended Threat Intelligence Views ─────────────────
-    // ═══════════════════════════════════════════════════════════════
 
-    // ─── Generic table fetcher ────────────────────────────────────
     async function fetchTableData(endpoint, limit = 100) {
         const d = await apiFetch(`${endpoint}?limit=${limit}`, { sanitize: false });
         return arrayMaybe(d?.items);
@@ -3041,7 +3237,6 @@
         });
     }
 
-    // ─── New specific fetch functions ─────────────────────────────
     async function fetchAlerts(limit=100)           { return (await fetchTableData('/alerts',limit)).map(normalizeAlertRow); }
     async function fetchJobs(limit=100)             { return (await fetchTableData('/jobs',limit)).map(normalizeJobRow); }
     async function fetchFeedStatus(limit=50)        { return (await fetchTableData('/feed-status',limit)).map(normalizeFeedRow); }
@@ -3057,7 +3252,6 @@
     async function fetchPredictionBacktests(limit=20) { return (await fetchTableData('/prediction-backtests',limit)).map(normalizeBacktest); }
     async function fetchWebhooks(limit=50)          { return (await fetchTableData('/webhooks',limit)).map(normalizeWebhook); }
 
-    // ─── New shared helpers ───────────────────────────────────────
     function severityBadge(sev) {
         const s=(sev||'unknown').toLowerCase();
         const styles={
@@ -3075,7 +3269,6 @@
         return `<div class="flex items-center gap-2"><div class="score-bar-track" style="width:60px"><div class="score-bar-fill" style="width:${s}%;background:${c}"></div></div><span class="text-xs font-mono" style="color:${c}">${s}%</span></div>`;
     }
 
-    // ─── OPS CENTER ───────────────────────────────────────────────
     async function renderOpsCenter() {
         state.view='opscenter';
         updateNav('opscenter');
@@ -3311,7 +3504,6 @@
         },50);
     }
 
-    // ─── CAMPAIGNS & INTRUSIONS ───────────────────────────────────
     async function renderCampaigns() {
         state.view='campaigns';
         updateNav('campaigns');
@@ -3485,7 +3677,6 @@
         },50);
     }
 
-    // ─── IOC INTELLIGENCE ─────────────────────────────────────────
     async function renderIOC() {
         state.view='ioc';
         updateNav('ioc');
@@ -3678,11 +3869,10 @@
     }
 
 
-    // ─── PREDICTION ───────────────────────────────────────────────
     async function renderPrediction() {
         state.view='prediction';
         updateNav('prediction');
-        document.getElementById('breadcrumb').innerHTML=`<a href="#" onclick="navigateTo('dashboard');return false;" class="hover:text-zinc-100 transition-colors">Overview</a><i data-lucide="chevron-right" class="w-3.5 h-3.5 mx-1 text-zinc-700"></i><span class="text-zinc-100 font-medium">Prediction</span>`;
+        document.getElementById('breadcrumb').innerHTML=`<a href="#" onclick="navigateTo('dashboard');return false;" class="hover:text-zinc-100 transition-colors">Overview</a><i data-lucide="chevron-right" class="w-3.5 h-3.5 mx-1 text-zinc-700"></i><span class="text-zinc-100 font-medium">Prediction Context</span>`;
         document.getElementById('app-content').innerHTML=`<div class="p-7"><div class="skeleton h-64 w-full rounded-xl"></div></div>`;
         lucide.createIcons();
 
@@ -3714,7 +3904,7 @@
         document.getElementById('app-content').innerHTML=`
         <div class="p-7 space-y-6 animate-fade-in">
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                ${metricCard('Prediction Snapshots',snaps.length,'stored realtime snapshots','camera','#34d399')}
+                ${metricCard('Prediction Snapshots',snaps.length,'stored advisory snapshots','camera','#34d399')}
                 ${metricCard('Latest Top-1',top1,`${latest.sessions_tested||0} evaluated sessions`,'target','#3b82f6')}
                 ${metricCard('Latest Top-3',top3,`coverage ${coverage}`,'list-checks','#f59e0b')}
                 ${metricCard('Disagreement',snaps.length?`${Math.round(disagreementSnaps.length/snaps.length*100)}%`:'—',`${disagreementSnaps.length} recent snapshots`,'git-compare','#f87171')}
@@ -3724,8 +3914,8 @@
                 <div class="card p-5 xl:col-span-2">
                     <div class="flex items-center justify-between mb-4">
                         <div>
-                            <h3 class="text-sm font-semibold text-zinc-100 tracking-tight">Prediction Backtest Trend</h3>
-                            <p class="text-xs text-zinc-600 mt-0.5">Top-1 and Top-3 next-tactic accuracy from stored backtest runs</p>
+                            <h3 class="text-sm font-semibold text-zinc-100 tracking-tight">Historical Prediction Evaluation</h3>
+                            <p class="text-xs text-zinc-600 mt-0.5">Stored evaluation records are non-authoritative and cannot change current findings or guidance.</p>
                         </div>
                         <span class="chip">${completedBacktests.length} completed</span>
                     </div>
@@ -3746,7 +3936,7 @@
 
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 <div class="card overflow-hidden">
-                    <div class="card-header"><h3 class="text-sm font-semibold text-zinc-100">Scorer Performance</h3><span class="chip">latest backtest</span></div>
+                    <div class="card-header"><h3 class="text-sm font-semibold text-zinc-100">Historical Model Comparison</h3><span class="chip">evaluation record</span></div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left">
                             <thead style="background:#09090b;border-bottom:1px solid #1f1f23"><tr class="text-zinc-600 text-[10px] uppercase tracking-widest"><th class="px-5 py-3">Scorer</th><th class="px-5 py-3 text-right">Cases</th><th class="px-5 py-3 text-right">Top-1</th><th class="px-5 py-3 text-right">Top-3</th><th class="px-5 py-3 text-right">MRR</th></tr></thead>
@@ -3773,7 +3963,7 @@
                         <tbody>${snaps.length?snaps.slice(0,80).map(s=>{
                             const div=Number(s.agreement?.divergence_ratio||0);
                             const cq=Number(s.classification_quality?.confidence_min||0);
-                            return `<tr class="data-row cursor-pointer" onclick="openSession('${String(s.session_id||'').replace(/'/g,"\\'")}')"><td class="px-5 py-3 font-mono text-[11px] text-teal-400">${(s.session_id||'—').slice(0,22)}</td><td class="px-5 py-3 text-xs text-zinc-300">${s.prediction||'—'}</td><td class="px-5 py-3 text-right text-xs font-mono">${pct(s.confidence)}</td><td class="px-5 py-3">${confidenceBadge(s.confidence_label || (s.confidence>=0.7?'high':s.confidence>=0.4?'medium':'low'))}</td><td class="px-5 py-3 text-xs ${s.agreement?.disagreement?'text-amber-400':'text-emerald-400'}">${s.agreement?.disagreement?`diverged ${Math.round(div*100)}%`:'aligned'}</td><td class="px-5 py-3 text-right text-xs font-mono text-zinc-500">${cq?pct(cq):'—'}</td><td class="px-5 py-3 text-right text-xs text-zinc-600">${relativeTime(s.created_at)}</td></tr>`;
+                            return `<tr class="data-row cursor-pointer" data-open-session="${escapeHtmlString(s.session_id || '')}"><td class="px-5 py-3 font-mono text-[11px] text-teal-400">${(s.session_id||'—').slice(0,22)}</td><td class="px-5 py-3 text-xs text-zinc-300">${s.prediction||'—'}</td><td class="px-5 py-3 text-right text-xs font-mono">${pct(s.confidence)}</td><td class="px-5 py-3">${confidenceBadge(s.confidence_label || (s.confidence>=0.7?'high':s.confidence>=0.4?'medium':'low'))}</td><td class="px-5 py-3 text-xs ${s.agreement?.disagreement?'text-amber-400':'text-emerald-400'}">${s.agreement?.disagreement?`diverged ${Math.round(div*100)}%`:'aligned'}</td><td class="px-5 py-3 text-right text-xs font-mono text-zinc-500">${cq?pct(cq):'—'}</td><td class="px-5 py-3 text-right text-xs text-zinc-600">${relativeTime(s.created_at)}</td></tr>`;
                         }).join(''):`<tr><td colspan="7" class="px-6 py-10 text-center text-sm text-zinc-600 italic">No prediction snapshots available yet.</td></tr>`}</tbody>
                     </table>
                 </div>
@@ -3797,134 +3987,14 @@
     }
 
 
-    // --- OPERATOR ACTIONS ------------------------------------------
     async function renderActions() {
         state.view = 'actions';
         updateNav('actions');
         document.getElementById('breadcrumb').innerHTML = `<a href="#" onclick="navigateTo('dashboard');return false;" class="hover:text-zinc-100 transition-colors">Overview</a><i data-lucide="chevron-right" class="w-3.5 h-3.5 mx-1 text-zinc-700"></i><span class="text-zinc-100 font-medium">Operator Actions</span>`;
-        document.getElementById('app-content').innerHTML = `<div class="p-7"><div class="skeleton h-64 w-full rounded-xl"></div></div>`;
-        lucide.createIcons();
-
-        let snaps = [], alerts = [];
-        try {
-            [snaps, alerts] = await Promise.all([fetchPredictionSnapshots(250), fetchAlerts(150)]);
-            snaps = arrayMaybe(snaps);
-            alerts = arrayMaybe(alerts);
-        } catch (err) {
-            document.getElementById('app-content').innerHTML = `<div class="p-7"><div class="card p-6"><h3 class="text-sm font-semibold text-zinc-100">Recommendation data unavailable</h3><p class="text-xs text-zinc-500 mt-2">${escapeHtmlString(err?.message || 'The recommendation data could not be loaded from the existing APIs.')}</p></div></div>`;
-            return;
-        }
-
-        const latestBySession = new Map();
-        for (const snap of [...snaps].sort((a,b)=>new Date(b.created_at || 0)-new Date(a.created_at || 0))) {
-            const decision = decisionFromSnapshot(snap);
-            const sid = snap.session_id || decision?.session_id;
-            if (!sid || !decision || latestBySession.has(sid)) continue;
-            latestBySession.set(sid, { session_id: sid, snapshot: snap, decision });
-        }
-        const decisions = [...latestBySession.values()];
-        const actionRows = [];
-        const guidanceRows = [];
-        for (const item of decisions) {
-            const risk = item.decision.risk || {};
-            for (const action of decisionActions(item.decision)) {
-                actionRows.push({ ...item, action, risk });
-            }
-            for (const guidance of arrayMaybe(item.decision.reference_guidance)) {
-                guidanceRows.push({ ...item, guidance, risk });
-            }
-        }
-
-        const manualActions = actionRows.filter(r => {
-            const safety = r.action?.automation_safety || {};
-            return r.action?.requires_manual_approval === true || safety.requires_manual_approval === true || safety.safe_to_auto_execute === false;
-        });
-        const policyApproved = actionRows.filter(r => r.action?.approved_by_policy === true);
-        const highRisk = decisions.filter(d => ['high','critical'].includes(String(d.decision?.risk?.severity || '').toLowerCase()));
-        const smbAlerts = alerts.filter(a => String(a.alert_type || a.type || a.payload?.alert_type || '').toLowerCase() === 'smb_decision');
-
-        const rowsHtml = actionRows.length ? actionRows.slice(0, 120).map(row => {
-            const sid = row.session_id || 'unknown';
-            const risk = row.risk || {};
-            const action = row.action || {};
-            const source = action.source_type || action.rule_id || action.authority || 'trusted_policy_engine';
-            const confidence = action.confidence !== undefined ? action.confidence : '—';
-            return `<tr class="data-row cursor-pointer" onclick="openSession('${String(sid).replace(/'/g,"\\'")}')">
-                <td class="px-5 py-3 font-mono text-[11px] text-teal-400">${escapeHtmlString(String(sid).slice(0, 24))}</td>
-                <td class="px-5 py-3">${severityBadge(risk.severity || 'info')}</td>
-                <td class="px-5 py-3">
-                    <div class="text-xs text-zinc-200 leading-relaxed">${escapeHtmlString(action.action || action.title || 'Unnamed action')}</div>
-                    ${action.reason || action.why ? `<div class="text-[11px] text-zinc-600 mt-1 leading-relaxed">${escapeHtmlString(action.reason || action.why)}</div>` : ''}
-                    <div class="mt-2 flex flex-wrap gap-1.5">${renderEvidenceChips(action.evidence, 2)}</div>
-                </td>
-                <td class="px-5 py-3 text-xs font-mono text-zinc-400">${escapeHtmlString(source)}</td>
-                <td class="px-5 py-3">${actionApprovalBadge(action)}</td>
-                <td class="px-5 py-3 text-xs font-mono text-zinc-400">${escapeHtmlString(String(confidence))}</td>
-                <td class="px-5 py-3"><div class="flex flex-wrap gap-1.5">${renderReferenceChips(action.references, 2)}</div></td>
-                <td class="px-5 py-3 text-right text-xs text-zinc-600">${relativeTime(row.snapshot?.created_at)}</td>
-            </tr>`;
-        }).join('') : `<tr><td colspan="8" class="px-6 py-10 text-center text-sm text-zinc-600 italic">No policy-approved operator actions found in recent prediction snapshots.</td></tr>`;
-
-        document.getElementById('app-content').innerHTML = `
-        <div class="p-7 space-y-6 animate-fade-in">
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                ${metricCard('Sessions With Decisions', decisions.length, 'latest decision per session', 'clipboard-check', '#34d399')}
-                ${metricCard('Operator Actions', actionRows.length, `${policyApproved.length} policy approved`, 'list-checks', '#3b82f6')}
-                ${metricCard('Manual Approval', manualActions.length, 'actions require operator review', 'shield-alert', '#f59e0b')}
-                ${metricCard('High Risk Decisions', highRisk.length, `${smbAlerts.length} smb decision alerts`, 'alert-triangle', '#f87171')}
-            </div>
-
-            <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                <div class="card p-5 xl:col-span-2">
-                    <div class="flex items-start justify-between gap-4 mb-4">
-                        <div>
-                            <h3 class="text-sm font-semibold text-zinc-100 tracking-tight">Recommendation Source Of Truth</h3>
-                            <p class="text-xs text-zinc-600 mt-1 leading-relaxed">Actions shown here come from the trusted policy engine inside prediction snapshots. AI may explain these actions in reports, but it is not the authority that creates them.</p>
-                        </div>
-                        <span class="chip">existing APIs only</span>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div class="rounded-lg p-3" style="background:#09090b;border:1px solid #1f1f23"><div class="text-[10px] uppercase tracking-widest text-zinc-600">Authority</div><div class="text-xs font-mono text-zinc-300 mt-1">trusted_policy_engine</div></div>
-                        <div class="rounded-lg p-3" style="background:#09090b;border:1px solid #1f1f23"><div class="text-[10px] uppercase tracking-widest text-zinc-600">Evidence Required</div><div class="text-xs text-zinc-300 mt-1">structured evidence + references</div></div>
-                        <div class="rounded-lg p-3" style="background:#09090b;border:1px solid #1f1f23"><div class="text-[10px] uppercase tracking-widest text-zinc-600">Automation Safety</div><div class="text-xs text-zinc-300 mt-1">manual approval visible per action</div></div>
-                    </div>
-                </div>
-                <div class="card p-5">
-                    <h3 class="text-sm font-semibold text-zinc-100 tracking-tight mb-3">Reference Guidance</h3>
-                    <dl class="space-y-3">
-                        ${metaRow('Guidance rows', `<span class="font-mono text-xs">${guidanceRows.length}</span>`)}
-                        ${metaRow('Recent snapshots scanned', `<span class="font-mono text-xs">${snaps.length}</span>`)}
-                        ${metaRow('Policy-approved actions', `<span class="font-mono text-xs text-emerald-400">${policyApproved.length}</span>`)}
-                        ${metaRow('SMB decision alerts', `<span class="font-mono text-xs text-zinc-400">${smbAlerts.length}</span>`)}
-                    </dl>
-                </div>
-            </div>
-
-            <div class="card overflow-hidden">
-                <div class="card-header">
-                    <div>
-                        <h3 class="text-sm font-semibold text-zinc-100">Recent Policy-Approved Actions</h3>
-                        <p class="text-xs text-zinc-600 mt-0.5">Extracted from prediction snapshot <span class="font-mono">smb_decision.immediate_actions</span></p>
-                    </div>
-                    <span class="chip">${Math.min(actionRows.length, 120)} shown</span>
-                </div>
-                <div class="overflow-x-auto scroll-panel" style="max-height:520px">
-                    <table class="w-full text-left">
-                        <thead style="background:#09090b;border-bottom:1px solid #1f1f23;position:sticky;top:0"><tr class="text-zinc-600 text-[10px] uppercase tracking-widest"><th class="px-5 py-3">Session</th><th class="px-5 py-3">Risk</th><th class="px-5 py-3">Action / Evidence</th><th class="px-5 py-3">Source</th><th class="px-5 py-3">Safety</th><th class="px-5 py-3">Confidence</th><th class="px-5 py-3">References</th><th class="px-5 py-3 text-right">Age</th></tr></thead>
-                        <tbody>${rowsHtml}</tbody>
-                    </table>
-                </div>
-            </div>
-
-            ${guidanceRows.length ? `<div class="card overflow-hidden">
-                <div class="card-header"><h3 class="text-sm font-semibold text-zinc-100">Reference Guidance Not Treated As Operator Action</h3><span class="chip">${guidanceRows.length} rows</span></div>
-                <div class="p-5 grid grid-cols-1 xl:grid-cols-2 gap-3">${guidanceRows.slice(0, 8).map(row => `<div class="rounded-lg p-3" style="background:#09090b;border:1px solid #1f1f23"><div class="flex items-center justify-between gap-3 mb-2"><span class="font-mono text-[11px] text-teal-400">${escapeHtmlString(String(row.session_id).slice(0, 22))}</span>${severityBadge(row.risk?.severity || 'info')}</div><div class="text-xs text-zinc-300 leading-relaxed">${escapeHtmlString(row.guidance.action || row.guidance.summary || row.guidance.title || referenceLabel(row.guidance))}</div><div class="mt-2 flex flex-wrap gap-1.5">${renderReferenceChips(row.guidance.references || row.guidance.mitre_refs, 2)}</div></div>`).join('')}</div>
-            </div>` : ''}
-        </div>`;
+        document.getElementById('app-content').innerHTML = `<div class="p-7"><div class="card p-6"><h3 class="text-sm font-semibold text-zinc-100">Advisory response guidance is session-specific</h3><p class="text-xs text-zinc-500 mt-2 leading-relaxed">Guidance is deliberately not stored in prediction snapshots or summarized as a cross-session action queue. Open a session to inspect its immutable-evidence-backed <span class="font-mono">response_guidance.v3</span> record. Every shown task requires human approval and has no execution authority.</p></div></div>`;
         lucide.createIcons();
     }
 
-    // ─── THREAT HUNT ──────────────────────────────────────────────
     async function renderThreatHunt() {
         state.view='threathunt';
         updateNav('threathunt');
@@ -4109,7 +4179,6 @@
         },50);
     }
 
-    // ─── Map ─────────────────────────────────────────────────────
     function initMap(containerId, sessions) {
         const el = document.getElementById(containerId);
         if (!el) return;
@@ -4174,7 +4243,6 @@
         state.map = map;
     }
 
-    // ─── Navigation ──────────────────────────────────────────────
     function updateNav(active) {
         document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
         const el = document.getElementById(`nav-${active}`);
@@ -4190,7 +4258,6 @@
         else if (view==='classification') renderClassification();
         else if (view==='prediction') renderPrediction();
         else if (view==='seedhealth') renderSeedHealth();
-        // ── NEW routes ──
         else if (view==='opscenter') renderOpsCenter();
         else if (view==='campaigns') renderCampaigns();
         else if (view==='ioc') renderIOC();
@@ -4198,7 +4265,6 @@
         else if (view==='threathunt') renderThreatHunt();
     }
 
-    // ─── Init ────────────────────────────────────────────────────
     async function init() {
         startClock();
         const health = await checkHealth();

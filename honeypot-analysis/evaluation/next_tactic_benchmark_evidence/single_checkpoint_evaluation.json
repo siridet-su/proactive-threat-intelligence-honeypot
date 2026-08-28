@@ -1,0 +1,2579 @@
+{
+  "authoritative_poc_model_decision": "retain_external_hard_backoff_vomm",
+  "benchmark_code_commit": "4779ebab6c85205c2768f5f1b0ad0e29c158a308",
+  "chronological_windows": [
+    {
+      "case_count": 3059,
+      "chronological_positions": [
+        0,
+        3058
+      ],
+      "hard_backoff_vomm": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.40259917518846317,
+        "coverage": 1.0,
+        "covered_examples": 3059,
+        "evaluated_examples": 3059,
+        "macro_f1": 0.39783085647157396,
+        "macro_precision": 0.665339039291769,
+        "macro_recall": 0.40259917518846317,
+        "mean_reciprocal_rank": 0.8912607605971451,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 12,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.5599999999999999,
+            "precision": 0.9333333333333333,
+            "recall": 0.4,
+            "reportable": true,
+            "support": 35,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9585050838142347,
+            "precision": 0.9208025343189018,
+            "recall": 0.9994269340974212,
+            "reportable": true,
+            "support": 1745,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.7234042553191489,
+            "precision": 0.5888787602552416,
+            "recall": 0.9375907111756169,
+            "reportable": true,
+            "support": 689,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.10586011342155009,
+            "precision": 0.5490196078431373,
+            "recall": 0.058577405857740586,
+            "reportable": true,
+            "support": 478,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0392156862745098,
+            "precision": 1.0,
+            "recall": 0.02,
+            "reportable": true,
+            "support": 100,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.25400576816354725,
+        "raw_log_loss": 0.5585607061931175,
+        "selective_top1_accuracy": 0.7956848643347499,
+        "top1_accuracy": 0.7956848643347499,
+        "top3_accuracy": 0.9996730957829356,
+        "weighted_f1": 0.7339456051041796
+      },
+      "transformer": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.5638562515137094,
+        "coverage": 1.0,
+        "covered_examples": 3059,
+        "evaluated_examples": 3059,
+        "macro_f1": 0.5663122510681582,
+        "macro_precision": 0.5922691184362932,
+        "macro_recall": 0.5638562515137094,
+        "mean_reciprocal_rank": 0.9468975233113841,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 12,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.7666666666666667,
+            "precision": 0.92,
+            "recall": 0.6571428571428571,
+            "reportable": true,
+            "support": 35,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9721137757947574,
+            "precision": 0.9467680608365019,
+            "recall": 0.9988538681948425,
+            "reportable": true,
+            "support": 1745,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.8391959798994975,
+            "precision": 0.9920792079207921,
+            "recall": 0.7271407837445574,
+            "reportable": true,
+            "support": 689,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.8198970840480274,
+            "precision": 0.6947674418604651,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 478,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 100,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.1601329224400817,
+        "raw_log_loss": 0.28220243816732715,
+        "selective_top1_accuracy": 0.8973520758417783,
+        "top1_accuracy": 0.8973520758417783,
+        "top3_accuracy": 0.9954233409610984,
+        "weighted_f1": 0.8804474365547224
+      },
+      "window": 1
+    },
+    {
+      "case_count": 3059,
+      "chronological_positions": [
+        3059,
+        6117
+      ],
+      "hard_backoff_vomm": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.40752020901833635,
+        "coverage": 1.0,
+        "covered_examples": 3059,
+        "evaluated_examples": 3059,
+        "macro_f1": 0.41757904062649537,
+        "macro_precision": 0.8057047753084577,
+        "macro_recall": 0.40752020901833635,
+        "mean_reciprocal_rank": 0.8906832298136645,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.25,
+            "precision": 1.0,
+            "recall": 0.14285714285714285,
+            "reportable": true,
+            "support": 7,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.43243243243243246,
+            "precision": 0.8888888888888888,
+            "recall": 0.2857142857142857,
+            "reportable": true,
+            "support": 28,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9537366548042704,
+            "precision": 0.9115646258503401,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 1742,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.7416481069042316,
+            "precision": 0.6087751371115173,
+            "recall": 0.9487179487179487,
+            "reportable": true,
+            "support": 702,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.07010309278350516,
+            "precision": 0.425,
+            "recall": 0.038202247191011236,
+            "reportable": true,
+            "support": 445,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.05755395683453238,
+            "precision": 1.0,
+            "recall": 0.02962962962962963,
+            "reportable": true,
+            "support": 135,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.25853367552607376,
+        "raw_log_loss": 0.5354540564044803,
+        "selective_top1_accuracy": 0.7969924812030075,
+        "top1_accuracy": 0.7969924812030075,
+        "top3_accuracy": 0.9990192873488069,
+        "weighted_f1": 0.7305884250687281
+      },
+      "transformer": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.554765853273316,
+        "coverage": 1.0,
+        "covered_examples": 3059,
+        "evaluated_examples": 3059,
+        "macro_f1": 0.572487778688438,
+        "macro_precision": 0.7321176417780828,
+        "macro_recall": 0.554765853273316,
+        "mean_reciprocal_rank": 0.9371662852784134,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.25,
+            "precision": 1.0,
+            "recall": 0.14285714285714285,
+            "reportable": true,
+            "support": 7,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.6222222222222222,
+            "precision": 0.8235294117647058,
+            "recall": 0.5,
+            "reportable": true,
+            "support": 28,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9626142342841318,
+            "precision": 0.9299090422685928,
+            "recall": 0.9977037887485649,
+            "reportable": true,
+            "support": 1742,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.8110831234256928,
+            "precision": 0.9877300613496932,
+            "recall": 0.688034188034188,
+            "reportable": true,
+            "support": 702,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.7890070921985816,
+            "precision": 0.6515373352855052,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 445,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 135,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.18746522139879526,
+        "raw_log_loss": 0.31286924635920715,
+        "selective_top1_accuracy": 0.8764302059496567,
+        "top1_accuracy": 0.8764302059496567,
+        "top3_accuracy": 0.9970578620464204,
+        "weighted_f1": 0.855356236357759
+      },
+      "window": 2
+    },
+    {
+      "case_count": 3059,
+      "chronological_positions": [
+        6118,
+        9176
+      ],
+      "hard_backoff_vomm": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.4237886861602595,
+        "coverage": 1.0,
+        "covered_examples": 3059,
+        "evaluated_examples": 3059,
+        "macro_f1": 0.413980130469287,
+        "macro_precision": 0.5586668505441884,
+        "macro_recall": 0.4237886861602595,
+        "mean_reciprocal_rank": 0.8975155279503105,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.25,
+            "precision": 1.0,
+            "recall": 0.14285714285714285,
+            "reportable": true,
+            "support": 7,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 2,
+            "support_status": "sufficient_support"
+          },
+          "defense-evasion": {
+            "f1": 0.8749999999999999,
+            "precision": 0.9130434782608695,
+            "recall": 0.84,
+            "reportable": true,
+            "support": 75,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9579214911042079,
+            "precision": 0.9222403480152257,
+            "recall": 0.9964747356051704,
+            "reportable": true,
+            "support": 1702,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.7545945945945945,
+            "precision": 0.6237712243074174,
+            "recall": 0.9548563611491108,
+            "reportable": true,
+            "support": 731,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.060344827586206906,
+            "precision": 0.45161290322580644,
+            "recall": 0.03233256351039261,
+            "reportable": true,
+            "support": 433,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 109,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.24154536270795998,
+        "raw_log_loss": 0.4918380427334786,
+        "selective_top1_accuracy": 0.8081072245831972,
+        "top1_accuracy": 0.8081072245831972,
+        "top3_accuracy": 0.9993461915658712,
+        "weighted_f1": 0.7438690215275705
+      },
+      "transformer": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.5332125806352382,
+        "coverage": 1.0,
+        "covered_examples": 3059,
+        "evaluated_examples": 3059,
+        "macro_f1": 0.533139506041192,
+        "macro_precision": 0.6435173731102647,
+        "macro_recall": 0.5332125806352382,
+        "mean_reciprocal_rank": 0.9407836361089057,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.25,
+            "precision": 1.0,
+            "recall": 0.14285714285714285,
+            "reportable": true,
+            "support": 7,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 2,
+            "support_status": "sufficient_support"
+          },
+          "defense-evasion": {
+            "f1": 0.9054054054054055,
+            "precision": 0.9178082191780822,
+            "recall": 0.8933333333333333,
+            "reportable": true,
+            "support": 75,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9669138619509413,
+            "precision": 0.9395787139689579,
+            "recall": 0.9958871915393654,
+            "reportable": true,
+            "support": 1702,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.8238133547868061,
+            "precision": 1.0,
+            "recall": 0.7004103967168263,
+            "reportable": true,
+            "support": 731,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.7858439201451906,
+            "precision": 0.6472346786248132,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 433,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 109,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.17414793786027782,
+        "raw_log_loss": 0.29899968777752584,
+        "selective_top1_accuracy": 0.8852566198103956,
+        "top1_accuracy": 0.8852566198103956,
+        "top3_accuracy": 0.9960771493952272,
+        "weighted_f1": 0.8688528206008271
+      },
+      "window": 3
+    },
+    {
+      "case_count": 3058,
+      "chronological_positions": [
+        9177,
+        12234
+      ],
+      "hard_backoff_vomm": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.48940479445447954,
+        "coverage": 1.0,
+        "covered_examples": 3058,
+        "evaluated_examples": 3058,
+        "macro_f1": 0.48190584759066346,
+        "macro_precision": 0.8209997738397862,
+        "macro_recall": 0.48940479445447954,
+        "mean_reciprocal_rank": 0.8938549160671463,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.18181818181818182,
+            "precision": 1.0,
+            "recall": 0.1,
+            "reportable": true,
+            "support": 20,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.898876404494382,
+            "precision": 0.9876543209876543,
+            "recall": 0.8247422680412371,
+            "reportable": true,
+            "support": 97,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9552238805970149,
+            "precision": 0.9147883452446399,
+            "recall": 0.9993993993993994,
+            "reportable": true,
+            "support": 1665,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.7505422993492407,
+            "precision": 0.6173059768064229,
+            "recall": 0.9571230982019364,
+            "reportable": true,
+            "support": 723,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.05579399141630901,
+            "precision": 0.40625,
+            "recall": 0.029953917050691243,
+            "reportable": true,
+            "support": 434,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.049180327868852465,
+            "precision": 1.0,
+            "recall": 0.025210084033613446,
+            "reportable": true,
+            "support": 119,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.2496342907911983,
+        "raw_log_loss": 0.6299897059968125,
+        "selective_top1_accuracy": 0.8024852844996729,
+        "top1_accuracy": 0.8024852844996729,
+        "top3_accuracy": 0.9970568999345978,
+        "weighted_f1": 0.7370779168694968
+      },
+      "transformer": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.6095602735815338,
+        "coverage": 1.0,
+        "covered_examples": 3058,
+        "evaluated_examples": 3058,
+        "macro_f1": 0.5988853399236927,
+        "macro_precision": 0.748980700146033,
+        "macro_recall": 0.6095602735815338,
+        "mean_reciprocal_rank": 0.9415526020741849,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.09523809523809523,
+            "precision": 1.0,
+            "recall": 0.05,
+            "reportable": true,
+            "support": 20,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.8854166666666666,
+            "precision": 0.8947368421052632,
+            "recall": 0.8762886597938144,
+            "reportable": true,
+            "support": 97,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9643581570559258,
+            "precision": 0.9316909294512878,
+            "recall": 0.9993993993993994,
+            "reportable": true,
+            "support": 1665,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.8423566878980892,
+            "precision": 0.9924953095684803,
+            "recall": 0.7316735822959889,
+            "reportable": true,
+            "support": 723,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.8059424326833798,
+            "precision": 0.6749611197511665,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 434,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 119,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.17429000071295775,
+        "raw_log_loss": 0.299800158171889,
+        "selective_top1_accuracy": 0.8871811641595815,
+        "top1_accuracy": 0.8871811641595815,
+        "top3_accuracy": 0.9954218443427076,
+        "weighted_f1": 0.8673150461754251
+      },
+      "window": 4
+    }
+  ],
+  "confidence_intervals_95": {
+    "hard_backoff_vomm": {
+      "balanced_accuracy": [
+        0.38543517190683624,
+        0.47260918568187676
+      ],
+      "macro_f1": [
+        0.3752364867832102,
+        0.47151384362659515
+      ],
+      "mean_reciprocal_rank": [
+        0.8907031959699396,
+        0.8959019245697154
+      ],
+      "raw_brier_score": [
+        0.24473218700275381,
+        0.2566832657598228
+      ],
+      "raw_log_loss": [
+        0.513334649903844,
+        0.5988848672100741
+      ],
+      "top1_accuracy": [
+        0.7967064635652532,
+        0.8047630860828578
+      ],
+      "top3_accuracy": [
+        0.9981424648683573,
+        0.9993425918317035
+      ]
+    },
+    "paired": {
+      "candidate_minus_vomm_95ci": {
+        "balanced_accuracy": [
+          0.1008711273700234,
+          0.13524154759688095
+        ],
+        "macro_f1": [
+          0.0976283673118225,
+          0.1398691134813067
+        ],
+        "top1_accuracy": [
+          0.07859033752481792,
+          0.09344650289724965
+        ]
+      },
+      "iterations": 500,
+      "seed": 20260721,
+      "unit": "whole_session"
+    },
+    "transformer_seed_20260723": {
+      "balanced_accuracy": [
+        0.4993707767368011,
+        0.6009571705132287
+      ],
+      "macro_f1": [
+        0.49138923346591845,
+        0.6009500992589222
+      ],
+      "mean_reciprocal_rank": [
+        0.9381161045577892,
+        0.9448811453268504
+      ],
+      "raw_brier_score": [
+        0.16569564572996184,
+        0.18282755181019814
+      ],
+      "raw_log_loss": [
+        0.2821954532278097,
+        0.31416343222790805
+      ],
+      "top1_accuracy": [
+        0.879734219269103,
+        0.892816787732042
+      ],
+      "top3_accuracy": [
+        0.994669946699467,
+        0.9971162560764604
+      ]
+    }
+  },
+  "confusion_matrices": {
+    "hard_backoff_vomm": {
+      "counts": {
+        "command-and-control": {
+          "<abstained>": 0,
+          "command-and-control": 4,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 7,
+          "execution": 7,
+          "impact": 0,
+          "persistence": 28,
+          "privilege-escalation": 0
+        },
+        "credential-access": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 0,
+          "execution": 2,
+          "impact": 0,
+          "persistence": 0,
+          "privilege-escalation": 0
+        },
+        "defense-evasion": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 165,
+          "discovery": 18,
+          "execution": 0,
+          "impact": 0,
+          "persistence": 52,
+          "privilege-escalation": 0
+        },
+        "discovery": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 8,
+          "discovery": 6846,
+          "execution": 0,
+          "impact": 0,
+          "persistence": 0,
+          "privilege-escalation": 0
+        },
+        "execution": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 1,
+          "discovery": 141,
+          "execution": 2702,
+          "impact": 0,
+          "persistence": 1,
+          "privilege-escalation": 0
+        },
+        "impact": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 0,
+          "execution": 0,
+          "impact": 0,
+          "persistence": 0,
+          "privilege-escalation": 0
+        },
+        "persistence": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 0,
+          "execution": 1718,
+          "impact": 0,
+          "persistence": 72,
+          "privilege-escalation": 0
+        },
+        "privilege-escalation": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 451,
+          "execution": 2,
+          "impact": 0,
+          "persistence": 1,
+          "privilege-escalation": 9
+        }
+      },
+      "normalized": {
+        "command-and-control": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.08695652173913043,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.15217391304347827,
+          "execution": 0.15217391304347827,
+          "impact": 0.0,
+          "persistence": 0.6086956521739131,
+          "privilege-escalation": 0.0
+        },
+        "credential-access": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.0,
+          "execution": 1.0,
+          "impact": 0.0,
+          "persistence": 0.0,
+          "privilege-escalation": 0.0
+        },
+        "defense-evasion": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.7021276595744681,
+          "discovery": 0.07659574468085106,
+          "execution": 0.0,
+          "impact": 0.0,
+          "persistence": 0.22127659574468084,
+          "privilege-escalation": 0.0
+        },
+        "discovery": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0011672016340822876,
+          "discovery": 0.9988327983659178,
+          "execution": 0.0,
+          "impact": 0.0,
+          "persistence": 0.0,
+          "privilege-escalation": 0.0
+        },
+        "execution": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.000351493848857645,
+          "discovery": 0.04956063268892794,
+          "execution": 0.9497363796133568,
+          "impact": 0.0,
+          "persistence": 0.000351493848857645,
+          "privilege-escalation": 0.0
+        },
+        "impact": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.0,
+          "execution": 0.0,
+          "impact": 0.0,
+          "persistence": 0.0,
+          "privilege-escalation": 0.0
+        },
+        "persistence": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.0,
+          "execution": 0.9597765363128492,
+          "impact": 0.0,
+          "persistence": 0.04022346368715084,
+          "privilege-escalation": 0.0
+        },
+        "privilege-escalation": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.9740820734341252,
+          "execution": 0.004319654427645789,
+          "impact": 0.0,
+          "persistence": 0.0021598272138228943,
+          "privilege-escalation": 0.019438444924406047
+        }
+      }
+    },
+    "transformer_seed_20260723": {
+      "counts": {
+        "command-and-control": {
+          "<abstained>": 0,
+          "command-and-control": 3,
+          "credential-access": 0,
+          "defense-evasion": 8,
+          "discovery": 7,
+          "execution": 0,
+          "impact": 0,
+          "persistence": 28,
+          "privilege-escalation": 0
+        },
+        "credential-access": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 0,
+          "execution": 0,
+          "impact": 0,
+          "persistence": 2,
+          "privilege-escalation": 0
+        },
+        "defense-evasion": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 189,
+          "discovery": 2,
+          "execution": 2,
+          "impact": 0,
+          "persistence": 42,
+          "privilege-escalation": 0
+        },
+        "discovery": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 8,
+          "discovery": 6840,
+          "execution": 5,
+          "impact": 0,
+          "persistence": 1,
+          "privilege-escalation": 0
+        },
+        "execution": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 1,
+          "discovery": 0,
+          "execution": 2025,
+          "impact": 0,
+          "persistence": 819,
+          "privilege-escalation": 0
+        },
+        "impact": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 0,
+          "execution": 0,
+          "impact": 0,
+          "persistence": 0,
+          "privilege-escalation": 0
+        },
+        "persistence": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 0,
+          "discovery": 0,
+          "execution": 0,
+          "impact": 0,
+          "persistence": 1790,
+          "privilege-escalation": 0
+        },
+        "privilege-escalation": {
+          "<abstained>": 0,
+          "command-and-control": 0,
+          "credential-access": 0,
+          "defense-evasion": 4,
+          "discovery": 451,
+          "execution": 7,
+          "impact": 0,
+          "persistence": 1,
+          "privilege-escalation": 0
+        }
+      },
+      "normalized": {
+        "command-and-control": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.06521739130434782,
+          "credential-access": 0.0,
+          "defense-evasion": 0.17391304347826086,
+          "discovery": 0.15217391304347827,
+          "execution": 0.0,
+          "impact": 0.0,
+          "persistence": 0.6086956521739131,
+          "privilege-escalation": 0.0
+        },
+        "credential-access": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.0,
+          "execution": 0.0,
+          "impact": 0.0,
+          "persistence": 1.0,
+          "privilege-escalation": 0.0
+        },
+        "defense-evasion": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.8042553191489362,
+          "discovery": 0.00851063829787234,
+          "execution": 0.00851063829787234,
+          "impact": 0.0,
+          "persistence": 0.17872340425531916,
+          "privilege-escalation": 0.0
+        },
+        "discovery": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0011672016340822876,
+          "discovery": 0.997957397140356,
+          "execution": 0.0007295010213014298,
+          "impact": 0.0,
+          "persistence": 0.00014590020426028595,
+          "privilege-escalation": 0.0
+        },
+        "execution": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.000351493848857645,
+          "discovery": 0.0,
+          "execution": 0.7117750439367311,
+          "impact": 0.0,
+          "persistence": 0.28787346221441124,
+          "privilege-escalation": 0.0
+        },
+        "impact": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.0,
+          "execution": 0.0,
+          "impact": 0.0,
+          "persistence": 0.0,
+          "privilege-escalation": 0.0
+        },
+        "persistence": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.0,
+          "discovery": 0.0,
+          "execution": 0.0,
+          "impact": 0.0,
+          "persistence": 1.0,
+          "privilege-escalation": 0.0
+        },
+        "privilege-escalation": {
+          "<abstained>": 0.0,
+          "command-and-control": 0.0,
+          "credential-access": 0.0,
+          "defense-evasion": 0.008639308855291577,
+          "discovery": 0.9740820734341252,
+          "execution": 0.01511879049676026,
+          "impact": 0.0,
+          "persistence": 0.0021598272138228943,
+          "privilege-escalation": 0.0
+        }
+      }
+    }
+  },
+  "efficiency": {
+    "hard_backoff_vomm_reference": {
+      "cpu_user_seconds_process": 602.268653,
+      "gpu": {
+        "note": "CPU-only offline benchmark environment",
+        "used": false
+      },
+      "inference_latency_ms": {
+        "mean": 1.4126886005,
+        "p50": 1.035407,
+        "p95": 2.096564,
+        "p99": 2.135035
+      },
+      "inference_peak_python_bytes": 159023,
+      "load_seconds": 0.0,
+      "sample_cases": 2000,
+      "serialized_model_size_bytes": 0,
+      "throughput_cases_per_second": 707.0166676086998,
+      "training_peak_python_bytes": 0,
+      "training_seconds": 0.0,
+      "warmup_cases": 32
+    },
+    "transformer_seed_20260723": {
+      "batch_elapsed_seconds": 0.11911013200005982,
+      "batched_case_count": 12235,
+      "batched_throughput_per_second": 102720.06079208992,
+      "checkpoint_load_seconds": 0.0033976869999605697,
+      "checkpoint_size_bytes": 17279,
+      "individual_case_latency_ms": {
+        "mean": 0.5515563355,
+        "p50": 0.517059,
+        "p95": 0.809352,
+        "p99": 0.925266
+      },
+      "individual_case_sample_count": 2000,
+      "individual_case_throughput_per_second": 1803.966547029659,
+      "memory_note": "ru_maxrss delta is a process high-water delta, not isolated model RSS",
+      "parameter_count": 2632,
+      "peak_python_allocation_bytes": 76541,
+      "process_max_rss_delta_bytes": 131072
+    }
+  },
+  "generated_at_epoch_seconds": 1784651169.3833756,
+  "integrity": {
+    "checkpoint": {
+      "checkpoint_path": "data/models/transformer_shadow_20260721.pt",
+      "checkpoint_sha256": "d9b316d76e63b15b175668aa0bf69cfe4172bbd812d6b19743a628cd0ec8073d",
+      "checkpoint_size_bytes": 17279,
+      "device": "cpu",
+      "dtype": "float32",
+      "load_seconds": 0.0033976869999605697,
+      "model_eval": true,
+      "parameter_count": 2632,
+      "state_dictionary_compatible": true,
+      "state_dictionary_keys_sha256": "bc854c8c6b6e496041f7df9d26bfac21f6b6f632a1348258b5298227ed43973a",
+      "weights_only_load": true
+    },
+    "checks": {
+      "checkpoint_sha256": true,
+      "deterministic_eval_no_grad": true,
+      "ordered_test_case_membership": true,
+      "parameter_count": true,
+      "partition_intersections_empty": true,
+      "payload_sha256": true,
+      "preprocessing_sha256": true,
+      "state_dictionary_compatible": true,
+      "test_not_used_for_selection_recorded": true,
+      "validation_only_seed_selection": true,
+      "vocabulary_order_bound_to_manifest_and_training_code": true
+    },
+    "deterministic_replay": {
+      "eval_mode": true,
+      "max_absolute_difference": 0.0,
+      "no_grad_inference_function": true,
+      "top3_identical_all_cases": true
+    },
+    "ordered_test_case_ids_sha256": "aab9e4a5cde42b8a0ce3fdfa66ef09281c34fdc7d3ae033001d788958d1d9024",
+    "partition_membership": {
+      "partitions": {
+        "test": {
+          "actual_membership_sha256": "1227dad42a6097facd518310f0958c741a6665e8b3a0290317df4360c1177844",
+          "actual_session_count": 32901,
+          "manifest_membership_sha256": "1227dad42a6097facd518310f0958c741a6665e8b3a0290317df4360c1177844",
+          "manifest_session_count": 32901
+        },
+        "train": {
+          "actual_membership_sha256": "049610c20eec543d21dc044e4b3dcda90c0cd0f29471346d6f13b39d355f719d",
+          "actual_session_count": 153535,
+          "manifest_membership_sha256": "049610c20eec543d21dc044e4b3dcda90c0cd0f29471346d6f13b39d355f719d",
+          "manifest_session_count": 153535
+        },
+        "validation": {
+          "actual_membership_sha256": "a596ec781b79b778e9a13bdd59462cd540b44ccbc2da8f8dc064899b29025ba1",
+          "actual_session_count": 32900,
+          "manifest_membership_sha256": "a596ec781b79b778e9a13bdd59462cd540b44ccbc2da8f8dc064899b29025ba1",
+          "manifest_session_count": 32900
+        }
+      },
+      "reasons": [],
+      "valid": true
+    },
+    "payload_sha256": "c36b2519fcb859910a9e6b95c16662e13ed8b2c974e7a5be1b4e301ea6654cdb",
+    "preprocessing": {
+      "adjacent_tactic_deduplication": true,
+      "input_schema": "privacy-minimized whole-session tactic payload",
+      "min_transition_count": 2,
+      "prefix_max_length": 3,
+      "split_requirement": "preassigned chronological whole-session train/validation/test",
+      "transition_smoothing": 0.05,
+      "trusted_label_requirement": "source builder admitted trusted classifier-derived tactic labels only"
+    },
+    "preprocessing_sha256": "24afeebb659a5ad60b94e5e2127616cab3d8d42265367850e31c34be3ec6beaa",
+    "seed": 20260723,
+    "selection": {
+      "computed_validation_winner": 20260723,
+      "held_out_test_metrics_consulted": false,
+      "rule": "highest validation macro-F1, then balanced accuracy, then lower seed",
+      "selected_seed": 20260723,
+      "validation_case_count": 8211
+    },
+    "split_method": "preassigned_whole_session_split",
+    "test_case_count": 12235,
+    "test_membership_sha256": "1227dad42a6097facd518310f0958c741a6665e8b3a0290317df4360c1177844",
+    "training_membership_sha256": "e48e5d844eb7bd37caa7b25dd467f985747f9cacc2b34f9b26ee3765b9595c0c",
+    "validation_membership_sha256": "2124177b0434d6ce95f5e7133986f73596f0d87258cecb41322755636acf740e",
+    "validation_roles": {
+      "calibration": {
+        "membership_sha256": "2124177b0434d6ce95f5e7133986f73596f0d87258cecb41322755636acf740e",
+        "session_count": 16450
+      },
+      "intersection_count": 0,
+      "method": "chronological_half_of_preassigned_validation_whole_sessions.v1",
+      "selection": {
+        "membership_sha256": "8fddf1fc105b4a3bf2a5e8f24263343ff19d9f3678891e521bf1b78ccde3c0db",
+        "session_count": 16450
+      }
+    },
+    "vocabulary": [
+      "command-and-control",
+      "credential-access",
+      "defense-evasion",
+      "discovery",
+      "execution",
+      "impact",
+      "persistence",
+      "privilege-escalation"
+    ],
+    "vocabulary_sha256": "b3bc584579a725a894c52e6d6e271812cad374dcfa98e19d54b2816c35db1c55"
+  },
+  "limitations": [
+    "Targets are classifier-derived weak labels, not independent analyst adjudications.",
+    "The privacy-minimized external corpus omits source template identifiers and per-session timestamps.",
+    "The test set has only two credential-access targets and no impact targets.",
+    "This held-out corpus is not a production-local chronological evaluation.",
+    "Transformer softmax outputs are raw scores and are not calibrated probabilities."
+  ],
+  "metric_deltas_transformer_minus_vomm": {
+    "balanced_accuracy": 0.11169855480370589,
+    "macro_f1": 0.11283963318905449,
+    "mean_reciprocal_rank": 0.048271449977620895,
+    "top1_accuracy": 0.08573763792398847,
+    "top3_accuracy": -0.0027789129546383906,
+    "weighted_f1": 0.1313040157061509
+  },
+  "metrics": {
+    "hard_backoff_vomm": {
+      "abstention_rate": 0.0,
+      "balanced_accuracy": 0.39961646684349,
+      "coverage": 1.0,
+      "covered_examples": 12235,
+      "evaluated_examples": 12235,
+      "expected_calibration_error": 0.11406462131728033,
+      "macro_f1": 0.39687385915623946,
+      "macro_precision": 0.7061326329547957,
+      "macro_recall": 0.39961646684349,
+      "mean_reciprocal_rank": 0.893328565590519,
+      "per_tactic": {
+        "command-and-control": {
+          "f1": 0.16,
+          "precision": 1.0,
+          "recall": 0.08695652173913043,
+          "reportable": true,
+          "support": 46,
+          "support_status": "sufficient_support"
+        },
+        "credential-access": {
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reportable": false,
+          "support": 2,
+          "support_status": "low_support_descriptive_only"
+        },
+        "defense-evasion": {
+          "f1": 0.8068459657701712,
+          "precision": 0.9482758620689655,
+          "recall": 0.7021276595744681,
+          "reportable": true,
+          "support": 235,
+          "support_status": "sufficient_support"
+        },
+        "discovery": {
+          "f1": 0.9563456031291471,
+          "precision": 0.9173254723301622,
+          "recall": 0.9988327983659178,
+          "reportable": true,
+          "support": 6854,
+          "support_status": "sufficient_support"
+        },
+        "execution": {
+          "f1": 0.742715777899945,
+          "precision": 0.6097946287519748,
+          "recall": 0.9497363796133568,
+          "reportable": true,
+          "support": 2845,
+          "support_status": "sufficient_support"
+        },
+        "impact": {
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reportable": false,
+          "support": 0,
+          "support_status": "no_heldout_support"
+        },
+        "persistence": {
+          "f1": 0.07407407407407407,
+          "precision": 0.4675324675324675,
+          "recall": 0.04022346368715084,
+          "reportable": true,
+          "support": 1790,
+          "support_status": "sufficient_support"
+        },
+        "privilege-escalation": {
+          "f1": 0.038135593220338986,
+          "precision": 1.0,
+          "recall": 0.019438444924406047,
+          "reportable": true,
+          "support": 463,
+          "support_status": "sufficient_support"
+        }
+      },
+      "raw_brier_score": 0.2509298801806036,
+      "raw_log_loss": 0.5539544137675534,
+      "selective_top1_accuracy": 0.8008173273395995,
+      "top1_accuracy": 0.8008173273395995,
+      "top3_accuracy": 0.9987740089906008,
+      "weighted_f1": 0.7368236474198706
+    },
+    "transformer_seed_20260723": {
+      "abstention_rate": 0.0,
+      "balanced_accuracy": 0.5113150216471959,
+      "coverage": 1.0,
+      "covered_examples": 12235,
+      "evaluated_examples": 12235,
+      "expected_calibration_error": 0.03427951953021103,
+      "macro_f1": 0.509713492345294,
+      "macro_precision": 0.6424691161916434,
+      "macro_recall": 0.5113150216471959,
+      "mean_reciprocal_rank": 0.9416000155681399,
+      "per_tactic": {
+        "command-and-control": {
+          "f1": 0.12244897959183672,
+          "precision": 1.0,
+          "recall": 0.06521739130434782,
+          "reportable": true,
+          "support": 46,
+          "support_status": "sufficient_support"
+        },
+        "credential-access": {
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reportable": false,
+          "support": 2,
+          "support_status": "low_support_descriptive_only"
+        },
+        "defense-evasion": {
+          "f1": 0.849438202247191,
+          "precision": 0.9,
+          "recall": 0.8042553191489362,
+          "reportable": true,
+          "support": 235,
+          "support_status": "sufficient_support"
+        },
+        "discovery": {
+          "f1": 0.9665112335735482,
+          "precision": 0.936986301369863,
+          "recall": 0.997957397140356,
+          "reportable": true,
+          "support": 6854,
+          "support_status": "sufficient_support"
+        },
+        "execution": {
+          "f1": 0.8292383292383292,
+          "precision": 0.9931338891613536,
+          "recall": 0.7117750439367311,
+          "reportable": true,
+          "support": 2845,
+          "support_status": "sufficient_support"
+        },
+        "impact": {
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reportable": false,
+          "support": 0,
+          "support_status": "no_heldout_support"
+        },
+        "persistence": {
+          "f1": 0.8003577017661525,
+          "precision": 0.667163622810287,
+          "recall": 1.0,
+          "reportable": true,
+          "support": 1790,
+          "support_status": "sufficient_support"
+        },
+        "privilege-escalation": {
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reportable": true,
+          "support": 463,
+          "support_status": "sufficient_support"
+        }
+      },
+      "raw_brier_score": 0.17400899763775557,
+      "raw_log_loss": 0.29846777372846395,
+      "selective_top1_accuracy": 0.886554965263588,
+      "top1_accuracy": 0.886554965263588,
+      "top3_accuracy": 0.9959950960359624,
+      "weighted_f1": 0.8681276631260215
+    }
+  },
+  "offline_only": true,
+  "paired_comparison": {
+    "by_tactic": {
+      "command-and-control": {
+        "both_wrong_or_abstained": 42,
+        "production_vomm_win": 1,
+        "tie_both_correct": 3
+      },
+      "credential-access": {
+        "both_wrong_or_abstained": 2
+      },
+      "defense-evasion": {
+        "both_wrong_or_abstained": 42,
+        "candidate_win": 28,
+        "production_vomm_win": 4,
+        "tie_both_correct": 161
+      },
+      "discovery": {
+        "both_wrong_or_abstained": 8,
+        "production_vomm_win": 6,
+        "tie_both_correct": 6840
+      },
+      "execution": {
+        "both_wrong_or_abstained": 2,
+        "candidate_win": 141,
+        "production_vomm_win": 818,
+        "tie_both_correct": 1884
+      },
+      "persistence": {
+        "candidate_win": 1718,
+        "tie_both_correct": 72
+      },
+      "privilege-escalation": {
+        "both_wrong_or_abstained": 454,
+        "production_vomm_win": 9
+      }
+    },
+    "case_count": 12235,
+    "outcomes": {
+      "both_wrong_or_abstained": 550,
+      "candidate_win": 1887,
+      "production_vomm_win": 838,
+      "tie_both_correct": 8960
+    }
+  },
+  "production_mutations": false,
+  "promotion_gate": {
+    "criterion_1_primary_metrics": {
+      "pass": true,
+      "requirement": "Transformer exceeds VOMM in Top-1, macro-F1, and balanced accuracy"
+    },
+    "criterion_2_paired_wins": {
+      "candidate_wins": 1887,
+      "pass": true,
+      "requirement": "candidate wins exceed 1.25x VOMM wins",
+      "vomm_wins": 838
+    },
+    "criterion_3_confidence_intervals": {
+      "pass": true,
+      "requirement": "paired whole-session 95% CI lower bounds exceed zero for all primary metrics"
+    },
+    "criterion_4_tactic_safety": {
+      "execution_recall_regression": 0.2379613356766257,
+      "pass": false,
+      "rare_tactic_collapses": [],
+      "requirement": "Execution recall regression <= 0.10 absolute and no >0.10 collapse for held-out tactics with support 1-99"
+    },
+    "criterion_5_integrity": {
+      "pass": true,
+      "requirement": "all checkpoint, vocabulary, preprocessing, membership, and provenance checks pass"
+    },
+    "criterion_6_operational": {
+      "pass": true,
+      "requirement": "p95 <= 25 ms, Python allocation <= 64 MiB, deterministic reload/inference"
+    },
+    "criterion_7_prediction_authority_boundary": {
+      "basis": "evaluation is offline-only; current canonical evidence validation remains unchanged",
+      "pass": true,
+      "requirement": "prediction alone remains insufficient for guidance or action eligibility"
+    }
+  },
+  "promotion_gate_passed": false,
+  "raw_transformer_scores_are_calibrated_probabilities": false,
+  "schema_version": "frozen_transformer_poc_evaluation.v1",
+  "sequence_length": {
+    "hard_backoff_vomm": {
+      "1": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.4748858447488584,
+        "coverage": 1.0,
+        "covered_examples": 3342,
+        "evaluated_examples": 3342,
+        "macro_f1": 0.3596370157493857,
+        "macro_precision": 0.3360385765732772,
+        "macro_recall": 0.4748858447488584,
+        "mean_reciprocal_rank": 0.8776206862158388,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 35,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.9185185185185185,
+            "precision": 1.0,
+            "recall": 0.8493150684931506,
+            "reportable": true,
+            "support": 146,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.8931497298239497,
+            "precision": 0.8069291338582677,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 2562,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 142,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.3461538461538462,
+            "precision": 0.20930232558139536,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 9,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 448,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.45355602112347365,
+        "raw_log_loss": 1.3014520696180856,
+        "selective_top1_accuracy": 0.8064033512866547,
+        "top1_accuracy": 0.8064033512866547,
+        "top3_accuracy": 0.9964093357271095,
+        "weighted_f1": 0.7257536493501039
+      },
+      "2": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.3729827304435108,
+        "coverage": 1.0,
+        "covered_examples": 2777,
+        "evaluated_examples": 2777,
+        "macro_f1": 0.3282339081489448,
+        "macro_precision": 0.3928837525747563,
+        "macro_recall": 0.3729827304435108,
+        "mean_reciprocal_rank": 0.6803625015004201,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 1,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 2,
+            "support_status": "sufficient_support"
+          },
+          "defense-evasion": {
+            "f1": 0.6050420168067226,
+            "precision": 0.8,
+            "recall": 0.4864864864864865,
+            "reportable": true,
+            "support": 74,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.14285714285714285,
+            "precision": 0.2,
+            "recall": 0.1111111111111111,
+            "reportable": true,
+            "support": 9,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.5220527045769764,
+            "precision": 0.3533608711978971,
+            "recall": 0.9989384288747346,
+            "reportable": true,
+            "support": 942,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.02768549280177187,
+            "precision": 0.3968253968253968,
+            "recall": 0.01434308663224326,
+            "reportable": true,
+            "support": 1743,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 6,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.543489575464822,
+        "raw_log_loss": 0.7686423862740605,
+        "selective_top1_accuracy": 0.36154123154483253,
+        "top1_accuracy": 0.36154123154483253,
+        "top3_accuracy": 0.9989196975153043,
+        "weighted_f1": 0.2114109777437565
+      },
+      "3": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.6166666666666667,
+        "coverage": 1.0,
+        "covered_examples": 2618,
+        "evaluated_examples": 2618,
+        "macro_f1": 0.6704580466262708,
+        "macro_precision": 0.9692982456140351,
+        "macro_recall": 0.6166666666666667,
+        "mean_reciprocal_rank": 0.9967532467532467,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.4615384615384615,
+            "precision": 1.0,
+            "recall": 0.3,
+            "reportable": true,
+            "support": 10,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.2857142857142857,
+            "precision": 1.0,
+            "recall": 0.16666666666666666,
+            "reportable": true,
+            "support": 12,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 2546,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.9345794392523363,
+            "precision": 0.8771929824561403,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 50,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          }
+        },
+        "raw_brier_score": 0.010534618063111179,
+        "raw_log_loss": 0.1019199704330908,
+        "selective_top1_accuracy": 0.9935064935064936,
+        "top1_accuracy": 0.9935064935064936,
+        "top3_accuracy": 1.0,
+        "weighted_f1": 0.9934197585968575
+      },
+      "4": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 1.0,
+        "coverage": 1.0,
+        "covered_examples": 1752,
+        "evaluated_examples": 1752,
+        "macro_f1": 1.0,
+        "macro_precision": 1.0,
+        "macro_recall": 1.0,
+        "mean_reciprocal_rank": 1.0,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 3,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 7,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 1699,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 38,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 5,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.009117505993150685,
+        "raw_log_loss": 0.01363386744615122,
+        "selective_top1_accuracy": 1.0,
+        "top1_accuracy": 1.0,
+        "top3_accuracy": 1.0,
+        "weighted_f1": 1.0
+      },
+      "5": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 1.0,
+        "coverage": 1.0,
+        "covered_examples": 1738,
+        "evaluated_examples": 1738,
+        "macro_f1": 1.0,
+        "macro_precision": 1.0,
+        "macro_recall": 1.0,
+        "mean_reciprocal_rank": 1.0,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "discovery": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 1730,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 8,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          }
+        },
+        "raw_brier_score": 0.00043694181818181824,
+        "raw_log_loss": 0.0008476728250342272,
+        "selective_top1_accuracy": 1.0,
+        "top1_accuracy": 1.0,
+        "top3_accuracy": 1.0,
+        "weighted_f1": 1.0
+      },
+      "6+": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 1.0,
+        "coverage": 1.0,
+        "covered_examples": 8,
+        "evaluated_examples": 8,
+        "macro_f1": 1.0,
+        "macro_precision": 1.0,
+        "macro_recall": 1.0,
+        "mean_reciprocal_rank": 1.0,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "discovery": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "execution": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 4,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "privilege-escalation": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 4,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.09492561000000001,
+        "raw_log_loss": 0.18415692123868585,
+        "selective_top1_accuracy": 1.0,
+        "top1_accuracy": 1.0,
+        "top3_accuracy": 1.0,
+        "weighted_f1": 1.0
+      }
+    },
+    "transformer_seed_20260723": {
+      "1": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.6583183759592764,
+        "coverage": 1.0,
+        "covered_examples": 3342,
+        "evaluated_examples": 3342,
+        "macro_f1": 0.53323575930268,
+        "macro_precision": 0.4963447953024709,
+        "macro_recall": 0.6583183759592764,
+        "mean_reciprocal_rank": 0.9223892878515859,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 35,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.955631399317406,
+            "precision": 0.9523809523809523,
+            "recall": 0.958904109589041,
+            "reportable": true,
+            "support": 146,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.918462643678161,
+            "precision": 0.8506320691949435,
+            "recall": 0.998048399687744,
+            "reportable": true,
+            "support": 2562,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.9791666666666666,
+            "precision": 0.9657534246575342,
+            "recall": 0.9929577464788732,
+            "reportable": true,
+            "support": 142,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.3461538461538462,
+            "precision": 0.20930232558139536,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 9,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 448,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.26844983183911314,
+        "raw_log_loss": 0.521965717011586,
+        "selective_top1_accuracy": 0.8518850987432675,
+        "top1_accuracy": 0.8518850987432675,
+        "top3_accuracy": 0.9913225613405147,
+        "weighted_f1": 0.7883843592716461
+      },
+      "2": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.2322217576994647,
+        "coverage": 1.0,
+        "covered_examples": 2777,
+        "evaluated_examples": 2777,
+        "macro_f1": 0.235228405609353,
+        "macro_precision": 0.3443926157674678,
+        "macro_recall": 0.2322217576994647,
+        "mean_reciprocal_rank": 0.8420722087898898,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 1,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 2,
+            "support_status": "sufficient_support"
+          },
+          "defense-evasion": {
+            "f1": 0.6000000000000001,
+            "precision": 0.782608695652174,
+            "recall": 0.4864864864864865,
+            "reportable": true,
+            "support": 74,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 9,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.2428174235403151,
+            "precision": 0.9562043795620438,
+            "recall": 0.13906581740976645,
+            "reportable": true,
+            "support": 942,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.8037814157251557,
+            "precision": 0.6719352351580571,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 1743,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 6,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.42934890736245357,
+        "raw_log_loss": 0.6469887270564256,
+        "selective_top1_accuracy": 0.6877925819229385,
+        "top1_accuracy": 0.6877925819229385,
+        "top3_accuracy": 0.9953186892329853,
+        "weighted_f1": 0.6028538064760257
+      },
+      "3": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.7433333333333333,
+        "coverage": 1.0,
+        "covered_examples": 2618,
+        "evaluated_examples": 2618,
+        "macro_f1": 0.8157183934265798,
+        "macro_precision": 0.9879508955595913,
+        "macro_recall": 0.7433333333333333,
+        "mean_reciprocal_rank": 0.9954481792717087,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.4615384615384615,
+            "precision": 1.0,
+            "recall": 0.3,
+            "reportable": true,
+            "support": 10,
+            "support_status": "sufficient_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.9090909090909091,
+            "precision": 1.0,
+            "recall": 0.8333333333333334,
+            "reportable": true,
+            "support": 12,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.9986271818003529,
+            "precision": 0.9972581276929103,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 2546,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.8936170212765958,
+            "precision": 0.9545454545454546,
+            "recall": 0.84,
+            "reportable": true,
+            "support": 50,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          }
+        },
+        "raw_brier_score": 0.011354517192921567,
+        "raw_log_loss": 0.030184492934631022,
+        "selective_top1_accuracy": 0.9935064935064936,
+        "top1_accuracy": 0.9935064935064936,
+        "top3_accuracy": 0.9973262032085561,
+        "weighted_f1": 0.9941597140763958
+      },
+      "4": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.8,
+        "coverage": 1.0,
+        "covered_examples": 1752,
+        "evaluated_examples": 1752,
+        "macro_f1": 0.7554967147200157,
+        "macro_precision": 0.7271550802139037,
+        "macro_recall": 0.8,
+        "mean_reciprocal_rank": 0.9984779299847792,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 3,
+            "support_status": "sufficient_support"
+          },
+          "discovery": {
+            "f1": 0.7777777777777778,
+            "precision": 0.6363636363636364,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 7,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 0.9997057958223006,
+            "precision": 0.9994117647058823,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 1699,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 38,
+            "support_status": "sufficient_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 5,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.0031735031833291603,
+        "raw_log_loss": 0.01069650262370494,
+        "selective_top1_accuracy": 0.9971461187214612,
+        "top1_accuracy": 0.9971461187214612,
+        "top3_accuracy": 1.0,
+        "weighted_f1": 0.9959729403804413
+      },
+      "5": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 1.0,
+        "coverage": 1.0,
+        "covered_examples": 1738,
+        "evaluated_examples": 1738,
+        "macro_f1": 1.0,
+        "macro_precision": 1.0,
+        "macro_recall": 1.0,
+        "mean_reciprocal_rank": 1.0,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "discovery": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 1730,
+            "support_status": "sufficient_support"
+          },
+          "execution": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 8,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          }
+        },
+        "raw_brier_score": 3.966705877700045e-05,
+        "raw_log_loss": 0.002721872823793782,
+        "selective_top1_accuracy": 1.0,
+        "top1_accuracy": 1.0,
+        "top3_accuracy": 1.0,
+        "weighted_f1": 1.0
+      },
+      "6+": {
+        "abstention_rate": 0.0,
+        "balanced_accuracy": 0.5,
+        "coverage": 1.0,
+        "covered_examples": 8,
+        "evaluated_examples": 8,
+        "macro_f1": 0.5,
+        "macro_precision": 0.5,
+        "macro_recall": 0.5,
+        "mean_reciprocal_rank": 0.75,
+        "per_tactic": {
+          "command-and-control": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "credential-access": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "defense-evasion": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "discovery": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "execution": {
+            "f1": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "reportable": true,
+            "support": 4,
+            "support_status": "sufficient_support"
+          },
+          "impact": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "persistence": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": false,
+            "support": 0,
+            "support_status": "no_heldout_support"
+          },
+          "privilege-escalation": {
+            "f1": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reportable": true,
+            "support": 4,
+            "support_status": "sufficient_support"
+          }
+        },
+        "raw_brier_score": 0.5229734262092424,
+        "raw_log_loss": 1.0202750264991813,
+        "selective_top1_accuracy": 0.5,
+        "top1_accuracy": 0.5,
+        "top3_accuracy": 1.0,
+        "weighted_f1": 0.5
+      }
+    }
+  },
+  "template_and_weak_label_analysis": {
+    "candidate_win_count": 1887,
+    "candidate_wins_in_input_patterns_repeated_at_least_10_times_fraction": 0.994700582935877,
+    "cases_in_input_patterns_repeated_at_least_10_times_fraction": 0.9912545974662852,
+    "note": "Exact repeated tactic-sequence concentration is measurable, but the privacy-minimized payload has no source template identifier; causality cannot be established.",
+    "persistence_candidate_win_count": 1718,
+    "persistence_cases_in_input_patterns_repeated_at_least_10_times_fraction": 1.0,
+    "unique_input_sequences": 45,
+    "unique_sequence_target_pairs": 56
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "schema_version": "prediction_next_distinct_transformer_refinement_leakage_audit.v1",
+  "status": "COMPLETE_VALID",
+  "audit_id": "prediction_next_distinct_transformer_refinement_v1_20260823_retry3_leakage",
+  "created_at": "2026-08-23T10:47:40Z",
+  "purpose": "Independent, content-addressed audit of the tuning boundary required by protocol section 38.",
+  "source_bindings": {
+    "search_runner_path": "honeypot-analysis/evaluation/prediction_next_distinct_transformer_refinement_v1/run_refinement.py",
+    "search_runner_sha256": "e6838f1bd50c93f915c9e66a56b6c2256386a4c68ce6dfbb8bf2107c35afd2ad",
+    "postselection_runner_path": "honeypot-analysis/evaluation/prediction_next_distinct_transformer_refinement_v1_retry3/continue_postselection.py",
+    "postselection_runner_sha256": "1aa8cd18db0a78ea97d099e66244a7f2881355755d99eb02382dc424afce71d8",
+    "base_receipt_path": "honeypot-analysis/evaluation/prediction_next_distinct_transformer_refinement_v1_retry3/artifacts-20260823/receipt.json",
+    "base_receipt_self_sha256": "5faf7491b445ae0ea3352f84f20b9e3fe68bc5f1a0ed2b09b28d7fac68c82d0b",
+    "base_receipt_file_sha256": "1926fdd2e3c748507bfc2c6646771c9b7aaf1942bd58842e63b64c3514a8c9d1",
+    "dataset_manifest_sha256": "5b88e7410e4f2ba96ff578cb5e9da025b3028c2e12c6017f08e6bee0a177458d",
+    "baseline_checkpoint_sha256": "362f3903fa508d6034f9e92098d33a9b15711d0d8cf4d8b0b4df4c12e74fdd85",
+    "refined_checkpoint_sha256": "16506e962432f9921d18a514c3a31686a20f9734385ec49439ad2651e4cdd283"
+  },
+  "frozen_contracts": {
+    "task": "P(next observed distinct trusted tactic | prior observed distinct trusted tactics)",
+    "class_vocabulary": [
+      "command-and-control",
+      "credential-access",
+      "defense-evasion",
+      "discovery",
+      "execution",
+      "persistence",
+      "privilege-escalation"
+    ],
+    "dataset_roles": ["train", "selection", "calibration"],
+    "training_role": "train",
+    "selection_role": "selection",
+    "calibration_role": "calibration",
+    "synthetic_and_ood_roles": "evaluation_only_after_candidate_freeze",
+    "sealed_role": "not accessed"
+  },
+  "tuning_boundary": {
+    "train_only": true,
+    "grouped_cv": true,
+    "group_field": "unit_id",
+    "fold_count": 5,
+    "early_stopping_labels": "train-fold validation portions only",
+    "seed_selection_labels": "train grouped-CV only",
+    "loss_selection_labels": "train grouped-CV only",
+    "architecture_selection_labels": "train grouped-CV only",
+    "post_selection_freeze_required": true,
+    "candidate_frozen_before_non_train_reads": true,
+    "source_line_bindings": {
+      "fold_construction": "run_refinement.py:728-729",
+      "baseline_train_cv": "run_refinement.py:743-744",
+      "all_search_stages_train_only": "run_refinement.py:747-768",
+      "current_class_inference_probe_train_only": "run_refinement.py:770-774",
+      "robust_shortlist_train_only": "run_refinement.py:776-784",
+      "seed_stability_train_only": "run_refinement.py:785-788",
+      "candidate_freeze": "run_refinement.py:789",
+      "final_refit_before_external_role_reads": "run_refinement.py:791-792",
+      "post_selection_role_reads": "run_refinement.py:793-803"
+    }
+  },
+  "negative_checks": {
+    "selection_labels_during_architecture_search": false,
+    "selection_labels_during_hyperparameter_selection": false,
+    "selection_labels_during_loss_selection": false,
+    "selection_labels_during_seed_selection": false,
+    "selection_labels_during_early_stopping": false,
+    "calibration_labels_during_tuning": false,
+    "synthetic_labels_during_tuning": false,
+    "ood_labels_during_tuning": false,
+    "sealed_labels_during_tuning": false,
+    "synthetic_data_used_for_training": false,
+    "selection_used_for_tuning": false,
+    "calibration_used_for_tuning": false,
+    "controlled_benchmark_used_for_tuning": false,
+    "sealed_data_accessed": false,
+    "historical_weights_loaded": false
+  },
+  "evidence_artifacts": {
+    "internal_cv_folds": "internal_cv_folds.json",
+    "baseline_cv": "baseline_cv_results.json",
+    "search_stages": [
+      "positional_encoding_results.json",
+      "padding_mask_results.json",
+      "pooling_results.json",
+      "capacity_search_results.json",
+      "max_history_results.json",
+      "loss_study_results.json",
+      "label_smoothing_results.json",
+      "optimization_results.json"
+    ],
+    "robust_shortlist": "robust_shortlist_results.json",
+    "seed_stability": "seed_stability_results.json",
+    "selected_candidate": "selected_candidate.json",
+    "final_model_config": "final_model_config.json",
+    "final_training_history": "final_training_history.json",
+    "post_selection_descriptive": [
+      "selection_post_refinement.json",
+      "calibration_post_refinement.json",
+      "controlled_benchmark_post_refinement.json",
+      "ood_post_refinement.json"
+    ]
+  },
+  "audit_conclusion": "PASS — all architecture, loss, capacity, optimization, label-smoothing, seed, and candidate-selection decisions are bound to grouped TRAIN-only evaluation. Selection, Calibration, controlled synthetic, OOD, and sealed cohorts are not read until after candidate freeze; they remain descriptive and cannot influence tuning.",
+  "limitations": [
+    "This audit verifies the implemented runner boundary and receipt flags; it does not claim blind external validity.",
+    "The base receipt was frozen before this supplemental artifact was added; the completion addendum binds both identities without rewriting the base receipt."
+  ],
+  "prior_artifacts_preserved": true,
+  "production_changed": false,
+  "external_ai_called": false
+}

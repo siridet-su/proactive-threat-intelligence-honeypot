@@ -1,0 +1,51 @@
+{
+  "a_c_d_j_status": {
+    "A": "PASS",
+    "C": "PASS",
+    "D": "PASS",
+    "E": "PASS",
+    "F": "PASS",
+    "G": "PASS",
+    "H": "PASS",
+    "I": "PASS",
+    "J": "PASS"
+  },
+  "active_principal": "97738468999-compute@developer.gserviceaccount.com",
+  "captured_at": "2026-08-23T14:07:42Z",
+  "gate_b1_destructive_cleanup": "PASS_EMPTY_ALLOWLIST_NO_CLEANUP_NEEDED",
+  "gate_b2_non_destructive_shadow_deployment": "PASS_NON_DESTRUCTIVE_SHADOW_DEPLOYMENT",
+  "preservation": {
+    "disk_modified": false,
+    "gcp_resources_created": false,
+    "gcp_resources_deleted": false,
+    "gcp_resources_modified": false,
+    "iam_modified": false,
+    "model_retrained": false,
+    "production_modified": false,
+    "sealed_data_accessed": false,
+    "temperature_refit": false
+  },
+  "prior_ambiguous_resources": 94,
+  "prior_gate_b": "FAIL",
+  "project_scope": "SHARED_OR_UNPROVEN",
+  "remaining_ambiguous_preserve": 4,
+  "resolved_resources": 90,
+  "schema_version": "gcp_gate_b_ownership_resolution.v1",
+  "source_bindings": {
+    "conflict_check": "gcp_non_destructive_deployment_conflict_check.json",
+    "inventory": "honeypot-analysis/evaluation/receipts/gcp_external_gate_resolution_20260823/gcp_final_resource_inventory.json",
+    "inventory_sha256": "d94af7d81f26ba89b802e24d668647475f7947b51c7eb471e85c92e352e69b2f",
+    "new_allowlist": "gcp_verified_deletion_allowlist_v2.json",
+    "new_classification": "gcp_gate_b_resource_classification.json",
+    "previous_allowlist": "honeypot-analysis/evaluation/receipts/gcp_external_gate_resolution_20260823/gcp_verified_deletion_allowlist.json",
+    "previous_allowlist_sha256": "7e40245aa4b34bd611736b91652616db37e701c50a2a55476fdc0d059e785d62"
+  },
+  "status": "COMPLETE_VALID_READ_ONLY",
+  "target": {
+    "project": "project-dff4b23a-3010-4936-a02",
+    "vm": "capstone",
+    "zone": "asia-southeast1-b"
+  },
+  "zero_deletions_authorized": true,
+  "zero_deletions_required": true
+}

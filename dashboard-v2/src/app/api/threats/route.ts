@@ -2,6 +2,79 @@ import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import geoip from 'geoip-lite';
 
+type ThreatIntelResult<T> = {
+  status?: string;
+  summary?: T;
+};
+
+type AbuseIPDBSummary = {
+  abuse_confidence_score?: number;
+  total_reports?: number;
+  country_code?: string;
+  domain?: string;
+  isp?: string;
+  is_tor?: boolean;
+  usage_type?: string;
+};
+
+type VirusTotalSummary = {
+  meaningful_name?: string;
+  reputation?: number;
+  analysis_stats?: {
+    malicious?: number;
+    undetected?: number;
+  };
+};
+
+type DashboardThreatEvent = {
+  [key: string]: unknown;
+  abuseipdb?: unknown;
+  virustotal?: unknown;
+  threat_intel?: {
+    abuseipdb?: ThreatIntelResult<AbuseIPDBSummary>;
+    virustotal?: ThreatIntelResult<VirusTotalSummary>;
+  };
+};
+
+// The worker stores provider-neutral records under threat_intel. Keep this
+// adapter while existing dashboard components consume the earlier provider
+// shapes, so old historical events and new asynchronous results coexist.
+function abuseIPDBForDashboard(event: DashboardThreatEvent) {
+  if (event.abuseipdb) return event.abuseipdb;
+
+  const result = event.threat_intel?.abuseipdb;
+  if (result?.status !== 'complete' || !result.summary) return null;
+
+  return {
+    abuseConfidenceScore: result.summary.abuse_confidence_score ?? 0,
+    totalReports: result.summary.total_reports ?? 0,
+    countryCode: result.summary.country_code ?? null,
+    domain: result.summary.domain ?? null,
+    isp: result.summary.isp ?? null,
+    isTor: result.summary.is_tor ?? false,
+    usageType: result.summary.usage_type ?? null,
+  };
+}
+
+function virusTotalForDashboard(event: DashboardThreatEvent) {
+  if (event.virustotal) return event.virustotal;
+
+  const result = event.threat_intel?.virustotal;
+  if (result?.status !== 'complete' || !result.summary) return null;
+
+  const stats = result.summary.analysis_stats || {};
+  return {
+    attributes: {
+      meaningful_name: result.summary.meaningful_name ?? null,
+      reputation: result.summary.reputation ?? 0,
+      stats: {
+        malicious: stats.malicious ?? 0,
+        undetected: stats.undetected ?? 0,
+      },
+    },
+  };
+}
+
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
@@ -49,6 +122,8 @@ export async function GET() {
         payload: event.payload || '',
         payloadPreview: event.payload || event.event_type || 'Unknown Event',
         severity: event.severity || (event.sensor === 'cowrie' ? 'High' : 'Medium'),
+        abuseipdb: abuseIPDBForDashboard(event),
+        virustotal: virusTotalForDashboard(event),
         geo: {
           lat,
           lon,
@@ -59,8 +134,9 @@ export async function GET() {
     });
 
     return NextResponse.json(threats);
-  } catch (e: any) {
-    console.error('Failed to fetch threats:', e);
-    return NextResponse.json({ error: e.message || 'Failed to fetch threats' }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch threats';
+    console.error('Failed to fetch threats:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

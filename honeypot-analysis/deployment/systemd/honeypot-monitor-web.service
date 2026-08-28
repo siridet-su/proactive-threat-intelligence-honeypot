@@ -1,0 +1,29 @@
+[Unit]
+Description=Honeypot Cloud Pipeline Monitor
+After=network-online.target honeypot-dashboard-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot
+EnvironmentFile=-/etc/honeypot/common.env
+EnvironmentFile=-/etc/honeypot/services/monitor-web.env
+LoadCredential=mongodb-uri
+Environment=MONGODB_URI_FILE=%d/mongodb-uri
+ExecStart=/opt/honeypot/.venv/bin/python -m production.api.monitor_web --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=5
+TimeoutStopSec=120
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
