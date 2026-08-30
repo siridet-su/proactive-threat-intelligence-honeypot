@@ -46,12 +46,25 @@ func enqueueThreatIntelJobs(
 
 	maxLen := cfg.TIJobsMaxLen
 	if maxLen <= 0 {
-		maxLen = 50000
+		maxLen = 5000
+	}
+	dedupTTL := cfg.TIEnqueueDedupTTL
+	if dedupTTL <= 0 {
+		dedupTTL = time.Minute
 	}
 
 	for _, job := range buildThreatIntelJobs(source, eventID, eventType, srcIP, payload) {
+		queued, err := rdb.SetNX(ctx, "ti:queued:"+job.JobID, "1", dedupTTL).Result()
+		if err != nil {
+			return fmt.Errorf("deduplicate job %s: %w", job.JobID, err)
+		}
+		if !queued {
+			continue
+		}
+
 		jobJSON, err := json.Marshal(job)
 		if err != nil {
+			_ = rdb.Del(ctx, "ti:queued:"+job.JobID).Err()
 			return fmt.Errorf("marshal job %s: %w", job.JobID, err)
 		}
 
@@ -64,6 +77,7 @@ func enqueueThreatIntelJobs(
 				"job_json": string(jobJSON),
 			},
 		}).Result(); err != nil {
+			_ = rdb.Del(ctx, "ti:queued:"+job.JobID).Err()
 			return fmt.Errorf("xadd %s: %w", cfg.TIJobsStream, err)
 		}
 	}

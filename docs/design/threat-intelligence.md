@@ -1,7 +1,7 @@
 ---
 title: Threat-intelligence enrichment design
-status: target
-last_verified: 2026-08-25
+status: current
+last_verified: 2026-08-27
 related_adr: ADR-0002, ADR-0003
 ---
 
@@ -34,8 +34,8 @@ Input validation is mandatory:
 
 - AbuseIPDB accepts only public global-unicast IP addresses.
 - VirusTotal accepts only a normalized 64-hex-character SHA-256.
-- Invalid, private, loopback, link-local, multicast, and sensor addresses are
-  recorded as skipped and never queried.
+- Invalid, private, loopback, link-local, multicast, and sensor addresses do
+  not produce a job and are never queried.
 
 ## Event flow
 
@@ -58,27 +58,38 @@ The processor emits a job only after its canonical event is durable. If job
 publication fails, the raw message remains unacknowledged and is retried through
 the existing at-least-once path. The TI worker must make updates idempotently.
 
+### Public-traffic controls
+
+One SSH scanner can produce many Cowrie telemetry events for the same source IP.
+Before publishing, the processor therefore takes a Redis `SETNX` dispatch lock
+at `ti:queued:<job_id>`. The `TI_ENQUEUE_DEDUP_TTL` is one minute by default,
+so an observable is sent to the worker at most once in that window. This limits
+provider requests and queue growth; it does not discard the canonical Cowrie or
+Zeek events in Atlas.
+
+`TI_JOBS_STREAM_MAXLEN` is bounded (default: 5,000 approximate entries) to
+protect Redis on the Pi. Use a dashboard health view to alert well before this
+cap is approached; it is a safety cap, not durable long-term storage.
+
 ## Job contract
 
 ```json
 {
-  "job_id": "provider:type:value_hash",
+  "job_id": "sha256(provider|type|normalized-observable)",
   "provider": "virustotal",
-  "observable": {
-    "type": "sha256",
-    "value": "normalized-value"
-  },
+  "observable_type": "sha256",
+  "observable": "normalized-value",
   "source_event_id": "atlas-event-id",
   "session_id": "optional-source-session",
   "priority": "high",
   "requested_at": "RFC3339 timestamp",
-  "schema_version": 1
+  "schema_version": "v1"
 }
 ```
 
-`value_hash` is a hash of the normalized observable used as the persistent
-deduplication key. The observable value remains available only where required
-for the provider request and analyst correlation.
+`job_id` is the SHA-256 digest of the provider, observable type, and normalized
+observable. The observable value is retained only for the provider request and
+analyst correlation.
 
 ## Storage contract
 
@@ -87,38 +98,41 @@ not rewrite or duplicate raw telemetry.
 
 ```json
 {
-  "_id": "provider:type:value_hash",
+  "_id": "sha256(provider|type|normalized-observable)",
   "provider": "abuseipdb",
   "observable_type": "ip",
   "observable": "example",
-  "status": "found|not_found|skipped|failed|rate_limited",
+  "status": "complete|not_found|skipped|deferred",
   "summary": {
     "risk_level": "unknown|low|medium|high",
     "abuse_confidence_score": 0
   },
-  "retrieved_at": "BSON date",
-  "expires_at": "BSON date",
-  "schema_version": 1
+  "queried_at": "BSON date",
+  "expires_at": "BSON date"
 }
 ```
 
-Canonical event documents contain only enrichment references or a small
-time-stamped projection. The dashboard must represent `pending`, `not_found`,
-`failed`, and `expired` distinctly from a benign verdict.
+Canonical event documents contain a small time-stamped projection under
+`threat_intel.<provider>`. The dashboard must represent an absent projection
+(`pending`), `not_found`, `deferred`, and an expired result distinctly from a
+benign verdict.
 
 ## Cache and quota policy
 
-| Provider/result | Initial cache TTL | Request policy |
+| Provider/result | Current cache TTL | Request policy |
 | --- | --- | --- |
-| AbuseIPDB IP result | 24 hours | Redis + Atlas persistent cache; configurable daily budget |
-| VirusTotal known SHA-256 | 7–30 days | shared token bucket; single worker/concurrency one for community-tier safety |
-| VirusTotal hash not found | 24 hours | negative cache; unknown, never benign |
-| Transient failure | short bounded backoff | no busy retry; retain failure metadata |
+| Successful or not-found provider result | `TI_CACHE_TTL`, 7 days by default | Redis cache backed by `threat_intel` in Atlas |
+| Provider key missing | 1 hour | `skipped`; no provider request |
+| Invalid/private observable | no record | rejected before a job is published |
+| Local budget exhausted or provider HTTP 429 | until the next configured window | `deferred` record is stored and the stream entry is acknowledged |
+| Transient network or provider 5xx failure | no result cache | Leave the stream entry pending for the bounded recovery loop |
 
-The worker reads provider rate-limit headers, honors `Retry-After`, exposes
-remaining budget metrics, and stops requests when the configured budget is
-exhausted. The exact provider plan/limits are configuration, not hard-coded
-assumptions.
+The worker keeps per-provider, UTC minute and day counters in Redis and stops
+requests at the configured local budget. Production configuration is deliberately
+low for this educational public honeypot: 2 requests/minute and 200/day for
+each provider. The values are environment configuration and must be adjusted to
+the actual provider plan. Provider rate-limit headers are not yet interpreted;
+an HTTP 429 is conservatively deferred for one minute.
 
 ## Secrets and network boundary
 

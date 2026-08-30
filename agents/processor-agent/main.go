@@ -47,9 +47,10 @@ type Config struct {
 	EventRetention           time.Duration
 	HardwareMetricsRetention time.Duration
 
-	TIEnabled    bool
-	TIJobsStream string
-	TIJobsMaxLen int64
+	TIEnabled         bool
+	TIJobsStream      string
+	TIJobsMaxLen      int64
+	TIEnqueueDedupTTL time.Duration
 }
 
 type LookupRecord struct {
@@ -114,9 +115,10 @@ func main() {
 
 func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
-	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "50000"), 10, 64)
+	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "5000"), 10, 64)
 	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
 	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
+	tiEnqueueDedupTTL := getenvPositiveDuration("TI_ENQUEUE_DEDUP_TTL", time.Minute)
 
 	return Config{
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
@@ -133,9 +135,10 @@ func loadConfig() Config {
 		EventRetention:           eventRetention,
 		HardwareMetricsRetention: hardwareMetricsRetention,
 
-		TIEnabled:    strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
-		TIJobsStream: getenv("TI_JOBS_STREAM", "ti:jobs"),
-		TIJobsMaxLen: tiJobsMaxLen,
+		TIEnabled:         strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
+		TIJobsStream:      getenv("TI_JOBS_STREAM", "ti:jobs"),
+		TIJobsMaxLen:      tiJobsMaxLen,
+		TIEnqueueDedupTTL: tiEnqueueDedupTTL,
 	}
 }
 
@@ -879,7 +882,7 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "session.id", Value: 1}, {Key: "timestamp", Value: 1}}, Options: options.Index().SetSparse(true)},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
-	if _, err := mw.db.Collection("events").Indexes().CreateMany(ctx, indexes); err != nil {
+	if err := ensureIndexModels(ctx, mw.db.Collection("events"), indexes); err != nil {
 		return err
 	}
 
@@ -887,8 +890,7 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
-	_, err := mw.db.Collection("hardware_metrics").Indexes().CreateMany(ctx, hardwareIndexes)
-	return err
+	return ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes)
 }
 
 func loadLookups(dir string) LookupStore {
