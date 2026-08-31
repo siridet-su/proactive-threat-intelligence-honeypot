@@ -17,13 +17,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => clearInterval(timer);
   }, []);
 
-  const isDashboard = pathname === "/dashboard";
   const isThreatIntel = pathname === "/threat-intel"; // เช็คหน้า Threat Intel หน้าหลัก
 
   // ฟังก์ชัน: จัดการเมื่อกดปุ่ม Log Out
   const handleLogout = () => {
     if (window.confirm("คุณต้องการออกจากระบบและกลับสู่หน้าแรกใช่หรือไม่?")) {
-      router.push("/");
+      void fetch("/api/auth", { method: "DELETE" }).finally(() => router.push("/"));
     }
   };
 
@@ -105,7 +104,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </button>
 
                 <span className="text-white font-medium text-lg">
-                  {pathname.includes('/threat-intel/') ? 'Hacker Profile Analysis' : isThreatIntel ? 'Threat Intelligence' : 'System Overview'}
+                  {pathname.includes('/threat-intel/') ? 'Session Intelligence Detail' : isThreatIntel ? 'Threat Intelligence' : 'System Overview'}
                 </span>
             </div>
 

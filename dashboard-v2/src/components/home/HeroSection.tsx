@@ -18,7 +18,7 @@ export default function HeroSection() {
       {/* Subtitle */}
       <p className="text-slate-400 text-lg md:text-xl leading-relaxed mb-10 max-w-2xl">
         Advanced Cyber Intelligence & Decoy Operations. Neutralize threats by
-        becoming the target they can't resist. High-fidelity honeypot systems for the
+        becoming the target they can&apos;t resist. High-fidelity honeypot systems for the
         modern enterprise.
       </p>
 

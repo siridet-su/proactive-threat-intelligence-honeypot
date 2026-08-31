@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 export default function Navbar() {
   return (
     <nav className="w-full flex items-center justify-between py-6 px-8 absolute top-0 left-0 right-0 z-50">
@@ -11,8 +9,8 @@ export default function Navbar() {
       {/* Status & Icons */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 border border-slate-700 bg-slate-900/50 px-4 py-1.5 rounded-full text-xs text-slate-300 font-mono tracking-widest">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          SYSTEM STATUS
+          <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+          READ-ONLY MODE
         </div>
         <button className="text-slate-400 hover:text-white transition">
           {/* ใช้ไอคอนจำลอง หรือใส่ Heroicons ที่นี่ */}

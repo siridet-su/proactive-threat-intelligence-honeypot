@@ -10,19 +10,24 @@ export default function LoginForm() {
   const router = useRouter();
 
   const handleAuthenticate = (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  // ตรวจสอบข้อมูลม็อกอัพ
-  if (operatorId === "OP_4725" && accessKey === "password098") {
+    e.preventDefault();
     setError("");
-    
-    // เอาคอมเมนต์ออกเพื่อให้คำสั่งทำงาน (และสามารถลบหรือปิดตัว alert ออกได้เลยเพื่อความลื่นไหล)
-    router.push("/dashboard"); 
-    
-  } else {
-    setError("ACCESS DENIED: Invalid Operator ID or Access Key.");
-  }
-};
+    void fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ operator_id: operatorId, access_key: accessKey }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(typeof body.error === "string" ? body.error : "Authentication failed.");
+        }
+        router.push("/dashboard");
+      })
+      .catch((authError: unknown) => {
+        setError(authError instanceof Error ? authError.message : "Authentication failed.");
+      });
+  };
 
   return (
     <div className="relative w-full max-w-md p-[1px] rounded-lg bg-gradient-to-b from-purple-500/30 to-transparent">
@@ -37,7 +42,7 @@ export default function LoginForm() {
 
         {/* Title */}
         <h2 className="text-xl text-white font-semibold tracking-[0.2em] mb-1">ACCESS CONTROL</h2>
-        <p className="text-[10px] text-slate-500 font-mono mb-8 tracking-widest">SECURE TERMINAL NODE: 0x8F-B22</p>
+        <p className="text-[10px] text-slate-500 font-mono mb-8 tracking-widest">READ-ONLY API SESSION</p>
 
         <form onSubmit={handleAuthenticate} className="w-full flex flex-col gap-5">
           
@@ -103,7 +108,7 @@ export default function LoginForm() {
         <div className="mt-8 text-center flex flex-col gap-2">
           <a href="#" className="text-[10px] text-slate-400 font-mono hover:text-purple-400 transition-colors">FORGOT ACCESS KEY?</a>
           <p className="text-[9px] text-slate-600 font-mono mt-4 max-w-[250px] leading-relaxed">
-            WARNING: UNAUTHORIZED ACCESS ATTEMPTS ARE MONITORED AND LOGGED. FEDERAL PROSECUTION MAY APPLY.
+            WARNING: DEPLOYMENT AUTHENTICATION MUST BE CONFIGURED BEFORE THIS INTERFACE IS EXPOSED.
           </p>
         </div>
 

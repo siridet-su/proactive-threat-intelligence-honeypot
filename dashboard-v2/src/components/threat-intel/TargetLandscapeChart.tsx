@@ -2,20 +2,32 @@
 
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
-const data = [
-  { name: "Bot", value: 45, color: "#d946ef" }, // สีชมพูอมม่วง
-  { name: "APT", value: 25, color: "#a855f7" }, // สีม่วง
-  { name: "Script", value: 20, color: "#64748b" }, // สีเทา
-  { name: "Other", value: 10, color: "#d97706" }, // สีส้ม
-];
+export interface LandscapeDatum {
+  name: string;
+  value: number;
+  color: string;
+}
 
-export default function TargetLandscapeChart() {
+export default function TargetLandscapeChart({
+  data,
+  totalLabel,
+}: {
+  data: LandscapeDatum[];
+  totalLabel: string;
+}) {
+  if (!data.length) {
+    return (
+      <div className="h-48 flex items-center justify-center text-center text-[11px] text-slate-500">
+        No verified session classification data.
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-48 flex items-center justify-center">
-      {/* ข้อความตรงกลางโดนัท */}
       <div className="absolute flex flex-col items-center justify-center text-center pointer-events-none z-10">
-        <span className="text-2xl font-bold text-white">1.2k</span>
-        <span className="text-[9px] text-slate-400 tracking-wider">DAILY PEAKS</span>
+        <span className="text-2xl font-bold text-white">{totalLabel}</span>
+        <span className="text-[9px] text-slate-400 tracking-wider">SHOWN SESSIONS</span>
       </div>
 
       <ResponsiveContainer width="100%" height="100%">
