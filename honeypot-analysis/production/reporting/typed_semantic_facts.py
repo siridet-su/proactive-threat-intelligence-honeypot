@@ -19,6 +19,7 @@ from production.reporting.typed_semantic_parser import (
     extract_transfer_semantics,
     extract_typed_semantics,
 )
+from production.semantics.command_operations import parse_command_operation
 from production.utils.serialization import stable_id, stable_json
 
 
@@ -508,6 +509,7 @@ def _absolute_candidate(value: str, working_directory: str) -> str:
         not raw
         or any(character in raw for character in ("$", "`", "*", "?", "[", "]"))
         or raw.startswith("~")
+        or any(part == ".." for part in raw.split("/"))
     ):
         return ""
     if raw.startswith("/"):
@@ -519,6 +521,20 @@ def _absolute_candidate(value: str, working_directory: str) -> str:
 
         return posixpath.normpath(posixpath.join(working_directory, raw))
     return ""
+
+
+def _safe_observed_cwd(value: str) -> str:
+    """Return a cwd only when its literal provenance is unambiguous."""
+
+    raw = _clean(value)
+    if (
+        not raw.startswith("/")
+        or any(character in raw for character in ("$", "`", "*", "?", "[", "]"))
+        or raw.startswith("~")
+        or any(part == ".." for part in raw.split("/"))
+    ):
+        return ""
+    return raw
 
 
 def _path_resolutions(
@@ -721,9 +737,13 @@ def _command_facts(
     for observation in observations:
         if not isinstance(observation, dict):
             continue
-        observed_cwd = _clean(observation.get("working_directory_observed"))
+        raw_observed_cwd = _clean(observation.get("working_directory_observed"))
+        observed_cwd = _safe_observed_cwd(raw_observed_cwd)
+        invalid_observed_cwd = bool(raw_observed_cwd and not observed_cwd)
         compound_index = int(observation.get("compound_command_index") or 0)
-        if observed_cwd.startswith("/"):
+        if invalid_observed_cwd:
+            effective, cwd_status = "", "unknown"
+        elif observed_cwd.startswith("/"):
             effective, cwd_status = observed_cwd, "observed"
         elif candidates_by_compound.get(compound_index):
             effective = candidates_by_compound[compound_index]
@@ -733,8 +753,87 @@ def _command_facts(
             cwd_status = "confirmed"
         else:
             effective, cwd_status = "", "unknown"
+        typed_observation = deepcopy(observation)
+        if cwd_status in {"observed", "confirmed"}:
+            # Canonical relationship observations may carry an unresolved
+            # relative path entity because they intentionally do not maintain
+            # shell cwd state.  In the typed shadow representation, resolve
+            # only that literal entity from a confirmed/observed cwd.  The
+            # normalized value is then rebuilt by ``extract_typed_semantics``
+            # into the same content-addressed entity for transfer, chmod, and
+            # execution.  Dynamic/traversal paths remain unresolved.
+            source_entities = typed_observation.get("entities")
+            if isinstance(source_entities, dict):
+                for values in source_entities.values():
+                    if not isinstance(values, list):
+                        continue
+                    for entity in values:
+                        if not isinstance(entity, dict):
+                            continue
+                        if _clean(entity.get("entity_type")) != "path":
+                            continue
+                        original = _clean(
+                            entity.get("original_value")
+                            or entity.get("normalized_value")
+                        )
+                        resolved = _absolute_candidate(original, effective)
+                        if not resolved:
+                            continue
+                        entity["normalized_value"] = resolved
+                        entity["candidate_normalized_value"] = resolved
+                        entity["uncertain"] = False
+                        entity["linkable"] = True
+                        entity["uncertainty_reason"] = "none"
+        # The canonical relationship graph intentionally keeps literal action
+        # extraction conservative.  For the approved REPLAY-04 representation
+        # path, a direct executable path may be recovered only when the
+        # preceding cwd is confirmed/observed and the shared parser resolves
+        # it without shell expansion or traversal ambiguity.  This remains a
+        # shadow typed fact and never grants canonical authority.
+        if cwd_status in {"observed", "confirmed"}:
+            direct = parse_command_operation(
+                _clean(observation.get("command")),
+                working_directory=effective,
+                working_directory_status=cwd_status,
+            )
+            if (
+                direct.get("parse_status") == "parsed"
+                and "execution_attempt" in (direct.get("operation_types") or [])
+                and "execution_attempt" not in (typed_observation.get("action_types") or [])
+            ):
+                typed_observation["action_types"] = [
+                    *(typed_observation.get("action_types") or []),
+                    "execution_attempt",
+                ]
+                source_entities = typed_observation.setdefault("entities", {})
+                existing = source_entities.setdefault("executed_paths", [])
+                for entity in (direct.get("entities") or {}).get("executed_paths", []):
+                    if (
+                        isinstance(entity, dict)
+                        and entity.get("linkable") is True
+                        and _absolute_candidate(
+                            _clean(entity.get("raw_value")), effective
+                        )
+                    ):
+                        # ``parse_command_operation`` returns neutral path
+                        # records; adapt them to the typed parser's closed
+                        # source-entity shape before merging.  This remains a
+                        # shadow representation and carries no authority.
+                        normalized = _clean(entity.get("normalized_value"))
+                        original = _clean(entity.get("raw_value"))
+                        existing.append({
+                            "entity_type": "path",
+                            "normalized_value": normalized,
+                            "original_value": original,
+                            "uncertain": False,
+                            "linkable": True,
+                            "uncertainty_reason": "none",
+                            "candidate_normalized_value": normalized,
+                            "source_entity_ref": "",
+                            "redacted_components": False,
+                        })
         extracted = extract_typed_semantics(
-            observation,
+            typed_observation,
             working_directory=effective,
             working_directory_status=cwd_status,
             policy=policy,
@@ -760,6 +859,7 @@ def _command_facts(
         entities = deepcopy(extracted["entities"])
         abstentions = _texts([
             *extracted["parse"]["abstention_reasons"],
+            *( ["identity_unresolved"] if invalid_observed_cwd else [] ),
             *(
                 ["identity_unresolved"]
                 if any(

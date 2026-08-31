@@ -1375,33 +1375,44 @@
         </div>`;
     }
 
-    // Fields: session_ttp_correlations, session_ttp_correlation_summary [2]
+    // Fields: correlated_ttp_hypotheses (canonical), with the legacy
+    // session_ttp_correlations alias retained for older API snapshots [2]
     function ttpCorrelationPanel(correlations, summary) {
         if (!correlations?.length) {
-            return `<div class="card p-5"><h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">TTP Correlations</h3><p class="text-xs text-zinc-600 italic">No correlated techniques found.</p></div>`;
+            return `<div class="card p-5"><h3 class="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">Contextual TTP Correlations</h3><p class="text-xs text-zinc-600 italic">No contextual correlated techniques found.</p></div>`;
         }
-        const sorted = [...correlations].sort((a,b)=>(b.score||0)-(a.score||0));
+        const strengthOf = item => {
+            const value = Number(item?.strength ?? item?.confidence ?? item?.score);
+            return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+        };
+        const sorted = [...correlations].sort((a,b)=>strengthOf(b)-strengthOf(a));
+        const semantics = summary?.confidence_semantics || summary?.strength_semantics ||
+            sorted[0]?.strength_semantics || 'developer-defined heuristic policy strength, not probability';
+        const matchedCount = summary?.correlation_count ?? summary?.total_matched ?? sorted.length;
         return `<div class="card overflow-hidden">
             <div class="card-header">
                 <div>
-                    <h3 class="text-sm font-semibold text-zinc-100 tracking-tight">TTP Correlations</h3>
-                    <p class="text-xs text-zinc-600 mt-0.5">${summary?.total_matched||sorted.length} techniques matched · ${summary?.coverage_pct!=null?Math.round(summary.coverage_pct*100)+'% coverage':'—'}</p>
+                    <h3 class="text-sm font-semibold text-zinc-100 tracking-tight">Contextual TTP Correlations</h3>
+                    <p class="text-xs text-zinc-600 mt-0.5">${matchedCount} contextual matches · report-only · ${semantics}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    ${summary?.high_confidence!=null?`<span class="chip">${summary.high_confidence} high-conf</span>`:''}
+                    <span class="chip">non-authoritative</span>
                 </div>
             </div>
             <div class="p-5 space-y-3">
                 ${sorted.map(t=>{
-                    const s = Math.round((t.score||0)*100);
+                    const s = Math.round(strengthOf(t)*100);
                     const barColor = s>=70?'#3b82f6':s>=50?'#f59e0b':'#52525b';
+                    const techniqueId = t.ttp || t.ttp_id || t.technique_id || '—';
+                    const techniqueName = t.technique_name || t.name || techniqueId;
+                    const matchedCommands = t.matched_commands || t.commands || [];
                     return `<div>
                         <div class="flex items-start gap-3 mb-1.5">
-                            <span class="ttp-node ttp-node-highlight flex-shrink-0" style="margin-top:1px">${t.ttp_id||'—'}</span>
+                            <span class="ttp-node ttp-node-highlight flex-shrink-0" style="margin-top:1px">${techniqueId}</span>
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-center justify-between gap-2">
-                                    <span class="text-xs font-medium text-zinc-300 truncate">${t.name||'Unknown Technique'}</span>
-                                    <span class="text-xs font-mono font-semibold flex-shrink-0" style="color:${barColor}">${s}%</span>
+                                    <span class="text-xs font-medium text-zinc-300 truncate">${techniqueName}</span>
+                                    <span class="text-xs font-mono font-semibold flex-shrink-0" style="color:${barColor}">${s}/100 heuristic strength</span>
                                 </div>
                                 <div class="text-[10px] text-zinc-600 mt-0.5 capitalize">${t.tactic||'—'}</div>
                             </div>
@@ -1409,7 +1420,7 @@
                         <div class="score-bar-track ml-16">
                             <div class="score-bar-fill" style="width:${s}%;background:${barColor}"></div>
                         </div>
-                        ${t.matched_commands?.length?`<div class="ml-16 mt-1.5 flex flex-wrap gap-1">${t.matched_commands.slice(0,3).map(c=>`<span class="chip" style="font-family:JetBrains Mono,monospace;font-size:10px">${c}</span>`).join('')}</div>`:''}
+                        ${matchedCommands?.length?`<div class="ml-16 mt-1.5 flex flex-wrap gap-1">${matchedCommands.slice(0,3).map(c=>`<span class="chip" style="font-family:JetBrains Mono,monospace;font-size:10px">${c}</span>`).join('')}</div>`:''}
                     </div>`;
                 }).join('<div class="divider my-2"></div>')}
             </div>
@@ -2223,7 +2234,9 @@
         const weightInfluenceScope = cp.weight_influence_scope || '';
         const weightPolicy = cp.external_seed_weight_policy || {};
         const sourceBreakdown = cp.source_breakdown || {};
-        const ttpCorrelations = cp.session_ttp_correlations || [];
+        const ttpCorrelations = Array.isArray(cp.correlated_ttp_hypotheses)
+            ? cp.correlated_ttp_hypotheses
+            : (cp.session_ttp_correlations || []);
         const ttpSummary = cp.session_ttp_correlation_summary || {};
         const feedbackSummary = cp.feedback_summary || {};
         const calibrationStatus = cp.calibration_status || {};
@@ -2359,7 +2372,7 @@
                         </div>
                     </div>
 
-                    <!-- TTP Correlations (session_ttp_correlations [2]) -->
+                    <!-- Contextual TTP Correlations (correlated_ttp_hypotheses [2]) -->
                     ${ttpCorrelationPanel(ttpCorrelations, ttpSummary)}
 
                     <!-- Command Timing Analysis (inter-command interval chart) -->

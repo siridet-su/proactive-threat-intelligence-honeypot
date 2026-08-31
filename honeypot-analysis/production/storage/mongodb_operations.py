@@ -257,66 +257,32 @@ class MongoDBRuntimeOperations:
     ) -> List[str]:
         """Return deterministic session heads satisfying ``match``.
 
-        The self lookup deliberately considers every unprocessed predecessor,
-        including one that is delayed or currently leased. This is the MongoDB
-        equivalent of SQLite's correlated ``NOT EXISTS`` head-of-line guard.
-        The subsequent update remains a compare-and-set operation, so two
-        workers may observe a candidate but only one can claim it.
+        The first reduction deliberately considers every unprocessed event,
+        including one that is delayed or currently leased.  Grouping the
+        earliest row for each session before applying ``match`` is equivalent
+        to SQLite's correlated ``NOT EXISTS`` head-of-line guard, while
+        avoiding a correlated self lookup over the complete claimable
+        backlog.  The subsequent update remains a compare-and-set operation,
+        so two workers may observe a candidate but only one can claim it.
         """
 
         pipeline: List[Dict[str, Any]] = [
-            {"$match": match},
+            {"$match": {"processed": False}},
             {
-                "$lookup": {
-                    "from": "events",
-                    "let": {
-                        "candidate_session": "$session_id",
-                        "candidate_received": "$received_at",
-                        "candidate_id": "$event_id",
-                    },
-                    "pipeline": [
-                        {
-                            "$match": {
-                                "$expr": {
-                                    "$and": [
-                                        {"$eq": ["$session_id", "$$candidate_session"]},
-                                        {"$eq": ["$processed", False]},
-                                        {
-                                            "$or": [
-                                                {
-                                                    "$lt": [
-                                                        "$received_at",
-                                                        "$$candidate_received",
-                                                    ]
-                                                },
-                                                {
-                                                    "$and": [
-                                                        {
-                                                            "$eq": [
-                                                                "$received_at",
-                                                                "$$candidate_received",
-                                                            ]
-                                                        },
-                                                        {
-                                                            "$lt": [
-                                                                "$event_id",
-                                                                "$$candidate_id",
-                                                            ]
-                                                        },
-                                                    ]
-                                                },
-                                            ]
-                                        },
-                                    ]
-                                }
-                            }
-                        },
-                        {"$limit": 1},
-                    ],
-                    "as": "predecessors",
+                "$sort": {
+                    "session_id": 1,
+                    "received_at": 1,
+                    "event_id": 1,
                 }
             },
-            {"$match": {"predecessors": {"$eq": []}}},
+            {
+                "$group": {
+                    "_id": "$session_id",
+                    "head": {"$first": "$$ROOT"},
+                }
+            },
+            {"$replaceRoot": {"newRoot": "$head"}},
+            {"$match": match},
             {"$sort": {"received_at": 1, "event_id": 1}},
             {"$project": {"_id": 1}},
         ]

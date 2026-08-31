@@ -1,7 +1,7 @@
 {
   "classification_policy": {
     "authority_decision_contract_version": "command_authority_decision.v1",
-    "authority_decision_sha256": "872c0cb3840b47d7239c9fdf8920d700bc0fed95a7c9e93cdaf62565fe961c86",
+    "authority_decision_sha256": "6b31f407941c0a4850c7080688c8ef0699bc5ddd234bf0e4e088068856598c18",
     "compound_command_splitter": "production.classification.classification_pipeline.split_compound_command",
     "drop_rule_securebert_disagreements": true,
     "mitre_cache_path": "data/feeds/mitre_attack_cache.json",
@@ -12,7 +12,7 @@
     "rule_policy_version": "2026-08-11-operation-aware-v3",
     "securebert_candidate_threshold": 0.55,
     "trust_policy_path": "production/classification/trust.py",
-    "trust_policy_sha256": "4c7af019a6ff39b5b35fd8e6929571f69c3574ad27d6fb254db02f940de2f885",
+    "trust_policy_sha256": "9cc8529f025c31b368f0dc653a4de241bb668fd4e59b177f5e6297309bb63056",
     "trusted_history_builder_path": "production/prediction/trusted_history.py",
     "trusted_history_builder_sha256": "531e0193f13d7238f8f200b2b6b5612578998f4932db42d84b52fcc879431772",
     "trusted_history_maximum_phases": 8,
@@ -23,7 +23,7 @@
   },
   "classifier": {
     "adapter": "production.classification.securebert_classifier.SecureBertCommandClassifier",
-    "adapter_sha256": "72c7cb7a4c2a9f85f141d8eb39a12b24414e0cd861f463ac6cb9e4811cc622be",
+    "adapter_sha256": "33a05e4d9fbd0cc15516e10c4f61b5e8a2ca7a659f795024162bb100a8975a86",
     "checkpoint_id": "securebert_ttp_model_v2/checkpoint-6765",
     "checkpoint_sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
     "device": "cpu",
@@ -41,7 +41,9 @@
     "max_length": 128,
     "operation_parser_sha256": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1",
     "parameter_count": 149755588,
-    "pipeline_sha256": "a8e283664af15f40c13e6bf091eeea439c2f28bb83011b4dbf1dd432b27d780e",
+    "pipeline_sha256": "4e648bb99039883627878da1c78842f990cf6c57ae2c54cf6f7c2f56eaa167d6",
+    "runtime_asset_contract_path": "configs/securebert_runtime_asset_contract.v1.json",
+    "runtime_asset_contract_sha256": "c956e79ccd5cb26fb2c5038dcc5f2ba505db04b89ac2b93363c1db07e8a57be2",
     "splitter_sha256": "68b5e6348af55bd309cac993a702317d120f80c4a8ac57d75302f83ff56e1a9f"
   },
   "dependency_lock": {
@@ -60,19 +62,19 @@
   "schema_version": "next_behavior_classifier_environment.v3",
   "source_identity": {
     "files": {
-      "configs/classification_rules.trusted.json": "32744defdf1746d23764772ad20cf8fd4c2630c04f63ed85cbb4bbfc28f7d7fc",
-      "data/feeds/mitre_attack_cache.json": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
-      "production/classification/authority.py": "872c0cb3840b47d7239c9fdf8920d700bc0fed95a7c9e93cdaf62565fe961c86",
-      "production/classification/classification_pipeline.py": "a8e283664af15f40c13e6bf091eeea439c2f28bb83011b4dbf1dd432b27d780e",
-      "production/classification/environment.py": "3da4ef8b3c2fe775ccfd9a2a146b1787da8c7bb4a1addcf5e98ffb2bce31436f",
-      "production/classification/securebert_classifier.py": "72c7cb7a4c2a9f85f141d8eb39a12b24414e0cd861f463ac6cb9e4811cc622be",
-      "production/classification/trust.py": "4c7af019a6ff39b5b35fd8e6929571f69c3574ad27d6fb254db02f940de2f885",
-      "production/prediction/next_behavior_runtime.py": "bd1fd2b022812043654c944319b444c0cb2c5ce7647fb7a00056db53329b63cc",
+      "production/classification/securebert_classifier.py": "33a05e4d9fbd0cc15516e10c4f61b5e8a2ca7a659f795024162bb100a8975a86",
+      "production/classification/classification_pipeline.py": "4e648bb99039883627878da1c78842f990cf6c57ae2c54cf6f7c2f56eaa167d6",
+      "production/classification/authority.py": "6b31f407941c0a4850c7080688c8ef0699bc5ddd234bf0e4e088068856598c18",
+      "production/classification/environment.py": "cecd7f69844cd602fc8d4db42c6d75f5bd79379f240719b9ebd832464672c1de",
+      "production/reproduction/next_behavior/classifier_assets.py": "0ba5a55c25e783345f0729641af72a8c8329c001b6b493d26960503e2a02d240",
+      "production/semantics/command_operations.py": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1",
       "production/prediction/trusted_history.py": "531e0193f13d7238f8f200b2b6b5612578998f4932db42d84b52fcc879431772",
-      "production/reproduction/next_behavior/classifier_assets.py": "943d420fc10682ca419de4b91dbe505be94ecb40b1800ad80826f8fbac50b7f5",
-      "production/semantics/command_operations.py": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1"
+      "production/prediction/next_behavior_runtime.py": "bd1fd2b022812043654c944319b444c0cb2c5ce7647fb7a00056db53329b63cc",
+      "configs/classification_rules.trusted.json": "32744defdf1746d23764772ad20cf8fd4c2630c04f63ed85cbb4bbfc28f7d7fc",
+      "production/classification/trust.py": "9cc8529f025c31b368f0dc653a4de241bb668fd4e59b177f5e6297309bb63056",
+      "data/feeds/mitre_attack_cache.json": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c"
     },
     "schema_version": "classifier_source_identity.v1",
-    "sha256": "eef2c25304ffa2c8094d8a60c04672c50a4f4758f8e5255d81d4d1f0c0afad04"
+      "sha256": "087e8f076170f7eb0c22e9370ff80088c392df467836a79bf8a386be7a1e7208"
   }
 }

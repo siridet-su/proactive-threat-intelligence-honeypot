@@ -1,0 +1,21 @@
+[Unit]
+Description=Honeypot Mongo hot/cold retention read-only planner (inactive template)
+Documentation=README.md
+ConditionPathExists=/etc/honeypot/retention-policy.json
+ConditionPathExists=/etc/honeypot/retention-planner.enabled
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/honeypot-mongo-retention run --automation --config /etc/honeypot/retention-policy.json --protected-env-file /etc/honeypot/processor.env --protected-env-file /etc/honeypot-agent.env
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/honeypot-cold-archive
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# This unit is an intentionally inactive template. The delivered policy has
+# automatic_archive=false and automatic_purge=false, so it only plans. Do not
+# enable or alter it as part of retention finalization.

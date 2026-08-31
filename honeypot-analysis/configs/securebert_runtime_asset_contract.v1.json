@@ -1,0 +1,67 @@
+{
+  "schema_version": "securebert_runtime_asset_contract.v1",
+  "contract_id": "private-modernbert-attack-command-classifier-v1",
+  "legacy_project_identifier": "securebert",
+  "verified_model_architecture": "ModernBertForSequenceClassification",
+  "model_type": "modernbert",
+  "published_securebert_lineage": "UNPROVEN",
+  "task": "SINGLE_LABEL_MULTICLASS",
+  "num_labels": 196,
+  "parameter_count": 149755588,
+  "max_model_tokens": 128,
+  "confidence_semantics": "uncalibrated_top_softmax_score",
+  "temperature_applied": false,
+  "checkpoint": {
+    "path": "checkpoint-6765/model.safetensors",
+    "sha256": "dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b"
+  },
+  "model_config": {
+    "files": {
+      "config.json": "5e8ceaf5a403d630e78d8c49982f97b519b227977f4880166d3168f38988b90b",
+      "checkpoint-6765/config.json": "5e8ceaf5a403d630e78d8c49982f97b519b227977f4880166d3168f38988b90b"
+    },
+    "architecture_family": "ModernBertForSequenceClassification",
+    "model_type": "modernbert"
+  },
+  "tokenizer": {
+    "files": {
+      "tokenizer.json": "e0a696f1fbf0f2c7d212e8b9e133250d19bd1c7e5bc34fc91c59d008894dc7b1",
+      "tokenizer_config.json": "cbea6a0ec8bf4a66475f458a359223ec17f1ac36b2f5797036a76140daa065de",
+      "checkpoint-6765/tokenizer.json": "e0a696f1fbf0f2c7d212e8b9e133250d19bd1c7e5bc34fc91c59d008894dc7b1",
+      "checkpoint-6765/tokenizer_config.json": "cbea6a0ec8bf4a66475f458a359223ec17f1ac36b2f5797036a76140daa065de"
+    },
+    "normalizer": "NFC",
+    "lowercase": false,
+    "truncation_side": "right",
+    "padding_side": "right",
+    "special_tokens": {
+      "unk": 50280,
+      "cls": 50281,
+      "sep": 50282,
+      "pad": 50283,
+      "mask": 50284
+    }
+  },
+  "label_space": {
+    "path": "label_mapping.json",
+    "sha256": "53a6fca070ce44d15731cf654475e1e66a17d0c1f924021ab597d192ba22f16b",
+    "label_count": 196,
+    "ordered_labels_sha256": "0a64ed0711edc9d91837f0b089f65c544ef1fd14352e503247f6fa5e30b8de36"
+  },
+  "preprocessing": {
+    "strip": true,
+    "split_operators": ["\\n", ";", "&&", "||"],
+    "split_pipes": false,
+    "lowercase": false,
+    "path_replacement": false,
+    "argument_removal": false
+  },
+  "provenance": {
+    "checkpoint_bytes": "VERIFIED",
+    "tokenizer_bytes": "VERIFIED",
+    "label_order": "VERIFIED",
+    "training_corpus": "MISSING",
+    "training_split": "MISSING",
+    "published_securebert_derivation": "UNPROVEN"
+  }
+}

@@ -16,6 +16,7 @@ from typing import Any, Dict
 
 from production.reproduction.next_behavior.classifier_assets import (
     ClassifierAssetError,
+    load_securebert_runtime_contract,
     validate_classifier_manifest,
     verify_classifier_source_identity,
 )
@@ -94,6 +95,12 @@ def load_classifier_environment(
         required["basis_commit"] = freeze.get("basis_commit")
     else:
         required["source_identity"] = (receipt.get("source_identity") or {}).get("sha256")
+        required["runtime_asset_contract_path"] = classifier.get(
+            "runtime_asset_contract_path"
+        )
+        required["runtime_asset_contract_sha256"] = classifier.get(
+            "runtime_asset_contract_sha256"
+        )
     if any(not _clean(value) for value in required.values()):
         raise ClassifierAssetError("classifier environment provenance is incomplete")
     configured_revision = _clean(os.getenv("DEPLOYED_COMMIT"))
@@ -146,6 +153,23 @@ def load_classifier_environment(
             asset = root / str(relative)
             if not relative or not asset.is_file() or _sha256(asset) != str(expected):
                 raise ClassifierAssetError(f"classifier environment asset mismatch: {relative}")
+        contract_path_text = _clean(classifier.get("runtime_asset_contract_path"))
+        # v3 requires the explicit runtime contract.  Older v2 receipts may
+        # legitimately predate that field and remain readable as historical
+        # evidence; when a v2 receipt carries the fields, verify them too.
+        if receipt_schema == "next_behavior_classifier_environment.v3" or contract_path_text:
+            contract_path = root / contract_path_text
+            if not contract_path.is_file() or contract_path.is_symlink():
+                raise ClassifierAssetError(
+                    "classifier environment runtime asset contract is unavailable"
+                )
+            if _sha256(contract_path) != _clean(
+                classifier.get("runtime_asset_contract_sha256")
+            ):
+                raise ClassifierAssetError(
+                    "classifier environment runtime asset contract mismatch"
+                )
+            load_securebert_runtime_contract(contract_path)
         policy_path = root / _clean(policy.get("rule_policy_path"))
         try:
             policy_document = json.loads(policy_path.read_text(encoding="utf-8"))
@@ -187,6 +211,17 @@ def environment_identity(environment: Dict[str, Any]) -> Dict[str, Any]:
         "trust_policy_sha256": _clean(policy.get("trust_policy_sha256")),
         "mitre_cache_sha256": _clean(policy.get("mitre_cache_sha256")),
         "securebert_checkpoint_sha256": _clean(classifier.get("checkpoint_sha256")),
+        "runtime_asset_contract_path": _clean(
+            classifier.get("runtime_asset_contract_path")
+        ),
+        "runtime_asset_contract_sha256": _clean(
+            classifier.get("runtime_asset_contract_sha256")
+        ),
+        "model_architecture": "ModernBertForSequenceClassification",
+        "model_type": "modernbert",
+        "model_task": "SINGLE_LABEL_MULTICLASS",
+        "model_confidence_semantics": "uncalibrated_top_softmax_score",
+        "model_temperature_applied": False,
         "authority_decision_contract_version": _clean(
             policy.get("authority_decision_contract_version")
         ),

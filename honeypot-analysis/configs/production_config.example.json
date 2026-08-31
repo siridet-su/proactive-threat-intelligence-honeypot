@@ -137,7 +137,9 @@
     "bert_min_confidence": 0.55,
     "keyword_fallback_on_low_confidence": true,
     "keyword_fallback_on_error": true,
-    "rule_review_mode": "reviewed_only"
+    "rule_review_mode": "reviewed_only",
+    "s1_advisory_enabled": false,
+    "s1_advisory_model_path": "models/command_ttp_s1/20260831_cclr2"
   },
   "classification_rules_path": "configs/classification_rules.trusted.json",
   "classifier_environment_path": "configs/next_behavior_classifier_environment.v1.json",
@@ -149,7 +151,7 @@
   "prediction_snapshot_keep_latest_per_session": true,
   "enable_session_ttp_correlation": true,
   "session_ttp_correlation_policy_path": "configs/session_ttp_correlation.trusted.json",
-  "session_ttp_knowledge_pack_paths": ["configs/session_ttp_knowledge_pack.generated.json"],
+  "session_ttp_knowledge_pack_paths": [],
   "calibration_policy": {
     "enabled": true,
     "output_path": "calibration_output.json",

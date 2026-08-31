@@ -69,6 +69,10 @@ from production.utils.http_security import safe_correlation_id
 from production.prediction.session_features import build_session_features
 from production.correlation.session_ttp_correlation import apply_session_ttp_correlations, load_knowledge as load_session_ttp_correlation_knowledge
 from production.classification.securebert_classifier import load_securebert_classifier
+from production.classification.s1_advisory_classifier import (
+    S1AdvisoryClassifier,
+    S1AdvisoryModelError,
+)
 from production.storage import open_storage
 from production.storage.contract import EVENT_FAILURE_TYPES
 from production.storage.session_provenance import (
@@ -261,11 +265,18 @@ class SessionWorker:
         }
         self._session_latest_snapshots: Dict[str, Dict[str, Any]] = {}
         self._session_prediction_snapshots: Dict[str, List[Dict[str, Any]]] = {}
-        self.bert_fn = load_securebert_classifier(config)
         self.classifier_environment = load_classifier_environment(
             getattr(config, "classifier_environment_path", ""),
             verify_assets=True,
         )
+        # Bind the verified environment before constructing the model.  A
+        # wrong/unverified model must never be loaded ahead of the source,
+        # policy, and runtime-asset identity gates.
+        self.bert_fn = load_securebert_classifier(
+            config,
+            classifier_environment=self.classifier_environment,
+        )
+        self.s1_advisory_classifier = self._load_s1_advisory_classifier()
         self.classifier = None
         self.session_ttp_correlation_policy = self._load_session_ttp_correlation_policy()
         self.prediction_engine = self._new_prediction_engine()
@@ -289,6 +300,69 @@ class SessionWorker:
         )
         save_feed_status(self.storage, config)
         self.monitor = self._new_monitor()
+
+    def _load_s1_advisory_classifier(self) -> Optional[S1AdvisoryClassifier]:
+        """Load the optional frozen S1 model without changing authority.
+
+        The model is opt-in through ``classification_policy``.  A configured
+        path is fail-closed: a missing or tampered package must not silently
+        turn off the requested advisory integration or alter deterministic
+        rule classification.  The default policy has no path, preserving the
+        existing runtime behavior.
+        """
+
+        policy = self.config.classification_policy or {}
+        path_text = str(policy.get("s1_advisory_model_path") or "").strip()
+        enabled = policy.get("s1_advisory_enabled")
+        if enabled is False or (not path_text and enabled is not True):
+            return None
+        if not path_text:
+            raise WorkerError(
+                "s1 advisory classifier is enabled but its package path is missing"
+            )
+        try:
+            return S1AdvisoryClassifier(
+                path_text,
+                repository_root=Path(__file__).resolve().parents[2],
+            )
+        except (OSError, S1AdvisoryModelError) as exc:
+            raise WorkerError("s1 advisory classifier package failed closed") from exc
+
+    def _classify_with_s1_advisory(self, command: str) -> List[Dict[str, Any]]:
+        """Run the canonical classifier and attach a non-authoritative S1 view."""
+
+        if self.classifier is None:
+            return []
+        events = self.classifier.classify(command)
+        advisory = self.s1_advisory_classifier
+        if advisory is None:
+            return events
+        try:
+            prediction = advisory.predict(command)
+        except Exception:
+            # Inference failures are advisory-only failures.  Preserve the
+            # canonical event and expose a stable fail-closed status without
+            # leaking exception text or manufacturing a TTP.
+            prediction = {
+                "schema_version": "s1_advisory_prediction.v1",
+                "status": "inference_error",
+                "predicted_technique": None,
+                "topk": [],
+                "decision_score": None,
+                "score_type": "linear_svc_decision_margin",
+                "calibrated_probability": None,
+                "authority": "advisory_only",
+                "trusted_eligible": False,
+                "canonical_write_allowed": False,
+                "response_authority": False,
+            }
+        return [
+            {
+                **event,
+                "s1_advisory": dict(prediction),
+            }
+            for event in events
+        ]
 
     def _session_source(self) -> str:
         return normalize_session_source(
@@ -704,7 +778,9 @@ class SessionWorker:
             mitre_db=self.mitre_db,
             enrichment_db=self.enrichment_db,
             bert_fn=self.bert_fn,
-            classification_fn=self.classifier.classify if self.classifier else None,
+            classification_fn=(
+                self._classify_with_s1_advisory if self.classifier else None
+            ),
             prediction_fn=self._predict_next_for_alert,
             on_alert=None,
             # The durable worker invokes the close stage explicitly after the
@@ -738,6 +814,8 @@ class SessionWorker:
 
     def _apply_session_ttp_correlations(self, state: Any) -> None:
         if not self.config.enable_session_ttp_correlation:
+            setattr(state, "observed_trusted_ttps", [])
+            setattr(state, "correlated_ttp_hypotheses", [])
             setattr(state, "session_ttp_correlations", [])
             setattr(
                 state,
@@ -752,6 +830,16 @@ class SessionWorker:
             state,
             "session_evidence_graph_summary",
             updated.get("session_evidence_graph_summary") or {},
+        )
+        setattr(
+            state,
+            "observed_trusted_ttps",
+            updated.get("observed_trusted_ttps") or [],
+        )
+        setattr(
+            state,
+            "correlated_ttp_hypotheses",
+            updated.get("correlated_ttp_hypotheses") or [],
         )
         setattr(state, "session_ttp_correlations", updated.get("session_ttp_correlations") or [])
         setattr(

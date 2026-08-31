@@ -510,6 +510,10 @@ class ProductionConfig:
         "keyword_fallback_on_low_confidence": True,
         "keyword_fallback_on_error": True,
         "rule_review_mode": "reviewed_only",
+        # Optional frozen S1 LinearSVC metadata.  Disabled by default so the
+        # established deterministic/legacy classifier path is unchanged.
+        "s1_advisory_enabled": False,
+        "s1_advisory_model_path": "",
     })
     classification_rules_path: str = "configs/classification_rules.trusted.json"
     classifier_environment_path: str = "configs/next_behavior_classifier_environment.v1.json"
@@ -589,6 +593,9 @@ class ProductionConfig:
         "command_pattern_command_limit": 6,
         "command_pattern_token_limit": 3,
         "emit_observational_signals": True,
+        "confidence_semantics": "developer_defined_heuristic_policy_strength_not_probability",
+        "strength_semantics": "developer_defined_heuristic_policy_strength_not_probability",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "field_weights": {
             "hassh_fingerprint": 0.45,
             "ja3_fingerprint": 0.35,

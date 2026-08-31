@@ -16,6 +16,9 @@ from production.utils.sensitive_data import (
     redact_for_log,
     sanitize_url,
 )
+from production.correlation.semantics import (
+    resolve_confidence_semantics,
+)
 
 
 @dataclass(frozen=True)
@@ -343,6 +346,9 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                 ),
             )
         )
+        view["confidence_semantics"] = resolve_confidence_semantics(
+            item.get("confidence_semantics") or payload.get("confidence_semantics")
+        )
     elif table == "campaigns":
         view.update(
             _pick(
@@ -361,6 +367,9 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
     elif table == "campaign_sessions":
         view.update(_pick(item, ("campaign_id", "session_id", "confidence")))
         view["match_reasons"] = item.get("match_reasons") or []
+        view["confidence_semantics"] = resolve_confidence_semantics(
+            item.get("confidence_semantics") or payload.get("confidence_semantics")
+        )
     elif table == "feed_status":
         view.update(
             {
@@ -477,6 +486,30 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     public_commands = _redact_public_command_text(
         {"commands": detail.get("commands") or []}
     )["commands"]
+    raw_correlations = detail.get("session_ttp_correlations") or []
+    public_correlations = []
+    for item in raw_correlations:
+        if not isinstance(item, Mapping):
+            continue
+        projected = dict(item)
+        projected["confidence_semantics"] = resolve_confidence_semantics(
+            item.get("confidence_semantics")
+        )
+        public_correlations.append(projected)
+    raw_correlation_summary = detail.get("session_ttp_correlation_summary") or {}
+    public_correlation_summary = (
+        dict(raw_correlation_summary)
+        if isinstance(raw_correlation_summary, Mapping)
+        else {}
+    )
+    public_correlation_summary["confidence_semantics"] = resolve_confidence_semantics(
+        public_correlation_summary.get("confidence_semantics")
+    )
+    observed_trusted_ttps = _redact_public_command_text(
+        detail.get("observed_trusted_ttps")
+        or session_payload.get("observed_trusted_ttps")
+        or []
+    )
     output: Dict[str, Any] = {
         "ok": True,
         "timestamp": detail.get("timestamp"),
@@ -489,8 +522,10 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "classification_events": _redact_public_command_text(
             detail.get("classification_events") or []
         ),
-        "session_ttp_correlations": detail.get("session_ttp_correlations") or [],
-        "session_ttp_correlation_summary": detail.get("session_ttp_correlation_summary") or {},
+        "observed_trusted_ttps": observed_trusted_ttps,
+        "correlated_ttp_hypotheses": public_correlations,
+        "session_ttp_correlations": public_correlations,
+        "session_ttp_correlation_summary": public_correlation_summary,
         "tactics": detail.get("tactics") or [],
         "ttps": detail.get("ttps") or [],
         "ttp_command_map": _redact_public_command_text(
