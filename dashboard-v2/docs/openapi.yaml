@@ -1,0 +1,330 @@
+openapi: 3.1.0
+info:
+  title: Honeypot dashboard-v2 BFF
+  version: 0.1.0-source-audit
+  description: >-
+    Source-backed description of the dashboard-v2 same-origin BFF. See API.md
+    for the complete field and semantic contract. GET routes are read-only;
+    auth methods only establish or expire a dashboard cookie.
+servers:
+  - url: /
+    description: Same-origin dashboard deployment
+tags:
+  - name: health
+  - name: monitor
+  - name: dashboard
+  - name: auth
+components:
+  securitySchemes:
+    DashboardSession:
+      type: apiKey
+      in: cookie
+      name: dashboard_v2_session
+      description: HMAC-backed HttpOnly dashboard session cookie.
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 1000}
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema: {type: integer, minimum: 0, maximum: 5000}
+    SessionId:
+      name: session_id
+      in: query
+      required: true
+      schema: {type: string, maxLength: 256}
+    OptionalSessionId:
+      name: session_id
+      in: query
+      required: false
+      schema: {type: string, maxLength: 256}
+    Filter:
+      name: filter
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [all, wrong, useful, high_confidence_wrong, low_confidence_useful, missing_actual, classification_error, missing_transition_evidence, policy_review, needs_review]
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: {type: string}
+        route: {type: string}
+      additionalProperties: true
+    HealthResponse:
+      type: object
+      required: [ok, service, timestamp]
+      properties:
+        ok: {type: boolean}
+        service: {type: string}
+        timestamp: {type: string, format: date-time}
+    JsonRecord:
+      type: object
+      additionalProperties: true
+    TableResponse:
+      type: object
+      required: [items, limit, table, timestamp]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/JsonRecord'}}
+        limit: {type: integer}
+        table: {type: string}
+        timestamp: {type: string, format: date-time}
+    SessionsResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        timestamp: {type: string, format: date-time}
+        summary: {$ref: '#/components/schemas/JsonRecord'}
+        sessions: {type: array, items: {$ref: '#/components/schemas/JsonRecord'}}
+        selected_session_id: {type: [string, 'null']}
+        error: {type: string}
+      additionalProperties: true
+    EventsResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        timestamp: {type: string, format: date-time}
+        session_id: {type: string}
+        events: {type: array, items: {$ref: '#/components/schemas/JsonRecord'}}
+        error: {type: string}
+      additionalProperties: true
+    SessionDetailResponse:
+      allOf:
+        - {$ref: '#/components/schemas/JsonRecord'}
+        - type: object
+          properties:
+            ok: {type: boolean}
+            session_id: {type: string}
+            timestamp: {type: string, format: date-time}
+    PredictionResponse:
+      type: object
+      properties:
+        item: {$ref: '#/components/schemas/JsonRecord'}
+        current_prediction: {$ref: '#/components/schemas/JsonRecord'}
+        response_guidance: {$ref: '#/components/schemas/JsonRecord'}
+        session_id: {type: string}
+        timestamp: {type: string, format: date-time}
+      additionalProperties: true
+    AiAdvisoryResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        status: {type: string}
+        session_id: {type: string}
+        advisory: {$ref: '#/components/schemas/JsonRecord'}
+        metrics: {$ref: '#/components/schemas/JsonRecord'}
+        timestamp: {type: string, format: date-time}
+      additionalProperties: true
+    DecisionResponse:
+      type: object
+      properties:
+        response_guidance: {$ref: '#/components/schemas/JsonRecord'}
+        session_id: {type: string}
+        timestamp: {type: string, format: date-time}
+      additionalProperties: true
+    FeedbackReviewResponse:
+      type: object
+      properties:
+        filter: {type: string}
+        items: {type: array, items: {$ref: '#/components/schemas/JsonRecord'}}
+        review: {$ref: '#/components/schemas/JsonRecord'}
+        timestamp: {type: string, format: date-time}
+      additionalProperties: true
+    ClassificationEvaluationResponse:
+      type: object
+      properties:
+        report: {$ref: '#/components/schemas/JsonRecord'}
+        timestamp: {type: string, format: date-time}
+      additionalProperties: true
+    ExternalSeedHealthResponse:
+      type: object
+      properties:
+        external_seed_health: {$ref: '#/components/schemas/JsonRecord'}
+        timestamp: {type: string, format: date-time}
+      additionalProperties: true
+    AuthRequest:
+      type: object
+      required: [operator_id, access_key]
+      properties:
+        operator_id: {type: string}
+        access_key: {type: string, writeOnly: true}
+    AuthSuccess:
+      type: object
+      required: [ok]
+      properties:
+        ok: {type: boolean}
+  responses:
+    Unauthorized:
+      description: Dashboard session missing or invalid.
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+    NotFound:
+      description: Route or requested data was not found.
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+    BadGateway:
+      description: Upstream response was not safe JSON or exceeded 8 MiB.
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+    Unavailable:
+      description: Upstream unavailable or origin not configured safely.
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+paths:
+  /api/health:
+    get:
+      tags: [health]
+      security: [{DashboardSession: []}]
+      summary: Monitor liveness
+      x-upstream-path: /health
+      responses: {200: {description: Liveness, content: {application/json: {schema: {$ref: '#/components/schemas/HealthResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/health/live:
+    get:
+      tags: [health]
+      security: [{DashboardSession: []}]
+      summary: Explicit monitor liveness
+      x-upstream-path: /health/live
+      responses: {200: {description: Liveness, content: {application/json: {schema: {$ref: '#/components/schemas/HealthResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/health/ready:
+    get:
+      tags: [health]
+      security: [{DashboardSession: []}]
+      summary: Monitor storage readiness
+      x-upstream-path: /health/ready
+      responses: {200: {description: Ready, content: {application/json: {schema: {$ref: '#/components/schemas/HealthResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {description: Not ready or upstream unavailable}}
+  /api/live:
+    get:
+      tags: [health]
+      security: [{DashboardSession: []}]
+      summary: Liveness alias
+      x-upstream-path: /live
+      responses: {200: {description: Liveness, content: {application/json: {schema: {$ref: '#/components/schemas/HealthResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/ready:
+    get:
+      tags: [health]
+      security: [{DashboardSession: []}]
+      summary: Readiness alias
+      x-upstream-path: /ready
+      responses: {200: {description: Ready, content: {application/json: {schema: {$ref: '#/components/schemas/HealthResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {description: Not ready or upstream unavailable}}
+  /api/sessions:
+    get:
+      tags: [monitor]
+      security: [{DashboardSession: []}]
+      summary: Bounded session snapshot
+      x-upstream-path: /api/sessions
+      parameters: [{$ref: '#/components/parameters/OptionalSessionId'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Offset'}]
+      responses: {200: {description: Session snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/SessionsResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/session:
+    get:
+      tags: [monitor]
+      security: [{DashboardSession: []}]
+      summary: Session detail
+      x-upstream-path: /api/session
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {200: {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/SessionDetailResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '404': {$ref: '#/components/responses/NotFound'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/events:
+    get:
+      tags: [monitor]
+      security: [{DashboardSession: []}]
+      summary: Global or session event view
+      x-upstream-path: /api/events
+      parameters: [{$ref: '#/components/parameters/OptionalSessionId'}]
+      responses: {200: {description: Event view, content: {application/json: {schema: {$ref: '#/components/schemas/EventsResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '404': {$ref: '#/components/responses/NotFound'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/ai-advisory:
+    get:
+      tags: [monitor]
+      security: [{DashboardSession: []}]
+      summary: Stored AI advisory detail
+      x-upstream-path: /api/ai-advisory
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {200: {description: Advisory detail, content: {application/json: {schema: {$ref: '#/components/schemas/AiAdvisoryResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '404': {$ref: '#/components/responses/NotFound'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/predictions/current:
+    get:
+      tags: [dashboard]
+      security: [{DashboardSession: []}]
+      summary: Current prediction
+      x-upstream-path: /predictions/current
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {200: {description: Prediction and guidance, content: {application/json: {schema: {$ref: '#/components/schemas/PredictionResponse'}}}}, '400': {description: session_id required}, '401': {$ref: '#/components/responses/Unauthorized'}, '404': {$ref: '#/components/responses/NotFound'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/decisions/current:
+    get:
+      tags: [dashboard]
+      security: [{DashboardSession: []}]
+      summary: Current response guidance
+      x-upstream-path: /decisions/current
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {200: {description: Response guidance, content: {application/json: {schema: {$ref: '#/components/schemas/DecisionResponse'}}}}, '400': {description: session_id required}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/feedback-review:
+    get:
+      tags: [dashboard]
+      security: [{DashboardSession: []}]
+      summary: Analyst feedback review
+      x-upstream-path: /feedback-review
+      parameters: [{$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Filter'}]
+      responses: {200: {description: Feedback review, content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackReviewResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/classification-evaluation:
+    get:
+      tags: [dashboard]
+      security: [{DashboardSession: []}]
+      summary: Classification evaluation
+      x-upstream-path: /classification-evaluation
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses: {200: {description: Evaluation report, content: {application/json: {schema: {$ref: '#/components/schemas/ClassificationEvaluationResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/external-seed-health:
+    get:
+      tags: [dashboard]
+      security: [{DashboardSession: []}]
+      summary: External seed artifact health
+      x-upstream-path: /external-seed-health
+      responses: {200: {description: Artifact health, content: {application/json: {schema: {$ref: '#/components/schemas/ExternalSeedHealthResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/events-table:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Generic event rows, x-upstream-path: /events, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/sessions-table:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Generic session rows, x-upstream-path: /sessions, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/alerts:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Alert rows, x-upstream-path: /alerts, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/jobs:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Analysis job rows, x-upstream-path: /jobs, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/reports:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Report rows, x-upstream-path: /reports, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/feed-status:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Feed status rows, x-upstream-path: /feed-status, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/enrichment-records:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Enrichment rows, x-upstream-path: /enrichment-records, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/enrichment-jobs:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Enrichment job rows, x-upstream-path: /enrichment-jobs, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/prediction-snapshots:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Prediction snapshot rows, x-upstream-path: /prediction-snapshots, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/prediction-backtests:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Backtest run rows, x-upstream-path: /prediction-backtests, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/prediction-calibrations:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Calibration run rows, x-upstream-path: /prediction-calibrations, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/analyst-feedback:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Analyst feedback rows, x-upstream-path: /analyst-feedback, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/classification-review-labels:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Review label rows, x-upstream-path: /classification-review-labels, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/observables:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Observable rows, x-upstream-path: /observables, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/observable-sightings:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Observable sighting rows, x-upstream-path: /observable-sightings, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/threat-hunt-jobs:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Threat hunt job rows, x-upstream-path: /threat-hunt-jobs, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/session-links:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Session link rows, x-upstream-path: /session-links, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/campaigns:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Campaign rows, x-upstream-path: /campaigns, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/campaign-sessions:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Campaign membership rows, x-upstream-path: /campaign-sessions, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/webhooks:
+    get: {tags: [dashboard], security: [{DashboardSession: []}], summary: Webhook delivery rows, x-upstream-path: /webhooks, parameters: [{$ref: '#/components/parameters/Limit'}], responses: {200: {description: Table rows, content: {application/json: {schema: {$ref: '#/components/schemas/TableResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}}
+  /api/auth:
+    post:
+      tags: [auth]
+      summary: Establish dashboard session
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AuthRequest'}}}}
+      responses: {200: {description: Authenticated, headers: {Set-Cookie: {schema: {type: string}, description: HttpOnly dashboard session cookie (value intentionally not documented)}}, content: {application/json: {schema: {$ref: '#/components/schemas/AuthSuccess'}}}}, '400': {description: Invalid JSON request}, '401': {description: Invalid operator credentials}, '503': {description: Authentication is not configured}}
+    delete:
+      tags: [auth]
+      summary: Expire dashboard session
+      responses: {200: {description: Cookie expired, content: {application/json: {schema: {$ref: '#/components/schemas/AuthSuccess'}}}}}
