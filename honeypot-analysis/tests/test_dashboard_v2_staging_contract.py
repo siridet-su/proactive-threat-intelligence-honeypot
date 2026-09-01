@@ -68,6 +68,7 @@ def test_staging_wrapper_has_no_production_restart_or_unbounded_root_input() -> 
     assert 'artifact" == "$INCOMING/dashboard-v2-staging-${commit}.tar.gz"' in wrapper
     assert 'DEPLOY_GROUP="dashboard-staging-deploy"' in wrapper
     assert 'staging incoming ownership/mode is unsafe' in wrapper
+    assert 'switch_pointer "releases/$release_name"' in wrapper
     assert "--no-same-owner" in wrapper
     assert "--no-same-permissions" in wrapper
     assert "mv -Tf" in wrapper

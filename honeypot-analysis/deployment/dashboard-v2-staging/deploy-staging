@@ -217,6 +217,8 @@ write_receipt() {
   /usr/bin/mv -Tf -- "$receipt_tmp" "$RELEASE_ROOT/shared/last-deployment.json"
 }
 
+switch_pointer "releases/$release_name"
+
 if ! "$SYSTEMCTL" restart "$SERVICE"; then
   restart_failed=1
 else
