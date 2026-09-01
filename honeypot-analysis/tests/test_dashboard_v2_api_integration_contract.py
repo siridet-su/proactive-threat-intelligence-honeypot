@@ -52,6 +52,9 @@ def test_dashboard_v2_proxy_does_not_expose_sensitive_command_route() -> None:
     assert 'origin.pathname === "/"' in proxy
     assert '"/sessions"' in proxy
     assert '"/events"' in proxy
+    assert '"session": "/api/session-detail"' in proxy
+    assert 'new Set(["sessions", "events"])' in proxy
+    assert '"?limit=1000"' not in proxy
 
 
 def test_dashboard_v2_response_guidance_is_fail_closed_and_manual_only() -> None:

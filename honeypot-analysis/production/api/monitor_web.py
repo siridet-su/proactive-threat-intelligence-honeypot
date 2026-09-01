@@ -9,6 +9,7 @@ import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html import escape
 from http import HTTPStatus
@@ -22,6 +23,7 @@ from production.api.dashboard_api import (
     _current_decision_payload,
     _current_prediction_payload,
     _external_seed_health_payload,
+    _unverified_guidance_payload,
 )
 from production.api.security import (
     api_row_view,
@@ -615,11 +617,9 @@ def _storage_session_rows(
     limit: int,
 ) -> Tuple[List[Dict[str, Any]], str]:
     if table == "prediction_snapshots":
-        prediction_loader = getattr(
-            storage,
-            "list_prediction_snapshots_for_session",
-            None,
-        )
+        prediction_loader = getattr(storage, "list_dashboard_session_detail_prediction_snapshots", None)
+        if prediction_loader is None:
+            prediction_loader = getattr(storage, "list_prediction_snapshots_for_session", None)
         if prediction_loader is not None:
             try:
                 rows = prediction_loader(session_id, limit=limit)
@@ -666,23 +666,39 @@ def _storage_enrichment_rows(
     normalized = [(str(t), str(v)) for t, v in observables if t and v]
     records: List[Dict[str, Any]] = []
     errors: List[str] = []
-    for observable_type, observable_value in normalized:
+    batch_loader = getattr(storage, "list_enrichment_records_for_observables", None)
+    if callable(batch_loader):
         try:
-            record = storage.get_enrichment_record(
-                observable_type,
-                observable_value,
-                allow_stale=True,
-            )
-        except Exception as exc:
-            errors.append(
-                _storage_error(
-                    f"enrichment record {observable_type}",
-                    exc,
+            records = [
+                dict(record)
+                for record in batch_loader(
+                    normalized,
+                    allow_stale=True,
                 )
-            )
-            continue
-        if record:
-            records.append(dict(record))
+                or []
+            ]
+        except Exception as exc:
+            errors.append(_storage_error("enrichment records batch query", exc))
+    else:
+        # Compatibility for injected pre-contract test doubles only. Runtime
+        # adapters implement the bounded batch method above.
+        for observable_type, observable_value in normalized:
+            try:
+                record = storage.get_enrichment_record(
+                    observable_type,
+                    observable_value,
+                    allow_stale=True,
+                )
+            except Exception as exc:
+                errors.append(
+                    _storage_error(
+                        f"enrichment record {observable_type}",
+                        exc,
+                    )
+                )
+                continue
+            if record:
+                records.append(dict(record))
 
     session_jobs, session_jobs_error = _storage_session_rows(
         storage,
@@ -2034,6 +2050,182 @@ def _session_observables(payload: Dict[str, Any], session_id: str) -> List[Tuple
         if isinstance(item, dict):
             add("hash", item.get("value"))
     return observables
+
+
+DASHBOARD_SESSION_DETAIL_SCHEMA = "monitor.dashboard_session_detail.v1"
+DASHBOARD_SESSION_DETAIL_TABLE_LIMITS = {
+    "events": MAX_SESSION_EVENTS,
+    "analysis_jobs": 50,
+    "reports": 50,
+    "prediction_snapshots": 50,
+}
+
+
+def _fail_closed_session_guidance(
+    session_id: str,
+    guidance: Any,
+) -> Dict[str, Any]:
+    """Expose stored guidance while making the public safety default explicit."""
+
+    if not isinstance(guidance, dict) or not guidance:
+        result = _unverified_guidance_payload(
+            session_id,
+            ["stored response guidance is unavailable"],
+        )
+    else:
+        result = copy.deepcopy(guidance)
+    safety = result.get("safety") if isinstance(result.get("safety"), dict) else {}
+    manual = result.get("requires_manual_approval")
+    auto_execute = result.get("safe_to_auto_execute")
+    if not isinstance(manual, bool):
+        manual = safety.get("manual_approval_required")
+    if not isinstance(auto_execute, bool):
+        auto_execute = safety.get("automatic_execution")
+    result["requires_manual_approval"] = manual if isinstance(manual, bool) else True
+    result["safe_to_auto_execute"] = (
+        bool(auto_execute)
+        if result["requires_manual_approval"] is False and isinstance(auto_execute, bool)
+        else False
+    )
+    if result["requires_manual_approval"]:
+        result["safe_to_auto_execute"] = False
+    return result
+
+
+def load_dashboard_session_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Load the bounded session contract consumed by dashboard-v2.
+
+    This endpoint intentionally has a smaller initial contract than the
+    historical monitor detail view. Every selected collection is queried by
+    the exact session identity through the storage adapter; no generic table
+    route, global scan, correlation join, or observable enrichment lookup is
+    part of this request.
+    """
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {
+            "ok": False,
+            "error_code": "missing_session_id",
+            "error": "session_id is required",
+            "timestamp": utc_now(),
+        }
+    if len(clean_session_id) > 256 or any(
+        ord(character) < 0x20 or ord(character) == 0x7F
+        for character in clean_session_id
+    ):
+        return {
+            "ok": False,
+            "error_code": "malformed_session_id",
+            "error": "session_id is malformed",
+            "session_id": clean_session_id[:256],
+            "timestamp": utc_now(),
+        }
+    try:
+        storage = _storage or _open_monitor_storage(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("storage open", exc),
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+
+    session_rows, session_error = _storage_session_rows(
+        storage,
+        "sessions",
+        clean_session_id,
+        1,
+    )
+    if not session_rows:
+        return {
+            "ok": False,
+            "error_code": "session_not_found",
+            "error": session_error or "session was not found",
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+
+    def load_table(table: str) -> Tuple[str, List[Dict[str, Any]], str]:
+        rows, error = _storage_session_rows(
+            storage,
+            table,
+            clean_session_id,
+            DASHBOARD_SESSION_DETAIL_TABLE_LIMITS[table],
+        )
+        return table, rows, error
+
+    related: Dict[str, List[Dict[str, Any]]] = {}
+    errors: Dict[str, str] = {}
+    with ThreadPoolExecutor(
+        max_workers=len(DASHBOARD_SESSION_DETAIL_TABLE_LIMITS)
+    ) as pool:
+        futures = [pool.submit(load_table, table) for table in DASHBOARD_SESSION_DETAIL_TABLE_LIMITS]
+        for future in futures:
+            table, rows, error = future.result()
+            related[table] = rows
+            errors[table] = error
+
+    job_rows = related["analysis_jobs"]
+    report_rows = related["reports"]
+    event_rows = related["events"]
+    prediction_rows = related["prediction_snapshots"]
+    latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
+    latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
+    selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
+    selected["command_count"] = count_command_events(event_rows)
+    payload = selected["payload"]
+    report_payload = _report_payload(selected.get("report_row"))
+    historical_guidance = _historical_response_guidance_payload(report_payload)
+    response_guidance = _fail_closed_session_guidance(
+        clean_session_id,
+        historical_guidance,
+    )
+    detail = {
+        "ok": True,
+        "schema_version": DASHBOARD_SESSION_DETAIL_SCHEMA,
+        "timestamp": utc_now(),
+        "session_id": clean_session_id,
+        "overview": _session_overview(selected),
+        "source_geo": selected.get("geo") or (
+            _extract_geo(payload) if selected.get("src_ip_is_public") else {}
+        ),
+        "source_geo_context": selected.get("source_geo_context") or selected.get("geo_context") or {},
+        "observables": [
+            {"type": observable_type, "value": observable_value}
+            for observable_type, observable_value in _session_observables(payload, clean_session_id)
+        ],
+        "commands": payload.get("commands") or [],
+        "classification_events": payload.get("classification_events") or [],
+        "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
+        "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],
+        "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
+        "session_ttp_correlation_summary": payload.get("session_ttp_correlation_summary") or {},
+        "tactics": payload.get("tactics") or [],
+        "ttps": payload.get("ttps") or [],
+        "ttp_command_map": payload.get("ttp_command_map") or {},
+        "enrichment_status": payload.get("enrichment_status") or {},
+        "session_payload": payload,
+        "events_table_rows": [_row_with_payload(row) for row in event_rows],
+        "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
+        "latest_prediction_snapshot": _row_with_payload(prediction_rows[0]) if prediction_rows else {},
+        "analysis_jobs": [_row_with_payload(row) for row in job_rows],
+        "reports": [_row_with_payload(row) for row in report_rows],
+        "report_summary": _report_summary(report_payload, {}),
+        "response_guidance": response_guidance,
+        "errors": {
+            table: message
+            for table, message in errors.items()
+            if message
+        },
+    }
+    return _sanitize_public(detail)
 
 
 def load_session_detail(
@@ -4923,6 +5115,23 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
                 detail,
             )
+            return
+        if parsed.path == "/api/session-detail":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_dashboard_session_detail(
+                self.monitor_config,
+                session_id=session_id,
+            )
+            if detail.get("ok"):
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {"missing_session_id", "malformed_session_id"}:
+                status = HTTPStatus.BAD_REQUEST
+            elif detail.get("error_code") == "session_not_found":
+                status = HTTPStatus.NOT_FOUND
+            else:
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(status, session_detail_view(detail))
             return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)

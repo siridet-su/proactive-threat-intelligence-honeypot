@@ -17,7 +17,7 @@ browser page/component
   -> canonical datastore/artifacts selected by the deployed monitor service
 ```
 
-The browser never receives a Mongo URI and never connects to MongoDB directly. The BFF reads `DASHBOARD_API_ORIGIN` and the optional server-only `DASHBOARD_API_READ_TOKEN`; it does not accept an origin or credential from the browser. A configured origin must be HTTP(S) and must not contain userinfo. The default monitor origin is the active `monitor_web` service. On the current `127.0.0.1:8090` deployment, the BFF uses the bounded generic table routes first for `/api/sessions`, `/api/session`, and `/api/events` because the corresponding structured routes currently return incompatible responses; other origins retain structured-route probing with compatibility fallback. `dashboard_api` implements the table and semantic dashboard paths but does not implement those four monitor-specific paths; pointing the BFF at it is therefore a deployment compatibility decision, not a second browser contract.
+The browser never receives a Mongo URI and never connects to MongoDB directly. The BFF reads `DASHBOARD_API_ORIGIN` and the optional server-only `DASHBOARD_API_READ_TOKEN`; it does not accept an origin or credential from the browser. A configured origin must be HTTP(S) and must not contain userinfo. The default monitor origin is the active `monitor_web` service. On the current `127.0.0.1:8090` deployment, the BFF uses bounded generic table routes first for `/api/sessions` and `/api/events` because those structured routes currently return incompatible responses; the browser `/api/session` key forwards directly to the new bounded `/api/session-detail` monitor route. Other origins retain structured-route probing with compatibility fallback. `dashboard_api` implements the table and semantic dashboard paths but does not implement the monitor-specific `/api/sessions`, `/api/session-detail`, `/api/events`, or `/api/ai-advisory` paths; pointing the BFF at it is therefore a deployment compatibility decision, not a second browser contract.
 
 All `GET /api/...` requests require a valid `dashboard_v2_session` cookie before route dispatch. The cookie is an HMAC-SHA256 value derived from server-side operator credentials and `DASHBOARD_V2_SESSION_SECRET`; it is HttpOnly, SameSite=Lax, path-scoped, eight hours on login, and Secure in production. `POST /api/auth` and `DELETE /api/auth` are the only unauthenticated browser methods. The upstream monitor may additionally require a server-owned bearer read token; a loopback monitor with no configured read token can allow anonymous upstream reads, but that does not bypass the BFF cookie.
 
@@ -41,7 +41,7 @@ Authentication errors are `503` when server auth configuration is incomplete, `4
 | GET | `/api/live` | `/live` | Liveness alias | `monitor_web`; `{ok,service,timestamp}` | None |
 | GET | `/api/ready` | `/ready` | Readiness alias | `monitor_web` health check; `{ok,service,timestamp}` | None |
 | GET | `/api/sessions` | `/api/sessions` | Bounded session snapshot | `sessions`, plus bounded jobs/reports/events/evidence joins; `{ok,timestamp,summary,sessions,selected_session_id,error}` | Dashboard, Threat Intel |
-| GET | `/api/session` | `/api/session` | One-session detail | `sessions` and bounded related tables; `session_detail_view` projection | Threat Intel session detail |
+| GET | `/api/session` | `/api/session-detail` | One-session detail | Exact `sessions` lookup plus bounded session-scoped `events`, `analysis_jobs`, `reports`, and `prediction_snapshots`; `session_detail_view` projection | Threat Intel session detail |
 | GET | `/api/events` | `/api/events` | Global or session event view | `events`; `{ok,timestamp,events,error}` | Dashboard freshness/activity |
 | GET | `/api/ai-advisory` | `/api/ai-advisory` | Stored advisory status/detail | advisory/outbox/report records; `{ok,status,advisory,metrics,...}` | Threat Intel session detail |
 | GET | `/api/predictions/current` | `/predictions/current` | Current model snapshot and guidance | `prediction_snapshots` plus feedback; `{item,current_prediction,response_guidance,...}` | Threat Intel session detail |
@@ -145,12 +145,12 @@ The detailed entries below use synthetic examples. They contain no production id
 - Purpose: return one session and bounded related evidence/work products.
 - Authentication: dashboard session plus upstream read authorization.
 - Parameters/body: required `session_id`; no body.
-- Response: public `session_detail_view` with `ok,timestamp,session_id,overview,source_geo,observables,commands,classification_events,observed_trusted_ttps,correlated_ttp_hypotheses,session_ttp_correlations,tactics,ttps,enrichment_status,session,events,events_table_rows,alerts,prediction_snapshots,analyst_feedback,session_links,threat_hunt_jobs,campaigns,enrichment_records,enrichment_jobs,analysis_jobs,reports,report_summary,response_guidance,errors`. The public projection redacts command-shaped sensitive values.
+- Response: public `session_detail_view` with `ok,schema_version,timestamp,session_id,overview,source_geo,observables,commands,classification_events,observed_trusted_ttps,correlated_ttp_hypotheses,session_ttp_correlations,tactics,ttps,enrichment_status,session,events,events_table_rows,prediction_snapshots,analysis_jobs,reports,report_summary,response_guidance,errors`. The public projection redacts command-shaped sensitive values. The current schema version is `monitor.dashboard_session_detail.v1`.
 - Important fields and authority: `observed_trusted_ttps` is the trusted observed-evidence lane; correlations are hypotheses with explicit semantics; alerts are historical/legacy; model/advisory fields are not authoritative evidence.
-- Errors: `404` for missing `session_id` or unavailable session; per-table errors are reported under `errors` when the detail remains usable; BFF errors also apply.
-- Pagination/filter: no client pagination; backend bounds events and related rows (for example, 50 jobs/reports/predictions and a bounded event set).
+- Errors: `400` for missing or malformed `session_id`, `404` for an unavailable session, and per-table errors under `errors` when the detail remains usable; BFF errors also apply.
+- Pagination/filter: no client pagination; every related query is session-scoped after the exact session identity lookup. The backend bounds events and related rows (50 analysis jobs, reports, and prediction snapshots, plus the configured bounded event set); it does not accept a collection/table selector or perform global enrichment/correlation joins.
 - Frontend consumer: `/threat-intel/[id]` detail page.
-- Source: `monitor_web.py` `load_session_detail()` and `security.py` `session_detail_view()`.
+- Source: `monitor_web.py` `load_dashboard_session_detail()` and `security.py` `session_detail_view()`; the legacy monitor `load_session_detail()` route is not used by dashboard-v2.
 
 ### GET `/api/events`
 

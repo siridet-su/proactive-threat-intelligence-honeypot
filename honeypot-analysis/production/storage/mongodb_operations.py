@@ -53,6 +53,8 @@ QUEUE_COLLECTIONS = dict(JOB_QUEUE_TABLES)
 QUEUE_COLLECTIONS["prediction"] = "prediction_outbox"
 _PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
 _SESSION_TABLES = {
+    "sessions",
+    "events",
     "reports",
     "alerts",
     "analysis_jobs",
@@ -68,6 +70,66 @@ _SESSION_TABLES = {
     "ai_advisory_outbox",
     "ai_advisories",
 }
+
+# Dashboard detail reads are deliberately projected to the durable identity,
+# ordering, state, and payload fields needed by the public monitor projection.
+# Keeping this allowlist here prevents a session detail request from becoming
+# an arbitrary collection/document read while still preserving the existing
+# legacy callers of list_rows_for_session.
+_SESSION_DETAIL_PROJECTION = {
+    "_id": 1,
+    "schema_version": 1,
+    "session_id": 1,
+    "event_id": 1,
+    "eventid": 1,
+    "sensor_id": 1,
+    "sensor": 1,
+    "src_ip": 1,
+    "timestamp": 1,
+    "received_at": 1,
+    "start_time": 1,
+    "updated_at": 1,
+    "created_at": 1,
+    "ended": 1,
+    "is_ended": 1,
+    "session_source": 1,
+    "is_external_source": 1,
+    "revision": 1,
+    "status": 1,
+    "error": 1,
+    "report_id": 1,
+    "assessment_id": 1,
+    "job_id": 1,
+    "alert_id": 1,
+    "snapshot_id": 1,
+    "features_hash": 1,
+    "processed": 1,
+    "command_event": 1,
+    "severity": 1,
+    "reason": 1,
+    "observable_type": 1,
+    "observable_value": 1,
+    "sighting_id": 1,
+    "link_id": 1,
+    "campaign_id": 1,
+    "priority": 1,
+    "delivered": 1,
+    "expires_at": 1,
+    "next_retry_at": 1,
+    "payload_json": 1,
+    "result_json": 1,
+    "provider_status_json": 1,
+    "confirmed_tactics_json": 1,
+    "match_reasons_json": 1,
+}
+
+_SESSION_DETAIL_MONGO_SORTS = {
+    "events": [("received_at", 1), ("event_id", 1)],
+    "analysis_jobs": [("updated_at", -1), ("job_id", 1)],
+    "reports": [("created_at", -1), ("report_id", 1)],
+}
+
+_SESSION_DETAIL_PREDICTION_SCAN_LIMIT = 500
 
 
 def _utc(value: Any = None) -> str:
@@ -903,8 +965,11 @@ class MongoDBRuntimeOperations:
             body = stable_json(payload)
             self.database.feed_status.replace_one({"_id": str(name)}, {"_id": str(name), "schema_version": "mongodb_feed_status.v1", "feed_id": str(name), "payload_json": body, "payload_sha256": hashlib.sha256(body.encode()).hexdigest(), "updated_at": current}, upsert=True)
 
-    def get_enrichment_record(self, observable_type: str, observable_value: str, allow_stale: bool = True) -> Optional[Dict[str, Any]]:
-        document = self.database.enrichment_records.find_one({"_id": stable_id("enrichment", {"observable_type": observable_type, "observable_value": observable_value})})
+    @staticmethod
+    def _decode_enrichment_record(
+        document: Optional[Mapping[str, Any]],
+        allow_stale: bool,
+    ) -> Optional[Dict[str, Any]]:
         item = _row(document)
         if item is None:
             return None
@@ -914,10 +979,49 @@ class MongoDBRuntimeOperations:
         item["is_stale"] = not expires or expires <= _utc()
         return None if item["is_stale"] and not allow_stale else item
 
+    def get_enrichment_record(self, observable_type: str, observable_value: str, allow_stale: bool = True) -> Optional[Dict[str, Any]]:
+        document = self.database.enrichment_records.find_one(
+            {"_id": stable_id("enrichment", {"observable_type": observable_type, "observable_value": observable_value})},
+            _SESSION_DETAIL_PROJECTION,
+        )
+        return self._decode_enrichment_record(document, allow_stale)
+
+    def list_enrichment_records_for_observables(
+        self,
+        observables: Any,
+        allow_stale: bool = True,
+    ) -> List[Dict[str, Any]]:
+        identities = [
+            stable_id(
+                "enrichment",
+                {"observable_type": str(observable_type), "observable_value": str(observable_value)},
+            )
+            for observable_type, observable_value in observables
+            if str(observable_type) and str(observable_value)
+        ]
+        if not identities:
+            return []
+        documents = self.database.enrichment_records.find(
+            {"_id": {"$in": identities}},
+            _SESSION_DETAIL_PROJECTION,
+        )
+        records = []
+        for document in documents:
+            record = self._decode_enrichment_record(document, allow_stale)
+            if record is not None:
+                records.append(record)
+        return records
+
     def load_enrichment_cache(self, observable_type: str = "ip", allow_stale: bool = True) -> Dict[str, Dict[str, Any]]:
+        # The cache is a bounded read model.  Decode the already-selected
+        # documents in one query; do not re-fetch every record by identity.
         output: Dict[str, Dict[str, Any]] = {}
-        for document in self.database.enrichment_records.find({"observable_type": observable_type}):
-            record = self.get_enrichment_record(observable_type, document["observable_value"], allow_stale=allow_stale)
+        documents = self.database.enrichment_records.find(
+            {"observable_type": observable_type},
+            _SESSION_DETAIL_PROJECTION,
+        )
+        for document in documents:
+            record = self._decode_enrichment_record(document, allow_stale)
             if record is None:
                 continue
             payload = record["payload"]
@@ -1232,9 +1336,35 @@ class MongoDBRuntimeOperations:
 
     def list_prediction_snapshots_for_session(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         output = []
-        for document in self.database.prediction_snapshots.find({"session_id": session_id}):
+        for document in self.database.prediction_snapshots.find(
+            {"session_id": session_id},
+            _SESSION_DETAIL_PROJECTION,
+        ):
             item = _row(document) or {}; item["payload"] = _payload(item); item["integrity_errors"] = validate_prediction_snapshot_integrity(item["payload"]) if item["payload"].get("schema_version") == SNAPSHOT_SCHEMA_VERSION else []; output.append(item)
         output.sort(key=self._prediction_order, reverse=True); return output[: max(0, int(limit))]
+
+    def list_dashboard_session_detail_prediction_snapshots(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return a bounded, indexed session-detail snapshot window.
+
+        The worker-facing history method above intentionally preserves the full
+        evidence-order semantics. Dashboard detail only needs a bounded recent
+        window, so use the existing session/created_at index before applying
+        the canonical evidence ordering to that fixed window.
+        """
+        bounded_limit = min(max(0, int(limit)), 50)
+        if bounded_limit == 0:
+            return []
+        cursor = self.database.prediction_snapshots.find(
+            {"session_id": session_id},
+            _SESSION_DETAIL_PROJECTION,
+        ).sort([("created_at", -1), ("snapshot_id", 1)]).limit(
+            _SESSION_DETAIL_PREDICTION_SCAN_LIMIT
+        )
+        output = []
+        for document in cursor:
+            item = _row(document) or {}; item["payload"] = _payload(item); item["integrity_errors"] = validate_prediction_snapshot_integrity(item["payload"]) if item["payload"].get("schema_version") == SNAPSHOT_SCHEMA_VERSION else []; output.append(item)
+        output.sort(key=self._prediction_order, reverse=True)
+        return output[:bounded_limit]
 
     def get_current_prediction_snapshot(self, session_id: str) -> Optional[Dict[str, Any]]:
         rows = self.list_prediction_snapshots_for_session(session_id, 1); return rows[0] if rows and self._prediction_order(rows[0])[0] >= 0 else None
@@ -1298,7 +1428,16 @@ class MongoDBRuntimeOperations:
 
     def list_rows_for_session(self, table: str, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         if table not in _SESSION_TABLES: raise ValueError("unsupported session-scoped table")
-        return [_row(item) or {} for item in self.database[table].find({"session_id": session_id}).sort([("created_at", -1), ("_id", 1)]).limit(max(0, int(limit)))]
+        query = {"_id": session_id} if table == "sessions" else {"session_id": session_id}
+        cursor = self.database[table].find(query, _SESSION_DETAIL_PROJECTION)
+        sort_order = _SESSION_DETAIL_MONGO_SORTS.get(
+            table,
+            [("created_at", -1), ("_id", 1)],
+        )
+        if table != "sessions":
+            cursor = cursor.sort(sort_order)
+        rows = [_row(item) or {} for item in cursor.limit(max(0, int(limit)))]
+        return rows
 
     def list_session_rows(self, limit: int = 100, session_source: str | None = SESSION_SOURCE_PRODUCTION_LIVE, external_only: bool = False) -> List[Dict[str, Any]]:
         query: Dict[str, Any] = {}

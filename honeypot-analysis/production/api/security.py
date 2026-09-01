@@ -597,6 +597,8 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "response_guidance": detail.get("response_guidance") or {},
         "errors": detail.get("errors") or {},
     }
+    if detail.get("schema_version"):
+        output["schema_version"] = detail.get("schema_version")
     # Apply the command-specific boundary after assembling every consumer
     # field.  Correlations and legacy compatibility structures can carry a
     # command-shaped value even when the primary fields are empty.

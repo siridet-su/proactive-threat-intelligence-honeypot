@@ -757,6 +757,12 @@ class StorageBackend(Protocol):
         allow_stale: bool = True,
     ) -> Optional[Dict[str, Any]]: ...
 
+    def list_enrichment_records_for_observables(
+        self,
+        observables: Any,
+        allow_stale: bool = True,
+    ) -> List[Dict[str, Any]]: ...
+
     def load_enrichment_cache(
         self,
         observable_type: str = "ip",
@@ -981,6 +987,12 @@ class StorageBackend(Protocol):
         self,
         session_id: str,
         limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
+    def list_dashboard_session_detail_prediction_snapshots(
+        self,
+        session_id: str,
+        limit: int = 50,
     ) -> List[Dict[str, Any]]: ...
 
     def get_prediction_snapshot(

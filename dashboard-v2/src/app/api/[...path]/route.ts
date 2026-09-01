@@ -9,7 +9,7 @@ const ROUTES: Record<string, string> = {
   "live": "/live",
   "ready": "/ready",
   "sessions": "/api/sessions",
-  "session": "/api/session",
+  "session": "/api/session-detail",
   "events": "/api/events",
   "ai-advisory": "/api/ai-advisory",
   "predictions/current": "/predictions/current",
@@ -43,7 +43,7 @@ const ALLOWED_QUERY_KEYS = new Set(["session_id", "limit", "offset", "filter"]);
 const ALLOWED_FILTERS = new Set(["all", "wrong", "useful", "high_confidence_wrong", "low_confidence_useful", "missing_actual", "classification_error", "missing_transition_evidence", "policy_review", "needs_review"]);
 const MAX_QUERY_VALUE_LENGTH = 256;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-const COMPATIBILITY_FIRST_KEYS = new Set(["sessions", "events", "session"]);
+const COMPATIBILITY_FIRST_KEYS = new Set(["sessions", "events"]);
 
 type JsonRecord = Record<string, unknown>;
 
@@ -216,32 +216,9 @@ function projectSession(row: JsonRecord): JsonRecord {
 
 function projectEvent(row: JsonRecord): JsonRecord {
   return pickFields(row, [
-    "event_id", "session_id", "session", "sensor_id", "sensor", "src_ip", "src_ip_is_public",
-    "eventid", "timestamp", "received_at", "processed", "command_event",
+    "event_id", "session_id", "session", "sensor_id", "sensor", "src_ip", "src_ip_is_public", "eventid",
+    "timestamp", "received_at", "processed", "command_event",
   ]);
-}
-
-function projectReport(row: JsonRecord): JsonRecord {
-  return pickFields(row, ["report_id", "session_id", "status", "created_at", "updated_at", "summary", "confidence"]);
-}
-
-function projectSnapshot(row: JsonRecord): JsonRecord {
-  return pickFields(row, [
-    "snapshot_id", "session_id", "created_at", "updated_at", "generated_at", "src_ip", "session_status",
-    "event_id", "features_hash", "prediction", "final_ranking", "trust_status", "coverage", "evidence_cutoff",
-  ]);
-}
-
-function projectJob(row: JsonRecord): JsonRecord {
-  return pickFields(row, ["job_id", "session_id", "status", "created_at", "updated_at", "report_id", "priority", "error"]);
-}
-
-function projectAlert(row: JsonRecord): JsonRecord {
-  return pickFields(row, ["alert_id", "session_id", "severity", "created_at", "updated_at", "reason", "delivered", "authority_display"]);
-}
-
-function belongsToSession(row: JsonRecord, sessionId: string): boolean {
-  return recordText(row, "session_id") === sessionId || recordText(row, "session") === sessionId;
 }
 
 function latestTimestamp(rows: JsonRecord[], fields: readonly string[]): string | undefined {
@@ -267,23 +244,11 @@ async function fetchTableRows(
   }
 }
 
-async function fetchCurrentPrediction(origin: URL, headers: Headers, sessionId: string): Promise<JsonRecord | null> {
-  const query = new URLSearchParams({ session_id: sessionId }).toString();
-  try {
-    const result = await fetchUpstreamJson(new URL(`/predictions/current?${query}`, origin), headers);
-    if (result.status < 200 || result.status >= 300 || !isRecord(result.body)) return null;
-    return result.body;
-  } catch {
-    return null;
-  }
-}
-
 function shouldUseCompatibilityFallback(key: string, result: UpstreamJson): boolean {
-  if (!["sessions", "events", "session"].includes(key)) return false;
+  if (!["sessions", "events"].includes(key)) return false;
   if (result.status === 401 || result.status === 403) return false;
   if (result.status === 404 || result.status >= 500) return true;
   if (!isRecord(result.body)) return false;
-  if (key === "session") return result.body.ok === false || !isRecord(result.body.overview);
   return typeof result.body.error === "string" && result.body.error.length > 0;
 }
 
@@ -322,94 +287,6 @@ async function eventsCompatibilityResponse(origin: URL, headers: Headers, reques
   });
 }
 
-async function sessionCompatibilityResponse(
-  origin: URL,
-  headers: Headers,
-  request: Request,
-): Promise<Response> {
-  const sessionId = new URL(request.url).searchParams.get("session_id")?.trim() || "";
-  if (!sessionId || sessionId.length > MAX_QUERY_VALUE_LENGTH) {
-    return jsonResponse({ error: "session_id is required" }, 400);
-  }
-
-  const [sessionTable, eventTable, reportTable, snapshotTable, jobTable, alertTable, prediction] = await Promise.all([
-    fetchTableRows(origin, headers, "/sessions", "?limit=1000"),
-    fetchTableRows(origin, headers, "/events", "?limit=1000"),
-    fetchTableRows(origin, headers, "/reports", "?limit=1000"),
-    fetchTableRows(origin, headers, "/prediction-snapshots", "?limit=1000"),
-    fetchTableRows(origin, headers, "/jobs", "?limit=1000"),
-    fetchTableRows(origin, headers, "/alerts", "?limit=1000"),
-    fetchCurrentPrediction(origin, headers, sessionId),
-  ]);
-
-  if (!sessionTable) return jsonResponse({ error: "dashboard backend is unavailable" }, 503);
-  const session = sessionTable.rows.find((row) => belongsToSession(row, sessionId));
-  if (!session) {
-    return jsonResponse({ ok: false, session_id: sessionId, error: "dashboard data was not found" }, 404);
-  }
-
-  const events = (eventTable?.rows || []).filter((row) => belongsToSession(row, sessionId)).map(projectEvent);
-  const reports = (reportTable?.rows || []).filter((row) => belongsToSession(row, sessionId)).map(projectReport);
-  const snapshots = (snapshotTable?.rows || []).filter((row) => belongsToSession(row, sessionId)).map(projectSnapshot);
-  const jobs = (jobTable?.rows || []).filter((row) => belongsToSession(row, sessionId)).map(projectJob);
-  const alerts = (alertTable?.rows || []).filter((row) => belongsToSession(row, sessionId)).map(projectAlert);
-  const overview = projectSession(session);
-  overview.session_id = overview.session_id || sessionId;
-  const predictionRecord = asRecord(prediction);
-  const responseGuidance = isRecord(predictionRecord.response_guidance) ? predictionRecord.response_guidance : {};
-  const reportSummary = reports.length && isRecord(reports[0].summary) ? reports[0].summary : {};
-  const timestamp = [
-    recordText(sessionTable.body, "timestamp"),
-    recordText(eventTable?.body || {}, "timestamp"),
-    recordText(reportTable?.body || {}, "timestamp"),
-  ].find(Boolean) || new Date().toISOString();
-
-  return jsonResponse({
-    ok: true,
-    timestamp,
-    session_id: sessionId,
-    overview,
-    source_geo: {},
-    source_geo_context: {},
-    observables: [],
-    commands: [],
-    classification_events: [],
-    observed_trusted_ttps: [],
-    correlated_ttp_hypotheses: [],
-    session_ttp_correlations: [],
-    session_ttp_correlation_summary: {},
-    tactics: Array.isArray(overview.tactics) ? overview.tactics : [],
-    ttps: Array.isArray(overview.ttps) ? overview.ttps : [],
-    session: {
-      session_id: overview.session_id,
-      sensor_id: overview.sensor_id,
-      src_ip: overview.src_ip,
-      start_time: overview.start_time,
-      is_ended: overview.is_ended ?? overview.ended,
-      command_count: overview.command_count,
-      analysis_status: overview.analysis_status || overview.job_status,
-    },
-    events,
-    events_table_rows: events,
-    alerts,
-    prediction_snapshots: snapshots,
-    latest_prediction_snapshot: snapshots[0] || {},
-    analysis_jobs: jobs,
-    reports,
-    report_summary: reportSummary,
-    response_guidance: responseGuidance,
-    errors: {
-      structured_route: "structured monitor route unavailable; generic table compatibility fallback used",
-      events: eventTable ? "" : "generic events table unavailable",
-      reports: reportTable ? "" : "generic reports table unavailable",
-      predictions: snapshotTable ? "" : "generic prediction snapshot table unavailable",
-      jobs: jobTable ? "" : "generic analysis jobs table unavailable",
-      alerts: alertTable ? "" : "generic alerts table unavailable",
-    },
-    compatibility_fallback: "monitor_generic_table_routes",
-  });
-}
-
 async function compatibilityResponse(
   key: string,
   origin: URL,
@@ -418,7 +295,6 @@ async function compatibilityResponse(
 ): Promise<Response | null> {
   if (key === "sessions") return sessionsCompatibilityResponse(origin, headers, request);
   if (key === "events") return eventsCompatibilityResponse(origin, headers, request);
-  if (key === "session") return sessionCompatibilityResponse(origin, headers, request);
   return null;
 }
 
