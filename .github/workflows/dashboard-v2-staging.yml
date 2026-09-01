@@ -74,15 +74,9 @@ jobs:
           NEXT_PUBLIC_DASHBOARD_BUILD_ID: ${{ github.sha }}
         run: npm run build
 
-      - name: Bind the source tree identity
-        id: source-identity
-        shell: bash
-        run: echo "tree=$(git rev-parse \"${GITHUB_SHA}^{tree}\")" >> "$GITHUB_OUTPUT"
-
       - name: Package the exact tested staging artifact
         working-directory: dashboard-v2
         env:
-          GITHUB_TREE_SHA: ${{ steps.source-identity.outputs.tree }}
           NEXT_PUBLIC_DASHBOARD_DEPLOYMENT_LABEL: STAGING
           NEXT_PUBLIC_DASHBOARD_BUILD_ID: ${{ github.sha }}
           STAGING_ARTIFACT_DIR: ${{ runner.temp }}/dashboard-v2-staging-artifacts
