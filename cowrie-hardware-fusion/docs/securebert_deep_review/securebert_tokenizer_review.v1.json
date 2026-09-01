@@ -1,0 +1,20 @@
+{
+  "schema_version":"securebert_tokenizer_review.v1",
+  "runtime_class":"transformers.TokenizersBackend",
+  "asset_type":"ModernBERT byte-level BPE tokenizer",
+  "tokenizer_json_sha256":"e0a696f1fbf0f2c7d212e8b9e133250d19bd1c7e5bc34fc91c59d008894dc7b1",
+  "tokenizer_config_sha256":"cbea6a0ec8bf4a66475f458a359223ec17f1ac36b2f5797036a76140daa065de",
+  "base_vocab_entries":50280,
+  "model_vocab_size":50368,
+  "merge_count":50009,
+  "normalizer":"NFC",
+  "lowercase":false,
+  "pre_tokenizer":{"type":"ByteLevel","add_prefix_space":false,"trim_offsets":true,"use_regex":true},
+  "special_tokens":{"UNK":{"text":"[UNK]","id":50280},"CLS":{"text":"[CLS]","id":50281},"SEP":{"text":"[SEP]","id":50282},"PAD":{"text":"[PAD]","id":50283},"MASK":{"text":"[MASK]","id":50284}},
+  "unused_added_tokens":"[unused0] through [unused82], ids 50285..50367",
+  "unknown_behavior":"The BPE model itself has no unk_token and byte-level coverage normally avoids unknowns; tokenizer configuration still exposes [UNK].",
+  "model_max_length":8192,
+  "serialized_default_truncation":{"max_length":256,"direction":"Right","strategy":"LongestFirst"},
+  "runtime_override":{"max_length":128,"truncation":true,"padding":true,"padding_side":"right","truncation_side":"right","single_template":"[CLS] A [SEP]","attention_mask":true},
+  "match_result":"Tokenizer/config/checkpoint file hashes match the frozen bundle and active environment. Architecture and token IDs match ModernBERT, not the published RoBERTa-based SecureBERT tokenizer."
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version":"securebert_input_sensitivity.v1",
+  "method":"bounded non-adversarial metamorphic CPU inference; no accuracy claim",
+  "observations":[
+    {"variant":"whoami","tokens":4,"top":"T1056","score":0.5153906},
+    {"variant":"WHOAMI","input_sha256":"b07060a30d092999a6da5cebc9d545897ecd165fd55143460ba25ad606f4a9a5","tokens":5,"top":"T1033","score":0.11272,"finding":"case materially changes distribution"},
+    {"variant":"leading/trailing spaces around whoami","finding":"strip makes logits bit-identical to whoami"},
+    {"variant":"echo quoted whoami","input_sha256":"318f66113db83adbfc490cce527a6146ec8c70f55acc1d6d4a3b0aada2046d5f","top":"T1056","score":0.495,"second":"T1033","second_score":0.248},
+    {"variant":"whoami semicolon uname -a passed directly to adapter","input_sha256":"ff8f34e014f082adf88e8a1cad909e14dff7d4603a145afe5e978f6f143d6024","top":"T1078","score":0.728,"boundary":"canonical pipeline splits the command first, so this is adapter sensitivity only"},
+    {"variant":"long URL","original_tokens":241,"retained_tokens":128,"top":"T1102","score":0.2006},
+    {"variant":"long base64-like payload","original_tokens":1008,"retained_tokens":128,"top":"T1189","score":0.0872},
+    {"variant":"important behavior near beginning","original_tokens":411,"retained_tokens":128,"top":"T1052","score":0.3593},
+    {"variant":"important behavior near end","original_tokens":412,"retained_tokens":128,"top":"T1205","score":0.2436,"finding":"right-tail behavior was discarded"},
+    {"variant":"Unicode café","input_sha256":"3bbe02a2234861d6e19720d1af013f96ad1985f6d6ba927eaec308549f855f7d","tokens":4,"top":"T1546","score":0.147}
+  ],
+  "conclusion":"Outputs are sensitive to case, quoting, content placement, and long-tail truncation. This does not establish adversarial robustness or error rate."
+}

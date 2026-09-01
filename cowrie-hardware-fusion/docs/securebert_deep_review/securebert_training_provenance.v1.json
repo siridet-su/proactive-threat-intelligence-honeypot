@@ -1,0 +1,10 @@
+{
+  "schema_version":"securebert_training_provenance.v1",
+  "status":"INCOMPLETE_TRAINING_DATA_PROVENANCE",
+  "available":{"checkpoint_identity":"AVAILABLE","config_tokenizer_label_bytes":"AVAILABLE","bundle_manifest":"AVAILABLE","task_head_shape":"AVAILABLE","runtime_dependency_lock":"AVAILABLE","prior_read_only_provenance_audit":"AVAILABLE"},
+  "fields":{"authoritative_training_corpus":"MISSING","dataset_source_and_license":"MISSING","immutable_membership":"MISSING","train_validation_test_split":"MISSING","class_distribution":"MISSING","training_preprocessing":"MISSING","base_model_initialization":"MISSING","trained_layers":"MISSING","optimizer":"MISSING","learning_rate_and_schedule":"MISSING","epochs":"MISSING","batch_size":"MISSING","loss_function":"MISSING","class_weighting":"MISSING","random_seed":"MISSING","early_stopping":"MISSING","best_checkpoint_rule":"MISSING","training_metrics":"MISSING","independent_validation_metrics":"MISSING","independent_test_metrics":"MISSING"},
+  "leakage_review":{"duplicate_commands_across_splits":"NOT_TESTABLE","near_duplicates":"NOT_TESTABLE","same_session_leakage":"NOT_TESTABLE","template_leakage":"NOT_TESTABLE","rule_oracle_overlap":"NOT_TESTABLE","calibration_test_overlap":"NOT_APPLICABLE_NO_SECUREBERT_CALIBRATION"},
+  "fine_tuned_conclusion":"The 196-way task head establishes project task specialization, but exact initialization and optimization history cannot be reconstructed.",
+  "safe_claim":"strong byte identity, incomplete model-development provenance",
+  "historical_evidence_preserved":true
+}

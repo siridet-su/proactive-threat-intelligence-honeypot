@@ -1,0 +1,14 @@
+{
+  "schema_version":"securebert_rule_model_authority_matrix.v1",
+  "rows":[
+    {"rule_state":"reviewed rule only","model_state":"unavailable/below 0.55","output":"rule event plus model status","source":"rule","trust":"trusted only if authority_decision says trusted","authority":"reviewed rule","visibility":"report + trusted history when trusted"},
+    {"rule_state":"reviewed rule","model_state":"same TTP at/above 0.55","output":"rule TTP with bert_ttp/score","source":"both","trust":"trusted if rule authority is valid","authority":"reviewed rule, not model consensus","visibility":"report + trusted history"},
+    {"rule_state":"reviewed rule","model_state":"different TTP at/above 0.55","output":"rule TTP retained with conflicting bert_ttp","source":"rule_securebert_disagreement","trust":"audit-only","authority":"none","visibility":"audit/report only"},
+    {"rule_state":"none","model_state":"top-1 at/above 0.55","output":"model TTP candidate","source":"securebert","trust":"audit-only; high_confidence forced false","authority":"none","visibility":"audit/report only"},
+    {"rule_state":"none","model_state":"below 0.55","output":"model low-score candidate or unknown","source":"securebert_low_confidence","trust":"audit-only","authority":"none","visibility":"audit/report only"},
+    {"rule_state":"none","model_state":"unavailable/error/empty","output":"unknown/status event or no event","source":"securebert_unavailable/securebert_error","trust":"audit-only","authority":"none","visibility":"audit/log"},
+    {"rule_state":"multiple reviewed rules","model_state":"one top-1 label","output":"one event per rule; each compared to same model label","source":"both for exact match, disagreement for others, otherwise rule","trust":"per-event; disagreement rows audit-only","authority":"each reviewed rule decision","visibility":"report; only trusted rows enter history"},
+    {"rule_state":"any","model_state":"multiple model labels","output":"not possible through canonical classify; top-k helper is noncanonical","source":"n/a","trust":"none","authority":"none","visibility":"offline only"}
+  ],
+  "safety_answers":{"model_only_authoritative":false,"model_can_override_rule_with_own_label":false,"model_can_demote_rule_on_disagreement":true,"model_can_write_canonical_fact":false,"model_can_trigger_automatic_response":false,"model_can_authorize_prediction":false,"prediction_and_shadow_non_authoritative":true}
+}

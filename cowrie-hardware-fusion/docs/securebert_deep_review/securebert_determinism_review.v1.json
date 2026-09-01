@@ -1,0 +1,16 @@
+{
+  "schema_version":"securebert_determinism_review.v1",
+  "model_eval":true,
+  "torch_no_grad":true,
+  "dropout_disabled":true,
+  "preprocessing_stable":true,
+  "label_order_stable_for_bound_bytes":true,
+  "repetitions":3,
+  "tested_device":"CPU",
+  "logits_bit_equal":true,
+  "selected_outputs_equal":true,
+  "batch_repeat_equal":true,
+  "cross_hardware_claim":false,
+  "gpu_review":"device=auto may select CUDA; no GPU replay was run and bit-exact CPU/GPU equivalence is not claimed",
+  "conclusion":"Deterministic on the tested CPU/environment for fixed bytes and input."
+}

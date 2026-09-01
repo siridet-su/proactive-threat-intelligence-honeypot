@@ -1,0 +1,17 @@
+{
+  "schema_version":"securebert_checkpoint_identity.v1",
+  "checkpoint_id":"securebert_ttp_model_v2/checkpoint-6765",
+  "retained_local_path":"build/release-7194c0b4091c5acd234708b494f400cd901fcdc7/model-bundles/frozen_model_bundle_62a8ffe36cc4ee0561c3ae191d2e8733/securebert_ttp/checkpoint-6765/model.safetensors",
+  "size_bytes":599036536,
+  "sha256_verified":"dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b",
+  "format":"safetensors with metadata format=pt",
+  "bundle_id":"frozen_model_bundle_62a8ffe36cc4ee0561c3ae191d2e8733434549761f1e842cc82031068e156c96",
+  "bundle_manifest_sha256":"ec27d2a4b3c75a36d343fac86d0f9c9fb29f380c2827c4aa39593cc408d749f7",
+  "release_packaging":"not vendored in the normal immutable application release; release links to an external content-addressed model bundle",
+  "ownership_source":"private unpublished project artifact; byte identity is strong, training ownership/origin is not established by a training receipt",
+  "production_resolution":"ProductionConfig SECUREBERT_PATH/SECUREBERT_CHECKPOINT_PATH, normally a release-visible model-bundle link",
+  "missing_behavior":"loader logs unavailable and returns None; deterministic rules continue",
+  "hash_mismatch_behavior":{"offline_bundle_verification":"fatal","ordinary_runtime_loader":"not checked against manifest at load time"},
+  "known_classifier_environment_sha256":"612f5e46e961aa233c5498560670c9aa532dabf86051abc5f0a123e5c0eb74c6",
+  "identity_scope_reconciliation":{"release_manifest_classifier_source_identity":"e55289bdce1cc757205ebfc7c581dbd7828989b82cb1667aab4c84f0148177d0","meaning":"four-file Phase 4A.2 authority-candidate identity","active_environment_embedded_source_identity":"dbcbf30f85c2db9b805f43cd23fd85d82eeacf1056e68da952ede476940fc178","meaning_2":"eleven-file classifier environment identity"}
+}

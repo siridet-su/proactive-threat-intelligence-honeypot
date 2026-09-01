@@ -1,0 +1,76 @@
+{
+  "schema_version": "experiment_run_manifest.v1",
+  "run_id": "run-v1-neutral-idle-0001",
+  "experiment_id": "pilot-v1-20260901",
+  "state": "planned",
+  "provenance": {
+    "source": "controlled_experiment",
+    "controlled": true,
+    "pilot_only": true,
+    "production_analytics_eligible": false
+  },
+  "sensor": {
+    "sensor_id": "sensor-redacted",
+    "host_id": "pi-host-pseudonymous-01",
+    "repo_commit": "d44f01bec6a542f4c8f1a84f07e6b2b7a0058d4f",
+    "cowrie_backend": "shell",
+    "environment_signature_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "execution_boundary": {
+    "kind": "none",
+    "metric_scopes": ["pi_sensor"],
+    "execution_observed": false,
+    "backend_id": null,
+    "backend_image_sha256": null,
+    "network_policy_sha256": null
+  },
+  "timing": {
+    "timezone": "UTC",
+    "sample_interval_seconds": 1,
+    "baseline_seconds": 30,
+    "workload_seconds": 30,
+    "recovery_seconds": 30
+  },
+  "workload": {
+    "scenario_catalog_version": "cowrie_hardware_scenario_catalog.v1",
+    "scenario_id": "neutral_idle",
+    "family": "none",
+    "variant_id": "idle-v1",
+    "implementation_id": "none-v1",
+    "implementation_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "intensity_percent": 0,
+    "intensity_basis": "none",
+    "background_load_profile": "ordinary-decoy-stack"
+  },
+  "labels": {
+    "scenario_disposition": "neutral_baseline",
+    "primary_impact": "NO_MATERIAL_IMPACT",
+    "observed_impacts": ["NO_MATERIAL_IMPACT"],
+    "ground_truth_ttps": [],
+    "label_source": "scenario_manifest_plus_observed_evidence",
+    "evidence_receipt_ids": []
+  },
+  "collection": {
+    "telemetry_schema_version": "hardware_telemetry_sample.v1",
+    "collector_id": "experimental-telemetry-collector",
+    "collector_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "command_events_required": false,
+    "raw_data_immutable": true
+  },
+  "split_groups": {
+    "scenario_variant_group": "neutral-idle",
+    "workload_family_group": "none",
+    "command_template_group": "no-command",
+    "collection_batch": "pilot-day-01",
+    "environment_group": "pi-shell-decoy-stack-v1"
+  },
+  "safety": {
+    "bounded_benign_workload": true,
+    "actual_malware_used": false,
+    "public_or_third_party_target_used": false,
+    "default_deny_egress": true,
+    "hard_resource_limits": true,
+    "watchdog_timeout_seconds": 120
+  }
+}
+
