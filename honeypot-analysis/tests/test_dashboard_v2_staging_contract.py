@@ -91,6 +91,8 @@ def test_staging_artifact_contains_only_non_secret_identity_fields() -> None:
     assert "DASHBOARD_V2_ACCESS_KEY=<generate-with-bootstrap-script>" in env_example
     assert "MONGO_URI" not in package_script
     assert "CLOUDFLARE_API_TOKEN" not in package_script
+    assert package_script.index("await mkdir(outputRoot") < package_script.index("await runArchive")
+    assert 'output.on("error", rejectArchive)' in package_script
 
 
 def test_staging_deploy_identity_restricts_the_ci_ssh_key() -> None:

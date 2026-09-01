@@ -70,6 +70,9 @@ function runArchive(packageRoot, archivePath, includePublic) {
         resolveArchive();
       }
     };
+    output.on("error", rejectArchive);
+    tar.stdout.on("error", rejectArchive);
+    gzip.stdin.on("error", rejectArchive);
     output.on("close", () => { outputClosed = true; finish(); });
     tar.on("error", rejectArchive);
     gzip.on("error", rejectArchive);
@@ -90,6 +93,7 @@ const buildId = process.env.NEXT_PUBLIC_DASHBOARD_BUILD_ID || commit;
 const deploymentLabel = (process.env.NEXT_PUBLIC_DASHBOARD_DEPLOYMENT_LABEL || "STAGING").trim().toUpperCase();
 if (deploymentLabel !== "STAGING") fail("staging packages must be built with the STAGING label");
 
+await mkdir(outputRoot, { recursive: true, mode: 0o700 });
 const packageRoot = await mkdtemp(join(tmpdir(), "dashboard-v2-staging-package-"));
 try {
   const standaloneServer = join(standaloneRoot, "server.js");
@@ -126,7 +130,6 @@ try {
   };
   await writeFile(join(packageRoot, "build-metadata.json"), `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o644 });
 
-  await mkdir(outputRoot, { recursive: true, mode: 0o700 });
   const archiveName = `dashboard-v2-staging-${commit}.tar.gz`;
   const archivePath = join(outputRoot, archiveName);
   await runArchive(packageRoot, archivePath, includePublic);
