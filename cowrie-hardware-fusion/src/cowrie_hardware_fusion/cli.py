@@ -59,15 +59,18 @@ def _validate(document: dict[str, Any], schema_path: Path, source: str) -> None:
 
 def _build_window(args: argparse.Namespace) -> int:
     manifest = _load_json(args.manifest)
-    samples = _load_jsonl(args.telemetry)
     _validate(
         manifest,
         args.schema_dir / "experiment_run_manifest.v1.schema.json",
         str(args.manifest),
     )
     telemetry_schema = args.schema_dir / "hardware_telemetry_sample.v1.schema.json"
-    for index, sample in enumerate(samples, start=1):
-        _validate(sample, telemetry_schema, f"{args.telemetry}:{index}")
+    samples: list[dict[str, Any]] = []
+    for telemetry_path in args.telemetry:
+        segment_samples = _load_jsonl(telemetry_path)
+        for index, sample in enumerate(segment_samples, start=1):
+            _validate(sample, telemetry_schema, f"{telemetry_path}:{index}")
+        samples.extend(segment_samples)
 
     record = build_training_window(
         manifest,
@@ -214,7 +217,14 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     build = subparsers.add_parser("build-window", help="build one derived training window")
     build.add_argument("--manifest", type=Path, required=True)
-    build.add_argument("--telemetry", type=Path, required=True, help="telemetry JSONL")
+    build.add_argument(
+        "--telemetry",
+        type=Path,
+        nargs="+",
+        required=True,
+        metavar="JSONL",
+        help="one or more immutable telemetry JSONL segments in receipt order",
+    )
     build.add_argument("--output", type=Path)
     build.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     build.add_argument("--metric-scope", default="pi_sensor")

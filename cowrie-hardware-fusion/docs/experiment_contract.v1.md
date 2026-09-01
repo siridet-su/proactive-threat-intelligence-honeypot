@@ -286,8 +286,8 @@ score เป็น probability
 ## 12. Exit gate ก่อนเริ่มเขียน model
 
 - [ ] schema และ catalog ผ่าน review
-- [ ] experimental collector ไม่เปลี่ยน production authority path
-- [ ] pilot run replay แล้วได้ record/hash ตรงกัน
+- [x] experimental collector manual pilot ไม่เปลี่ยน production authority path
+- [x] neutral-idle pilot 3 runs replay แล้วได้ record/hash ตรงกัน
 - [ ] benign counterexamples มีครบ
 - [ ] split policy สามารถสร้าง disjoint groups ได้จริง
 - [ ] ไม่มี actual malware หรือ external target

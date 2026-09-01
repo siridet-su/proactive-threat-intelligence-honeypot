@@ -1,6 +1,6 @@
 # Experimental 1 Hz Collector v1
 
-> สถานะ: `IMPLEMENTED LOCALLY / NOT DEPLOYED`
+> สถานะ: `ISOLATED MANUAL PILOT VERIFIED / NOT A SERVICE`
 > Runtime version: `0.2.0`
 > ขอบเขต: `pi_sensor` + `neutral_idle` Stage A pilot เท่านั้น
 
@@ -59,8 +59,15 @@ Spool ไม่มีการ overwrite หรือ resume แบบเดา�
 - `wlan0`, `tailscale0` และ `lo` มีอยู่จริง
 - NTP synchronized เป็น `yes`
 
-ตัวอย่าง config จึงใช้ `mmcblk0p2` และยังต้อง copy ไปเป็น deployment-specific config
-ห้ามแก้ example ให้กลายเป็น secret-bearing production config
+ทดลองผ่าน detached source worktree และ isolated venv ใต้ experiment directory บน Pi
+โดยไม่แก้ production worktree หรือ service configuration ตัวอย่าง config จึงใช้
+`mmcblk0p2` และยังต้อง copy ไปเป็น deployment-specific config ห้ามแก้ example ให้
+กลายเป็น secret-bearing production config
+
+Stage A neutral-idle pilot สำเร็จ 3 runs รวม 270 samples: ทุก sample ผ่าน schema,
+ไม่มี late sample, missing field, counter reset หรือ collector error และ replay เป็น
+derived windows 5/10/30 วินาทีได้ coverage 100% ดู
+[pilot report](pilot_idle_collection_2026-09-01.md)
 
 ## Review/run workflow
 

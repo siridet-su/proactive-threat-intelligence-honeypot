@@ -5,7 +5,7 @@
 
 ของที่ implement แล้ว:
 
-- อ่าน completed run manifest และ telemetry JSONL
+- อ่าน completed run manifest และ immutable telemetry JSONL ได้หนึ่งหรือหลาย segment
 - ตรวจ identity, boot, sequence, monotonic clock และ coverage
 - สร้าง aggregate feature row สำหรับ XGBoost
 - สร้าง fixed-length channel arrays พร้อม missing masks สำหรับ TCN

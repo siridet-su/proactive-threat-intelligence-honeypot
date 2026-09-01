@@ -9,6 +9,7 @@
 5. [Dataset split policy v1](dataset_split_policy.v1.md)
 6. [Dataset storage plan v1](dataset_storage_plan.v1.md)
 7. [Pi environment audit — 2026-09-01](pi_environment_audit_2026-09-01.md)
+8. [Stage A idle pilot report — 2026-09-01](pilot_idle_collection_2026-09-01.md)
 
 ## Imported SecureBERT review
 

@@ -1,6 +1,6 @@
 # Dataset Builder v1
 
-> สถานะ: `IMPLEMENTED / PILOT-READY`  
+> สถานะ: `IMPLEMENTED / STAGE A REPLAY VERIFIED`
 > เวอร์ชัน: `0.1.0`  
 > ขอบเขต: controlled experiment data เท่านั้น
 
@@ -11,7 +11,7 @@ Dataset builder รับหนึ่ง completed run:
 ```text
 experiment_run_manifest.v1 JSON
                  +
-hardware_telemetry_sample.v1 JSONL
+hardware_telemetry_sample.v1 JSONL segment(s)
                  |
                  v
 schema + correlation + coverage validation
@@ -75,7 +75,9 @@ target process CPU/RSS/socket count
 ```bash
 PYTHONPATH=src python -m cowrie_hardware_fusion.cli build-window \
   --manifest data/raw/run-0001/manifest.json \
-  --telemetry data/raw/run-0001/telemetry.jsonl \
+  --telemetry data/raw/run-0001/part-000000.jsonl \
+              data/raw/run-0001/part-000030.jsonl \
+              data/raw/run-0001/part-000060.jsonl \
   --metric-scope pi_sensor \
   --phase workload \
   --horizon-seconds 30 \
@@ -83,6 +85,9 @@ PYTHONPATH=src python -m cowrie_hardware_fusion.cli build-window \
 ```
 
 หรือ install editable แล้วใช้ `cowrie-hardware-dataset build-window ...`
+
+ไฟล์หลัง `--telemetry` รับได้หนึ่งหรือหลาย immutable segments และต้องเรียงตาม receipt;
+builder ยังตรวจ sequence/correlation ซ้ำและไม่ต้อง concatenate raw evidence
 
 ## สิ่งที่ยังไม่ทำใน v1
 
@@ -93,6 +98,6 @@ PYTHONPATH=src python -m cowrie_hardware_fusion.cli build-window \
 - Parquet/NumPy export
 - XGBoost หรือ TCN training
 
-ลำดับถัดไปคือ replay builder กับ pilot idle/ordinary-load records จาก collector แล้วจึง
-freeze feature/channel schema ก่อนสร้าง split และเทรน baseline
-
+neutral-idle pilot จริง 3 runs replay ผ่านที่ horizon 5/10/30 วินาทีแล้ว ลำดับถัดไปคือ
+เพิ่ม ordinary-load/benign counterexamples และ batch discovery จาก receipt ก่อน freeze
+feature/channel schema สร้าง split และเทรน baseline

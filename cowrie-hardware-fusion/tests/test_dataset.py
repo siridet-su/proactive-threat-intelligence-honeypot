@@ -179,3 +179,38 @@ def test_cli_validates_sources_and_writes_a_derived_record(tmp_path: Path) -> No
     record = json.loads(output_path.read_text(encoding="utf-8"))
     assert record["schema_version"] == "derived_training_window.v1"
     assert record["quality"]["sample_coverage"] == 1.0
+
+
+def test_cli_accepts_multiple_immutable_segments_in_order(tmp_path: Path) -> None:
+    manifest, samples = _fixture_run()
+    manifest_path = tmp_path / "manifest.json"
+    first_segment = tmp_path / "part-000000-000029.jsonl"
+    second_segment = tmp_path / "part-000030-000059.jsonl"
+    output_path = tmp_path / "window.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    first_segment.write_text(
+        "".join(json.dumps(sample) + "\n" for sample in samples[:30]),
+        encoding="utf-8",
+    )
+    second_segment.write_text(
+        "".join(json.dumps(sample) + "\n" for sample in samples[30:]),
+        encoding="utf-8",
+    )
+
+    exit_code = cli_main(
+        [
+            "build-window",
+            "--manifest",
+            str(manifest_path),
+            "--telemetry",
+            str(first_segment),
+            str(second_segment),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    record = json.loads(output_path.read_text(encoding="utf-8"))
+    assert record["schema_version"] == "derived_training_window.v1"
+    assert record["quality"]["sample_coverage"] == 1.0

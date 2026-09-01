@@ -6,8 +6,9 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `PILOT DATASET TOOLING` มี dataset builder รุ่นแรกแล้ว แต่ยังไม่มี
-โมเดลใหม่ที่ถือว่าผ่านการเทรนหรือพร้อม deploy
+สถานะปัจจุบันคือ `STAGE A IDLE PILOT VERIFIED` มี collector และ dataset builder
+รุ่นแรกแล้ว และ replay neutral-idle pilot จริงจาก Pi สำเร็จ 3 runs แต่ยังไม่มีโมเดลใหม่
+ที่ถือว่าผ่านการเทรนหรือพร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -38,12 +39,13 @@ cowrie-hardware-fusion/
 
 1. Freeze experiment contract และ label semantics
 2. สร้าง telemetry schema พร้อม session/run correlation
-3. **กำลังทำ:** เก็บและ replay pilot dataset ผ่าน dataset builder v1
-4. สร้าง trivial baseline และ XGBoost hardware-only baseline
-5. ทดลอง MiniROCKET/TCN บน split เดียวกัน
-6. เลือก hardware branch จาก frozen evaluation protocol
-7. เทรน Fusion ด้วย leakage-safe predictions/features
-8. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
+3. **เสร็จ Stage A:** เก็บ/replay neutral-idle pilot 3 runs ผ่าน dataset builder v1
+4. **ถัดไป:** เพิ่ม safe ordinary-load collector/orchestrator และเก็บ benign counterexamples
+5. สร้าง grouped split, trivial baseline และ XGBoost hardware-only baseline
+6. ทดลอง MiniROCKET/TCN บน split เดียวกัน
+7. เลือก hardware branch จาก frozen evaluation protocol
+8. เทรน Fusion ด้วย leakage-safe predictions/features
+9. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
 
 ## เอกสารเริ่มต้น
 
@@ -54,6 +56,7 @@ cowrie-hardware-fusion/
 - [Dataset split policy v1](docs/dataset_split_policy.v1.md)
 - [Dataset storage plan v1](docs/dataset_storage_plan.v1.md)
 - [Pi environment audit](docs/pi_environment_audit_2026-09-01.md)
+- [Stage A idle pilot report](docs/pilot_idle_collection_2026-09-01.md)
 - [Scenario catalog v1](configs/scenario_catalog.v1.json)
 - [Run manifest schema](schemas/experiment_run_manifest.v1.schema.json)
 - [Telemetry sample schema](schemas/hardware_telemetry_sample.v1.schema.json)

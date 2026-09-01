@@ -1,6 +1,6 @@
 # Dataset Storage Plan v1
 
-> สถานะ: `DRAFT / LOCAL SPOOL IMPLEMENTED / NOT DEPLOYED`
+> สถานะ: `DRAFT / ISOLATED PILOT MEASURED / UPLOADER NOT DEPLOYED`
 > ปรับปรุง: 2026-09-01 หลัง operator เพิ่ม Atlas capacity และอนุญาตให้ enable agent
 
 ## Decision
@@ -25,6 +25,23 @@ Record rate ต่อ metric scope:
 หากเก็บหลาย scopes เช่น `pi_sensor`, `backend_guest`, `backend_cgroup`,
 `target_process`, `local_sink` จำนวน records จะเพิ่มตาม scope ที่เปิดจริง จึงต้องวัด
 bytes/sample จาก pilot ก่อนกำหนด storage budget
+
+### ค่าวัดจริงจาก Stage A idle pilot
+
+วันที่ 2026-09-01 เก็บ `pi_sensor` 3 runs ที่ 1 Hz รวม 270 samples ได้ raw canonical
+JSONL 967,716 bytes หรือเฉลี่ย 3,584.13 bytes/sample:
+
+| Projection ต่อหนึ่ง metric scope | ปริมาณโดยประมาณ |
+|---|---:|
+| raw 1 วัน | 295.32 MiB |
+| raw 30 วัน | 8.65 GiB |
+| gzip pilot 1 วัน | 27.94 MiB |
+| gzip pilot 30 วัน | 0.82 GiB |
+| bounded spool 1 GiB ก่อนเงื่อนไข free-space | 83.22 ชั่วโมง |
+
+gzip pilot มีขนาด 91,565 bytes เทียบ raw 967,716 bytes หรือ ratio 9.5% ตัวเลข gzip
+เป็น engineering estimate จาก idle data ขนาดเล็ก ไม่ใช่ capacity guarantee; workload,
+field additions, object metadata, index และ Atlas bucket overhead อาจทำให้ต่างออกไป
 
 ## Proposed path
 
@@ -61,7 +78,8 @@ storage receipt ก่อน raw hot data หมดอายุ
 
 Local implementation `0.2.0` มี bounded spool, per-record fsync, byte/record rotation,
 read-only published segments, content hashes, no-overwrite และ completed collection
-receipt แล้ว แต่ยังไม่มี uploader/quarantine service และยังไม่ deploy บน Pi ดู
+receipt แล้ว และผ่าน isolated manual pilot บน Pi แต่ยังไม่มี uploader/quarantine service
+หรือ long-running service deployment ดู
 [Experimental 1 Hz collector v1](experimental_collector.v1.md)
 
 - reuse durability pattern ของ existing Cowrie sensor forwarder: write, fsync, checkpoint
@@ -176,8 +194,8 @@ Dashboard ระยะยาวอ่าน rollup ไม่อ่าน raw 1 H
 
 ## Pilot exit gate
 
-- [ ] วัด serialized bytes/sample จริง
-- [ ] คำนวณ bytes/run และ bytes/day สำหรับ scopes ที่เปิด
+- [x] วัด serialized bytes/sample จริงสำหรับ neutral-idle `pi_sensor` pilot
+- [x] คำนวณ bytes/run และ bytes/day สำหรับ `pi_sensor` scope
 - [ ] ทดสอบ network outage และ resume โดยไม่ duplicate/loss
 - [ ] ตรวจ SHA-256/record count หลัง upload
 - [ ] schema-invalid segment เข้า quarantine แบบ bounded
