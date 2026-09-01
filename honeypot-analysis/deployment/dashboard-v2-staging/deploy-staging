@@ -164,37 +164,38 @@ candidate=""
 
 check_health() {
   local expected_short="$1"
-  "$SYSTEMCTL" is-active --quiet "$SERVICE" || return 1
-  local restarts
-  restarts="$($SYSTEMCTL show "$SERVICE" -p NRestarts --value)"
-  [[ "$restarts" =~ ^[0-9]+$ && "$restarts" -lt 5 ]] || return 1
-  local listener
-  listener="$($SS -H -ltn 2>/dev/null | /usr/bin/awk '$4 == "127.0.0.1:3001" { print $4 }')"
-  [[ "$listener" == '127.0.0.1:3001' ]] || return 1
-  if $SS -H -ltn 2>/dev/null | /usr/bin/awk '$4 ~ /:3001$/ && $4 != "127.0.0.1:3001" { found = 1 } END { exit found ? 0 : 1 }'; then
-    return 1
-  fi
   local health_page
   health_page="$(/usr/bin/mktemp "$RELEASE_ROOT/shared/health.XXXXXX")"
   /usr/bin/chown root:root "$health_page"
   /usr/bin/chmod 600 "$health_page"
-  if ! "$CURL" --silent --show-error --fail --max-time 15 --max-filesize 1048576 \
-    --output "$health_page" http://127.0.0.1:3001/; then
-    /usr/bin/rm -f -- "$health_page"
-    return 1
-  fi
-  /usr/bin/grep -Fq 'STAGING' "$health_page" || {
-    /usr/bin/rm -f -- "$health_page"
-    return 1
-  }
-  /usr/bin/grep -Fq "$expected_short" "$health_page" || {
-    /usr/bin/rm -f -- "$health_page"
-    return 1
-  }
-  local unauth_status
-  unauth_status="$($CURL --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3001/api/health || true)"
+  local healthy=0
+  local attempt
+  for ((attempt = 0; attempt < 30; attempt++)); do
+    if "$SYSTEMCTL" is-active --quiet "$SERVICE"; then
+      local restarts
+      restarts="$($SYSTEMCTL show "$SERVICE" -p NRestarts --value)"
+      if [[ "$restarts" =~ ^[0-9]+$ && "$restarts" -lt 5 ]]; then
+        local listener
+        listener="$($SS -H -ltn 2>/dev/null | /usr/bin/awk '$4 == "127.0.0.1:3001" { print $4 }')"
+        if [[ "$listener" == '127.0.0.1:3001' ]] && ! $SS -H -ltn 2>/dev/null | /usr/bin/awk '$4 ~ /:3001$/ && $4 != "127.0.0.1:3001" { found = 1 } END { exit found ? 0 : 1 }'; then
+          if "$CURL" --silent --show-error --fail --max-time 3 --max-filesize 1048576 \
+            --output "$health_page" http://127.0.0.1:3001/ \
+            && /usr/bin/grep -Fq 'STAGING' "$health_page" \
+            && /usr/bin/grep -Fq "$expected_short" "$health_page"; then
+            local unauth_status
+            unauth_status="$($CURL --silent --show-error --max-time 3 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3001/api/health || true)"
+            if [[ "$unauth_status" == '401' ]]; then
+              healthy=1
+              break
+            fi
+          fi
+        fi
+      fi
+    fi
+    (( attempt < 29 )) && sleep 1
+  done
   /usr/bin/rm -f -- "$health_page"
-  [[ "$unauth_status" == '401' ]]
+  (( healthy == 1 ))
 }
 
 switch_pointer() {
