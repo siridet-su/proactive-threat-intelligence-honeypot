@@ -255,6 +255,7 @@ def validate_pi_poc_contract(
 
 def build_pi_poc_matrix(
     *,
+    generation: str,
     experiment_id: str,
     repetitions: int,
     image_id: str,
@@ -268,6 +269,8 @@ def build_pi_poc_matrix(
 ) -> tuple[dict[str, Any], list[tuple[dict[str, Any], dict[str, Any] | None]]]:
     """Create an interleaved 3-repetition smoke-test matrix without writing it."""
 
+    if not generation.startswith("v") or not generation[1:].isdigit():
+        raise DatasetContractError("Pi PoC generation must use v<number>")
     if repetitions != 3:
         raise DatasetContractError("Pi PoC v1 requires exactly three repetitions")
     if not image_id.startswith("sha256:") or len(image_id) != 71:
@@ -294,14 +297,14 @@ def build_pi_poc_matrix(
     for repetition in range(1, repetitions + 1):
         for scenario_index, scenario_id in enumerate(ordered_scenarios):
             slug = SCENARIO_SLUGS[scenario_id]
-            run_id = f"run-poc-pi-v1-{slug}-r{repetition:02d}"
+            run_id = f"run-poc-pi-{generation}-{slug}-r{repetition:02d}"
             controlled = scenario_id != "neutral_idle"
             profile = PROFILES.get(scenario_id)
             specification: dict[str, Any] | None = None
             if profile is not None:
                 specification = {
                     "schema_version": SPEC_SCHEMA_VERSION,
-                    "spec_id": f"spec-poc-pi-v1-{slug}-r{repetition:02d}",
+                    "spec_id": f"spec-poc-pi-{generation}-{slug}-r{repetition:02d}",
                     "scenario_catalog_sha256": catalog_hash,
                     "scenario_id": scenario_id,
                     "runner": {
@@ -464,7 +467,7 @@ def build_pi_poc_matrix(
                         profile.family if profile is not None else "none"
                     ),
                     "command_template_group": "no-command",
-                    "collection_batch": f"poc-pi-v1-r{repetition:02d}",
+                    "collection_batch": f"poc-pi-{generation}-r{repetition:02d}",
                     "environment_group": "pi5-safe-container-v1",
                 },
                 "safety": safety,
@@ -485,6 +488,7 @@ def build_pi_poc_matrix(
         manifest["collection"]["collector_sha256"] = source_hash
     matrix = {
         "schema_version": "pi_poc_matrix.v1",
+        "generation": generation,
         "experiment_id": experiment_id,
         "status": "planned",
         "repetitions": repetitions,
@@ -657,7 +661,7 @@ class DockerWorkloadLifecycle:
             "--network=none",
             "--read-only",
             "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
+            "--security-opt=no-new-privileges=true",
             f"--user={security['run_as_uid']}:{security['run_as_gid']}",
             f"--pids-limit={limits['pids_max']}",
             f"--memory={limits['memory_max_bytes']}",
@@ -668,6 +672,7 @@ class DockerWorkloadLifecycle:
             "--log-driver=local",
             "--log-opt=max-size=64k",
             "--log-opt=max-file=1",
+            "--log-opt=compress=false",
             "--label=org.proactive-threat-intelligence.purpose=bounded-hardware-poc",
             image_id,
             *self._fixed_workload_arguments(),
@@ -731,7 +736,7 @@ class DockerWorkloadLifecycle:
             raise DatasetContractError("created container does not match fixed limits")
         if "ALL" not in (host_config.get("CapDrop") or []):
             raise DatasetContractError("created container did not drop all capabilities")
-        if "no-new-privileges:true" not in security_options:
+        if "no-new-privileges=true" not in security_options:
             raise DatasetContractError("created container lacks no-new-privileges")
         if inspected.get("Mounts"):
             raise DatasetContractError("created container unexpectedly has host mounts")

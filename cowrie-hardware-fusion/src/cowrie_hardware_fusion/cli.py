@@ -476,6 +476,7 @@ def _prepare_pi_poc_matrix(args: argparse.Namespace) -> int:
         str(args.config),
     )
     matrix, documents = build_pi_poc_matrix(
+        generation=args.generation,
         experiment_id=args.experiment_id,
         repetitions=3,
         image_id=args.image_id,
@@ -675,6 +676,7 @@ def _parser() -> argparse.ArgumentParser:
         help="freeze 15 interleaved idle/control/TTP PoC run manifests",
     )
     pi_prepare.add_argument("--experiment-id", required=True)
+    pi_prepare.add_argument("--generation", required=True)
     pi_prepare.add_argument("--image-id", required=True)
     pi_prepare.add_argument("--implementation-sha256", required=True)
     pi_prepare.add_argument("--repo-commit", required=True)

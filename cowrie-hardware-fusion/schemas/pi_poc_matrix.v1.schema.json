@@ -4,9 +4,10 @@
   "title": "Pi Hardware PoC Matrix v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "experiment_id", "status", "repetitions", "scenario_count", "run_count", "sample_interval_seconds", "seconds_per_run", "estimated_total_seconds", "collector_source_sha256", "image_id", "implementation_sha256", "runs", "matrix_sha256"],
+  "required": ["schema_version", "generation", "experiment_id", "status", "repetitions", "scenario_count", "run_count", "sample_interval_seconds", "seconds_per_run", "estimated_total_seconds", "collector_source_sha256", "image_id", "implementation_sha256", "runs", "matrix_sha256"],
   "properties": {
     "schema_version": {"const": "pi_poc_matrix.v1"},
+    "generation": {"type": "string", "pattern": "^v[0-9]+$"},
     "experiment_id": {"$ref": "#/$defs/identifier"},
     "status": {"const": "planned"},
     "repetitions": {"const": 3},

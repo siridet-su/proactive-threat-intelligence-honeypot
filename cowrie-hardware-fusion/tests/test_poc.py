@@ -181,6 +181,7 @@ def test_pi_poc_contract_rejects_parameter_drift() -> None:
 
 def test_pi_poc_matrix_is_interleaved_and_all_documents_validate() -> None:
     matrix, documents = build_pi_poc_matrix(
+        generation="v1",
         experiment_id="poc-pi-two-ttp-v1",
         repetitions=3,
         image_id="sha256:" + "1" * 64,
