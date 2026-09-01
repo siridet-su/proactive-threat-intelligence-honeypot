@@ -1,0 +1,269 @@
+{
+  "artifact": "dashboard_v2_performance_remediation",
+  "verification_timestamp_utc": "2026-09-01T15:48:26Z",
+  "scope": {
+    "repository": "/home/rubchek/Desktop/teammate-repo",
+    "dashboard_path": "/home/rubchek/Desktop/teammate-repo/dashboard-v2",
+    "runtime_host": "capstone",
+    "ssh_alias": "honeypot-gcp",
+    "browser_dom_automation": false,
+    "measurement_note": "Authenticated concurrent network-completion probes of the exact frontend request graph; no first-paint claim."
+  },
+  "runtime": {
+    "dashboard_service": "honeypot-dashboard-v2.service",
+    "dashboard_release": "/opt/honeypot-dashboard-v2/releases/20260901-e80b04e6",
+    "dashboard_build_id": "ATeIFbXeNiQCrpf_CVirv",
+    "dashboard_main_pid": 3903260,
+    "dashboard_started_utc": "2026-09-01T15:43:08Z",
+    "dashboard_restart_count": 0,
+    "dashboard_listener": "127.0.0.1:3000",
+    "bff_origin": "http://127.0.0.1:8090",
+    "monitor_listener": "127.0.0.1:8090",
+    "dashboard_api_listener": "127.0.0.1:8081",
+    "backend_release": "d61d4cbdf8ce5a4635870b04a72f76d5404e38ac",
+    "monitor_active_after_final_restart": true,
+    "dashboard_api_active_after_final_restart": true
+  },
+  "request_graph": {
+    "dashboard_browser_gets": 5,
+    "threat_intel_browser_gets": 3,
+    "detail_browser_gets": 3,
+    "dashboard_monitor_requests_before": 7,
+    "dashboard_monitor_requests_after": 5,
+    "detail_monitor_requests_before": 10,
+    "detail_monitor_requests_after": 9,
+    "polling_found": false,
+    "structured_probes_after_final_restart": {
+      "sessions": 0,
+      "events": 0,
+      "detail": 0
+    },
+    "generic_route_trace_counts_after_final_restart": {
+      "sessions": 17,
+      "events": 17
+    }
+  },
+  "latency_decomposition": {
+    "bff_overhead_sessions_p50_seconds_approx": 0.007804,
+    "bff_overhead_events_p50_seconds_approx": 0.005588,
+    "mongo_explain_server_execution_seconds_approx": "0.001-0.002",
+    "structured_snapshot_mongo_commands_per_attempt": 65,
+    "native_structured_detail_mongo_commands_before_failure": 14,
+    "generic_landing_docs_examined": {
+      "sessions": 100,
+      "events": 100
+    },
+    "detail_session_scoped_docs_examined": {
+      "sessions": 1,
+      "events": 14,
+      "analysis_jobs": 563,
+      "reports": 1,
+      "prediction_snapshots": 8
+    },
+    "serialization_note": "Monitor retrieval/public projection/JSON serialization account for most of the approximately 0.5/0.2 second generic responses after Mongo server execution; BFF adds only several milliseconds."
+  },
+  "baseline": {
+    "sample_count": 3,
+    "p95": null,
+    "p95_note": "Three diagnostic samples are insufficient for a meaningful p95; observed max is reported.",
+    "bff_sessions_seconds": {
+      "samples": [15.467059, 14.8498, 10.042041],
+      "p50": 14.8498,
+      "max": 15.467059
+    },
+    "bff_events_seconds": {
+      "samples": [7.219028, 7.064697, 6.792558],
+      "p50": 7.064697,
+      "max": 7.219028
+    },
+    "dashboard_request_graph_seconds": {
+      "samples": [8.018092, 10.092823, 15.025671],
+      "p50": 10.092823,
+      "max": 15.025671
+    },
+    "bff_detail_seconds": {
+      "samples": [10.667939, 10.373102, 10.137167],
+      "p50": 10.373102,
+      "max": 10.667939
+    },
+    "detail_request_graph_seconds": {
+      "samples": [16.547036, 17.628327, 17.028479],
+      "p50": 17.028479,
+      "max": 17.628327
+    },
+    "generic_upstream_sessions_seconds": {
+      "samples": [0.517578, 0.568595, 0.572069],
+      "p50": 0.568595,
+      "max": 0.572069
+    },
+    "generic_upstream_events_seconds": {
+      "samples": [0.19758, 0.18358, 0.183887],
+      "p50": 0.183887,
+      "max": 0.19758
+    },
+    "structured_upstream_seconds": {
+      "sessions_p50": 11.067477,
+      "events_p50": 5.876508,
+      "detail_p50": 1.061255
+    }
+  },
+  "after": {
+    "sample_count": 3,
+    "p95": null,
+    "p95_note": "Three diagnostic samples are insufficient for a meaningful p95; observed max is reported.",
+    "bff_sessions_seconds": {
+      "samples": [0.739976, 0.501211, 0.523923],
+      "p50": 0.523923,
+      "max": 0.739976
+    },
+    "bff_events_seconds": {
+      "samples": [0.195018, 0.189627, 0.202126],
+      "p50": 0.195018,
+      "max": 0.202126
+    },
+    "dashboard_request_graph_seconds": {
+      "samples": [0.949076, 0.79009, 0.779635],
+      "p50": 0.79009,
+      "max": 0.949076
+    },
+    "bff_detail_seconds": {
+      "samples": [8.941566, 8.697997, 8.483014],
+      "p50": 8.697997,
+      "max": 8.941566
+    },
+    "detail_request_graph_seconds": {
+      "samples": [9.012707, 8.777974, 8.697782],
+      "p50": 8.777974,
+      "max": 9.012707
+    },
+    "generic_upstream_sessions_seconds": {
+      "samples": [0.529206, 0.48381, 0.516119],
+      "p50": 0.516119,
+      "max": 0.529206
+    },
+    "generic_upstream_events_seconds": {
+      "samples": [0.180861, 0.18943, 0.194733],
+      "p50": 0.18943,
+      "max": 0.194733
+    },
+    "response_contract": {
+      "sessions_status": 200,
+      "events_status": 200,
+      "detail_status": 200,
+      "fallback_label": "monitor_generic_table_routes",
+      "detail_event_count": 3,
+      "detail_report_count": 1,
+      "detail_snapshot_count": 3
+    }
+  },
+  "root_causes": [
+    "The active monitor structured sessions/events/detail routes were incompatible and caused a structured probe before generic fallback.",
+    "Structured snapshot sessions sorting exceeded MongoDB's 32 MiB memory limit because the query did not constrain the leading session_source index field.",
+    "Structured snapshot loading performed 57 enrichment-record lookups in an N+1 pattern.",
+    "The storage session-table allowlist omitted sessions and events, breaking structured detail.",
+    "The remaining detail path uses six generic limit=1000 reads plus current prediction because the backend generic contract has no session_id filtering."
+  ],
+  "mongo": {
+    "backend_selector": "mongodb",
+    "transport": "mongodb+srv",
+    "redacted_srv_hostname": "honeypot-db.o4c0xzu.mongodb.net",
+    "database": "honeypot_canonical_v1",
+    "storage_epoch": "mongodb-target-a-honeypot-db-20260831",
+    "schema_manifest_sha256": "593bfa5464a63135c86c27469db3676961136eaa78f906996b1e2e2bbc8c89a5",
+    "ping": true,
+    "hello_writable_primary": true,
+    "visible_canonical_collection_count": 31,
+    "expected_collection_set_exact": true,
+    "unexpected_ttl_indexes": false,
+    "index_changes": false,
+    "mongo_mutations": false,
+    "writer_api_target_match": true,
+    "local_development_resolution": "sqlite / production_state.db",
+    "production_runtime_resolution": "mongodb / honeypot_canonical_v1"
+  },
+  "changes": {
+    "source_commits": [
+      {
+        "commit": "55c700ed",
+        "message": "dashboard-v2: prefer measured monitor compatibility routes"
+      },
+      {
+        "commit": "e80b04e6",
+        "message": "dashboard-v2: match normalized loopback origin path"
+      }
+    ],
+    "changed_source_paths": [
+      "dashboard-v2/src/app/api/[...path]/route.ts",
+      "dashboard-v2/docs/API.md",
+      "dashboard-v2/docs/API_ARCHITECTURE.md",
+      "honeypot-analysis/tests/test_dashboard_v2_api_integration_contract.py"
+    ],
+    "final_release": "/opt/honeypot-dashboard-v2/releases/20260901-e80b04e6",
+    "only_restarted_service": "honeypot-dashboard-v2.service",
+    "backend_release_changed": false,
+    "mongo_or_atlas_changed": false
+  },
+  "validation": {
+    "eslint": "PASS",
+    "typescript": "PASS",
+    "focused_contract_tests": "4 passed",
+    "production_build": "PASS",
+    "final_dashboard_service": "active",
+    "final_monitor_service": "active",
+    "final_dashboard_api_service": "active",
+    "loopback_only": true
+  },
+  "cache_decision": {
+    "process_local_cache": false,
+    "redis": false,
+    "decision": "not justified",
+    "reason": "Landing network median is below one second, no polling or multi-instance requirement was found, and a cache would not remove the first detail load cost while adding staleness and operational complexity.",
+    "candidates": {
+      "compatibility_first_bff": {
+        "expected_latency_benefit": "removes two landing probes and one detail probe",
+        "invalidation": "none; no-store reads",
+        "stale_data_risk": "none introduced",
+        "deployment_complexity": "one dashboard release",
+        "operational_dependency": "none",
+        "memory": "none",
+        "failure_behavior": "existing structured fallback remains available on alternate origins"
+      },
+      "backend_query_or_index_repair": {
+        "expected_latency_benefit": "could remove code-292 structured-loader failure and reduce detail fanout",
+        "invalidation": "none if semantics and index authority are preserved",
+        "stale_data_risk": "none introduced",
+        "deployment_complexity": "separate epoch-bound backend review/release",
+        "operational_dependency": "canonical deployment/review process",
+        "memory": "Mongo index/query resource cost",
+        "failure_behavior": "must retain current API fallback"
+      },
+      "process_local_ttl_lru": {
+        "expected_latency_benefit": "only repeated identical detail loads after the first",
+        "invalidation": "TTL/invalidation required",
+        "stale_data_risk": "derived data can be stale",
+        "deployment_complexity": "low",
+        "operational_dependency": "none",
+        "memory": "bounded local memory",
+        "failure_behavior": "must fall back to Mongo/API"
+      },
+      "redis": {
+        "expected_latency_benefit": "shared reuse only if repeated expensive reads or multiple instances exist",
+        "invalidation": "versioned keys, TTL, and explicit invalidation",
+        "stale_data_risk": "derived cache staleness",
+        "deployment_complexity": "new private service/dependency and eviction policy",
+        "operational_dependency": "Redis availability",
+        "memory": "bounded Redis memory required",
+        "failure_behavior": "dashboard must fall back to Mongo/API"
+      }
+    }
+  },
+  "safety": {
+    "credential_exposure": false,
+    "credential_copy": false,
+    "production_mutations": false,
+    "synthetic_events": false,
+    "canonical_semantics_changed": false,
+    "final_s1_or_model_authority_changed": false
+  },
+  "terminal_status": "DASHBOARD_PERFORMANCE_REMEDIATED_NO_REDIS"
+}
