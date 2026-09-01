@@ -5131,7 +5131,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 status = HTTPStatus.NOT_FOUND
             else:
                 status = HTTPStatus.INTERNAL_SERVER_ERROR
-            self._send_json(status, session_detail_view(detail))
+            self._send_json(status, session_detail_view(detail, compact=True))
             return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)

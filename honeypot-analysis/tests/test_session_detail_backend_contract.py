@@ -146,6 +146,7 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_pa
         _config(tmp_path), SESSION_ID, _storage=storage
     )
     public = session_detail_view(detail)
+    compact = session_detail_view(detail, compact=True)
 
     assert detail["ok"] is True
     assert detail["schema_version"] == "monitor.dashboard_session_detail.v1"
@@ -157,6 +158,13 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_pa
     assert public["correlated_ttp_hypotheses"][0]["ttp"] == "T1059"
     assert public["response_guidance"]["requires_manual_approval"] is True
     assert public["response_guidance"]["safe_to_auto_execute"] is False
+    assert compact["schema_version"] == "monitor.dashboard_session_detail.v1"
+    assert compact["events"] == public["events"]
+    assert compact["correlated_ttp_hypotheses"][0]["ttp"] == "T1059"
+    assert "session_ttp_correlations" not in compact
+    assert "classification_events" not in compact
+    assert compact["response_guidance"]["requires_manual_approval"] is True
+    assert compact["response_guidance"]["safe_to_auto_execute"] is False
     assert storage.global_reads == 0
     assert storage.single_enrichment_reads == 0
     assert {table for table, _, _ in storage.calls} == {
@@ -176,6 +184,9 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_pa
     serialized = json.dumps(public, sort_keys=True)
     assert "payload_json" not in serialized
     assert '"input": "id"' not in serialized
+    compact_serialized = json.dumps(compact, sort_keys=True)
+    assert "payload_json" not in compact_serialized
+    assert '"input": "id"' not in compact_serialized
 
 
 def test_dashboard_detail_missing_and_malformed_identity_fail_closed(tmp_path: Path) -> None:
