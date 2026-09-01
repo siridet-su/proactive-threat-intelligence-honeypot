@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 
-import { createWriteStream } from "node:fs";
 import { access, cp, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 const dashboardRoot = resolve(dirname(new URL(import.meta.url).pathname), "..");
 const repositoryRoot = resolve(dashboardRoot, "..");
@@ -31,54 +30,30 @@ function sha256File(path) {
 }
 
 function runArchive(packageRoot, archivePath, includePublic) {
-  return new Promise((resolveArchive, rejectArchive) => {
-    const tarArgs = [
-      "--sort=name",
-      "--mtime=@0",
-      "--owner=0",
-      "--group=0",
-      "--numeric-owner",
-      "-cf",
-      "-",
-      "-C",
-      packageRoot,
-      "server.js",
-      ".next",
-      "node_modules",
-      "build-metadata.json",
-      "package.json",
-    ];
-    if (includePublic) tarArgs.push("public");
+  const tarArgs = [
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--use-compress-program=gzip -n -9",
+    "-cf",
+    archivePath,
+    "-C",
+    packageRoot,
+    "server.js",
+    ".next",
+    "node_modules",
+    "build-metadata.json",
+    "package.json",
+  ];
+  if (includePublic) tarArgs.push("public");
 
-    const tar = spawn("tar", tarArgs, { stdio: ["ignore", "pipe", "pipe"] });
-    const gzip = spawn("gzip", ["-n", "-9"], { stdio: ["pipe", "pipe", "pipe"] });
-    const output = createWriteStream(archivePath, { mode: 0o600 });
-    let diagnostics = "";
-    tar.stderr.on("data", (chunk) => { diagnostics += chunk.toString(); });
-    gzip.stderr.on("data", (chunk) => { diagnostics += chunk.toString(); });
-    tar.stdout.pipe(gzip.stdin);
-    gzip.stdout.pipe(output);
-
-    let tarCode;
-    let gzipCode;
-    let outputClosed = false;
-    const finish = () => {
-      if (!outputClosed || tarCode === undefined || gzipCode === undefined) return;
-      if (tarCode !== 0 || gzipCode !== 0) {
-        rejectArchive(new Error(diagnostics.trim() || "tar/gzip failed"));
-      } else {
-        resolveArchive();
-      }
-    };
-    output.on("error", rejectArchive);
-    tar.stdout.on("error", rejectArchive);
-    gzip.stdin.on("error", rejectArchive);
-    output.on("close", () => { outputClosed = true; finish(); });
-    tar.on("error", rejectArchive);
-    gzip.on("error", rejectArchive);
-    tar.on("close", (code) => { tarCode = code; finish(); });
-    gzip.on("close", (code) => { gzipCode = code; finish(); });
-  });
+  try {
+    execFileSync("tar", tarArgs, { stdio: ["ignore", "pipe", "pipe"] });
+  } catch {
+    fail("tar archive creation failed");
+  }
 }
 
 const commit = process.env.GITHUB_SHA || gitRevision(["rev-parse", "HEAD"]);
