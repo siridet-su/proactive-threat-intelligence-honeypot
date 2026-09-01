@@ -72,6 +72,20 @@ def _safe_error_text(value: Any) -> str:
     return redact_error_for_log(value)
 
 
+def _load_securebert_for_replay(
+    config: ProductionConfig,
+    classifier_environment: Dict[str, Any],
+) -> Any:
+    """Keep SecureBERT available only for explicit historical replay opt-in."""
+
+    if not bool(getattr(config, "enable_securebert", False)):
+        return None
+    return load_securebert_classifier(
+        config,
+        classifier_environment=classifier_environment,
+    )
+
+
 def _safe_log_json(value: Any) -> str:
     try:
         redacted = redact_for_log(value, max_string_chars=1_000)
@@ -662,9 +676,9 @@ async def analyze_job(
         verify_assets=True,
     )
     replay_classifier = NotebookParityClassifier(
-        bert_fn=load_securebert_classifier(
+        bert_fn=_load_securebert_for_replay(
             config,
-            classifier_environment=classifier_environment,
+            classifier_environment,
         ),
         mitre_db=context["mitre_attack"],
         high_confidence=float(

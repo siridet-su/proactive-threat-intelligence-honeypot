@@ -166,6 +166,25 @@ def _safe_exception_text(exc: BaseException) -> str:
     return redact_exception_for_log(exc)
 
 
+def _load_securebert_for_final_runtime(
+    config: ProductionConfig,
+    classifier_environment: Dict[str, Any],
+) -> Any:
+    """Load the legacy SecureBERT candidate only for an explicit opt-in.
+
+    The classifier environment remains verified for replay/provenance, but the
+    final runtime must not construct the historical model when its feature is
+    disabled.  FINAL_S1 is a separate advisory overlay and is not routed here.
+    """
+
+    if not bool(getattr(config, "enable_securebert", False)):
+        return None
+    return load_securebert_classifier(
+        config,
+        classifier_environment=classifier_environment,
+    )
+
+
 def alert_payload(alert: Any, *, triggering_event_id: str = "") -> Dict[str, Any]:
     """Normalize a historical alert payload without granting storage authority.
 
@@ -272,9 +291,9 @@ class SessionWorker:
         # Bind the verified environment before constructing the model.  A
         # wrong/unverified model must never be loaded ahead of the source,
         # policy, and runtime-asset identity gates.
-        self.bert_fn = load_securebert_classifier(
+        self.bert_fn = _load_securebert_for_final_runtime(
             config,
-            classifier_environment=self.classifier_environment,
+            self.classifier_environment,
         )
         self.s1_advisory_classifier = self._load_s1_advisory_classifier()
         self.classifier = None

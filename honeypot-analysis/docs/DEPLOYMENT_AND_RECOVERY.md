@@ -7,6 +7,14 @@ and model references. Mutable
 databases, queues, reports, secrets, feed caches, virtual environments, and
 the separately managed frozen model bundle are outside the source archive.
 
+> **Current-runtime note (2026-08-31).** The active capstone profile is
+> MongoDB-backed (`honeypot_canonical_v1`) on the verified Atlas Flex
+> `Honeypot-DB` cluster (5-GB limit, AWS `AP_EAST_1`); the epoch-bound SQLite
+> file is a recovery mirror only. The older SQLite-default and custom
+> cold-storage procedures below are retained as historical/recovery guidance
+> and must not be read as evidence that Pi cold storage or an automatic
+> retention timer is active.
+
 ## Manifest-bound release boundary
 
 Require a clean worktree whose `HEAD` is the full requested revision, run
@@ -46,8 +54,11 @@ session through the real Pi-to-GCP route with retained evidence identifiers.
 
 ## Frozen external model bundle
 
-Transformer and SecureBERT binaries are private runtime assets, never Git
-content or a mutable release overlay. A separately managed content-addressed
+The Transformer and retained SecureBERT binaries are private runtime assets,
+never Git content or a mutable release overlay. FINAL_S1 is the sole learned
+command model selected by the final architecture and is advisory-only; the
+retained SecureBERT bundle is historical/replay/research compatibility and is
+not loaded by the aligned final runtime. A separately managed content-addressed
 bundle under `/opt/honeypot-model-bundles/` contains only the receipt-pinned
 Transformer checkpoint/specification/vocabulary/calibration files and the
 eight classifier files listed by its reviewed environment receipt.
@@ -101,8 +112,10 @@ counts, and restored it to a new isolated path.
 Never broaden networking, firewall, SSH, Tailscale, or Cowrie exposure as part
 of an application rollback. Never enter real credentials into Cowrie or print
 HMAC keys, bearer tokens, identity-bearing private paths, or unredacted commands
-to shared logs. Unrelated failed units are outside scope. Only `sqlite:///`
-database URLs are supported; other backends fail closed.
+to shared logs. Unrelated failed units are outside scope. The historical local
+SQLite profile remains supported for recovery/demo tooling; the current
+production profile uses the reviewed MongoDB epoch contract, and an unbound or
+unverified backend must fail closed.
 
 ## Current repository-recorded production target
 

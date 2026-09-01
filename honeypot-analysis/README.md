@@ -14,7 +14,7 @@ actions.
 ```text
 Cowrie sensor
   -> authenticated bounded ingest
-  -> SQLite
+  -> MongoDB Atlas (canonical production datastore)
   -> session worker
   -> deterministic classification and trust filtering
   -> evidence graph and report-only correlation
@@ -24,7 +24,13 @@ Cowrie sensor
   -> reports, dashboard API, and monitor
 ```
 
-- SQLite is the authoritative deployed backend.
+- The current capstone deployment uses MongoDB Atlas Flex as the canonical
+  backend (`honeypot_canonical_v1`). A read-only Atlas control-plane
+  verification on 2026-08-31 confirmed `Honeypot-DB` as the Flex tier with a
+  5-GB limit in AWS `AP_EAST_1` and Atlas-managed backup enabled. The
+  effective `DATABASE_BACKEND=mongodb` setting is supplied by the protected
+  production environment; the earlier M0/512-MiB observation is historical
+  context only.
 - Transformer seed `20260721` is the sole active experimental PoC predictor.
 - Its checkpoint SHA-256 is
   `7fbd73c4bd071336fa52a589bf41e39f5a3122a67aee398dfb8e6dd9cfdfb04a`.
@@ -34,8 +40,11 @@ Cowrie sensor
   VOMM fallback.
 - Missing, malformed, incompatible, or hash-mismatched Transformer artifacts
   fail closed to model-unavailable/abstained forecast semantics.
-- SQLite is the only active runtime backend. Removed MongoDB/PostgreSQL
-  implementations remain recoverable from Git history, not selectable code.
+- SQLite files are rollback/recovery evidence or local-demo inputs, not the
+  canonical production authority. The epoch-bound rollback mirror remains
+  required for recovery. The custom Pi cold-storage/automatic-retention
+  subsystem is not part of the active release; historical Pi archives remain
+  preserved outside the runtime.
 
 See the [documentation index](docs/README.md). The retained documentation is a
 single canonical set covering architecture, security/privacy, model/evaluation,
@@ -50,9 +59,11 @@ attempts, commands, transfers, and derived candidate ATT&CK mappings. It does
 not establish attacker identity or intent, real-host impact, compromise,
 malware execution, or unobserved lateral movement.
 
-Deterministic trusted evidence is authoritative. SecureBERT, enrichment,
-correlation, forecasts, and presentation text cannot promote weak or
-audit-only evidence into fact. All response actions require canonical
+Deterministic trusted evidence is authoritative. FINAL_S1 LinearSVC is the sole
+learned model in the aligned final architecture and emits raw, uncalibrated
+advisory margins only. Historical SecureBERT, enrichment, correlation,
+forecasts, and presentation text cannot promote weak or audit-only evidence
+into fact. All response actions require canonical
 behavioral evidence, policy provenance, scope, preconditions, verification,
 rollback guidance, and manual approval.
 
@@ -159,9 +170,10 @@ results under `evaluation/` and in Git history.
 - Guidance changes must preserve deterministic v3 identity, immutable observed
   evidence, manual approval, non-executability, and adversarial tests for
   non-authoritative input and policy/hash drift.
-- Storage changes must preserve SQLite transactions, migrations, leases,
-  backups, and restore semantics. Another backend is a new reviewed design,
-  not a compatibility switch.
+- Storage changes must preserve MongoDB transactions, leases, epoch/source
+  bindings, rollback-mirror integrity, and restore semantics. SQLite is kept
+  only where an epoch-bound recovery contract or local demonstration requires
+  it; it must not silently become canonical.
 
 Caches, databases, checkpoints, logs, benchmark runs, generated reports, local
 keys, and environments are not source artifacts. Commit evaluation evidence
@@ -191,7 +203,8 @@ history.
 Optional dependency groups are separated in `pyproject.toml` and
 `requirements-*.txt`. SecureBERT, PDF/STIX artifacts, evaluation, and research
 training are not part of the minimal runtime. Optional imports must remain lazy
-and fail closed. MongoDB, PostgreSQL, and Vertex dependencies are archived.
+and fail closed. MongoDB is the active production backend; PostgreSQL and
+custom Pi cold-storage dependencies are not active runtime components.
 
 Lifecycle and generated-output rules are consolidated in
 [SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md).
