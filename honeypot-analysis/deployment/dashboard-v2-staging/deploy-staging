@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Root-owned, narrow staging release wrapper. The only supported input is a
+# CI-produced archive uploaded to the isolated staging incoming directory. All
+# values are validated before an
+# immutable staging release is created. Production paths and units are never
+# accepted or referenced by the deployment operation.
+
+SERVICE="honeypot-dashboard-v2-staging.service"
+RELEASE_ROOT="/opt/honeypot-dashboard-v2-staging"
+RELEASES="$RELEASE_ROOT/releases"
+INCOMING="$RELEASE_ROOT/incoming"
+CURRENT="$RELEASE_ROOT/current"
+DEPLOY_GROUP="dashboard-staging-deploy"
+MAX_RELEASES=5
+SYSTEMCTL="/usr/bin/systemctl"
+TAR="/usr/bin/tar"
+CURL="/usr/bin/curl"
+SHA256SUM="/usr/bin/sha256sum"
+PYTHON="/usr/bin/python3"
+SS="/usr/bin/ss"
+
+die() {
+  printf 'staging deployment rejected: %s\n' "$1" >&2
+  exit 1
+}
+
+usage() {
+  printf '%s\n' \
+    'usage: deploy-staging --artifact /opt/honeypot-dashboard-v2-staging/incoming/dashboard-v2-staging-<commit>.tar.gz' \
+    '       --sha256 <64 hex> --commit <40 hex> --tree <40 hex>' \
+    '       --lock-sha256 <64 hex> --run-id <safe CI id>' >&2
+  exit 2
+}
+
+(( EUID == 0 )) || die 'this wrapper must run through the root-only sudo rule'
+[[ -x "$SYSTEMCTL" && -x "$TAR" && -x "$CURL" && -x "$SHA256SUM" && -x "$PYTHON" && -x "$SS" ]] || die 'required host tools are unavailable'
+
+artifact=""
+artifact_sha=""
+commit=""
+tree=""
+lock_sha=""
+run_id=""
+while (( $# > 0 )); do
+  case "$1" in
+    --artifact) (( $# >= 2 )) || usage; artifact="$2"; shift 2 ;;
+    --sha256) (( $# >= 2 )) || usage; artifact_sha="$2"; shift 2 ;;
+    --commit) (( $# >= 2 )) || usage; commit="$2"; shift 2 ;;
+    --tree) (( $# >= 2 )) || usage; tree="$2"; shift 2 ;;
+    --lock-sha256) (( $# >= 2 )) || usage; lock_sha="$2"; shift 2 ;;
+    --run-id) (( $# >= 2 )) || usage; run_id="$2"; shift 2 ;;
+    *) usage ;;
+  esac
+done
+
+[[ "$artifact_sha" =~ ^[0-9a-fA-F]{64}$ ]] || die 'artifact SHA-256 is invalid'
+[[ "$commit" =~ ^[0-9a-fA-F]{40}$ ]] || die 'commit SHA is invalid'
+[[ "$tree" =~ ^[0-9a-fA-F]{40}$ ]] || die 'tree SHA is invalid'
+[[ "$lock_sha" =~ ^[0-9a-fA-F]{64}$ ]] || die 'package-lock SHA-256 is invalid'
+[[ "$run_id" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || die 'CI run ID is invalid'
+commit="${commit,,}"
+tree="${tree,,}"
+artifact_sha="${artifact_sha,,}"
+lock_sha="${lock_sha,,}"
+[[ "$artifact" == "$INCOMING/dashboard-v2-staging-${commit}.tar.gz" ]] || die 'artifact path is outside the staging upload contract'
+[[ -f "$artifact" && ! -L "$artifact" ]] || die 'artifact is not a regular file'
+
+[[ -d "$RELEASE_ROOT" && -d "$RELEASES" ]] || die 'staging release root is not provisioned'
+[[ "$(stat -c '%U:%G %a' "$RELEASE_ROOT")" == 'root:root 755' ]] || die 'staging release root ownership/mode is unsafe'
+[[ "$(stat -c '%U:%G %a' "$RELEASES")" == 'root:root 755' ]] || die 'staging releases ownership/mode is unsafe'
+[[ "$(stat -c '%U:%G %a' "$INCOMING")" == "root:$DEPLOY_GROUP 730" ]] || die 'staging incoming ownership/mode is unsafe'
+
+actual_sha="$($SHA256SUM "$artifact" | awk '{print $1}')"
+[[ "$actual_sha" == "$artifact_sha" ]] || die 'artifact SHA-256 does not match the CI manifest'
+
+while IFS= read -r entry; do
+  entry="${entry#./}"
+  [[ -n "$entry" ]] || continue
+  [[ "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'archive contains a path traversal entry'
+  case "$entry" in
+    server.js|build-metadata.json|package.json|.next|.next/*|node_modules|node_modules/*|public|public/*) ;;
+    *) die "archive contains an unexpected path: $entry" ;;
+  esac
+done < <($TAR -tzf "$artifact")
+
+candidate="$(/usr/bin/mktemp -d "$RELEASES/.incoming.XXXXXX")"
+cleanup_candidate() {
+  if [[ -n "${candidate:-}" && -d "$candidate" ]]; then
+    /usr/bin/rm -rf -- "$candidate"
+  fi
+}
+trap cleanup_candidate EXIT
+
+$TAR --extract --file "$artifact" --directory "$candidate" --no-same-owner --no-same-permissions --no-overwrite-dir
+if /usr/bin/find "$candidate" -type l -print -quit | /usr/bin/grep -q .; then
+  die 'archive contains a symbolic link'
+fi
+for required in server.js build-metadata.json package.json; do
+  [[ -f "$candidate/$required" && ! -L "$candidate/$required" ]] || die "required artifact file is missing: $required"
+done
+[[ -d "$candidate/.next" && ! -L "$candidate/.next" ]] || die 'standalone .next directory is missing'
+[[ -d "$candidate/node_modules" && ! -L "$candidate/node_modules" ]] || die 'standalone node_modules directory is missing'
+
+$PYTHON - "$candidate/build-metadata.json" "$commit" "$tree" "$lock_sha" "$run_id" <<'PY'
+import json
+import re
+import sys
+
+path, expected_commit, expected_tree, expected_lock, expected_run = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    metadata = json.load(handle)
+
+if metadata.get("schema_version") != "dashboard-v2-staging-artifact.v1":
+    raise SystemExit("unexpected staging artifact schema")
+if metadata.get("deployment_environment") != "staging":
+    raise SystemExit("artifact is not marked for staging")
+if metadata.get("deployment_label") != "STAGING":
+    raise SystemExit("artifact does not carry the STAGING label")
+if metadata.get("git_commit_sha", "").lower() != expected_commit:
+    raise SystemExit("artifact commit identity mismatch")
+if metadata.get("git_tree_sha", "").lower() != expected_tree:
+    raise SystemExit("artifact tree identity mismatch")
+if metadata.get("package_lock_sha256", "").lower() != expected_lock:
+    raise SystemExit("artifact package-lock identity mismatch")
+if metadata.get("ci_run_id") != expected_run:
+    raise SystemExit("artifact CI run identity mismatch")
+if not re.fullmatch(r"[0-9A-Za-z._-]{1,128}", str(metadata.get("build_id", ""))):
+    raise SystemExit("artifact build identity is invalid")
+expected_contents = {
+    "server.js", ".next", "node_modules", "build-metadata.json", "package.json"
+}
+actual_contents = set(metadata.get("artifact_contents", []))
+if not expected_contents.issubset(actual_contents):
+    raise SystemExit("artifact contents metadata is incomplete")
+PY
+
+release_name="${commit}-${artifact_sha:0:12}"
+[[ "$release_name" =~ ^[0-9a-f]{40}-[0-9a-f]{12}$ ]] || die 'release name is invalid'
+release_dir="$RELEASES/$release_name"
+[[ ! -e "$release_dir" && ! -L "$release_dir" ]] || die 'release identity already exists; refusing to overwrite it'
+
+previous_target=""
+previous_release=""
+if [[ -L "$CURRENT" ]]; then
+  previous_target="$(readlink -- "$CURRENT")"
+  [[ "$previous_target" =~ ^releases/[0-9a-f]{40}-[0-9a-f]{12}$ ]] || die 'existing staging current pointer is unsafe'
+  [[ -d "$RELEASE_ROOT/$previous_target" ]] || die 'existing staging current pointer is dangling'
+  previous_release="${previous_target#releases/}"
+elif [[ -e "$CURRENT" ]]; then
+  die 'staging current path exists but is not a symlink'
+fi
+
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf '%s\n' "{\"schema_version\":\"dashboard-v2-staging-release.v1\",\"git_commit_sha\":\"$commit\",\"git_tree_sha\":\"$tree\",\"package_lock_sha256\":\"$lock_sha\",\"artifact_sha256\":\"$artifact_sha\",\"ci_run_id\":\"$run_id\",\"deployment_started_at\":\"$started_at\",\"previous_release\":\"$previous_release\"}" > "$candidate/release-manifest.json"
+
+/usr/bin/chown -R root:root "$candidate"
+/usr/bin/find "$candidate" -type d -exec /usr/bin/chmod 755 {} +
+/usr/bin/find "$candidate" -type f -exec /usr/bin/chmod 644 {} +
+/usr/bin/chmod 755 "$candidate/server.js"
+/usr/bin/mv -- "$candidate" "$release_dir"
+candidate=""
+
+check_health() {
+  local expected_short="$1"
+  "$SYSTEMCTL" is-active --quiet "$SERVICE" || return 1
+  local restarts
+  restarts="$($SYSTEMCTL show "$SERVICE" -p NRestarts --value)"
+  [[ "$restarts" =~ ^[0-9]+$ && "$restarts" -lt 5 ]] || return 1
+  local listener
+  listener="$($SS -H -ltn 2>/dev/null | /usr/bin/awk '$4 == "127.0.0.1:3001" { print $4 }')"
+  [[ "$listener" == '127.0.0.1:3001' ]] || return 1
+  if $SS -H -ltn 2>/dev/null | /usr/bin/awk '$4 ~ /:3001$/ && $4 != "127.0.0.1:3001" { found = 1 } END { exit found ? 0 : 1 }'; then
+    return 1
+  fi
+  local health_page
+  health_page="$(/usr/bin/mktemp "$RELEASE_ROOT/shared/health.XXXXXX")"
+  /usr/bin/chown root:root "$health_page"
+  /usr/bin/chmod 600 "$health_page"
+  if ! "$CURL" --silent --show-error --fail --max-time 15 --max-filesize 1048576 \
+    --output "$health_page" http://127.0.0.1:3001/; then
+    /usr/bin/rm -f -- "$health_page"
+    return 1
+  fi
+  /usr/bin/grep -Fq 'STAGING' "$health_page" || {
+    /usr/bin/rm -f -- "$health_page"
+    return 1
+  }
+  /usr/bin/grep -Fq "$expected_short" "$health_page" || {
+    /usr/bin/rm -f -- "$health_page"
+    return 1
+  }
+  local unauth_status
+  unauth_status="$($CURL --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3001/api/health || true)"
+  /usr/bin/rm -f -- "$health_page"
+  [[ "$unauth_status" == '401' ]]
+}
+
+switch_pointer() {
+  local target="$1"
+  local temporary_link="$RELEASE_ROOT/.current.$$.link"
+  [[ ! -e "$temporary_link" && ! -L "$temporary_link" ]] || die 'temporary current pointer already exists'
+  /usr/bin/ln -s -- "$target" "$temporary_link"
+  /usr/bin/mv -Tf -- "$temporary_link" "$CURRENT"
+}
+
+write_receipt() {
+  local status="$1"
+  local rollback="$2"
+  local finished_at
+  finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local receipt_tmp="$RELEASE_ROOT/shared/.last-deployment.$$.json"
+  printf '%s\n' "{\"schema_version\":\"dashboard-v2-staging-deployment.v1\",\"service\":\"$SERVICE\",\"status\":\"$status\",\"rollback\":$rollback,\"new_release\":\"$release_name\",\"previous_release\":\"$previous_release\",\"git_commit_sha\":\"$commit\",\"git_tree_sha\":\"$tree\",\"package_lock_sha256\":\"$lock_sha\",\"artifact_sha256\":\"$artifact_sha\",\"ci_run_id\":\"$run_id\",\"finished_at\":\"$finished_at\"}" > "$receipt_tmp"
+  /usr/bin/chown root:root "$receipt_tmp"
+  /usr/bin/chmod 644 "$receipt_tmp"
+  /usr/bin/mv -Tf -- "$receipt_tmp" "$RELEASE_ROOT/shared/last-deployment.json"
+}
+
+if ! "$SYSTEMCTL" restart "$SERVICE"; then
+  restart_failed=1
+else
+  restart_failed=0
+fi
+
+if (( restart_failed == 0 )) && check_health "${commit:0:12}"; then
+  write_receipt success false
+  current_target="$(readlink -- "$CURRENT")"
+  # Retain only validated release-directory names, never the active pointer.
+  mapfile -t old_releases < <(
+    /usr/bin/find "$RELEASES" -mindepth 1 -maxdepth 1 -type d \
+      -regextype posix-extended -regex '.*/[0-9a-f]{40}-[0-9a-f]{12}' \
+      -printf '%T@ %f\n' | /usr/bin/sort -nr | /usr/bin/awk -v max="$MAX_RELEASES" 'NR > max {print $2}'
+  )
+  for old_release in "${old_releases[@]}"; do
+    [[ "$old_release" =~ ^[0-9a-f]{40}-[0-9a-f]{12}$ ]] || continue
+    [[ "releases/$old_release" == "$current_target" ]] && continue
+    /usr/bin/rm -rf -- "$RELEASES/$old_release"
+  done
+  printf '%s\n' "{\"service\":\"$SERVICE\",\"status\":\"success\",\"release\":\"$release_name\",\"previous_release\":\"$previous_release\",\"artifact_sha256\":\"$artifact_sha\",\"git_commit_sha\":\"$commit\",\"git_tree_sha\":\"$tree\",\"package_lock_sha256\":\"$lock_sha\",\"ci_run_id\":\"$run_id\",\"rollback\":false}"
+  exit 0
+fi
+
+rollback_ok=0
+if [[ -n "$previous_target" ]]; then
+  switch_pointer "$previous_target"
+  previous_short="${previous_release:0:12}"
+  if "$SYSTEMCTL" restart "$SERVICE" && check_health "$previous_short"; then
+    rollback_ok=1
+  fi
+else
+  if [[ -L "$CURRENT" ]]; then
+    /usr/bin/rm -f -- "$CURRENT"
+  fi
+  "$SYSTEMCTL" stop "$SERVICE" >/dev/null 2>&1 || true
+fi
+
+if (( rollback_ok == 1 )); then
+  write_receipt health_failed_rolled_back true
+  printf '%s\n' "{\"service\":\"$SERVICE\",\"status\":\"health_failed_rolled_back\",\"release\":\"$release_name\",\"previous_release\":\"$previous_release\",\"artifact_sha256\":\"$artifact_sha\",\"git_commit_sha\":\"$commit\",\"rollback\":true}"
+else
+  write_receipt failed false
+  printf '%s\n' "{\"service\":\"$SERVICE\",\"status\":\"failed_and_rollback_unavailable\",\"release\":\"$release_name\",\"previous_release\":\"$previous_release\",\"artifact_sha256\":\"$artifact_sha\",\"git_commit_sha\":\"$commit\",\"rollback\":false}"
+fi
+exit 1

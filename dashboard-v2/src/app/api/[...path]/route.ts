@@ -348,3 +348,40 @@ export async function GET(
   if (upstream.status < 200 || upstream.status >= 300) return upstreamError(upstream.status);
   return jsonResponse(upstream.body, upstream.status);
 }
+
+// This catch-all is deliberately a read-only BFF.  Keep non-authentication
+// state-changing methods explicit and fail closed so a future route addition
+// cannot accidentally inherit a write-capable default.  /api/auth is a
+// separate route and only changes this dashboard's local session cookie.
+function methodNotAllowed(): Response {
+  const response = jsonResponse(
+    { error: "dashboard BFF accepts read-only GET and HEAD requests" },
+    405,
+  );
+  response.headers.set("allow", "GET, HEAD");
+  return response;
+}
+
+export async function HEAD(
+  request: Request,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  const response = await GET(request, context);
+  return new Response(null, { status: response.status, headers: response.headers });
+}
+
+export async function POST() {
+  return methodNotAllowed();
+}
+
+export async function PUT() {
+  return methodNotAllowed();
+}
+
+export async function PATCH() {
+  return methodNotAllowed();
+}
+
+export async function DELETE() {
+  return methodNotAllowed();
+}
