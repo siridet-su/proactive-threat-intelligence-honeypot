@@ -600,26 +600,36 @@ Exit gate: ผ่านระยะ shadow ที่กำหนดและม�
 - default gate ต้องได้ target และ baseline coverage อย่างน้อย 99%, sequence ไม่ซ้ำ,
   monotonic clock เพิ่ม, NTP synchronized และไม่ข้าม boot
 - output มี deterministic content hashes และ validate กับ derived schema
-- automated tests ปัจจุบันผ่าน 8 tests ครอบคลุม percentile semantics, missing/leading
-  sample alignment, duplicates, correlation, determinism, schema และ CLI
+- experimental collector `0.2.0` สำหรับ `pi_sensor` neutral-idle Stage A เขียนเฉพาะ
+  bounded immutable local spool ไม่มี Redis/Mongo/cloud/workload execution path
+- network schema ระบุ `include_in_aggregate` เพื่อห้ามนับ `wlan0` กับ overlay traffic ซ้ำ
+- มี manifest finalizer ที่ตรวจ receipt/segment hashes, counts และ contiguous sequences
+  ก่อนสร้าง completed manifest copy
+- automated tests ปัจจุบันผ่าน 16 tests ครอบคลุม percentile semantics, missing/leading
+  sample alignment, duplicates, correlation, determinism, spool interruption/no-overwrite,
+  raw/receipt schemas และ synthetic 90-sample replay จาก collector เข้า builder
 
 ไฟล์ implementation หลัก:
 
 - `src/cowrie_hardware_fusion/dataset.py`
+- `src/cowrie_hardware_fusion/collector.py`
+- `src/cowrie_hardware_fusion/spool.py`
 - `src/cowrie_hardware_fusion/cli.py`
 - `schemas/derived_training_window.v1.schema.json`
 - [Dataset builder v1](../dataset_builder.v1.md)
+- [Experimental 1 Hz collector v1](../experimental_collector.v1.md)
 
 สิ่งที่ยังไม่ถือว่าเสร็จ:
 
 - schemas/catalog ยังเป็น draft จนกว่า pilot replay ผ่าน
-- ยังไม่มี experimental 1 Hz collector หรือ deployment change บน Pi
+- collector ยังไม่ deploy บน Pi และ system Python ของ Pi ยังไม่มี `psutil`
+- ยังไม่มี uploader, Atlas experimental time-series หรือ rollup
 - ยังไม่ได้สร้าง command-event correlation, batch split หรือ model training
 - ยังไม่มี XGBoost/TCN/Fusion checkpoint
 
-ลำดับถัดไปคือสร้าง experimental collector/spool แยกจาก `raw:hardware` และ
-`hardware_metrics`, เก็บ idle/ordinary-load pilot โดยไม่รัน attack-like workload แล้ว
-replay เข้า builder เพื่อ freeze feature/channel schema
+ลำดับถัดไปคือ review deployment boundary, สร้าง isolated venv/config/manifest บน Pi,
+รัน preflight และเก็บ neutral-idle pilot โดยไม่แตะ production service จากนั้น replay
+segment จริงเข้า builder เพื่อวัด bytes/sample และ freeze feature/channel schema
 
 ## References
 

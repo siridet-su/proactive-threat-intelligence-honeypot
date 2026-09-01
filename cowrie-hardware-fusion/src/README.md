@@ -10,10 +10,11 @@
 - สร้าง aggregate feature row สำหรับ XGBoost
 - สร้าง fixed-length channel arrays พร้อม missing masks สำหรับ TCN
 - สร้าง deterministic content hashes
+- experimental `pi_sensor` neutral-idle collector ที่เขียน bounded immutable spool
 
 ขอบเขต implementation ถัดไป:
 
-- batch ingestion และ Cowrie command correlation adapters
+- Pi deployment review, batch ingestion และ Cowrie command correlation adapters
 - train-only preprocessing และ run-level split generator
 - XGBoost baseline
 - MiniROCKET/TCN experiments

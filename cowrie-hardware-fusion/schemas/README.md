@@ -17,5 +17,7 @@
 - [Experiment run manifest schema](experiment_run_manifest.v1.schema.json)
 - [Hardware telemetry sample schema](hardware_telemetry_sample.v1.schema.json)
 - [Derived training window schema](derived_training_window.v1.schema.json)
+- [Experimental collector config schema](experimental_collector_config.v1.schema.json)
+- [Experiment collection receipt schema](experiment_collection_receipt.v1.schema.json)
 - [Example run manifest](examples/experiment_run_manifest.v1.example.json)
 - [Example telemetry sample](examples/hardware_telemetry_sample.v1.example.json)

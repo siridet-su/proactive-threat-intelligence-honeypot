@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:experimental_collector_config:v1",
+  "title": "Experimental Pi Telemetry Collector Config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "collector_id", "collector_version", "sensor_id", "subject_id", "metric_scope", "interfaces", "disk_devices", "spool", "timing"],
+  "properties": {
+    "schema_version": {"const": "experimental_collector_config.v1"},
+    "collector_id": {"$ref": "#/$defs/identifier"},
+    "collector_version": {"const": "0.2.0"},
+    "sensor_id": {"$ref": "#/$defs/identifier"},
+    "subject_id": {"$ref": "#/$defs/identifier"},
+    "metric_scope": {"const": "pi_sensor"},
+    "interfaces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "accounting_role", "include_in_aggregate"],
+        "properties": {
+          "name": {"$ref": "#/$defs/identifier"},
+          "accounting_role": {
+            "enum": ["primary_physical", "other_physical", "overlay_observability", "loopback_observability", "local_sink", "other"]
+          },
+          "include_in_aggregate": {"type": "boolean"}
+        }
+      }
+    },
+    "disk_devices": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/identifier"}
+    },
+    "spool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directory", "max_total_bytes", "min_free_bytes", "segment_max_bytes", "segment_max_records", "fsync_every_records"],
+      "properties": {
+        "directory": {"type": "string", "pattern": "^/", "maxLength": 4096},
+        "max_total_bytes": {"type": "integer", "minimum": 10485760},
+        "min_free_bytes": {"type": "integer", "minimum": 104857600},
+        "segment_max_bytes": {"type": "integer", "minimum": 65536},
+        "segment_max_records": {"type": "integer", "minimum": 10, "maximum": 3600},
+        "fsync_every_records": {"const": 1}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["late_tolerance_ms", "require_ntp_synchronized"],
+      "properties": {
+        "late_tolerance_ms": {"type": "number", "minimum": 0, "maximum": 1000},
+        "require_ntp_synchronized": {"const": true}
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}
+  }
+}

@@ -49,6 +49,7 @@ cowrie-hardware-fusion/
 
 - [Experiment contract v1](docs/experiment_contract.v1.md)
 - [Dataset builder v1](docs/dataset_builder.v1.md)
+- [Experimental 1 Hz collector v1](docs/experimental_collector.v1.md)
 - [XGBoost, TCN and Fusion architecture](docs/model_architecture_xgboost_tcn_fusion.v1.md)
 - [Dataset split policy v1](docs/dataset_split_policy.v1.md)
 - [Dataset storage plan v1](docs/dataset_storage_plan.v1.md)

@@ -7,3 +7,5 @@ configuration ทุก config ที่มีผลต่อ dataset/model iden
 ไฟล์ปัจจุบัน:
 
 - [Scenario catalog v1](scenario_catalog.v1.json)
+- [Experimental Pi collector example](experimental_collector.pi_sensor.pilot.example.json)
+  — ต้องยืนยัน disk/interface names จาก Pi ก่อนใช้งานจริง

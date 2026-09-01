@@ -1,6 +1,6 @@
 # Dataset Storage Plan v1
 
-> สถานะ: `DRAFT / PRE-IMPLEMENTATION`  
+> สถานะ: `DRAFT / LOCAL SPOOL IMPLEMENTED / NOT DEPLOYED`
 > ปรับปรุง: 2026-09-01 หลัง operator เพิ่ม Atlas capacity และอนุญาตให้ enable agent
 
 ## Decision
@@ -58,6 +58,11 @@ Training pipeline ห้ามพึ่ง Atlas raw TTL: ทุก completed ru
 storage receipt ก่อน raw hot data หมดอายุ
 
 ## Pi/backend spool
+
+Local implementation `0.2.0` มี bounded spool, per-record fsync, byte/record rotation,
+read-only published segments, content hashes, no-overwrite และ completed collection
+receipt แล้ว แต่ยังไม่มี uploader/quarantine service และยังไม่ deploy บน Pi ดู
+[Experimental 1 Hz collector v1](experimental_collector.v1.md)
 
 - reuse durability pattern ของ existing Cowrie sensor forwarder: write, fsync, checkpoint
 - rotate ตาม byte size และเวลา ไม่สร้างไฟล์เดียวโตไม่จำกัด

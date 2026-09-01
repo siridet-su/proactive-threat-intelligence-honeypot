@@ -5,9 +5,10 @@
 1. [Experiment contract v1](experiment_contract.v1.md)
 2. [XGBoost, TCN and Fusion architecture](model_architecture_xgboost_tcn_fusion.v1.md)
 3. [Dataset builder v1](dataset_builder.v1.md)
-4. [Dataset split policy v1](dataset_split_policy.v1.md)
-5. [Dataset storage plan v1](dataset_storage_plan.v1.md)
-6. [Pi environment audit — 2026-09-01](pi_environment_audit_2026-09-01.md)
+4. [Experimental 1 Hz collector v1](experimental_collector.v1.md)
+5. [Dataset split policy v1](dataset_split_policy.v1.md)
+6. [Dataset storage plan v1](dataset_storage_plan.v1.md)
+7. [Pi environment audit — 2026-09-01](pi_environment_audit_2026-09-01.md)
 
 ## Imported SecureBERT review
 

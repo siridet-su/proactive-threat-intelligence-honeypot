@@ -106,6 +106,21 @@ def _sum_items(
     return total
 
 
+def _sum_aggregate_interfaces(sample: Mapping[str, Any], value_name: str) -> float:
+    interfaces = sample["network"].get("interfaces")
+    _require(isinstance(interfaces, list), "network.interfaces must be an array")
+    eligible = [
+        interface
+        for interface in interfaces
+        if isinstance(interface, Mapping) and interface.get("include_in_aggregate") is True
+    ]
+    _require(eligible, "network.interfaces must contain an aggregate-eligible interface")
+    return sum(
+        _number(interface.get(value_name), f"network.interfaces[].{value_name}")
+        for interface in eligible
+    )
+
+
 def _optional_number(value: Any, path: str) -> float | None:
     if value is None:
         return None
@@ -281,10 +296,10 @@ def _aggregate_features(
     root_used = _values(points(lambda sample: _nested_number(sample, "disk.root_used_percent")))
     baseline_root_used = baseline_values(lambda sample: _nested_number(sample, "disk.root_used_percent"))
 
-    net_rx_bytes = _values(points(lambda sample: _sum_items(sample, "network.interfaces", "rx_bytes_per_second")))
-    net_tx_bytes = _values(points(lambda sample: _sum_items(sample, "network.interfaces", "tx_bytes_per_second")))
-    net_rx_packets = _values(points(lambda sample: _sum_items(sample, "network.interfaces", "rx_packets_per_second")))
-    net_tx_packets = _values(points(lambda sample: _sum_items(sample, "network.interfaces", "tx_packets_per_second")))
+    net_rx_bytes = _values(points(lambda sample: _sum_aggregate_interfaces(sample, "rx_bytes_per_second")))
+    net_tx_bytes = _values(points(lambda sample: _sum_aggregate_interfaces(sample, "tx_bytes_per_second")))
+    net_rx_packets = _values(points(lambda sample: _sum_aggregate_interfaces(sample, "rx_packets_per_second")))
+    net_tx_packets = _values(points(lambda sample: _sum_aggregate_interfaces(sample, "tx_packets_per_second")))
     connections = _values(points(lambda sample: _nested_number(sample, "network.connection_count")))
     sockets = _values(points(lambda sample: _nested_number(sample, "network.socket_count")))
     unique_destinations = _values(points(lambda sample: _number(sample["network"].get("unique_destination_count", 0), "network.unique_destination_count")))
@@ -376,10 +391,10 @@ _SEQUENCE_EXTRACTORS: dict[str, Callable[[Mapping[str, Any]], float | None]] = {
     "memory_used_percent": lambda sample: _nested_number(sample, "memory.used_percent"),
     "disk_read_bytes_per_second": lambda sample: _sum_items(sample, "disk.devices", "read_bytes_per_second"),
     "disk_write_bytes_per_second": lambda sample: _sum_items(sample, "disk.devices", "write_bytes_per_second"),
-    "network_rx_bytes_per_second": lambda sample: _sum_items(sample, "network.interfaces", "rx_bytes_per_second"),
-    "network_tx_bytes_per_second": lambda sample: _sum_items(sample, "network.interfaces", "tx_bytes_per_second"),
-    "network_rx_packets_per_second": lambda sample: _sum_items(sample, "network.interfaces", "rx_packets_per_second"),
-    "network_tx_packets_per_second": lambda sample: _sum_items(sample, "network.interfaces", "tx_packets_per_second"),
+    "network_rx_bytes_per_second": lambda sample: _sum_aggregate_interfaces(sample, "rx_bytes_per_second"),
+    "network_tx_bytes_per_second": lambda sample: _sum_aggregate_interfaces(sample, "tx_bytes_per_second"),
+    "network_rx_packets_per_second": lambda sample: _sum_aggregate_interfaces(sample, "rx_packets_per_second"),
+    "network_tx_packets_per_second": lambda sample: _sum_aggregate_interfaces(sample, "tx_packets_per_second"),
     "network_connection_count": lambda sample: _nested_number(sample, "network.connection_count"),
     "network_socket_count": lambda sample: _nested_number(sample, "network.socket_count"),
     "temperature_c": _temperature,

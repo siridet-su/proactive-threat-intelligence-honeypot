@@ -75,6 +75,8 @@
     "interfaces": [
       {
         "name": "wlan0",
+        "accounting_role": "primary_physical",
+        "include_in_aggregate": true,
         "up": true,
         "rx_bytes_total": 1000000,
         "tx_bytes_total": 500000,
@@ -119,4 +121,3 @@
     "collector_errors": []
   }
 }
-

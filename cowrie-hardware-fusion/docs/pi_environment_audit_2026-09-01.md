@@ -17,6 +17,14 @@
 | NTP | synchronized |
 | Kernel | Ubuntu Raspberry Pi 6.8.0-1063-raspi |
 
+Read-only collector preflight follow-up ในวันเดียวกันยืนยันเพิ่มว่า:
+
+- Python system runtime คือ `3.12.3`
+- system Python ยังไม่มี package `psutil`
+- root filesystem block device คือ `mmcblk0p2`
+- `wlan0`, `tailscale0` และ `lo` ยังมีอยู่จริง
+- `timedatectl` รายงาน `NTPSynchronized=yes`
+
 ## Honeypot services
 
 Active ตอนตรวจ:

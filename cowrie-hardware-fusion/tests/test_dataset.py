@@ -81,6 +81,21 @@ def test_cpu_p95_is_not_changed_by_one_isolated_maximum() -> None:
     assert record["xgboost"]["features"]["cpu_max"] == 100.0
 
 
+def test_overlay_interface_is_not_double_counted() -> None:
+    manifest, samples = _fixture_run()
+    for sample in samples:
+        overlay = deepcopy(sample["network"]["interfaces"][0])
+        overlay["name"] = "tailscale0"
+        overlay["accounting_role"] = "overlay_observability"
+        overlay["include_in_aggregate"] = False
+        overlay["tx_bytes_per_second"] = 50_000.0
+        sample["network"]["interfaces"].append(overlay)
+
+    record = _build(manifest, samples)
+
+    assert record["xgboost"]["features"]["network_tx_bytes_per_second_max"] == 800.0
+
+
 def test_missing_sample_fails_default_gate_but_is_masked_when_explicitly_allowed() -> None:
     manifest, samples = _fixture_run()
     samples = [sample for sample in samples if sample["time"]["sequence"] != 45]

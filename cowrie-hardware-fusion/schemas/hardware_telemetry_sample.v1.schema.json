@@ -294,6 +294,8 @@
             "additionalProperties": false,
             "required": [
               "name",
+              "accounting_role",
+              "include_in_aggregate",
               "up",
               "rx_bytes_total",
               "tx_bytes_total",
@@ -311,6 +313,19 @@
             "properties": {
               "name": {
                 "$ref": "#/$defs/identifier"
+              },
+              "accounting_role": {
+                "enum": [
+                  "primary_physical",
+                  "other_physical",
+                  "overlay_observability",
+                  "loopback_observability",
+                  "local_sink",
+                  "other"
+                ]
+              },
+              "include_in_aggregate": {
+                "type": "boolean"
               },
               "up": {
                 "type": "boolean"
@@ -514,4 +529,3 @@
     }
   }
 }
-
