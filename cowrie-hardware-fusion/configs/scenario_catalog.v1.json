@@ -1,16 +1,17 @@
 {
   "schema_version": "cowrie_hardware_scenario_catalog.v1",
   "catalog_id": "cowrie-hardware-fusion-pilot-v1",
-  "status": "stage_a_verified_stage_b_pre_execution",
+  "status": "stage_a_verified_stage_b_pi_poc_controlled_only",
   "reviewed_at": "2026-09-02",
   "attack_reference": {
     "domain": "Enterprise",
-    "checked_at": "2026-09-01",
+    "checked_at": "2026-09-02",
     "sources": [
       "https://attack.mitre.org/techniques/T1496/",
       "https://attack.mitre.org/techniques/T1496/001/",
       "https://attack.mitre.org/techniques/T1498/",
-      "https://attack.mitre.org/techniques/T1499/"
+      "https://attack.mitre.org/techniques/T1499/",
+      "https://attack.mitre.org/techniques/T1499/002/"
     ]
   },
   "impact_label_space": [
@@ -60,6 +61,54 @@
       "ground_truth_ttps": [],
       "execution_observed_required": false,
       "paired_counterexample": null
+    },
+    {
+      "scenario_id": "poc_pi_benign_compute_control",
+      "name": "Pi PoC authorized bounded compute control",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_compute_control",
+      "primary_impact": "COMPUTE_SATURATION",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_compute_hijacking_simulation"
+    },
+    {
+      "scenario_id": "poc_pi_compute_hijacking_simulation",
+      "name": "Pi PoC compute hijacking behavior without mining",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_compute_simulation",
+      "primary_impact": "COMPUTE_SATURATION",
+      "ground_truth_ttps": ["T1496.001"],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_benign_compute_control"
+    },
+    {
+      "scenario_id": "poc_pi_benign_service_load_control",
+      "name": "Pi PoC authorized bounded loopback service load",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_local_service_control",
+      "primary_impact": "SERVICE_PRESSURE",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_service_exhaustion_simulation"
+    },
+    {
+      "scenario_id": "poc_pi_service_exhaustion_simulation",
+      "name": "Pi PoC bounded loopback service exhaustion behavior",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_local_service_simulation",
+      "primary_impact": "SERVICE_PRESSURE",
+      "ground_truth_ttps": ["T1499.002"],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_benign_service_load_control"
     },
     {
       "scenario_id": "benign_compute_control",

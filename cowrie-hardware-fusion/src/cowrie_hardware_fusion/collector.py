@@ -1,4 +1,4 @@
-"""Isolated 1 Hz telemetry collector for Stage A neutral-idle pilot runs.
+"""Isolated 1 Hz telemetry collector for neutral and controlled PoC runs.
 
 The collector writes only to a bounded local spool. It has no Redis, MongoDB, cloud,
 command execution, or canonical-authority integration.
@@ -25,7 +25,7 @@ from .dataset import DatasetContractError
 from .spool import BoundedSegmentSpool, SpoolLimits
 
 
-COLLECTOR_VERSION = "0.2.0"
+COLLECTOR_VERSION = "0.3.0"
 COLLECTOR_SCHEMA_VERSION = "experimental_collector_config.v1"
 RECEIPT_SCHEMA_VERSION = "experiment_collection_receipt.v1"
 
@@ -104,6 +104,16 @@ class Probe(Protocol):
     boot_id_sha256: str
 
     def sample(self) -> ProbeResult: ...
+
+
+class PhaseLifecycle(Protocol):
+    """Optional phase boundary hooks used by the safe-container PoC runner."""
+
+    def before_phase(self, phase: str, probe: Probe) -> None: ...
+
+    def after_phase(self, phase: str, probe: Probe) -> None: ...
+
+    def close(self, probe: Probe) -> None: ...
 
 
 class Clock(Protocol):
@@ -278,6 +288,93 @@ class LinuxSystemProbe:
         self._previous_at_ns = time.monotonic_ns()
         self._previous_disk = psutil.disk_io_counters(perdisk=True) or {}
         self._previous_network = psutil.net_io_counters(pernic=True)
+        self._target_process: psutil.Process | None = None
+        self._target_process_id_hash: str | None = None
+        self._target_parent_process_id_hash: str | None = None
+        self._target_cgroup_id: str | None = None
+
+    def set_target_process(self, process_id: int) -> None:
+        """Observe one fixed container process without exposing its host PID."""
+
+        if process_id <= 0:
+            raise DatasetContractError("target process ID must be positive")
+        process = psutil.Process(process_id)
+        parent_id = process.ppid()
+        self._target_process_id_hash = sha256(
+            f"{self.boot_id_sha256}\0pid\0{process_id}".encode("utf-8")
+        ).hexdigest()
+        self._target_parent_process_id_hash = (
+            sha256(
+                f"{self.boot_id_sha256}\0pid\0{parent_id}".encode("utf-8")
+            ).hexdigest()
+            if parent_id > 0
+            else None
+        )
+        try:
+            cgroup_lines = Path(f"/proc/{process_id}/cgroup").read_text(
+                encoding="ascii"
+            )
+            cgroup_path = next(
+                line.split(":", 2)[2]
+                for line in cgroup_lines.splitlines()
+                if line.startswith("0::")
+            )
+            self._target_cgroup_id = sha256(cgroup_path.encode("utf-8")).hexdigest()
+        except (OSError, StopIteration, IndexError):
+            self._target_cgroup_id = None
+        process.cpu_percent(interval=None)
+        self._target_process = process
+
+    def clear_target_process(self) -> None:
+        self._target_process = None
+        self._target_process_id_hash = None
+        self._target_parent_process_id_hash = None
+        self._target_cgroup_id = None
+
+    @staticmethod
+    def _process_socket_count(process_id: int) -> int | None:
+        """Count sockets visible in the target's isolated network namespace."""
+
+        count = 0
+        readable_files = 0
+        network_root = Path(f"/proc/{process_id}/net")
+        for name in ("tcp", "tcp6", "udp", "udp6", "unix"):
+            try:
+                with (network_root / name).open("r", encoding="ascii") as handle:
+                    count += max(sum(1 for _ in handle) - 1, 0)
+                readable_files += 1
+            except OSError:
+                continue
+        return count if readable_files else None
+
+    def _sample_target_process(
+        self,
+        missing: list[str],
+        errors: list[str],
+    ) -> dict[str, Any] | None:
+        process = self._target_process
+        if process is None:
+            return None
+        try:
+            memory = process.memory_info()
+            socket_count = self._process_socket_count(process.pid)
+            if socket_count is None:
+                missing.append("process.target.socket_count")
+            return {
+                "process_id_hash": self._target_process_id_hash,
+                "parent_process_id_hash": self._target_parent_process_id_hash,
+                "cpu_percent_single_core_basis": float(
+                    process.cpu_percent(interval=None)
+                ),
+                "rss_bytes": int(memory.rss),
+                "thread_count": int(process.num_threads()),
+                "socket_count": socket_count,
+                "cgroup_id": self._target_cgroup_id,
+            }
+        except (OSError, psutil.Error) as exc:
+            missing.append("process.target")
+            errors.append(f"process.target:{type(exc).__name__}")
+            return None
 
     def sample(self) -> ProbeResult:
         missing: list[str] = []
@@ -473,10 +570,14 @@ class LinuxSystemProbe:
             threads = process.info.get("num_threads")
             if isinstance(threads, int):
                 thread_count += threads
+        target_expected = self._target_process is not None
+        target_process = self._sample_target_process(missing, errors)
+        if target_expected and target_process is None:
+            valid = False
         process_block = {
             "process_count": process_count,
             "thread_count": thread_count,
-            "target": None,
+            "target": target_process,
         }
 
         self._previous_at_ns = observed_ns
@@ -496,7 +597,7 @@ class LinuxSystemProbe:
         )
 
 
-def _validate_idle_contract(
+def _validate_common_contract(
     manifest: Mapping[str, Any], config: CollectorConfig, source_sha256: str
 ) -> None:
     if manifest.get("state") not in {"planned", "running"}:
@@ -504,7 +605,7 @@ def _validate_idle_contract(
     if config.collector_version != COLLECTOR_VERSION:
         raise DatasetContractError("collector config version does not match runtime")
     if config.metric_scope != "pi_sensor":
-        raise DatasetContractError("collector v0.2.0 supports only pi_sensor")
+        raise DatasetContractError("collector v0.3.0 supports only pi_sensor")
     if config.sensor_id != manifest["sensor"]["sensor_id"]:
         raise DatasetContractError("config sensor_id does not match manifest")
     if config.subject_id != manifest["sensor"]["host_id"]:
@@ -516,34 +617,14 @@ def _validate_idle_contract(
             "manifest collector_sha256 does not match this collector source"
         )
     if manifest["timing"]["sample_interval_seconds"] != 1:
-        raise DatasetContractError("collector v0.2.0 requires a 1-second manifest interval")
-    if manifest["workload"]["scenario_id"] != "neutral_idle":
-        raise DatasetContractError("collector v0.2.0 is restricted to neutral_idle")
-    if manifest["workload"]["family"] != "none":
-        raise DatasetContractError("idle collector cannot run a workload family")
-    if manifest["workload"]["intensity_percent"] != 0:
-        raise DatasetContractError("idle collector requires intensity_percent=0")
-    if manifest["execution_boundary"]["kind"] != "none":
-        raise DatasetContractError("idle collector requires execution_boundary.kind=none")
-    if manifest["execution_boundary"]["execution_observed"] is not False:
-        raise DatasetContractError("idle collector cannot claim execution evidence")
+        raise DatasetContractError("collector v0.3.0 requires a 1-second manifest interval")
     if "pi_sensor" not in manifest["execution_boundary"]["metric_scopes"]:
         raise DatasetContractError("manifest does not authorize pi_sensor telemetry")
     if manifest["collection"]["command_events_required"] is not False:
-        raise DatasetContractError("Stage A idle run cannot require command events")
-    if manifest["labels"]["scenario_disposition"] != "neutral_baseline":
-        raise DatasetContractError("idle run must use neutral_baseline disposition")
-    if manifest["labels"]["primary_impact"] != "NO_MATERIAL_IMPACT":
-        raise DatasetContractError("idle run must use NO_MATERIAL_IMPACT")
-    if manifest["labels"]["ground_truth_ttps"]:
-        raise DatasetContractError("idle run cannot declare ground-truth TTPs")
+        raise DatasetContractError("hardware-only PoC cannot require command events")
     safety = manifest["safety"]
     if safety["actual_malware_used"] or safety["public_or_third_party_target_used"]:
-        raise DatasetContractError("idle collector safety boundary was violated")
-    if safety["egress_enforcement_scope"] != "not_applicable_no_execution":
-        raise DatasetContractError(
-            "idle collector requires egress_enforcement_scope=not_applicable_no_execution"
-        )
+        raise DatasetContractError("collector safety boundary was violated")
 
     names = [interface.name for interface in config.interfaces]
     if len(names) != len(set(names)):
@@ -562,16 +643,76 @@ def _validate_idle_contract(
     config.spool_limits.validate()
 
 
-def collector_preflight(
+def _validate_idle_contract(
+    manifest: Mapping[str, Any], config: CollectorConfig, source_sha256: str
+) -> None:
+    _validate_common_contract(manifest, config, source_sha256)
+    if manifest["workload"]["scenario_id"] != "neutral_idle":
+        raise DatasetContractError("idle collector is restricted to neutral_idle")
+    if manifest["workload"]["family"] != "none":
+        raise DatasetContractError("idle collector cannot run a workload family")
+    if manifest["workload"]["intensity_percent"] != 0:
+        raise DatasetContractError("idle collector requires intensity_percent=0")
+    if manifest["execution_boundary"]["kind"] != "none":
+        raise DatasetContractError("idle collector requires execution_boundary.kind=none")
+    if manifest["execution_boundary"]["execution_observed"] is not False:
+        raise DatasetContractError("idle collector cannot claim execution evidence")
+    if manifest["labels"]["scenario_disposition"] != "neutral_baseline":
+        raise DatasetContractError("idle run must use neutral_baseline disposition")
+    if manifest["labels"]["primary_impact"] != "NO_MATERIAL_IMPACT":
+        raise DatasetContractError("idle run must use NO_MATERIAL_IMPACT")
+    if manifest["labels"]["ground_truth_ttps"]:
+        raise DatasetContractError("idle run cannot declare ground-truth TTPs")
+    safety = manifest["safety"]
+    if safety["egress_enforcement_scope"] != "not_applicable_no_execution":
+        raise DatasetContractError(
+            "idle collector requires egress_enforcement_scope=not_applicable_no_execution"
+        )
+
+
+
+def _validate_controlled_contract(
+    manifest: Mapping[str, Any], config: CollectorConfig, source_sha256: str
+) -> None:
+    _validate_common_contract(manifest, config, source_sha256)
+    workload = manifest["workload"]
+    boundary = manifest["execution_boundary"]
+    labels = manifest["labels"]
+    safety = manifest["safety"]
+    if not workload["scenario_id"].startswith("poc_pi_"):
+        raise DatasetContractError("controlled collector accepts only poc_pi scenarios")
+    if workload["family"] == "none" or workload["intensity_percent"] == 0:
+        raise DatasetContractError("controlled run requires a non-zero fixed workload")
+    if boundary["kind"] != "safe_container":
+        raise DatasetContractError("controlled Pi PoC requires safe_container boundary")
+    if boundary["metric_scopes"] != ["pi_sensor"]:
+        raise DatasetContractError("controlled Pi PoC permits only pi_sensor telemetry")
+    if boundary["execution_observed"] is not True:
+        raise DatasetContractError("controlled run requires execution evidence")
+    if labels["scenario_disposition"] not in {"benign_control", "malicious_simulation"}:
+        raise DatasetContractError("controlled run has an unsupported disposition")
+    if safety["default_deny_egress"] is not True:
+        raise DatasetContractError("controlled Pi PoC requires default-deny egress")
+    if safety["egress_enforcement_scope"] != "execution_boundary":
+        raise DatasetContractError("egress must be enforced at the container boundary")
+    if safety["hard_resource_limits"] is not True:
+        raise DatasetContractError("controlled Pi PoC requires hard resource limits")
+
+
+def _collector_preflight(
     manifest: Mapping[str, Any],
     config: CollectorConfig,
     *,
     schema_dir: Path,
     ntp_synchronized: bool | None = None,
+    controlled: bool,
 ) -> dict[str, Any]:
     source_hash = collector_source_sha256()
     feature_hash = telemetry_schema_sha256(schema_dir)
-    _validate_idle_contract(manifest, config, source_hash)
+    contract_validator = (
+        _validate_controlled_contract if controlled else _validate_idle_contract
+    )
+    contract_validator(manifest, config, source_hash)
     synchronized = ntp_is_synchronized() if ntp_synchronized is None else ntp_synchronized
     if config.require_ntp_synchronized and not synchronized:
         raise DatasetContractError("NTP is not synchronized or could not be verified")
@@ -617,6 +758,38 @@ def collector_preflight(
     }
 
 
+def collector_preflight(
+    manifest: Mapping[str, Any],
+    config: CollectorConfig,
+    *,
+    schema_dir: Path,
+    ntp_synchronized: bool | None = None,
+) -> dict[str, Any]:
+    return _collector_preflight(
+        manifest,
+        config,
+        schema_dir=schema_dir,
+        ntp_synchronized=ntp_synchronized,
+        controlled=False,
+    )
+
+
+def controlled_collector_preflight(
+    manifest: Mapping[str, Any],
+    config: CollectorConfig,
+    *,
+    schema_dir: Path,
+    ntp_synchronized: bool | None = None,
+) -> dict[str, Any]:
+    return _collector_preflight(
+        manifest,
+        config,
+        schema_dir=schema_dir,
+        ntp_synchronized=ntp_synchronized,
+        controlled=True,
+    )
+
+
 def _phase_counts(manifest: Mapping[str, Any]) -> dict[str, int]:
     interval = float(manifest["timing"]["sample_interval_seconds"])
     counts: dict[str, int] = {}
@@ -655,20 +828,23 @@ def write_json_exclusive(path: Path, document: Mapping[str, Any]) -> None:
         os.close(directory_fd)
 
 
-def collect_idle_run(
+def _collect_run(
     manifest: Mapping[str, Any],
     config: CollectorConfig,
     *,
     schema_dir: Path,
+    controlled: bool,
+    lifecycle: PhaseLifecycle | None = None,
     probe: Probe | None = None,
     clock: Clock | None = None,
     ntp_synchronized: bool = True,
 ) -> dict[str, Any]:
-    """Collect one neutral-idle run and return its durable collection receipt."""
-
     source_hash = collector_source_sha256()
     feature_hash = telemetry_schema_sha256(schema_dir)
-    _validate_idle_contract(manifest, config, source_hash)
+    contract_validator = (
+        _validate_controlled_contract if controlled else _validate_idle_contract
+    )
+    contract_validator(manifest, config, source_hash)
     if config.require_ntp_synchronized and not ntp_synchronized:
         raise DatasetContractError("NTP synchronization is required")
     phase_counts = _phase_counts(manifest)
@@ -689,80 +865,90 @@ def collect_idle_run(
         metric_scope=config.metric_scope,
         limits=config.spool_limits,
     )
-    with spool:
-        for phase in ("baseline", "workload", "recovery"):
-            for _ in range(phase_counts[phase]):
-                runtime_clock.sleep_until_ns(deadline_ns)
-                observed_monotonic_ns = runtime_clock.monotonic_ns()
-                late_by_ms = max(
-                    (observed_monotonic_ns - deadline_ns) / 1_000_000,
-                    0.0,
-                )
-                result = runtime_probe.sample()
-                sample = {
-                    "schema_version": "hardware_telemetry_sample.v1",
-                    "sample_id": _sample_id(
-                        manifest["run_id"],
-                        config.metric_scope,
-                        runtime_probe.boot_id_sha256,
-                        sequence,
-                    ),
-                    "run_id": manifest["run_id"],
-                    "experiment_id": manifest["experiment_id"],
-                    "phase": phase,
-                    "metric_scope": config.metric_scope,
-                    "subject_id": config.subject_id,
-                    "time": {
-                        "observed_at": _iso_utc(runtime_clock.now_utc()),
-                        "monotonic_ns": observed_monotonic_ns,
-                        "boot_id_sha256": runtime_probe.boot_id_sha256,
-                        "sequence": sequence,
-                        "sample_interval_seconds": float(
-                            manifest["timing"]["sample_interval_seconds"]
-                        ),
-                        "ntp_synchronized": ntp_synchronized,
-                        "clock_error_bound_ms": None,
-                    },
-                    "collector": {
-                        "collector_id": config.collector_id,
-                        "version": config.collector_version,
-                        "source_sha256": source_hash,
-                        "feature_schema_sha256": feature_hash,
-                    },
-                    "correlation": {
-                        "sensor_id": config.sensor_id,
-                        "state": "no_active_session",
-                        "canonical_session_ids": [],
-                        "command_event_ids": [],
-                    },
-                    "cpu": result.cpu,
-                    "memory": result.memory,
-                    "disk": result.disk,
-                    "network": result.network,
-                    "thermal": result.thermal,
-                    "process": result.process,
-                    "privacy": {
-                        "contains_raw_command": False,
-                        "contains_credentials": False,
-                        "contains_raw_ip": False,
-                    },
-                    "quality": {
-                        "valid": result.valid,
-                        "missing_fields": list(result.missing_fields),
-                        "counter_resets": list(result.counter_resets),
-                        "sample_late": late_by_ms > config.late_tolerance_ms,
-                        "late_by_ms": late_by_ms,
-                        "collector_errors": list(result.collector_errors),
-                    },
-                }
-                _validate_document(
-                    sample,
-                    telemetry_validator,
-                    f"telemetry sequence {sequence}",
-                )
-                spool.append(sample)
-                sequence += 1
-                deadline_ns += interval_ns
+    try:
+        with spool:
+            for phase in ("baseline", "workload", "recovery"):
+                if lifecycle is not None:
+                    lifecycle.before_phase(phase, runtime_probe)
+                try:
+                    for _ in range(phase_counts[phase]):
+                        runtime_clock.sleep_until_ns(deadline_ns)
+                        observed_monotonic_ns = runtime_clock.monotonic_ns()
+                        late_by_ms = max(
+                            (observed_monotonic_ns - deadline_ns) / 1_000_000,
+                            0.0,
+                        )
+                        result = runtime_probe.sample()
+                        sample = {
+                            "schema_version": "hardware_telemetry_sample.v1",
+                            "sample_id": _sample_id(
+                                manifest["run_id"],
+                                config.metric_scope,
+                                runtime_probe.boot_id_sha256,
+                                sequence,
+                            ),
+                            "run_id": manifest["run_id"],
+                            "experiment_id": manifest["experiment_id"],
+                            "phase": phase,
+                            "metric_scope": config.metric_scope,
+                            "subject_id": config.subject_id,
+                            "time": {
+                                "observed_at": _iso_utc(runtime_clock.now_utc()),
+                                "monotonic_ns": observed_monotonic_ns,
+                                "boot_id_sha256": runtime_probe.boot_id_sha256,
+                                "sequence": sequence,
+                                "sample_interval_seconds": float(
+                                    manifest["timing"]["sample_interval_seconds"]
+                                ),
+                                "ntp_synchronized": ntp_synchronized,
+                                "clock_error_bound_ms": None,
+                            },
+                            "collector": {
+                                "collector_id": config.collector_id,
+                                "version": config.collector_version,
+                                "source_sha256": source_hash,
+                                "feature_schema_sha256": feature_hash,
+                            },
+                            "correlation": {
+                                "sensor_id": config.sensor_id,
+                                "state": "no_active_session",
+                                "canonical_session_ids": [],
+                                "command_event_ids": [],
+                            },
+                            "cpu": result.cpu,
+                            "memory": result.memory,
+                            "disk": result.disk,
+                            "network": result.network,
+                            "thermal": result.thermal,
+                            "process": result.process,
+                            "privacy": {
+                                "contains_raw_command": False,
+                                "contains_credentials": False,
+                                "contains_raw_ip": False,
+                            },
+                            "quality": {
+                                "valid": result.valid,
+                                "missing_fields": list(result.missing_fields),
+                                "counter_resets": list(result.counter_resets),
+                                "sample_late": late_by_ms > config.late_tolerance_ms,
+                                "late_by_ms": late_by_ms,
+                                "collector_errors": list(result.collector_errors),
+                            },
+                        }
+                        _validate_document(
+                            sample,
+                            telemetry_validator,
+                            f"telemetry sequence {sequence}",
+                        )
+                        spool.append(sample)
+                        sequence += 1
+                        deadline_ns += interval_ns
+                finally:
+                    if lifecycle is not None:
+                        lifecycle.after_phase(phase, runtime_probe)
+    finally:
+        if lifecycle is not None:
+            lifecycle.close(runtime_probe)
 
     ended_at = runtime_clock.now_utc()
     receipt = {
@@ -791,6 +977,52 @@ def collect_idle_run(
     receipt["receipt_sha256"] = _canonical_sha256(receipt)
     write_json_exclusive(spool.run_dir / "collection-receipt.json", receipt)
     return receipt
+
+
+def collect_idle_run(
+    manifest: Mapping[str, Any],
+    config: CollectorConfig,
+    *,
+    schema_dir: Path,
+    probe: Probe | None = None,
+    clock: Clock | None = None,
+    ntp_synchronized: bool = True,
+) -> dict[str, Any]:
+    """Collect one neutral-idle run and return its durable collection receipt."""
+
+    return _collect_run(
+        manifest,
+        config,
+        schema_dir=schema_dir,
+        controlled=False,
+        probe=probe,
+        clock=clock,
+        ntp_synchronized=ntp_synchronized,
+    )
+
+
+def collect_controlled_run(
+    manifest: Mapping[str, Any],
+    config: CollectorConfig,
+    *,
+    schema_dir: Path,
+    lifecycle: PhaseLifecycle,
+    probe: Probe | None = None,
+    clock: Clock | None = None,
+    ntp_synchronized: bool = True,
+) -> dict[str, Any]:
+    """Collect one reviewed safe-container run with phase-boundary lifecycle hooks."""
+
+    return _collect_run(
+        manifest,
+        config,
+        schema_dir=schema_dir,
+        controlled=True,
+        lifecycle=lifecycle,
+        probe=probe,
+        clock=clock,
+        ntp_synchronized=ntp_synchronized,
+    )
 
 
 def verify_collection_receipt(

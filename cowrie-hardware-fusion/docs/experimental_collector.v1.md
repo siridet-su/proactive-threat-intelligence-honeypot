@@ -1,25 +1,28 @@
 # Experimental 1 Hz Collector v1
 
-> สถานะ: `ISOLATED MANUAL PILOT VERIFIED / NOT A SERVICE`
-> Runtime version: `0.2.0`
-> ขอบเขต: `pi_sensor` + `neutral_idle` Stage A pilot เท่านั้น
+> สถานะ: `ISOLATED IDLE VERIFIED / CONTROLLED PI POC IMPLEMENTED / NOT A SERVICE`
+> Runtime version: `0.3.0`
+> ขอบเขต: `pi_sensor` สำหรับ neutral idle และ fixed `poc_pi_*` safe-container runs
 
 ## Safety boundary
 
 Collector รุ่นนี้ตั้งใจแคบกว่าระบบสุดท้ายและ fail closed:
 
 - รับเฉพาะ manifest state `planned` หรือ `running`
-- รับเฉพาะ `scenario_id=neutral_idle`, workload family `none`, intensity `0`
-- รับเฉพาะ `execution_boundary.kind=none` และ `metric_scope=pi_sensor`
-- ปฏิเสธ manifest ที่ประกาศ malware, third-party target, command event หรือ TTP
+- idle path รับเฉพาะ `scenario_id=neutral_idle`, family `none`, intensity `0` และ
+  `execution_boundary.kind=none`
+- controlled path รับเฉพาะ allowlisted `poc_pi_*`, boundary `safe_container` และ scope
+  `pi_sensor`; specification validator ต้องตรวจ label/profile/image/security/limits ก่อน
+- ปฏิเสธ manifest ที่ประกาศ actual malware, third-party target หรือ command event
 - neutral-idle ใช้ `egress_enforcement_scope=not_applicable_no_execution`; field
   `default_deny_egress` บันทึกสภาพ host จริงและไม่ได้อ้างว่า Pi เป็น default-deny
-- ไม่มีโค้ด execute workload/command
+- ไม่มี path execute raw command; controlled lifecycle เรียกเฉพาะ Docker argument list ที่
+  สร้างจาก fixed reviewed specification
 - ไม่มี Redis, MongoDB, Atlas, uploader หรือ canonical write path
 - ไม่แก้/เปิด/หยุด production service
 
-ดังนั้นรุ่นนี้ใช้ตรวจความถูกต้องและต้นทุนของ telemetry/spool ก่อนเท่านั้น ยังใช้เก็บ
-compute-hijacking/network-flood simulation ไม่ได้
+รุ่นนี้ใช้เก็บ fixed behavioral simulation สำหรับ Pi PoC ได้ แต่ยังไม่ใช่ production
+service และไม่รับ attacker-controlled input
 
 ## Data path
 
@@ -45,7 +48,8 @@ Spool ไม่มีการ overwrite หรือ resume แบบเดา�
 - configured network interfaces, counters และ rates
 - TCP/socket counts โดยไม่ persist IP address
 - temperature เมื่อ sysfs รองรับ
-- process/thread counts; target process ยังเป็น `null`
+- process/thread counts; controlled workload phase เพิ่ม target process CPU แบบ
+  single-core basis, RSS, threads, socket count และ pseudonymous process/cgroup identity
 
 `wlan0` เป็น aggregate interface ส่วน `tailscale0` และ `lo` เป็น observability-only
 เพื่อป้องกันการนับ traffic ซ้ำ Dataset builder บังคับอ่านเฉพาะ interface ที่มี
@@ -104,6 +108,20 @@ preflight ตรวจ manifest/safety/source identity, NTP, interface, disk dev
   --config /path/to/collector-config.json
 ```
 
+สำหรับ controlled Pi PoC ต้องรัน `pi-poc-preflight` ก่อนทุก run แล้วใช้:
+
+```bash
+.venv/bin/cowrie-hardware-dataset collect-pi-poc-run \
+  --manifest /path/to/planned-manifest.json \
+  --config /path/to/collector-config.json \
+  --specification /path/to/workload-spec.json \
+  --scenario-catalog configs/scenario_catalog.v1.json
+```
+
+คำสั่งนี้สร้าง container เฉพาะ workload phase และต้องได้ execution receipt ที่ยืนยัน
+fixed image/limits/output/cleanup คู่กับ collection receipt ดู safety gates ทั้งหมดใน
+[Pi PoC runbook](pi_poc_runbook.v1.md)
+
 หลังได้ receipt ต้อง validate segment count/hash แล้วจึงสร้าง finalized manifest copy ที่
 state `completed` พร้อม actual started/ended timestamps ด้วยคำสั่ง:
 
@@ -117,12 +135,16 @@ state `completed` พร้อม actual started/ended timestamps ด้วย�
 คำสั่งนี้ตรวจ receipt content hash, segment SHA-256, byte/record count และ contiguous
 sequence ก่อนสร้างไฟล์ output แบบ exclusive ห้ามแก้ raw planned manifest แบบไม่มี receipt
 
+controlled run ใช้ `finalize-pi-poc-manifest` แทน เพื่อบังคับตรวจและอ้างอิงทั้ง
+collection receipt กับ execution receipt
+
 ## สิ่งที่ยังไม่ทำ
 
 - Pi deployment/service unit และ dedicated OS user
 - signed/authenticated batch uploader
 - Atlas hot time-series/TTL/rollup
 - Cowrie session/command correlation
-- cgroup/backend/target-process collectors
-- safe workload orchestration
+- backend guest/cgroup multi-scope collectors (Pi PoC มี target process ภายใน
+  `pi_sensor` แล้ว แต่ยังไม่ใช่ backend multi-scope)
+- production-grade workload orchestration; runtime ปัจจุบันเป็น fixed manual PoC เท่านั้น
 - resume/quarantine operational workflow; interrupted run ต้องใช้ run ID ใหม่หลัง review

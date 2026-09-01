@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": {"const": "experimental_collector_config.v1"},
     "collector_id": {"$ref": "#/$defs/identifier"},
-    "collector_version": {"const": "0.2.0"},
+    "collector_version": {"const": "0.3.0"},
     "sensor_id": {"$ref": "#/$defs/identifier"},
     "subject_id": {"$ref": "#/$defs/identifier"},
     "metric_scope": {"const": "pi_sensor"},

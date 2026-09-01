@@ -438,7 +438,10 @@
               "$ref": "#/$defs/nonnegative_integer"
             },
             "socket_count": {
-              "$ref": "#/$defs/nonnegative_integer"
+              "anyOf": [
+                {"$ref": "#/$defs/nonnegative_integer"},
+                {"type": "null"}
+              ]
             },
             "cgroup_id": {
               "type": ["string", "null"],

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:pi-poc-workload-spec:v1",
+  "title": "Pi Safe-Container PoC Workload Specification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "spec_id",
+    "scenario_catalog_sha256",
+    "scenario_id",
+    "runner",
+    "security",
+    "limits",
+    "timing",
+    "parameters",
+    "host_gates",
+    "input_policy"
+  ],
+  "properties": {
+    "schema_version": {"const": "pi_poc_workload_spec.v1"},
+    "spec_id": {"$ref": "#/$defs/identifier"},
+    "scenario_catalog_sha256": {"$ref": "#/$defs/sha256"},
+    "scenario_id": {
+      "enum": [
+        "poc_pi_benign_compute_control",
+        "poc_pi_compute_hijacking_simulation",
+        "poc_pi_benign_service_load_control",
+        "poc_pi_service_exhaustion_simulation"
+      ]
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "runtime", "image_id", "entrypoint_id", "implementation_sha256"],
+      "properties": {
+        "kind": {"const": "oci_container_on_pi"},
+        "runtime": {"const": "docker"},
+        "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "entrypoint_id": {"const": "poc_workload_v1"},
+        "implementation_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network_mode", "read_only_rootfs", "cap_drop_all", "no_new_privileges", "run_as_uid", "run_as_gid"],
+      "properties": {
+        "network_mode": {"const": "none"},
+        "read_only_rootfs": {"const": true},
+        "cap_drop_all": {"const": true},
+        "no_new_privileges": {"const": true},
+        "run_as_uid": {"const": 65532},
+        "run_as_gid": {"const": 65532}
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu_limit_cores", "memory_max_bytes", "pids_max", "output_max_bytes"],
+      "properties": {
+        "cpu_limit_cores": {"enum": [0.25, 0.75]},
+        "memory_max_bytes": {"const": 134217728},
+        "pids_max": {"const": 16},
+        "output_max_bytes": {"const": 4096}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workload_seconds", "binary_extra_seconds", "watchdog_timeout_seconds", "termination_grace_seconds"],
+      "properties": {
+        "workload_seconds": {"enum": [10, 30, 60]},
+        "binary_extra_seconds": {"const": 2},
+        "watchdog_timeout_seconds": {"type": "integer", "minimum": 15, "maximum": 75},
+        "termination_grace_seconds": {"const": 2}
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "workers", "duty_percent", "duty_period_ms", "requests_per_second", "work_iterations", "deterministic_seed"],
+      "properties": {
+        "mode": {"enum": ["compute", "service"]},
+        "workers": {"type": "integer", "minimum": 1, "maximum": 4},
+        "duty_percent": {"type": "integer", "minimum": 1, "maximum": 100},
+        "duty_period_ms": {"type": "integer", "minimum": 50, "maximum": 1000},
+        "requests_per_second": {"type": "integer", "minimum": 1, "maximum": 200},
+        "work_iterations": {"type": "integer", "minimum": 1, "maximum": 20000},
+        "deterministic_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    "host_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_available_memory_bytes", "minimum_free_disk_bytes", "maximum_temperature_c", "maximum_load_1m"],
+      "properties": {
+        "minimum_available_memory_bytes": {"const": 2147483648},
+        "minimum_free_disk_bytes": {"const": 5368709120},
+        "maximum_temperature_c": {"const": 75},
+        "maximum_load_1m": {"const": 3}
+      }
+    },
+    "input_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attacker_controlled_input", "fixed_entrypoint_only", "raw_cowrie_command_allowed"],
+      "properties": {
+        "attacker_controlled_input": {"const": false},
+        "fixed_entrypoint_only": {"const": true},
+        "raw_cowrie_command_allowed": {"const": false}
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

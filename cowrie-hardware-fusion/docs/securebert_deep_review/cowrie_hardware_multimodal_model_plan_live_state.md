@@ -674,3 +674,46 @@ freeze feature/channel schema และเทรน trivial/XGBoost baseline; ne
 - MITRE Proxy: https://attack.mitre.org/techniques/T1090/
 - Cowrie proxy: https://docs.cowrie.org/en/stable/PROXY.html
 - Cowrie backend pool: https://docs.cowrie.org/en/latest/BACKEND_POOL.html
+
+## 18. Pi two-TTP PoC live update — 2026-09-02
+
+ส่วนนี้ supersede สถานะ `STAGE B PRE-EXECUTION TOOLING` ในข้อ 17 สำหรับ PoC ขนาดเล็ก
+เท่านั้น สถาปัตยกรรม production ยังคงให้ training/inference หลักอยู่ Cloud และ Pi เป็น
+sensor/controlled data generator
+
+สถานะ: `IMPLEMENTED / LOCAL TESTS PASS / PI EXECUTION PENDING`
+
+- เลือก 2 behavior candidates แรกคือ `T1496.001 Compute Hijacking` และ
+  `T1499.002 Service Exhaustion Flood`
+- เพิ่ม paired benign compute/service controls และ neutral idle เพื่อไม่ให้โมเดลจำเพียง
+  ว่า CPU สูงเท่ากับ malicious
+- matrix v1 มี 5 scenarios × 3 repetitions, interleave ตาม repetition; run ละ
+  baseline/workload/recovery 30/30/30 วินาที ที่ 1 Hz รวม 15 runs/1,350 samples
+- ค่า 25/75 เป็น treatment intensity metadata; model features ยังคงใช้ continuous raw
+  measurements และ aggregate mean/max/p95/slope/delta ไม่ใช้การหารเป็น rank 1–4
+- collector ขยับเป็น `0.3.0`; idle contract เดิมยัง fail closed และ controlled path รับ
+  เฉพาะ `poc_pi_*` manifest ที่ใช้ `safe_container`
+- workload เป็น static ARM64 Go binary ใน scratch image: bounded SHA-256 compute หรือ
+  HTTP server/client ที่ loopback ภายใน container เดียว ไม่มี mining protocol, raw
+  Cowrie command, host mount, DNS หรือ external target
+- runtime บังคับ network none, read-only rootfs, non-root UID/GID, drop all capabilities,
+  no-new-privileges, default seccomp, CPU 0.25/0.75 core, RAM 128 MiB และ PID 16
+- preflight ผูก catalog/manifest/spec/collector/binary/image hashes และตรวจ cgroup v2,
+  Docker seccomp, RAM/disk/load/temperature gates ก่อนทุก run
+- workload phase เก็บ target process CPU/RSS/threads/socket/cgroup identity เพิ่มจาก host
+  metrics เดิม; baseline/recovery target เป็น null
+- data เขียนเฉพาะ bounded local spool และ execution/collection receipts ไม่เปิด Go
+  hardware agent production และไม่เขียน Atlas
+- automated tests ปัจจุบันผ่าน 30 Python tests; Go compute/service bounds tests ผ่าน โดย
+  local sandbox skip socket integration และกำหนดให้ service integration ต้องผ่านบน Pi
+- PoC จะ train XGBoost smoke baseline ด้วย repetition-held-out folds หลัง transfer และ
+  verify immutable data; TCN/Fusion รับ sequence ได้แต่ห้ามอ้าง accuracy จากเพียง 15 runs
+
+เอกสารและ implementation หลัก:
+
+- [Pi safe-container PoC runbook](../pi_poc_runbook.v1.md)
+- `src/cowrie_hardware_fusion/poc.py`
+- `workloads/poc-workload/`
+- `schemas/pi_poc_workload_spec.v1.schema.json`
+- `schemas/pi_poc_execution_receipt.v1.schema.json`
+- `schemas/pi_poc_matrix.v1.schema.json`

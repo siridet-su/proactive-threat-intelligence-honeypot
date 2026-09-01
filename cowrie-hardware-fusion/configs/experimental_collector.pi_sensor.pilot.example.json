@@ -1,7 +1,7 @@
 {
   "schema_version": "experimental_collector_config.v1",
   "collector_id": "experimental-telemetry-collector",
-  "collector_version": "0.2.0",
+  "collector_version": "0.3.0",
   "sensor_id": "sensor-redacted",
   "subject_id": "pi-host-pseudonymous-01",
   "metric_scope": "pi_sensor",

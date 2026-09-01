@@ -289,6 +289,246 @@ def _workload_preflight(args: argparse.Namespace) -> int:
     return 0
 
 
+def _validated_pi_poc_inputs(
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], Any, dict[str, Any]]:
+    manifest, config = _validated_collector_inputs(args)
+    specification = _load_json(args.specification)
+    _validate(
+        specification,
+        args.schema_dir / "pi_poc_workload_spec.v1.schema.json",
+        str(args.specification),
+    )
+    return manifest, config, specification
+
+
+def _pi_poc_preflight(args: argparse.Namespace) -> int:
+    from .collector import controlled_collector_preflight
+    from .poc import pi_poc_preflight
+
+    manifest, config, specification = _validated_pi_poc_inputs(args)
+    collector_report = controlled_collector_preflight(
+        manifest,
+        config,
+        schema_dir=args.schema_dir,
+    )
+    runtime_report = pi_poc_preflight(
+        manifest,
+        specification,
+        catalog_path=args.scenario_catalog,
+    )
+    print(
+        json.dumps(
+            {"collector": collector_report, "runtime": runtime_report},
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _collect_pi_poc_run(args: argparse.Namespace) -> int:
+    from .collector import (
+        collect_controlled_run,
+        controlled_collector_preflight,
+        write_json_exclusive,
+    )
+    from .poc import DockerWorkloadLifecycle, pi_poc_preflight
+
+    manifest, config, specification = _validated_pi_poc_inputs(args)
+    collector_report = controlled_collector_preflight(
+        manifest,
+        config,
+        schema_dir=args.schema_dir,
+    )
+    pi_poc_preflight(
+        manifest,
+        specification,
+        catalog_path=args.scenario_catalog,
+    )
+    lifecycle = DockerWorkloadLifecycle(manifest, specification)
+    collection_receipt = collect_controlled_run(
+        manifest,
+        config,
+        schema_dir=args.schema_dir,
+        lifecycle=lifecycle,
+        ntp_synchronized=collector_report["ntp_synchronized"],
+    )
+    execution_receipt = lifecycle.execution_receipt()
+    _validate(
+        collection_receipt,
+        args.schema_dir / "experiment_collection_receipt.v1.schema.json",
+        "collection receipt",
+    )
+    _validate(
+        execution_receipt,
+        args.schema_dir / "pi_poc_execution_receipt.v1.schema.json",
+        "execution receipt",
+    )
+    run_dir = (
+        config.spool_directory
+        / f"run={manifest['run_id']}"
+        / f"scope={config.metric_scope}"
+    )
+    execution_path = run_dir / "pi-poc-execution-receipt.json"
+    write_json_exclusive(execution_path, execution_receipt)
+    print(
+        json.dumps(
+            {
+                "run_id": manifest["run_id"],
+                "collection_receipt": str(run_dir / "collection-receipt.json"),
+                "execution_receipt": str(execution_path),
+                "records": collection_receipt["record_count"],
+                "workload_summary": execution_receipt["workload_summary"],
+                "cleanup_verified": execution_receipt["cleanup_verified"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _finalize_pi_poc_manifest(args: argparse.Namespace) -> int:
+    from .batch import canonical_sha256
+    from .collector import finalize_idle_manifest, write_json_exclusive
+    from .poc import validate_pi_poc_contract
+
+    manifest = _load_json(args.manifest)
+    specification = _load_json(args.specification)
+    collection_receipt = _load_json(args.collection_receipt)
+    execution_receipt = _load_json(args.execution_receipt)
+    _validate(
+        specification,
+        args.schema_dir / "pi_poc_workload_spec.v1.schema.json",
+        str(args.specification),
+    )
+    validate_pi_poc_contract(
+        manifest,
+        specification,
+        catalog_path=args.scenario_catalog,
+    )
+    _validate(
+        execution_receipt,
+        args.schema_dir / "pi_poc_execution_receipt.v1.schema.json",
+        str(args.execution_receipt),
+    )
+    claimed_hash = execution_receipt["receipt_sha256"]
+    without_hash = dict(execution_receipt)
+    without_hash.pop("receipt_sha256")
+    if canonical_sha256(without_hash) != claimed_hash:
+        raise DatasetContractError("execution receipt content hash does not match")
+    if execution_receipt["run_id"] != manifest["run_id"]:
+        raise DatasetContractError("execution receipt run_id does not match manifest")
+    if execution_receipt["scenario_id"] != manifest["workload"]["scenario_id"]:
+        raise DatasetContractError("execution receipt scenario does not match manifest")
+    if execution_receipt["manifest_content_sha256"] != canonical_sha256(manifest):
+        raise DatasetContractError("execution receipt does not bind the planned manifest")
+    if execution_receipt["specification_content_sha256"] != canonical_sha256(
+        specification
+    ):
+        raise DatasetContractError("execution receipt does not bind the specification")
+    if execution_receipt["image_id"].removeprefix("sha256:") != manifest[
+        "execution_boundary"
+    ]["backend_image_sha256"]:
+        raise DatasetContractError("execution receipt image does not match manifest")
+    completed = finalize_idle_manifest(
+        manifest,
+        collection_receipt,
+        run_dir=args.collection_receipt.parent,
+        schema_dir=args.schema_dir,
+    )
+    execution_id = execution_receipt["receipt_id"]
+    if execution_id not in completed["labels"]["evidence_receipt_ids"]:
+        completed["labels"]["evidence_receipt_ids"].append(execution_id)
+    _validate(
+        completed,
+        args.schema_dir / "experiment_run_manifest.v1.schema.json",
+        "completed manifest",
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    write_json_exclusive(args.output, completed)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "run_id": completed["run_id"],
+                "state": completed["state"],
+                "evidence_receipt_ids": completed["labels"][
+                    "evidence_receipt_ids"
+                ],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _prepare_pi_poc_matrix(args: argparse.Namespace) -> int:
+    from .batch import write_json_exclusive
+    from .poc import build_pi_poc_matrix, validate_pi_poc_contract
+
+    config_document = _load_json(args.config)
+    _validate(
+        config_document,
+        args.schema_dir / "experimental_collector_config.v1.schema.json",
+        str(args.config),
+    )
+    matrix, documents = build_pi_poc_matrix(
+        experiment_id=args.experiment_id,
+        repetitions=3,
+        image_id=args.image_id,
+        implementation_sha256=args.implementation_sha256,
+        repo_commit=args.repo_commit,
+        environment_signature_sha256=args.environment_signature_sha256,
+        sensor_id=config_document["sensor_id"],
+        host_id=config_document["subject_id"],
+        collector_id=config_document["collector_id"],
+        catalog_path=args.scenario_catalog,
+    )
+    _validate(
+        matrix,
+        args.schema_dir / "pi_poc_matrix.v1.schema.json",
+        "Pi PoC matrix",
+    )
+    for manifest, specification in documents:
+        _validate(
+            manifest,
+            args.schema_dir / "experiment_run_manifest.v1.schema.json",
+            manifest["run_id"],
+        )
+        if specification is not None:
+            _validate(
+                specification,
+                args.schema_dir / "pi_poc_workload_spec.v1.schema.json",
+                specification["spec_id"],
+            )
+            validate_pi_poc_contract(
+                manifest,
+                specification,
+                catalog_path=args.scenario_catalog,
+            )
+    write_json_exclusive(args.output_dir / "matrix.json", matrix)
+    for manifest, specification in documents:
+        control_dir = args.output_dir / "control" / f"run={manifest['run_id']}"
+        write_json_exclusive(control_dir / "planned-manifest.json", manifest)
+        if specification is not None:
+            write_json_exclusive(control_dir / "workload-spec.json", specification)
+    print(
+        json.dumps(
+            {
+                "output_dir": str(args.output_dir),
+                "matrix_sha256": matrix["matrix_sha256"],
+                "run_count": matrix["run_count"],
+                "estimated_total_seconds": matrix["estimated_total_seconds"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cowrie-hardware-dataset",
@@ -394,6 +634,56 @@ def _parser() -> argparse.ArgumentParser:
     workload_preflight.add_argument("--output", type=Path, required=True)
     workload_preflight.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     workload_preflight.set_defaults(handler=_workload_preflight)
+
+    pi_preflight = subparsers.add_parser(
+        "pi-poc-preflight",
+        help="validate a fixed safe-container PoC and current Pi safety gates",
+    )
+    pi_preflight.add_argument("--manifest", type=Path, required=True)
+    pi_preflight.add_argument("--config", type=Path, required=True)
+    pi_preflight.add_argument("--specification", type=Path, required=True)
+    pi_preflight.add_argument("--scenario-catalog", type=Path, required=True)
+    pi_preflight.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    pi_preflight.set_defaults(handler=_pi_poc_preflight)
+
+    pi_collect = subparsers.add_parser(
+        "collect-pi-poc-run",
+        help="collect one bounded Pi run and execute only its fixed container workload",
+    )
+    pi_collect.add_argument("--manifest", type=Path, required=True)
+    pi_collect.add_argument("--config", type=Path, required=True)
+    pi_collect.add_argument("--specification", type=Path, required=True)
+    pi_collect.add_argument("--scenario-catalog", type=Path, required=True)
+    pi_collect.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    pi_collect.set_defaults(handler=_collect_pi_poc_run)
+
+    pi_finalize = subparsers.add_parser(
+        "finalize-pi-poc-manifest",
+        help="verify collection and execution evidence, then complete a Pi PoC manifest",
+    )
+    pi_finalize.add_argument("--manifest", type=Path, required=True)
+    pi_finalize.add_argument("--specification", type=Path, required=True)
+    pi_finalize.add_argument("--scenario-catalog", type=Path, required=True)
+    pi_finalize.add_argument("--collection-receipt", type=Path, required=True)
+    pi_finalize.add_argument("--execution-receipt", type=Path, required=True)
+    pi_finalize.add_argument("--output", type=Path, required=True)
+    pi_finalize.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    pi_finalize.set_defaults(handler=_finalize_pi_poc_manifest)
+
+    pi_prepare = subparsers.add_parser(
+        "prepare-pi-poc-matrix",
+        help="freeze 15 interleaved idle/control/TTP PoC run manifests",
+    )
+    pi_prepare.add_argument("--experiment-id", required=True)
+    pi_prepare.add_argument("--image-id", required=True)
+    pi_prepare.add_argument("--implementation-sha256", required=True)
+    pi_prepare.add_argument("--repo-commit", required=True)
+    pi_prepare.add_argument("--environment-signature-sha256", required=True)
+    pi_prepare.add_argument("--config", type=Path, required=True)
+    pi_prepare.add_argument("--scenario-catalog", type=Path, required=True)
+    pi_prepare.add_argument("--output-dir", type=Path, required=True)
+    pi_prepare.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    pi_prepare.set_defaults(handler=_prepare_pi_poc_matrix)
     return parser
 
 

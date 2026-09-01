@@ -6,10 +6,10 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `STAGE A VERIFIED / STAGE B PRE-EXECUTION TOOLING` มี collector,
-dataset builder, receipt-driven source index และ grouped split generator แล้ว และ replay
-neutral-idle pilot จริงจาก Pi สำเร็จ 3 runs แต่ยังไม่มีโมเดลใหม่ที่ถือว่าผ่านการเทรน
-หรือพร้อม deploy
+สถานะปัจจุบันคือ `STAGE A VERIFIED / PI TWO-TTP POC IMPLEMENTED` มี collector,
+dataset builder, receipt-driven source index, grouped split generator และ fixed
+safe-container runtime แล้ว neutral-idle pilot จริงจาก Pi สำเร็จ 3 runs และกำลังเตรียม
+รัน matrix ของ `T1496.001`/`T1499.002` แต่ยังไม่มีโมเดลใหม่ที่ถือว่าพร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -41,10 +41,10 @@ cowrie-hardware-fusion/
 1. Freeze experiment contract และ label semantics
 2. สร้าง telemetry schema พร้อม session/run correlation
 3. **เสร็จ Stage A:** เก็บ/replay neutral-idle pilot 3 runs ผ่าน dataset builder v1
-4. **กำลังทำ:** เตรียม content-bound safe ordinary-load contract สำหรับ disposable backend
+4. **เสร็จ tooling:** fixed ARM64 safe-container workload + Pi preflight/runtime receipts
 5. **เสร็จ tooling:** สร้าง verified source index และ grouped split generator
-6. **ถัดไป:** provision/review disposable backend แล้วเก็บ benign counterexamples
-7. สร้าง trivial baseline และ XGBoost hardware-only baseline
+6. **กำลังทำ:** เก็บ interleaved idle/benign/TTP Pi PoC 15 runs
+7. สร้าง XGBoost hardware-only smoke baseline จาก repetition-held-out folds
 8. ทดลอง MiniROCKET/TCN บน split เดียวกัน
 9. เลือก hardware branch จาก frozen evaluation protocol
 10. เทรน Fusion ด้วย leakage-safe predictions/features
@@ -58,6 +58,7 @@ cowrie-hardware-fusion/
 - [XGBoost, TCN and Fusion architecture](docs/model_architecture_xgboost_tcn_fusion.v1.md)
 - [Dataset split policy v1](docs/dataset_split_policy.v1.md)
 - [Bounded workload contract v1](docs/bounded_workload_contract.v1.md)
+- [Pi safe-container PoC runbook v1](docs/pi_poc_runbook.v1.md)
 - [Dataset storage plan v1](docs/dataset_storage_plan.v1.md)
 - [Pi environment audit](docs/pi_environment_audit_2026-09-01.md)
 - [Stage A idle pilot report](docs/pilot_idle_collection_2026-09-01.md)
