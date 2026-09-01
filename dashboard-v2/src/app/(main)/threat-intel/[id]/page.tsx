@@ -59,6 +59,9 @@ export default function SessionIntelligencePage({ params }: { params: Promise<{ 
     : Array.isArray(detail?.session_ttp_correlations) ? detail.session_ttp_correlations : [];
   const modelPrediction = state.prediction?.current_prediction || null;
   const ranking = predictionRanking(modelPrediction);
+  const responseGuidance = Object.keys(state.prediction?.response_guidance || {}).length
+    ? state.prediction?.response_guidance || {}
+    : detail?.response_guidance || {};
   const reportSummary = detail?.report_summary || {};
 
   return (
@@ -134,7 +137,7 @@ export default function SessionIntelligencePage({ params }: { params: Promise<{ 
             </div>
           </div>
 
-          <EvidenceLanes detail={detail} trusted={trusted} ranking={ranking} correlations={correlations} advisory={state.advisory} />
+          <EvidenceLanes detail={detail} trusted={trusted} ranking={ranking} correlations={correlations} advisory={state.advisory} responseGuidance={responseGuidance} />
 
           <div className="bg-[#0f0f13] border border-slate-800/50 rounded-xl p-6 font-mono text-xs">
             <div className="flex gap-2 mb-4 items-center">
@@ -164,12 +167,14 @@ function EvidenceLanes({
   ranking,
   correlations,
   advisory,
+  responseGuidance,
 }: {
   detail: SessionDetail;
   trusted: unknown[];
   ranking: JsonRecord[];
   correlations: JsonRecord[];
   advisory: AiAdvisoryResponse | null;
+  responseGuidance: JsonRecord;
 }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -189,7 +194,7 @@ function EvidenceLanes({
         tone="amber"
       >
         {ranking.length ? ranking.slice(0, 8).map((item, index) => <PredictionRow key={`prediction-${index}`} item={item} />) : <EmptyState text="No current prediction snapshot returned." />}
-        {detail.response_guidance && <p className="text-[10px] text-slate-600 mt-3">Response guidance is kept as a separate stored-policy record.</p>}
+        <ResponseGuidancePanel guidance={responseGuidance} />
       </EvidencePanel>
 
       <EvidencePanel
@@ -211,6 +216,41 @@ function EvidenceLanes({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ResponseGuidancePanel({ guidance }: { guidance: JsonRecord }) {
+  const suppliedManualApproval = typeof guidance.requires_manual_approval === "boolean";
+  const suppliedAutoExecute = typeof guidance.safe_to_auto_execute === "boolean";
+  const requiresManualApproval = suppliedManualApproval ? guidance.requires_manual_approval as boolean : true;
+  const safeToAutoExecute = requiresManualApproval
+    ? false
+    : suppliedAutoExecute ? guidance.safe_to_auto_execute as boolean : false;
+  const guidanceState = text(guidance.guidance_state || guidance.status, "unavailable");
+  const failClosed = !suppliedManualApproval || !suppliedAutoExecute;
+
+  return (
+    <div className="border-t border-slate-800/60 mt-4 pt-4">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-[10px] font-bold text-white uppercase tracking-wider">Response guidance</h4>
+        <span className="text-[9px] uppercase tracking-wider text-slate-500">{guidanceState}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mt-3 text-[10px]">
+        <div className="bg-[#18181b] border border-emerald-900/40 rounded px-2 py-2">
+          <div className="text-slate-500">requires_manual_approval</div>
+          <div className="text-emerald-300 font-bold mt-1">{requiresManualApproval ? "true" : "false"}</div>
+        </div>
+        <div className="bg-[#18181b] border border-amber-900/40 rounded px-2 py-2">
+          <div className="text-slate-500">safe_to_auto_execute</div>
+          <div className="text-amber-300 font-bold mt-1">{safeToAutoExecute ? "true" : "false"}</div>
+        </div>
+      </div>
+      <p className="text-[10px] text-slate-600 mt-3 leading-relaxed">
+        {failClosed
+          ? "Policy flags unavailable or unverified; display is fail-closed to manual-only and is not execution authorization."
+          : "Stored policy flags are displayed as advisory metadata; this dashboard cannot execute actions."}
+      </p>
     </div>
   );
 }

@@ -45,3 +45,14 @@ def test_dashboard_v2_proxy_does_not_expose_sensitive_command_route() -> None:
     assert 'cache: "no-store"' in proxy
     assert "internal/session-commands" not in proxy
     assert "Authorization" in proxy
+    assert "monitor_generic_table_routes" in proxy
+    assert '"/sessions"' in proxy
+    assert '"/events"' in proxy
+
+
+def test_dashboard_v2_response_guidance_is_fail_closed_and_manual_only() -> None:
+    detail = (DASHBOARD / "src/app/(main)/threat-intel/[id]/page.tsx").read_text(encoding="utf-8")
+    assert "requires_manual_approval" in detail
+    assert "safe_to_auto_execute" in detail
+    assert "fail-closed" in detail
+    assert "execution authorization" in detail
