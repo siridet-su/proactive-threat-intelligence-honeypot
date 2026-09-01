@@ -43,6 +43,7 @@ const ALLOWED_QUERY_KEYS = new Set(["session_id", "limit", "offset", "filter"]);
 const ALLOWED_FILTERS = new Set(["all", "wrong", "useful", "high_confidence_wrong", "low_confidence_useful", "missing_actual", "classification_error", "missing_transition_evidence", "policy_review", "needs_review"]);
 const MAX_QUERY_VALUE_LENGTH = 256;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const COMPATIBILITY_FIRST_KEYS = new Set(["sessions", "events", "session"]);
 
 type JsonRecord = Record<string, unknown>;
 
@@ -120,6 +121,17 @@ function upstreamOrigin(): URL {
   origin.search = "";
   origin.hash = "";
   return origin;
+}
+
+function shouldPreferCompatibilityRoute(origin: URL, key: string): boolean {
+  // The active monitor deployment at 127.0.0.1:8090 returns an incompatible
+  // success-with-error response (or 404) for these structured routes. The
+  // generic table routes are the measured, current compatibility contract.
+  return origin.protocol === "http:"
+    && origin.hostname === "127.0.0.1"
+    && origin.port === "8090"
+    && origin.pathname === ""
+    && COMPATIBILITY_FIRST_KEYS.has(key);
 }
 
 function safeQuery(request: Request): string {
@@ -398,6 +410,18 @@ async function sessionCompatibilityResponse(
   });
 }
 
+async function compatibilityResponse(
+  key: string,
+  origin: URL,
+  headers: Headers,
+  request: Request,
+): Promise<Response | null> {
+  if (key === "sessions") return sessionsCompatibilityResponse(origin, headers, request);
+  if (key === "events") return eventsCompatibilityResponse(origin, headers, request);
+  if (key === "session") return sessionCompatibilityResponse(origin, headers, request);
+  return null;
+}
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ path: string[] }> },
@@ -425,6 +449,11 @@ export async function GET(
   const readToken = process.env.DASHBOARD_API_READ_TOKEN?.trim();
   if (readToken) headers.set("Authorization", `Bearer ${readToken}`);
 
+  if (shouldPreferCompatibilityRoute(origin, key)) {
+    const compatibility = await compatibilityResponse(key, origin, headers, request);
+    if (compatibility) return compatibility;
+  }
+
   let upstream: UpstreamJson;
   try {
     upstream = await fetchUpstreamJson(target, headers);
@@ -436,11 +465,7 @@ export async function GET(
   }
 
   if (shouldUseCompatibilityFallback(key, upstream)) {
-    const fallback = key === "sessions"
-      ? await sessionsCompatibilityResponse(origin, headers, request)
-      : key === "events"
-        ? await eventsCompatibilityResponse(origin, headers, request)
-        : await sessionCompatibilityResponse(origin, headers, request);
+    const fallback = await compatibilityResponse(key, origin, headers, request);
     if (fallback) return fallback;
   }
 

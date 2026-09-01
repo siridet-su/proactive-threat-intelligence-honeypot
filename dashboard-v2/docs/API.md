@@ -1,6 +1,6 @@
 # Dashboard v2 API
 
-Status: source-backed contract for the current `dashboard-v2` tree, audited 2026-08-31.
+Status: source-backed contract for the current `dashboard-v2` tree, audited 2026-09-01.
 
 This document describes the browser-visible contract. The implementation has 36 explicit method/path contracts: 34 authenticated `GET` paths dispatched by `src/app/api/[...path]/route.ts`, plus `POST` and `DELETE` on `/api/auth`. The catch-all Next route is one handler, not an additional logical endpoint.
 
@@ -17,7 +17,7 @@ browser page/component
   -> canonical datastore/artifacts selected by the deployed monitor service
 ```
 
-The browser never receives a Mongo URI and never connects to MongoDB directly. The BFF reads `DASHBOARD_API_ORIGIN` and the optional server-only `DASHBOARD_API_READ_TOKEN`; it does not accept an origin or credential from the browser. A configured origin must be HTTP(S) and must not contain userinfo. The default monitor origin is compatible with the monitor-specific routes (`/api/sessions`, `/api/session`, `/api/events`, and `/api/ai-advisory`). `dashboard_api` implements the table and semantic dashboard paths but does not implement those four monitor-specific paths; pointing the BFF at it is therefore a deployment compatibility decision, not a second browser contract.
+The browser never receives a Mongo URI and never connects to MongoDB directly. The BFF reads `DASHBOARD_API_ORIGIN` and the optional server-only `DASHBOARD_API_READ_TOKEN`; it does not accept an origin or credential from the browser. A configured origin must be HTTP(S) and must not contain userinfo. The default monitor origin is the active `monitor_web` service. On the current `127.0.0.1:8090` deployment, the BFF uses the bounded generic table routes first for `/api/sessions`, `/api/session`, and `/api/events` because the corresponding structured routes currently return incompatible responses; other origins retain structured-route probing with compatibility fallback. `dashboard_api` implements the table and semantic dashboard paths but does not implement those four monitor-specific paths; pointing the BFF at it is therefore a deployment compatibility decision, not a second browser contract.
 
 All `GET /api/...` requests require a valid `dashboard_v2_session` cookie before route dispatch. The cookie is an HMAC-SHA256 value derived from server-side operator credentials and `DASHBOARD_V2_SESSION_SECRET`; it is HttpOnly, SameSite=Lax, path-scoped, eight hours on login, and Secure in production. `POST /api/auth` and `DELETE /api/auth` are the only unauthenticated browser methods. The upstream monitor may additionally require a server-owned bearer read token; a loopback monitor with no configured read token can allow anonymous upstream reads, but that does not bypass the BFF cookie.
 
