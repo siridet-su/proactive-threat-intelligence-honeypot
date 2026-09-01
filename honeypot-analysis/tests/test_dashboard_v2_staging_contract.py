@@ -95,6 +95,8 @@ def test_staging_artifact_contains_only_non_secret_identity_fields() -> None:
     assert '"--use-compress-program=gzip -n -9"' in package_script
     assert 'execFileSync("tar", tarArgs' in package_script
     assert 'spawn("tar"' not in package_script
+    assert 'title=staging packaging failed' in package_script
+    assert 'standalone copy failed' in package_script
 
 
 def test_staging_deploy_identity_restricts_the_ci_ssh_key() -> None:
