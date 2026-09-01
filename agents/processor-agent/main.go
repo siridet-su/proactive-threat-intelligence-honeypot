@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -26,6 +26,10 @@ var rawStreams = []string{
 	"raw:zeek:conn",
 	"raw:zeek:ssh",
 	"raw:zeek:ssl",
+	"raw:zeek:dns",
+	"raw:zeek:http",
+	"raw:zeek:files",
+	"raw:zeek:notice",
 }
 
 type Config struct {
@@ -38,8 +42,15 @@ type Config struct {
 
 	LookupDir string
 
-	MongoURI string
-	MongoDB  string
+	MongoURI                 string
+	MongoDB                  string
+	EventRetention           time.Duration
+	HardwareMetricsRetention time.Duration
+
+	TIEnabled         bool
+	TIJobsStream      string
+	TIJobsMaxLen      int64
+	TIEnqueueDedupTTL time.Duration
 }
 
 type LookupRecord struct {
@@ -64,10 +75,6 @@ type MongoWriter struct {
 }
 
 func main() {
-	// โหลดไฟล์ .env
-	if err := godotenv.Load(); err != nil {
-		log.Println("⚠️ No .env file found or unable to load, using system env variables")
-	}
 
 	cfg := loadConfig()
 	ctx := context.Background()
@@ -102,11 +109,16 @@ func main() {
 		mw.enabled,
 	)
 
+	go recoverPendingLoop(ctx, rdb, mw, lookups, cfg)
 	processLoop(ctx, rdb, mw, lookups, cfg)
 }
 
 func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
+	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "5000"), 10, 64)
+	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
+	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
+	tiEnqueueDedupTTL := getenvPositiveDuration("TI_ENQUEUE_DEDUP_TTL", time.Minute)
 
 	return Config{
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
@@ -118,8 +130,15 @@ func loadConfig() Config {
 
 		LookupDir: getenv("LOOKUP_DIR", "/home/cpe27/honeypot-pipeline/lookups"),
 
-		MongoURI: getenv("MONGO_URI", ""),
-		MongoDB:  getenv("MONGO_DATABASE", "honeypot"),
+		MongoURI:                 getenv("MONGO_URI", ""),
+		MongoDB:                  getenv("MONGO_DATABASE", "honeypot_db"),
+		EventRetention:           eventRetention,
+		HardwareMetricsRetention: hardwareMetricsRetention,
+
+		TIEnabled:         strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
+		TIJobsStream:      getenv("TI_JOBS_STREAM", "ti:jobs"),
+		TIJobsMaxLen:      tiJobsMaxLen,
+		TIEnqueueDedupTTL: tiEnqueueDedupTTL,
 	}
 }
 
@@ -168,6 +187,31 @@ func processLoop(ctx context.Context, rdb *redis.Client, mw *MongoWriter, lookup
 	}
 }
 
+func recoverPendingLoop(ctx context.Context, rdb *redis.Client, mw *MongoWriter, lookups LookupStore, cfg Config) {
+	for {
+		for _, stream := range rawStreams {
+			messages, _, err := rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+				Stream: stream, Group: cfg.GroupName, Consumer: cfg.ConsumerName,
+				MinIdle: 30 * time.Second, Start: "0-0", Count: 100,
+			}).Result()
+			if err != nil && !errors.Is(err, redis.Nil) {
+				log.Printf("xautoclaim failed stream=%s err=%v", stream, err)
+				continue
+			}
+			for _, msg := range messages {
+				if err := processMessage(ctx, rdb, mw, lookups, cfg, stream, msg); err != nil {
+					log.Printf("pending retry failed stream=%s id=%s err=%v", stream, msg.ID, err)
+					continue
+				}
+				if err := rdb.XAck(ctx, stream, cfg.GroupName, msg.ID).Err(); err != nil {
+					log.Printf("pending xack failed stream=%s id=%s err=%v", stream, msg.ID, err)
+				}
+			}
+		}
+		time.Sleep(time.Minute)
+	}
+}
+
 func processMessage(
 	ctx context.Context,
 	rdb *redis.Client,
@@ -187,9 +231,13 @@ func processMessage(
 				doc[k] = strVal
 			}
 		}
-		// Convert Unix timestamp to MongoDB DateTime if present
+		observedAt := time.Now().UTC()
 		if ts, ok := doc["timestamp"].(float64); ok {
-			doc["timestamp"] = time.Unix(int64(ts), 0)
+			observedAt = time.Unix(int64(ts), 0).UTC()
+		}
+		setHardwareMetricExpiry(doc, observedAt, cfg.HardwareMetricsRetention)
+		if !mw.enabled {
+			return fmt.Errorf("MongoDB is disabled; refusing to acknowledge hardware metric")
 		}
 		_, err := mw.db.Collection("hardware_metrics").InsertOne(ctx, doc)
 		return err
@@ -210,67 +258,44 @@ func processMessage(
 
 	normalized := normalizeEvent(streamName, msg.ID, msg.Values, payload)
 	enriched := enrichEvent(normalized, lookups)
+	setEventExpiry(enriched, cfg.EventRetention)
 
-	normalizedJSON := mustJSON(normalized)
-	enrichedJSON := mustJSON(enriched)
+	srcIP := getNestedString(enriched, "network.src_ip")
+	eventJSON := mustJSON(enriched)
 
 	eventID := getNestedString(enriched, "event_id")
 	eventType := getNestedString(enriched, "event_type")
-	srcIP := getNestedString(enriched, "network.src_ip")
 	dstIP := getNestedString(enriched, "network.dst_ip")
 	dstPort := getNestedString(enriched, "network.dst_port")
 
-	if _, err := rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: "event:normalized",
-		MaxLen: 5000,
-		Approx: true,
-		Values: map[string]any{
-			"event_id":        eventID,
-			"source":          source,
-			"log_type":        logType,
-			"event_type":      eventType,
-			"src_ip":          srcIP,
-			"dst_ip":          dstIP,
-			"dst_port":        dstPort,
-			"raw_stream":      streamName,
-			"raw_id":          msg.ID,
-			"normalized_json": normalizedJSON,
-		},
-	}).Result(); err != nil {
-		return fmt.Errorf("xadd normalized failed: %w", err)
+	// MongoDB is the durable sink. Only acknowledge the raw message after this
+	// idempotent upsert succeeds. This gives the pipeline at-least-once delivery
+	// without duplicate documents.
+	if err := mw.upsertEvent(ctx, enriched); err != nil {
+		return fmt.Errorf("mongo upsert event failed: %w", err)
+	}
+
+	// Threat-intelligence calls must not delay or block ingestion. The worker
+	// receives one idempotent job per supported observable after MongoDB has the
+	// canonical event, and attaches its result later.
+	if err := enqueueThreatIntelJobs(ctx, rdb, cfg, source, eventID, eventType, srcIP, payload); err != nil {
+		return fmt.Errorf("enqueue threat-intelligence jobs: %w", err)
 	}
 
 	if _, err := rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: "event:enriched",
-		MaxLen: 5000,
+		Stream: "event:canonical",
+		MaxLen: 50000,
 		Approx: true,
 		Values: map[string]any{
-			"event_id":      eventID,
-			"source":        source,
-			"log_type":      logType,
-			"event_type":    eventType,
-			"src_ip":        srcIP,
-			"dst_ip":        dstIP,
-			"dst_port":      dstPort,
-			"raw_stream":    streamName,
-			"raw_id":        msg.ID,
-			"enriched_json": enrichedJSON,
+			"event_id": eventID, "source": source, "log_type": logType,
+			"event_type": eventType, "src_ip": srcIP, "dst_ip": dstIP,
+			"dst_port": dstPort, "event_json": eventJSON,
 		},
 	}).Result(); err != nil {
-		return fmt.Errorf("xadd enriched failed: %w", err)
+		return fmt.Errorf("xadd canonical failed: %w", err)
 	}
 
 	cacheLookups(ctx, rdb, enriched)
-
-	if mw.enabled {
-		if err := mw.insert(ctx, "normalized_events", normalized); err != nil {
-			log.Printf("mongo insert normalized failed: %v", err)
-		}
-
-		if err := mw.insert(ctx, "enriched_events", enriched); err != nil {
-			log.Printf("mongo insert enriched failed: %v", err)
-		}
-	}
 
 	log.Printf(
 		"enriched stream=%s id=%s type=%s src=%s dst=%s:%s",
@@ -409,8 +434,13 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 		zeek["auth_attempts"] = getPayloadAny(payload, "auth_attempts")
 	}
 
+	dedupID := valueToString(values["dedup_id"])
+	if dedupID == "" {
+		dedupID = makeEventID(streamName, mustJSON(payload))
+	}
+
 	event := map[string]any{
-		"event_id":    makeEventID(streamName, rawID, mustJSON(payload)),
+		"event_id":    dedupID,
 		"timestamp":   normalizeTimestamp(payload),
 		"ingested_at": valueToString(values["ingested_at"]),
 		"source":      source,
@@ -425,9 +455,9 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 
 		"network": map[string]any{
 			"src_ip":   srcIP,
-			"src_port": srcPort,
+			"src_port": portValue(srcPort),
 			"dst_ip":   dstIP,
-			"dst_port": dstPort,
+			"dst_port": portValue(dstPort),
 			"protocol": protocol,
 			"service":  service,
 		},
@@ -451,8 +481,9 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 			"tls_cipher":  tlsCipher,
 		},
 
-		"zeek":   zeek,
-		"cowrie": cowrie,
+		"zeek":    zeek,
+		"cowrie":  cowrie,
+		"session": map[string]any{"id": firstNonEmpty(getPayloadString(payload, "session"), getPayloadString(payload, "uid")), "source": source},
 
 		"raw": map[string]any{
 			"redis_stream": streamName,
@@ -462,7 +493,7 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 		},
 	}
 
-	return event
+	return compactMap(event)
 }
 
 func enrichEvent(event map[string]any, lookups LookupStore) map[string]any {
@@ -604,10 +635,14 @@ func enrichEvent(event map[string]any, lookups LookupStore) map[string]any {
 		"enriched_at": enrichedAt,
 	}
 
-	enriched["client_enrichment"] = clientEnrichment
-	enriched["server_enrichment"] = serverEnrichment
+	if valueToString(clientEnrichment["application"]) != "" {
+		enriched["client_enrichment"] = clientEnrichment
+	}
+	if valueToString(serverEnrichment["application"]) != "" {
+		enriched["server_enrichment"] = serverEnrichment
+	}
 
-	return enriched
+	return compactMap(enriched)
 }
 
 func buildSideEnrichment(matches []map[string]any, allowedTypes []string) map[string]any {
@@ -694,6 +729,8 @@ func computeRiskScore(
 		score += 15
 	case "443":
 		score += 5
+	case "3306":
+		score += 15
 	}
 
 	if !isLocalLabIP(srcIP) {
@@ -756,6 +793,14 @@ func inferEventType(source string, logType string, payload map[string]any) strin
 			return "ssh_fingerprint"
 		case "ssl":
 			return "tls_fingerprint"
+		case "dns":
+			return "dns_query"
+		case "http":
+			return "http_request"
+		case "files":
+			return "file_observed"
+		case "notice":
+			return "security_notice"
 		}
 	}
 
@@ -807,19 +852,45 @@ func newMongoWriter(ctx context.Context, cfg Config) (*MongoWriter, error) {
 		return nil, err
 	}
 
-	return &MongoWriter{
-		enabled: true,
-		db:      client.Database(cfg.MongoDB),
-	}, nil
+	mw := &MongoWriter{enabled: true, db: client.Database(cfg.MongoDB)}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		return nil, fmt.Errorf("ensure mongo indexes: %w", err)
+	}
+	return mw, nil
 }
 
-func (mw *MongoWriter) insert(ctx context.Context, collection string, doc map[string]any) error {
+func (mw *MongoWriter) upsertEvent(ctx context.Context, doc map[string]any) error {
 	if !mw.enabled {
-		return nil
+		return fmt.Errorf("MongoDB is disabled; refusing to acknowledge durable event")
+	}
+	eventID := getNestedString(doc, "event_id")
+	if eventID == "" {
+		return fmt.Errorf("event_id is empty")
+	}
+	_, err := mw.db.Collection("events").UpdateOne(
+		ctx, bson.M{"_id": eventID}, bson.M{"$setOnInsert": doc},
+		options.Update().SetUpsert(true),
+	)
+	return err
+}
+
+func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
+	indexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "source", Value: 1}, {Key: "event_type", Value: 1}, {Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "network.src_ip", Value: 1}, {Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "session.id", Value: 1}, {Key: "timestamp", Value: 1}}, Options: options.Index().SetSparse(true)},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+	if err := ensureIndexModels(ctx, mw.db.Collection("events"), indexes); err != nil {
+		return err
 	}
 
-	_, err := mw.db.Collection(collection).InsertOne(ctx, doc)
-	return err
+	hardwareIndexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+	return ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes)
 }
 
 func loadLookups(dir string) LookupStore {
@@ -850,9 +921,11 @@ func loadLookupFile(path string) map[string]LookupRecord {
 	return result
 }
 
-func normalizeTimestamp(payload map[string]any) string {
+func normalizeTimestamp(payload map[string]any) time.Time {
 	if ts := getPayloadString(payload, "timestamp"); ts != "" {
-		return ts
+		if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+			return parsed.UTC()
+		}
 	}
 
 	v := getPayloadAny(payload, "ts")
@@ -861,24 +934,24 @@ func normalizeTimestamp(payload map[string]any) string {
 	case float64:
 		sec := int64(t)
 		nsec := int64((t - float64(sec)) * 1e9)
-		return time.Unix(sec, nsec).UTC().Format(time.RFC3339Nano)
+		return time.Unix(sec, nsec).UTC()
 
 	case int64:
-		return time.Unix(t, 0).UTC().Format(time.RFC3339Nano)
+		return time.Unix(t, 0).UTC()
 
 	case int:
-		return time.Unix(int64(t), 0).UTC().Format(time.RFC3339Nano)
+		return time.Unix(int64(t), 0).UTC()
 
 	case string:
 		f, err := strconv.ParseFloat(t, 64)
 		if err == nil {
 			sec := int64(f)
 			nsec := int64((f - float64(sec)) * 1e9)
-			return time.Unix(sec, nsec).UTC().Format(time.RFC3339Nano)
+			return time.Unix(sec, nsec).UTC()
 		}
 	}
 
-	return time.Now().UTC().Format(time.RFC3339Nano)
+	return time.Now().UTC()
 }
 
 func makeEventID(parts ...string) string {
@@ -1016,8 +1089,53 @@ func mapKeysToSlice(m map[string]bool) []string {
 
 func isLocalLabIP(ip string) bool {
 	return strings.HasPrefix(ip, "192.168.") ||
-		strings.HasPrefix(ip, "10.123.") ||
+		strings.HasPrefix(ip, "10.") ||
+		strings.HasPrefix(ip, "100.64.") ||
 		strings.HasPrefix(ip, "127.")
+}
+
+func portValue(value string) any {
+	if value == "" {
+		return nil
+	}
+	if port, err := strconv.Atoi(value); err == nil {
+		return port
+	}
+	return value
+}
+
+func compactMap(input map[string]any) map[string]any {
+	result := make(map[string]any, len(input))
+	for key, value := range input {
+		switch typed := value.(type) {
+		case map[string]any:
+			child := compactMap(typed)
+			if len(child) > 0 {
+				result[key] = child
+			}
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				result[key] = typed
+			}
+		case []string:
+			if len(typed) > 0 {
+				result[key] = typed
+			}
+		case []map[string]any:
+			if len(typed) > 0 {
+				result[key] = typed
+			}
+		case []any:
+			if len(typed) > 0 {
+				result[key] = typed
+			}
+		case nil:
+			continue
+		default:
+			result[key] = value
+		}
+	}
+	return result
 }
 
 func getenv(key string, fallback string) string {

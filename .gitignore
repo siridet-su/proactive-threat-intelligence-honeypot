@@ -1,5 +1,16 @@
-# Environment Files
+# Environment Files & Secrets
 .env
+.env.local
+*.env
+*.pem
+*.key
+secrets/
+credentials.json
+
+# Large Archives and Packages
+*.tar.gz
+*.deb
+*.zip
 *.env
 /etc/honeypot-agent.env
 
@@ -7,6 +18,7 @@
 agents/collector-agent/collector-agent
 agents/processor-agent/processor-agent
 agents/hardware-agent/hardware-agent
+agents/ti-worker/ti-worker
 
 # IDE / OS files
 .vscode/

@@ -25,17 +25,20 @@ type LogSource struct {
 }
 
 type AppConfig struct {
-	RedisAddr      string
-	RedisPassword  string
-	RedisDB        int
-	SensorName     string
-	LanIP          string
-	LanInterface   string
-	ZtIP           string
-	ZtInterface    string
-	AllowedCIDRs   []*net.IPNet
-	AllowedPorts   map[int]bool
-	ReadFromStart  bool
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+	SensorName    string
+	LanIP         string
+	LanInterface  string
+	ZtIP          string
+	ZtInterface   string
+	ZeroTierIP    string
+	ZeroTierIface string
+	AllowedCIDRs  []*net.IPNet
+	AllowedPorts  map[int]bool
+	ReadFromStart bool
+	StreamMaxLen  int64
 }
 
 func main() {
@@ -81,6 +84,10 @@ func main() {
 			Path:    getenv("ZEEK_SSL_LOG", "/usr/local/zeek/logs/current/ssl.log"),
 			Stream:  "raw:zeek:ssl",
 		},
+		{Name: "zeek", LogType: "dns", Path: getenv("ZEEK_DNS_LOG", "/usr/local/zeek/logs/current/dns.log"), Stream: "raw:zeek:dns"},
+		{Name: "zeek", LogType: "http", Path: getenv("ZEEK_HTTP_LOG", "/usr/local/zeek/logs/current/http.log"), Stream: "raw:zeek:http"},
+		{Name: "zeek", LogType: "files", Path: getenv("ZEEK_FILES_LOG", "/usr/local/zeek/logs/current/files.log"), Stream: "raw:zeek:files"},
+		{Name: "zeek", LogType: "notice", Path: getenv("ZEEK_NOTICE_LOG", "/usr/local/zeek/logs/current/notice.log"), Stream: "raw:zeek:notice"},
 	}
 
 	for _, src := range sources {
@@ -92,6 +99,7 @@ func main() {
 
 func loadConfig() AppConfig {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
+	streamMaxLen, _ := strconv.ParseInt(getenv("RAW_STREAM_MAXLEN", "50000"), 10, 64)
 
 	readFromStart := strings.EqualFold(getenv("READ_FROM_START", "false"), "true")
 
@@ -100,15 +108,18 @@ func loadConfig() AppConfig {
 		RedisPassword: getenv("REDIS_PASSWORD", ""),
 		RedisDB:       redisDB,
 
-		SensorName:   getenv("SENSOR_NAME", "ubuntu-pi-server"),
-		LanIP:        getenv("SENSOR_LAN_IP", "192.168.1.8"),
-		LanInterface: getenv("SENSOR_LAN_IFACE", "wlan0"),
-		ZtIP:         getenv("SENSOR_ZT_IP", "10.123.100.42"),
-		ZtInterface:  getenv("SENSOR_ZT_IFACE", "zttqhz5xog"),
+		SensorName:    getenv("SENSOR_NAME", "ubuntu-pi-server"),
+		LanIP:         getenv("SENSOR_LAN_IP", "192.168.1.8"),
+		LanInterface:  getenv("SENSOR_LAN_IFACE", "wlan0"),
+		ZtIP:          getenv("SENSOR_ZT_IP", "10.123.100.42"),
+		ZtInterface:   getenv("SENSOR_ZT_IFACE", "tailscale0"),
+		ZeroTierIP:    getenv("SENSOR_ZEROTIER_IP", ""),
+		ZeroTierIface: getenv("SENSOR_ZEROTIER_IFACE", ""),
 
 		AllowedCIDRs:  parseCIDRs(getenv("ALLOW_CIDRS", "192.168.1.0/24,10.123.100.0/24")),
 		AllowedPorts:  parsePorts(getenv("ALLOW_RESP_PORTS", "22,23,80,443,21,445")),
 		ReadFromStart: readFromStart,
+		StreamMaxLen:  streamMaxLen,
 	}
 }
 
@@ -116,7 +127,7 @@ func tailSource(ctx context.Context, rdb *redis.Client, cfg AppConfig, src LogSo
 	for {
 		if _, err := os.Stat(src.Path); err != nil {
 			log.Printf("[%s/%s] waiting for file: %s", src.Name, src.LogType, src.Path)
-			time.Sleep(3 * time.Second)
+			time.Sleep(30 * time.Second)
 			continue
 		}
 
@@ -138,7 +149,7 @@ func tailSource(ctx context.Context, rdb *redis.Client, cfg AppConfig, src LogSo
 
 		if err != nil {
 			log.Printf("[%s/%s] tail error: %v", src.Name, src.LogType, err)
-			time.Sleep(3 * time.Second)
+			time.Sleep(30 * time.Second)
 			continue
 		}
 
@@ -184,7 +195,7 @@ func tailSource(ctx context.Context, rdb *redis.Client, cfg AppConfig, src LogSo
 
 			id, err := rdb.XAdd(ctx, &redis.XAddArgs{
 				Stream: src.Stream,
-				MaxLen: 5000,
+				MaxLen: cfg.StreamMaxLen,
 				Approx: true,
 				Values: values,
 			}).Result()
@@ -237,15 +248,30 @@ func shouldKeepCowrie(cfg AppConfig, payload map[string]any) (bool, EventMeta) {
 		return false, EventMeta{}
 	}
 
-	// ข้อมูลจาก Cowrie สำคัญทั้งหมด ไม่ต้องกรอง IP ต้นทางทิ้ง
-	// เนื่องจาก Cowrie ไม่ได้บอกว่าแฮกเกอร์เข้ามาทาง Interface ไหน เราจึงใช้ค่า Default ของ Sensor ไปเลย
+	dstIP := firstNonEmptyString(getString(payload, "dst_ip"), cfg.LanIP)
+	dstPort := firstNonEmptyString(getString(payload, "dst_port"), "22")
+	sensorIP := dstIP
+	if net.ParseIP(sensorIP) == nil {
+		sensorIP = cfg.LanIP
+	}
+
+	// Cowrie is authoritative for proxied destinations.
 	return true, EventMeta{
 		Interface: "honeypot",
-		SensorIP:  cfg.LanIP,
+		SensorIP:  sensorIP,
 		SrcIP:     srcIP,
-		DstIP:     cfg.LanIP,
-		DstPort:   "22",
+		DstIP:     dstIP,
+		DstPort:   dstPort,
 	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func shouldKeepZeek(cfg AppConfig, payload map[string]any) (bool, EventMeta) {
@@ -258,7 +284,7 @@ func shouldKeepZeek(cfg AppConfig, payload map[string]any) (bool, EventMeta) {
 	}
 
 	// รับเฉพาะ inbound service ที่ปลายทางคือ Pi ผ่าน LAN หรือ ZeroTier
-	if respH != cfg.LanIP && respH != cfg.ZtIP {
+	if respH != cfg.LanIP && respH != cfg.ZtIP && respH != cfg.ZeroTierIP {
 		return false, EventMeta{}
 	}
 
@@ -273,6 +299,8 @@ func shouldKeepZeek(cfg AppConfig, payload map[string]any) (bool, EventMeta) {
 		iface = cfg.LanInterface
 	case cfg.ZtIP:
 		iface = cfg.ZtInterface
+	case cfg.ZeroTierIP:
+		iface = cfg.ZeroTierIface
 	}
 
 	if iface == "" {

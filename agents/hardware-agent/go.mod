@@ -3,7 +3,6 @@ module hardware-agent
 go 1.26.3
 
 require (
-	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/shirou/gopsutil/v3 v3.24.5
 )

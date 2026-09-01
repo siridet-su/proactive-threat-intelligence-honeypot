@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -17,11 +17,48 @@ import (
 	"github.com/shirou/gopsutil/v3/net"
 )
 
-func getenv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+var metricNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+
+type networkSample struct {
+	takenAt time.Time
+	byName  map[string]net.IOCountersStat
+}
+
+func requireEnv(key string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		log.Fatalf("%s must be set in the service environment", key)
 	}
-	return fallback
+	return value
+}
+
+func requirePositiveIntEnv(key string) int {
+	value, err := strconv.Atoi(requireEnv(key))
+	if err != nil || value <= 0 {
+		log.Fatalf("%s must be a positive integer", key)
+	}
+	return value
+}
+
+func csvValues(value string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+	return result
+}
+
+func metricInterfaceName(name string) string {
+	return strings.Trim(metricNameSanitizer.ReplaceAllString(name, "_"), "_")
 }
 
 // getTemp reads the Raspberry Pi CPU temperature
@@ -40,12 +77,9 @@ func getTemp() float64 {
 }
 
 func main() {
-	_ = godotenv.Load("/etc/honeypot-agent.env")
-	_ = godotenv.Load()
-
-	redisAddr := getenv("REDIS_ADDR", "127.0.0.1:6379")
-	redisPass := getenv("REDIS_PASSWORD", "")
-	redisDBStr := getenv("REDIS_DB", "0")
+	redisAddr := requireEnv("REDIS_ADDR")
+	redisPass := os.Getenv("REDIS_PASSWORD")
+	redisDBStr := requireEnv("REDIS_DB")
 
 	db, _ := strconv.Atoi(redisDBStr)
 
@@ -60,30 +94,42 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 
-	log.Println("Hardware Agent started, pushing detailed metrics to Redis stream: raw:hardware")
+	interfaces := csvValues(requireEnv("NETWORK_INTERFACES"))
+	primaryInterface := requireEnv("NETWORK_PRIMARY_INTERFACE")
+	sampleSeconds := requirePositiveIntEnv("NETWORK_SAMPLE_SECONDS")
 
-	ticker := time.NewTicker(30 * time.Second)
+	log.Printf(
+		"Hardware Agent started, stream=raw:hardware interval=%ds primary_interface=%s interfaces=%s",
+		sampleSeconds,
+		primaryInterface,
+		strings.Join(interfaces, ","),
+	)
+
+	ticker := time.NewTicker(time.Duration(sampleSeconds) * time.Second)
 	defer ticker.Stop()
 
-	pushMetrics(ctx, rdb)
+	previousNetwork := pushMetrics(ctx, rdb, nil, interfaces, primaryInterface)
 
 	for {
 		<-ticker.C
-		pushMetrics(ctx, rdb)
+		previousNetwork = pushMetrics(ctx, rdb, previousNetwork, interfaces, primaryInterface)
 	}
 }
 
-func pushMetrics(ctx context.Context, rdb *redis.Client) {
+func pushMetrics(
+	ctx context.Context,
+	rdb *redis.Client,
+	previousNetwork *networkSample,
+	interfaces []string,
+	primaryInterface string,
+) *networkSample {
 	values := map[string]interface{}{
 		"timestamp": time.Now().Unix(),
 	}
 
 	// 1. Memory Metrics
 	if v, err := mem.VirtualMemory(); err == nil && v != nil {
-		values["mem_total_bytes"] = v.Total
 		values["mem_used_bytes"] = v.Used
-		values["mem_available_bytes"] = v.Available
-		values["mem_free_bytes"] = v.Free
 		values["mem_percent"] = fmt.Sprintf("%.2f", v.UsedPercent)
 	}
 
@@ -91,30 +137,18 @@ func pushMetrics(ctx context.Context, rdb *redis.Client) {
 	if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
 		values["cpu_percent"] = fmt.Sprintf("%.2f", c[0])
 	}
-	
-	// Per-core CPU %
-	if perCore, err := cpu.Percent(0, true); err == nil {
-		for i, corePercent := range perCore {
-			values[fmt.Sprintf("cpu_core_%d_percent", i)] = fmt.Sprintf("%.2f", corePercent)
-		}
-		values["cpu_cores"] = len(perCore)
-	}
+
+	// Per-core CPU % removed to save database space
 
 	// 3. Disk Metrics (root /)
 	if d, err := disk.Usage("/"); err == nil && d != nil {
-		values["disk_total_bytes"] = d.Total
 		values["disk_used_bytes"] = d.Used
-		values["disk_free_bytes"] = d.Free
 		values["disk_percent"] = fmt.Sprintf("%.2f", d.UsedPercent)
 	}
 
-	// 4. Network Metrics (all interfaces combined)
-	if io, err := net.IOCounters(false); err == nil && len(io) > 0 {
-		values["net_bytes_sent"] = io[0].BytesSent
-		values["net_bytes_recv"] = io[0].BytesRecv
-		values["net_packets_sent"] = io[0].PacketsSent
-		values["net_packets_recv"] = io[0].PacketsRecv
-	}
+	// 4. Keep physical and overlay metrics separate. Tailscale traffic is also
+	// carried by wlan0, so adding both interfaces would double-count it.
+	currentNetwork := collectNetworkMetrics(values, previousNetwork, interfaces, primaryInterface, time.Now())
 
 	// 5. Temperature
 	temp := getTemp()
@@ -132,4 +166,81 @@ func pushMetrics(ctx context.Context, rdb *redis.Client) {
 	} else {
 		log.Printf("Pushed detailed metrics successfully.")
 	}
+
+	return currentNetwork
+}
+
+func collectNetworkMetrics(
+	values map[string]interface{},
+	previous *networkSample,
+	interfaces []string,
+	primaryInterface string,
+	takenAt time.Time,
+) *networkSample {
+	allCounters, err := net.IOCounters(true)
+	if err != nil {
+		log.Printf("Error reading network counters: %v", err)
+		return previous
+	}
+
+	available := make(map[string]net.IOCountersStat, len(allCounters))
+	for _, counter := range allCounters {
+		available[counter.Name] = counter
+	}
+
+	current := &networkSample{takenAt: takenAt, byName: make(map[string]net.IOCountersStat)}
+	values["network_primary_interface"] = primaryInterface
+	values["network_interfaces"] = strings.Join(interfaces, ",")
+
+	elapsedSeconds := 0.0
+	if previous != nil {
+		elapsedSeconds = takenAt.Sub(previous.takenAt).Seconds()
+		if elapsedSeconds > 0 {
+			values["network_sample_interval_seconds"] = fmt.Sprintf("%.3f", elapsedSeconds)
+		}
+	}
+
+	for _, interfaceName := range interfaces {
+		counter, exists := available[interfaceName]
+		prefix := "net_" + metricInterfaceName(interfaceName) + "_"
+		if !exists {
+			values[prefix+"up"] = 0
+			continue
+		}
+
+		current.byName[interfaceName] = counter
+		values[prefix+"up"] = 1
+		values[prefix+"rx_bytes_total"] = counter.BytesRecv
+		values[prefix+"tx_bytes_total"] = counter.BytesSent
+
+		// Preserve the old fields for current dashboards, but define them as the
+		// primary physical interface counters rather than all interfaces combined.
+		if interfaceName == primaryInterface {
+			values["net_bytes_sent"] = counter.BytesSent
+			values["net_bytes_recv"] = counter.BytesRecv
+		}
+
+		previousCounter, hadPrevious := net.IOCountersStat{}, false
+		if previous != nil {
+			previousCounter, hadPrevious = previous.byName[interfaceName]
+		}
+		if !hadPrevious || elapsedSeconds <= 0 {
+			continue
+		}
+
+		// Skip one rate sample after an interface reset/counter wrap.
+		if counter.BytesRecv < previousCounter.BytesRecv || counter.BytesSent < previousCounter.BytesSent {
+			continue
+		}
+
+		rxBytesPerSecond := float64(counter.BytesRecv-previousCounter.BytesRecv) / elapsedSeconds
+		txBytesPerSecond := float64(counter.BytesSent-previousCounter.BytesSent) / elapsedSeconds
+
+		values[prefix+"rx_bytes_per_second"] = fmt.Sprintf("%.3f", rxBytesPerSecond)
+		values[prefix+"tx_bytes_per_second"] = fmt.Sprintf("%.3f", txBytesPerSecond)
+		values[prefix+"rx_mbps"] = fmt.Sprintf("%.6f", rxBytesPerSecond*8/1_000_000)
+		values[prefix+"tx_mbps"] = fmt.Sprintf("%.6f", txBytesPerSecond*8/1_000_000)
+	}
+
+	return current
 }

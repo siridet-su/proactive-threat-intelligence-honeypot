@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Brain, Search, Clock, LogOut, ArrowLeft } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Brain, Search, Clock, LogOut, ArrowLeft, Bug } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -66,6 +66,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             }`}>
                 <Brain className="w-[18px] h-[18px]" /> 
                 <span className="text-sm">Threat Intel</span>
+            </Link>
+
+            <Link href="/malware-vault" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
+                pathname.includes("/malware-vault") ? 'bg-red-900/20 text-red-400 border-l-2 border-red-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'
+            }`}>
+                <Bug className="w-[18px] h-[18px]" /> 
+                <span className="text-sm">Malware Vault</span>
             </Link>
          </nav>
 

@@ -1,0 +1,260 @@
+"""Raspberry Pi Cowrie log forwarder with a local disk spool."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from .config import ProductionConfig
+from .serialization import utc_now
+
+
+@dataclass
+class ForwardResult:
+    sent: int
+    remaining: int
+    error: str = ""
+
+
+class CowrieLogTailer:
+    """Tails Cowrie's NDJSON log using a persistent byte offset."""
+
+    def __init__(self, log_path: str, offset_path: str) -> None:
+        self.log_path = Path(log_path)
+        self.offset_path = Path(offset_path)
+
+    def _load_offset(self) -> int:
+        try:
+            return int(self.offset_path.read_text(encoding="utf-8").strip() or "0")
+        except (OSError, ValueError):
+            return 0
+
+    def _save_offset(self, offset: int) -> None:
+        self.offset_path.parent.mkdir(parents=True, exist_ok=True)
+        self.offset_path.write_text(str(offset), encoding="utf-8")
+
+    def read_new_events(self) -> Tuple[List[Dict[str, Any]], int]:
+        if not self.log_path.exists():
+            return [], self._load_offset()
+
+        offset = self._load_offset()
+        size = self.log_path.stat().st_size
+        if offset > size:
+            offset = 0
+
+        events: List[Dict[str, Any]] = []
+        with self.log_path.open("rb") as handle:
+            handle.seek(offset)
+            for raw_line in handle:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    event = {
+                        "eventid": "forwarder.parse_error",
+                        "timestamp": utc_now(),
+                        "raw_line": line,
+                    }
+                events.append(event)
+            new_offset = handle.tell()
+
+        if new_offset != offset:
+            self._save_offset(new_offset)
+        return events, new_offset
+
+
+class DiskSpool:
+    """Small durable NDJSON queue for outbound-only sensors."""
+
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+
+    def append_many(self, events: Iterable[Dict[str, Any]]) -> int:
+        materialized = list(events)
+        if not materialized:
+            return 0
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            for event in materialized:
+                handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
+        return len(materialized)
+
+    def load_batch(self, limit: int) -> Tuple[List[Dict[str, Any]], List[str]]:
+        if not self.path.exists():
+            return [], []
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        batch_lines = lines[:limit]
+        remaining = lines[limit:]
+        events: List[Dict[str, Any]] = []
+        for line in batch_lines:
+            if not line.strip():
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                events.append(
+                    {
+                        "eventid": "forwarder.spool_parse_error",
+                        "timestamp": utc_now(),
+                        "raw_line": line,
+                    }
+                )
+        return events, remaining
+
+    def replace_remaining(self, remaining_lines: List[str]) -> None:
+        if remaining_lines:
+            self.path.write_text("\n".join(remaining_lines) + "\n", encoding="utf-8")
+        elif self.path.exists():
+            self.path.unlink()
+
+    def count(self) -> int:
+        if not self.path.exists():
+            return 0
+        return sum(1 for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def post_events(config: ProductionConfig, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    POST events to GCP ingest_api endpoint.
+    
+    Args:
+        config: ProductionConfig instance
+        events: List of event dictionaries to send
+    
+    Returns:
+        Parsed JSON response from server
+    
+    Raises:
+        OSError, urllib.error.URLError, TimeoutError on network failure
+    """
+    payload = {"sensor_id": config.sensor_id, "events": events}
+    request = urllib.request.Request(
+        config.ingest_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {config.api_token}",
+            "Content-Type": "application/json",
+            "X-Sensor-ID": config.sensor_id,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=config.forwarder_timeout_seconds) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def forward_once(config: ProductionConfig) -> ForwardResult:
+    """
+    Run a single poll-and-flush cycle.
+    
+    This mode is useful for validation before enabling continuous tail-mode.
+    
+    Args:
+        config: ProductionConfig instance
+    
+    Returns:
+        ForwardResult with sent count, remaining count, and any error message
+    """
+    tailer = CowrieLogTailer(config.cowrie_log_path, f"{config.spool_path}.offset")
+    spool = DiskSpool(config.spool_path)
+    new_events, _ = tailer.read_new_events()
+    spool.append_many(new_events)
+
+    events, remaining_lines = spool.load_batch(config.forwarder_batch_size)
+    if not events:
+        return ForwardResult(sent=0, remaining=0)
+
+    try:
+        response = post_events(config, events)
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        return ForwardResult(sent=0, remaining=spool.count(), error=str(exc))
+
+    accepted = int(response.get("accepted", len(events)))
+    if accepted >= len(events):
+        spool.replace_remaining(remaining_lines)
+    else:
+        unsent = events[accepted:]
+        rewritten = [json.dumps(event, sort_keys=True, separators=(",", ":")) for event in unsent]
+        rewritten.extend(remaining_lines)
+        spool.replace_remaining(rewritten)
+    return ForwardResult(sent=accepted, remaining=spool.count())
+
+
+def run_forever(config: ProductionConfig) -> None:
+    """
+    Run continuous tail-mode forwarding.
+    
+    Polls for new Cowrie events and forwards them to GCP ingest_api in batches.
+    Uses local disk spool for resilience when API is temporarily down.
+    
+    Args:
+        config: ProductionConfig instance
+    """
+    while True:
+        result = forward_once(config)
+        print(
+            json.dumps(
+                {
+                    "service": "sensor_forwarder",
+                    "sent": result.sent,
+                    "remaining": result.remaining,
+                    "error": result.error,
+                    "timestamp": utc_now(),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        time.sleep(config.forwarder_poll_seconds)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Forward Cowrie NDJSON events to the cloud ingest API."
+    )
+    parser.add_argument("--config", help="Path to production JSON config file.")
+    parser.add_argument("--once", action="store_true", help="Run one poll/flush cycle and exit.")
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """
+    Main entry point for the sensor forwarder.
+    
+    Configuration via environment variables (or JSON config file):
+    - SENSOR_ID: Unique sensor identifier (e.g., pi5-cowrie-01)
+    - INGEST_URL: GCP ingest_api endpoint (e.g., http://34.124.181.196:8080/events)
+    - HONEYPOT_API_TOKEN: Bearer token for authentication
+    - COWRIE_LOG_PATH: Path to Cowrie JSON log file
+    - FORWARDER_SPOOL_PATH: Path for local disk spool
+    - FORWARDER_TIMEOUT_SECONDS: HTTP timeout in seconds (default: 30)
+    - FORWARDER_BATCH_SIZE: Events per POST (default: 100)
+    - FORWARDER_POLL_SECONDS: Polling interval (default: 5)
+    
+    Args:
+        argv: Command-line arguments (if None, uses sys.argv)
+    
+    Returns:
+        Exit code (0 on success, 1 on error)
+    """
+    args = build_arg_parser().parse_args(argv)
+    config = ProductionConfig.from_env(args.config)
+    if not config.api_token:
+        raise SystemExit("HONEYPOT_API_TOKEN or api_token is required for sensor forwarding.")
+    if args.once:
+        result = forward_once(config)
+        print(json.dumps(result.__dict__, sort_keys=True))
+        return 0 if not result.error else 1
+    run_forever(config)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -5,9 +5,10 @@ After=network.target redis.service
 [Service]
 Type=simple
 User=cpe27
-WorkingDirectory=/home/cpe27/honeypot-pipeline/agents/processor-agent
+WorkingDirectory=/home/cpe27/proactive-threat-intelligence-honeypot/agents/processor-agent
 EnvironmentFile=/etc/honeypot-agent.env
-ExecStart=/home/cpe27/honeypot-pipeline/agents/processor-agent/processor-agent
+EnvironmentFile=/etc/honeypot/processor.env
+ExecStart=/home/cpe27/proactive-threat-intelligence-honeypot/agents/processor-agent/processor-agent
 Restart=always
 RestartSec=5s
 

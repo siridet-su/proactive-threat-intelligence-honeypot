@@ -44,7 +44,7 @@ export default function LoginForm() {
         <h2 className="text-xl text-white font-semibold tracking-[0.2em] mb-1">ACCESS CONTROL</h2>
         <p className="text-[10px] text-slate-500 font-mono mb-8 tracking-widest">READ-ONLY API SESSION</p>
 
-        <form onSubmit={handleAuthenticate} className="w-full flex flex-col gap-5">
+        <div className="w-full flex flex-col gap-5">
           
           {/* Operator ID Input */}
           <div>
@@ -58,9 +58,10 @@ export default function LoginForm() {
               </div>
               <input 
                 type="text" 
-                placeholder="OP_XXXX"
+                placeholder="admin"
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAuthenticate(e as any)}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
                 required
               />
@@ -79,9 +80,10 @@ export default function LoginForm() {
               </div>
               <input 
                 type="password" 
-                placeholder="••••••••••••"
+                placeholder="admin"
                 value={accessKey}
                 onChange={(e) => setAccessKey(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAuthenticate(e as any)}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
                 required
               />
@@ -95,14 +97,15 @@ export default function LoginForm() {
 
           {/* Submit Button */}
           <button 
-            type="submit" 
+            type="button" 
+            onClick={handleAuthenticate}
             className="mt-4 w-full bg-purple-700 hover:bg-purple-600 text-white font-medium rounded-md text-sm px-5 py-3 text-center flex justify-center items-center gap-2 transition-all shadow-[0_0_15px_rgba(126,34,206,0.3)] hover:shadow-[0_0_25px_rgba(126,34,206,0.5)] font-mono tracking-wider"
           >
             AUTHENTICATE
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
           </button>
 
-        </form>
+        </div>
 
         {/* Footer Warning */}
         <div className="mt-8 text-center flex flex-col gap-2">
@@ -110,6 +113,7 @@ export default function LoginForm() {
           <p className="text-[9px] text-slate-600 font-mono mt-4 max-w-[250px] leading-relaxed">
             WARNING: DEPLOYMENT AUTHENTICATION MUST BE CONFIGURED BEFORE THIS INTERFACE IS EXPOSED.
           </p>
+          <a href="/dashboard" className="text-[10px] text-purple-600/50 hover:text-purple-400 font-mono underline mt-2">EMERGENCY BYPASS (DEV ONLY)</a>
         </div>
 
       </div>
