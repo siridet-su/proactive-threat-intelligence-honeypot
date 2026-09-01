@@ -585,9 +585,10 @@ Exit gate: ผ่านระยะ shadow ที่กำหนดและม�
 - [ ] memory/latency/temperature budget สำหรับ production inference
 - [ ] fusion ใช้ full logits, top-k features หรือ frozen encoder embedding
 
-## 17. Implementation live update — 2026-09-01
+## 17. Implementation live update — 2026-09-01 ถึง 2026-09-02
 
-สถานะปัจจุบันขยับจาก design-only เป็น `STAGE A IDLE PILOT VERIFIED` แล้ว:
+สถานะปัจจุบันขยับจาก design-only เป็น
+`STAGE A VERIFIED / STAGE B PRE-EXECUTION TOOLING` แล้ว:
 
 - สร้าง `cowrie-hardware-fusion` project boundary แยกจาก production path
 - มี run manifest, raw telemetry และ derived-window JSON Schemas
@@ -605,7 +606,7 @@ Exit gate: ผ่านระยะ shadow ที่กำหนดและม�
 - network schema ระบุ `include_in_aggregate` เพื่อห้ามนับ `wlan0` กับ overlay traffic ซ้ำ
 - มี manifest finalizer ที่ตรวจ receipt/segment hashes, counts และ contiguous sequences
   ก่อนสร้าง completed manifest copy
-- automated tests ปัจจุบันผ่าน 17 tests ครอบคลุม percentile semantics, missing/leading
+- automated tests ปัจจุบันผ่าน 26 tests ครอบคลุม percentile semantics, missing/leading
   sample alignment, duplicates, correlation, determinism, spool interruption/no-overwrite,
   raw/receipt schemas, multi-segment input และ synthetic 90-sample replay จาก collector
   เข้า builder
@@ -617,29 +618,41 @@ Exit gate: ผ่านระยะ shadow ที่กำหนดและม�
 - replay immutable segments เป็น XGBoost/TCN windows 5/10/30 วินาทีได้ coverage 100%
 - raw เฉลี่ย 3,584.13 bytes/sample หรือประมาณ 295.32 MiB/วัน/scope ที่ 1 Hz;
   gzip estimate จาก idle pilot ประมาณ 27.94 MiB/วัน
+- receipt-driven indexer ตรวจ completed manifest, receipt, raw segment hashes/bytes/schema/
+  sequence แล้ว freeze exact dataset membership
+- grouped splitter exclude pilot runs และป้องกัน shared leakage axes ข้าม partition ด้วย
+  connected components; Stage A index hash `63a10edf...e3599b9` มี eligible runs เท่ากับ 0
+  จึง fail split ตามที่ออกแบบ
+- bounded-workload preflight ตรวจ benign compute contract สำหรับ OCI container ภายใน
+  disposable VM พร้อม no-network/read-only/drop-capabilities/no-new-privileges/seccomp
+  และ resource/watchdog limits โดยยังไม่มี execution adapter
 
 ไฟล์ implementation หลัก:
 
 - `src/cowrie_hardware_fusion/dataset.py`
 - `src/cowrie_hardware_fusion/collector.py`
 - `src/cowrie_hardware_fusion/spool.py`
+- `src/cowrie_hardware_fusion/batch.py`
+- `src/cowrie_hardware_fusion/workload.py`
 - `src/cowrie_hardware_fusion/cli.py`
 - `schemas/derived_training_window.v1.schema.json`
 - [Dataset builder v1](../dataset_builder.v1.md)
 - [Experimental 1 Hz collector v1](../experimental_collector.v1.md)
+- [Bounded workload contract v1](../bounded_workload_contract.v1.md)
 
 สิ่งที่ยังไม่ถือว่าเสร็จ:
 
 - feature/channel schema ยังไม่ freeze จนกว่าจะมี ordinary-load counterexamples
 - collector ยังไม่เป็น service; isolated venv มี `psutil` แต่ system Python ไม่ถูกแก้
 - ยังไม่มี uploader, Atlas experimental time-series หรือ rollup
-- ยังไม่ได้สร้าง command-event correlation, batch split หรือ model training
+- ยังไม่ได้สร้าง command-event correlation, eligible split หรือ model training
+- ยังไม่มี disposable backend/runtime adapter และ workload preflight ไม่ execute งาน
 - ยังไม่มี XGBoost/TCN/Fusion checkpoint
 
-ลำดับถัดไปคือ implement safe ordinary-load orchestration ที่ไม่มี attacker-controlled
-execution, เพิ่ม receipt-driven batch discovery/grouped split และเก็บ benign
-counterexamples หลายเวลา ก่อน freeze feature/channel schema และเทรน trivial/XGBoost
-baseline; neutral-idle pilot นี้เป็น `pilot_only=true` และห้ามใช้รายงาน model accuracy
+ลำดับถัดไปคือ provision/review disposable backend, implement backend telemetry/runtime
+adapter ตาม bounded-workload contract แล้วเก็บ benign counterexamples หลายเวลา ก่อน
+freeze feature/channel schema และเทรน trivial/XGBoost baseline; neutral-idle pilot นี้
+เป็น `pilot_only=true` และห้ามใช้รายงาน model accuracy
 
 ## References
 

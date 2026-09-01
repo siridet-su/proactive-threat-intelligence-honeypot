@@ -65,6 +65,12 @@ coverage 100% ผลลัพธ์แต่ละ record มี:
 CLI รองรับหลาย immutable JSONL segments หลัง `--telemetry` โดยไม่ต้อง concatenate raw
 evidence; correlation และ sequence validation ยังทำงานกับ sample รวมทุก segment
 
+หลังเพิ่ม batch tooling ทั้งสาม runs ถูก index จาก completed manifests/receipts/raw
+segments สำเร็จเป็น `dataset_source_index.v1` hash
+`63a10edf5e6f9b4ed4b1254a390328d7ad7f99debe5a1861f38c5de68e3599b9` สรุป 3 pilot
+runs, 3 receipts, 270 records และ 967,716 bytes แต่ `eligible_run_count=0`; splitter
+ปฏิเสธการสร้าง model partitions เพราะ pilot data ห้ามใช้ train/evaluate
+
 ## Storage observation
 
 raw JSONL เฉลี่ย 3,584.13 bytes/sample สำหรับ idle `pi_sensor` pilot:

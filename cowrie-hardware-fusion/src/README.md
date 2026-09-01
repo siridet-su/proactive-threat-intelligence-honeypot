@@ -11,11 +11,15 @@
 - สร้าง fixed-length channel arrays พร้อม missing masks สำหรับ TCN
 - สร้าง deterministic content hashes
 - experimental `pi_sensor` neutral-idle collector ที่เขียน bounded immutable spool
+- สร้าง verified dataset source index จาก completed manifest/receipt/raw segments
+- สร้าง deterministic grouped split ที่ exclude pilot และกัน connected groups ข้าม split
+- ตรวจ bounded ordinary-workload contract สำหรับ disposable backend โดยไม่ execute
 
 ขอบเขต implementation ถัดไป:
 
-- Pi deployment review, batch ingestion และ Cowrie command correlation adapters
-- train-only preprocessing และ run-level split generator
+- authenticated batch upload และ Cowrie command correlation adapters
+- disposable backend runtime/telemetry adapters หลัง review execution boundary
+- train-only preprocessing
 - XGBoost baseline
 - MiniROCKET/TCN experiments
 - ModernBERT shadow feature adapter

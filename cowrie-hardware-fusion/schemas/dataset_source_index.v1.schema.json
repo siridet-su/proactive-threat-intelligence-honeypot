@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:dataset-source-index:v1",
+  "title": "Verified Dataset Source Index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "dataset_id", "builder_version", "runs", "summary", "index_sha256"],
+  "properties": {
+    "schema_version": {"const": "dataset_source_index.v1"},
+    "dataset_id": {"$ref": "#/$defs/identifier"},
+    "builder_version": {"const": "0.1.0"},
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/run"}
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_count", "eligible_run_count", "pilot_run_count", "receipt_count", "record_count", "serialized_bytes"],
+      "properties": {
+        "run_count": {"type": "integer", "minimum": 1},
+        "eligible_run_count": {"type": "integer", "minimum": 0},
+        "pilot_run_count": {"type": "integer", "minimum": 0},
+        "receipt_count": {"type": "integer", "minimum": 1},
+        "record_count": {"type": "integer", "minimum": 1},
+        "serialized_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "index_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "metric_scope": {
+      "enum": ["pi_sensor", "backend_guest", "backend_cgroup", "target_process", "local_sink"]
+    },
+    "impact_label": {
+      "enum": ["NO_MATERIAL_IMPACT", "COMPUTE_SATURATION", "MEMORY_PRESSURE", "DISK_IO_PRESSURE", "NETWORK_HIGH_THROUGHPUT", "NETWORK_FLOOD_PATTERN", "PROCESS_EXHAUSTION", "SERVICE_PRESSURE", "SERVICE_DEGRADATION", "UNKNOWN"]
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "experiment_id", "manifest_content_sha256", "raw_membership_sha256", "pilot_only", "labels", "workload", "groups", "receipts"],
+      "properties": {
+        "run_id": {"$ref": "#/$defs/identifier"},
+        "experiment_id": {"$ref": "#/$defs/identifier"},
+        "manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+        "raw_membership_sha256": {"$ref": "#/$defs/sha256"},
+        "pilot_only": {"type": "boolean"},
+        "labels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scenario_disposition", "primary_impact", "observed_impacts", "ground_truth_ttps", "label_source", "evidence_receipt_ids"],
+          "properties": {
+            "scenario_disposition": {"enum": ["benign_control", "malicious_simulation", "neutral_baseline"]},
+            "primary_impact": {"$ref": "#/$defs/impact_label"},
+            "observed_impacts": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/impact_label"}},
+            "ground_truth_ttps": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$"}},
+            "label_source": {"const": "scenario_manifest_plus_observed_evidence"},
+            "evidence_receipt_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}}
+          }
+        },
+        "workload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scenario_id", "family", "variant_id", "implementation_sha256", "intensity_percent"],
+          "properties": {
+            "scenario_id": {"$ref": "#/$defs/identifier"},
+            "family": {"$ref": "#/$defs/identifier"},
+            "variant_id": {"$ref": "#/$defs/identifier"},
+            "implementation_sha256": {"$ref": "#/$defs/sha256"},
+            "intensity_percent": {"enum": [0, 25, 50, 75, 90]}
+          }
+        },
+        "groups": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scenario_variant_group", "workload_family_group", "command_template_group", "collection_batch", "environment_group", "workload_implementation_sha256"],
+          "properties": {
+            "scenario_variant_group": {"$ref": "#/$defs/identifier"},
+            "workload_family_group": {"$ref": "#/$defs/identifier"},
+            "command_template_group": {"$ref": "#/$defs/identifier"},
+            "collection_batch": {"$ref": "#/$defs/identifier"},
+            "environment_group": {"$ref": "#/$defs/identifier"},
+            "workload_implementation_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "receipts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["receipt_id", "receipt_sha256", "metric_scope", "record_count", "serialized_bytes", "segments"],
+            "properties": {
+              "receipt_id": {"$ref": "#/$defs/identifier"},
+              "receipt_sha256": {"$ref": "#/$defs/sha256"},
+              "metric_scope": {"$ref": "#/$defs/metric_scope"},
+              "record_count": {"type": "integer", "minimum": 1},
+              "serialized_bytes": {"type": "integer", "minimum": 1},
+              "segments": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["filename", "sha256", "record_count", "serialized_bytes"],
+                  "properties": {
+                    "filename": {"type": "string", "pattern": "^part-[0-9]{6}-[0-9]{6}-[a-f0-9]{64}\\.jsonl$"},
+                    "sha256": {"$ref": "#/$defs/sha256"},
+                    "record_count": {"type": "integer", "minimum": 1},
+                    "serialized_bytes": {"type": "integer", "minimum": 1}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

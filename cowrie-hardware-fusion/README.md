@@ -6,9 +6,10 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `STAGE A IDLE PILOT VERIFIED` มี collector และ dataset builder
-รุ่นแรกแล้ว และ replay neutral-idle pilot จริงจาก Pi สำเร็จ 3 runs แต่ยังไม่มีโมเดลใหม่
-ที่ถือว่าผ่านการเทรนหรือพร้อม deploy
+สถานะปัจจุบันคือ `STAGE A VERIFIED / STAGE B PRE-EXECUTION TOOLING` มี collector,
+dataset builder, receipt-driven source index และ grouped split generator แล้ว และ replay
+neutral-idle pilot จริงจาก Pi สำเร็จ 3 runs แต่ยังไม่มีโมเดลใหม่ที่ถือว่าผ่านการเทรน
+หรือพร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -40,12 +41,14 @@ cowrie-hardware-fusion/
 1. Freeze experiment contract และ label semantics
 2. สร้าง telemetry schema พร้อม session/run correlation
 3. **เสร็จ Stage A:** เก็บ/replay neutral-idle pilot 3 runs ผ่าน dataset builder v1
-4. **ถัดไป:** เพิ่ม safe ordinary-load collector/orchestrator และเก็บ benign counterexamples
-5. สร้าง grouped split, trivial baseline และ XGBoost hardware-only baseline
-6. ทดลอง MiniROCKET/TCN บน split เดียวกัน
-7. เลือก hardware branch จาก frozen evaluation protocol
-8. เทรน Fusion ด้วย leakage-safe predictions/features
-9. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
+4. **กำลังทำ:** เตรียม content-bound safe ordinary-load contract สำหรับ disposable backend
+5. **เสร็จ tooling:** สร้าง verified source index และ grouped split generator
+6. **ถัดไป:** provision/review disposable backend แล้วเก็บ benign counterexamples
+7. สร้าง trivial baseline และ XGBoost hardware-only baseline
+8. ทดลอง MiniROCKET/TCN บน split เดียวกัน
+9. เลือก hardware branch จาก frozen evaluation protocol
+10. เทรน Fusion ด้วย leakage-safe predictions/features
+11. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
 
 ## เอกสารเริ่มต้น
 
@@ -54,6 +57,7 @@ cowrie-hardware-fusion/
 - [Experimental 1 Hz collector v1](docs/experimental_collector.v1.md)
 - [XGBoost, TCN and Fusion architecture](docs/model_architecture_xgboost_tcn_fusion.v1.md)
 - [Dataset split policy v1](docs/dataset_split_policy.v1.md)
+- [Bounded workload contract v1](docs/bounded_workload_contract.v1.md)
 - [Dataset storage plan v1](docs/dataset_storage_plan.v1.md)
 - [Pi environment audit](docs/pi_environment_audit_2026-09-01.md)
 - [Stage A idle pilot report](docs/pilot_idle_collection_2026-09-01.md)

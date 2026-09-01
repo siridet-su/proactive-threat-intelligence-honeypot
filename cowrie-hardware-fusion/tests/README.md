@@ -14,5 +14,11 @@ collector tests ตรวจ bounded spool rotation, fsync/publish contract, int
 no-overwrite, idle-only safety gate, raw/receipt schema และ replay 90 samples เข้า dataset
 builder
 
-ชุดถัดไปจะเพิ่ม grouped split invariants, feature-order identity, model contracts และ
-shadow/canonical non-interference
+batch/split tests ตรวจ raw tampering, exact receipt membership, pilot exclusion,
+deterministic connected-group assignment และ fail เมื่อ independent groups ไม่พอ
+
+workload contract tests ตรวจ disposable-VM boundary, fixed input, no-network policy และ
+CPU quota/intensity binding โดยไม่มี test ใด execute workload จริง
+
+ชุดถัดไปจะเพิ่ม feature-order identity, model contracts และ shadow/canonical
+non-interference

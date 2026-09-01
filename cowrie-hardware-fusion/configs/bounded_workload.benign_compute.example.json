@@ -1,0 +1,44 @@
+{
+  "schema_version": "bounded_workload_spec.v1",
+  "spec_id": "benign-compute-control-25pct-30s-example",
+  "scenario_catalog_sha256": "7bda736a17d12ea2a7aff19a1d86e2acf4c44bb5047bbd7b97294b4d78d61865",
+  "scenario_id": "benign_compute_control",
+  "runner": {
+    "kind": "oci_container_in_disposable_vm",
+    "runtime": "docker",
+    "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "entrypoint_id": "cpu_duty_cycle_v1",
+    "implementation_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "security": {
+    "network_mode": "none",
+    "network_policy_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "read_only_rootfs": true,
+    "cap_drop_all": true,
+    "no_new_privileges": true,
+    "seccomp_profile_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "limits": {
+    "cpu_capacity_millicores": 1000,
+    "cpu_quota_millicores": 250,
+    "memory_max_bytes": 268435456,
+    "pids_max": 16,
+    "tmpfs_max_bytes": 16777216,
+    "output_max_bytes": 65536
+  },
+  "timing": {
+    "workload_seconds": 30,
+    "watchdog_timeout_seconds": 40,
+    "termination_grace_seconds": 5
+  },
+  "parameters": {
+    "intensity_percent": 25,
+    "duty_cycle_period_ms": 100,
+    "deterministic_seed": 20260901
+  },
+  "input_policy": {
+    "attacker_controlled_input": false,
+    "fixed_entrypoint_only": true,
+    "raw_cowrie_command_allowed": false
+  }
+}

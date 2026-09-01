@@ -209,6 +209,86 @@ def _finalize_idle_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _index_dataset(args: argparse.Namespace) -> int:
+    from .batch import build_dataset_index, write_json_exclusive
+
+    document = build_dataset_index(
+        args.dataset_id,
+        args.run_root,
+        schema_dir=args.schema_dir,
+    )
+    write_json_exclusive(args.output, document)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "dataset_id": document["dataset_id"],
+                "index_sha256": document["index_sha256"],
+                "summary": document["summary"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _split_dataset(args: argparse.Namespace) -> int:
+    from .batch import generate_grouped_split, write_json_exclusive
+
+    index = _load_json(args.index)
+    document = generate_grouped_split(
+        index,
+        args.split_id,
+        seed=args.seed,
+        group_axes=args.group_axis,
+        schema_dir=args.schema_dir,
+    )
+    write_json_exclusive(args.output, document)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "split_id": document["split_id"],
+                "assignment_sha256": document["assignment_sha256"],
+                "partition_run_counts": document["partition_run_counts"],
+                "excluded_count": len(document["excluded"]),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _workload_preflight(args: argparse.Namespace) -> int:
+    from .batch import write_json_exclusive
+    from .workload import validate_bounded_workload
+
+    manifest = _load_json(args.manifest)
+    specification = _load_json(args.specification)
+    receipt = validate_bounded_workload(
+        manifest,
+        specification,
+        catalog_path=args.scenario_catalog,
+        schema_dir=args.schema_dir,
+    )
+    write_json_exclusive(args.output, receipt)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "receipt_id": receipt["receipt_id"],
+                "receipt_sha256": receipt["receipt_sha256"],
+                "run_id": receipt["run_id"],
+                "contract_valid": receipt["contract_valid"],
+                "execution_authorized": receipt["execution_authorized"],
+                "execution_started": False,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cowrie-hardware-dataset",
@@ -267,6 +347,53 @@ def _parser() -> argparse.ArgumentParser:
     finalize.add_argument("--output", type=Path, required=True)
     finalize.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     finalize.set_defaults(handler=_finalize_idle_manifest)
+
+    index_dataset = subparsers.add_parser(
+        "index-dataset",
+        help="verify completed run roots and freeze exact raw membership",
+    )
+    index_dataset.add_argument("--dataset-id", required=True)
+    index_dataset.add_argument(
+        "--run-root",
+        type=Path,
+        nargs="+",
+        required=True,
+        metavar="RUN_ROOT",
+        help="run root containing manifest.json and scope=*/collection-receipt.json",
+    )
+    index_dataset.add_argument("--output", type=Path, required=True)
+    index_dataset.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    index_dataset.set_defaults(handler=_index_dataset)
+
+    from .batch import DEFAULT_GROUP_AXES, SUPPORTED_GROUP_AXES
+
+    split_dataset = subparsers.add_parser(
+        "split-dataset",
+        help="assign verified non-pilot runs using connected leakage groups",
+    )
+    split_dataset.add_argument("--index", type=Path, required=True)
+    split_dataset.add_argument("--split-id", required=True)
+    split_dataset.add_argument("--seed", type=int, default=20260901)
+    split_dataset.add_argument(
+        "--group-axis",
+        nargs="+",
+        choices=SUPPORTED_GROUP_AXES,
+        default=DEFAULT_GROUP_AXES,
+    )
+    split_dataset.add_argument("--output", type=Path, required=True)
+    split_dataset.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    split_dataset.set_defaults(handler=_split_dataset)
+
+    workload_preflight = subparsers.add_parser(
+        "workload-preflight",
+        help="validate an isolated bounded-workload contract without executing it",
+    )
+    workload_preflight.add_argument("--manifest", type=Path, required=True)
+    workload_preflight.add_argument("--specification", type=Path, required=True)
+    workload_preflight.add_argument("--scenario-catalog", type=Path, required=True)
+    workload_preflight.add_argument("--output", type=Path, required=True)
+    workload_preflight.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    workload_preflight.set_defaults(handler=_workload_preflight)
     return parser
 
 

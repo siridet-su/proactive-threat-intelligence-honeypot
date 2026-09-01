@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:bounded-workload-preflight-receipt:v1",
+  "title": "Bounded Workload Preflight Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_id", "run_id", "spec_id", "scenario_id", "contract_valid", "execution_authorized", "scenario_catalog_sha256", "manifest_content_sha256", "specification_content_sha256", "execution_policy_sha256", "runner", "limits", "receipt_sha256"],
+  "properties": {
+    "schema_version": {"const": "bounded_workload_preflight_receipt.v1"},
+    "receipt_id": {"$ref": "#/$defs/identifier"},
+    "run_id": {"$ref": "#/$defs/identifier"},
+    "spec_id": {"$ref": "#/$defs/identifier"},
+    "scenario_id": {"const": "benign_compute_control"},
+    "contract_valid": {"const": true},
+    "execution_authorized": {"const": false},
+    "scenario_catalog_sha256": {"$ref": "#/$defs/sha256"},
+    "manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+    "specification_content_sha256": {"$ref": "#/$defs/sha256"},
+    "execution_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "image_sha256", "implementation_sha256", "entrypoint_id"],
+      "properties": {
+        "kind": {"const": "oci_container_in_disposable_vm"},
+        "image_sha256": {"$ref": "#/$defs/sha256"},
+        "implementation_sha256": {"$ref": "#/$defs/sha256"},
+        "entrypoint_id": {"const": "cpu_duty_cycle_v1"}
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu_capacity_millicores", "cpu_quota_millicores", "memory_max_bytes", "pids_max", "tmpfs_max_bytes", "output_max_bytes"],
+      "properties": {
+        "cpu_capacity_millicores": {"type": "integer", "minimum": 100},
+        "cpu_quota_millicores": {"type": "integer", "minimum": 25},
+        "memory_max_bytes": {"type": "integer", "minimum": 67108864},
+        "pids_max": {"type": "integer", "minimum": 1},
+        "tmpfs_max_bytes": {"type": "integer", "minimum": 1048576},
+        "output_max_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "receipt_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

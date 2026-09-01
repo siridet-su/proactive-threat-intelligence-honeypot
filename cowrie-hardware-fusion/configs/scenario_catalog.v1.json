@@ -1,8 +1,8 @@
 {
   "schema_version": "cowrie_hardware_scenario_catalog.v1",
   "catalog_id": "cowrie-hardware-fusion-pilot-v1",
-  "status": "draft_pre_collection",
-  "reviewed_at": "2026-09-01",
+  "status": "stage_a_verified_stage_b_pre_execution",
+  "reviewed_at": "2026-09-02",
   "attack_reference": {
     "domain": "Enterprise",
     "checked_at": "2026-09-01",
@@ -171,4 +171,3 @@
     }
   ]
 }
-

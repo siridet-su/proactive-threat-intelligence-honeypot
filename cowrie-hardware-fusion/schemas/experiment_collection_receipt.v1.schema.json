@@ -11,7 +11,7 @@
     "receipt_sha256": {"$ref": "#/$defs/sha256"},
     "run_id": {"$ref": "#/$defs/identifier"},
     "experiment_id": {"$ref": "#/$defs/identifier"},
-    "metric_scope": {"const": "pi_sensor"},
+    "metric_scope": {"enum": ["pi_sensor", "backend_guest", "backend_cgroup", "target_process", "local_sink"]},
     "state": {"const": "completed"},
     "started_at": {"type": "string", "format": "date-time"},
     "ended_at": {"type": "string", "format": "date-time"},

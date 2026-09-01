@@ -1,6 +1,6 @@
 # Dataset Split Policy v1
 
-> สถานะ: `DRAFT / PRE-COLLECTION`  
+> สถานะ: `IMPLEMENTED TOOLING / INSUFFICIENT ELIGIBLE DATA`
 > ใช้กับ: Cowrie Hardware Fusion controlled datasets
 
 ## หลักการ
@@ -21,6 +21,13 @@ runs ไปเพิ่มจำนวน final test ภายหลัง
 
 หากจำนวน independent groups ยังน้อย ให้ใช้ GroupKFold ภายใน development partition
 และยังไม่สร้าง claim จาก final test จน support ต่อ label เพียงพอ
+
+Implementation ปัจจุบันใช้ connected components: ถ้า runs แชร์ค่าบน leakage axis ใด
+axis หนึ่ง runs เหล่านั้นต้องอยู่ component/partition เดียวกัน ค่า `no-command` ไม่สร้าง
+edge เฉพาะ command-template axis และ `none`/zero hash ไม่สร้าง edge เฉพาะ workload
+identity axis เพราะไม่ได้แทน identity จริง; ค่าเดียวกันบน batch/environment axis ยัง
+สร้าง edge ตามปกติ ผู้ใช้เลือก axes ได้แต่ assignment receipt ต้องบันทึก axes และ seed
+เสมอ
 
 ## Group boundaries
 
@@ -104,3 +111,9 @@ text predictions เช่นเดียวกัน
 - fusion development rows ใช้ out-of-fold base predictions
 - controlled/synthetic runs ไม่ถูกนับเป็น `production_live`
 
+## Stage A gate result
+
+source index จาก neutral-idle pilot 3 runs ผ่านการตรวจ raw 270 records และมี hash
+`63a10edf5e6f9b4ed4b1254a390328d7ad7f99debe5a1861f38c5de68e3599b9` แต่ทั้งสาม
+runs เป็น `pilot_only=true` จึงมี eligible run เท่ากับ 0 และ split generator ปฏิเสธ
+การสร้าง train/calibration/test assignment ตามที่ออกแบบไว้

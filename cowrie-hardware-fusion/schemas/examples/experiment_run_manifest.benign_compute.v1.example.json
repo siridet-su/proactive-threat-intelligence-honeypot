@@ -1,0 +1,76 @@
+{
+  "schema_version": "experiment_run_manifest.v1",
+  "run_id": "run-benign-compute-example-001",
+  "experiment_id": "stage-b-benign-control-example",
+  "state": "planned",
+  "provenance": {
+    "source": "controlled_experiment",
+    "controlled": true,
+    "pilot_only": true,
+    "production_analytics_eligible": false
+  },
+  "sensor": {
+    "sensor_id": "isolated-backend-sensor-example",
+    "host_id": "disposable-vm-example",
+    "repo_commit": "0000000000000000000000000000000000000000",
+    "cowrie_backend": "shell",
+    "environment_signature_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "execution_boundary": {
+    "kind": "disposable_vm",
+    "metric_scopes": ["backend_guest", "backend_cgroup", "target_process"],
+    "execution_observed": true,
+    "backend_id": "disposable-backend-example",
+    "backend_image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "network_policy_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "timing": {
+    "timezone": "UTC",
+    "sample_interval_seconds": 1,
+    "baseline_seconds": 30,
+    "workload_seconds": 30,
+    "recovery_seconds": 30
+  },
+  "workload": {
+    "scenario_catalog_version": "cowrie_hardware_scenario_catalog.v1",
+    "scenario_id": "benign_compute_control",
+    "family": "bounded_compute_benchmark",
+    "variant_id": "cpu-duty-cycle-25pct-v1",
+    "implementation_id": "cpu-duty-cycle-v1",
+    "implementation_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "intensity_percent": 25,
+    "intensity_basis": "assigned_cpu_capacity",
+    "background_load_profile": "isolated-backend-idle"
+  },
+  "labels": {
+    "scenario_disposition": "benign_control",
+    "primary_impact": "COMPUTE_SATURATION",
+    "observed_impacts": ["COMPUTE_SATURATION"],
+    "ground_truth_ttps": [],
+    "label_source": "scenario_manifest_plus_observed_evidence",
+    "evidence_receipt_ids": ["environment-receipt-placeholder"]
+  },
+  "collection": {
+    "telemetry_schema_version": "hardware_telemetry_sample.v1",
+    "collector_id": "backend-telemetry-collector",
+    "collector_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "command_events_required": false,
+    "raw_data_immutable": true
+  },
+  "split_groups": {
+    "scenario_variant_group": "benign-compute-25pct-v1",
+    "workload_family_group": "bounded-compute-benchmark-v1",
+    "command_template_group": "no-command",
+    "collection_batch": "stage-b-example-b01",
+    "environment_group": "disposable-backend-example"
+  },
+  "safety": {
+    "bounded_benign_workload": true,
+    "actual_malware_used": false,
+    "public_or_third_party_target_used": false,
+    "default_deny_egress": true,
+    "egress_enforcement_scope": "execution_boundary",
+    "hard_resource_limits": true,
+    "watchdog_timeout_seconds": 40
+  }
+}

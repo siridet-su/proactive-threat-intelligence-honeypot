@@ -1,7 +1,7 @@
 # Dataset Builder v1
 
 > สถานะ: `IMPLEMENTED / STAGE A REPLAY VERIFIED`
-> เวอร์ชัน: `0.1.0`  
+> เวอร์ชัน: `0.1.0`
 > ขอบเขต: controlled experiment data เท่านั้น
 
 ## หน้าที่
@@ -89,15 +89,41 @@ PYTHONPATH=src python -m cowrie_hardware_fusion.cli build-window \
 ไฟล์หลัง `--telemetry` รับได้หนึ่งหรือหลาย immutable segments และต้องเรียงตาม receipt;
 builder ยังตรวจ sequence/correlation ซ้ำและไม่ต้อง concatenate raw evidence
 
+## Verified batch index
+
+แต่ละ completed run ใช้ canonical layout ใน [data README](../data/README.md) แล้ว freeze
+exact raw membership ด้วย:
+
+```bash
+cowrie-hardware-dataset index-dataset \
+  --dataset-id controlled-dataset-v1 \
+  --run-root data/raw/run=run-0001 data/raw/run=run-0002 \
+  --output data/processed/controlled-dataset-v1.source-index.json
+```
+
+คำสั่งตรวจ manifest/receipt/sample schemas, receipt content hash, segment bytes/hash,
+contiguous sequence, scope/correlation และ receipt citation ก่อนออก
+`dataset_source_index.v1` ที่มี index hash
+
+จากนั้นสร้าง run-level assignment:
+
+```bash
+cowrie-hardware-dataset split-dataset \
+  --index data/processed/controlled-dataset-v1.source-index.json \
+  --split-id controlled-split-v1 \
+  --output data/processed/controlled-split-v1.json
+```
+
+splitter exclude `pilot_only=true`, รวม runs ที่แชร์ leakage axes เป็น connected component
+เดียว และ fail หากมี independent components น้อยกว่าสามแทนการลด guard อัตโนมัติ
+
 ## สิ่งที่ยังไม่ทำใน v1
 
-- batch discovery หลาย run
 - Cowrie command-event correlation adapter
-- run-level split generator
 - train-only normalization/imputation
 - Parquet/NumPy export
 - XGBoost หรือ TCN training
 
-neutral-idle pilot จริง 3 runs replay ผ่านที่ horizon 5/10/30 วินาทีแล้ว ลำดับถัดไปคือ
-เพิ่ม ordinary-load/benign counterexamples และ batch discovery จาก receipt ก่อน freeze
-feature/channel schema สร้าง split และเทรน baseline
+neutral-idle pilot จริง 3 runs replay/index ผ่านแล้ว แต่ถูก exclude จาก split ทั้งหมด
+ลำดับถัดไปคือเพิ่ม ordinary-load/benign counterexamples จาก isolated backend ก่อน freeze
+feature/channel schema สร้าง eligible split และเทรน baseline
