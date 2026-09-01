@@ -540,6 +540,10 @@ def _validate_idle_contract(
     safety = manifest["safety"]
     if safety["actual_malware_used"] or safety["public_or_third_party_target_used"]:
         raise DatasetContractError("idle collector safety boundary was violated")
+    if safety["egress_enforcement_scope"] != "not_applicable_no_execution":
+        raise DatasetContractError(
+            "idle collector requires egress_enforcement_scope=not_applicable_no_execution"
+        )
 
     names = [interface.name for interface in config.interfaces]
     if len(names) != len(set(names)):

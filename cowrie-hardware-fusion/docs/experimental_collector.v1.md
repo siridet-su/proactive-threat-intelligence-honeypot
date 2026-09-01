@@ -12,6 +12,8 @@ Collector รุ่นนี้ตั้งใจแคบกว่าระบ�
 - รับเฉพาะ `scenario_id=neutral_idle`, workload family `none`, intensity `0`
 - รับเฉพาะ `execution_boundary.kind=none` และ `metric_scope=pi_sensor`
 - ปฏิเสธ manifest ที่ประกาศ malware, third-party target, command event หรือ TTP
+- neutral-idle ใช้ `egress_enforcement_scope=not_applicable_no_execution`; field
+  `default_deny_egress` บันทึกสภาพ host จริงและไม่ได้อ้างว่า Pi เป็น default-deny
 - ไม่มีโค้ด execute workload/command
 - ไม่มี Redis, MongoDB, Atlas, uploader หรือ canonical write path
 - ไม่แก้/เปิด/หยุด production service

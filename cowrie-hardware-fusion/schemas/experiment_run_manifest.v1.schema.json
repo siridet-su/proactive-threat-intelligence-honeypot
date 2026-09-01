@@ -326,6 +326,7 @@
         "actual_malware_used",
         "public_or_third_party_target_used",
         "default_deny_egress",
+        "egress_enforcement_scope",
         "hard_resource_limits",
         "watchdog_timeout_seconds"
       ],
@@ -340,7 +341,14 @@
           "const": false
         },
         "default_deny_egress": {
-          "const": true
+          "type": "boolean"
+        },
+        "egress_enforcement_scope": {
+          "enum": [
+            "not_applicable_no_execution",
+            "execution_boundary",
+            "host"
+          ]
         },
         "hard_resource_limits": {
           "const": true

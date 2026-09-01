@@ -219,7 +219,11 @@ Run ที่ workload ไม่เริ่ม, telemetry ไม่ครบ �
 - public/third-party traffic targets: prohibited
 - Internet mining pool/proxy: prohibited
 - workload: bounded benign implementation เท่านั้น
-- outbound network: default deny; local sink allowlist เท่านั้น
+- scenario ที่มี execution/outbound network: default deny ที่ execution boundary และ
+  local sink allowlist เท่านั้น
+- neutral-idle ที่ไม่มี execution ต้องบันทึก host egress truth และใช้
+  `egress_enforcement_scope=not_applicable_no_execution`; ห้ามอ้าง host default-deny
+  หากไม่ได้ enforce จริง
 - untrusted binary: ห้ามรันบน Pi หรือ container-only boundary
 - disposable VM/backend ต้อง reset จาก content-addressed image
 - CPU, memory, process, disk, network และ duration ต้องมี hard limits/watchdog

@@ -68,9 +68,9 @@
     "bounded_benign_workload": true,
     "actual_malware_used": false,
     "public_or_third_party_target_used": false,
-    "default_deny_egress": true,
+    "default_deny_egress": false,
+    "egress_enforcement_scope": "not_applicable_no_execution",
     "hard_resource_limits": true,
     "watchdog_timeout_seconds": 120
   }
 }
-

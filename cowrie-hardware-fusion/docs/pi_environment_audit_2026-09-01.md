@@ -24,6 +24,8 @@ Read-only collector preflight follow-up ในวันเดียวกัน�
 - root filesystem block device คือ `mmcblk0p2`
 - `wlan0`, `tailscale0` และ `lo` ยังมีอยู่จริง
 - `timedatectl` รายงาน `NTPSynchronized=yes`
+- read-only `iptables -S OUTPUT` รายงาน policy `ACCEPT`; จึงห้ามระบุว่า host มี
+  default-deny egress สำหรับ neutral-idle manifest
 
 ## Honeypot services
 
