@@ -130,7 +130,7 @@ function shouldPreferCompatibilityRoute(origin: URL, key: string): boolean {
   return origin.protocol === "http:"
     && origin.hostname === "127.0.0.1"
     && origin.port === "8090"
-    && origin.pathname === ""
+    && origin.pathname === "/"
     && COMPATIBILITY_FIRST_KEYS.has(key);
 }
 

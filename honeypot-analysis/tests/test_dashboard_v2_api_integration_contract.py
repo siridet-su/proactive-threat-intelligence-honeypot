@@ -49,6 +49,7 @@ def test_dashboard_v2_proxy_does_not_expose_sensitive_command_route() -> None:
     assert "shouldPreferCompatibilityRoute" in proxy
     assert 'origin.hostname === "127.0.0.1"' in proxy
     assert 'origin.port === "8090"' in proxy
+    assert 'origin.pathname === "/"' in proxy
     assert '"/sessions"' in proxy
     assert '"/events"' in proxy
 
