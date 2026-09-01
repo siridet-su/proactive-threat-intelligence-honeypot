@@ -7,7 +7,9 @@ import copy
 import ipaddress
 import json
 import os
-from dataclasses import dataclass
+import threading
+import time
+from dataclasses import dataclass, field
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -88,6 +90,13 @@ class MonitorConfig:
     enable_response_guidance: bool = True
     refresh_seconds: int = DEFAULT_REFRESH_SECONDS
     production_config: Optional[ProductionConfig] = None
+    _storage: Any = field(default=None, init=False, repr=False, compare=False)
+    _storage_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
 
 def _sqlite_path(database_url: str) -> str:
@@ -183,9 +192,93 @@ def _monitor_database_display(config: MonitorConfig) -> str:
 
 
 def _open_monitor_storage(config: MonitorConfig) -> Any:
-    if config.production_config is not None:
-        return open_storage(config.production_config.database_settings())
-    return open_storage(_monitor_database_url(config))
+    """Return the process-owned monitor storage backend.
+
+    MongoClient is thread-safe and is intended to be long lived. Opening the
+    full epoch-bound adapter for every HTTP request repeats DNS/TLS, schema,
+    deployment, and rollback-mirror verification and can exceed the bounded
+    readiness caller deadline. Cache only within one immutable service
+    process; release activation restarts the service and therefore constructs a
+    fresh, strictly bound backend.
+    """
+
+    if config._storage is not None:
+        return config._storage
+    with config._storage_lock:
+        if config._storage is None:
+            if config.production_config is not None:
+                config._storage = open_storage(
+                    config.production_config.database_settings()
+                )
+            else:
+                config._storage = open_storage(_monitor_database_url(config))
+        return config._storage
+
+
+def _close_monitor_storage(config: MonitorConfig) -> None:
+    """Release the cached client once the monitor process stops."""
+
+    with config._storage_lock:
+        storage = config._storage
+        config._storage = None
+    if storage is None:
+        return
+    close = getattr(storage, "close", None)
+    if callable(close):
+        close()
+        return
+    mongo = getattr(storage, "mongo", None)
+    client = getattr(mongo, "client", None)
+    close_client = getattr(client, "close", None)
+    if callable(close_client):
+        close_client()
+
+
+def _safe_monitor_exception_class(exc: BaseException) -> str:
+    """Return an allowlisted class label without serializing exception data."""
+
+    allowed = {
+        "BrokenPipeError",
+        "ConnectionError",
+        "ConnectionResetError",
+        "NetworkTimeout",
+        "OperationFailure",
+        "ServerSelectionTimeoutError",
+        "TimeoutError",
+    }
+    name = type(exc).__name__
+    return name if name in allowed else "operation_failed"
+
+
+def _monitor_readiness(config: MonitorConfig) -> Tuple[bool, Dict[str, Any]]:
+    """Run readiness and return only secret-safe operational diagnostics."""
+
+    started = time.monotonic()
+    try:
+        storage = _open_monitor_storage(config)
+        storage_finished = time.monotonic()
+        result = storage.health_check()
+        finished = time.monotonic()
+        ready = bool(result.get("ok"))
+        backend = str(result.get("backend") or "unknown")
+        if backend not in {"mongodb", "sqlite"}:
+            backend = "unknown"
+        return ready, {
+            "operation": "storage_health_check",
+            "backend": backend,
+            "storage_open_latency_ms": round(
+                (storage_finished - started) * 1000.0, 3
+            ),
+            "health_latency_ms": round((finished - storage_finished) * 1000.0, 3),
+            "latency_ms": round((finished - started) * 1000.0, 3),
+        }
+    except Exception as exc:
+        finished = time.monotonic()
+        return False, {
+            "operation": "storage_health_check",
+            "exception_class": _safe_monitor_exception_class(exc),
+            "latency_ms": round((finished - started) * 1000.0, 3),
+        }
 
 
 def _monitor_runtime_config(config: MonitorConfig) -> ProductionConfig:
@@ -4777,14 +4870,23 @@ class MonitorHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path in {"/health/ready", "/ready"}:
-            try:
-                ready = bool(
-                    _open_monitor_storage(self.monitor_config)
-                    .health_check()
-                    .get("ok")
-                )
-            except Exception:
-                ready = False
+            ready, diagnostic = _monitor_readiness(self.monitor_config)
+            print(
+                json.dumps(
+                    log_payload(
+                        {
+                            "service": "monitor_web",
+                            "event": "readiness_check",
+                            "ok": ready,
+                            "request_id": self._request_id(),
+                            "timestamp": utc_now(),
+                            **diagnostic,
+                        }
+                    ),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             self._send_json(
                 HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
                 {
@@ -4915,13 +5017,15 @@ class MonitorHandler(BaseHTTPRequestHandler):
         )
 
     def _handle_unexpected_error(self, event: str, exc: BaseException) -> None:
+        disconnected = isinstance(exc, (BrokenPipeError, ConnectionResetError))
         print(
             json.dumps(
                 log_payload(
                     {
                         "service": "monitor_web",
-                        "event": event,
+                        "event": "client_disconnected" if disconnected else event,
                         "exception": exc,
+                        "exception_class": _safe_monitor_exception_class(exc),
                         "request_id": self._request_id(),
                         "timestamp": utc_now(),
                     }
@@ -4930,6 +5034,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
             ),
             flush=True,
         )
+        if disconnected:
+            return
         self._send_json(
             HTTPStatus.SERVICE_UNAVAILABLE,
             {
@@ -5034,6 +5140,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0 if snapshot.get("ok") else 1
 
+    # Warm and strictly validate the process-owned storage before accepting a
+    # request. The service manager/activation guard can retry a not-yet-bound
+    # process without racing the first readiness request against a cold
+    # MongoDB DNS/TLS/schema/epoch initialization.
+    _open_monitor_storage(config)
     server = build_server(args.host, args.port, config)
     print(
         json.dumps(
@@ -5049,7 +5160,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         flush=True,
     )
-    serve_http_until_stopped(server)
+    try:
+        serve_http_until_stopped(server)
+    finally:
+        _close_monitor_storage(config)
     return 0
 
 
