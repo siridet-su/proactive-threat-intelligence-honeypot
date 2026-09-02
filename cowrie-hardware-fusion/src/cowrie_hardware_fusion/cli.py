@@ -120,6 +120,84 @@ def _collector_source_hash(args: argparse.Namespace) -> int:
     return 0
 
 
+def _snapshot_experimental_hardware(args: argparse.Namespace) -> int:
+    from .batch import write_json_exclusive
+    from .collector import CollectorConfig
+    from .parity import capture_experimental_snapshot
+
+    config_document = _load_json(args.config)
+    _validate(
+        config_document,
+        args.schema_dir / "experimental_collector_config.v1.schema.json",
+        str(args.config),
+    )
+    snapshot = capture_experimental_snapshot(
+        CollectorConfig.from_document(config_document),
+        interval_seconds=args.interval_seconds,
+    )
+    if args.output is None:
+        print(
+            json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                indent=2,
+            )
+        )
+    else:
+        write_json_exclusive(args.output, snapshot)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "snapshot_sha256": snapshot["snapshot_sha256"],
+                    "valid": snapshot["quality"]["valid"],
+                    "mode": snapshot["mode"],
+                },
+                sort_keys=True,
+            )
+        )
+    return 0
+
+
+def _compare_hardware_snapshots(args: argparse.Namespace) -> int:
+    from .batch import write_json_exclusive
+    from .parity import compare_hardware_snapshots
+
+    report = compare_hardware_snapshots(
+        _load_json(args.go_snapshot),
+        _load_json(args.experimental_snapshot),
+    )
+    write_json_exclusive(args.output, report)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "report_sha256": report["report_sha256"],
+                "summary": report["summary"],
+                "purpose": report["purpose"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _validate_hardware_impact_protocol(args: argparse.Namespace) -> int:
+    from .protocol import validate_hardware_impact_protocol
+
+    document = _load_json(args.protocol)
+    _validate(
+        document,
+        args.schema_dir / "hardware_impact_experiment_protocol.v2.schema.json",
+        str(args.protocol),
+    )
+    summary = validate_hardware_impact_protocol(document)
+    print(json.dumps(summary, sort_keys=True, indent=2))
+    return 0
+
+
 def _validated_collector_inputs(args: argparse.Namespace) -> tuple[dict[str, Any], Any]:
     from .collector import CollectorConfig
 
@@ -225,6 +303,45 @@ def _index_dataset(args: argparse.Namespace) -> int:
                 "dataset_id": document["dataset_id"],
                 "index_sha256": document["index_sha256"],
                 "summary": document["summary"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _train_xgboost_smoke(args: argparse.Namespace) -> int:
+    from .smoke import train_xgboost_smoke
+
+    source_index = _load_json(args.source_index)
+    _validate(
+        source_index,
+        args.schema_dir / "dataset_source_index.v1.schema.json",
+        str(args.source_index),
+    )
+    window_schema = args.schema_dir / "derived_training_window.v1.schema.json"
+    records: list[dict[str, Any]] = []
+    for path in args.window:
+        record = _load_json(path)
+        _validate(record, window_schema, str(path))
+        records.append(record)
+    report = train_xgboost_smoke(
+        records,
+        source_index,
+        output_dir=args.output_dir,
+        seed=args.seed,
+        num_boost_round=args.num_boost_round,
+        minimum_coverage=args.minimum_coverage,
+    )
+    print(
+        json.dumps(
+            {
+                "output_dir": str(args.output_dir),
+                "report_sha256": report["report_sha256"],
+                "run_count": report["source"]["run_count"],
+                "accuracy": report["out_of_fold"]["metrics"]["accuracy"],
+                "macro_f1": report["out_of_fold"]["metrics"]["macro_f1"],
+                "purpose": report["purpose"],
             },
             sort_keys=True,
         )
@@ -561,6 +678,33 @@ def _parser() -> argparse.ArgumentParser:
     source_hash.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     source_hash.set_defaults(handler=_collector_source_hash)
 
+    parity_snapshot = subparsers.add_parser(
+        "snapshot-experimental-hardware",
+        help="print one warmed read-only experimental collector snapshot",
+    )
+    parity_snapshot.add_argument("--config", type=Path, required=True)
+    parity_snapshot.add_argument("--interval-seconds", type=float, default=1.0)
+    parity_snapshot.add_argument("--output", type=Path)
+    parity_snapshot.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    parity_snapshot.set_defaults(handler=_snapshot_experimental_hardware)
+
+    parity_compare = subparsers.add_parser(
+        "compare-hardware-snapshots",
+        help="compare read-only Go Agent and experimental collector snapshots",
+    )
+    parity_compare.add_argument("--go-snapshot", type=Path, required=True)
+    parity_compare.add_argument("--experimental-snapshot", type=Path, required=True)
+    parity_compare.add_argument("--output", type=Path, required=True)
+    parity_compare.set_defaults(handler=_compare_hardware_snapshots)
+
+    protocol_validate = subparsers.add_parser(
+        "validate-hardware-impact-protocol",
+        help="verify schema, content hash, leakage, label, and split gates for protocol v2",
+    )
+    protocol_validate.add_argument("--protocol", type=Path, required=True)
+    protocol_validate.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    protocol_validate.set_defaults(handler=_validate_hardware_impact_protocol)
+
     preflight = subparsers.add_parser(
         "collector-preflight",
         help="run host, contract, and spool safety checks for a neutral-idle pilot",
@@ -624,6 +768,25 @@ def _parser() -> argparse.ArgumentParser:
     split_dataset.add_argument("--output", type=Path, required=True)
     split_dataset.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     split_dataset.set_defaults(handler=_split_dataset)
+
+    train_smoke = subparsers.add_parser(
+        "train-xgboost-smoke",
+        help="run repetition-held-out XGBoost evaluation on controlled pilot windows",
+    )
+    train_smoke.add_argument("--source-index", type=Path, required=True)
+    train_smoke.add_argument(
+        "--window",
+        type=Path,
+        nargs="+",
+        required=True,
+        metavar="WINDOW_JSON",
+    )
+    train_smoke.add_argument("--output-dir", type=Path, required=True)
+    train_smoke.add_argument("--seed", type=int, default=20260902)
+    train_smoke.add_argument("--num-boost-round", type=int, default=40)
+    train_smoke.add_argument("--minimum-coverage", type=float, default=0.99)
+    train_smoke.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    train_smoke.set_defaults(handler=_train_xgboost_smoke)
 
     workload_preflight = subparsers.add_parser(
         "workload-preflight",

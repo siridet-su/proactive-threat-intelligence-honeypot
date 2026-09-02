@@ -681,7 +681,7 @@ freeze feature/channel schema และเทรน trivial/XGBoost baseline; ne
 เท่านั้น สถาปัตยกรรม production ยังคงให้ training/inference หลักอยู่ Cloud และ Pi เป็น
 sensor/controlled data generator
 
-สถานะ: `IMPLEMENTED / LOCAL TESTS PASS / PI EXECUTION PENDING`
+สถานะ: `SUPERSEDED BY SECTION 19 / PI EXECUTION COMPLETE`
 
 - เลือก 2 behavior candidates แรกคือ `T1496.001 Compute Hijacking` และ
   `T1499.002 Service Exhaustion Flood`
@@ -717,3 +717,77 @@ sensor/controlled data generator
 - `schemas/pi_poc_workload_spec.v1.schema.json`
 - `schemas/pi_poc_execution_receipt.v1.schema.json`
 - `schemas/pi_poc_matrix.v1.schema.json`
+
+## 19. Pi two-TTP PoC result — 2026-09-02
+
+สถานะ: `MATRIX COMPLETE / XGBOOST SMOKE COMPLETE / T1499 BRANCH NOT PASSED`
+
+- Pi matrix v2 รันครบ 15/15 runs ได้ 1,350/1,350 valid samples และ workload windows
+  15/15 ชุดที่ sample/baseline coverage 100%
+- controlled workload 12/12 runs ไม่มี workload error, cleanup ผ่านทั้งหมด และไม่กระทบ
+  production containers; ไม่มี Redis/MongoDB/Atlas write
+- transfer archive SHA-256 ตรงกันระหว่าง Pi/local และ local re-index ให้ source index file
+  ตรงกับ Pi ทุก byte; canonical index hash คือ
+  `72fcb6b7b3a6c5bea70226100cbabf4a73a7349871c96f421957f62fc862bf42`
+- XGBoost ใช้ 54 continuous aggregate features และ repetition-held-out 3 folds โดยแต่ละ fold
+  train 10/test 5 runs; ไม่มี repetition เดียวกันข้าม train/test
+- out-of-fold Accuracy `0.80`, Macro-F1 `0.619`; NO_TTP ถูก 9/9, T1496.001 ถูก 3/3,
+  แต่ T1499.002 ถูก 0/3 และถูกทำนายเป็น NO_TTP ทั้งหมด
+- ผลนี้ยืนยัน end-to-end pipeline และ compute signal เท่านั้น ยังไม่ใช่ production accuracy
+  และยังไม่สนับสนุนให้ deploy hardware checkpoint หรือเริ่ม Fusion
+- next gate คือ freeze feature/training protocol v2 ก่อนเก็บ independent runs ใหม่อย่างน้อย
+  10–20 runs ต่อ scenario หลายวัน เพิ่ม production-observable service pressure และคง final
+  test ไว้ unopened; TCN ยังไม่เหมาะกับ dataset 15 runs
+
+รายละเอียด evidence, hashes, telemetry และ confusion matrix:
+[pi_poc_results_2026-09-02.md](../pi_poc_results_2026-09-02.md)
+
+## 20. Hardware-impact protocol v2 และ Go Agent parity — 2026-09-02
+
+สถานะ: `PROTOCOL FROZEN / COMMON-METRIC PARITY PASSED / DEVELOPMENT DATA NOT STARTED`
+
+ส่วนนี้ supersede “next gate” ในข้อ 19:
+
+- freeze protocol `pi-hardware-impact-v2-20260902` ก่อนเก็บ independent data ใหม่;
+  canonical SHA-256 คือ
+  `8eb0786e8427f7fa685a8d137db62b1ecfff40a7897b65f742915477b9b2471d`
+- hardware XGBoost เปลี่ยน target จาก TTP เป็น observed `primary_impact` สาม class:
+  no material impact, compute saturation และ service pressure
+- `T1496.001`/`T1499.002` เหลือบทบาท ground-truth metadata และ Fusion evaluation;
+  ModernBERT ยังเป็น command-intent/TTP candidate branch
+- scenario v2 มี 7 matched neutral/benign/malicious simulations โดย compute และ service
+  แต่ละ impact มี benign/malicious pair ที่ family/intensity เท่ากัน เพื่อไม่ให้ hardware
+  model อ้าง intent ที่ telemetry แยกไม่ได้
+- แผนเต็ม 20 repetitions/scenario = 140 runs/12,600 samples อย่างน้อย 5 วัน แบ่ง
+  development 70, calibration 35 และ locked final test 35 runs; หยุด review หลัง
+  development wave ไม่เปิด final test ระหว่างแก้ feature
+- feature profiles ถูก freeze เป็น Go-overlap diagnostic 25 features, host-extended 48 และ
+  target-augmented 54 features; intensity, scenario, label, IDs และ timestamp ถูกห้ามเข้า
+  model
+- XGBoost v2 ใช้ balanced class weights/fixed parameters/no tuning; TCN ถูก gate ไว้จนกว่า
+  XGBoost และจำนวน independent runs จะผ่าน
+- เพิ่ม semantic protocol validator และ automated tests รวมปัจจุบัน 44 Python tests
+
+Feature-parity audit บน `pi-z` ใช้ proposed static ARM64 Go binary และ experimental
+Python collector แบบ read-only/no-sink โดยไม่แก้/restart production service และไม่เขียน
+Redis/MongoDB/Atlas พบว่า legacy gopsutil memory กับ psutil นิยาม `used` ไม่เหมือนกัน จึง
+เพิ่ม explicit Go `mem_pressure_* = total - available` แทนการขยาย tolerance หลังแก้แล้ว
+probe 5 คู่ผ่าน 225/225 common-field comparisons
+
+คำว่า parity ผ่านในที่นี้ไม่ใช่ full collector parity: Go Agent ยังขาด run/sample identity,
+clock/quality metadata, per-core/disk-I/O/socket/process/thermal health, target cgroup และ
+immutable receipt-bound spool ดังนั้น experimental collector ยังคงเป็น dataset authority
+และห้ามเปิด Go Agent ที่ 1 Hz เข้า ordinary Redis/Atlas
+
+ลำดับถัดไป:
+
+1. เพิ่ม production-observable service-pressure features และ receipt-bound local collection
+2. review safe workload/collector manifests กับ protocol hash
+3. เก็บเฉพาะ development wave 70 runs บน Pi หลายวัน
+4. transfer/hash-verify แล้ว train fixed XGBoost บน Arch/Cloud
+5. หยุดตรวจ signal/per-class recall/false positives ก่อนเก็บ calibration wave
+
+เอกสาร authority/evidence:
+
+- [Hardware-impact experiment protocol v2](../hardware_impact_experiment_protocol.v2.md)
+- [Hardware Go Agent feature-parity audit](../hardware_agent_feature_parity_2026-09-02.md)

@@ -1,6 +1,6 @@
 # Dataset Builder v1
 
-> สถานะ: `IMPLEMENTED / STAGE A REPLAY VERIFIED`
+> สถานะ: `IMPLEMENTED / PI POC REPLAY + XGBOOST SMOKE VERIFIED`
 > เวอร์ชัน: `0.1.0`
 > ขอบเขต: controlled experiment data เท่านั้น
 
@@ -117,12 +117,33 @@ cowrie-hardware-dataset split-dataset \
 splitter exclude `pilot_only=true`, รวม runs ที่แชร์ leakage axes เป็น connected component
 เดียว และ fail หากมี independent components น้อยกว่าสามแทนการลด guard อัตโนมัติ
 
+## Pilot XGBoost smoke command
+
+PoC-only trainer รับ verified source index กับ derived workload windows แล้วตรวจ record hash,
+manifest binding, label binding, coverage และ feature schema ก่อนแบ่ง fold ด้วย
+`collection_batch` ทั้งกลุ่ม:
+
+```bash
+python -m pip install -e '.[poc-ml]'
+
+cowrie-hardware-dataset train-xgboost-smoke \
+  --source-index data/processed/poc.source-index.json \
+  --window data/interim/*.workload.30s.json \
+  --output-dir artifacts/poc-xgboost-smoke-v1
+```
+
+output มี fold models, full-data inspection-only model, predictions, confusion matrix,
+per-class precision/recall/F1, Macro-F1, feature ordering, library/config/model hashes และ
+ข้อจำกัด `pilot_smoke_only_not_for_deployment` โฟลเดอร์ output ต้องยังไม่มีเพื่อไม่เขียนทับ
+หลักฐานเดิม ผลรัน Pi จริงอยู่ใน
+[pi_poc_results_2026-09-02.md](pi_poc_results_2026-09-02.md)
+
 ## สิ่งที่ยังไม่ทำใน v1
 
 - Cowrie command-event correlation adapter
 - train-only normalization/imputation
 - Parquet/NumPy export
-- XGBoost หรือ TCN training
+- production-eligible XGBoost หรือ TCN training
 
 neutral-idle pilot จริง 3 runs replay/index ผ่านแล้ว แต่ถูก exclude จาก split ทั้งหมด
 ลำดับถัดไปคือเพิ่ม ordinary-load/benign counterexamples จาก isolated backend ก่อน freeze

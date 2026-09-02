@@ -78,6 +78,49 @@ bytes_per_second = (current_bytes - previous_bytes) / elapsed_seconds
 Mbps             = bytes_per_second * 8 / 1,000,000
 ```
 
+## Memory semantics
+
+Existing dashboard fields are preserved to avoid silently changing production charts:
+
+```text
+mem_used_bytes
+mem_percent
+mem_used_semantics=legacy_total_minus_free_buffers_cached
+```
+
+For training and collector parity, use the explicit pressure fields instead:
+
+```text
+mem_total_bytes
+mem_available_bytes
+mem_pressure_used_bytes
+mem_pressure_percent
+mem_pressure_semantics=total_minus_available
+```
+
+`gopsutil.VirtualMemory().Used` and Python `psutil.virtual_memory().used` do not have
+the same Linux semantics. The pressure fields deliberately calculate
+`total - available`, matching the experimental Python collector. Do not mix the
+legacy and pressure fields in one feature definition.
+
+## Read-only parity snapshot
+
+The binary can emit one warmed JSON snapshot without requiring Redis configuration
+or writing to Redis, MongoDB, or Atlas:
+
+```bash
+./hardware-agent \
+  --snapshot-json \
+  --snapshot-interval 2s \
+  --snapshot-interfaces wlan0,tailscale0,lo \
+  --snapshot-primary-interface wlan0
+```
+
+This mode is for short parity audits only. It is not a service, does not create
+training rows, and does not replace the receipt-bound experimental collector.
+Running the agent normally, without `--snapshot-json`, keeps the existing Redis
+stream behavior.
+
 ## Build and service
 
 ```bash
@@ -94,4 +137,3 @@ Verify the latest Redis sample:
 redis-cli XREVRANGE raw:hardware + - COUNT 1
 journalctl -u honeypot-hardware.service -n 30 --no-pager
 ```
-

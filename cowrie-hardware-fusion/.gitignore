@@ -1,5 +1,7 @@
 .venv/
+.venv-poc-ml/
 __pycache__/
+*.egg-info/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
@@ -15,4 +17,3 @@ runs/
 *.pth
 *.onnx
 *.safetensors
-

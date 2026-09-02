@@ -1,8 +1,10 @@
 # Raspberry Pi Safe-Container Hardware PoC v1
 
-> สถานะ: `IMPLEMENTED / TESTED LOCALLY / PI EXECUTION PENDING`
+> สถานะ: `PI MATRIX COMPLETE / XGBOOST SMOKE COMPLETE / NOT DEPLOYABLE`
 > เป้าหมาย: smoke test ว่า hardware telemetry แยก behavior candidate ของ
 > `T1496.001` และ `T1499.002` จาก idle/benign controls ได้หรือไม่
+>
+> ผลรันจริงและข้อสรุป: [Pi two-TTP PoC result — 2026-09-02](pi_poc_results_2026-09-02.md)
 
 ## Claim boundary
 
