@@ -962,3 +962,55 @@ generate v2 artifacts แล้ว rerun 7 scenarios/630 samples ก่อนต
 
 รายละเอียด hashes, execution evidence, signal table และ feature decision:
 [service_pressure_v2_pilot_results_2026-09-03.md](../service_pressure_v2_pilot_results_2026-09-03.md)
+
+## 26. Dataset builder v2 service-pressure revision — 2026-09-03
+
+สถานะ: `IMPLEMENTED / RAW PILOT REPLAY 7/7 PASS / PROFILE CONTRACT NEXT`
+
+- builder `0.2.0` สร้าง `derived_training_window.v2`, XGBoost features v2 จำนวน 67 ค่า
+  และ TCN channels v2 จำนวน 22 channels
+- เพิ่ม host CPU PSI aggregates 3 ค่า และ target cgroup CPU usage/CPU PSI/memory,
+  TCP TIME_WAIT/socket aggregates รวม 10 ค่า; ไม่เพิ่ม TCP total ที่ซ้ำสูงหรือ queue/drop
+  ที่ pilot เป็นศูนย์
+- TCN เพิ่ม host CPU PSI กับ target TCP/cgroup signals 6 channels โดยรักษา continuous
+  values และ per-channel missing masks
+- freeze feature-order hash `2cb0663c...f881b` และ channel-order hash
+  `0c9b4aa7...22256`; validator ตรวจ order/keys/masks/lengths/record hash แบบ fail closed
+- CLI build-window สร้าง schema v2; historical schema v1 ยังคงอยู่ และ smoke reader รองรับ
+  v1/v2 แต่ห้ามปน feature schema ใน evaluation เดียวกัน
+- replay raw excluded pilot 7/7 ผ่าน coverage 1.0 และ aggregates ตรง independent reports;
+  derived pilot records ยังห้าม train หรือใช้วัด accuracy
+- `target_process_present_fraction` ยัง output เพื่อ diagnostic/compatibility แต่ต้อง exclude
+  จาก model profile v3 เพราะอาจเรียน execution-boundary artifact
+- ขั้นถัดไปต้อง freeze host-only/target-required profiles และ deployment availability
+  ก่อนสร้าง development-wave controls; final test ยังปิด
+
+รายละเอียด feature/channel names, hashes, masking และ leakage boundary:
+[dataset_builder.v2.md](../dataset_builder.v2.md)
+
+## 27. Model feature contract v1 — 2026-09-03
+
+สถานะ: `FROZEN / 7 PILOT WINDOWS VALIDATED / AUDIT-ONLY`
+
+- freeze contract hash `257121d6...af18` ผูก builder `0.2.0`, window/features/channels v2,
+  feature/channel order hashes และ evidence hashes ของ excluded service-pressure pilot v2
+- XGBoost มี strict nested profiles: Go-agent overlap 25, host-extended 51 และ
+  target-augmented 66 features; ตัวสุดท้ายเป็น upper-bound ไม่ใช่ production-ready profile
+- TCN มี host-extended 14 และ target-augmented 22 channels พร้อมบังคับใช้ทั้ง
+  `sample_present`/`channel_present`; zero-imputation ไม่เท่ากับ observed zero
+- execution receipt, labels, identity/split fields และ `target_process_present_fraction`
+  เป็น forbidden model inputs; receipt ใช้ตรวจ treatment/label authority เท่านั้น
+- semantic validator ตรวจ contract/record hash, builder/schema/order identity, profile
+  availability/nesting, forbidden fields, mask policy และ fail-closed claims
+- ระหว่าง test พบและแก้ validator ที่เคยผูก TCN กับ insertion order ของ JSON object;
+  ตอนนี้ยึด frozen `channel_order` และ exact key sets จึง serialize/reload ได้ถูกต้อง
+- schema/semantic/CLI negative tests ผ่าน และ derived windows จาก Pi pilot v2 ผ่าน 7/7
+- deployment authority ยังคง `audit_only`, final test ยังปิด และ target profile ต้องผ่าน
+  Cowrie container/cgroup mapping กับ shadow availability test ก่อนอ้างว่า deploy ได้
+
+ขั้นถัดไปคือ generate/freeze development-wave 70-run controls จาก Protocol v2 แล้วตรวจ
+matrix โดยยังไม่เก็บ/เปิด final-test wave 35 runs จากนั้นจึงเก็บข้อมูลจริงและเปรียบเทียบ
+XGBoost สาม profile ตามลำดับ
+
+รายละเอียด exact inputs, counts, boundary และ validation command:
+[model_feature_contract.v1.md](../model_feature_contract.v1.md)

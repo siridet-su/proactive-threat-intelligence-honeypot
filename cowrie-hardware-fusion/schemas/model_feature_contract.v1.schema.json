@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:model-feature-contract:v1",
+  "title": "Hardware model feature contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_id", "builder_binding", "evidence_binding", "xgboost_profiles", "tcn_profiles", "tcn_missingness_policy", "forbidden_model_inputs", "claim_control", "contract_sha256"],
+  "properties": {
+    "schema_version": {"const": "model_feature_contract.v1"},
+    "contract_id": {"$ref": "#/$defs/identifier"},
+    "builder_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["builder_version", "window_schema_version", "feature_schema_version", "feature_count", "feature_order_sha256", "channel_schema_version", "channel_count", "channel_order_sha256"],
+      "properties": {
+        "builder_version": {"const": "0.2.0"},
+        "window_schema_version": {"const": "derived_training_window.v2"},
+        "feature_schema_version": {"const": "xgboost_hardware_features.v2"},
+        "feature_count": {"const": 67},
+        "feature_order_sha256": {"$ref": "#/$defs/sha256"},
+        "channel_schema_version": {"const": "tcn_hardware_channels.v2"},
+        "channel_count": {"const": 22},
+        "channel_order_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "evidence_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pilot_matrix_sha256", "pilot_audit_summary_sha256", "pilot_export_sha256"],
+      "properties": {
+        "pilot_matrix_sha256": {"$ref": "#/$defs/sha256"},
+        "pilot_audit_summary_sha256": {"$ref": "#/$defs/sha256"},
+        "pilot_export_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "xgboost_profiles": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/profile"}
+    },
+    "tcn_profiles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/profile"}
+    },
+    "tcn_missingness_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_present_required", "channel_present_required", "zero_value_is_not_observed_zero"],
+      "properties": {
+        "sample_present_required": {"const": true},
+        "channel_present_required": {"const": true},
+        "zero_value_is_not_observed_zero": {"const": true}
+      }
+    },
+    "forbidden_model_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.]*$"}
+    },
+    "claim_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deployment_authority", "target_profile_requires_shadow_availability_test", "simulator_receipt_is_model_input", "final_test_opened"],
+      "properties": {
+        "deployment_authority": {"const": "audit_only"},
+        "target_profile_requires_shadow_availability_test": {"const": true},
+        "simulator_receipt_is_model_input": {"const": false},
+        "final_test_opened": {"const": false}
+      }
+    },
+    "contract_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id", "role", "deployment_availability", "input_names"],
+      "properties": {
+        "profile_id": {"$ref": "#/$defs/identifier"},
+        "role": {"enum": ["diagnostic_baseline", "candidate"]},
+        "deployment_availability": {"enum": ["current_go_agent_overlap", "extended_host_collector", "target_process_or_cgroup_required"]},
+        "input_names": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}
+      }
+    }
+  }
+}

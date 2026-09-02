@@ -82,7 +82,7 @@ def _build_window(args: argparse.Namespace) -> int:
     )
     _validate(
         record,
-        args.schema_dir / "derived_training_window.v1.schema.json",
+        args.schema_dir / "derived_training_window.v2.schema.json",
         "derived record",
     )
     rendered = json.dumps(record, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2)
@@ -199,6 +199,26 @@ def _validate_hardware_impact_protocol(args: argparse.Namespace) -> int:
         str(args.protocol),
     )
     summary = validate_hardware_impact_protocol(document)
+    print(json.dumps(summary, sort_keys=True, indent=2))
+    return 0
+
+
+def _validate_model_feature_contract(args: argparse.Namespace) -> int:
+    from .feature_contract import validate_model_feature_contract
+
+    contract = _load_json(args.contract)
+    window = _load_json(args.window)
+    _validate(
+        contract,
+        args.schema_dir / "model_feature_contract.v1.schema.json",
+        str(args.contract),
+    )
+    _validate(
+        window,
+        args.schema_dir / "derived_training_window.v2.schema.json",
+        str(args.window),
+    )
+    summary = validate_model_feature_contract(contract, window)
     print(json.dumps(summary, sort_keys=True, indent=2))
     return 0
 
@@ -324,11 +344,17 @@ def _train_xgboost_smoke(args: argparse.Namespace) -> int:
         args.schema_dir / "dataset_source_index.v1.schema.json",
         str(args.source_index),
     )
-    window_schema = args.schema_dir / "derived_training_window.v1.schema.json"
     records: list[dict[str, Any]] = []
     for path in args.window:
         record = _load_json(path)
-        _validate(record, window_schema, str(path))
+        schema_version = record.get("schema_version")
+        schema_filename = {
+            "derived_training_window.v1": "derived_training_window.v1.schema.json",
+            "derived_training_window.v2": "derived_training_window.v2.schema.json",
+        }.get(schema_version)
+        if schema_filename is None:
+            raise DatasetContractError(f"unsupported derived window schema: {schema_version}")
+        _validate(record, args.schema_dir / schema_filename, str(path))
         records.append(record)
     report = train_xgboost_smoke(
         records,
@@ -1075,6 +1101,17 @@ def _parser() -> argparse.ArgumentParser:
     protocol_validate.add_argument("--protocol", type=Path, required=True)
     protocol_validate.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     protocol_validate.set_defaults(handler=_validate_hardware_impact_protocol)
+
+    feature_contract_validate = subparsers.add_parser(
+        "validate-model-feature-contract",
+        help="bind frozen XGBoost/TCN profiles to a verified builder-v2 window",
+    )
+    feature_contract_validate.add_argument("--contract", type=Path, required=True)
+    feature_contract_validate.add_argument("--window", type=Path, required=True)
+    feature_contract_validate.add_argument(
+        "--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR
+    )
+    feature_contract_validate.set_defaults(handler=_validate_model_feature_contract)
 
     preflight = subparsers.add_parser(
         "collector-preflight",

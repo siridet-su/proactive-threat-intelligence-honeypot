@@ -7,8 +7,13 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from cowrie_hardware_fusion.batch import canonical_sha256
 from cowrie_hardware_fusion.cli import main as cli_main
-from cowrie_hardware_fusion.dataset import DatasetContractError, build_training_window
+from cowrie_hardware_fusion.dataset import (
+    DatasetContractError,
+    build_training_window,
+    validate_derived_window_identity,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +73,16 @@ def test_builds_xgboost_features_and_fixed_length_tcn_channels() -> None:
     ]
     assert record["tcn"]["sample_present"] == [1] * 30
     assert all(len(values) == 30 for values in record["tcn"]["channels"].values())
+    assert features["host_cpu_psi_some_mean"] == 0.0
+    assert features["target_tcp_time_wait_p95"] == 0.0
+    assert record["tcn"]["channel_present"]["target_tcp_time_wait"] == [0] * 30
+    assert record["xgboost"]["feature_order"] == sorted(features)
+    assert record["xgboost"]["feature_order_sha256"] == canonical_sha256(
+        sorted(features)
+    )
+    assert record["tcn"]["channel_order_sha256"] == canonical_sha256(
+        record["tcn"]["channel_order"]
+    )
     assert "run_id" not in features
     assert "scenario_id" not in features
 
@@ -94,6 +109,50 @@ def test_overlay_interface_is_not_double_counted() -> None:
     record = _build(manifest, samples)
 
     assert record["xgboost"]["features"]["network_tx_bytes_per_second_max"] == 800.0
+
+
+def test_service_pressure_features_and_channels_preserve_continuous_values() -> None:
+    manifest, samples = _fixture_run()
+    for sample in samples[30:]:
+        index = sample["time"]["sequence"] - 30
+        sample["cpu"]["pressure"] = {
+            "some": {"stall_usec_per_second": 1000.0 + index}
+        }
+        sample["process"]["target"] = {
+            "cpu_percent_single_core_basis": 20.0,
+            "rss_bytes": 4096,
+            "socket_count": 3,
+            "tcp_states": {"time_wait": index * 10},
+            "socket_summary": {"sockets_used": 4 + index},
+            "cgroup": {
+                "cpu": {"usage_usec_per_second": 200000.0 + index},
+                "memory": {"current_bytes": 8_000_000 + index},
+                "pressure": {
+                    "cpu": {"some": {"stall_usec_per_second": 2000.0 + index}}
+                },
+            },
+        }
+
+    record = _build(manifest, samples)
+    features = record["xgboost"]["features"]
+
+    assert features["host_cpu_psi_some_mean"] == pytest.approx(1014.5)
+    assert features["target_tcp_time_wait_mean"] == pytest.approx(145.0)
+    assert features["target_tcp_time_wait_p95"] == pytest.approx(275.5)
+    assert features["target_sockets_used_mean"] == pytest.approx(18.5)
+    assert features[
+        "target_cgroup_cpu_usage_usec_per_second_mean"
+    ] == pytest.approx(200014.5)
+    assert features[
+        "target_cgroup_cpu_psi_some_usec_per_second_p95"
+    ] == pytest.approx(2027.55)
+    assert features["target_cgroup_memory_current_bytes_mean"] == pytest.approx(
+        8_000_014.5
+    )
+    assert record["tcn"]["channels"]["target_tcp_time_wait"] == [
+        float(index * 10) for index in range(30)
+    ]
+    assert record["tcn"]["channel_present"]["target_tcp_time_wait"] == [1] * 30
 
 
 def test_missing_sample_fails_default_gate_but_is_masked_when_explicitly_allowed() -> None:
@@ -145,11 +204,26 @@ def test_output_is_deterministic_and_validates_against_schema() -> None:
 
     assert first == second
     schema = json.loads(
-        (PROJECT_ROOT / "schemas" / "derived_training_window.v1.schema.json").read_text(
+        (PROJECT_ROOT / "schemas" / "derived_training_window.v2.schema.json").read_text(
             encoding="utf-8"
         )
     )
     Draft202012Validator(schema).validate(first)
+
+
+def test_v2_identity_rejects_tampered_feature_and_channel_order_hashes() -> None:
+    manifest, samples = _fixture_run()
+    record = _build(manifest, samples)
+
+    tampered_feature = deepcopy(record)
+    tampered_feature["xgboost"]["feature_order_sha256"] = "0" * 64
+    with pytest.raises(DatasetContractError, match="feature order hash"):
+        validate_derived_window_identity(tampered_feature)
+
+    tampered_channel = deepcopy(record)
+    tampered_channel["tcn"]["channel_order"].reverse()
+    with pytest.raises(DatasetContractError, match="channel order/masks"):
+        validate_derived_window_identity(tampered_channel)
 
 
 def test_cli_validates_sources_and_writes_a_derived_record(tmp_path: Path) -> None:
@@ -177,7 +251,7 @@ def test_cli_validates_sources_and_writes_a_derived_record(tmp_path: Path) -> No
 
     assert exit_code == 0
     record = json.loads(output_path.read_text(encoding="utf-8"))
-    assert record["schema_version"] == "derived_training_window.v1"
+    assert record["schema_version"] == "derived_training_window.v2"
     assert record["quality"]["sample_coverage"] == 1.0
 
 
@@ -212,5 +286,5 @@ def test_cli_accepts_multiple_immutable_segments_in_order(tmp_path: Path) -> Non
 
     assert exit_code == 0
     record = json.loads(output_path.read_text(encoding="utf-8"))
-    assert record["schema_version"] == "derived_training_window.v1"
+    assert record["schema_version"] == "derived_training_window.v2"
     assert record["quality"]["sample_coverage"] == 1.0
