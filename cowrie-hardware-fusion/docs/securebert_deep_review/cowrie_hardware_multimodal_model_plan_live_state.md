@@ -681,7 +681,7 @@ freeze feature/channel schema และเทรน trivial/XGBoost baseline; ne
 เท่านั้น สถาปัตยกรรม production ยังคงให้ training/inference หลักอยู่ Cloud และ Pi เป็น
 sensor/controlled data generator
 
-สถานะ: `IMPLEMENTED / LOCAL TESTS PASS / PI EXECUTION PENDING`
+สถานะ: `SUPERSEDED BY SECTION 19 / PI EXECUTION COMPLETE`
 
 - เลือก 2 behavior candidates แรกคือ `T1496.001 Compute Hijacking` และ
   `T1499.002 Service Exhaustion Flood`
@@ -717,3 +717,27 @@ sensor/controlled data generator
 - `schemas/pi_poc_workload_spec.v1.schema.json`
 - `schemas/pi_poc_execution_receipt.v1.schema.json`
 - `schemas/pi_poc_matrix.v1.schema.json`
+
+## 19. Pi two-TTP PoC result — 2026-09-02
+
+สถานะ: `MATRIX COMPLETE / XGBOOST SMOKE COMPLETE / T1499 BRANCH NOT PASSED`
+
+- Pi matrix v2 รันครบ 15/15 runs ได้ 1,350/1,350 valid samples และ workload windows
+  15/15 ชุดที่ sample/baseline coverage 100%
+- controlled workload 12/12 runs ไม่มี workload error, cleanup ผ่านทั้งหมด และไม่กระทบ
+  production containers; ไม่มี Redis/MongoDB/Atlas write
+- transfer archive SHA-256 ตรงกันระหว่าง Pi/local และ local re-index ให้ source index file
+  ตรงกับ Pi ทุก byte; canonical index hash คือ
+  `72fcb6b7b3a6c5bea70226100cbabf4a73a7349871c96f421957f62fc862bf42`
+- XGBoost ใช้ 54 continuous aggregate features และ repetition-held-out 3 folds โดยแต่ละ fold
+  train 10/test 5 runs; ไม่มี repetition เดียวกันข้าม train/test
+- out-of-fold Accuracy `0.80`, Macro-F1 `0.619`; NO_TTP ถูก 9/9, T1496.001 ถูก 3/3,
+  แต่ T1499.002 ถูก 0/3 และถูกทำนายเป็น NO_TTP ทั้งหมด
+- ผลนี้ยืนยัน end-to-end pipeline และ compute signal เท่านั้น ยังไม่ใช่ production accuracy
+  และยังไม่สนับสนุนให้ deploy hardware checkpoint หรือเริ่ม Fusion
+- next gate คือ freeze feature/training protocol v2 ก่อนเก็บ independent runs ใหม่อย่างน้อย
+  10–20 runs ต่อ scenario หลายวัน เพิ่ม production-observable service pressure และคง final
+  test ไว้ unopened; TCN ยังไม่เหมาะกับ dataset 15 runs
+
+รายละเอียด evidence, hashes, telemetry และ confusion matrix:
+[pi_poc_results_2026-09-02.md](../pi_poc_results_2026-09-02.md)

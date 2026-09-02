@@ -20,6 +20,10 @@ test = [
   "pytest>=8,<10",
   "psutil>=5.9,<8",
 ]
+poc-ml = [
+  "numpy>=2,<3",
+  "xgboost>=2.1,<4",
+]
 
 [project.scripts]
 cowrie-hardware-dataset = "cowrie_hardware_fusion.cli:main"

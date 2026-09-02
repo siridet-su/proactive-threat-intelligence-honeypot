@@ -6,10 +6,11 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `STAGE A VERIFIED / PI TWO-TTP POC IMPLEMENTED` มี collector,
+สถานะปัจจุบันคือ `PI TWO-TTP MATRIX + XGBOOST SMOKE COMPLETE` มี collector,
 dataset builder, receipt-driven source index, grouped split generator และ fixed
-safe-container runtime แล้ว neutral-idle pilot จริงจาก Pi สำเร็จ 3 runs และกำลังเตรียม
-รัน matrix ของ `T1496.001`/`T1499.002` แต่ยังไม่มีโมเดลใหม่ที่ถือว่าพร้อม deploy
+safe-container runtime แล้ว Pi matrix จริงของ `T1496.001`/`T1499.002` สำเร็จ 15 runs
+XGBoost smoke แยก compute simulation ได้แต่ service-exhaustion ยังไม่ผ่าน และยังไม่มีโมเดล
+ใหม่ที่ถือว่าพร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -43,12 +44,13 @@ cowrie-hardware-fusion/
 3. **เสร็จ Stage A:** เก็บ/replay neutral-idle pilot 3 runs ผ่าน dataset builder v1
 4. **เสร็จ tooling:** fixed ARM64 safe-container workload + Pi preflight/runtime receipts
 5. **เสร็จ tooling:** สร้าง verified source index และ grouped split generator
-6. **กำลังทำ:** เก็บ interleaved idle/benign/TTP Pi PoC 15 runs
-7. สร้าง XGBoost hardware-only smoke baseline จาก repetition-held-out folds
-8. ทดลอง MiniROCKET/TCN บน split เดียวกัน
-9. เลือก hardware branch จาก frozen evaluation protocol
-10. เทรน Fusion ด้วย leakage-safe predictions/features
-11. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
+6. **เสร็จ PoC:** เก็บ interleaved idle/benign/TTP Pi 15 runs, 1,350 valid samples
+7. **เสร็จ smoke:** XGBoost repetition-held-out; T1496.001 ผ่าน 3/3, T1499.002 ไม่ผ่าน 0/3
+8. **ลำดับถัดไป:** freeze protocol v2 และเพิ่ม independent service-pressure data
+9. ทดลอง MiniROCKET/TCN เมื่อจำนวน independent runs เพียงพอ
+10. เลือก hardware branch จาก frozen evaluation protocol
+11. เทรน Fusion ด้วย leakage-safe predictions/features
+12. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
 
 ## เอกสารเริ่มต้น
 
@@ -59,6 +61,7 @@ cowrie-hardware-fusion/
 - [Dataset split policy v1](docs/dataset_split_policy.v1.md)
 - [Bounded workload contract v1](docs/bounded_workload_contract.v1.md)
 - [Pi safe-container PoC runbook v1](docs/pi_poc_runbook.v1.md)
+- [Pi two-TTP PoC result — 2026-09-02](docs/pi_poc_results_2026-09-02.md)
 - [Dataset storage plan v1](docs/dataset_storage_plan.v1.md)
 - [Pi environment audit](docs/pi_environment_audit_2026-09-01.md)
 - [Stage A idle pilot report](docs/pilot_idle_collection_2026-09-01.md)

@@ -232,6 +232,45 @@ def _index_dataset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _train_xgboost_smoke(args: argparse.Namespace) -> int:
+    from .smoke import train_xgboost_smoke
+
+    source_index = _load_json(args.source_index)
+    _validate(
+        source_index,
+        args.schema_dir / "dataset_source_index.v1.schema.json",
+        str(args.source_index),
+    )
+    window_schema = args.schema_dir / "derived_training_window.v1.schema.json"
+    records: list[dict[str, Any]] = []
+    for path in args.window:
+        record = _load_json(path)
+        _validate(record, window_schema, str(path))
+        records.append(record)
+    report = train_xgboost_smoke(
+        records,
+        source_index,
+        output_dir=args.output_dir,
+        seed=args.seed,
+        num_boost_round=args.num_boost_round,
+        minimum_coverage=args.minimum_coverage,
+    )
+    print(
+        json.dumps(
+            {
+                "output_dir": str(args.output_dir),
+                "report_sha256": report["report_sha256"],
+                "run_count": report["source"]["run_count"],
+                "accuracy": report["out_of_fold"]["metrics"]["accuracy"],
+                "macro_f1": report["out_of_fold"]["metrics"]["macro_f1"],
+                "purpose": report["purpose"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def _split_dataset(args: argparse.Namespace) -> int:
     from .batch import generate_grouped_split, write_json_exclusive
 
@@ -624,6 +663,25 @@ def _parser() -> argparse.ArgumentParser:
     split_dataset.add_argument("--output", type=Path, required=True)
     split_dataset.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     split_dataset.set_defaults(handler=_split_dataset)
+
+    train_smoke = subparsers.add_parser(
+        "train-xgboost-smoke",
+        help="run repetition-held-out XGBoost evaluation on controlled pilot windows",
+    )
+    train_smoke.add_argument("--source-index", type=Path, required=True)
+    train_smoke.add_argument(
+        "--window",
+        type=Path,
+        nargs="+",
+        required=True,
+        metavar="WINDOW_JSON",
+    )
+    train_smoke.add_argument("--output-dir", type=Path, required=True)
+    train_smoke.add_argument("--seed", type=int, default=20260902)
+    train_smoke.add_argument("--num-boost-round", type=int, default=40)
+    train_smoke.add_argument("--minimum-coverage", type=float, default=0.99)
+    train_smoke.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    train_smoke.set_defaults(handler=_train_xgboost_smoke)
 
     workload_preflight = subparsers.add_parser(
         "workload-preflight",
