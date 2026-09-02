@@ -22,8 +22,8 @@ from .dataset import DatasetContractError
 from .protocol import validate_hardware_impact_protocol
 
 
-SPEC_SCHEMA_VERSION = "service_pressure_workload_spec.v1"
-MATRIX_SCHEMA_VERSION = "service_pressure_instrumentation_matrix.v1"
+SPEC_SCHEMA_VERSION = "service_pressure_workload_spec.v2"
+MATRIX_SCHEMA_VERSION = "service_pressure_instrumentation_matrix.v2"
 REPORT_SCHEMA_VERSION = "service_pressure_signal_report.v1"
 
 
@@ -41,8 +41,19 @@ class InstrumentationProfile:
     intensity_basis: str
     cpu_limit_cores: float | None
     workers: int | None
+    duty_percent: int | None
     requests_per_second: int | None
     work_iterations: int | None
+    connection_mode: str | None
+    service_capacity: int | None
+    handler_delay_ms: int | None
+    evidence_gate_type: str | None
+    minimum_attempts: int | None
+    minimum_error_fraction: float | None
+    maximum_error_fraction: float | None
+    minimum_rejected: int | None
+    maximum_rejected: int | None
+    minimum_latency_p95_ms: float | None
 
 
 PROFILES: dict[str, InstrumentationProfile] = {
@@ -61,6 +72,17 @@ PROFILES: dict[str, InstrumentationProfile] = {
         None,
         None,
         None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     ),
     "v2_benign_compute_low": InstrumentationProfile(
         "benign_control",
@@ -73,10 +95,21 @@ PROFILES: dict[str, InstrumentationProfile] = {
         "compute",
         25,
         "assigned_cpu_capacity",
-        0.25,
+        1.0,
+        1,
+        25,
         1,
         1,
+        "reuse",
+        2,
+        0,
+        "bounded_execution",
         1,
+        0.0,
+        0.0,
+        0,
+        0,
+        0.0,
     ),
     "v2_benign_compute_high": InstrumentationProfile(
         "benign_control",
@@ -89,10 +122,21 @@ PROFILES: dict[str, InstrumentationProfile] = {
         "compute",
         75,
         "assigned_cpu_capacity",
-        0.75,
+        1.0,
+        1,
+        75,
         1,
         1,
+        "reuse",
+        2,
+        0,
+        "bounded_execution",
         1,
+        0.0,
+        0.0,
+        0,
+        0,
+        0.0,
     ),
     "v2_t1496_001_compute_high": InstrumentationProfile(
         "malicious_simulation",
@@ -105,10 +149,21 @@ PROFILES: dict[str, InstrumentationProfile] = {
         "compute",
         75,
         "assigned_cpu_capacity",
-        0.75,
+        1.0,
+        1,
+        75,
         1,
         1,
+        "reuse",
+        2,
+        0,
+        "bounded_execution",
         1,
+        0.0,
+        0.0,
+        0,
+        0,
+        0.0,
     ),
     "v2_benign_service_low": InstrumentationProfile(
         "benign_control",
@@ -121,10 +176,21 @@ PROFILES: dict[str, InstrumentationProfile] = {
         "service",
         25,
         "assigned_service_capacity",
-        0.25,
-        2,
+        1.0,
+        8,
+        100,
         10,
         500,
+        "close",
+        2,
+        40,
+        "healthy_service",
+        200,
+        0.0,
+        0.05,
+        0,
+        0,
+        20.0,
     ),
     "v2_benign_service_high": InstrumentationProfile(
         "benign_control",
@@ -137,10 +203,21 @@ PROFILES: dict[str, InstrumentationProfile] = {
         "service",
         75,
         "assigned_service_capacity",
-        0.75,
-        4,
+        1.0,
+        8,
+        100,
         150,
-        5000,
+        500,
+        "close",
+        2,
+        40,
+        "service_degradation",
+        3000,
+        0.20,
+        1.0,
+        1,
+        None,
+        20.0,
     ),
     "v2_t1499_002_service_high": InstrumentationProfile(
         "malicious_simulation",
@@ -153,10 +230,21 @@ PROFILES: dict[str, InstrumentationProfile] = {
         "service",
         75,
         "assigned_service_capacity",
-        0.75,
-        4,
+        1.0,
+        8,
+        100,
         150,
-        5000,
+        500,
+        "close",
+        2,
+        40,
+        "service_degradation",
+        3000,
+        0.20,
+        1.0,
+        1,
+        None,
+        20.0,
     ),
 }
 
@@ -291,16 +379,30 @@ def validate_service_pressure_contract(
     expected_parameters = {
         "mode": profile.mode,
         "workers": profile.workers,
-        "duty_percent": 100,
+        "duty_percent": profile.duty_percent,
         "duty_period_ms": 100,
         "requests_per_second": profile.requests_per_second,
         "work_iterations": profile.work_iterations,
+        "connection_mode": profile.connection_mode,
+        "service_capacity": profile.service_capacity,
+        "handler_delay_ms": profile.handler_delay_ms,
     }
     for field, expected in expected_parameters.items():
         if parameters.get(field) != expected:
             raise DatasetContractError(f"workload parameters.{field} is not allowlisted")
     if specification["limits"]["cpu_limit_cores"] != profile.cpu_limit_cores:
         raise DatasetContractError("CPU limit does not match the fixed profile")
+    expected_gate = {
+        "gate_type": profile.evidence_gate_type,
+        "minimum_attempts": profile.minimum_attempts,
+        "minimum_error_fraction": profile.minimum_error_fraction,
+        "maximum_error_fraction": profile.maximum_error_fraction,
+        "minimum_rejected": profile.minimum_rejected,
+        "maximum_rejected": profile.maximum_rejected,
+        "minimum_latency_p95_ms": profile.minimum_latency_p95_ms,
+    }
+    if specification["observed_impact_gate"] != expected_gate:
+        raise DatasetContractError("observed-impact evidence gate is not allowlisted")
 
     workload = manifest["workload"]
     expected_workload = {
@@ -353,7 +455,7 @@ def validate_service_pressure_contract(
         "kind": "safe_container",
         "metric_scopes": ["pi_sensor"],
         "execution_observed": True,
-        "backend_id": "service-pressure-instrumentation-pi-v1",
+        "backend_id": "service-pressure-instrumentation-pi-v2",
         "backend_image_sha256": specification["runner"]["image_id"].removeprefix(
             "sha256:"
         ),
@@ -381,6 +483,73 @@ def validate_service_pressure_contract(
     return profile
 
 
+def validate_observed_impact_evidence(
+    manifest: Mapping[str, Any],
+    specification: Mapping[str, Any],
+    execution_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Fail closed unless the workload receipt proves its assigned treatment occurred."""
+
+    summary = execution_receipt.get("workload_summary")
+    if not isinstance(summary, Mapping):
+        raise DatasetContractError("execution receipt lacks a workload summary")
+    if summary.get("schema_version") != "poc_workload_summary.v2":
+        raise DatasetContractError("instrumentation requires workload summary v2 evidence")
+    if summary.get("mode") != specification["parameters"]["mode"]:
+        raise DatasetContractError("workload evidence mode does not match specification")
+
+    integer_fields = ("operations", "errors", "attempts", "rejected")
+    if any(
+        not isinstance(summary.get(field), int) or summary[field] < 0
+        for field in integer_fields
+    ):
+        raise DatasetContractError("workload evidence counters are invalid")
+    attempts = summary["attempts"]
+    errors = summary["errors"]
+    rejected = summary["rejected"]
+    if attempts <= 0 or attempts != summary["operations"] + errors:
+        raise DatasetContractError("workload evidence attempts do not reconcile")
+    if rejected > errors:
+        raise DatasetContractError("workload rejected count exceeds errors")
+    latency_p95_ms = summary.get("latency_p95_ms")
+    if (
+        not isinstance(latency_p95_ms, (int, float))
+        or isinstance(latency_p95_ms, bool)
+        or not math.isfinite(float(latency_p95_ms))
+        or latency_p95_ms < 0
+    ):
+        raise DatasetContractError("workload latency evidence is invalid")
+
+    gate = specification["observed_impact_gate"]
+    error_fraction = errors / attempts
+    if attempts < gate["minimum_attempts"]:
+        raise DatasetContractError("observed-impact gate failed: insufficient attempts")
+    if error_fraction < gate["minimum_error_fraction"]:
+        raise DatasetContractError("observed-impact gate failed: error fraction too low")
+    if error_fraction > gate["maximum_error_fraction"]:
+        raise DatasetContractError("observed-impact gate failed: error fraction too high")
+    if rejected < gate["minimum_rejected"]:
+        raise DatasetContractError("observed-impact gate failed: insufficient rejections")
+    maximum_rejected = gate["maximum_rejected"]
+    if maximum_rejected is not None and rejected > maximum_rejected:
+        raise DatasetContractError("observed-impact gate failed: too many rejections")
+    if latency_p95_ms < gate["minimum_latency_p95_ms"]:
+        raise DatasetContractError("observed-impact gate failed: p95 latency too low")
+
+    return {
+        "gate_type": gate["gate_type"],
+        "attempts": attempts,
+        "operations": summary["operations"],
+        "errors": errors,
+        "error_fraction": error_fraction,
+        "rejected": rejected,
+        "latency_p95_ms": float(latency_p95_ms),
+        "passed": True,
+        "simulator_receipt_is_model_feature": False,
+        "scenario_id": manifest["workload"]["scenario_id"],
+    }
+
+
 def build_service_pressure_instrumentation_matrix(
     *,
     generation: str,
@@ -398,8 +567,8 @@ def build_service_pressure_instrumentation_matrix(
 ) -> tuple[dict[str, Any], list[tuple[dict[str, Any], dict[str, Any] | None]]]:
     """Build one excluded instrumentation run for each frozen protocol scenario."""
 
-    if generation != "v1":
-        raise DatasetContractError("service-pressure instrumentation requires generation v1")
+    if generation != "v2":
+        raise DatasetContractError("service-pressure instrumentation requires generation v2")
     if not image_id.startswith("sha256:") or len(image_id) != 71:
         raise DatasetContractError("instrumentation image_id is invalid")
     for label, value, valid_lengths in (
@@ -455,7 +624,7 @@ def build_service_pressure_instrumentation_matrix(
                     "kind": "oci_container_on_pi",
                     "runtime": "docker",
                     "image_id": image_id,
-                    "entrypoint_id": "poc_workload_v1",
+                    "entrypoint_id": "poc_workload_v2",
                     "implementation_sha256": implementation_sha256,
                 },
                 "security": dict(security),
@@ -474,11 +643,23 @@ def build_service_pressure_instrumentation_matrix(
                 "parameters": {
                     "mode": profile.mode,
                     "workers": profile.workers,
-                    "duty_percent": 100,
+                    "duty_percent": profile.duty_percent,
                     "duty_period_ms": 100,
                     "requests_per_second": profile.requests_per_second,
                     "work_iterations": profile.work_iterations,
+                    "connection_mode": profile.connection_mode,
+                    "service_capacity": profile.service_capacity,
+                    "handler_delay_ms": profile.handler_delay_ms,
                     "deterministic_seed": 2026090200 + order,
+                },
+                "observed_impact_gate": {
+                    "gate_type": profile.evidence_gate_type,
+                    "minimum_attempts": profile.minimum_attempts,
+                    "minimum_error_fraction": profile.minimum_error_fraction,
+                    "maximum_error_fraction": profile.maximum_error_fraction,
+                    "minimum_rejected": profile.minimum_rejected,
+                    "maximum_rejected": profile.maximum_rejected,
+                    "minimum_latency_p95_ms": profile.minimum_latency_p95_ms,
                 },
                 "host_gates": {
                     "minimum_available_memory_bytes": 2147483648,
@@ -504,8 +685,8 @@ def build_service_pressure_instrumentation_matrix(
                 "scenario_catalog_version": catalog["schema_version"],
                 "scenario_id": scenario_id,
                 "family": profile.workload_family,
-                "variant_id": f"service-pressure-{slug}-v1",
-                "implementation_id": "poc-workload-v1",
+                "variant_id": f"service-pressure-{slug}-v2",
+                "implementation_id": "poc-workload-v2",
                 "implementation_sha256": implementation_sha256,
                 "intensity_percent": profile.manifest_intensity_percent,
                 "intensity_basis": profile.intensity_basis,
@@ -515,7 +696,7 @@ def build_service_pressure_instrumentation_matrix(
                 "kind": "safe_container",
                 "metric_scopes": ["pi_sensor"],
                 "execution_observed": True,
-                "backend_id": "service-pressure-instrumentation-pi-v1",
+                "backend_id": "service-pressure-instrumentation-pi-v2",
                 "backend_image_sha256": image_id.removeprefix("sha256:"),
                 "network_policy_sha256": canonical_sha256(security),
             }
@@ -533,7 +714,7 @@ def build_service_pressure_instrumentation_matrix(
                 "scenario_catalog_version": catalog["schema_version"],
                 "scenario_id": scenario_id,
                 "family": "none",
-                "variant_id": "service-pressure-idle-v1",
+                "variant_id": "service-pressure-idle-v2",
                 "implementation_id": "none-v1",
                 "implementation_sha256": "0" * 64,
                 "intensity_percent": 0,
@@ -601,11 +782,11 @@ def build_service_pressure_instrumentation_matrix(
                 "raw_data_immutable": True,
             },
             "split_groups": {
-                "scenario_variant_group": f"service-pressure-{slug}-v1",
+                "scenario_variant_group": f"service-pressure-{slug}-v2",
                 "workload_family_group": profile.workload_family,
                 "command_template_group": "no-command",
                 "collection_batch": f"service-pressure-{generation}-instrumentation-r01",
-                "environment_group": "pi5-safe-container-v1",
+                "environment_group": "pi5-safe-container-v2",
             },
             "safety": safety,
         }

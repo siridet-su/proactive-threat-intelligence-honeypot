@@ -643,7 +643,7 @@ class DockerWorkloadLifecycle:
         parameters = self.specification["parameters"]
         timing = self.specification["timing"]
         duration = timing["workload_seconds"] + timing["binary_extra_seconds"]
-        return [
+        arguments = [
             f"--mode={parameters['mode']}",
             f"--duration={duration}s",
             f"--workers={parameters['workers']}",
@@ -653,6 +653,15 @@ class DockerWorkloadLifecycle:
             f"--work-iterations={parameters['work_iterations']}",
             f"--seed={parameters['deterministic_seed']}",
         ]
+        if self.specification.get("schema_version") == "service_pressure_workload_spec.v2":
+            arguments.extend(
+                [
+                    f"--connection-mode={parameters['connection_mode']}",
+                    f"--service-capacity={parameters['service_capacity']}",
+                    f"--handler-delay={parameters['handler_delay_ms']}ms",
+                ]
+            )
+        return arguments
 
     def before_phase(self, phase: str, probe: Probe) -> None:
         if phase != "workload":

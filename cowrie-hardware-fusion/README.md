@@ -6,16 +6,17 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `SERVICE-PRESSURE INSTRUMENTATION COMPLETE / TREATMENT REVISION NEEDED` มี collector,
+สถานะปัจจุบันคือ `SERVICE-PRESSURE TREATMENT V2 READY / EXCLUDED RERUN PENDING` มี collector,
 dataset builder, receipt-driven source index, grouped split generator และ fixed
 safe-container runtime แล้ว Pi matrix จริงของ `T1496.001`/`T1499.002` สำเร็จ 15 runs
 XGBoost smoke แยก compute simulation ได้แต่ service-exhaustion ยังไม่ผ่าน Protocol v2 จึง
 เปลี่ยน hardware target เป็น observed impact, เพิ่ม matched benign controls และ lock final
 test ก่อนเก็บข้อมูลใหม่ Common Go/Python metrics ผ่าน parity บน Pi 225/225 comparisons
 และ experimental collector เพิ่ม host/target PSI, TCP pressure และ cgroup v2 observability
-แล้ว Collector `0.4.1` กับ matrix/spec/report tooling ผ่าน excluded pilot จริง 7 runs/630
-valid samples แต่ service/TCP pressure และ compute quota semantics ยังไม่ผ่าน treatment gate
-จึงยังไม่เริ่ม development dataset และยังไม่มีโมเดลใหม่ที่พร้อม deploy
+แล้ว pilot v1 ได้ 7 runs/630 valid samples แต่ไม่ผ่าน treatment gate ตอนนี้ collector
+`0.4.2` และ matrix/spec v2 แก้ phase scheduling, compute duty-cycle semantics และเพิ่ม
+service rejection/latency evidence gate แล้ว แต่ต้องผ่าน excluded pilot ซ้ำก่อนเริ่ม
+development dataset และยังไม่มีโมเดลใหม่ที่พร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -60,12 +61,14 @@ cowrie-hardware-fusion/
     instrumentation pilot และขยาย fail-closed allowlist ใน collector 0.4.1
 12. **เสร็จ pilot:** รัน 7 excluded scenarios ได้ 630/630 valid samples; hashes/cleanup
     ผ่าน แต่พบ compute inverse-throttling artifact และ service queue/drop/TCP pressure เป็นศูนย์
-13. **ลำดับถัดไป:** แก้ phase scheduling และ safe workload treatment แล้ว rerun excluded
-    pilot ก่อน freeze feature revision/เก็บ development wave 70 runs
-14. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
-15. เลือก hardware branch จาก frozen evaluation protocol
-16. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
-17. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
+13. **เสร็จ tooling v2:** reset phase deadline หลัง lifecycle hook, compute ใช้ duty 25/75%
+    ภายใต้เพดาน 1 CPU เดียวกัน และ service ใช้ bounded capacity/503/latency evidence gate
+14. **ลำดับถัดไป:** build/hash ARM64 image แล้ว rerun excluded pilot 7 scenarios ก่อน
+    freeze feature revision/เก็บ development wave 70 runs
+15. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
+16. เลือก hardware branch จาก frozen evaluation protocol
+17. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
+18. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
 
 ## เอกสารเริ่มต้น
 
@@ -82,6 +85,7 @@ cowrie-hardware-fusion/
 - [Service-pressure observability v1](docs/service_pressure_observability.v1.md)
 - [Service-pressure instrumentation pilot v1](docs/service_pressure_instrumentation_pilot.v1.md)
 - [Service-pressure instrumentation result](docs/service_pressure_instrumentation_results_2026-09-02.md)
+- [Service-pressure treatment revision v2](docs/service_pressure_treatment_revision.v2.md)
 - [Dataset storage plan v1](docs/dataset_storage_plan.v1.md)
 - [Pi environment audit](docs/pi_environment_audit_2026-09-01.md)
 - [Stage A idle pilot report](docs/pilot_idle_collection_2026-09-01.md)

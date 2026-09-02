@@ -682,7 +682,7 @@ def _prepare_service_pressure_pilot(args: argparse.Namespace) -> int:
     )
     _validate(
         matrix,
-        args.schema_dir / "service_pressure_instrumentation_matrix.v1.schema.json",
+        args.schema_dir / "service_pressure_instrumentation_matrix.v2.schema.json",
         "service-pressure instrumentation matrix",
     )
     protocol = _load_json(args.protocol)
@@ -699,7 +699,7 @@ def _prepare_service_pressure_pilot(args: argparse.Namespace) -> int:
         if specification is not None:
             _validate(
                 specification,
-                args.schema_dir / "service_pressure_workload_spec.v1.schema.json",
+                args.schema_dir / "service_pressure_workload_spec.v2.schema.json",
                 specification["spec_id"],
             )
             validate_service_pressure_contract(
@@ -745,7 +745,7 @@ def _validated_service_pressure_inputs(
     specification = _load_json(args.specification)
     _validate(
         specification,
-        args.schema_dir / "service_pressure_workload_spec.v1.schema.json",
+        args.schema_dir / "service_pressure_workload_spec.v2.schema.json",
         str(args.specification),
     )
     validate_service_pressure_contract(
@@ -844,7 +844,10 @@ def _finalize_service_pressure_manifest(args: argparse.Namespace) -> int:
 
     from .batch import canonical_sha256
     from .collector import finalize_idle_manifest, write_json_exclusive
-    from .instrumentation import validate_service_pressure_contract
+    from .instrumentation import (
+        validate_observed_impact_evidence,
+        validate_service_pressure_contract,
+    )
 
     manifest = _load_json(args.manifest)
     specification = _load_json(args.specification)
@@ -857,7 +860,7 @@ def _finalize_service_pressure_manifest(args: argparse.Namespace) -> int:
     )
     _validate(
         specification,
-        args.schema_dir / "service_pressure_workload_spec.v1.schema.json",
+        args.schema_dir / "service_pressure_workload_spec.v2.schema.json",
         str(args.specification),
     )
     validate_service_pressure_contract(
@@ -888,6 +891,11 @@ def _finalize_service_pressure_manifest(args: argparse.Namespace) -> int:
         specification
     ):
         raise DatasetContractError("execution receipt does not bind the specification")
+    impact_evidence = validate_observed_impact_evidence(
+        manifest,
+        specification,
+        execution_receipt,
+    )
     completed = finalize_idle_manifest(
         manifest,
         collection_receipt,
@@ -911,6 +919,7 @@ def _finalize_service_pressure_manifest(args: argparse.Namespace) -> int:
                 "run_id": completed["run_id"],
                 "state": completed["state"],
                 "evidence_receipt_ids": completed["labels"]["evidence_receipt_ids"],
+                "observed_impact_gate": impact_evidence,
             },
             sort_keys=True,
         )
@@ -1217,7 +1226,7 @@ def _parser() -> argparse.ArgumentParser:
         help="freeze one excluded 7-scenario instrumentation run per protocol scenario",
     )
     instrumentation_prepare.add_argument("--experiment-id", required=True)
-    instrumentation_prepare.add_argument("--generation", default="v1")
+    instrumentation_prepare.add_argument("--generation", default="v2")
     instrumentation_prepare.add_argument("--image-id", required=True)
     instrumentation_prepare.add_argument("--implementation-sha256", required=True)
     instrumentation_prepare.add_argument("--repo-commit", required=True)

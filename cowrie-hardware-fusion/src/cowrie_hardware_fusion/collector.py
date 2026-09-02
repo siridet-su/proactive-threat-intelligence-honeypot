@@ -36,7 +36,7 @@ from .service_pressure import (
 from .spool import BoundedSegmentSpool, SpoolLimits
 
 
-COLLECTOR_VERSION = "0.4.1"
+COLLECTOR_VERSION = "0.4.2"
 
 IDLE_SCENARIO_IDS = {"neutral_idle", "v2_neutral_idle"}
 CONTROLLED_SAFE_CONTAINER_SCENARIO_IDS = {
@@ -786,7 +786,7 @@ def _validate_common_contract(
     if config.collector_version != COLLECTOR_VERSION:
         raise DatasetContractError("collector config version does not match runtime")
     if config.metric_scope != "pi_sensor":
-        raise DatasetContractError("collector v0.4.1 supports only pi_sensor")
+        raise DatasetContractError("collector v0.4.2 supports only pi_sensor")
     if config.sensor_id != manifest["sensor"]["sensor_id"]:
         raise DatasetContractError("config sensor_id does not match manifest")
     if config.subject_id != manifest["sensor"]["host_id"]:
@@ -798,7 +798,7 @@ def _validate_common_contract(
             "manifest collector_sha256 does not match this collector source"
         )
     if manifest["timing"]["sample_interval_seconds"] != 1:
-        raise DatasetContractError("collector v0.4.1 requires a 1-second manifest interval")
+        raise DatasetContractError("collector v0.4.2 requires a 1-second manifest interval")
     if "pi_sensor" not in manifest["execution_boundary"]["metric_scopes"]:
         raise DatasetContractError("manifest does not authorize pi_sensor telemetry")
     if manifest["collection"]["command_events_required"] is not False:
@@ -1053,6 +1053,10 @@ def _collect_run(
             for phase in ("baseline", "workload", "recovery"):
                 if lifecycle is not None:
                     lifecycle.before_phase(phase, runtime_probe)
+                    # Container create/start/stop time is outside the measured phase.
+                    # Give the first observation a full interval after the hook so a
+                    # lifecycle delay cannot manufacture one or more late samples.
+                    deadline_ns = runtime_clock.monotonic_ns() + interval_ns
                 try:
                     for _ in range(phase_counts[phase]):
                         runtime_clock.sleep_until_ns(deadline_ns)

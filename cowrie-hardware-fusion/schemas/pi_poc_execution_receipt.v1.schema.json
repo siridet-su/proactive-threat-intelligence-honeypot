@@ -41,6 +41,18 @@
     "security": {"type": "object"},
     "limits": {"type": "object"},
     "workload_summary": {
+      "oneOf": [
+        {"$ref": "#/$defs/workload_summary_v1"},
+        {"$ref": "#/$defs/workload_summary_v2"}
+      ]
+    },
+    "cleanup_verified": {"const": true},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "workload_summary_v1": {
       "type": "object",
       "additionalProperties": false,
       "required": ["schema_version", "mode", "elapsed_ms", "operations", "errors"],
@@ -52,11 +64,20 @@
         "errors": {"type": "integer", "minimum": 0}
       }
     },
-    "cleanup_verified": {"const": true},
-    "receipt_sha256": {"$ref": "#/$defs/sha256"}
-  },
-  "$defs": {
-    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
-    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+    "workload_summary_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "mode", "elapsed_ms", "operations", "errors", "attempts", "rejected", "latency_p95_ms"],
+      "properties": {
+        "schema_version": {"const": "poc_workload_summary.v2"},
+        "mode": {"enum": ["compute", "service"]},
+        "elapsed_ms": {"type": "integer", "minimum": 1, "maximum": 75000},
+        "operations": {"type": "integer", "minimum": 1},
+        "errors": {"type": "integer", "minimum": 0},
+        "attempts": {"type": "integer", "minimum": 1},
+        "rejected": {"type": "integer", "minimum": 0},
+        "latency_p95_ms": {"type": "number", "minimum": 0, "maximum": 5000}
+      }
+    }
   }
 }

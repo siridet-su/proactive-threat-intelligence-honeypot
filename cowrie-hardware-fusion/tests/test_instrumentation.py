@@ -5,11 +5,14 @@ import json
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+import pytest
 
 from cowrie_hardware_fusion.instrumentation import (
     build_service_pressure_instrumentation_matrix,
     summarize_service_pressure_signals,
+    validate_observed_impact_evidence,
 )
+from cowrie_hardware_fusion.dataset import DatasetContractError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,8 +24,8 @@ def _load_json(path: Path) -> dict:
 
 def _build() -> tuple[dict, list[tuple[dict, dict | None]]]:
     return build_service_pressure_instrumentation_matrix(
-        generation="v1",
-        experiment_id="service-pressure-instrumentation-v1",
+        generation="v2",
+        experiment_id="service-pressure-instrumentation-v2",
         image_id="sha256:" + "1" * 64,
         implementation_sha256="2" * 64,
         repo_commit="3" * 40,
@@ -44,7 +47,7 @@ def test_instrumentation_matrix_is_hash_bound_excluded_and_schema_valid() -> Non
         _load_json(
             PROJECT_ROOT
             / "schemas"
-            / "service_pressure_instrumentation_matrix.v1.schema.json"
+            / "service_pressure_instrumentation_matrix.v2.schema.json"
         )
     ).validate(matrix)
     manifest_validator = Draft202012Validator(
@@ -52,7 +55,7 @@ def test_instrumentation_matrix_is_hash_bound_excluded_and_schema_valid() -> Non
     )
     specification_validator = Draft202012Validator(
         _load_json(
-            PROJECT_ROOT / "schemas" / "service_pressure_workload_spec.v1.schema.json"
+            PROJECT_ROOT / "schemas" / "service_pressure_workload_spec.v2.schema.json"
         )
     )
 
@@ -90,6 +93,56 @@ def test_matched_benign_malicious_pairs_have_identical_hardware_treatment() -> N
         benign_parameters.pop("deterministic_seed")
         malicious_parameters.pop("deterministic_seed")
         assert benign_parameters == malicious_parameters
+
+
+def test_compute_intensity_uses_duty_cycle_under_one_fixed_cpu_ceiling() -> None:
+    _, documents = _build()
+    specifications = {
+        manifest["workload"]["scenario_id"]: specification
+        for manifest, specification in documents
+        if specification is not None
+    }
+    low = specifications["v2_benign_compute_low"]
+    high = specifications["v2_benign_compute_high"]
+    assert low is not None and high is not None
+    assert low["limits"]["cpu_limit_cores"] == high["limits"]["cpu_limit_cores"] == 1.0
+    assert low["parameters"]["duty_percent"] == 25
+    assert high["parameters"]["duty_percent"] == 75
+
+
+def test_service_impact_gate_accepts_pressure_and_rejects_healthy_summary() -> None:
+    _, documents = _build()
+    manifest, specification = next(
+        (manifest, specification)
+        for manifest, specification in documents
+        if manifest["workload"]["scenario_id"] == "v2_t1499_002_service_high"
+    )
+    assert specification is not None
+    pressure_receipt = {
+        "workload_summary": {
+            "schema_version": "poc_workload_summary.v2",
+            "mode": "service",
+            "elapsed_ms": 32000,
+            "operations": 1200,
+            "errors": 3600,
+            "attempts": 4800,
+            "rejected": 3590,
+            "latency_p95_ms": 41.5,
+        }
+    }
+    evidence = validate_observed_impact_evidence(
+        manifest, specification, pressure_receipt
+    )
+    assert evidence["passed"] is True
+    assert evidence["error_fraction"] == 0.75
+    assert evidence["simulator_receipt_is_model_feature"] is False
+
+    healthy_receipt = deepcopy(pressure_receipt)
+    healthy_receipt["workload_summary"].update(
+        {"operations": 4800, "errors": 0, "rejected": 0}
+    )
+    with pytest.raises(DatasetContractError, match="error fraction too low"):
+        validate_observed_impact_evidence(manifest, specification, healthy_receipt)
 
 
 def test_signal_report_measures_host_delta_and_target_workload_availability() -> None:

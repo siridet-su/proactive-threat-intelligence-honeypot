@@ -234,6 +234,9 @@ class FakeClock:
     def sleep_until_ns(self, deadline_ns: int) -> None:
         self._current_ns = max(self._current_ns, deadline_ns)
 
+    def advance_seconds(self, seconds: float) -> None:
+        self._current_ns += int(seconds * 1_000_000_000)
+
 
 class FakeProbe:
     boot_id_sha256 = "3" * 64
@@ -321,3 +324,56 @@ def test_controlled_collection_starts_target_only_in_workload_phase(
         "after:recovery",
         "close",
     ]
+
+
+def test_controlled_collection_resets_deadline_after_slow_lifecycle_hooks(
+    tmp_path: Path,
+) -> None:
+    config_document = _load_json(
+        PROJECT_ROOT / "configs" / "experimental_collector.pi_sensor.pilot.example.json"
+    )
+    config = replace(
+        CollectorConfig.from_document(config_document),
+        spool_directory=tmp_path,
+        spool_limits=SpoolLimits(
+            max_total_bytes=20_000_000,
+            min_free_bytes=0,
+            segment_max_bytes=1_000_000,
+            segment_max_records=30,
+        ),
+    )
+    clock = FakeClock()
+
+    class SlowLifecycle(FakeLifecycle):
+        def before_phase(self, phase: str, probe: FakeProbe) -> None:
+            if phase == "workload":
+                clock.advance_seconds(2.25)
+            super().before_phase(phase, probe)
+
+        def after_phase(self, phase: str, probe: FakeProbe) -> None:
+            super().after_phase(phase, probe)
+            if phase == "workload":
+                clock.advance_seconds(1.5)
+
+    manifest = _manifest()
+    receipt = collect_controlled_run(
+        manifest,
+        config,
+        schema_dir=PROJECT_ROOT / "schemas",
+        lifecycle=SlowLifecycle(),
+        probe=FakeProbe(),
+        clock=clock,
+    )
+    run_dir = tmp_path / f"run={manifest['run_id']}" / "scope=pi_sensor"
+    samples = [
+        json.loads(line)
+        for segment in receipt["segments"]
+        for line in (run_dir / segment["filename"])
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    assert len(samples) == 90
+    assert all(sample["quality"]["sample_late"] is False for sample in samples)
+    assert samples[30]["quality"]["late_by_ms"] == 0.0
+    assert samples[60]["quality"]["late_by_ms"] == 0.0

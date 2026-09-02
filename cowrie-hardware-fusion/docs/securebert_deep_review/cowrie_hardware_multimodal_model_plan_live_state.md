@@ -903,3 +903,30 @@ pilot ก่อนเริ่ม development 70 runs Training v2 และ fina
 
 รายละเอียด evidence hashes, operation counts, signal table และ gate decision:
 [service_pressure_instrumentation_results_2026-09-02.md](../service_pressure_instrumentation_results_2026-09-02.md)
+
+## 24. Service-pressure treatment revision v2 — 2026-09-02
+
+สถานะ: `IMPLEMENTED / LOCAL TEST PASS / EXCLUDED PI RERUN PENDING`
+
+ส่วนนี้ supersede ขั้นแก้ treatment ใน Section 23 แต่ยังไม่ supersede ผล pilot v1:
+
+- collector `0.4.2` reset sample deadline หลัง lifecycle hook เพื่อกัน Docker startup/stop
+  time สร้าง late sample ปลอม; slow-hook test ได้ 90/90 samples โดย late 0
+- compute low/high เปลี่ยนเป็น duty cycle 25/75% ภายใต้ hard ceiling 1 CPU เดียวกัน
+  แทน full-duty ที่ quota 0.25/0.75 ซึ่งสร้าง inverse-throttling artifact
+- service ใช้ short-lived loopback connections, client concurrency 8, server capacity 2,
+  bounded delay 40 ms และ low/high 10/150 requests/s; ยังคง `network=none`
+- workload summary v2 เพิ่ม attempts/rejected/p95 latency และ finalize gate บังคับให้
+  service-high มี error fraction ≥20%, rejection ≥1 และ p95 ≥20 ms; service-low ต้อง
+  rejection=0/error≤5%; summary เป็น label evidence และห้ามใช้เป็น model feature
+- เพิ่ม matrix/spec schema v2 โดยเก็บ v1 ไว้เป็น historical contract; entrypoint identity
+  เปลี่ยนเป็น `poc_workload_v2`
+- Python suite ผ่าน 58 tests; Go config/compute ผ่าน ส่วน loopback integration จะยืนยันบน Pi
+- revision นี้ยังเป็น `pilot_only=true`, `training_eligible=false`; ห้ามเริ่ม 70-run
+  development wave จนกว่า ARM64 image และ excluded 7-run rerun จะผ่าน treatment/telemetry gate
+
+ขั้นถัดไปคือ freeze commit, build/hash ARM64 image, ทำ service integration canary บน Pi,
+generate v2 artifacts แล้ว rerun 7 scenarios/630 samples ก่อนตัดสิน feature revision
+
+รายละเอียด treatment, evidence thresholds และ run order:
+[service_pressure_treatment_revision.v2.md](../service_pressure_treatment_revision.v2.md)
