@@ -73,6 +73,29 @@ Stage A neutral-idle pilot สำเร็จ 3 runs รวม 270 samples: ท�
 derived windows 5/10/30 วินาทีได้ coverage 100% ดู
 [pilot report](pilot_idle_collection_2026-09-01.md)
 
+## Hardware Go Agent parity snapshot
+
+วันที่ 2026-09-02 ตรวจ common metrics ระหว่าง experimental collector กับ proposed Go
+Agent source บน Pi แบบ read-only/no-sink ซ้ำ 5 คู่ ผ่าน 225/225 comparisons ดู
+[feature-parity audit](hardware_agent_feature_parity_2026-09-02.md)
+
+Memory ต้องใช้ semantics เดียวกัน: experimental collector ใช้ `total - available` จึง
+เทียบกับ Go fields `mem_pressure_used_bytes` และ `mem_pressure_percent` เท่านั้น Legacy Go
+fields `mem_used_bytes`/`mem_percent` ใช้อีกนิยามและไม่ใช่ training authority
+
+สร้าง snapshot ของ experimental collector โดยไม่เปิด spool หรือ cloud sink:
+
+```bash
+cowrie-hardware-dataset snapshot-experimental-hardware \
+  --config configs/experimental_collector.pi_sensor.pilot.example.json \
+  --interval-seconds 2 \
+  --output experimental-snapshot.json
+```
+
+Snapshot นี้ใช้ audit semantics/plumbing เท่านั้น ห้ามใช้เป็น training sample Full dataset
+ยังต้องมาจาก manifest/schema/receipt-bound collection workflow ด้านล่าง และ experimental
+collector ยังคงเป็น v2 dataset authority เพราะ Go Agent มีเฉพาะ feature subset
+
 ## Review/run workflow
 
 ติดตั้งใน isolated development environment:

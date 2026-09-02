@@ -15,10 +15,14 @@ smoke evaluation แล้ว โดยยังไม่มี production infer
 - สร้าง deterministic grouped split ที่ exclude pilot และกัน connected groups ข้าม split
 - ตรวจ bounded ordinary-workload contract สำหรับ disposable backend โดยไม่ execute
 - รัน XGBoost PoC ด้วย repetition-held-out folds พร้อม hash-bound report/model artifacts
+- validate frozen hardware-impact protocol v2 ทั้ง schema, content hash, label authority,
+  matched controls, split waves และ feature leakage invariants
+- สร้าง read-only no-sink collector snapshots และ hash-bound common-metric parity report
 
 ขอบเขต implementation ถัดไป:
 
 - authenticated batch upload และ Cowrie command correlation adapters
+- service-pressure observability และ receipt-bound development-wave acquisition
 - disposable backend runtime/telemetry adapters หลัง review execution boundary
 - train-only preprocessing
 - production-eligible XGBoost baseline หลังเพิ่ม independent data

@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:hardware-impact-experiment-protocol:v2",
+  "title": "Hardware Impact Experiment Protocol v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol_id", "status", "claim_boundary", "labels_and_authority", "scenario_design", "acquisition", "features", "model_protocol", "leakage_controls", "promotion_gates", "safety", "protocol_sha256"],
+  "properties": {
+    "schema_version": {"const": "hardware_impact_experiment_protocol.v2"},
+    "protocol_id": {"$ref": "#/$defs/identifier"},
+    "status": {"const": "frozen_before_collection"},
+    "claim_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "deployment_authority", "pi_role", "training_role"],
+      "properties": {
+        "purpose": {"const": "controlled_hardware_impact_model_development"},
+        "deployment_authority": {"const": "audit_only"},
+        "pi_role": {"const": "sensor_and_controlled_data_generator"},
+        "training_role": {"const": "arch_or_cloud_only"}
+      }
+    },
+    "labels_and_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hardware_primary_target", "hardware_classes", "ttp_role", "fusion_role"],
+      "properties": {
+        "hardware_primary_target": {"const": "primary_impact"},
+        "hardware_classes": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["NO_MATERIAL_IMPACT", "COMPUTE_SATURATION", "SERVICE_PRESSURE"]}
+        },
+        "ttp_role": {"const": "metadata_and_fusion_evaluation_only"},
+        "fusion_role": {"const": "combine_frozen_text_intent_with_observed_hardware_impact"}
+      }
+    },
+    "scenario_design": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenarios"],
+      "properties": {
+        "scenarios": {
+          "type": "array",
+          "minItems": 7,
+          "items": {"$ref": "#/$defs/scenario"}
+        }
+      }
+    },
+    "acquisition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repetitions_per_scenario", "minimum_collection_days", "sample_interval_seconds", "phase_seconds", "waves", "raw_cpu_semantics", "stop_after_development_for_signal_review"],
+      "properties": {
+        "repetitions_per_scenario": {"type": "integer", "minimum": 10, "maximum": 30},
+        "minimum_collection_days": {"type": "integer", "minimum": 3},
+        "sample_interval_seconds": {"const": 1},
+        "phase_seconds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["baseline", "workload", "recovery"],
+          "properties": {
+            "baseline": {"type": "integer", "minimum": 30},
+            "workload": {"type": "integer", "minimum": 30},
+            "recovery": {"type": "integer", "minimum": 30}
+          }
+        },
+        "waves": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/wave"}
+        },
+        "raw_cpu_semantics": {"const": "continuous_percent_not_ranked"},
+        "stop_after_development_for_signal_review": {"type": "boolean"}
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "profiles", "forbidden_model_features", "simulator_receipt_is_feature"],
+      "properties": {
+        "schema_version": {"const": "xgboost_hardware_features.v1"},
+        "profiles": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"$ref": "#/$defs/feature_profile"}
+        },
+        "forbidden_model_features": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "simulator_receipt_is_feature": {"const": false}
+      }
+    },
+    "model_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "target", "objective", "class_weighting", "hyperparameter_tuning", "parameters", "selection_metric", "reported_metrics", "seed", "tcn_gate"],
+      "properties": {
+        "algorithm": {"const": "xgboost"},
+        "target": {"const": "primary_impact"},
+        "objective": {"const": "multi:softprob"},
+        "class_weighting": {"const": "balanced"},
+        "hyperparameter_tuning": {"const": false},
+        "parameters": {"type": "object", "minProperties": 8, "additionalProperties": {"type": ["number", "integer", "string"]}},
+        "selection_metric": {"const": "macro_f1"},
+        "reported_metrics": {"type": "array", "minItems": 5, "uniqueItems": true, "items": {"type": "string"}},
+        "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "tcn_gate": {"const": "do_not_train_until_xgboost_v2_and_independent_run_gate_pass"}
+      }
+    },
+    "leakage_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["split_unit", "group_axes", "final_test_opened", "fit_preprocessing_on", "forbid_test_guided_changes", "out_of_fold_required_for_fusion"],
+      "properties": {
+        "split_unit": {"const": "complete_run"},
+        "group_axes": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"type": "string"}},
+        "final_test_opened": {"const": false},
+        "fit_preprocessing_on": {"const": "development_train_only"},
+        "forbid_test_guided_changes": {"const": true},
+        "out_of_fold_required_for_fusion": {"const": true}
+      }
+    },
+    "promotion_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_window_coverage", "minimum_macro_f1", "minimum_per_class_recall", "maximum_no_impact_false_positive_rate", "minimum_macro_f1_gain_over_majority", "confidence_calibrated_before_fusion", "deployment_allowed"],
+      "properties": {
+        "minimum_window_coverage": {"type": "number", "minimum": 0.99, "maximum": 1},
+        "minimum_macro_f1": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimum_per_class_recall": {"type": "number", "minimum": 0, "maximum": 1},
+        "maximum_no_impact_false_positive_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimum_macro_f1_gain_over_majority": {"type": "number", "minimum": 0, "maximum": 1},
+        "confidence_calibrated_before_fusion": {"const": true},
+        "deployment_allowed": {"const": false}
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actual_malware", "external_target", "attacker_code_execution", "network_mode", "pi_training", "production_sink_write"],
+      "properties": {
+        "actual_malware": {"const": false},
+        "external_target": {"const": false},
+        "attacker_code_execution": {"const": false},
+        "network_mode": {"const": "none"},
+        "pi_training": {"const": false},
+        "production_sink_write": {"const": false}
+      }
+    },
+    "protocol_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_id", "scenario_disposition", "workload_family", "intensity", "primary_impact", "ground_truth_ttps", "hardware_label_source"],
+      "properties": {
+        "scenario_id": {"$ref": "#/$defs/identifier"},
+        "scenario_disposition": {"enum": ["neutral_baseline", "benign_control", "malicious_simulation"]},
+        "workload_family": {"enum": ["none", "bounded_compute", "bounded_service"]},
+        "intensity": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "primary_impact": {"enum": ["NO_MATERIAL_IMPACT", "COMPUTE_SATURATION", "SERVICE_PRESSURE"]},
+        "ground_truth_ttps": {"type": "array", "maxItems": 1, "uniqueItems": true, "items": {"pattern": "^T[0-9]{4}(\\.[0-9]{3})?$"}},
+        "hardware_label_source": {"const": "scenario_manifest_plus_observed_impact_evidence"}
+      }
+    },
+    "wave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["partition", "repetitions_per_scenario", "minimum_distinct_days", "locked_until_model_freeze"],
+      "properties": {
+        "partition": {"enum": ["development_train", "calibration", "final_test"]},
+        "repetitions_per_scenario": {"type": "integer", "minimum": 1},
+        "minimum_distinct_days": {"type": "integer", "minimum": 1},
+        "locked_until_model_freeze": {"type": "boolean"}
+      }
+    },
+    "feature_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id", "role", "deployment_availability", "feature_names"],
+      "properties": {
+        "profile_id": {"$ref": "#/$defs/identifier"},
+        "role": {"enum": ["diagnostic_baseline", "candidate"]},
+        "deployment_availability": {"enum": ["current_go_agent_overlap", "extended_host_collector", "target_process_or_cgroup_required"]},
+        "feature_names": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}
+      }
+    }
+  }
+}

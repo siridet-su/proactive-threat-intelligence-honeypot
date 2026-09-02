@@ -1,0 +1,353 @@
+{
+  "schema_version": "hardware_impact_experiment_protocol.v2",
+  "protocol_id": "pi-hardware-impact-v2-20260902",
+  "status": "frozen_before_collection",
+  "claim_boundary": {
+    "purpose": "controlled_hardware_impact_model_development",
+    "deployment_authority": "audit_only",
+    "pi_role": "sensor_and_controlled_data_generator",
+    "training_role": "arch_or_cloud_only"
+  },
+  "labels_and_authority": {
+    "hardware_primary_target": "primary_impact",
+    "hardware_classes": [
+      "NO_MATERIAL_IMPACT",
+      "COMPUTE_SATURATION",
+      "SERVICE_PRESSURE"
+    ],
+    "ttp_role": "metadata_and_fusion_evaluation_only",
+    "fusion_role": "combine_frozen_text_intent_with_observed_hardware_impact"
+  },
+  "scenario_design": {
+    "scenarios": [
+      {
+        "scenario_id": "v2_neutral_idle",
+        "scenario_disposition": "neutral_baseline",
+        "workload_family": "none",
+        "intensity": 0,
+        "primary_impact": "NO_MATERIAL_IMPACT",
+        "ground_truth_ttps": [],
+        "hardware_label_source": "scenario_manifest_plus_observed_impact_evidence"
+      },
+      {
+        "scenario_id": "v2_benign_compute_low",
+        "scenario_disposition": "benign_control",
+        "workload_family": "bounded_compute",
+        "intensity": 25,
+        "primary_impact": "NO_MATERIAL_IMPACT",
+        "ground_truth_ttps": [],
+        "hardware_label_source": "scenario_manifest_plus_observed_impact_evidence"
+      },
+      {
+        "scenario_id": "v2_benign_compute_high",
+        "scenario_disposition": "benign_control",
+        "workload_family": "bounded_compute",
+        "intensity": 75,
+        "primary_impact": "COMPUTE_SATURATION",
+        "ground_truth_ttps": [],
+        "hardware_label_source": "scenario_manifest_plus_observed_impact_evidence"
+      },
+      {
+        "scenario_id": "v2_t1496_001_compute_high",
+        "scenario_disposition": "malicious_simulation",
+        "workload_family": "bounded_compute",
+        "intensity": 75,
+        "primary_impact": "COMPUTE_SATURATION",
+        "ground_truth_ttps": ["T1496.001"],
+        "hardware_label_source": "scenario_manifest_plus_observed_impact_evidence"
+      },
+      {
+        "scenario_id": "v2_benign_service_low",
+        "scenario_disposition": "benign_control",
+        "workload_family": "bounded_service",
+        "intensity": 10,
+        "primary_impact": "NO_MATERIAL_IMPACT",
+        "ground_truth_ttps": [],
+        "hardware_label_source": "scenario_manifest_plus_observed_impact_evidence"
+      },
+      {
+        "scenario_id": "v2_benign_service_high",
+        "scenario_disposition": "benign_control",
+        "workload_family": "bounded_service",
+        "intensity": 150,
+        "primary_impact": "SERVICE_PRESSURE",
+        "ground_truth_ttps": [],
+        "hardware_label_source": "scenario_manifest_plus_observed_impact_evidence"
+      },
+      {
+        "scenario_id": "v2_t1499_002_service_high",
+        "scenario_disposition": "malicious_simulation",
+        "workload_family": "bounded_service",
+        "intensity": 150,
+        "primary_impact": "SERVICE_PRESSURE",
+        "ground_truth_ttps": ["T1499.002"],
+        "hardware_label_source": "scenario_manifest_plus_observed_impact_evidence"
+      }
+    ]
+  },
+  "acquisition": {
+    "repetitions_per_scenario": 20,
+    "minimum_collection_days": 5,
+    "sample_interval_seconds": 1,
+    "phase_seconds": {
+      "baseline": 30,
+      "workload": 30,
+      "recovery": 30
+    },
+    "waves": [
+      {
+        "partition": "development_train",
+        "repetitions_per_scenario": 10,
+        "minimum_distinct_days": 2,
+        "locked_until_model_freeze": false
+      },
+      {
+        "partition": "calibration",
+        "repetitions_per_scenario": 5,
+        "minimum_distinct_days": 1,
+        "locked_until_model_freeze": false
+      },
+      {
+        "partition": "final_test",
+        "repetitions_per_scenario": 5,
+        "minimum_distinct_days": 2,
+        "locked_until_model_freeze": true
+      }
+    ],
+    "raw_cpu_semantics": "continuous_percent_not_ranked",
+    "stop_after_development_for_signal_review": true
+  },
+  "features": {
+    "schema_version": "xgboost_hardware_features.v1",
+    "profiles": [
+      {
+        "profile_id": "go_agent_overlap_v1",
+        "role": "diagnostic_baseline",
+        "deployment_availability": "current_go_agent_overlap",
+        "feature_names": [
+          "baseline_coverage",
+          "baseline_temperature_available_fraction",
+          "cpu_delta_from_baseline_mean",
+          "cpu_max",
+          "cpu_mean",
+          "cpu_p95",
+          "cpu_seconds_above_70",
+          "cpu_seconds_above_90",
+          "cpu_slope_per_second",
+          "cpu_std",
+          "memory_used_bytes_delta_from_baseline",
+          "memory_used_percent_delta_from_baseline",
+          "memory_used_percent_max",
+          "memory_used_percent_mean",
+          "memory_used_percent_p95",
+          "network_rx_bytes_per_second_max",
+          "network_rx_bytes_per_second_p95",
+          "network_tx_bytes_per_second_max",
+          "network_tx_bytes_per_second_p95",
+          "root_used_percent_delta_from_baseline",
+          "sample_coverage",
+          "temperature_available_fraction",
+          "temperature_delta_from_baseline_c",
+          "temperature_max_c",
+          "temperature_mean_c"
+        ]
+      },
+      {
+        "profile_id": "host_extended_v2",
+        "role": "candidate",
+        "deployment_availability": "extended_host_collector",
+        "feature_names": [
+          "baseline_coverage",
+          "baseline_temperature_available_fraction",
+          "cpu_delta_from_baseline_mean",
+          "cpu_max",
+          "cpu_mean",
+          "cpu_p95",
+          "cpu_seconds_above_70",
+          "cpu_seconds_above_90",
+          "cpu_slope_per_second",
+          "cpu_std",
+          "disk_read_bytes_per_second_max",
+          "disk_read_bytes_per_second_p95",
+          "disk_write_bytes_per_second_max",
+          "disk_write_bytes_per_second_p95",
+          "memory_available_bytes_min",
+          "memory_used_bytes_delta_from_baseline",
+          "memory_used_percent_delta_from_baseline",
+          "memory_used_percent_max",
+          "memory_used_percent_mean",
+          "memory_used_percent_p95",
+          "network_connection_count_delta_from_baseline",
+          "network_connection_count_max",
+          "network_connection_count_p95",
+          "network_dns_queries_per_second_max",
+          "network_rx_bytes_per_second_max",
+          "network_rx_bytes_per_second_p95",
+          "network_rx_packets_per_second_max",
+          "network_rx_packets_per_second_p95",
+          "network_socket_count_max",
+          "network_tx_bytes_per_second_max",
+          "network_tx_bytes_per_second_p95",
+          "network_tx_packets_per_second_max",
+          "network_tx_packets_per_second_p95",
+          "network_unique_destination_count_max",
+          "per_core_imbalance_mean",
+          "process_count_delta_from_baseline",
+          "process_count_max",
+          "process_count_mean",
+          "root_used_percent_delta_from_baseline",
+          "sample_coverage",
+          "temperature_available_fraction",
+          "temperature_delta_from_baseline_c",
+          "temperature_max_c",
+          "temperature_mean_c",
+          "thermal_throttled_fraction",
+          "thermal_undervoltage_fraction",
+          "thread_count_delta_from_baseline",
+          "thread_count_max"
+        ]
+      },
+      {
+        "profile_id": "target_augmented_v2",
+        "role": "candidate",
+        "deployment_availability": "target_process_or_cgroup_required",
+        "feature_names": [
+          "baseline_coverage",
+          "baseline_temperature_available_fraction",
+          "cpu_delta_from_baseline_mean",
+          "cpu_max",
+          "cpu_mean",
+          "cpu_p95",
+          "cpu_seconds_above_70",
+          "cpu_seconds_above_90",
+          "cpu_slope_per_second",
+          "cpu_std",
+          "disk_read_bytes_per_second_max",
+          "disk_read_bytes_per_second_p95",
+          "disk_write_bytes_per_second_max",
+          "disk_write_bytes_per_second_p95",
+          "memory_available_bytes_min",
+          "memory_used_bytes_delta_from_baseline",
+          "memory_used_percent_delta_from_baseline",
+          "memory_used_percent_max",
+          "memory_used_percent_mean",
+          "memory_used_percent_p95",
+          "network_connection_count_delta_from_baseline",
+          "network_connection_count_max",
+          "network_connection_count_p95",
+          "network_dns_queries_per_second_max",
+          "network_rx_bytes_per_second_max",
+          "network_rx_bytes_per_second_p95",
+          "network_rx_packets_per_second_max",
+          "network_rx_packets_per_second_p95",
+          "network_socket_count_max",
+          "network_tx_bytes_per_second_max",
+          "network_tx_bytes_per_second_p95",
+          "network_tx_packets_per_second_max",
+          "network_tx_packets_per_second_p95",
+          "network_unique_destination_count_max",
+          "per_core_imbalance_mean",
+          "process_count_delta_from_baseline",
+          "process_count_max",
+          "process_count_mean",
+          "root_used_percent_delta_from_baseline",
+          "sample_coverage",
+          "target_cpu_percent_max",
+          "target_cpu_percent_p95",
+          "target_process_present_fraction",
+          "target_rss_bytes_max",
+          "target_rss_bytes_p95",
+          "target_socket_count_max",
+          "temperature_available_fraction",
+          "temperature_delta_from_baseline_c",
+          "temperature_max_c",
+          "temperature_mean_c",
+          "thermal_throttled_fraction",
+          "thermal_undervoltage_fraction",
+          "thread_count_delta_from_baseline",
+          "thread_count_max"
+        ]
+      }
+    ],
+    "forbidden_model_features": [
+      "run_id",
+      "record_id",
+      "experiment_id",
+      "scenario_id",
+      "scenario_disposition",
+      "ground_truth_ttps",
+      "primary_impact",
+      "collection_batch",
+      "scenario_variant_group",
+      "workload_family_group",
+      "workload_intensity",
+      "execution_receipt_operations",
+      "timestamp"
+    ],
+    "simulator_receipt_is_feature": false
+  },
+  "model_protocol": {
+    "algorithm": "xgboost",
+    "target": "primary_impact",
+    "objective": "multi:softprob",
+    "class_weighting": "balanced",
+    "hyperparameter_tuning": false,
+    "parameters": {
+      "eta": 0.05,
+      "max_depth": 3,
+      "min_child_weight": 1.0,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "lambda": 1.0,
+      "alpha": 0.0,
+      "tree_method": "hist",
+      "num_boost_round": 100,
+      "nthread": 4
+    },
+    "selection_metric": "macro_f1",
+    "reported_metrics": [
+      "accuracy",
+      "macro_f1",
+      "per_class_precision",
+      "per_class_recall",
+      "per_class_f1",
+      "per_class_pr_auc",
+      "no_impact_false_positive_rate",
+      "brier_score",
+      "ece"
+    ],
+    "seed": 20260902,
+    "tcn_gate": "do_not_train_until_xgboost_v2_and_independent_run_gate_pass"
+  },
+  "leakage_controls": {
+    "split_unit": "complete_run",
+    "group_axes": [
+      "collection_day",
+      "collection_batch",
+      "environment_signature",
+      "workload_implementation_sha256"
+    ],
+    "final_test_opened": false,
+    "fit_preprocessing_on": "development_train_only",
+    "forbid_test_guided_changes": true,
+    "out_of_fold_required_for_fusion": true
+  },
+  "promotion_gates": {
+    "minimum_window_coverage": 0.99,
+    "minimum_macro_f1": 0.75,
+    "minimum_per_class_recall": 0.7,
+    "maximum_no_impact_false_positive_rate": 0.15,
+    "minimum_macro_f1_gain_over_majority": 0.1,
+    "confidence_calibrated_before_fusion": true,
+    "deployment_allowed": false
+  },
+  "safety": {
+    "actual_malware": false,
+    "external_target": false,
+    "attacker_code_execution": false,
+    "network_mode": "none",
+    "pi_training": false,
+    "production_sink_write": false
+  },
+  "protocol_sha256": "8eb0786e8427f7fa685a8d137db62b1ecfff40a7897b65f742915477b9b2471d"
+}

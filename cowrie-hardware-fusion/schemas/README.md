@@ -26,6 +26,7 @@
 - [Pi PoC workload specification schema](pi_poc_workload_spec.v1.schema.json)
 - [Pi PoC execution receipt schema](pi_poc_execution_receipt.v1.schema.json)
 - [Pi PoC matrix schema](pi_poc_matrix.v1.schema.json)
+- [Hardware-impact experiment protocol v2 schema](hardware_impact_experiment_protocol.v2.schema.json)
 - [Example run manifest](examples/experiment_run_manifest.v1.example.json)
 - [Example bounded benign-compute manifest](examples/experiment_run_manifest.benign_compute.v1.example.json)
 - [Example telemetry sample](examples/hardware_telemetry_sample.v1.example.json)
