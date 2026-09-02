@@ -1072,3 +1072,24 @@ no-collection preflight กับ idle/compute/service อย่างละห�
 
 รายละเอียด runtime commands และ audit:
 [hardware_impact_development_wave.v1.md](../hardware_impact_development_wave.v1.md)
+
+## 30. Versioned environment receipt v2 — 2026-09-03
+
+สถานะ: TOOLING PASS / PI CAPTURE NEXT
+
+- เพิ่ม privacy-bounded receipt/schema/CLI ที่ capture boot hash, static host identity,
+  collector/runtime hashes, production services/container images และ reviewed runner
+- environment signature ไม่รวม capture time/headroom ชั่วขณะ จึงคงที่เมื่อ capture ซ้ำใน
+  boot/runtime state เดิม; receipt hash ครอบคลุม observed time และ headroom ทุกค่า
+- ไม่เก็บ hostname, raw IP, credentials, Cowrie command หรือ raw boot/container IDs
+- semantic safety gates บังคับ NTP/Cowrie, inactive hardware sinks, ไม่มี experiment
+  container ค้าง, RAM/disk/load/temperature และ exact ARM64 runner contract
+- เพิ่ม capture/validate CLI แบบ exclusive output และ full suite ผ่าน 79 tests
+- production repo บน Pi ที่ตรวจพบแบบ read-only คือ
+  /home/cpe27/proactive-threat-intelligence-honeypot
+
+ขั้นถัดไปคือ commit/push, deploy source archive แบบ isolated, capture receipt v2 แล้ว
+regenerate development controls จาก signature ใหม่ก่อนทำ runtime preflight
+
+รายละเอียด signature payload, safety และ privacy:
+[environment_receipt.v2.md](../environment_receipt.v2.md)

@@ -34,5 +34,7 @@ ordering/seeds, schemas, artifact/profile/protocol bindings, matched treatments 
 negative gates ที่ห้ามเปิด final test, เปลี่ยน schedule หรือย้อน claim เป็น pilot รวมทั้ง
 matrix round-trip validator และ controlled/idle preflight dispatch ที่ไม่เริ่ม collection
 
-ชุดถัดไปจะเพิ่ม environment receipt, runtime finalization negative tests และ
-shadow/canonical non-interference
+environment-receipt tests ตรวจ schema, stable-within-state signature, per-capture receipt
+hash, inactive sink/experiment-container/headroom gates และ CLI round trip
+
+ชุดถัดไปจะเพิ่ม runtime finalization negative tests และ shadow/canonical non-interference

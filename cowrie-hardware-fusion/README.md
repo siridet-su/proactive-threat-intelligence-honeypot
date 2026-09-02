@@ -92,6 +92,7 @@ cowrie-hardware-fusion/
 - [Dataset builder v2](docs/dataset_builder.v2.md)
 - [Model feature contract v1](docs/model_feature_contract.v1.md)
 - [Hardware-impact development wave v1](docs/hardware_impact_development_wave.v1.md)
+- [Experiment environment receipt v2](docs/environment_receipt.v2.md)
 - [Experimental 1 Hz collector v1](docs/experimental_collector.v1.md)
 - [XGBoost, TCN and Fusion architecture](docs/model_architecture_xgboost_tcn_fusion.v1.md)
 - [Dataset split policy v1](docs/dataset_split_policy.v1.md)

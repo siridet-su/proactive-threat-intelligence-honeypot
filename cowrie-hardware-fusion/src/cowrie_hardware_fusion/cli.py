@@ -120,6 +120,52 @@ def _collector_source_hash(args: argparse.Namespace) -> int:
     return 0
 
 
+def _capture_pi_environment_receipt(args: argparse.Namespace) -> int:
+    from .batch import write_json_exclusive
+    from .environment import (
+        capture_pi_environment_receipt,
+        validate_environment_receipt,
+    )
+
+    config = _load_json(args.config)
+    _validate(
+        config,
+        args.schema_dir / "experimental_collector_config.v1.schema.json",
+        str(args.config),
+    )
+    receipt = capture_pi_environment_receipt(
+        sensor_id=config["sensor_id"],
+        subject_id=config["subject_id"],
+        collector_repo_commit=args.collector_repo_commit,
+        production_repo=args.production_repo,
+        runner_image_id=args.runner_image_id,
+        schema_dir=args.schema_dir,
+    )
+    _validate(
+        receipt,
+        args.schema_dir / "experiment_environment_receipt.v2.schema.json",
+        "environment receipt",
+    )
+    summary = validate_environment_receipt(receipt)
+    write_json_exclusive(args.output, receipt)
+    print(json.dumps({"output": str(args.output), **summary}, sort_keys=True))
+    return 0
+
+
+def _validate_pi_environment_receipt(args: argparse.Namespace) -> int:
+    from .environment import validate_environment_receipt
+
+    receipt = _load_json(args.receipt)
+    _validate(
+        receipt,
+        args.schema_dir / "experiment_environment_receipt.v2.schema.json",
+        str(args.receipt),
+    )
+    summary = validate_environment_receipt(receipt)
+    print(json.dumps(summary, sort_keys=True, indent=2))
+    return 0
+
+
 def _snapshot_experimental_hardware(args: argparse.Namespace) -> int:
     from .batch import write_json_exclusive
     from .collector import CollectorConfig, LinuxSystemProbe
@@ -1464,6 +1510,30 @@ def _parser() -> argparse.ArgumentParser:
     )
     source_hash.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     source_hash.set_defaults(handler=_collector_source_hash)
+
+    environment_capture = subparsers.add_parser(
+        "capture-pi-environment-receipt",
+        help="capture a privacy-bounded, hash-bound Pi runtime/environment receipt",
+    )
+    environment_capture.add_argument("--config", type=Path, required=True)
+    environment_capture.add_argument("--collector-repo-commit", required=True)
+    environment_capture.add_argument("--production-repo", type=Path, required=True)
+    environment_capture.add_argument("--runner-image-id", required=True)
+    environment_capture.add_argument("--output", type=Path, required=True)
+    environment_capture.add_argument(
+        "--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR
+    )
+    environment_capture.set_defaults(handler=_capture_pi_environment_receipt)
+
+    environment_validate = subparsers.add_parser(
+        "validate-pi-environment-receipt",
+        help="verify a captured Pi environment receipt and safety gates",
+    )
+    environment_validate.add_argument("--receipt", type=Path, required=True)
+    environment_validate.add_argument(
+        "--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR
+    )
+    environment_validate.set_defaults(handler=_validate_pi_environment_receipt)
 
     parity_snapshot = subparsers.add_parser(
         "snapshot-experimental-hardware",
