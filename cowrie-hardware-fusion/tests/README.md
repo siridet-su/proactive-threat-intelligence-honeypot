@@ -20,5 +20,9 @@ deterministic connected-group assignment และ fail เมื่อ independ
 workload contract tests ตรวจ disposable-VM boundary, fixed input, no-network policy และ
 CPU quota/intensity binding โดยไม่มี test ใด execute workload จริง
 
+instrumentation tests ตรวจ 7-scenario matrix/schema/hash bindings, pilot exclusion,
+matched benign/malicious hardware treatment และ candidate host/target signal summary โดย
+ไม่เปลี่ยน frozen feature profile
+
 ชุดถัดไปจะเพิ่ม feature-order identity, model contracts และ shadow/canonical
 non-interference

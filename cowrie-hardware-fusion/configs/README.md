@@ -16,3 +16,5 @@ configuration ทุก config ที่มีผลต่อ dataset/model iden
   parameters, leakage/safety controls และ promotion gates; validate content hash ก่อนเก็บข้อมูล
 - [Scenario catalog v1](scenario_catalog.v1.json) มี Pi-specific paired controls สำหรับ
   `T1496.001` และ `T1499.002`; runtime spec/manifests จะ generate หลัง freeze ARM64 image ID
+- Scenario catalog เดียวกันมี protocol-v2 allowlist 7 scenarios สำหรับ excluded
+  service-pressure instrumentation pilot; matrix/spec จะผูก catalog byte hash ทุกครั้ง

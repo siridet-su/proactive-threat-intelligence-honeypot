@@ -529,15 +529,12 @@ def _run_docker(
     return result
 
 
-def pi_poc_preflight(
+def safe_container_runtime_preflight(
     manifest: Mapping[str, Any],
     specification: Mapping[str, Any],
-    *,
-    catalog_path: Path,
 ) -> dict[str, Any]:
-    """Check image identity, Docker defenses, cgroup v2, and Pi headroom."""
+    """Check fixed image identity, Docker defenses, cgroup v2, and Pi headroom."""
 
-    validate_pi_poc_contract(manifest, specification, catalog_path=catalog_path)
     if shutil.which("docker") is None:
         raise DatasetContractError("Docker CLI is unavailable")
     if not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
@@ -605,6 +602,18 @@ def pi_poc_preflight(
         "load_1m": load_1m,
         "temperature_c": temperature_c,
     }
+
+
+def pi_poc_preflight(
+    manifest: Mapping[str, Any],
+    specification: Mapping[str, Any],
+    *,
+    catalog_path: Path,
+) -> dict[str, Any]:
+    """Validate the historical PoC contract, then check its Pi runtime."""
+
+    validate_pi_poc_contract(manifest, specification, catalog_path=catalog_path)
+    return safe_container_runtime_preflight(manifest, specification)
 
 
 class DockerWorkloadLifecycle:

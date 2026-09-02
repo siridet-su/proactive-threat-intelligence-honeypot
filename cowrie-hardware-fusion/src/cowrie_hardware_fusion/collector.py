@@ -36,7 +36,21 @@ from .service_pressure import (
 from .spool import BoundedSegmentSpool, SpoolLimits
 
 
-COLLECTOR_VERSION = "0.4.0"
+COLLECTOR_VERSION = "0.4.1"
+
+IDLE_SCENARIO_IDS = {"neutral_idle", "v2_neutral_idle"}
+CONTROLLED_SAFE_CONTAINER_SCENARIO_IDS = {
+    "poc_pi_benign_compute_control",
+    "poc_pi_compute_hijacking_simulation",
+    "poc_pi_benign_service_load_control",
+    "poc_pi_service_exhaustion_simulation",
+    "v2_benign_compute_low",
+    "v2_benign_compute_high",
+    "v2_t1496_001_compute_high",
+    "v2_benign_service_low",
+    "v2_benign_service_high",
+    "v2_t1499_002_service_high",
+}
 COLLECTOR_SCHEMA_VERSION = "experimental_collector_config.v1"
 RECEIPT_SCHEMA_VERSION = "experiment_collection_receipt.v1"
 
@@ -772,7 +786,7 @@ def _validate_common_contract(
     if config.collector_version != COLLECTOR_VERSION:
         raise DatasetContractError("collector config version does not match runtime")
     if config.metric_scope != "pi_sensor":
-        raise DatasetContractError("collector v0.4.0 supports only pi_sensor")
+        raise DatasetContractError("collector v0.4.1 supports only pi_sensor")
     if config.sensor_id != manifest["sensor"]["sensor_id"]:
         raise DatasetContractError("config sensor_id does not match manifest")
     if config.subject_id != manifest["sensor"]["host_id"]:
@@ -784,7 +798,7 @@ def _validate_common_contract(
             "manifest collector_sha256 does not match this collector source"
         )
     if manifest["timing"]["sample_interval_seconds"] != 1:
-        raise DatasetContractError("collector v0.4.0 requires a 1-second manifest interval")
+        raise DatasetContractError("collector v0.4.1 requires a 1-second manifest interval")
     if "pi_sensor" not in manifest["execution_boundary"]["metric_scopes"]:
         raise DatasetContractError("manifest does not authorize pi_sensor telemetry")
     if manifest["collection"]["command_events_required"] is not False:
@@ -814,8 +828,10 @@ def _validate_idle_contract(
     manifest: Mapping[str, Any], config: CollectorConfig, source_sha256: str
 ) -> None:
     _validate_common_contract(manifest, config, source_sha256)
-    if manifest["workload"]["scenario_id"] != "neutral_idle":
-        raise DatasetContractError("idle collector is restricted to neutral_idle")
+    if manifest["workload"]["scenario_id"] not in IDLE_SCENARIO_IDS:
+        raise DatasetContractError(
+            "idle collector is restricted to neutral_idle or v2_neutral_idle"
+        )
     if manifest["workload"]["family"] != "none":
         raise DatasetContractError("idle collector cannot run a workload family")
     if manifest["workload"]["intensity_percent"] != 0:
@@ -846,8 +862,8 @@ def _validate_controlled_contract(
     boundary = manifest["execution_boundary"]
     labels = manifest["labels"]
     safety = manifest["safety"]
-    if not workload["scenario_id"].startswith("poc_pi_"):
-        raise DatasetContractError("controlled collector accepts only poc_pi scenarios")
+    if workload["scenario_id"] not in CONTROLLED_SAFE_CONTAINER_SCENARIO_IDS:
+        raise DatasetContractError("controlled collector scenario is not allowlisted")
     if workload["family"] == "none" or workload["intensity_percent"] == 0:
         raise DatasetContractError("controlled run requires a non-zero fixed workload")
     if boundary["kind"] != "safe_container":

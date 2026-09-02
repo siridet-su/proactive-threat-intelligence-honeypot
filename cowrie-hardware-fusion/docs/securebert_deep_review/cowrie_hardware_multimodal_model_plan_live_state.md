@@ -823,3 +823,43 @@ profile เพราะ canary เดียวพิสูจน์ availability
 
 รายละเอียด fields, privacy decision และ evidence hashes:
 [service_pressure_observability.v1.md](../service_pressure_observability.v1.md)
+
+## 22. Service-pressure instrumentation tooling — 2026-09-02
+
+สถานะ: `TOOLING READY / 7 PI RUNS NOT STARTED`
+
+ส่วนนี้ supersede “ขั้นถัดไป” ใน Section 21 เฉพาะงานเตรียม tooling:
+
+- เพิ่ม generator สำหรับ protocol-v2 scenarios ครบ 7 ตัว; scenario ละหนึ่ง run,
+  baseline/workload/recovery 30/30/30 วินาทีที่ 1 Hz รวม 630 planned samples
+- matrix ผูก canonical protocol hash, scenario catalog byte hash, collector source,
+  telemetry schema, ARM64 image/workload implementation, repository commit และ Pi
+  environment signature
+- matrix, manifests และ specs บังคับ `pilot_only=true`, `training_eligible=false` และ
+  `changes_frozen_feature_set=false`; 7 runs นี้ใช้ตัดสิน instrumentation เท่านั้น
+- compute high benign/T1496.001 และ service high benign/T1499.002 ใช้ hardware treatment
+  เดียวกันเป็น matched pairs; TTP/disposition ไม่ถูกใช้เป็น candidate value
+- แยก service `protocol_intensity=10/150 requests_per_second` จาก manifest assigned
+  service capacity 25/75% เพื่อไม่ตีความ 150 เป็น CPU percent
+- collector patch `0.4.1` เพิ่ม exact allowlist สำหรับ protocol-v2 idle/controlled
+  scenarios โดยไม่เปลี่ยน telemetry semantics; runtime ยังคง fixed image,
+  `network=none`, non-root, read-only และ hard limits
+- collector `0.4.1` source hash คือ
+  `f56cce1858f3d604e5e298258fc0d1af076fafaf03d9e3a6c17ae454e291d1a3`;
+  telemetry schema hash ยังคง `b99697c8...a4d4e` และ protocol canonical hash ยังคง
+  `8eb0786e...2471d`
+- เพิ่ม report builder สำหรับ host/target PSI, TCP state/socket/drop และ target cgroup
+  CPU/memory/PID/I/O metrics สรุป coverage/mean/p95/max/delta แยก phase
+- target ไม่มี baseline ตาม design จึงไม่สร้าง delta ปลอม; signal เข้า feature-freeze
+  review เมื่อ workload coverage ≥90% และ host signal ต้องมี baseline coverage ≥90%
+- report ผูก completed manifest/segment hashes และมี `model_feature_eligible=false` เสมอ;
+  simulator operation count ไม่ถูกใช้เป็น model feature
+- automated tests ปัจจุบันผ่าน 55 tests รวม matrix exclusion, schema bindings,
+  matched-pair invariants และ synthetic signal summary
+
+ขั้นถัดไปคือ query image/environment identity จริงจาก Pi หลัง freeze commit, generate
+control artifacts, รัน preflight แล้วจึงรัน 7 excluded instrumentation runs พร้อม verify
+cleanup/receipts ก่อน transfer กลับ Arch เพื่อสร้าง signal reports
+
+รายละเอียด matrix, intensity semantics, commands และ selection gate:
+[service_pressure_instrumentation_pilot.v1.md](../service_pressure_instrumentation_pilot.v1.md)

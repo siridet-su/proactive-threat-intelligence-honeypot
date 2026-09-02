@@ -1,7 +1,7 @@
 # Experimental 1 Hz Collector v1
 
 > สถานะ: `ISOLATED IDLE VERIFIED / CONTROLLED PI POC IMPLEMENTED / NOT A SERVICE`
-> Runtime version: `0.4.0`
+> Runtime version: `0.4.1` (`0.4.0` telemetry + protocol-v2 scenario allowlist)
 > ขอบเขต: `pi_sensor` สำหรับ neutral idle และ fixed `poc_pi_*` safe-container runs
 
 ## Safety boundary
@@ -56,7 +56,9 @@ Spool ไม่มีการ overwrite หรือ resume แบบเดา�
 - target cgroup v2 CPU usage/throttling, memory/current/peak/events, PID usage/events และ
   aggregate I/O counters/rates รวมทั้ง CPU/memory/I/O PSI
 
-metric ชุด service-pressure ใน `0.4.0` มาจาก read-only `/proc` และ cgroup v2 เท่านั้น
+metric ชุด service-pressure ที่เริ่มใน `0.4.0` และคงเดิมใน `0.4.1` มาจาก read-only
+`/proc` และ cgroup v2 เท่านั้น Patch `0.4.1` เพิ่มเฉพาะ fail-closed scenario allowlist และ
+instrumentation flow ไม่เปลี่ยน raw metric semantics
 ไม่อ่าน socket address, payload, command หรือ simulator operation count และยังไม่ถูกเพิ่มเข้า
 frozen model feature profile จนกว่า instrumentation pilot จะพิสูจน์ coverage/signal
 

@@ -632,6 +632,7 @@ def _prepare_pi_poc_matrix(args: argparse.Namespace) -> int:
                 specification,
                 catalog_path=args.scenario_catalog,
             )
+    args.output_dir.mkdir(parents=True, exist_ok=False)
     write_json_exclusive(args.output_dir / "matrix.json", matrix)
     for manifest, specification in documents:
         control_dir = args.output_dir / "control" / f"run={manifest['run_id']}"
@@ -645,6 +646,357 @@ def _prepare_pi_poc_matrix(args: argparse.Namespace) -> int:
                 "matrix_sha256": matrix["matrix_sha256"],
                 "run_count": matrix["run_count"],
                 "estimated_total_seconds": matrix["estimated_total_seconds"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _prepare_service_pressure_pilot(args: argparse.Namespace) -> int:
+    from .batch import write_json_exclusive
+    from .instrumentation import (
+        build_service_pressure_instrumentation_matrix,
+        validate_service_pressure_contract,
+    )
+
+    config_document = _load_json(args.config)
+    _validate(
+        config_document,
+        args.schema_dir / "experimental_collector_config.v1.schema.json",
+        str(args.config),
+    )
+    matrix, documents = build_service_pressure_instrumentation_matrix(
+        generation=args.generation,
+        experiment_id=args.experiment_id,
+        image_id=args.image_id,
+        implementation_sha256=args.implementation_sha256,
+        repo_commit=args.repo_commit,
+        environment_signature_sha256=args.environment_signature_sha256,
+        sensor_id=config_document["sensor_id"],
+        host_id=config_document["subject_id"],
+        collector_id=config_document["collector_id"],
+        protocol_path=args.protocol,
+        catalog_path=args.scenario_catalog,
+        schema_dir=args.schema_dir,
+    )
+    _validate(
+        matrix,
+        args.schema_dir / "service_pressure_instrumentation_matrix.v1.schema.json",
+        "service-pressure instrumentation matrix",
+    )
+    protocol = _load_json(args.protocol)
+    catalog = _load_json(args.scenario_catalog)
+    from hashlib import sha256
+
+    catalog_hash = sha256(args.scenario_catalog.read_bytes()).hexdigest()
+    for manifest, specification in documents:
+        _validate(
+            manifest,
+            args.schema_dir / "experiment_run_manifest.v1.schema.json",
+            manifest["run_id"],
+        )
+        if specification is not None:
+            _validate(
+                specification,
+                args.schema_dir / "service_pressure_workload_spec.v1.schema.json",
+                specification["spec_id"],
+            )
+            validate_service_pressure_contract(
+                manifest,
+                specification,
+                protocol=protocol,
+                catalog=catalog,
+                catalog_sha256=catalog_hash,
+                schema_dir=args.schema_dir,
+            )
+
+    write_json_exclusive(args.output_dir / "matrix.json", matrix)
+    for manifest, specification in documents:
+        control_dir = args.output_dir / "control" / f"run={manifest['run_id']}"
+        control_dir.mkdir(parents=True, exist_ok=False)
+        write_json_exclusive(control_dir / "planned-manifest.json", manifest)
+        if specification is not None:
+            write_json_exclusive(control_dir / "workload-spec.json", specification)
+    print(
+        json.dumps(
+            {
+                "output_dir": str(args.output_dir),
+                "matrix_sha256": matrix["matrix_sha256"],
+                "run_count": matrix["run_count"],
+                "estimated_total_seconds": matrix["estimated_total_seconds"],
+                "pilot_only": matrix["pilot_only"],
+                "training_eligible": matrix["training_eligible"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _validated_service_pressure_inputs(
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], Any, dict[str, Any]]:
+    from hashlib import sha256
+
+    from .instrumentation import validate_service_pressure_contract
+
+    manifest, config = _validated_collector_inputs(args)
+    specification = _load_json(args.specification)
+    _validate(
+        specification,
+        args.schema_dir / "service_pressure_workload_spec.v1.schema.json",
+        str(args.specification),
+    )
+    validate_service_pressure_contract(
+        manifest,
+        specification,
+        protocol=_load_json(args.protocol),
+        catalog=_load_json(args.scenario_catalog),
+        catalog_sha256=sha256(args.scenario_catalog.read_bytes()).hexdigest(),
+        schema_dir=args.schema_dir,
+    )
+    return manifest, config, specification
+
+
+def _service_pressure_preflight(args: argparse.Namespace) -> int:
+    from .collector import controlled_collector_preflight
+    from .poc import safe_container_runtime_preflight
+
+    manifest, config, specification = _validated_service_pressure_inputs(args)
+    collector_report = controlled_collector_preflight(
+        manifest,
+        config,
+        schema_dir=args.schema_dir,
+    )
+    runtime_report = safe_container_runtime_preflight(manifest, specification)
+    print(
+        json.dumps(
+            {"collector": collector_report, "runtime": runtime_report},
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _collect_service_pressure_run(args: argparse.Namespace) -> int:
+    from .collector import (
+        collect_controlled_run,
+        controlled_collector_preflight,
+        write_json_exclusive,
+    )
+    from .poc import DockerWorkloadLifecycle, safe_container_runtime_preflight
+
+    manifest, config, specification = _validated_service_pressure_inputs(args)
+    collector_report = controlled_collector_preflight(
+        manifest,
+        config,
+        schema_dir=args.schema_dir,
+    )
+    safe_container_runtime_preflight(manifest, specification)
+    lifecycle = DockerWorkloadLifecycle(manifest, specification)
+    collection_receipt = collect_controlled_run(
+        manifest,
+        config,
+        schema_dir=args.schema_dir,
+        lifecycle=lifecycle,
+        ntp_synchronized=collector_report["ntp_synchronized"],
+    )
+    execution_receipt = lifecycle.execution_receipt()
+    _validate(
+        collection_receipt,
+        args.schema_dir / "experiment_collection_receipt.v1.schema.json",
+        "collection receipt",
+    )
+    _validate(
+        execution_receipt,
+        args.schema_dir / "pi_poc_execution_receipt.v1.schema.json",
+        "execution receipt",
+    )
+    run_dir = (
+        config.spool_directory
+        / f"run={manifest['run_id']}"
+        / f"scope={config.metric_scope}"
+    )
+    execution_path = run_dir / "pi-poc-execution-receipt.json"
+    write_json_exclusive(execution_path, execution_receipt)
+    print(
+        json.dumps(
+            {
+                "run_id": manifest["run_id"],
+                "collection_receipt": str(run_dir / "collection-receipt.json"),
+                "execution_receipt": str(execution_path),
+                "records": collection_receipt["record_count"],
+                "workload_summary": execution_receipt["workload_summary"],
+                "cleanup_verified": execution_receipt["cleanup_verified"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _finalize_service_pressure_manifest(args: argparse.Namespace) -> int:
+    from hashlib import sha256
+
+    from .batch import canonical_sha256
+    from .collector import finalize_idle_manifest, write_json_exclusive
+    from .instrumentation import validate_service_pressure_contract
+
+    manifest = _load_json(args.manifest)
+    specification = _load_json(args.specification)
+    collection_receipt = _load_json(args.collection_receipt)
+    execution_receipt = _load_json(args.execution_receipt)
+    _validate(
+        manifest,
+        args.schema_dir / "experiment_run_manifest.v1.schema.json",
+        str(args.manifest),
+    )
+    _validate(
+        specification,
+        args.schema_dir / "service_pressure_workload_spec.v1.schema.json",
+        str(args.specification),
+    )
+    validate_service_pressure_contract(
+        manifest,
+        specification,
+        protocol=_load_json(args.protocol),
+        catalog=_load_json(args.scenario_catalog),
+        catalog_sha256=sha256(args.scenario_catalog.read_bytes()).hexdigest(),
+        schema_dir=args.schema_dir,
+    )
+    _validate(
+        execution_receipt,
+        args.schema_dir / "pi_poc_execution_receipt.v1.schema.json",
+        str(args.execution_receipt),
+    )
+    claimed_hash = execution_receipt["receipt_sha256"]
+    without_hash = dict(execution_receipt)
+    without_hash.pop("receipt_sha256")
+    if canonical_sha256(without_hash) != claimed_hash:
+        raise DatasetContractError("execution receipt content hash does not match")
+    if execution_receipt["run_id"] != manifest["run_id"]:
+        raise DatasetContractError("execution receipt run_id does not match manifest")
+    if execution_receipt["scenario_id"] != manifest["workload"]["scenario_id"]:
+        raise DatasetContractError("execution receipt scenario does not match manifest")
+    if execution_receipt["manifest_content_sha256"] != canonical_sha256(manifest):
+        raise DatasetContractError("execution receipt does not bind the planned manifest")
+    if execution_receipt["specification_content_sha256"] != canonical_sha256(
+        specification
+    ):
+        raise DatasetContractError("execution receipt does not bind the specification")
+    completed = finalize_idle_manifest(
+        manifest,
+        collection_receipt,
+        run_dir=args.collection_receipt.parent,
+        schema_dir=args.schema_dir,
+    )
+    execution_id = execution_receipt["receipt_id"]
+    if execution_id not in completed["labels"]["evidence_receipt_ids"]:
+        completed["labels"]["evidence_receipt_ids"].append(execution_id)
+    _validate(
+        completed,
+        args.schema_dir / "experiment_run_manifest.v1.schema.json",
+        "completed manifest",
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    write_json_exclusive(args.output, completed)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "run_id": completed["run_id"],
+                "state": completed["state"],
+                "evidence_receipt_ids": completed["labels"]["evidence_receipt_ids"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _summarize_service_pressure_signals(args: argparse.Namespace) -> int:
+    from hashlib import sha256
+
+    from .batch import write_json_exclusive
+    from .instrumentation import summarize_service_pressure_signals
+
+    manifest = _load_json(args.manifest)
+    _validate(
+        manifest,
+        args.schema_dir / "experiment_run_manifest.v1.schema.json",
+        str(args.manifest),
+    )
+    telemetry_schema = args.schema_dir / "hardware_telemetry_sample.v1.schema.json"
+    collection_receipt = _load_json(args.collection_receipt)
+    _validate(
+        collection_receipt,
+        args.schema_dir / "experiment_collection_receipt.v1.schema.json",
+        str(args.collection_receipt),
+    )
+    from .collector import verify_collection_receipt
+
+    telemetry_validator = Draft202012Validator(
+        _load_json(telemetry_schema),
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+    )
+    verify_collection_receipt(
+        collection_receipt,
+        run_dir=args.collection_receipt.parent,
+        telemetry_validator=telemetry_validator,
+    )
+    if collection_receipt["run_id"] != manifest["run_id"]:
+        raise DatasetContractError("collection receipt run_id does not match manifest")
+    if collection_receipt["receipt_id"] not in manifest["labels"]["evidence_receipt_ids"]:
+        raise DatasetContractError("completed manifest does not cite collection receipt")
+    expected_paths = {
+        (args.collection_receipt.parent / segment["filename"]).resolve()
+        for segment in collection_receipt["segments"]
+    }
+    provided_paths = {path.resolve() for path in args.telemetry}
+    if provided_paths != expected_paths or len(args.telemetry) != len(expected_paths):
+        raise DatasetContractError(
+            "telemetry arguments must exactly match collection receipt segments"
+        )
+    samples: list[dict[str, Any]] = []
+    source_segments: list[dict[str, str]] = []
+    for telemetry_path in args.telemetry:
+        segment_samples = _load_jsonl(telemetry_path)
+        for index, sample in enumerate(segment_samples, start=1):
+            _validate(sample, telemetry_schema, f"{telemetry_path}:{index}")
+        samples.extend(segment_samples)
+        source_segments.append(
+            {
+                "filename": telemetry_path.name,
+                "sha256": sha256(telemetry_path.read_bytes()).hexdigest(),
+            }
+        )
+    report = summarize_service_pressure_signals(
+        manifest,
+        samples,
+        collection_receipt_sha256=collection_receipt["receipt_sha256"],
+        source_segments=source_segments,
+    )
+    _validate(
+        report,
+        args.schema_dir / "service_pressure_signal_report.v1.schema.json",
+        "service-pressure signal report",
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    write_json_exclusive(args.output, report)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "report_sha256": report["report_sha256"],
+                "candidate_signal_count": report["quality"]["candidate_signal_count"],
+                "feature_freeze_review_eligible_count": report["quality"][
+                    "feature_freeze_review_eligible_count"
+                ],
+                "model_feature_eligible": report["model_feature_eligible"],
             },
             sort_keys=True,
         )
@@ -859,6 +1211,78 @@ def _parser() -> argparse.ArgumentParser:
     pi_prepare.add_argument("--output-dir", type=Path, required=True)
     pi_prepare.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     pi_prepare.set_defaults(handler=_prepare_pi_poc_matrix)
+
+    instrumentation_prepare = subparsers.add_parser(
+        "prepare-service-pressure-pilot",
+        help="freeze one excluded 7-scenario instrumentation run per protocol scenario",
+    )
+    instrumentation_prepare.add_argument("--experiment-id", required=True)
+    instrumentation_prepare.add_argument("--generation", default="v1")
+    instrumentation_prepare.add_argument("--image-id", required=True)
+    instrumentation_prepare.add_argument("--implementation-sha256", required=True)
+    instrumentation_prepare.add_argument("--repo-commit", required=True)
+    instrumentation_prepare.add_argument("--environment-signature-sha256", required=True)
+    instrumentation_prepare.add_argument("--config", type=Path, required=True)
+    instrumentation_prepare.add_argument("--protocol", type=Path, required=True)
+    instrumentation_prepare.add_argument("--scenario-catalog", type=Path, required=True)
+    instrumentation_prepare.add_argument("--output-dir", type=Path, required=True)
+    instrumentation_prepare.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    instrumentation_prepare.set_defaults(handler=_prepare_service_pressure_pilot)
+
+    instrumentation_preflight = subparsers.add_parser(
+        "service-pressure-pilot-preflight",
+        help="validate one controlled instrumentation spec and current Pi safety gates",
+    )
+    instrumentation_preflight.add_argument("--manifest", type=Path, required=True)
+    instrumentation_preflight.add_argument("--config", type=Path, required=True)
+    instrumentation_preflight.add_argument("--specification", type=Path, required=True)
+    instrumentation_preflight.add_argument("--protocol", type=Path, required=True)
+    instrumentation_preflight.add_argument("--scenario-catalog", type=Path, required=True)
+    instrumentation_preflight.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    instrumentation_preflight.set_defaults(handler=_service_pressure_preflight)
+
+    instrumentation_collect = subparsers.add_parser(
+        "collect-service-pressure-pilot-run",
+        help="collect one reviewed instrumentation run with a fixed safe-container workload",
+    )
+    instrumentation_collect.add_argument("--manifest", type=Path, required=True)
+    instrumentation_collect.add_argument("--config", type=Path, required=True)
+    instrumentation_collect.add_argument("--specification", type=Path, required=True)
+    instrumentation_collect.add_argument("--protocol", type=Path, required=True)
+    instrumentation_collect.add_argument("--scenario-catalog", type=Path, required=True)
+    instrumentation_collect.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    instrumentation_collect.set_defaults(handler=_collect_service_pressure_run)
+
+    instrumentation_finalize = subparsers.add_parser(
+        "finalize-service-pressure-pilot-manifest",
+        help="bind controlled instrumentation collection/execution evidence to a manifest",
+    )
+    instrumentation_finalize.add_argument("--manifest", type=Path, required=True)
+    instrumentation_finalize.add_argument("--specification", type=Path, required=True)
+    instrumentation_finalize.add_argument("--protocol", type=Path, required=True)
+    instrumentation_finalize.add_argument("--scenario-catalog", type=Path, required=True)
+    instrumentation_finalize.add_argument("--collection-receipt", type=Path, required=True)
+    instrumentation_finalize.add_argument("--execution-receipt", type=Path, required=True)
+    instrumentation_finalize.add_argument("--output", type=Path, required=True)
+    instrumentation_finalize.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    instrumentation_finalize.set_defaults(handler=_finalize_service_pressure_manifest)
+
+    signal_summary = subparsers.add_parser(
+        "summarize-service-pressure-signals",
+        help="report candidate availability and phase deltas without changing model features",
+    )
+    signal_summary.add_argument("--manifest", type=Path, required=True)
+    signal_summary.add_argument("--collection-receipt", type=Path, required=True)
+    signal_summary.add_argument(
+        "--telemetry",
+        type=Path,
+        nargs="+",
+        required=True,
+        metavar="JSONL",
+    )
+    signal_summary.add_argument("--output", type=Path, required=True)
+    signal_summary.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+    signal_summary.set_defaults(handler=_summarize_service_pressure_signals)
     return parser
 
 
