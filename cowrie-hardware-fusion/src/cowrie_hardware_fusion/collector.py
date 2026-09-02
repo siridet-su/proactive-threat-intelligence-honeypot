@@ -22,10 +22,21 @@ import psutil
 from jsonschema import Draft202012Validator
 
 from .dataset import DatasetContractError
+from .service_pressure import (
+    cgroup_with_rates,
+    counters_with_rates,
+    pressure_with_rates,
+    read_cgroup_snapshot,
+    read_pressure,
+    read_socket_summary,
+    read_tcp_pressure,
+    read_tcp_states,
+    resolve_unified_cgroup,
+)
 from .spool import BoundedSegmentSpool, SpoolLimits
 
 
-COLLECTOR_VERSION = "0.3.0"
+COLLECTOR_VERSION = "0.4.0"
 COLLECTOR_SCHEMA_VERSION = "experimental_collector_config.v1"
 RECEIPT_SCHEMA_VERSION = "experiment_collection_receipt.v1"
 
@@ -192,7 +203,7 @@ def collector_source_sha256() -> str:
 
     digest = sha256()
     package_dir = Path(__file__).resolve().parent
-    for name in ("collector.py", "spool.py"):
+    for name in ("collector.py", "service_pressure.py", "spool.py"):
         payload = (package_dir / name).read_bytes()
         digest.update(name.encode("utf-8"))
         digest.update(b"\0")
@@ -288,10 +299,27 @@ class LinuxSystemProbe:
         self._previous_at_ns = time.monotonic_ns()
         self._previous_disk = psutil.disk_io_counters(perdisk=True) or {}
         self._previous_network = psutil.net_io_counters(pernic=True)
+        self._previous_host_pressure: dict[str, Any] = {}
+        for resource in ("cpu", "memory", "io"):
+            try:
+                self._previous_host_pressure[resource] = read_pressure(
+                    Path(f"/proc/pressure/{resource}")
+                )
+            except (OSError, ValueError):
+                continue
+        try:
+            self._previous_host_tcp_pressure = read_tcp_pressure(
+                Path("/proc/net/netstat")
+            )
+        except (OSError, ValueError):
+            self._previous_host_tcp_pressure = {}
         self._target_process: psutil.Process | None = None
         self._target_process_id_hash: str | None = None
         self._target_parent_process_id_hash: str | None = None
         self._target_cgroup_id: str | None = None
+        self._target_cgroup_path: Path | None = None
+        self._previous_target_cgroup: dict[str, Any] = {}
+        self._previous_target_tcp_pressure: dict[str, int] = {}
 
     def set_target_process(self, process_id: int) -> None:
         """Observe one fixed container process without exposing its host PID."""
@@ -320,8 +348,20 @@ class LinuxSystemProbe:
                 if line.startswith("0::")
             )
             self._target_cgroup_id = sha256(cgroup_path.encode("utf-8")).hexdigest()
-        except (OSError, StopIteration, IndexError):
+            self._target_cgroup_path = resolve_unified_cgroup(process_id)
+            self._previous_target_cgroup = read_cgroup_snapshot(
+                self._target_cgroup_path
+            )
+        except (OSError, StopIteration, IndexError, ValueError):
             self._target_cgroup_id = None
+            self._target_cgroup_path = None
+            self._previous_target_cgroup = {}
+        try:
+            self._previous_target_tcp_pressure = read_tcp_pressure(
+                Path(f"/proc/{process_id}/net/netstat")
+            )
+        except (OSError, ValueError):
+            self._previous_target_tcp_pressure = {}
         process.cpu_percent(interval=None)
         self._target_process = process
 
@@ -330,6 +370,9 @@ class LinuxSystemProbe:
         self._target_process_id_hash = None
         self._target_parent_process_id_hash = None
         self._target_cgroup_id = None
+        self._target_cgroup_path = None
+        self._previous_target_cgroup = {}
+        self._previous_target_tcp_pressure = {}
 
     @staticmethod
     def _process_socket_count(process_id: int) -> int | None:
@@ -350,7 +393,9 @@ class LinuxSystemProbe:
     def _sample_target_process(
         self,
         missing: list[str],
+        resets: list[str],
         errors: list[str],
+        elapsed_seconds: float,
     ) -> dict[str, Any] | None:
         process = self._target_process
         if process is None:
@@ -360,7 +405,7 @@ class LinuxSystemProbe:
             socket_count = self._process_socket_count(process.pid)
             if socket_count is None:
                 missing.append("process.target.socket_count")
-            return {
+            result: dict[str, Any] = {
                 "process_id_hash": self._target_process_id_hash,
                 "parent_process_id_hash": self._target_parent_process_id_hash,
                 "cpu_percent_single_core_basis": float(
@@ -371,6 +416,61 @@ class LinuxSystemProbe:
                 "socket_count": socket_count,
                 "cgroup_id": self._target_cgroup_id,
             }
+            try:
+                switches = process.num_ctx_switches()
+                result["voluntary_context_switches_total"] = int(switches.voluntary)
+                result["involuntary_context_switches_total"] = int(
+                    switches.involuntary
+                )
+            except (OSError, psutil.Error):
+                missing.append("process.target.context_switches")
+
+            target_network_root = Path(f"/proc/{process.pid}/net")
+            try:
+                result["tcp_states"] = read_tcp_states(target_network_root)
+            except (OSError, ValueError) as exc:
+                missing.append("process.target.tcp_states")
+                errors.append(f"process.target.tcp_states:{type(exc).__name__}")
+            try:
+                result["socket_summary"] = read_socket_summary(target_network_root)
+            except (OSError, ValueError) as exc:
+                missing.append("process.target.socket_summary")
+                errors.append(f"process.target.socket_summary:{type(exc).__name__}")
+            try:
+                current_tcp_pressure = read_tcp_pressure(
+                    target_network_root / "netstat"
+                )
+                result["tcp_pressure"] = counters_with_rates(
+                    current_tcp_pressure,
+                    self._previous_target_tcp_pressure,
+                    elapsed_seconds,
+                    reset_prefix="process.target.tcp_pressure",
+                    resets=resets,
+                )
+                self._previous_target_tcp_pressure = current_tcp_pressure
+            except (OSError, ValueError) as exc:
+                missing.append("process.target.tcp_pressure")
+                errors.append(f"process.target.tcp_pressure:{type(exc).__name__}")
+
+            if self._target_cgroup_path is not None:
+                try:
+                    current_cgroup = read_cgroup_snapshot(self._target_cgroup_path)
+                    result["cgroup"] = cgroup_with_rates(
+                        current_cgroup,
+                        self._previous_target_cgroup,
+                        elapsed_seconds,
+                        reset_prefix="process.target.cgroup",
+                        resets=resets,
+                    )
+                    self._previous_target_cgroup = current_cgroup
+                except (OSError, ValueError) as exc:
+                    result["cgroup"] = None
+                    missing.append("process.target.cgroup")
+                    errors.append(f"process.target.cgroup:{type(exc).__name__}")
+            else:
+                result["cgroup"] = None
+                missing.append("process.target.cgroup")
+            return result
         except (OSError, psutil.Error) as exc:
             missing.append("process.target")
             errors.append(f"process.target:{type(exc).__name__}")
@@ -410,6 +510,28 @@ class LinuxSystemProbe:
             valid = False
             missing.append("cpu.per_core_percent")
 
+        current_host_pressure: dict[str, Any] = {}
+        for resource, destination in (
+            ("cpu", cpu_block),
+            ("memory", None),
+            ("io", None),
+        ):
+            try:
+                current = read_pressure(Path(f"/proc/pressure/{resource}"))
+                current_host_pressure[resource] = current
+                enriched = pressure_with_rates(
+                    current,
+                    self._previous_host_pressure.get(resource),
+                    elapsed,
+                    reset_prefix=f"host.pressure.{resource}",
+                    resets=resets,
+                )
+                if destination is not None:
+                    destination["pressure"] = enriched
+            except (OSError, ValueError) as exc:
+                missing.append(f"host.pressure.{resource}")
+                errors.append(f"host.pressure.{resource}:{type(exc).__name__}")
+
         virtual = psutil.virtual_memory()
         swap = psutil.swap_memory()
         memory_block: dict[str, Any] = {
@@ -421,6 +543,14 @@ class LinuxSystemProbe:
             "swap_total_bytes": int(swap.total),
             "swap_used_bytes": int(swap.used),
         }
+        if "memory" in current_host_pressure:
+            memory_block["pressure"] = pressure_with_rates(
+                current_host_pressure["memory"],
+                self._previous_host_pressure.get("memory"),
+                elapsed,
+                reset_prefix="host.pressure.memory",
+                resets=resets,
+            )
         try:
             vmstat = _read_vmstat()
             if "pgfault" in vmstat:
@@ -474,6 +604,14 @@ class LinuxSystemProbe:
             "root_used_percent": float(root.percent),
             "devices": disk_devices,
         }
+        if "io" in current_host_pressure:
+            disk_block["pressure"] = pressure_with_rates(
+                current_host_pressure["io"],
+                self._previous_host_pressure.get("io"),
+                elapsed,
+                reset_prefix="host.pressure.io",
+                resets=resets,
+            )
 
         current_network = psutil.net_io_counters(pernic=True)
         try:
@@ -553,6 +691,29 @@ class LinuxSystemProbe:
             "connection_count": connection_count,
             "socket_count": socket_count,
         }
+        try:
+            network_block["tcp_states"] = read_tcp_states(Path("/proc/net"))
+        except (OSError, ValueError) as exc:
+            missing.append("network.tcp_states")
+            errors.append(f"network.tcp_states:{type(exc).__name__}")
+        try:
+            network_block["socket_summary"] = read_socket_summary(Path("/proc/net"))
+        except (OSError, ValueError) as exc:
+            missing.append("network.socket_summary")
+            errors.append(f"network.socket_summary:{type(exc).__name__}")
+        try:
+            current_tcp_pressure = read_tcp_pressure(Path("/proc/net/netstat"))
+            network_block["tcp_pressure"] = counters_with_rates(
+                current_tcp_pressure,
+                self._previous_host_tcp_pressure,
+                elapsed,
+                reset_prefix="network.tcp_pressure",
+                resets=resets,
+            )
+            self._previous_host_tcp_pressure = current_tcp_pressure
+        except (OSError, ValueError) as exc:
+            missing.append("network.tcp_pressure")
+            errors.append(f"network.tcp_pressure:{type(exc).__name__}")
 
         temperature = _temperature_c()
         if temperature is None:
@@ -571,7 +732,12 @@ class LinuxSystemProbe:
             if isinstance(threads, int):
                 thread_count += threads
         target_expected = self._target_process is not None
-        target_process = self._sample_target_process(missing, errors)
+        target_process = self._sample_target_process(
+            missing,
+            resets,
+            errors,
+            elapsed,
+        )
         if target_expected and target_process is None:
             valid = False
         process_block = {
@@ -583,6 +749,7 @@ class LinuxSystemProbe:
         self._previous_at_ns = observed_ns
         self._previous_disk = current_disk
         self._previous_network = current_network
+        self._previous_host_pressure = current_host_pressure
         return ProbeResult(
             cpu=cpu_block,
             memory=memory_block,
@@ -605,7 +772,7 @@ def _validate_common_contract(
     if config.collector_version != COLLECTOR_VERSION:
         raise DatasetContractError("collector config version does not match runtime")
     if config.metric_scope != "pi_sensor":
-        raise DatasetContractError("collector v0.3.0 supports only pi_sensor")
+        raise DatasetContractError("collector v0.4.0 supports only pi_sensor")
     if config.sensor_id != manifest["sensor"]["sensor_id"]:
         raise DatasetContractError("config sensor_id does not match manifest")
     if config.subject_id != manifest["sensor"]["host_id"]:
@@ -617,7 +784,7 @@ def _validate_common_contract(
             "manifest collector_sha256 does not match this collector source"
         )
     if manifest["timing"]["sample_interval_seconds"] != 1:
-        raise DatasetContractError("collector v0.3.0 requires a 1-second manifest interval")
+        raise DatasetContractError("collector v0.4.0 requires a 1-second manifest interval")
     if "pi_sensor" not in manifest["execution_boundary"]["metric_scopes"]:
         raise DatasetContractError("manifest does not authorize pi_sensor telemetry")
     if manifest["collection"]["command_events_required"] is not False:

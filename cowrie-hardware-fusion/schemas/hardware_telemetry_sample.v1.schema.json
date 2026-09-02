@@ -194,6 +194,9 @@
         "context_switches_total": {
           "type": "integer",
           "minimum": 0
+        },
+        "pressure": {
+          "$ref": "#/$defs/pressure_observation"
         }
       }
     },
@@ -231,6 +234,9 @@
         },
         "oom_kills_total": {
           "$ref": "#/$defs/nonnegative_integer"
+        },
+        "pressure": {
+          "$ref": "#/$defs/pressure_observation"
         }
       }
     },
@@ -278,6 +284,9 @@
               }
             }
           }
+        },
+        "pressure": {
+          "$ref": "#/$defs/pressure_observation"
         }
       }
     },
@@ -380,6 +389,15 @@
         },
         "dns_queries_per_second": {
           "$ref": "#/$defs/nonnegative_number"
+        },
+        "tcp_states": {
+          "$ref": "#/$defs/tcp_states"
+        },
+        "socket_summary": {
+          "$ref": "#/$defs/socket_summary"
+        },
+        "tcp_pressure": {
+          "$ref": "#/$defs/tcp_pressure"
         }
       }
     },
@@ -446,6 +464,27 @@
             "cgroup_id": {
               "type": ["string", "null"],
               "maxLength": 128
+            },
+            "voluntary_context_switches_total": {
+              "$ref": "#/$defs/nonnegative_integer"
+            },
+            "involuntary_context_switches_total": {
+              "$ref": "#/$defs/nonnegative_integer"
+            },
+            "tcp_states": {
+              "$ref": "#/$defs/tcp_states"
+            },
+            "socket_summary": {
+              "$ref": "#/$defs/socket_summary"
+            },
+            "tcp_pressure": {
+              "$ref": "#/$defs/tcp_pressure"
+            },
+            "cgroup": {
+              "anyOf": [
+                {"$ref": "#/$defs/cgroup_observation"},
+                {"type": "null"}
+              ]
             }
           }
         }
@@ -509,6 +548,109 @@
     }
   },
   "$defs": {
+    "pressure_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["some"],
+      "properties": {
+        "some": {"$ref": "#/$defs/pressure_line"},
+        "full": {"$ref": "#/$defs/pressure_line"}
+      }
+    },
+    "pressure_line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["avg10_percent", "avg60_percent", "avg300_percent", "total_stall_usec", "stall_usec_per_second"],
+      "properties": {
+        "avg10_percent": {"$ref": "#/$defs/percent"},
+        "avg60_percent": {"$ref": "#/$defs/percent"},
+        "avg300_percent": {"$ref": "#/$defs/percent"},
+        "total_stall_usec": {"$ref": "#/$defs/nonnegative_integer"},
+        "stall_usec_per_second": {"$ref": "#/$defs/nonnegative_number"}
+      }
+    },
+    "tcp_states": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["established", "syn_sent", "syn_received", "fin_wait_1", "fin_wait_2", "time_wait", "closed", "close_wait", "last_ack", "listen", "closing", "new_syn_received", "total"],
+      "properties": {
+        "established": {"$ref": "#/$defs/nonnegative_integer"},
+        "syn_sent": {"$ref": "#/$defs/nonnegative_integer"},
+        "syn_received": {"$ref": "#/$defs/nonnegative_integer"},
+        "fin_wait_1": {"$ref": "#/$defs/nonnegative_integer"},
+        "fin_wait_2": {"$ref": "#/$defs/nonnegative_integer"},
+        "time_wait": {"$ref": "#/$defs/nonnegative_integer"},
+        "closed": {"$ref": "#/$defs/nonnegative_integer"},
+        "close_wait": {"$ref": "#/$defs/nonnegative_integer"},
+        "last_ack": {"$ref": "#/$defs/nonnegative_integer"},
+        "listen": {"$ref": "#/$defs/nonnegative_integer"},
+        "closing": {"$ref": "#/$defs/nonnegative_integer"},
+        "new_syn_received": {"$ref": "#/$defs/nonnegative_integer"},
+        "total": {"$ref": "#/$defs/nonnegative_integer"}
+      }
+    },
+    "socket_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sockets_used", "tcp_inuse", "tcp_orphan", "tcp_time_wait", "tcp_allocated", "tcp_memory_pages", "udp_inuse", "udp_memory_pages", "tcp6_inuse", "udp6_inuse"],
+      "properties": {
+        "sockets_used": {"$ref": "#/$defs/nonnegative_integer"},
+        "tcp_inuse": {"$ref": "#/$defs/nonnegative_integer"},
+        "tcp_orphan": {"$ref": "#/$defs/nonnegative_integer"},
+        "tcp_time_wait": {"$ref": "#/$defs/nonnegative_integer"},
+        "tcp_allocated": {"$ref": "#/$defs/nonnegative_integer"},
+        "tcp_memory_pages": {"$ref": "#/$defs/nonnegative_integer"},
+        "udp_inuse": {"$ref": "#/$defs/nonnegative_integer"},
+        "udp_memory_pages": {"$ref": "#/$defs/nonnegative_integer"},
+        "tcp6_inuse": {"$ref": "#/$defs/nonnegative_integer"},
+        "udp6_inuse": {"$ref": "#/$defs/nonnegative_integer"}
+      }
+    },
+    "tcp_pressure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "listen_overflows_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "listen_overflows_per_second": {"$ref": "#/$defs/nonnegative_number"},
+        "listen_drops_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "listen_drops_per_second": {"$ref": "#/$defs/nonnegative_number"},
+        "request_queue_full_cookies_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "request_queue_full_cookies_per_second": {"$ref": "#/$defs/nonnegative_number"},
+        "request_queue_full_drops_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "request_queue_full_drops_per_second": {"$ref": "#/$defs/nonnegative_number"},
+        "backlog_drops_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "backlog_drops_per_second": {"$ref": "#/$defs/nonnegative_number"},
+        "memory_pressure_events_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "memory_pressure_events_per_second": {"$ref": "#/$defs/nonnegative_number"},
+        "aborts_on_memory_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "aborts_on_memory_per_second": {"$ref": "#/$defs/nonnegative_number"},
+        "receive_queue_drops_total": {"$ref": "#/$defs/nonnegative_integer"},
+        "receive_queue_drops_per_second": {"$ref": "#/$defs/nonnegative_number"}
+      }
+    },
+    "counter_block": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/nonnegative_number"}
+    },
+    "cgroup_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {"$ref": "#/$defs/counter_block"},
+        "memory": {"$ref": "#/$defs/counter_block"},
+        "pids": {"$ref": "#/$defs/counter_block"},
+        "io": {"$ref": "#/$defs/counter_block"},
+        "pressure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {"$ref": "#/$defs/pressure_observation"},
+            "memory": {"$ref": "#/$defs/pressure_observation"},
+            "io": {"$ref": "#/$defs/pressure_observation"}
+          }
+        }
+      }
+    },
     "identifier": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"

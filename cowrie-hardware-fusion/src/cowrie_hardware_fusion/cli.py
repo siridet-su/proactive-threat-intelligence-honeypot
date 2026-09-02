@@ -122,7 +122,7 @@ def _collector_source_hash(args: argparse.Namespace) -> int:
 
 def _snapshot_experimental_hardware(args: argparse.Namespace) -> int:
     from .batch import write_json_exclusive
-    from .collector import CollectorConfig
+    from .collector import CollectorConfig, LinuxSystemProbe
     from .parity import capture_experimental_snapshot
 
     config_document = _load_json(args.config)
@@ -131,9 +131,14 @@ def _snapshot_experimental_hardware(args: argparse.Namespace) -> int:
         args.schema_dir / "experimental_collector_config.v1.schema.json",
         str(args.config),
     )
+    config = CollectorConfig.from_document(config_document)
+    probe = LinuxSystemProbe(config)
+    if args.target_pid is not None:
+        probe.set_target_process(args.target_pid)
     snapshot = capture_experimental_snapshot(
-        CollectorConfig.from_document(config_document),
+        config,
         interval_seconds=args.interval_seconds,
+        probe=probe,
     )
     if args.output is None:
         print(
@@ -684,6 +689,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parity_snapshot.add_argument("--config", type=Path, required=True)
     parity_snapshot.add_argument("--interval-seconds", type=float, default=1.0)
+    parity_snapshot.add_argument(
+        "--target-pid",
+        type=int,
+        help="observe one already-authorized target process without persisting its PID",
+    )
     parity_snapshot.add_argument("--output", type=Path)
     parity_snapshot.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     parity_snapshot.set_defaults(handler=_snapshot_experimental_hardware)

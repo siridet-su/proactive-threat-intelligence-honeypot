@@ -6,13 +6,14 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `PROTOCOL V2 FROZEN + COMMON-METRIC PARITY PASSED` มี collector,
+สถานะปัจจุบันคือ `SERVICE-PRESSURE TELEMETRY 0.4.0 PI CANARY PASSED` มี collector,
 dataset builder, receipt-driven source index, grouped split generator และ fixed
 safe-container runtime แล้ว Pi matrix จริงของ `T1496.001`/`T1499.002` สำเร็จ 15 runs
 XGBoost smoke แยก compute simulation ได้แต่ service-exhaustion ยังไม่ผ่าน Protocol v2 จึง
 เปลี่ยน hardware target เป็น observed impact, เพิ่ม matched benign controls และ lock final
 test ก่อนเก็บข้อมูลใหม่ Common Go/Python metrics ผ่าน parity บน Pi 225/225 comparisons
-แต่ Go Agent ยังไม่ใช่ full dataset collector และยังไม่มีโมเดลใหม่ที่พร้อม deploy
+และ experimental collector เพิ่ม host/target PSI, TCP pressure และ cgroup v2 observability
+แล้ว แต่ยังไม่ผ่าน 7-scenario signal pilot และยังไม่มีโมเดลใหม่ที่พร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -51,12 +52,14 @@ cowrie-hardware-fusion/
 8. **เสร็จ:** freeze protocol v2 สำหรับ 7 matched scenarios/140 planned runs และ lock
    final-test wave 35 runs
 9. **เสร็จ:** audit common Go/Python metrics บน Pi ผ่าน 225/225 comparisons แบบ no-sink
-10. **ลำดับถัดไป:** เพิ่ม service-pressure observability/local-spool adapter แล้วเก็บเฉพาะ
-    development wave 70 runs ก่อนหยุด review signal
-11. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
-12. เลือก hardware branch จาก frozen evaluation protocol
-13. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
-14. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
+10. **เสร็จ:** เพิ่ม service-pressure observability ใน collector 0.4.0 และยืนยัน host/target
+    no-sink canary บน Pi
+11. **ลำดับถัดไป:** สร้างและรัน 7-scenario instrumentation pilot แบบ excluded data ก่อน
+    freeze feature revision แล้วจึงเก็บ development wave 70 runs
+12. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
+13. เลือก hardware branch จาก frozen evaluation protocol
+14. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
+15. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
 
 ## เอกสารเริ่มต้น
 
@@ -70,6 +73,7 @@ cowrie-hardware-fusion/
 - [Pi two-TTP PoC result — 2026-09-02](docs/pi_poc_results_2026-09-02.md)
 - [Hardware-impact experiment protocol v2](docs/hardware_impact_experiment_protocol.v2.md)
 - [Hardware Go Agent feature-parity audit](docs/hardware_agent_feature_parity_2026-09-02.md)
+- [Service-pressure observability v1](docs/service_pressure_observability.v1.md)
 - [Dataset storage plan v1](docs/dataset_storage_plan.v1.md)
 - [Pi environment audit](docs/pi_environment_audit_2026-09-01.md)
 - [Stage A idle pilot report](docs/pilot_idle_collection_2026-09-01.md)

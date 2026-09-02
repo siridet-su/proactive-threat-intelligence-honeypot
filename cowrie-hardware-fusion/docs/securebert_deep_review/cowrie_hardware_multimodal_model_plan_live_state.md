@@ -791,3 +791,35 @@ immutable receipt-bound spool ดังนั้น experimental collector ย�
 
 - [Hardware-impact experiment protocol v2](../hardware_impact_experiment_protocol.v2.md)
 - [Hardware Go Agent feature-parity audit](../hardware_agent_feature_parity_2026-09-02.md)
+
+## 21. Service-pressure observability implementation — 2026-09-02
+
+สถานะ: `COLLECTOR 0.4.0 IMPLEMENTED / PI CANARY PASS / SIGNAL PILOT NOT STARTED`
+
+ส่วนนี้ supersede ลำดับถัดไปข้อ 1 ใน Section 20:
+
+- experimental collector `0.4.0` เพิ่ม host CPU/memory/I/O PSI, TCP states, socket
+  allocation และ kernel listen/backlog/queue/memory-pressure totals/rates
+- target observation เพิ่ม context switches, network-namespace TCP states/socket/pressure
+  และ cgroup v2 CPU usage/throttling, memory events, PID usage, aggregate I/O และ
+  CPU/memory/I/O PSI
+- parser ไม่ persist address, port, raw IP, raw PID, command, credential หรือ simulator
+  operation count; collector source hash รวม module service-pressure แล้ว
+- Pi host no-sink snapshot valid โดย missing/error 0 และ target safe-container canary
+  revision 4 valid/schema-valid โดย missing/error 0
+- target canary เห็น TCP listen 1, established 2 และ cgroup blocks CPU/memory/PID/I/O/PSI
+  ครบ; readable empty `io.stat` ถูกนิยามเป็น zero I/O ไม่ใช่ missing
+- ทดลองอ่าน per-process FD/I/O แล้วพบ cross-UID permission boundary จึงตัด field นี้ออกและ
+  ไม่เพิ่ม root/ptrace capability; ใช้ cgroup I/O ที่อ่านได้โดยไม่ยกระดับสิทธิ์แทน
+- safe canary ใช้ `network=none`, read-only, non-root และ hard limits; cleanup ผ่าน,
+  production containers 9 ตัว, ไม่มี `chf-*` ค้าง และไม่มี Redis/MongoDB/Atlas write
+- automated tests ปัจจุบันผ่าน 52 tests
+
+Metric ใหม่ยังเป็น raw candidate observability และยังไม่ถูกเพิ่มเข้า frozen model feature
+profile เพราะ canary เดียวพิสูจน์ availability แต่ไม่พิสูจน์ class-separation signal ขั้นถัดไป
+คือสร้าง 7-scenario instrumentation matrix แบบ `pilot_only=true` scenario ละหนึ่ง run แล้ว
+วัด coverage/baseline deltas ก่อน freeze feature/profile revision และก่อน development wave
+70 runs
+
+รายละเอียด fields, privacy decision และ evidence hashes:
+[service_pressure_observability.v1.md](../service_pressure_observability.v1.md)

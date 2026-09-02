@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import cowrie_hardware_fusion.collector as collector_module
+from cowrie_hardware_fusion.cli import main as cli_main
 from cowrie_hardware_fusion.collector import CollectorConfig, ProbeResult
 from cowrie_hardware_fusion.dataset import DatasetContractError
 from cowrie_hardware_fusion.parity import (
@@ -165,3 +167,48 @@ def test_compare_rejects_snapshot_without_sink_and_service_isolation() -> None:
     invalid_experimental["quality"]["valid"] = False
     with pytest.raises(DatasetContractError, match="quality gate"):
         compare_hardware_snapshots(_go_snapshot(experimental), invalid_experimental)
+
+
+def test_snapshot_cli_observes_target_without_persisting_raw_pid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_pid = 4242
+
+    class FakeTargetProbe(FakeProbe):
+        def __init__(self, _config: CollectorConfig) -> None:
+            super().__init__(_probe_result())
+
+        def set_target_process(self, process_id: int) -> None:
+            assert process_id == target_pid
+            self.result.process["target"] = {
+                "process_id_hash": "a" * 64,
+                "cgroup_id": "b" * 64,
+            }
+
+    monkeypatch.setattr(collector_module, "LinuxSystemProbe", FakeTargetProbe)
+    output = tmp_path / "target-snapshot.json"
+
+    assert (
+        cli_main(
+            [
+                "snapshot-experimental-hardware",
+                "--config",
+                str(
+                    PROJECT_ROOT
+                    / "configs"
+                    / "experimental_collector.pi_sensor.pilot.example.json"
+                ),
+                "--interval-seconds",
+                "0.1",
+                "--target-pid",
+                str(target_pid),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert document["metrics"]["process"]["target"]["process_id_hash"] == "a" * 64
+    assert str(target_pid) not in output.read_text(encoding="utf-8")
