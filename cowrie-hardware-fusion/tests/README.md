@@ -31,6 +31,8 @@ validation หลัง serialize/reload
 
 development-wave tests ตรวจ 70-run exact coverage, two-day-slot schedule, deterministic
 ordering/seeds, schemas, artifact/profile/protocol bindings, matched treatments และ
-negative gates ที่ห้ามเปิด final test, เปลี่ยน schedule หรือย้อน claim เป็น pilot
+negative gates ที่ห้ามเปิด final test, เปลี่ยน schedule หรือย้อน claim เป็น pilot รวมทั้ง
+matrix round-trip validator และ controlled/idle preflight dispatch ที่ไม่เริ่ม collection
 
-ชุดถัดไปจะเพิ่ม development runtime/finalization และ shadow/canonical non-interference
+ชุดถัดไปจะเพิ่ม environment receipt, runtime finalization negative tests และ
+shadow/canonical non-interference

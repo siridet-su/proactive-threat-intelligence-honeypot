@@ -2,7 +2,7 @@
 
 วันที่เตรียม control set: 2026-09-03
 
-สถานะ: FROZEN LOCALLY / PI PREFLIGHT PENDING / FINAL TEST CLOSED
+สถานะ: RUNTIME TOOLING READY / FRESH PI RECEIPT PENDING / FINAL TEST CLOSED
 
 ## Scope
 
@@ -86,9 +86,38 @@ development-only claims และ final-test lock
 2. audit Pi ปัจจุบัน: image identity, environment signature, disk/RAM/load/temperature,
    NTP, production-container count และ hardware-metrics services
 3. หาก identity ใดเปลี่ยน ให้ regenerate control set และบันทึก matrix hash ใหม่
-4. เพิ่ม runtime commands ที่ validate development spec โดยตรง แล้วทำ no-collection
+4. ใช้ runtime commands ที่ validate development spec/matrix โดยตรง แล้วทำ no-collection
    preflight กับ run แรกของแต่ละ family
 5. เก็บ day slot 1 เท่านั้น ตรวจ receipts/cleanup/quality ก่อนนัดเก็บ day slot 2
 
 ยังไม่อนุญาต calibration/final-test generation หรือ model training จน development
 collection และ audit ผ่าน
+
+## Runtime commands
+
+ทุกคำสั่งอ่าน matrix และ control directories ครบ 70 ชุดและตรวจ hashes/schema/semantic
+ก่อนเลือก run เดียว จึงไม่สามารถส่ง manifest ที่อยู่นอก matrix เข้า collector ได้:
+
+- validate-hardware-impact-development-controls — ตรวจ 70 controls โดยไม่แตะ Pi runtime
+- hardware-impact-development-preflight — ตรวจ collector/Docker/headroom โดยไม่เก็บข้อมูล
+- collect-hardware-impact-development-run — เก็บหนึ่ง matrix-bound run
+- finalize-hardware-impact-development-manifest — ตรวจ collection/execution receipts,
+  observed-impact gate แล้วสร้าง completed manifest
+
+Idle runs ไม่มี workload spec/execution receipt และ dispatch ไป idle collector ส่วนอีก 60
+runs ใช้ reviewed safe-container lifecycle เดิม Service parameters ของ development schema
+ถูกส่งต่อเป็น connection-mode, capacity และ handler-delay เหมือน pilot v2
+
+## Read-only Pi audit 2026-09-03 04:09 +07
+
+- aarch64, kernel 6.8.0-1063-raspi, uptime ประมาณ 1 ชั่วโมง 18 นาที
+- NTP synchronized, load 1m 0.10
+- available RAM 6,411,137,024 bytes, root free 65,331,101,696 bytes
+- production containers 9 ตัวทำงาน; experiment container ค้าง 0
+- Cowrie active
+- honeypot-hardware, hardware-metrics และ hardware-metrics-processor inactive
+- reviewed image ID/architecture/user/entrypoint/revision label ตรงทั้งหมด
+
+Pi เพิ่ง reboot ดังนั้น signature จาก pilot ไม่ใช้เป็น fresh development identity แม้
+software/image หลักยังตรง ต้อง capture receipt ใหม่หลัง runtime tooling ถูก deploy แล้ว
+regenerate matrix ก่อน preflight จริง

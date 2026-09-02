@@ -61,6 +61,43 @@ def _semantic_arguments() -> dict:
     }
 
 
+def _write_controls(root: Path) -> tuple[dict, list[tuple[dict, dict | None]]]:
+    matrix, documents = _build()
+    root.mkdir()
+    (root / "matrix.json").write_text(json.dumps(matrix), encoding="utf-8")
+    control_root = root / "control"
+    for manifest, specification in documents:
+        run_root = control_root / f"run={manifest['run_id']}"
+        run_root.mkdir(parents=True)
+        (run_root / "planned-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        if specification is not None:
+            (run_root / "workload-spec.json").write_text(
+                json.dumps(specification), encoding="utf-8"
+            )
+    return matrix, documents
+
+
+def _runtime_cli_arguments(root: Path, run_id: str, config: Path) -> list[str]:
+    return [
+        "--matrix",
+        str(root / "matrix.json"),
+        "--control-dir",
+        str(root / "control"),
+        "--protocol",
+        str(PROTOCOL_PATH),
+        "--feature-contract",
+        str(FEATURE_CONTRACT_PATH),
+        "--scenario-catalog",
+        str(CATALOG_PATH),
+        "--run-id",
+        run_id,
+        "--config",
+        str(config),
+    ]
+
+
 def test_development_matrix_has_exact_70_run_coverage_and_valid_schemas() -> None:
     matrix, documents = _build()
     _validator("hardware_impact_development_matrix.v1.schema.json").validate(matrix)
@@ -228,3 +265,80 @@ def test_cli_writes_only_development_controls(tmp_path: Path) -> None:
         matrix, documents, **_semantic_arguments()
     )
     assert summary["run_count"] == 70
+    validation_exit = cli_main(
+        [
+            "validate-hardware-impact-development-controls",
+            "--matrix",
+            str(output / "matrix.json"),
+            "--control-dir",
+            str(output / "control"),
+            "--protocol",
+            str(PROTOCOL_PATH),
+            "--feature-contract",
+            str(FEATURE_CONTRACT_PATH),
+            "--scenario-catalog",
+            str(CATALOG_PATH),
+        ]
+    )
+    assert validation_exit == 0
+
+
+def test_development_preflight_dispatches_controlled_and_idle_without_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cowrie_hardware_fusion.collector as collector
+    import cowrie_hardware_fusion.poc as poc
+
+    root = tmp_path / "controls"
+    matrix, _ = _write_controls(root)
+    config = _load(
+        PROJECT_ROOT
+        / "configs"
+        / "experimental_collector.pi_sensor.pilot.example.json"
+    )
+    config["spool"]["directory"] = str(tmp_path / "spool")
+    config_path = tmp_path / "collector.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    calls = {"controlled": 0, "idle": 0, "runtime": 0}
+
+    def controlled_preflight(*args: object, **kwargs: object) -> dict:
+        calls["controlled"] += 1
+        return {"ntp_synchronized": True}
+
+    def idle_preflight(*args: object, **kwargs: object) -> dict:
+        calls["idle"] += 1
+        return {"ntp_synchronized": True}
+
+    def runtime_preflight(*args: object, **kwargs: object) -> dict:
+        calls["runtime"] += 1
+        return {"execution_authorized": True, "execution_started": False}
+
+    monkeypatch.setattr(collector, "controlled_collector_preflight", controlled_preflight)
+    monkeypatch.setattr(collector, "collector_preflight", idle_preflight)
+    monkeypatch.setattr(poc, "safe_container_runtime_preflight", runtime_preflight)
+
+    controlled_run = next(
+        entry["run_id"] for entry in matrix["runs"] if entry["controlled_workload"]
+    )
+    idle_run = next(
+        entry["run_id"] for entry in matrix["runs"] if not entry["controlled_workload"]
+    )
+    assert (
+        cli_main(
+            [
+                "hardware-impact-development-preflight",
+                *_runtime_cli_arguments(root, controlled_run, config_path),
+            ]
+        )
+        == 0
+    )
+    assert (
+        cli_main(
+            [
+                "hardware-impact-development-preflight",
+                *_runtime_cli_arguments(root, idle_run, config_path),
+            ]
+        )
+        == 0
+    )
+    assert calls == {"controlled": 1, "idle": 1, "runtime": 1}

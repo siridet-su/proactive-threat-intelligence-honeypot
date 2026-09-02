@@ -835,6 +835,308 @@ def _prepare_hardware_impact_development(args: argparse.Namespace) -> int:
     return 0
 
 
+def _validated_development_controls(
+    args: argparse.Namespace,
+) -> tuple[
+    dict[str, Any],
+    dict[str, tuple[dict[str, Any], dict[str, Any] | None]],
+    dict[str, Any],
+]:
+    from hashlib import sha256
+
+    from .development import validate_development_matrix
+
+    matrix = _load_json(args.matrix)
+    protocol = _load_json(args.protocol)
+    feature_contract = _load_json(args.feature_contract)
+    catalog = _load_json(args.scenario_catalog)
+    _validate(
+        matrix,
+        args.schema_dir / "hardware_impact_development_matrix.v1.schema.json",
+        str(args.matrix),
+    )
+    _validate(
+        protocol,
+        args.schema_dir / "hardware_impact_experiment_protocol.v2.schema.json",
+        str(args.protocol),
+    )
+    _validate(
+        feature_contract,
+        args.schema_dir / "model_feature_contract.v1.schema.json",
+        str(args.feature_contract),
+    )
+    manifest_schema = args.schema_dir / "experiment_run_manifest.v1.schema.json"
+    specification_schema = (
+        args.schema_dir / "hardware_impact_development_workload_spec.v1.schema.json"
+    )
+    documents: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+    by_run: dict[str, tuple[dict[str, Any], dict[str, Any] | None]] = {}
+    for entry in matrix["runs"]:
+        run_id = entry["run_id"]
+        control_dir = args.control_dir / f"run={run_id}"
+        manifest_path = control_dir / "planned-manifest.json"
+        specification_path = control_dir / "workload-spec.json"
+        manifest = _load_json(manifest_path)
+        _validate(manifest, manifest_schema, str(manifest_path))
+        if entry["controlled_workload"]:
+            specification = _load_json(specification_path)
+            _validate(specification, specification_schema, str(specification_path))
+        else:
+            if specification_path.exists():
+                raise DatasetContractError(
+                    f"idle control unexpectedly has workload spec: {run_id}"
+                )
+            specification = None
+        documents.append((manifest, specification))
+        by_run[run_id] = (manifest, specification)
+    summary = validate_development_matrix(
+        matrix,
+        documents,
+        protocol=protocol,
+        feature_contract=feature_contract,
+        catalog=catalog,
+        catalog_sha256=sha256(args.scenario_catalog.read_bytes()).hexdigest(),
+        schema_dir=args.schema_dir,
+    )
+    return matrix, by_run, summary
+
+
+def _validate_hardware_impact_development_controls(args: argparse.Namespace) -> int:
+    matrix, _, summary = _validated_development_controls(args)
+    print(
+        json.dumps(
+            {
+                "matrix_id": matrix["matrix_id"],
+                **summary,
+            },
+            sort_keys=True,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _development_run_inputs(
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], Any, dict[str, Any] | None, dict[str, Any]]:
+    from .collector import CollectorConfig
+
+    _, by_run, _ = _validated_development_controls(args)
+    if args.run_id not in by_run:
+        raise DatasetContractError("run_id is absent from the development matrix")
+    manifest, specification = by_run[args.run_id]
+    config_document = _load_json(args.config)
+    _validate(
+        config_document,
+        args.schema_dir / "experimental_collector_config.v1.schema.json",
+        str(args.config),
+    )
+    return manifest, CollectorConfig.from_document(config_document), specification, by_run
+
+
+def _hardware_impact_development_preflight(args: argparse.Namespace) -> int:
+    from .collector import collector_preflight, controlled_collector_preflight
+    from .poc import safe_container_runtime_preflight
+
+    manifest, config, specification, _ = _development_run_inputs(args)
+    if specification is None:
+        collector_report = collector_preflight(
+            manifest, config, schema_dir=args.schema_dir
+        )
+        runtime_report = {
+            "execution_authorized": False,
+            "execution_started": False,
+            "reason": "neutral_idle_no_execution",
+        }
+    else:
+        collector_report = controlled_collector_preflight(
+            manifest, config, schema_dir=args.schema_dir
+        )
+        runtime_report = safe_container_runtime_preflight(manifest, specification)
+    print(
+        json.dumps(
+            {
+                "run_id": manifest["run_id"],
+                "partition": "development_train",
+                "collector": collector_report,
+                "runtime": runtime_report,
+                "collection_started": False,
+                "final_test_opened": False,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _collect_hardware_impact_development_run(args: argparse.Namespace) -> int:
+    from .collector import (
+        collect_controlled_run,
+        collect_idle_run,
+        collector_preflight,
+        controlled_collector_preflight,
+        write_json_exclusive,
+    )
+    from .poc import DockerWorkloadLifecycle, safe_container_runtime_preflight
+
+    manifest, config, specification, _ = _development_run_inputs(args)
+    if specification is None:
+        preflight = collector_preflight(manifest, config, schema_dir=args.schema_dir)
+        collection_receipt = collect_idle_run(
+            manifest,
+            config,
+            schema_dir=args.schema_dir,
+            ntp_synchronized=preflight["ntp_synchronized"],
+        )
+        execution_receipt = None
+    else:
+        preflight = controlled_collector_preflight(
+            manifest, config, schema_dir=args.schema_dir
+        )
+        safe_container_runtime_preflight(manifest, specification)
+        lifecycle = DockerWorkloadLifecycle(manifest, specification)
+        collection_receipt = collect_controlled_run(
+            manifest,
+            config,
+            schema_dir=args.schema_dir,
+            lifecycle=lifecycle,
+            ntp_synchronized=preflight["ntp_synchronized"],
+        )
+        execution_receipt = lifecycle.execution_receipt()
+        _validate(
+            execution_receipt,
+            args.schema_dir / "pi_poc_execution_receipt.v1.schema.json",
+            "execution receipt",
+        )
+        run_dir = (
+            config.spool_directory
+            / f"run={manifest['run_id']}"
+            / f"scope={config.metric_scope}"
+        )
+        write_json_exclusive(
+            run_dir / "pi-poc-execution-receipt.json", execution_receipt
+        )
+    _validate(
+        collection_receipt,
+        args.schema_dir / "experiment_collection_receipt.v1.schema.json",
+        "collection receipt",
+    )
+    run_dir = (
+        config.spool_directory
+        / f"run={manifest['run_id']}"
+        / f"scope={config.metric_scope}"
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": manifest["run_id"],
+                "partition": "development_train",
+                "collection_receipt": str(run_dir / "collection-receipt.json"),
+                "execution_receipt": (
+                    str(run_dir / "pi-poc-execution-receipt.json")
+                    if execution_receipt is not None
+                    else None
+                ),
+                "records": collection_receipt["record_count"],
+                "workload_summary": (
+                    execution_receipt["workload_summary"]
+                    if execution_receipt is not None
+                    else None
+                ),
+                "cleanup_verified": (
+                    execution_receipt["cleanup_verified"]
+                    if execution_receipt is not None
+                    else True
+                ),
+                "final_test_opened": False,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _finalize_hardware_impact_development_manifest(args: argparse.Namespace) -> int:
+    from .batch import canonical_sha256
+    from .collector import finalize_idle_manifest, write_json_exclusive
+    from .instrumentation import validate_observed_impact_evidence
+
+    manifest, _, specification, _ = _development_run_inputs(args)
+    collection_receipt = _load_json(args.collection_receipt)
+    _validate(
+        collection_receipt,
+        args.schema_dir / "experiment_collection_receipt.v1.schema.json",
+        str(args.collection_receipt),
+    )
+    completed = finalize_idle_manifest(
+        manifest,
+        collection_receipt,
+        run_dir=args.collection_receipt.parent,
+        schema_dir=args.schema_dir,
+    )
+    impact_evidence = None
+    if specification is None:
+        if args.execution_receipt is not None:
+            raise DatasetContractError("idle development run cannot have execution receipt")
+    else:
+        if args.execution_receipt is None:
+            raise DatasetContractError(
+                "controlled development run requires execution receipt"
+            )
+        execution_receipt = _load_json(args.execution_receipt)
+        _validate(
+            execution_receipt,
+            args.schema_dir / "pi_poc_execution_receipt.v1.schema.json",
+            str(args.execution_receipt),
+        )
+        payload = dict(execution_receipt)
+        claimed_hash = payload.pop("receipt_sha256")
+        if canonical_sha256(payload) != claimed_hash:
+            raise DatasetContractError("execution receipt content hash does not match")
+        if (
+            execution_receipt["run_id"] != manifest["run_id"]
+            or execution_receipt["scenario_id"]
+            != manifest["workload"]["scenario_id"]
+            or execution_receipt["manifest_content_sha256"]
+            != canonical_sha256(manifest)
+            or execution_receipt["specification_content_sha256"]
+            != canonical_sha256(specification)
+        ):
+            raise DatasetContractError(
+                "execution receipt does not bind development controls"
+            )
+        impact_evidence = validate_observed_impact_evidence(
+            manifest, specification, execution_receipt
+        )
+        execution_id = execution_receipt["receipt_id"]
+        if execution_id not in completed["labels"]["evidence_receipt_ids"]:
+            completed["labels"]["evidence_receipt_ids"].append(execution_id)
+    _validate(
+        completed,
+        args.schema_dir / "experiment_run_manifest.v1.schema.json",
+        "completed development manifest",
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    write_json_exclusive(args.output, completed)
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "run_id": completed["run_id"],
+                "state": completed["state"],
+                "partition": "development_train",
+                "observed_impact_gate": impact_evidence,
+                "final_test_opened": False,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def _validated_service_pressure_inputs(
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], Any, dict[str, Any]]:
@@ -1114,6 +1416,24 @@ def _summarize_service_pressure_signals(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_development_control_arguments(
+    command: argparse.ArgumentParser,
+    *,
+    include_run: bool,
+    include_config: bool,
+) -> None:
+    command.add_argument("--matrix", type=Path, required=True)
+    command.add_argument("--control-dir", type=Path, required=True)
+    command.add_argument("--protocol", type=Path, required=True)
+    command.add_argument("--feature-contract", type=Path, required=True)
+    command.add_argument("--scenario-catalog", type=Path, required=True)
+    if include_run:
+        command.add_argument("--run-id", required=True)
+    if include_config:
+        command.add_argument("--config", type=Path, required=True)
+    command.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cowrie-hardware-dataset",
@@ -1369,6 +1689,55 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR
     )
     development_prepare.set_defaults(handler=_prepare_hardware_impact_development)
+
+    development_validate = subparsers.add_parser(
+        "validate-hardware-impact-development-controls",
+        help="verify all 70 development manifests/specs without collecting data",
+    )
+    _add_development_control_arguments(
+        development_validate, include_run=False, include_config=False
+    )
+    development_validate.set_defaults(
+        handler=_validate_hardware_impact_development_controls
+    )
+
+    development_preflight = subparsers.add_parser(
+        "hardware-impact-development-preflight",
+        help="preflight one matrix-bound development run without starting collection",
+    )
+    _add_development_control_arguments(
+        development_preflight, include_run=True, include_config=True
+    )
+    development_preflight.set_defaults(
+        handler=_hardware_impact_development_preflight
+    )
+
+    development_collect = subparsers.add_parser(
+        "collect-hardware-impact-development-run",
+        help="collect one matrix-bound development run using the reviewed safe runtime",
+    )
+    _add_development_control_arguments(
+        development_collect, include_run=True, include_config=True
+    )
+    development_collect.set_defaults(
+        handler=_collect_hardware_impact_development_run
+    )
+
+    development_finalize = subparsers.add_parser(
+        "finalize-hardware-impact-development-manifest",
+        help="verify receipts/evidence and complete one development manifest",
+    )
+    _add_development_control_arguments(
+        development_finalize, include_run=True, include_config=True
+    )
+    development_finalize.add_argument(
+        "--collection-receipt", type=Path, required=True
+    )
+    development_finalize.add_argument("--execution-receipt", type=Path)
+    development_finalize.add_argument("--output", type=Path, required=True)
+    development_finalize.set_defaults(
+        handler=_finalize_hardware_impact_development_manifest
+    )
 
     instrumentation_preflight = subparsers.add_parser(
         "service-pressure-pilot-preflight",

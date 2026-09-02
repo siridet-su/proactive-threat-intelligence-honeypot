@@ -6,7 +6,7 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `DEVELOPMENT WAVE TOOLING READY / PI PREFLIGHT NEXT` มี collector,
+สถานะปัจจุบันคือ `DEVELOPMENT RUNTIME READY / FRESH PI RECEIPT NEXT` มี collector,
 dataset builder, receipt-driven source index, grouped split generator และ fixed
 safe-container runtime แล้ว Pi matrix จริงของ `T1496.001`/`T1499.002` สำเร็จ 15 runs
 XGBoost smoke แยก compute simulation ได้แต่ service-exhaustion ยังไม่ผ่าน Protocol v2 จึง
@@ -19,8 +19,9 @@ service rejection/latency evidence gate แล้ว excluded pilot v2 ผ่า
 valid samples และ dataset builder v2 เพิ่ม 13 aggregate features/6 TCN channels พร้อม
 order hashes แล้ว และ freeze XGBoost 3 profiles/TCN 2 profiles พร้อม leakage/missingness
 gates แล้ว และ generator สร้าง local development controls 70 runs โดยไม่เปิด calibration/
-final test ขั้นถัดไปคือ review identity กับ Pi และเพิ่ม runtime validation ก่อน collection;
-ยังไม่มีโมเดลใหม่ที่พร้อม deploy
+final test พร้อม runtime validate/preflight/collect/finalize ที่ matrix-bound แล้ว Read-only
+Pi audit ผ่าน headroom/image/service gates แต่ Pi เพิ่ง reboot จึงต้อง capture environment
+receipt ใหม่และ regenerate controls ก่อน preflight จริง; ยังไม่มีโมเดลใหม่ที่พร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -75,11 +76,14 @@ cowrie-hardware-fusion/
     channels, forbidden leakage inputs, mask policy และ audit-only claim
 17. **เสร็จ tooling:** deterministic development matrix 70 runs, 2 planned day slots,
     schema/hash/claim gates; local control set generated และ final-test 35 runs ยังปิด
-18. **ลำดับถัดไป:** audit Pi identities และเพิ่ม development runtime preflight/collection
-19. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
-20. เลือก hardware branch จาก frozen evaluation protocol
-21. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
-22. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
+18. **เสร็จ tooling:** matrix-wide validator และ development-specific
+    preflight/collect/finalize dispatch สำหรับ controlled/idle
+19. **ลำดับถัดไป:** capture fresh Pi environment receipt, regenerate controls และทำ
+    no-collection preflight
+20. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
+21. เลือก hardware branch จาก frozen evaluation protocol
+22. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
+23. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
 
 ## เอกสารเริ่มต้น
 

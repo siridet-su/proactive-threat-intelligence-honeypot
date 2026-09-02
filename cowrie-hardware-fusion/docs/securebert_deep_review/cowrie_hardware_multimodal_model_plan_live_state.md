@@ -1042,3 +1042,33 @@ runtime preflight/collection/finalize commands และทำ preflight โด�
 
 รายละเอียด control identity, schedule, safety และคำสั่ง generate:
 [hardware_impact_development_wave.v1.md](../hardware_impact_development_wave.v1.md)
+
+## 29. Development runtime และ Pi read-only preflight audit — 2026-09-03
+
+สถานะ: `RUNTIME IMPLEMENTED / PI HEADROOM PASS / FRESH SIGNATURE REQUIRED`
+
+- เพิ่ม matrix-wide loader/validator: ทุก run command ต้องอ่านและตรวจครบ 70 manifests/
+  60 specs, matrix hash, protocol/feature contract และ artifact bindings ก่อนเลือก run
+- เพิ่ม CLI preflight, collect และ finalize สำหรับ development โดย controlled 60 runs
+  ใช้ safe Docker lifecycle เดิม ส่วน idle 10 runs ไม่มี workload/execution receipt
+- finalize ตรวจ receipt content/control hashes และ observed-impact treatment gate ก่อน
+  เปลี่ยน manifest เป็น completed; final-test state คง false ใน output ทุกขั้น
+- development service spec ส่ง connection-mode/capacity/handler-delay เข้า workload v2
+  ครบ ไม่ถอยกลับเป็น service behavior รุ่นแรก
+- local round-trip control validation ผ่าน 70/70 และ mocked preflight dispatch ยืนยันว่า
+  controlled/idle เข้า validator ถูก branch โดยไม่เริ่ม collection
+- full suite ผ่าน 73 tests
+- SSH read-only audit เวลา 04:09 +07: Pi เป็น aarch64/kernel 6.8.0-1063, NTP sync,
+  load 0.10, available RAM ~6.41 GB, free disk ~65.33 GB, production containers 9,
+  Cowrie active และ experiment containers ค้าง 0
+- ARM64 image ID/user/entrypoint/revision ตรง; honeypot-hardware, hardware-metrics และ
+  hardware-metrics-processor inactive จึงไม่มี MongoDB/Atlas sink write จากการทดลอง
+- Pi uptime เพียง ~1 ชั่วโมง 18 นาทีหลัง reboot จึงห้าม reuse environment signature จาก
+  pilot เป็น fresh development identity
+
+ขั้นถัดไปคือ commit/deploy runtime tooling แบบ isolated, capture versioned environment
+receipt ใหม่, regenerate matrix ด้วย repo/environment identities ใหม่ แล้วรัน
+no-collection preflight กับ idle/compute/service อย่างละหนึ่ง run ก่อนพิจารณา day slot 1
+
+รายละเอียด runtime commands และ audit:
+[hardware_impact_development_wave.v1.md](../hardware_impact_development_wave.v1.md)
