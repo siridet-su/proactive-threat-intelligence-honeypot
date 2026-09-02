@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Brain, Search, Clock, LogOut, ArrowLeft, Bug } from "lucide-react";
+import { Users,ShieldCheck, LayoutDashboard, Brain, Search, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -10,7 +10,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter(); // เพิ่ม useRouter สำหรับคุมการเปลี่ยนหน้า
   const [time, setTime] = useState("");
 
+  const [userRole, setUserRole] = useState("");
+  const [operatorId, setOperatorId] = useState("");
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setUserRole(localStorage.getItem("userRole") || "");
+    setOperatorId(localStorage.getItem("operatorId") || "");
+    
     const timer = setInterval(() => {
       setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
     }, 1000);
@@ -38,6 +45,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       // หน้าอื่นๆ เช่น Threat Intel Detail ให้ย้อนกลับตามประวัติเบราว์เซอร์ปกติ
       router.back();
     }
+  };
+
+  const getPageTitle = () => {
+    if (pathname.includes('/profile')) return 'User Profile';
+    if (pathname.includes('/system-health')) return 'System Health';
+    if (pathname.includes('/malware-vault')) return 'Malware Vault';
+    if (pathname.includes('/user-management')) return 'User Management';
+    if (pathname.includes('/threat-intel/')) return 'Hacker Profile Analysis';
+    if (pathname.includes('/threat-intel')) return 'Threat Intelligence';
+    return 'System Overview';
   };
 
   return (
@@ -75,26 +92,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <Bug className="w-[18px] h-[18px]" /> 
                 <span className="text-sm">Malware Vault</span>
             </Link>
+
+            <Link href="/system-health" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${pathname.includes("/system-health") ? 'bg-purple-900/20 text-purple-300 border-l-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'}`}>
+                <Activity className="w-[18px] h-[18px]" /> <span className="text-sm">System Health</span>
+            </Link>
+
+          {(userRole === "Admin" || userRole === "admin") && (
+            <Link href="/user-management" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${pathname.includes("/user-management") ? 'bg-purple-900/20 text-purple-300 border-l-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'}`}>
+              <Users className="w-[18px] h-[18px]" /> <span className="text-sm">User Management</span>
+            </Link>
+          )}
          </nav>
 
-         <div className="p-6 border-t border-slate-800/50">
-            <div className="flex items-center gap-3 mb-6">
-               <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-xs text-white">SA</div>
-               <div>
-                  <p className="text-sm font-semibold text-slate-200">Security Analyst</p>
-                  <p className="text-[10px] text-slate-500">LVL-4 ACCESS</p>
-               </div>
+         <div className="p-4 border-t border-slate-800/50 flex flex-col gap-2">
+          <Link href="/profile" className="flex items-center gap-3 px-4 py-3 bg-slate-900/50 hover:bg-slate-800 rounded-lg transition-colors border border-slate-800">
+            <div className="w-8 h-8 rounded-full bg-purple-900/50 border border-purple-500/30 flex items-center justify-center text-xs text-purple-300">
+              <User className="w-4 h-4"/>
             </div>
-            
-            {/* เพิ่มปุ่ม Log out */}
-            <button 
-              onClick={handleLogout}
-              className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/30 rounded-lg text-sm transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Log out</span>
-            </button>
-         </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-slate-200 truncate">{operatorId || "Operator"}</p>
+              <p className="text-[10px] text-slate-500">{userRole === "Admin" ? "LVL-4 ACCESS" : "LVL-2 ACCESS"}</p>
+            </div>
+            <Settings className="w-4 h-4 text-slate-500" />
+          </Link>
+
+          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2 hover:bg-red-900/20 text-slate-400 hover:text-red-400 rounded-lg text-sm transition-colors">
+            <LogOut className="w-4 h-4" /> <span>Logout</span>
+          </button>
+        </div>
       </aside>
 
       {/* ---------------- Main Content ---------------- */}
@@ -110,6 +135,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                     <ArrowLeft className="w-4 h-4" />
                 </button>
+
+                <span className="text-white font-medium text-lg">
+                    {getPageTitle()}
+                  </span>
+
+                <span className="text-white font-medium text-lg">
+                   {pathname.includes('/profile') ? 'User Profile' : 'System Overview'}
+                 </span>
 
                 <span className="text-white font-medium text-lg">
                   {pathname.includes('/malware-vault') ? 'Malware Vault' : pathname.includes('/threat-intel/') ? 'Hacker Profile Analysis' : isThreatIntel ? 'Threat Intelligence' : 'System Overview'}

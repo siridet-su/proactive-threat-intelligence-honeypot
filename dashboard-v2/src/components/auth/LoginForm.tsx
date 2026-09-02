@@ -9,20 +9,35 @@ export default function LoginForm() {
   const [error, setError] = useState("");
   const router = useRouter();
 
-  const handleAuthenticate = (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  // ตรวจสอบข้อมูลม็อกอัพ (เปลี่ยนเป็น admin/admin เพื่อง่ายต่อการทดสอบ)
-  if (operatorId.trim().toLowerCase() === "admin" && accessKey.trim().toLowerCase() === "admin") {
+  const handleAuthenticate = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError("");
-    
-    // เอาคอมเมนต์ออกเพื่อให้คำสั่งทำงาน (และสามารถลบหรือปิดตัว alert ออกได้เลยเพื่อความลื่นไหล)
-    router.push("/dashboard"); 
-    
-  } else {
-    setError("ACCESS DENIED: Invalid Operator ID or Access Key.");
-  }
-};
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operatorId, password: accessKey }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        // เก็บ Role ไว้ใน localStorage เพื่อใช้เช็คสิทธิ์ (จำลอง Session)
+        localStorage.setItem("userRole", data.role);
+        localStorage.setItem("operatorId", data.operatorId || operatorId);
+
+        if (data.isFirstLogin) {
+          router.push("/change-password"); // พาไปหน้าเปลี่ยนรหัส
+        } else {
+          router.push("/dashboard");
+        }
+      } else {
+        setError(data.error || "ACCESS DENIED: Invalid Credentials.");
+      }
+    } catch (err) {
+      setError("System Offline: Database Connection Failed.");
+    }
+  };
 
   return (
     <div className="relative w-full max-w-md p-[1px] rounded-lg bg-gradient-to-b from-purple-500/30 to-transparent">

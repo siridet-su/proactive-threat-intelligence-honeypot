@@ -91,8 +91,8 @@ export default function RegionalMap() {
             }
           </Geographies>
 
-          {markers.map(({ name, coordinates, status }, i) => (
-            <Marker key={`${name}-${i}`} coordinates={coordinates as [number, number]}>
+          {markers.map(({ name, coordinates, status }) => (
+            <Marker key={name} coordinates={coordinates as [number, number]}>
               <circle r={4} fill={
                 status === "running" ? "#34d399" : 
                 status === "failed" ? "#f87171" : "#a855f7"

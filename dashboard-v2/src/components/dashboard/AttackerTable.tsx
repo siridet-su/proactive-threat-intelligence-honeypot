@@ -31,23 +31,16 @@ export function AttackerTable() {
         map.set(t.src_ip, {
           ip: t.src_ip,
           country: t.geo.country || 'Unknown',
-          asn: t.abuseipdb?.isp || t.geo.city || 'Unknown',
+          asn: t.geo.city || 'Unknown',
           mainTechnique: t.event_type,
           attackCount: 1,
-          riskScore: t.abuseipdb?.abuseConfidenceScore ?? Math.min(100, 50),
+          riskScore: 50,
           status: t.severity
         });
       } else {
         const existing = map.get(t.src_ip);
         existing.attackCount += 1;
-
-        if (t.abuseipdb?.abuseConfidenceScore !== undefined) {
-           existing.riskScore = Math.max(existing.riskScore, t.abuseipdb.abuseConfidenceScore);
-           if (t.abuseipdb.isp) existing.asn = t.abuseipdb.isp;
-        } else {
-           existing.riskScore = Math.min(100, existing.riskScore + 5);
-        }
-
+        existing.riskScore = Math.min(100, existing.riskScore + 5);
         if (t.severity === 'Critical') existing.status = 'Critical';
         else if (t.severity === 'High' && existing.status !== 'Critical') existing.status = 'High';
       }
