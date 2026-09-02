@@ -930,3 +930,35 @@ generate v2 artifacts แล้ว rerun 7 scenarios/630 samples ก่อนต
 
 รายละเอียด treatment, evidence thresholds และ run order:
 [service_pressure_treatment_revision.v2.md](../service_pressure_treatment_revision.v2.md)
+
+## 25. Service-pressure v2 excluded pilot result — 2026-09-03
+
+สถานะ: `7/7 COMPLETE / QUALITY PASS / TREATMENT GATES PASS`
+
+ส่วนนี้ supersede `EXCLUDED PI RERUN PENDING` ใน Section 24:
+
+- freeze commit `95d7970`; ARM64 binary `c5ef621d...eb86`; final labeled image
+  `sha256:bcb5296b...e24c3`; matrix canonical hash `0c1bab3b...4e07`
+- image canary ตัวแรกไม่มี OCI revision label จึงถูก preflight ปฏิเสธก่อน collection;
+  rebuild จาก reviewed Dockerfile พร้อม binary-hash label แล้ว final preflight ผ่าน
+- รันครบ 7/7, 630/630 valid samples, phase 210/210/210, 21 segments,
+  late/missing/error/reset 0 และ controlled cleanup 6/6
+- service-low มี 301 attempts, rejection 0, error 0.33%, p95 ~41 ms; high benign/T1499
+  มี ~4,524 attempts, rejection ~3,200, error ~70.7%, p95 ~41.4 ms ทุก gate ผ่าน
+- compute cgroup CPU high/low ~2.97× และ throttling เป็นศูนย์ทั้งคู่ จึงแก้ quota artifact
+- service high/low: TIME_WAIT ~15.6×, CPU PSI ~9.4×, CPU usage ~8.4×,
+  memory ~1.6×; matched benign/T1499 signals หลักต่างประมาณ 0.1–2%
+- export Pi→Arch SHA-256 ตรงกัน `5570a87c...edf1`; audit summary byte-identical และ
+  Arch regenerate signal reports ตรง Pi 7/7
+- candidate review คือ cgroup CPU usage, TCP TIME_WAIT, target socket summary,
+  cgroup memory และ CPU PSI ablation; queue/drop เป็นศูนย์และ simulator receipt ยังคง
+  forbidden model input
+- ต้องแยก host-only กับ target/cgroup-required profiles; ห้ามอ้าง target profile deployable
+  กับ Cowrie production ก่อนทำ target mapping และ shadow availability test
+
+ขั้นถัดไปคือ freeze XGBoost aggregate features/TCN channels revision ใหม่จาก candidate ที่
+ผ่าน แล้วทดสอบ builder กับ raw pilot ก่อน generate development wave 70 runs โดย final test
+ยังคงปิด
+
+รายละเอียด hashes, execution evidence, signal table และ feature decision:
+[service_pressure_v2_pilot_results_2026-09-03.md](../service_pressure_v2_pilot_results_2026-09-03.md)

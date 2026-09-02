@@ -1,6 +1,6 @@
 # Service-pressure treatment revision v2
 
-> สถานะ: `IMPLEMENTED / LOCAL TEST PASS / EXCLUDED PI RERUN PENDING`
+> สถานะ: `IMPLEMENTED / EXCLUDED PI RERUN PASS`
 > วันที่: `2026-09-02`
 > ขอบเขต: แก้ข้อบกพร่องของ excluded instrumentation pilot v1; ยังห้ามใช้ train
 
@@ -86,23 +86,23 @@ Telemetry schema ไม่เปลี่ยนและยังมี SHA-256:
 - pilot v2 ยังคง `pilot_only=true`, `training_eligible=false`,
   `changes_frozen_feature_set=false`
 
-## Verification ปัจจุบัน
+## Verification
 
 - Python test suite: 58 passed
-- Go tests: compute/config passed; loopback integration ต้องยืนยันบน Pi environment
+- Go tests: compute/config passed; loopback integration ผ่านบน Pi environment
 - matched benign/malicious treatment invariant ผ่าน
 - schema validation, evidence gate pass/fail และ slow-lifecycle scheduling test ผ่าน
+- excluded Pi rerun ผ่าน 7/7 runs, 630/630 samples และทุก evidence gate
 
 ## ลำดับถัดไป
 
-1. commit source revision เพื่อ freeze repository identity
-2. cross-compile static ARM64 binary และบันทึก SHA-256
-3. build reviewed scratch image บน Pi และบันทึก immutable image ID
-4. รัน service low/high integration canary แล้วตรวจ summary gate/TCP state
-5. generate hash-bound v2 control artifacts
-6. รัน excluded matrix 7 scenarios/630 samples และ verify receipts/cleanup
-7. transfer แบบ hash-verified กลับ Arch แล้วสร้าง signal reports
-8. freeze feature revision เฉพาะเมื่อ treatment gate และ telemetry separation ผ่าน
+1. freeze XGBoost aggregate-feature และ TCN channel revision จาก signal ที่ pilot พิสูจน์
+2. แยก host-only profile จาก target/cgroup-required profile เพื่อวัด deployment trade-off
+3. generate development-wave control artifacts หลัง feature revision ผ่าน test เท่านั้น
+4. เก็บ 70 development runs หลายวันตาม protocol โดยยังไม่เปิด final-test wave
 
 ผลจาก pilot v1 ที่ถูก supersede เฉพาะ treatment design ยังคงเก็บเป็นหลักฐานที่
 [service_pressure_instrumentation_results_2026-09-02.md](service_pressure_instrumentation_results_2026-09-02.md)
+
+ผลจริงของ v2, hashes, quality audit และ candidate decision อยู่ที่
+[service_pressure_v2_pilot_results_2026-09-03.md](service_pressure_v2_pilot_results_2026-09-03.md)
