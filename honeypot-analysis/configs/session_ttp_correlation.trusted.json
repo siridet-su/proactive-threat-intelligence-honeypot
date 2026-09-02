@@ -9,10 +9,25 @@
     "enabled": true,
     "default_role": "post_session_report_evidence",
     "confidence_semantics": "developer_defined_heuristic_policy_strength_not_probability",
+    "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
+    "temporal_semantics": "session_scoped_no_elapsed_window",
+    "correlation_output_contract": {
+      "observed_namespace": "observed_trusted_ttps",
+      "context_namespace": "correlated_ttp_hypotheses",
+      "authority": "non_authoritative",
+      "can_override_observed": false,
+      "can_remove_observed": false,
+      "can_promote_trusted": false,
+      "may_drive_prediction": false,
+      "may_authorize_response": false,
+      "canonical_write_allowed": false
+    },
     "prediction_use_requires": ["reviewed", "empirically_evaluated"],
     "rules": [
       {
         "rule_id": "cowrie-file-transfer-correlates-t1105",
+        "rule_type": "DIRECT_EVENT_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1105",
         "tactic": "command-and-control",
@@ -57,6 +72,8 @@
       },
       {
         "rule_id": "downloader-command-observed-correlates-t1105",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1105",
         "tactic": "command-and-control",
@@ -115,6 +132,8 @@
       },
       {
         "rule_id": "download-then-execute-chain-correlates-t1059",
+        "rule_type": "GENUINE_MULTI_EVENT_CORRELATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1059",
         "tactic": "execution",
@@ -122,7 +141,7 @@
         "confidence": 0.7,
         "evidence_type": "sequence_correlation",
         "source_type": "human_curated_attck_detection",
-        "temporal_claim": true,
+        "temporal_claim": false,
         "apply_to_prediction": false,
         "reason": "The session contains transfer-related evidence followed by an execution command. This supports an ordered behavior candidate, but successful execution and resulting impact are not confirmed.",
         "conditions": {
@@ -176,6 +195,8 @@
       },
       {
         "rule_id": "ssh-login-failures-correlate-t1110",
+        "rule_type": "SINGLE_SESSION_THRESHOLD",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1110",
         "tactic": "credential-access",
@@ -227,6 +248,8 @@
       },
       {
         "rule_id": "linux-shadow-read-correlates-t1003-008",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1003.008",
         "tactic": "credential-access",
@@ -278,6 +301,8 @@
       },
       {
         "rule_id": "ssh-private-key-read-correlates-t1552-004",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1552.004",
         "tactic": "credential-access",
@@ -329,6 +354,8 @@
       },
       {
         "rule_id": "history-or-log-cleanup-correlates-t1070",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1070",
         "tactic": "defense-evasion",
@@ -375,6 +402,8 @@
       },
       {
         "rule_id": "cron-modification-correlates-t1053",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1053",
         "tactic": "persistence",
@@ -422,6 +451,8 @@
       },
       {
         "rule_id": "authorized-keys-modification-correlates-t1098",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1098.004",
         "tactic": "persistence",
@@ -469,6 +500,8 @@
       },
       {
         "rule_id": "recon-then-payload-chain-correlates-t1105",
+        "rule_type": "GENUINE_MULTI_EVENT_CORRELATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1105",
         "tactic": "command-and-control",
@@ -476,7 +509,7 @@
         "confidence": 0.7,
         "evidence_type": "sequence_correlation",
         "source_type": "human_curated_attck_detection",
-        "temporal_claim": true,
+        "temporal_claim": false,
         "apply_to_prediction": false,
         "reason": "The session shows reconnaissance before a downloader or transfer command, supporting a possible staged workflow. Transfer success and execution are not confirmed, and the rule does not replace command-level labels.",
         "conditions": {
@@ -565,6 +598,8 @@
       },
       {
         "rule_id": "botnet-miner-staging-correlates-t1496",
+        "rule_type": "GENUINE_MULTI_EVENT_CORRELATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1496",
         "tactic": "impact",
@@ -633,6 +668,8 @@
       },
       {
         "rule_id": "shell-startup-persistence-correlates-t1546",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1546",
         "tactic": "persistence",
@@ -681,6 +718,8 @@
       },
       {
         "rule_id": "remote-service-attempt-correlates-t1021",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1021.004",
         "tactic": "lateral-movement",
@@ -728,6 +767,8 @@
       },
       {
         "rule_id": "decode-then-execute-chain-correlates-t1140",
+        "rule_type": "GENUINE_MULTI_EVENT_CORRELATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1140",
         "tactic": "defense-evasion",
@@ -735,7 +776,7 @@
         "confidence": 0.7,
         "evidence_type": "sequence_correlation",
         "source_type": "human_curated_attck_detection",
-        "temporal_claim": true,
+        "temporal_claim": false,
         "apply_to_prediction": false,
         "reason": "Trusted decode-related evidence occurs before an execution command, supporting an ordered deobfuscation candidate. Successful decoding, execution, and impact are not confirmed.",
         "conditions": {
@@ -792,6 +833,8 @@
       },
       {
         "rule_id": "privilege-escalation-attempt-correlates-t1548",
+        "rule_type": "DIRECT_COMMAND_RECONFIRMATION",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "enabled": true,
         "ttp": "T1548",
         "tactic": "privilege-escalation",

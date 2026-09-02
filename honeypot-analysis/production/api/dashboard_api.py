@@ -26,7 +26,10 @@ from production.utils.http_security import (
 )
 from production.utils.serialization import utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
-from production.reporting.response_guidance_v3 import build_response_guidance_v3_from_session
+from production.reporting.response_guidance_v3 import (
+    build_response_guidance_v3_from_session,
+    validate_response_guidance_v3,
+)
 from production.storage import open_storage
 from production.api.security import (
     api_row_view,
@@ -37,6 +40,7 @@ from production.api.security import (
     sanitize_request_target,
     validate_configured_bearer_tokens,
 )
+from production.correlation.semantics import resolve_confidence_semantics
 
 
 TABLES = {
@@ -101,6 +105,22 @@ def _feedback_summary(rows: list[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _current_prediction_payload(snapshot: Dict[str, Any], feedback_rows: list[Dict[str, Any]]) -> Dict[str, Any]:
     payload = snapshot.get("payload") or {}
+    features = payload.get("features") or {}
+    raw_correlations = features.get("session_ttp_correlations") or []
+    correlations = []
+    for item in raw_correlations:
+        if not isinstance(item, dict):
+            continue
+        projected = dict(item)
+        projected["confidence_semantics"] = resolve_confidence_semantics(
+            item.get("confidence_semantics")
+        )
+        correlations.append(projected)
+    raw_summary = features.get("session_ttp_correlation_summary") or {}
+    correlation_summary = dict(raw_summary) if isinstance(raw_summary, dict) else {}
+    correlation_summary["confidence_semantics"] = resolve_confidence_semantics(
+        correlation_summary.get("confidence_semantics") or payload.get("confidence_semantics")
+    )
     final_ranking = payload.get("final_ranking") or []
     source_breakdown: Dict[str, Dict[str, Any]] = {}
     for item in final_ranking:
@@ -133,9 +153,13 @@ def _current_prediction_payload(snapshot: Dict[str, Any], feedback_rows: list[Di
         "local_transition_model": payload.get("local_transition_model") or payload.get("model_maturity") or {},
         "external_seed_model": payload.get("external_seed_model") or {},
         "classification_quality": payload.get("classification_quality") or {},
-        "session_ttp_correlations": (payload.get("features") or {}).get("session_ttp_correlations") or [],
-        "session_ttp_correlation_summary": (payload.get("features") or {}).get("session_ttp_correlation_summary") or {},
-        "session_evidence_graph_summary": (payload.get("features") or {}).get("session_evidence_graph_summary") or {},
+        "session_ttp_correlations": correlations,
+        "observed_trusted_ttps": features.get("observed_trusted_ttps") or [],
+        "correlated_ttp_hypotheses": features.get(
+            "correlated_ttp_hypotheses"
+        ) or correlations,
+        "session_ttp_correlation_summary": correlation_summary,
+        "session_evidence_graph_summary": features.get("session_evidence_graph_summary") or {},
         "calibration_status": payload.get("calibration_status") or {},
         "weight_calibration": payload.get("weight_calibration") or {},
         "trust_status": payload.get("trust_status") or {},
@@ -197,31 +221,97 @@ def _current_decision_payload(
 ) -> Dict[str, Any]:
     if not config.enable_response_guidance:
         return {"enabled": False, "reason": "response guidance layer disabled"}
-    session_payload = _session_payload_for_id(storage, session_id)
-    prediction_context = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else snapshot
-    guidance = build_response_guidance_v3_from_session(
-        session_payload,
-        policy_path=config.response_guidance_policy_path,
-        asset_profile_path=config.response_guidance_asset_profile_path,
-        behavior_policy_path=getattr(
-            config, "threat_hypothesis_behavior_policy_path", ""
-        ),
-        classification_policy_path=getattr(
-            config, "classification_rules_path", ""
-        ),
-        forecast_context=prediction_context or {},
-        enrichment_context=session_payload.get("enrichment_status") or {},
+    # Current decisions are a presentation of the stored report.  Rebuilding
+    # from the mutable session row here would silently move the durable
+    # evidence prefix forward and make the displayed identity ambiguous.
+    report = None
+    getter = getattr(storage, "get_current_report_for_session", None)
+    if callable(getter):
+        try:
+            report = getter(session_id)
+        except Exception:
+            report = None
+    report_payload = _payload_from_row(report or {}) if isinstance(report, dict) else {}
+    stored = report_payload.get("response_guidance_v3")
+    assessment_id = str(report_payload.get("assessment_id") or "")
+    if not isinstance(stored, dict):
+        return _unverified_guidance_payload(
+            session_id,
+            ["stored response guidance is unavailable"],
+        )
+    errors = validate_response_guidance_v3(
+        stored,
+        expected_session_id=session_id,
+        expected_assessment_id=assessment_id,
     )
-    guidance["presentation_semantics"] = {
-        "mode": "current_policy_reevaluation",
-        "historical_record": False,
-        "replaces_stored_historical_guidance": False,
-        "description": (
-            "Recomputed from the current v3 policy and immutable current observed "
-            "evidence; it does not replace stored point-in-time guidance."
-        ),
+    binding = stored.get("binding") or {}
+    if not errors and binding.get("status") == "verified":
+        guidance = json.loads(json.dumps(stored))
+        guidance["presentation_semantics"] = {
+            "mode": "stored_durable_prefix_bound",
+            "historical_record": False,
+            "stored_report": True,
+            "recomputed": False,
+            "replaces_stored_historical_guidance": False,
+            "description": (
+                "Displayed guidance is the stored output bound to the report's "
+                "durable evidence prefix, assessment, graph, policy, and output identity."
+            ),
+        }
+        return guidance
+    return _unverified_guidance_payload(
+        session_id,
+        errors or ["stored guidance binding is not fully verified"],
+        assessment_id=assessment_id,
+    )
+
+
+def _unverified_guidance_payload(
+    session_id: str,
+    errors: list[str],
+    *,
+    assessment_id: str = "",
+) -> Dict[str, Any]:
+    """Return a deterministic, non-actionable response for unverified data."""
+
+    return {
+        "schema_version": "response_guidance.v3",
+        "status": "unavailable",
+        "guidance_state": "stored_guidance_unverified",
+        "authority": "policy_unavailable",
+        "session_id": str(session_id or "unknown"),
+        "findings": [],
+        "triage": {
+            "review_priority": "info",
+            "urgency": "routine_review",
+            "semantics": "unverified_stored_guidance_not_actionable",
+            "finding_ids": [],
+        },
+        "advisory_actions": [],
+        "safety": {
+            "automatic_execution": False,
+            "manual_approval_required": True,
+            "alerting_side_effect": False,
+            "response_action_side_effect": False,
+            "execution_integration": "not_implemented",
+        },
+        "binding": {
+            "schema_version": "response_guidance_binding.v1",
+            "status": "unverified",
+            "session_id": str(session_id or "unknown"),
+            "assessment": {"status": "unverified", "assessment_id": assessment_id},
+            "validation_errors": list(errors),
+        },
+        "validation": {"status": "rejected", "errors": list(errors)},
+        "presentation_semantics": {
+            "mode": "stored_guidance_unverified",
+            "historical_record": False,
+            "stored_report": bool(assessment_id),
+            "recomputed": False,
+            "replaces_stored_historical_guidance": False,
+            "description": "Stored guidance was not presented as verified or actionable.",
+        },
     }
-    return guidance
 
 
 def _external_seed_health_payload(config: ProductionConfig) -> Dict[str, Any]:

@@ -9,9 +9,13 @@ generated here.
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
 from production.correlation.session_evidence_graph import build_session_evidence_graph
+from production.correlation.session_ttp_correlation import (
+    build_observed_trusted_ttps,
+)
 from production.policies.threat_hypothesis_behavior_policy import (
     compile_pattern,
     policy_body,
@@ -24,6 +28,7 @@ from production.reporting.typed_semantic_family_selection import (
 )
 from production.reporting.typed_semantic_chain_selection import (
     select_typed_semantic_chains,
+    validate_typed_chain_selection_provenance,
 )
 from production.utils.serialization import stable_id
 
@@ -84,6 +89,54 @@ def _claim_policy(document: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     claims = body.get("claims")
     return claims if isinstance(claims, dict) else {}
+
+
+_HYPOTHESIS_AUTHORITY_KEYS = {
+    "may_derive_hypotheses",
+    "may_render_hypotheses",
+    "may_select_authoritative_hypothesis",
+    "may_authorize_response",
+}
+
+
+def _hypothesis_authority_metadata(
+    claims_policy: Dict[str, Any],
+) -> tuple[Dict[str, bool], List[str]]:
+    """Read the explicit derive/render versus select/authorize boundary."""
+
+    boundary = claims_policy.get("authority_boundary")
+    metadata = boundary.get("hypothesis_authority") if isinstance(boundary, dict) else None
+    if not isinstance(metadata, dict) or set(metadata) != _HYPOTHESIS_AUTHORITY_KEYS:
+        return {}, ["hypothesis authority metadata is missing or malformed"]
+    errors: List[str] = []
+    for key in _HYPOTHESIS_AUTHORITY_KEYS:
+        if type(metadata.get(key)) is not bool:
+            errors.append(f"hypothesis authority {key} must be boolean")
+    if metadata.get("may_select_authoritative_hypothesis") is not False:
+        errors.append("authoritative hypothesis selection must remain denied")
+    if metadata.get("may_authorize_response") is not False:
+        errors.append("hypothesis response authorization must remain denied")
+    return (dict(metadata), errors) if not errors else ({}, errors)
+
+
+def _hypothesis_metadata_abstention(
+    document: Dict[str, Any],
+    reason: str,
+) -> Dict[str, Any]:
+    return {
+        "claims": [],
+        "abstained": True,
+        "abstention_reason": reason,
+        "basis_last_evidence_id": "",
+        "basis_session_last_trusted_evidence_id": "",
+        "basis_connected_chain_ids": [],
+        "disconfirming_observations": [],
+        "evidence_gaps": [],
+        "external_validation_suggestions": [],
+        "scope": "post_session_cowrie_observable_behavior",
+        "selection_semantics": "typed_hypothesis_authority_metadata_abstention",
+        "behavior_policy": policy_summary(document),
+    }
 
 
 def _session_value(session: Any, name: str, default: Any = None) -> Any:
@@ -198,6 +251,7 @@ def build_observed_behavior(
         }
         for item in chain
     ]
+    observed_trusted_ttps = build_observed_trusted_ttps(payload)
     adjacent_tactics: List[str] = []
     for item in chain:
         tactic = _clean(item.get("tactic"))
@@ -235,7 +289,13 @@ def build_observed_behavior(
             if isinstance(item, dict)
         ],
         "relationship_semantics": _clean(graph.get("relationship_semantics")),
+        "chronology_quality": _clean(graph.get("chronology_quality"))
+        or _clean((graph.get("summary") or {}).get("chronology_quality"))
+        or "not_available",
+        "chronology_basis": _clean(graph.get("chronology_basis"))
+        or _clean((graph.get("summary") or {}).get("chronology_basis")),
         "trusted_attck_candidates": trusted_candidates,
+        "observed_trusted_ttps": observed_trusted_ttps,
         "audit_only_candidates": audit_only,
         "cowrie_event_evidence": events,
         "adjacent_deduplicated_tactic_sequence": adjacent_tactics,
@@ -533,6 +593,9 @@ def build_supported_assessment(
 ) -> Dict[str, Any]:
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     claims_policy = _claim_policy(document)
+    hypothesis_authority, hypothesis_authority_errors = _hypothesis_authority_metadata(
+        claims_policy
+    )
     independent = claims_policy.get("independent") or {}
     chain = list(observed.get("ordered_behavior_chain") or [])
     graph_evidence_refs = None
@@ -586,6 +649,16 @@ def build_supported_assessment(
     for match in typed_chain_selection.get("matches") or []:
         if not isinstance(match, dict) or match.get("status") != "complete":
             continue
+        if (
+            hypothesis_authority_errors
+            or not hypothesis_authority.get("may_derive_hypotheses", False)
+            or not hypothesis_authority.get("may_render_hypotheses", False)
+        ):
+            continue
+        if validate_typed_chain_selection_provenance(
+            typed_chain_selection, match, expected_status="complete"
+        ):
+            continue
         definition = typed_rules.get(_clean(match.get("rule_id"))) or {}
         if not _clean(match.get("chain_id")) or not definition:
             continue
@@ -606,6 +679,14 @@ def build_supported_assessment(
                 or match.get("relationship_refs")
                 or []
             ) + list(match.get("supporting_relationship_refs") or []),
+            "selector_provenance": deepcopy(
+                match.get("selector_provenance") or {}
+            ),
+            "chronology_quality": _clean(
+                match.get("chronology_quality")
+            ),
+            "chronology_basis": _clean(match.get("chronology_basis")),
+            "hypothesis_authority": deepcopy(hypothesis_authority),
         })
         connected_claims.append(claim)
     objectives: List[Dict[str, Any]] = list(connected_claims)
@@ -1029,6 +1110,19 @@ def build_follow_on_hypothesis(
 ) -> Dict[str, Any]:
     document = _resolved_behavior_policy(behavior_policy_document, behavior_policy_path)
     claims_policy = _claim_policy(document)
+    hypothesis_authority, hypothesis_authority_errors = _hypothesis_authority_metadata(
+        claims_policy
+    )
+    if (
+        hypothesis_authority_errors
+        or not hypothesis_authority.get("may_derive_hypotheses", False)
+        or not hypothesis_authority.get("may_render_hypotheses", False)
+    ):
+        return _hypothesis_metadata_abstention(
+            document,
+            "; ".join(hypothesis_authority_errors)
+            or "hypothesis derivation/rendering is denied by policy metadata",
+        )
     follow_on_policy = claims_policy.get("follow_on") or {}
     independent = claims_policy.get("independent") or {}
     persistence_definition = independent.get("persistence") or {}
@@ -1062,8 +1156,14 @@ def build_follow_on_hypothesis(
         if isinstance(rule, dict) and _clean(rule.get("rule_id"))
     }
     typed_incomplete = []
+    invalid_selector_provenance = False
     for match in typed_chain_selection.get("matches") or []:
         if not isinstance(match, dict) or match.get("status") != "incomplete":
+            continue
+        if validate_typed_chain_selection_provenance(
+            typed_chain_selection, match, expected_status="incomplete"
+        ):
+            invalid_selector_provenance = True
             continue
         canonical_chain = _canonical_chain_for_typed_match(observed, match)
         definition = typed_rules.get(_clean(match.get("rule_id"))) or {}
@@ -1071,6 +1171,11 @@ def build_follow_on_hypothesis(
             match.get("supporting_evidence_refs") or []
         ):
             typed_incomplete.append((match, canonical_chain, definition))
+    if invalid_selector_provenance:
+        return _hypothesis_metadata_abstention(
+            document,
+            "typed chain selector provenance is malformed or incompatible",
+        )
     if typed_incomplete:
         claims: List[Dict[str, Any]] = []
         gaps: List[Dict[str, Any]] = []
@@ -1083,8 +1188,16 @@ def build_follow_on_hypothesis(
                 match.get("limitations") or [],
             )
             claim.update({
-                "claim_basis": "typed_semantic_chain_selection.v1",
+                "claim_basis": "typed_semantic_chain_selection.v2",
                 "connected_chain_id": _clean(canonical_chain.get("chain_id")),
+                "selector_provenance": deepcopy(
+                    match.get("selector_provenance") or {}
+                ),
+                "chronology_quality": _clean(
+                    match.get("chronology_quality")
+                ),
+                "chronology_basis": _clean(match.get("chronology_basis")),
+                "hypothesis_authority": deepcopy(hypothesis_authority),
             })
             claims.append(claim)
             gaps.append({

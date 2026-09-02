@@ -1,35 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
+import type { ZoomableGroupProps } from "react-simple-maps";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
-export default function RegionalMap() {
-  const [markers, setMarkers] = useState<any[]>([]);
+export interface RegionalMarker {
+  name: string;
+  coordinates: [number, number];
+  status: string;
+  count: number;
+}
 
-  useEffect(() => {
-    const fetchThreats = async () => {
-      try {
-        const res = await fetch("/api/threats");
-        if (res.ok) {
-          const data = await res.json();
-          const newMarkers = data.map((threat: any) => ({
-            name: `${threat.src_ip} (${threat.geo.country}) - ${threat.event_type}`,
-            coordinates: [threat.geo.lon, threat.geo.lat],
-            status: threat.severity === "Critical" ? "failed" : threat.severity === "High" ? "failed" : "running"
-          })).filter((m: any) => m.coordinates[0] !== 0 && m.coordinates[1] !== 0);
-          setMarkers(newMarkers);
-        }
-      } catch (err) {
-        console.error("Failed to fetch threats for map:", err);
-      }
-    };
-    
-    fetchThreats();
-    const interval = setInterval(fetchThreats, 5000); // refresh every 5s
-    return () => clearInterval(interval);
-  }, []);
+export default function RegionalMap({ markers }: { markers: RegionalMarker[] }) {
   const [position, setPosition] = useState({ coordinates: [0, 20] as [number, number], zoom: 1 });
   const [tooltip, setTooltip] = useState({ show: false, content: "", x: 0, y: 0 });
 
@@ -44,12 +28,11 @@ export default function RegionalMap() {
   }
 
   // ใช้ onMoveEnd แทน onMove เพื่อให้ Trackpad สามารถซูมและเลื่อนได้ลื่นไหล
-  function handleMoveEnd(newPosition: any) {
+  function handleMoveEnd(newPosition: Parameters<NonNullable<ZoomableGroupProps["onMoveEnd"]>>[0]) {
     setPosition(newPosition);
   }
 
   return (
-    // คง touchAction: "none" ไว้เพื่อป้องกันเบราว์เซอร์ซูมหน้าจอ
     <div className="w-full h-full relative bg-[#09090b] cursor-grab active:cursor-grabbing" style={{ touchAction: "none" }}>
       <ComposableMap 
         projection="geoMercator" 
@@ -58,7 +41,7 @@ export default function RegionalMap() {
         <ZoomableGroup 
           zoom={position.zoom} 
           center={position.coordinates} 
-          onMoveEnd={handleMoveEnd} // เปลี่ยนกลับมาใช้ onMoveEnd
+          onMoveEnd={handleMoveEnd}
           minZoom={1} 
           maxZoom={8}
         >
@@ -91,8 +74,8 @@ export default function RegionalMap() {
             }
           </Geographies>
 
-          {markers.map(({ name, coordinates, status }, i) => (
-            <Marker key={`${name}-${i}`} coordinates={coordinates as [number, number]}>
+          {markers.map(({ name, coordinates, status, count }) => (
+            <Marker key={name} coordinates={coordinates as [number, number]}>
               <circle r={4} fill={
                 status === "running" ? "#34d399" : 
                 status === "failed" ? "#f87171" : "#a855f7"
@@ -100,6 +83,7 @@ export default function RegionalMap() {
               {status === "running" && (
                 <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
               )}
+              <title>{`${name} · ${count} shown sessions`}</title>
             </Marker>
           ))}
         </ZoomableGroup>
@@ -111,6 +95,15 @@ export default function RegionalMap() {
           style={{ top: tooltip.y, left: tooltip.x }}
         >
           {tooltip.content}
+        </div>
+      )}
+
+      {!markers.length && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-[#111116]/90 border border-slate-800 rounded-md px-4 py-3 text-center">
+            <p className="text-[11px] text-slate-300">No verified public coordinates</p>
+            <p className="text-[10px] text-slate-500 mt-1">The API returned no map-safe geolocation for this window.</p>
+          </div>
         </div>
       )}
 

@@ -15,6 +15,10 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
 from production.correlation.session_ttp_correlation import correlation_allows_influence
+from production.correlation.semantics import (
+    CORRELATION_CONFIDENCE_SEMANTICS,
+    resolve_confidence_semantics,
+)
 from production.utils.config import ProductionConfig
 from production.policies.alert_authority_policy import (
     LoadedAlertAuthorityPolicy,
@@ -31,6 +35,7 @@ TOKEN_RE = re.compile(r"[a-zA-Z0-9_./:-]+")
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 HASH_RE = re.compile(r"\b[a-fA-F0-9]{32,64}\b")
+PROJECT_LOCAL_HEURISTIC = "PROJECT_LOCAL_HEURISTIC"
 
 
 def _sha256_text(value: str) -> str:
@@ -61,6 +66,12 @@ def _policy(config_or_policy: ProductionConfig | Dict[str, Any]) -> Dict[str, An
     policy.setdefault("command_pattern_command_limit", 6)
     policy.setdefault("command_pattern_token_limit", 3)
     policy.setdefault("emit_observational_signals", True)
+    policy.setdefault("confidence_semantics", CORRELATION_CONFIDENCE_SEMANTICS)
+    policy.setdefault("numeric_provenance", PROJECT_LOCAL_HEURISTIC)
+    policy.setdefault(
+        "strength_semantics",
+        "developer_defined_heuristic_policy_strength_not_probability",
+    )
     policy.setdefault(
         "field_weights",
         {
@@ -274,9 +285,21 @@ def score_campaign_match(campaign: Dict[str, Any], fingerprint: Dict[str, Any], 
         except (TypeError, ValueError):
             source_ip_cap = 0.2
         normalized = min(normalized, max(0.0, min(source_ip_cap, 1.0)))
+    semantics = resolve_confidence_semantics(
+        policy.get("confidence_semantics"),
+        absent=CORRELATION_CONFIDENCE_SEMANTICS,
+    )
     return {
         "campaign_id": campaign.get("campaign_id") or "",
         "score": round(normalized, 4),
+        "strength": round(normalized, 4),
+        "confidence_semantics": semantics,
+        "strength_semantics": semantics,
+        "numeric_provenance": str(
+            policy.get("numeric_provenance") or PROJECT_LOCAL_HEURISTIC
+        ),
+        "output_namespace": "campaign_similarity_match",
+        "correlation_kind": "observational_similarity",
         "raw_score": round(score, 4),
         "total_possible": round(total_possible, 4),
         "match_reasons": reasons,
@@ -371,6 +394,18 @@ def _campaign_payload(
         "max_confirmed_severity": max_severity,
         "fingerprint": fingerprint,
         "updated_from_session": session_payload.get("session_id") or "",
+        "confidence_semantics": resolve_confidence_semantics(
+            policy.get("confidence_semantics"),
+            absent=CORRELATION_CONFIDENCE_SEMANTICS,
+        ),
+        "strength_semantics": resolve_confidence_semantics(
+            policy.get("strength_semantics") or policy.get("confidence_semantics"),
+            absent=CORRELATION_CONFIDENCE_SEMANTICS,
+        ),
+        "numeric_provenance": str(
+            policy.get("numeric_provenance") or PROJECT_LOCAL_HEURISTIC
+        ),
+        "output_namespace": "campaign_similarity_context",
     }
     return payload
 
@@ -392,6 +427,10 @@ def _similar_session_pattern_signal(
         "campaign_id": campaign_id,
         "session_id": session_id,
         "match_score": match.get("score"),
+        "confidence_semantics": resolve_confidence_semantics(
+            match.get("confidence_semantics") or policy.get("confidence_semantics"),
+            absent=CORRELATION_CONFIDENCE_SEMANTICS,
+        ),
         "match_reasons": match.get("match_reasons") or [],
         "alert_authority_policy_sha256": policy_sha256,
     }
@@ -403,6 +442,22 @@ def _similar_session_pattern_signal(
         "campaign_id": campaign_id,
         "session_status": status,
         "match_score": match.get("score"),
+        "strength": match.get("strength", match.get("score")),
+        "confidence_semantics": resolve_confidence_semantics(
+            match.get("confidence_semantics") or policy.get("confidence_semantics"),
+            absent=CORRELATION_CONFIDENCE_SEMANTICS,
+        ),
+        "strength_semantics": resolve_confidence_semantics(
+            match.get("strength_semantics")
+            or match.get("confidence_semantics")
+            or policy.get("strength_semantics"),
+            absent=CORRELATION_CONFIDENCE_SEMANTICS,
+        ),
+        "numeric_provenance": str(
+            policy.get("numeric_provenance") or PROJECT_LOCAL_HEURISTIC
+        ),
+        "output_namespace": "campaign_similarity_signal",
+        "temporal_semantics": "session_similarity_timing_bucket_not_elapsed_window",
         "match_reasons": match.get("match_reasons") or [],
         "campaign_session_count": campaign.get("session_count") or 0,
         "authority": {
@@ -483,6 +538,19 @@ def create_or_update_campaign(
             "fingerprint_id": fingerprint.get("fingerprint_id"),
             "matched_existing_campaign": matched_existing,
             "match_score": best_match.get("score") or 0.0,
+            "confidence_semantics": resolve_confidence_semantics(
+                best_match.get("confidence_semantics") or policy.get("confidence_semantics"),
+                absent=CORRELATION_CONFIDENCE_SEMANTICS,
+            ),
+            "strength_semantics": resolve_confidence_semantics(
+                best_match.get("strength_semantics")
+                or best_match.get("confidence_semantics")
+                or policy.get("strength_semantics"),
+                absent=CORRELATION_CONFIDENCE_SEMANTICS,
+            ),
+            "numeric_provenance": str(
+                policy.get("numeric_provenance") or PROJECT_LOCAL_HEURISTIC
+            ),
             "match_reasons": best_match.get("match_reasons") or [],
             "primary_fingerprint_type": fingerprint.get("primary_fingerprint_type"),
             "primary_fingerprint_value": fingerprint.get("primary_fingerprint_value"),
@@ -523,6 +591,20 @@ def create_or_update_campaign(
             {
                 "campaign_id": item.get("campaign_id"),
                 "score": item.get("score"),
+                "strength": item.get("strength", item.get("score")),
+                "confidence_semantics": item.get("confidence_semantics")
+                or resolve_confidence_semantics(
+                    policy.get("confidence_semantics"),
+                    absent=CORRELATION_CONFIDENCE_SEMANTICS,
+                ),
+                "strength_semantics": item.get("strength_semantics")
+                or item.get("confidence_semantics")
+                or policy.get("strength_semantics"),
+                "numeric_provenance": str(
+                    item.get("numeric_provenance")
+                    or policy.get("numeric_provenance")
+                    or PROJECT_LOCAL_HEURISTIC
+                ),
                 "match_reasons": item.get("match_reasons") or [],
             }
             for item in matches
@@ -530,6 +612,10 @@ def create_or_update_campaign(
         "correlation_signal": correlation_signal or {},
         "correlation_signal_id": (
             correlation_signal.get("signal_id") if correlation_signal else ""
+        ),
+        "confidence_semantics": resolve_confidence_semantics(
+            best_match.get("confidence_semantics") or policy.get("confidence_semantics"),
+            absent=CORRELATION_CONFIDENCE_SEMANTICS,
         ),
         "automatic_alerts": {
             "status": "prohibited",

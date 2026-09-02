@@ -57,6 +57,9 @@ honeypot-feed-refresh = "production.enrichment.refresh_feeds:main"
 honeypot-sqlite-recovery = "production.tools.sqlite_backup_restore:main"
 honeypot-release-manifest = "production.tools.release_manifest:main"
 honeypot-ai-advisory-metrics = "production.tools.ai_advisory_metrics:main"
+honeypot-mongo-cold-archive = "production.tools.mongo_cold_archive:main"
+honeypot-mongo-purge-pilot = "production.tools.mongo_purge_pilot:main"
+honeypot-mongo-retention = "production.tools.mongo_retention:main"
 
 [tool.setuptools.packages.find]
 include = ["production*"]

@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PTI-Honeypot dashboard-v2
 
-## Getting Started
+This is the fixed-theme threat-intelligence dashboard for the honeypot project. The dashboard reads the existing monitor/dashboard APIs through a same-origin, read-only Next.js BFF; browser code never connects directly to MongoDB Atlas.
 
-First, run the development server:
+## Local run
+
+Install from the lockfile. The existing dependency set has a React 19 / `react-simple-maps` peer mismatch, so npm may require legacy peer resolution:
 
 ```bash
+npm ci --legacy-peer-deps --ignore-scripts
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The BFF defaults to `http://127.0.0.1:8090`, the existing `monitor_web` service. Configure these server-only variables before use:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+DASHBOARD_API_ORIGIN=http://127.0.0.1:8090
+DASHBOARD_API_READ_TOKEN=<monitor read token, never a NEXT_PUBLIC variable>
+DASHBOARD_V2_OPERATOR_ID=<deployment operator id>
+DASHBOARD_V2_ACCESS_KEY=<deployment dashboard access key>
+DASHBOARD_V2_SESSION_SECRET=<deployment session secret>
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The app fails closed when dashboard authentication is not configured. No Mongo URI or Mongo credential belongs in this application. The BFF exposes only allowlisted GET routes and excludes the sensitive monitor command route.
 
-## Learn More
+## API and data documentation
 
-To learn more about Next.js, take a look at the following resources:
+The source-backed API contract is maintained in [`docs/API.md`](/home/rubchek/Desktop/teammate-repo/dashboard-v2/docs/API.md), with a machine-readable inventory in [`docs/API_ENDPOINT_INVENTORY.csv`](/home/rubchek/Desktop/teammate-repo/dashboard-v2/docs/API_ENDPOINT_INVENTORY.csv) and a lightweight OpenAPI description in [`docs/openapi.yaml`](/home/rubchek/Desktop/teammate-repo/dashboard-v2/docs/openapi.yaml). Frontend consumers, trust boundaries, and freshness behavior are described in [`docs/FRONTEND_API_MAPPING.md`](/home/rubchek/Desktop/teammate-repo/dashboard-v2/docs/FRONTEND_API_MAPPING.md), [`docs/API_ARCHITECTURE.md`](/home/rubchek/Desktop/teammate-repo/dashboard-v2/docs/API_ARCHITECTURE.md), and [`docs/DATA_SEMANTICS.md`](/home/rubchek/Desktop/teammate-repo/dashboard-v2/docs/DATA_SEMANTICS.md).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The deterministic documentation check is [`docs/verify_endpoint_inventory.mjs`](/home/rubchek/Desktop/teammate-repo/dashboard-v2/docs/verify_endpoint_inventory.mjs). It verifies that the allowlisted source routes, CSV inventory, and API headings remain aligned.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Verification
 
-## Deploy on Vercel
+```bash
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The implementation audit and runtime binding are recorded under `honeypot-analysis/evaluation/current_policy_remediation_20260827/dashboard_v2_threat_intel_api_integration/`. Production deployment is a separate authorized step and must wait for a current runtime preflight.

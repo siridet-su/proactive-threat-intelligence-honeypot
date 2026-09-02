@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 from email.message import Message
 from http import HTTPStatus
 from pathlib import Path
@@ -22,6 +24,7 @@ from production.utils.cowrie_privacy import (
 class FakeMonitorHealthStorage:
     def __init__(self, ready: bool = True) -> None:
         self.ready = ready
+        self.closed = False
 
     def health_check(self) -> dict:
         return {
@@ -29,6 +32,9 @@ class FakeMonitorHealthStorage:
             "backend": "sqlite",
             "database": "must-not-leak",
         }
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _config(
@@ -135,6 +141,111 @@ def test_monitor_liveness_and_minimal_readiness_are_public(
     assert live_responses[0][0] == HTTPStatus.OK
     assert ready_responses[0][0] == HTTPStatus.OK
     assert set(ready_responses[0][1]) == {"ok", "service", "timestamp"}
+
+
+def test_monitor_storage_is_process_cached_and_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = []
+
+    def fake_open_storage(_database):
+        storage = FakeMonitorHealthStorage()
+        created.append(storage)
+        return storage
+
+    monkeypatch.setattr(monitor_web, "open_storage", fake_open_storage)
+    config = monitor_web.MonitorConfig(
+        db_path="",
+        database_url="sqlite:///:memory:",
+        reports_dir=str(tmp_path / "reports"),
+    )
+
+    first = monitor_web._open_monitor_storage(config)
+    second = monitor_web._open_monitor_storage(config)
+
+    assert first is second
+    assert created == [first]
+
+    monitor_web._close_monitor_storage(config)
+
+    assert first.closed is True
+    assert config._storage is None
+
+
+def test_monitor_storage_cache_is_thread_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = []
+
+    def fake_open_storage(_database):
+        time.sleep(0.01)
+        storage = FakeMonitorHealthStorage()
+        created.append(storage)
+        return storage
+
+    monkeypatch.setattr(monitor_web, "open_storage", fake_open_storage)
+    config = monitor_web.MonitorConfig(
+        db_path="",
+        database_url="sqlite:///:memory:",
+        reports_dir=str(tmp_path / "reports"),
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        storages = list(
+            pool.map(
+                lambda _index: monitor_web._open_monitor_storage(config),
+                range(16),
+            )
+        )
+
+    assert len(created) == 1
+    assert {id(storage) for storage in storages} == {id(created[0])}
+
+
+def test_monitor_readiness_reports_safe_latency_without_exposing_backend_detail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        monitor_web,
+        "open_storage",
+        lambda _database: FakeMonitorHealthStorage(),
+    )
+    config = monitor_web.MonitorConfig(
+        db_path="",
+        database_url="sqlite:///:memory:",
+        reports_dir=str(tmp_path / "reports"),
+    )
+
+    ready, diagnostic = monitor_web._monitor_readiness(config)
+
+    assert ready is True
+    assert diagnostic["operation"] == "storage_health_check"
+    assert diagnostic["backend"] == "sqlite"
+    assert diagnostic["storage_open_latency_ms"] >= 0
+    assert diagnostic["health_latency_ms"] >= 0
+    assert diagnostic["latency_ms"] >= 0
+    assert "database" not in diagnostic
+
+
+def test_monitor_does_not_send_second_response_after_client_disconnect(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _config(tmp_path)
+    handler, _, _ = _handler(config, "/health/ready")
+    handler._send_json = lambda *_args, **_kwargs: pytest.fail(
+        "disconnected client must not receive a second response"
+    )
+
+    handler._handle_unexpected_error("get_failed", BrokenPipeError())
+
+    log = json.loads(capsys.readouterr().out)
+    assert log["event"] == "client_disconnected"
+    assert log["exception_class"] == "BrokenPipeError"
+    assert log["exception"] == "ConnectionError: operation_failed"
 
 
 def test_monitor_sensitive_reads_require_bearer_when_configured(

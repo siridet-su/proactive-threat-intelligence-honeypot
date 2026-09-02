@@ -1,0 +1,78 @@
+{
+  "schema_version": "mongo_pi_archive_lifecycle_policy.v1",
+  "policy_id": "mongo-pi-cold-archive-local-policy",
+  "capacity_thresholds": {
+    "warning": 0.7,
+    "critical": 0.8,
+    "emergency": 0.9,
+    "note": "Configurable local operating thresholds; not an industry standard."
+  },
+  "default_hot_window_days": null,
+  "pi": {
+    "archive_root": "/var/lib/honeypot-cold-archive",
+    "reserve_bytes": 10737418240,
+    "max_used_ratio_after_transfer": 0.9,
+    "persistent_filesystem_required": true,
+    "no_persistent_archive_under_tmp": true
+  },
+  "transport": {
+    "allowed": ["ssh", "sftp", "rsync-over-ssh"],
+    "partial_suffix": ".partial",
+    "atomic_finalization_required": true,
+    "unauthenticated_http_archive_upload_allowed": false
+  },
+  "collections": {
+    "events": {
+      "classification": "ARCHIVE_ELIGIBLE_HISTORICAL",
+      "archive_eligible": true,
+      "purge_eligible": false,
+      "reconstructable": false,
+      "hot_window_days": null,
+      "required_terminal_fields": [
+        "session_finalized",
+        "analysis_complete",
+        "assessment_complete",
+        "report_complete",
+        "no_pending_enrichment",
+        "no_pending_prediction",
+        "no_pending_advisory"
+      ],
+      "dependencies": ["sessions", "analysis_jobs", "canonical_assessments", "reports"]
+    },
+    "sessions": {
+      "classification": "ARCHIVE_ELIGIBLE_HISTORICAL",
+      "archive_eligible": true,
+      "purge_eligible": false,
+      "reconstructable": false,
+      "hot_window_days": null,
+      "required_terminal_fields": [
+        "session_finalized",
+        "analysis_complete",
+        "assessment_complete",
+        "report_complete",
+        "no_pending_enrichment",
+        "no_pending_prediction",
+        "no_pending_advisory"
+      ],
+      "dependencies": ["events", "analysis_jobs", "canonical_assessments", "reports"]
+    },
+    "analysis_jobs": {
+      "classification": "ARCHIVE_ELIGIBLE_HISTORICAL",
+      "archive_eligible": true,
+      "purge_eligible": false,
+      "reconstructable": true,
+      "hot_window_days": null,
+      "required_terminal_fields": ["terminal_status", "no_active_retry"],
+      "dependencies": ["sessions"]
+    },
+    "hardware_metrics": {
+      "classification": "SPECIAL_REVIEW_REQUIRED",
+      "archive_eligible": true,
+      "purge_eligible": false,
+      "reconstructable": false,
+      "hot_window_days": null,
+      "required_terminal_fields": ["historical_cutoff", "privacy_scan_passed"],
+      "dependencies": []
+    }
+  }
+}

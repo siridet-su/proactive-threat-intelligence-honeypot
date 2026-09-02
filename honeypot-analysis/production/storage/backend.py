@@ -3845,6 +3845,39 @@ class SQLiteStorage:
             return None
         return record
 
+    def list_enrichment_records_for_observables(
+        self,
+        observables: Any,
+        allow_stale: bool = True,
+    ) -> List[Dict[str, Any]]:
+        normalized = [
+            (str(observable_type), str(observable_value))
+            for observable_type, observable_value in observables
+            if str(observable_type) and str(observable_value)
+        ]
+        if not normalized:
+            return []
+        clauses = " OR ".join(
+            "(observable_type = ? AND observable_value = ?)"
+            for _ in normalized
+        )
+        parameters = [value for pair in normalized for value in pair]
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM enrichment_records WHERE {clauses}",
+                parameters,
+            ).fetchall()
+        records: List[Dict[str, Any]] = []
+        for row in rows:
+            record = dict(row)
+            record["payload"] = json.loads(record["payload_json"])
+            record["provider_status"] = json.loads(record["provider_status_json"])
+            record["is_stale"] = not _is_future(record.get("expires_at"))
+            if record["is_stale"] and not allow_stale:
+                continue
+            records.append(record)
+        return records
+
     def load_enrichment_cache(self, observable_type: str = "ip", allow_stale: bool = True) -> Dict[str, Dict[str, Any]]:
         with self.connection() as conn:
             rows = conn.execute(
@@ -5039,6 +5072,40 @@ class SQLiteStorage:
             items.append(item)
         items.sort(key=_prediction_row_order, reverse=True)
         return items[: max(0, int(limit))]
+
+    def list_dashboard_session_detail_prediction_snapshots(
+        self,
+        session_id: str,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Return the bounded recent snapshot window used by dashboard detail."""
+        bounded_limit = min(max(0, int(limit)), 50)
+        if bounded_limit == 0:
+            return []
+        scan_limit = max(bounded_limit, 500)
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM prediction_snapshots
+                WHERE session_id = ?
+                ORDER BY created_at DESC, snapshot_id ASC
+                LIMIT ?
+                """,
+                (session_id, scan_limit),
+            ).fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = _prediction_row_payload(item)
+            item["integrity_errors"] = (
+                validate_prediction_snapshot_integrity(item["payload"])
+                if item["payload"].get("schema_version")
+                == SNAPSHOT_SCHEMA_VERSION
+                else []
+            )
+            items.append(item)
+        items.sort(key=_prediction_row_order, reverse=True)
+        return items[:bounded_limit]
 
     def get_current_prediction_snapshot(
         self,
