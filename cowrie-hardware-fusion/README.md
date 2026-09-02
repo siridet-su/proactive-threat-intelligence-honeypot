@@ -6,7 +6,7 @@ MITRE ATT&CK TTP candidates ได้ดีขึ้นกว่า command-only
 
 ## สถานะ
 
-สถานะปัจจุบันคือ `MODEL FEATURE CONTRACT V1 FROZEN / DEVELOPMENT MATRIX NEXT` มี collector,
+สถานะปัจจุบันคือ `DEVELOPMENT WAVE TOOLING READY / PI PREFLIGHT NEXT` มี collector,
 dataset builder, receipt-driven source index, grouped split generator และ fixed
 safe-container runtime แล้ว Pi matrix จริงของ `T1496.001`/`T1499.002` สำเร็จ 15 runs
 XGBoost smoke แยก compute simulation ได้แต่ service-exhaustion ยังไม่ผ่าน Protocol v2 จึง
@@ -18,7 +18,9 @@ test ก่อนเก็บข้อมูลใหม่ Common Go/Python met
 service rejection/latency evidence gate แล้ว excluded pilot v2 ผ่าน 7/7 runs และ 630/630
 valid samples และ dataset builder v2 เพิ่ม 13 aggregate features/6 TCN channels พร้อม
 order hashes แล้ว และ freeze XGBoost 3 profiles/TCN 2 profiles พร้อม leakage/missingness
-gates แล้ว ขั้นถัดไปคือสร้าง development dataset 70 runs; ยังไม่มีโมเดลใหม่ที่พร้อม deploy
+gates แล้ว และ generator สร้าง local development controls 70 runs โดยไม่เปิด calibration/
+final test ขั้นถัดไปคือ review identity กับ Pi และเพิ่ม runtime validation ก่อน collection;
+ยังไม่มีโมเดลใหม่ที่พร้อม deploy
 
 ข้อตกลงปัจจุบัน:
 
@@ -71,11 +73,13 @@ cowrie-hardware-fusion/
     feature/channel order hashes และ replay raw pilot ผ่าน 7/7
 16. **เสร็จ:** freeze model feature contract v1: XGBoost 25/51/66 features, TCN 14/22
     channels, forbidden leakage inputs, mask policy และ audit-only claim
-17. **ลำดับถัดไป:** generate และตรวจ development wave 70 runs โดย final-test 35 runs ยังปิด
-18. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
-19. เลือก hardware branch จาก frozen evaluation protocol
-20. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
-21. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
+17. **เสร็จ tooling:** deterministic development matrix 70 runs, 2 planned day slots,
+    schema/hash/claim gates; local control set generated และ final-test 35 runs ยังปิด
+18. **ลำดับถัดไป:** audit Pi identities และเพิ่ม development runtime preflight/collection
+19. ทดลอง MiniROCKET/TCN เมื่อ XGBoost v2 และ independent-run gate ผ่าน
+20. เลือก hardware branch จาก frozen evaluation protocol
+21. เทรน Fusion ด้วย leakage-safe out-of-fold predictions/features
+22. รัน Cloud shadow inference ก่อนพิจารณาการเชื่อม production
 
 ## เอกสารเริ่มต้น
 
@@ -83,6 +87,7 @@ cowrie-hardware-fusion/
 - [Dataset builder v1](docs/dataset_builder.v1.md)
 - [Dataset builder v2](docs/dataset_builder.v2.md)
 - [Model feature contract v1](docs/model_feature_contract.v1.md)
+- [Hardware-impact development wave v1](docs/hardware_impact_development_wave.v1.md)
 - [Experimental 1 Hz collector v1](docs/experimental_collector.v1.md)
 - [XGBoost, TCN and Fusion architecture](docs/model_architecture_xgboost_tcn_fusion.v1.md)
 - [Dataset split policy v1](docs/dataset_split_policy.v1.md)

@@ -34,6 +34,8 @@
 - [Service-pressure workload specification schema v2](service_pressure_workload_spec.v2.schema.json)
 - [Service-pressure candidate signal report schema](service_pressure_signal_report.v1.schema.json)
 - [Model feature contract schema](model_feature_contract.v1.schema.json)
+- [Hardware-impact development matrix schema](hardware_impact_development_matrix.v1.schema.json)
+- [Hardware-impact development workload spec schema](hardware_impact_development_workload_spec.v1.schema.json)
 - [Example run manifest](examples/experiment_run_manifest.v1.example.json)
 - [Example bounded benign-compute manifest](examples/experiment_run_manifest.benign_compute.v1.example.json)
 - [Example telemetry sample](examples/hardware_telemetry_sample.v1.example.json)

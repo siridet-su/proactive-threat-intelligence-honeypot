@@ -4,10 +4,20 @@
   "title": "Hardware model feature contract v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "contract_id", "builder_binding", "evidence_binding", "xgboost_profiles", "tcn_profiles", "tcn_missingness_policy", "forbidden_model_inputs", "claim_control", "contract_sha256"],
+  "required": ["schema_version", "contract_id", "experiment_protocol", "builder_binding", "evidence_binding", "xgboost_profiles", "tcn_profiles", "tcn_missingness_policy", "forbidden_model_inputs", "claim_control", "contract_sha256"],
   "properties": {
     "schema_version": {"const": "model_feature_contract.v1"},
     "contract_id": {"$ref": "#/$defs/identifier"},
+    "experiment_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "protocol_id", "protocol_sha256"],
+      "properties": {
+        "schema_version": {"const": "hardware_impact_experiment_protocol.v2"},
+        "protocol_id": {"$ref": "#/$defs/identifier"},
+        "protocol_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "builder_binding": {
       "type": "object",
       "additionalProperties": false,

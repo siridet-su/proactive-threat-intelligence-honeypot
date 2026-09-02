@@ -760,6 +760,81 @@ def _prepare_service_pressure_pilot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prepare_hardware_impact_development(args: argparse.Namespace) -> int:
+    from .batch import write_json_exclusive
+    from .development import build_hardware_impact_development_matrix
+
+    config_document = _load_json(args.config)
+    _validate(
+        config_document,
+        args.schema_dir / "experimental_collector_config.v1.schema.json",
+        str(args.config),
+    )
+    protocol = _load_json(args.protocol)
+    feature_contract = _load_json(args.feature_contract)
+    _validate(
+        protocol,
+        args.schema_dir / "hardware_impact_experiment_protocol.v2.schema.json",
+        str(args.protocol),
+    )
+    _validate(
+        feature_contract,
+        args.schema_dir / "model_feature_contract.v1.schema.json",
+        str(args.feature_contract),
+    )
+    matrix, documents = build_hardware_impact_development_matrix(
+        experiment_id=args.experiment_id,
+        image_id=args.image_id,
+        implementation_sha256=args.implementation_sha256,
+        repo_commit=args.repo_commit,
+        environment_signature_sha256=args.environment_signature_sha256,
+        sensor_id=config_document["sensor_id"],
+        host_id=config_document["subject_id"],
+        collector_id=config_document["collector_id"],
+        protocol_path=args.protocol,
+        feature_contract_path=args.feature_contract,
+        catalog_path=args.scenario_catalog,
+        schema_dir=args.schema_dir,
+        schedule_seed=args.schedule_seed,
+    )
+    _validate(
+        matrix,
+        args.schema_dir / "hardware_impact_development_matrix.v1.schema.json",
+        "hardware-impact development matrix",
+    )
+    manifest_schema = args.schema_dir / "experiment_run_manifest.v1.schema.json"
+    specification_schema = (
+        args.schema_dir / "hardware_impact_development_workload_spec.v1.schema.json"
+    )
+    for manifest, specification in documents:
+        _validate(manifest, manifest_schema, manifest["run_id"])
+        if specification is not None:
+            _validate(specification, specification_schema, specification["spec_id"])
+
+    write_json_exclusive(args.output_dir / "matrix.json", matrix)
+    for manifest, specification in documents:
+        control_dir = args.output_dir / "control" / f"run={manifest['run_id']}"
+        control_dir.mkdir(parents=True, exist_ok=False)
+        write_json_exclusive(control_dir / "planned-manifest.json", manifest)
+        if specification is not None:
+            write_json_exclusive(control_dir / "workload-spec.json", specification)
+    print(
+        json.dumps(
+            {
+                "output_dir": str(args.output_dir),
+                "matrix_sha256": matrix["matrix_sha256"],
+                "run_count": matrix["run_count"],
+                "estimated_total_seconds": matrix["estimated_total_seconds"],
+                "minimum_distinct_days": matrix["minimum_distinct_days"],
+                "training_eligible": matrix["training_eligible"],
+                "final_test_opened": matrix["final_test_opened"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def _validated_service_pressure_inputs(
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], Any, dict[str, Any]]:
@@ -1274,6 +1349,26 @@ def _parser() -> argparse.ArgumentParser:
     instrumentation_prepare.add_argument("--output-dir", type=Path, required=True)
     instrumentation_prepare.add_argument("--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR)
     instrumentation_prepare.set_defaults(handler=_prepare_service_pressure_pilot)
+
+    development_prepare = subparsers.add_parser(
+        "prepare-hardware-impact-development",
+        help="freeze the 70-run development wave while keeping calibration/final absent",
+    )
+    development_prepare.add_argument("--experiment-id", required=True)
+    development_prepare.add_argument("--image-id", required=True)
+    development_prepare.add_argument("--implementation-sha256", required=True)
+    development_prepare.add_argument("--repo-commit", required=True)
+    development_prepare.add_argument("--environment-signature-sha256", required=True)
+    development_prepare.add_argument("--config", type=Path, required=True)
+    development_prepare.add_argument("--protocol", type=Path, required=True)
+    development_prepare.add_argument("--feature-contract", type=Path, required=True)
+    development_prepare.add_argument("--scenario-catalog", type=Path, required=True)
+    development_prepare.add_argument("--output-dir", type=Path, required=True)
+    development_prepare.add_argument("--schedule-seed", type=int, default=20260903)
+    development_prepare.add_argument(
+        "--schema-dir", type=Path, default=DEFAULT_SCHEMA_DIR
+    )
+    development_prepare.set_defaults(handler=_prepare_hardware_impact_development)
 
     instrumentation_preflight = subparsers.add_parser(
         "service-pressure-pilot-preflight",

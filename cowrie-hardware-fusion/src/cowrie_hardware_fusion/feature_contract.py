@@ -78,6 +78,12 @@ def validate_model_feature_contract(
     without_hash.pop("contract_sha256", None)
     if not isinstance(claimed_hash, str) or canonical_sha256(without_hash) != claimed_hash:
         raise DatasetContractError("model feature contract hash does not match")
+    if document.get("experiment_protocol") != {
+        "schema_version": "hardware_impact_experiment_protocol.v2",
+        "protocol_id": "pi-hardware-impact-v2-20260902",
+        "protocol_sha256": "8eb0786e8427f7fa685a8d137db62b1ecfff40a7897b65f742915477b9b2471d",
+    }:
+        raise DatasetContractError("model feature contract protocol binding is not frozen")
 
     validate_derived_window_identity(representative_window)
     binding = document["builder_binding"]

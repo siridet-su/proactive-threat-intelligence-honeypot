@@ -21,5 +21,5 @@ configuration ทุก config ที่มีผลต่อ dataset/model iden
 - [Model feature contract v1](model_feature_contract.v1.json) — freeze input profiles
   สำหรับ XGBoost (`go_agent_overlap_v1`, `host_extended_v3`, `target_augmented_v3`)
   และ TCN (`host_extended_v3`, `target_augmented_v3`) โดยผูกกับ builder v2 และหลักฐาน
-  instrumentation pilot; receipt, label, identity และ simulator-only presence flag เป็น
-  forbidden model inputs
+  instrumentation pilot รวมทั้ง Experiment Protocol v2; receipt, label, identity และ
+  simulator-only presence flag เป็น forbidden model inputs

@@ -29,4 +29,8 @@ model-profile tests ตรวจ contract/schema/content hash, builder/order bin
 XGBoost/TCN profiles, simulator-artifact/label rejection, TCN missingness policy และ CLI
 validation หลัง serialize/reload
 
-ชุดถัดไปจะเพิ่ม development-matrix generation และ shadow/canonical non-interference
+development-wave tests ตรวจ 70-run exact coverage, two-day-slot schedule, deterministic
+ordering/seeds, schemas, artifact/profile/protocol bindings, matched treatments และ
+negative gates ที่ห้ามเปิด final test, เปลี่ยน schedule หรือย้อน claim เป็น pilot
+
+ชุดถัดไปจะเพิ่ม development runtime/finalization และ shadow/canonical non-interference

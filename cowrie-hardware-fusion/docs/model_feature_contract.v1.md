@@ -11,11 +11,12 @@ authority ที่เครื่องอ่านได้คือ
 ## Binding
 
 - builder `0.2.0`, window `derived_training_window.v2`
+- experiment protocol `pi-hardware-impact-v2-20260902`, hash `8eb0786e...71d`
 - XGBoost schema v2: 67 generated features,
   order hash `2cb0663c...f881b`
 - TCN schema v2: 22 generated channels,
   order hash `0c9b4aa7...22256`
-- contract hash `257121d6...af18`
+- contract hash `def95353...f5666`
 - ผูกกับ matrix, audit summary และ Pi export hashes ของ service-pressure pilot v2
 - pilot records เป็น evidence สำหรับเลือก signal เท่านั้น ไม่ใช่ training/evaluation data
 
@@ -68,6 +69,7 @@ profile nesting, input availability, forbidden inputs, TCN mask policy และ
 
 ## ขั้นถัดไป
 
-สร้าง development matrix 70 runs ตาม Protocol v2 โดยยังไม่เปิด final-test wave จากนั้น build
-windows ด้วย v2 และเริ่ม XGBoost development evaluation เปรียบเทียบสาม profile ข้างต้น
+development matrix 70 runs ถูก generate ใน local control area แล้วโดยยังไม่เปิด final-test
+wave ขั้นถัดไปคือ Pi identity/runtime preflight แล้วจึง collect, build windows ด้วย v2 และ
+เริ่ม XGBoost development evaluation เปรียบเทียบสาม profile ข้างต้น
 Target profile เป็นการวัด upper bound จนกว่าจะผ่าน Cowrie target mapping/shadow gate

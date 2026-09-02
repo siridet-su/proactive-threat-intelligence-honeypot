@@ -63,6 +63,12 @@ development wave หลัง service-pressure observability และ collectio
 
 ## Feature profiles
 
+หมายเหตุหลัง excluded instrumentation pilot: รายชื่อ feature v2 ที่ embed ใน protocol
+เป็น initial pre-collection proposal ส่วน authority สำหรับ development collection ถูก
+supersede โดย [Model Feature Contract v1](model_feature_contract.v1.md) ซึ่งผูกกลับมาที่
+protocol hash นี้และ freeze profiles v3 ก่อนสร้าง development matrix โดยไม่ได้เปลี่ยน
+labels, acquisition waves, XGBoost parameters หรือ promotion gates
+
 - `go_agent_overlap_v1` — 25 features ที่ Go agent ปัจจุบันพอเทียบได้ ใช้เป็น diagnostic
   baseline ไม่ใช่ full collector replacement
 - `host_extended_v2` — 48 host features รวม disk I/O, per-core imbalance,
@@ -100,3 +106,6 @@ cowrie-hardware-dataset validate-hardware-impact-protocol \
 
 Validator ตรวจทั้ง JSON Schema, content hash, label authority, matched controls, wave totals,
 final-test lock, feature leakage/nesting และ fixed model policy
+
+Development matrix/run controls:
+[hardware_impact_development_wave.v1.md](hardware_impact_development_wave.v1.md)

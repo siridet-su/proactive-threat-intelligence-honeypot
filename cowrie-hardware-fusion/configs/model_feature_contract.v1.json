@@ -1,6 +1,11 @@
 {
   "schema_version": "model_feature_contract.v1",
   "contract_id": "hardware-impact-model-features-v3-20260903",
+  "experiment_protocol": {
+    "schema_version": "hardware_impact_experiment_protocol.v2",
+    "protocol_id": "pi-hardware-impact-v2-20260902",
+    "protocol_sha256": "8eb0786e8427f7fa685a8d137db62b1ecfff40a7897b65f742915477b9b2471d"
+  },
   "builder_binding": {
     "builder_version": "0.2.0",
     "window_schema_version": "derived_training_window.v2",
@@ -264,5 +269,5 @@
     "simulator_receipt_is_model_input": false,
     "final_test_opened": false
   },
-  "contract_sha256": "257121d60da5f35d2d0f9d181a7f6f3fe75c13d4d3a552ae0bd2740586f3af18"
+  "contract_sha256": "def95353e69628454541a27b64559e8c537c9772a82ebb303b67e93cc27f5666"
 }

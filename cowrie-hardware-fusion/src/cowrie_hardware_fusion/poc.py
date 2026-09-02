@@ -653,7 +653,10 @@ class DockerWorkloadLifecycle:
             f"--work-iterations={parameters['work_iterations']}",
             f"--seed={parameters['deterministic_seed']}",
         ]
-        if self.specification.get("schema_version") == "service_pressure_workload_spec.v2":
+        if self.specification.get("schema_version") in {
+            "service_pressure_workload_spec.v2",
+            "hardware_impact_development_workload_spec.v1",
+        }:
             arguments.extend(
                 [
                     f"--connection-mode={parameters['connection_mode']}",

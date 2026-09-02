@@ -992,7 +992,8 @@ generate v2 artifacts แล้ว rerun 7 scenarios/630 samples ก่อนต
 
 สถานะ: `FROZEN / 7 PILOT WINDOWS VALIDATED / AUDIT-ONLY`
 
-- freeze contract hash `257121d6...af18` ผูก builder `0.2.0`, window/features/channels v2,
+- freeze contract hash `def95353...f5666` ผูก Protocol v2 hash `8eb0786e...71d`,
+  builder `0.2.0`, window/features/channels v2,
   feature/channel order hashes และ evidence hashes ของ excluded service-pressure pilot v2
 - XGBoost มี strict nested profiles: Go-agent overlap 25, host-extended 51 และ
   target-augmented 66 features; ตัวสุดท้ายเป็น upper-bound ไม่ใช่ production-ready profile
@@ -1014,3 +1015,30 @@ XGBoost สาม profile ตามลำดับ
 
 รายละเอียด exact inputs, counts, boundary และ validation command:
 [model_feature_contract.v1.md](../model_feature_contract.v1.md)
+
+## 28. Hardware-impact development-wave controls — 2026-09-03
+
+สถานะ: `GENERATOR PASS / 70 LOCAL CONTROLS / PI PREFLIGHT PENDING`
+
+- เพิ่ม matrix/spec schemas และ semantic generator สำหรับ development partition เท่านั้น:
+  7 scenarios × 10 repetitions = 70 runs/6,300 planned 1-Hz samples
+- schedule seed `20260903`; day slot 1 ใช้ repetitions 1/3/5/7/9 และ slot 2 ใช้
+  2/4/6/8/10 รวม slot ละ 35 runs; scenario order ภายใน repetition มาจาก canonical hash
+- exact scenario coverage 10 ครั้งต่อ scenario, matched benign/malicious treatment และ deterministic
+  regeneration ผ่าน; calibration/final-test ไม่มีใน output และ `final_test_opened=false`
+- spec/manifest ผูก Protocol v2, Model Feature Contract v1, catalog, collector/telemetry,
+  ARM64 image/binary, repo commit และ Pi environment signature
+- เพิ่ม protocol binding ที่ขาดใน Model Feature Contract ทำให้ contract hash ใหม่เป็น
+  `def95353...f5666`; binding นี้ถูกตรวจทั้งตอน validate contract และ generate matrix
+- local control set ที่ใช้ verified pilot identities มี matrix hash
+  `f22c5a17...5d959`, 70 manifests และ 60 workload specs; อยู่ใต้ ignored `data/`
+- generator/schema/negative tests รวมอยู่ใน suite 72 tests และ full suite ผ่านทั้งหมด
+- planned day slot ยังไม่พิสูจน์ distinct collection dates และ environment signature
+  ต้อง query Pi ใหม่ก่อน execute จึงยังไม่เริ่ม collection
+
+ขั้นถัดไปคือ commit/review tooling แล้ว audit Pi identities, เพิ่ม development-specific
+runtime preflight/collection/finalize commands และทำ preflight โดยไม่เก็บข้อมูลกับ run แรก
+ของ compute/service ก่อนเริ่ม day slot 1
+
+รายละเอียด control identity, schedule, safety และคำสั่ง generate:
+[hardware_impact_development_wave.v1.md](../hardware_impact_development_wave.v1.md)
