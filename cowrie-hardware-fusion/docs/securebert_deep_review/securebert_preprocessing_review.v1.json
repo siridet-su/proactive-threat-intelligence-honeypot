@@ -1,0 +1,13 @@
+{
+  "schema_version":"securebert_preprocessing_review.v1",
+  "canonical_input":"one stripped command fragment as observed by Cowrie",
+  "transformations":[
+    {"name":"outer_whitespace_strip","implementation":"NotebookParityClassifier.classify and SecureBertCommandClassifier.classify","why":"reject blank commands and stabilize input","semantic_effect":"can remove leading/trailing whitespace only","documented":true,"tested":true},
+    {"name":"compound_split","implementation":"split_compound_command","operators":["newline",";","&&","||"],"pipes_split":false,"why":"classify executable fragments separately","semantic_effect":"conditional RHS remains explicitly unproven and audit-only","documented":true,"tested":true},
+    {"name":"tokenizer_normalization","implementation":"tokenizer.json NFC","why":"Unicode canonical normalization","semantic_effect":"canonically equivalent Unicode sequences collapse","documented_in_model_asset":true,"tested_in_this_review":true},
+    {"name":"byte_level_bpe","implementation":"tokenizer.json","why":"model vocabulary encoding","semantic_effect":"case, quotes, paths, URLs, IPs, arguments and shell punctuation remain material","documented_in_model_asset":true,"tested_in_this_review":true},
+    {"name":"right_truncation","implementation":"adapter max_length=128","why":"bounded inference","semantic_effect":"all tokens after position 128 are discarded","documented":true,"runtime_truncation_flag_recorded":false,"tested_in_this_review":true}
+  ],
+  "not_performed":["lowercasing","redaction","argument removal","URL replacement","IP replacement","filename/path replacement","quote removal","escape normalization","base64 decoding","semantic-fact conversion","description generation","custom prompt/prefix","pre-tokenizer character truncation"],
+  "important_boundary":"The operation parser and rules inspect the fragment separately; their normalized semantic representation is not supplied to the model."
+}

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cowrie-hardware-fusion"
+version = "0.1.0"
+description = "Leakage-aware Cowrie and hardware telemetry dataset tooling"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "jsonschema>=4.23,<5",
+]
+
+[project.optional-dependencies]
+collector = [
+  "psutil>=5.9,<8",
+]
+test = [
+  "pytest>=8,<10",
+  "psutil>=5.9,<8",
+]
+poc-ml = [
+  "numpy>=2,<3",
+  "xgboost>=2.1,<4",
+]
+
+[project.scripts]
+cowrie-hardware-dataset = "cowrie_hardware_fusion.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

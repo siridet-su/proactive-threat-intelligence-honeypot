@@ -1,0 +1,16 @@
+{
+  "schema_version":"securebert_performance_profile.v1",
+  "boundary":"single bounded local CPU measurement; not an SLA",
+  "environment":{"cpu_only":true,"python":"3.12.13","torch":"2.13.0+cpu","transformers":"5.3.0","warm_local_storage":true},
+  "model_load_ms":87.3,
+  "tokenizer_load_ms":185.9,
+  "maximum_resident_set_kib":845584,
+  "short_command_inference_ms_range":[29.6,36.9],
+  "length_128_inference_ms_range":[142,145],
+  "batch_4":{"tokenization_ms":0.404,"inference_ms":82.38,"padding":"batch longest"},
+  "canonical_batching":false,
+  "concurrency":"synchronous within each worker call",
+  "timeout":"none around model forward pass",
+  "operational_observation":"Session worker holds one eager model; analysis job path can load another model per job.",
+  "universal_performance_claim":false
+}

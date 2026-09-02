@@ -1,0 +1,222 @@
+{
+  "schema_version": "cowrie_hardware_scenario_catalog.v1",
+  "catalog_id": "cowrie-hardware-fusion-pilot-v1",
+  "status": "stage_a_verified_stage_b_pi_poc_controlled_only",
+  "reviewed_at": "2026-09-02",
+  "attack_reference": {
+    "domain": "Enterprise",
+    "checked_at": "2026-09-02",
+    "sources": [
+      "https://attack.mitre.org/techniques/T1496/",
+      "https://attack.mitre.org/techniques/T1496/001/",
+      "https://attack.mitre.org/techniques/T1498/",
+      "https://attack.mitre.org/techniques/T1499/",
+      "https://attack.mitre.org/techniques/T1499/002/"
+    ]
+  },
+  "impact_label_space": [
+    "NO_MATERIAL_IMPACT",
+    "COMPUTE_SATURATION",
+    "MEMORY_PRESSURE",
+    "DISK_IO_PRESSURE",
+    "NETWORK_HIGH_THROUGHPUT",
+    "NETWORK_FLOOD_PATTERN",
+    "PROCESS_EXHAUSTION",
+    "SERVICE_PRESSURE",
+    "SERVICE_DEGRADATION",
+    "UNKNOWN"
+  ],
+  "safety_policy": {
+    "actual_malware_allowed": false,
+    "cryptocurrency_mining_allowed": false,
+    "public_or_third_party_targets_allowed": false,
+    "default_deny_egress": true,
+    "local_sink_only_for_network_workloads": true,
+    "hard_resource_limits_required": true,
+    "watchdog_required": true,
+    "pi_attacker_controlled_execution_allowed": false
+  },
+  "pilot_matrix": {
+    "intensity_percent": [25, 50, 75],
+    "duration_seconds": [30, 60],
+    "repetitions_per_cell": 3,
+    "baseline_seconds": 30,
+    "recovery_seconds": 30,
+    "sample_interval_seconds": 1
+  },
+  "full_matrix_candidate": {
+    "intensity_percent": [25, 50, 75, 90],
+    "duration_seconds": [10, 30, 60, 120],
+    "minimum_repetitions_per_cell": 10
+  },
+  "scenarios": [
+    {
+      "scenario_id": "neutral_idle",
+      "name": "Neutral idle/background baseline",
+      "disposition": "neutral_baseline",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "none",
+      "safe_workload_family": "none",
+      "primary_impact": "NO_MATERIAL_IMPACT",
+      "ground_truth_ttps": [],
+      "execution_observed_required": false,
+      "paired_counterexample": null
+    },
+    {
+      "scenario_id": "poc_pi_benign_compute_control",
+      "name": "Pi PoC authorized bounded compute control",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_compute_control",
+      "primary_impact": "COMPUTE_SATURATION",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_compute_hijacking_simulation"
+    },
+    {
+      "scenario_id": "poc_pi_compute_hijacking_simulation",
+      "name": "Pi PoC compute hijacking behavior without mining",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_compute_simulation",
+      "primary_impact": "COMPUTE_SATURATION",
+      "ground_truth_ttps": ["T1496.001"],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_benign_compute_control"
+    },
+    {
+      "scenario_id": "poc_pi_benign_service_load_control",
+      "name": "Pi PoC authorized bounded loopback service load",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_local_service_control",
+      "primary_impact": "SERVICE_PRESSURE",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_service_exhaustion_simulation"
+    },
+    {
+      "scenario_id": "poc_pi_service_exhaustion_simulation",
+      "name": "Pi PoC bounded loopback service exhaustion behavior",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["pi_sensor"],
+      "execution_boundary": "safe_container",
+      "safe_workload_family": "poc_bounded_local_service_simulation",
+      "primary_impact": "SERVICE_PRESSURE",
+      "ground_truth_ttps": ["T1499.002"],
+      "execution_observed_required": true,
+      "paired_counterexample": "poc_pi_benign_service_load_control"
+    },
+    {
+      "scenario_id": "benign_compute_control",
+      "name": "Authorized bounded compute workload",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_compute_benchmark",
+      "primary_impact": "COMPUTE_SATURATION",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "compute_hijacking_simulation"
+    },
+    {
+      "scenario_id": "compute_hijacking_simulation",
+      "name": "Compute hijacking behavioral simulation without mining",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_hashing_or_compute_simulation",
+      "primary_impact": "COMPUTE_SATURATION",
+      "ground_truth_ttps": ["T1496.001"],
+      "execution_observed_required": true,
+      "paired_counterexample": "benign_compute_control"
+    },
+    {
+      "scenario_id": "benign_bulk_transfer_control",
+      "name": "Authorized bounded transfer to local sink",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process", "local_sink"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_local_bulk_transfer",
+      "primary_impact": "NETWORK_HIGH_THROUGHPUT",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "bandwidth_hijacking_simulation"
+    },
+    {
+      "scenario_id": "bandwidth_hijacking_simulation",
+      "name": "Bandwidth hijacking behavioral simulation to local sink",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process", "local_sink"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_local_bandwidth_simulation",
+      "primary_impact": "NETWORK_HIGH_THROUGHPUT",
+      "ground_truth_ttps": ["T1496.002"],
+      "execution_observed_required": true,
+      "paired_counterexample": "benign_bulk_transfer_control"
+    },
+    {
+      "scenario_id": "direct_network_flood_simulation",
+      "name": "Rate-limited direct network flood pattern to local sink",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process", "local_sink"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "rate_limited_local_flood_simulation",
+      "primary_impact": "NETWORK_FLOOD_PATTERN",
+      "ground_truth_ttps": ["T1498.001"],
+      "execution_observed_required": true,
+      "paired_counterexample": "benign_bulk_transfer_control"
+    },
+    {
+      "scenario_id": "benign_process_load_control",
+      "name": "Authorized bounded process-concurrency workload",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_process_benchmark",
+      "primary_impact": "PROCESS_EXHAUSTION",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "os_exhaustion_simulation"
+    },
+    {
+      "scenario_id": "os_exhaustion_simulation",
+      "name": "Bounded OS resource-exhaustion behavioral simulation",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_process_or_memory_pressure_simulation",
+      "primary_impact": "PROCESS_EXHAUSTION",
+      "ground_truth_ttps": ["T1499.001"],
+      "execution_observed_required": true,
+      "paired_counterexample": "benign_process_load_control"
+    },
+    {
+      "scenario_id": "benign_service_load_control",
+      "name": "Authorized bounded service load",
+      "disposition": "benign_control",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process", "local_sink"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_local_service_load",
+      "primary_impact": "SERVICE_PRESSURE",
+      "ground_truth_ttps": [],
+      "execution_observed_required": true,
+      "paired_counterexample": "service_exhaustion_simulation"
+    },
+    {
+      "scenario_id": "service_exhaustion_simulation",
+      "name": "Bounded service-exhaustion behavioral simulation",
+      "disposition": "malicious_simulation",
+      "target_metric_scopes": ["backend_guest", "backend_cgroup", "target_process", "local_sink"],
+      "execution_boundary": "disposable_vm",
+      "safe_workload_family": "bounded_local_service_exhaustion_simulation",
+      "primary_impact": "SERVICE_PRESSURE",
+      "ground_truth_ttps": ["T1499.002"],
+      "execution_observed_required": true,
+      "paired_counterexample": "benign_service_load_control"
+    }
+  ]
+}

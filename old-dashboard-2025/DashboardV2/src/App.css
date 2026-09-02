@@ -1,0 +1,60 @@
+:root {
+  --body_main_background: #F3F4F6;  /*พื้นหลังสุด*/
+  --body_main_sidebar: #FFFFFF;     /*พื้นหลังของ side bar*/
+  --body_sub_sidebar: #F8F7FF;      /*เมนู side bar*/
+  --body_text_color: #2a3749;       /*สีของข้อความหลัก*/
+  --body_hover_text_color: #9183FF; /*สีของข้อความหลักเมื่อกดค้าง*/
+  --text_side_bar:#82848F;          /*สีจางๆของข้อความที่ side bar*/
+
+  --line_header: #E7E9ED;
+  --background-ui: #FFFFFF;
+  --text-ui: #1a1400;
+}
+
+[data-theme="dark"] {
+  --body_main_background: #010203;
+  --body_main_sidebar: #1C1C1C;
+  --body_sub_sidebar: #444444;
+  --body_text_color: #F3F4F6;
+  --body_hover_text_color: #F0EAC6;
+  --text_side_bar:#82848F;
+
+  --line_header: #B0AA8C;
+  --background-ui: #000;
+  --text-ui: #d7f3ec;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+*::selection {
+  background-color: var(--body_hover_text_color);
+  color: var(--body_main_background);
+}
+
+body{
+  margin: 0;
+  background-color: var(--body_main_background);
+  color: var(--body_text_color);
+  font-family: "Roboto", sans-serif;
+}
+
+*::-webkit-scrollbar {
+  display: none; /* For Chrome, Safari, and Opera */
+}
+
+.main {
+  display: flex;
+  justify-content: center;
+}
+
+.main-dashbord {
+  width: 100%;
+}
+
+@media screen and (max-width: 450px) {
+    .main {
+        display: block;
+    }
+}

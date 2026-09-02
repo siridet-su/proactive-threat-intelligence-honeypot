@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:pi-poc-matrix:v1",
+  "title": "Pi Hardware PoC Matrix v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generation", "experiment_id", "status", "repetitions", "scenario_count", "run_count", "sample_interval_seconds", "seconds_per_run", "estimated_total_seconds", "collector_source_sha256", "image_id", "implementation_sha256", "runs", "matrix_sha256"],
+  "properties": {
+    "schema_version": {"const": "pi_poc_matrix.v1"},
+    "generation": {"type": "string", "pattern": "^v[0-9]+$"},
+    "experiment_id": {"$ref": "#/$defs/identifier"},
+    "status": {"const": "planned"},
+    "repetitions": {"const": 3},
+    "scenario_count": {"const": 5},
+    "run_count": {"const": 15},
+    "sample_interval_seconds": {"const": 1},
+    "seconds_per_run": {"const": 90},
+    "estimated_total_seconds": {"const": 1350},
+    "collector_source_sha256": {"$ref": "#/$defs/sha256"},
+    "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "implementation_sha256": {"$ref": "#/$defs/sha256"},
+    "runs": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order", "run_id", "scenario_id", "repetition", "controlled_workload"],
+        "properties": {
+          "order": {"type": "integer", "minimum": 1, "maximum": 15},
+          "run_id": {"$ref": "#/$defs/identifier"},
+          "scenario_id": {"$ref": "#/$defs/identifier"},
+          "repetition": {"type": "integer", "minimum": 1, "maximum": 3},
+          "controlled_workload": {"type": "boolean"}
+        }
+      }
+    },
+    "matrix_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

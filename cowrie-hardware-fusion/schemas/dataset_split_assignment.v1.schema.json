@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:dataset-split-assignment:v1",
+  "title": "Leakage-Safe Dataset Split Assignment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "split_id", "source_index_sha256", "seed", "group_axes", "target_fractions", "partition_run_counts", "assignments", "excluded", "components", "assignment_sha256"],
+  "properties": {
+    "schema_version": {"const": "dataset_split_assignment.v1"},
+    "split_id": {"$ref": "#/$defs/identifier"},
+    "source_index_sha256": {"$ref": "#/$defs/sha256"},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "group_axes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["scenario_variant_group", "workload_implementation_sha256", "command_template_group", "collection_batch", "workload_family_group", "environment_group"]
+      }
+    },
+    "target_fractions": {"$ref": "#/$defs/partition_fractions"},
+    "partition_run_counts": {"$ref": "#/$defs/partition_counts"},
+    "assignments": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run_id", "partition", "component_id"],
+        "properties": {
+          "run_id": {"$ref": "#/$defs/identifier"},
+          "partition": {"$ref": "#/$defs/partition"},
+          "component_id": {"$ref": "#/$defs/identifier"}
+        }
+      }
+    },
+    "excluded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run_id", "reason"],
+        "properties": {
+          "run_id": {"$ref": "#/$defs/identifier"},
+          "reason": {"const": "pilot_only"}
+        }
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component_id", "partition", "run_ids"],
+        "properties": {
+          "component_id": {"$ref": "#/$defs/identifier"},
+          "partition": {"$ref": "#/$defs/partition"},
+          "run_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}}
+        }
+      }
+    },
+    "assignment_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "partition": {"enum": ["development_train", "calibration", "final_test"]},
+    "fraction": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+    "partition_fractions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development_train", "calibration", "final_test"],
+      "properties": {
+        "development_train": {"$ref": "#/$defs/fraction"},
+        "calibration": {"$ref": "#/$defs/fraction"},
+        "final_test": {"$ref": "#/$defs/fraction"}
+      }
+    },
+    "partition_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development_train", "calibration", "final_test"],
+      "properties": {
+        "development_train": {"type": "integer", "minimum": 1},
+        "calibration": {"type": "integer", "minimum": 1},
+        "final_test": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

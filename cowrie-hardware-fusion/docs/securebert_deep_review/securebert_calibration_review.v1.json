@@ -1,0 +1,16 @@
+{
+  "schema_version":"securebert_calibration_review.v1",
+  "securebert_temperature_applied":false,
+  "implemented_formula":"softmax(raw_logits)",
+  "known_value_0_6990670591704266":{"belongs_to":"next_observed_distinct_tactic Transformer checkpoint 16506e962432f9921d18a514c3a31686a20f9734385ec49439ad2651e4cdd283","applied":"logits divided by T before softmax in production/prediction_next_distinct_poc","belongs_to_securebert":false},
+  "securebert_calibration_artifact_found":false,
+  "calibration_dataset":null,
+  "split_identity":null,
+  "sample_count":null,
+  "objective":null,
+  "optimizer_method":null,
+  "seed":null,
+  "pre_post_metrics":null,
+  "conclusion":"SecureBERT scores are uncalibrated softmax rankings. Calibration quality is unsupported, not invalidly implemented.",
+  "severity":"HIGH if represented as calibrated probability; current active event semantics explicitly deny calibration"
+}

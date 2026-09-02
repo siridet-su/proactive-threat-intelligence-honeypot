@@ -1,0 +1,10 @@
+{
+  "schema_version":"securebert_evaluation_metrics_review.v1",
+  "model_quality_metrics":[],
+  "searched_metrics":["accuracy","precision","recall","F1","macro F1","micro F1","weighted F1","AUROC","ECE","NLL","Brier score","confusion matrix"],
+  "finding":"No independent checkpoint-bound SecureBERT quality receipt with dataset membership, split, sample count, distribution, and reproducible evaluation code was found.",
+  "historical_artifacts":"Several next-behavior/prediction evaluations mention the SecureBERT checkpoint as an upstream label source; they do not evaluate this 196-class command classifier's accuracy.",
+  "implementation_validation":{"focused_tests":"45 passed","scope":"environment, authority, cross-layer trust, final_ttps compatibility","quality_evidence":false},
+  "threshold_sensitivity":{"artifact":"securebert_candidate_threshold_sensitivity.v1.json","independent_labels":false,"safe_to_claim":false},
+  "safe_to_claim":{"inference_reproduced":true,"deterministic_on_tested_cpu":true,"classification_accuracy":false,"improves_detection_accuracy":false,"generalizes_to_unseen_commands":false,"calibrated_confidence":false}
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:pi-poc-execution-receipt:v1",
+  "title": "Pi Safe-Container PoC Execution Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "run_id",
+    "spec_id",
+    "scenario_id",
+    "state",
+    "started_at",
+    "ended_at",
+    "manifest_content_sha256",
+    "specification_content_sha256",
+    "container_id_sha256",
+    "image_id",
+    "target_process_id_sha256",
+    "security",
+    "limits",
+    "workload_summary",
+    "cleanup_verified",
+    "receipt_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "pi_poc_execution_receipt.v1"},
+    "receipt_id": {"$ref": "#/$defs/identifier"},
+    "run_id": {"$ref": "#/$defs/identifier"},
+    "spec_id": {"$ref": "#/$defs/identifier"},
+    "scenario_id": {"$ref": "#/$defs/identifier"},
+    "state": {"const": "completed"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "ended_at": {"type": "string", "format": "date-time"},
+    "manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+    "specification_content_sha256": {"$ref": "#/$defs/sha256"},
+    "container_id_sha256": {"$ref": "#/$defs/sha256"},
+    "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "target_process_id_sha256": {"$ref": "#/$defs/sha256"},
+    "security": {"type": "object"},
+    "limits": {"type": "object"},
+    "workload_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "mode", "elapsed_ms", "operations", "errors"],
+      "properties": {
+        "schema_version": {"const": "poc_workload_summary.v1"},
+        "mode": {"enum": ["compute", "service"]},
+        "elapsed_ms": {"type": "integer", "minimum": 1, "maximum": 75000},
+        "operations": {"type": "integer", "minimum": 1},
+        "errors": {"type": "integer", "minimum": 0}
+      }
+    },
+    "cleanup_verified": {"const": true},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

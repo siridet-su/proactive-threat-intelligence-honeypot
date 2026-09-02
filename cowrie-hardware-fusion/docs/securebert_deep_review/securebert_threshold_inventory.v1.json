@@ -1,0 +1,12 @@
+{
+  "schema_version":"securebert_threshold_inventory.v1",
+  "thresholds":[
+    {"name":"canonical SecureBERT candidate threshold","value":0.55,"locations":["configs/next_behavior_classifier_environment.v1.json classification_policy.securebert_candidate_threshold","ProductionConfig.classification_policy.bert_min_confidence","NotebookParityClassifier._bert_prediction"],"purpose":"admit top-1 model label for rule comparison/reporting","effect":"below: low-confidence audit event; at/above: model candidate, still audit-only if model-only","provenance":"PROJECT_HEURISTIC","validation":"no independent labeled threshold evaluation retained","authority":"never grants model-only trust"},
+    {"name":"trusted_model_only_threshold metadata","value":0.9,"locations":["classifier environment","next_behavior_label_policy.normalize_classifier_outputs argument"],"purpose":"historical/private label normalization guard","effect":"does not override current trust.py prohibition on model-only trust","provenance":"PROJECT_HEURISTIC","validation":"representative benchmark only; not independent authority validation","authority":"none in current runtime"},
+    {"name":"legacy monitor default","value":0.45,"locations":["SessionMonitor legacy strategy defaults/history"],"purpose":"legacy SecureBERT-first acceptance","effect":"not active canonical notebook_merge threshold","provenance":"UNEXPLAINED/HISTORICAL","validation":"not current policy","authority":"must not be used to describe active d5f"},
+    {"name":"classify_topk k","value":3,"locations":["SecureBertCommandClassifier.classify_topk"],"purpose":"offline ranking helper","effect":"returns three labels with max_length at least 512","provenance":"PROJECT_HEURISTIC","validation":"noncanonical helper","authority":"none"},
+    {"name":"canonical max token length","value":128,"locations":["ProductionConfig.securebert_max_length","classifier environment","SecureBertCommandClassifier.classify"],"purpose":"bound inference","effect":"silent right-tail discard","provenance":"PROJECT_HEURISTIC","validation":"bounded sensitivity only","authority":"input coverage, not trust"},
+    {"name":"minimum command characters","value":3,"locations":["SecureBertCommandClassifier.classify"],"purpose":"avoid empty/trivial inference","effect":"returns null,0","provenance":"PROJECT_HEURISTIC","validation":"implementation behavior","authority":"none"}
+  ],
+  "absent":["margin threshold","unknown-class threshold","multi-label threshold","SecureBERT temperature","sigmoid cutoff"]
+}

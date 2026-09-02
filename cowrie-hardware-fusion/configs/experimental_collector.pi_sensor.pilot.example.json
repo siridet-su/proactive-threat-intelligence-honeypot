@@ -1,0 +1,38 @@
+{
+  "schema_version": "experimental_collector_config.v1",
+  "collector_id": "experimental-telemetry-collector",
+  "collector_version": "0.3.0",
+  "sensor_id": "sensor-redacted",
+  "subject_id": "pi-host-pseudonymous-01",
+  "metric_scope": "pi_sensor",
+  "interfaces": [
+    {
+      "name": "wlan0",
+      "accounting_role": "primary_physical",
+      "include_in_aggregate": true
+    },
+    {
+      "name": "tailscale0",
+      "accounting_role": "overlay_observability",
+      "include_in_aggregate": false
+    },
+    {
+      "name": "lo",
+      "accounting_role": "loopback_observability",
+      "include_in_aggregate": false
+    }
+  ],
+  "disk_devices": ["mmcblk0p2"],
+  "spool": {
+    "directory": "/var/lib/honeypot-experiment-spool",
+    "max_total_bytes": 1073741824,
+    "min_free_bytes": 2147483648,
+    "segment_max_bytes": 8388608,
+    "segment_max_records": 300,
+    "fsync_every_records": 1
+  },
+  "timing": {
+    "late_tolerance_ms": 250,
+    "require_ntp_synchronized": true
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version":"securebert_fail_closed_review.v1",
+  "cases":[
+    {"condition":"checkpoint/model path missing","behavior":"loader catches and returns None; rules continue","classification":"FALLS_BACK_TO_RULES / model fails closed"},
+    {"condition":"checkpoint hash wrong but parseable","behavior":"ordinary runtime loader does not hash installed bytes","classification":"SILENTLY_CONTINUES","severity":"HIGH because a wrong model can change agreement/disagreement and suppress rule trust"},
+    {"condition":"tokenizer missing/unloadable","behavior":"loader catches and returns None","classification":"FALLS_BACK_TO_RULES"},
+    {"condition":"tokenizer wrong but parseable","behavior":"no runtime asset hash verification","classification":"SILENTLY_CONTINUES","severity":"HIGH"},
+    {"condition":"label count incompatible with head","behavior":"Hugging Face load normally errors; wrapper returns None","classification":"FALLS_BACK_TO_RULES"},
+    {"condition":"same-shape label order changed","behavior":"no per-load comparison; labels silently reinterpreted","classification":"SILENTLY_CONTINUES","severity":"HIGH"},
+    {"condition":"source/rule/trust environment mismatch","behavior":"load_classifier_environment verify_assets raises","classification":"FAILS CLOSED worker construction"},
+    {"condition":"empty or <3-character command","behavior":"returns null,0; audit/no event","classification":"FAILS CLOSED"},
+    {"condition":"Unicode","behavior":"NFC then byte-level tokenization","classification":"CONTINUES DETERMINISTICALLY"},
+    {"condition":"extremely long input","behavior":"silent right truncation to 128","classification":"SILENT EVIDENCE LOSS; auditability gap"},
+    {"condition":"malformed non-string input","behavior":"adapter/pipeline exception is contained as securebert_error","classification":"FALLS_BACK TO AUDIT/RULES"},
+    {"condition":"model exception","behavior":"_bert_prediction returns securebert_error audit-only","classification":"FALLS_BACK_TO_RULES"},
+    {"condition":"NaN logits","behavior":"no explicit finite check; score becomes NaN and threshold comparison is false","classification":"effectively audit-only but not explicitly fail-closed"},
+    {"condition":"invalid calibration temperature","behavior":"not applicable; SecureBERT has no temperature","classification":"NOT_APPLICABLE"}
+  ],
+  "load_order_gap":"SessionWorker loads SecureBERT before verifying the classifier environment. Analysis jobs also instantiate the model before source/environment verification completes.",
+  "offline_vs_runtime":"verify_classifier_assets hashes all model files during build/preactivation; load_securebert_classifier does not invoke it at ordinary process startup.",
+  "overall":"Authority promotion is fail-closed, but installed model/tokenizer/label asset identity and truncation observability are not fully fail-closed."
+}

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:derived_training_window:v1",
+  "title": "Cowrie Hardware Fusion Derived Training Window v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_id",
+    "window",
+    "labels",
+    "split_groups",
+    "xgboost",
+    "tcn",
+    "quality",
+    "provenance",
+    "record_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "derived_training_window.v1"},
+    "record_id": {"type": "string", "minLength": 1, "maxLength": 512},
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "experiment_id", "metric_scope", "phase", "horizon_seconds", "sample_interval_seconds", "start_sequence", "end_sequence"],
+      "properties": {
+        "run_id": {"$ref": "#/$defs/identifier"},
+        "experiment_id": {"$ref": "#/$defs/identifier"},
+        "metric_scope": {"enum": ["pi_sensor", "backend_guest", "backend_cgroup", "target_process", "local_sink"]},
+        "phase": {"enum": ["workload", "recovery"]},
+        "horizon_seconds": {"enum": [5, 10, 30, 60]},
+        "sample_interval_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "start_sequence": {"type": "integer", "minimum": 0},
+        "end_sequence": {"type": "integer", "minimum": 0}
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_disposition", "primary_impact", "observed_impacts", "ground_truth_ttps"],
+      "properties": {
+        "scenario_disposition": {"enum": ["benign_control", "malicious_simulation", "neutral_baseline"]},
+        "primary_impact": {"$ref": "#/$defs/impact_label"},
+        "observed_impacts": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/impact_label"}},
+        "ground_truth_ttps": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$"}}
+      }
+    },
+    "split_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_variant_group", "workload_family_group", "command_template_group", "collection_batch", "environment_group"],
+      "properties": {
+        "scenario_variant_group": {"$ref": "#/$defs/identifier"},
+        "workload_family_group": {"$ref": "#/$defs/identifier"},
+        "command_template_group": {"$ref": "#/$defs/identifier"},
+        "collection_batch": {"$ref": "#/$defs/identifier"},
+        "environment_group": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "xgboost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature_schema_version", "features"],
+      "properties": {
+        "feature_schema_version": {"const": "xgboost_hardware_features.v1"},
+        "features": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number"}}
+      }
+    },
+    "tcn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel_schema_version", "channel_order", "channels", "sample_present", "channel_present"],
+      "properties": {
+        "channel_schema_version": {"const": "tcn_hardware_channels.v1"},
+        "channel_order": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "channels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "array", "items": {"type": "number"}}},
+        "sample_present": {"type": "array", "items": {"enum": [0, 1]}},
+        "channel_present": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "array", "items": {"enum": [0, 1]}}}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_samples", "observed_samples", "valid_samples", "sample_coverage", "baseline_expected_samples", "baseline_valid_samples", "baseline_coverage", "missing_sequences", "late_sample_count", "counter_reset_count", "collector_error_count"],
+      "properties": {
+        "expected_samples": {"type": "integer", "minimum": 1},
+        "observed_samples": {"type": "integer", "minimum": 0},
+        "valid_samples": {"type": "integer", "minimum": 0},
+        "sample_coverage": {"$ref": "#/$defs/fraction"},
+        "baseline_expected_samples": {"type": "integer", "minimum": 1},
+        "baseline_valid_samples": {"type": "integer", "minimum": 0},
+        "baseline_coverage": {"$ref": "#/$defs/fraction"},
+        "missing_sequences": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 0}},
+        "late_sample_count": {"type": "integer", "minimum": 0},
+        "counter_reset_count": {"type": "integer", "minimum": 0},
+        "collector_error_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["builder_version", "manifest_content_sha256", "contributing_samples_content_sha256"],
+      "properties": {
+        "builder_version": {"const": "0.1.0"},
+        "manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+        "contributing_samples_content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "record_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "fraction": {"type": "number", "minimum": 0, "maximum": 1},
+    "impact_label": {
+      "enum": ["NO_MATERIAL_IMPACT", "COMPUTE_SATURATION", "MEMORY_PRESSURE", "DISK_IO_PRESSURE", "NETWORK_HIGH_THROUGHPUT", "NETWORK_FLOOD_PATTERN", "PROCESS_EXHAUSTION", "SERVICE_PRESSURE", "SERVICE_DEGRADATION", "UNKNOWN"]
+    }
+  }
+}

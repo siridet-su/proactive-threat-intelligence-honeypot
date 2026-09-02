@@ -1,0 +1,405 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:experiment_run_manifest:v1",
+  "title": "Cowrie Hardware Fusion Experiment Run Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "experiment_id",
+    "state",
+    "provenance",
+    "sensor",
+    "execution_boundary",
+    "timing",
+    "workload",
+    "labels",
+    "collection",
+    "split_groups",
+    "safety"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "experiment_run_manifest.v1"
+    },
+    "run_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "experiment_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "state": {
+      "enum": ["planned", "running", "completed", "aborted", "invalidated"]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "controlled",
+        "pilot_only",
+        "production_analytics_eligible"
+      ],
+      "properties": {
+        "source": {
+          "const": "controlled_experiment"
+        },
+        "controlled": {
+          "const": true
+        },
+        "pilot_only": {
+          "type": "boolean"
+        },
+        "production_analytics_eligible": {
+          "const": false
+        }
+      }
+    },
+    "sensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sensor_id",
+        "host_id",
+        "repo_commit",
+        "cowrie_backend",
+        "environment_signature_sha256"
+      ],
+      "properties": {
+        "sensor_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "host_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "repo_commit": {
+          "$ref": "#/$defs/git_commit"
+        },
+        "cowrie_backend": {
+          "enum": ["shell", "proxy", "pool"]
+        },
+        "environment_signature_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "execution_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "metric_scopes",
+        "execution_observed",
+        "backend_id",
+        "backend_image_sha256",
+        "network_policy_sha256"
+      ],
+      "properties": {
+        "kind": {
+          "enum": ["none", "safe_container", "disposable_vm"]
+        },
+        "metric_scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/metric_scope"
+          }
+        },
+        "execution_observed": {
+          "type": "boolean"
+        },
+        "backend_id": {
+          "type": ["string", "null"],
+          "maxLength": 128
+        },
+        "backend_image_sha256": {
+          "anyOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "network_policy_sha256": {
+          "anyOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "sample_interval_seconds",
+        "baseline_seconds",
+        "workload_seconds",
+        "recovery_seconds"
+      ],
+      "properties": {
+        "timezone": {
+          "const": "UTC"
+        },
+        "sample_interval_seconds": {
+          "const": 1
+        },
+        "baseline_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 600
+        },
+        "workload_seconds": {
+          "enum": [10, 30, 60, 120]
+        },
+        "recovery_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 600
+        },
+        "started_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "ended_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_catalog_version",
+        "scenario_id",
+        "family",
+        "variant_id",
+        "implementation_id",
+        "implementation_sha256",
+        "intensity_percent",
+        "intensity_basis",
+        "background_load_profile"
+      ],
+      "properties": {
+        "scenario_catalog_version": {
+          "const": "cowrie_hardware_scenario_catalog.v1"
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "family": {
+          "$ref": "#/$defs/identifier"
+        },
+        "variant_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "implementation_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "implementation_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "intensity_percent": {
+          "enum": [0, 25, 50, 75, 90]
+        },
+        "intensity_basis": {
+          "enum": [
+            "none",
+            "assigned_cpu_capacity",
+            "assigned_memory_capacity",
+            "local_link_rate_limit",
+            "assigned_process_limit",
+            "assigned_service_capacity"
+          ]
+        },
+        "background_load_profile": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_disposition",
+        "primary_impact",
+        "observed_impacts",
+        "ground_truth_ttps",
+        "label_source",
+        "evidence_receipt_ids"
+      ],
+      "properties": {
+        "scenario_disposition": {
+          "enum": ["benign_control", "malicious_simulation", "neutral_baseline"]
+        },
+        "primary_impact": {
+          "$ref": "#/$defs/impact_label"
+        },
+        "observed_impacts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/impact_label"
+          }
+        },
+        "ground_truth_ttps": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$"
+          }
+        },
+        "label_source": {
+          "const": "scenario_manifest_plus_observed_evidence"
+        },
+        "evidence_receipt_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "telemetry_schema_version",
+        "collector_id",
+        "collector_sha256",
+        "command_events_required",
+        "raw_data_immutable"
+      ],
+      "properties": {
+        "telemetry_schema_version": {
+          "const": "hardware_telemetry_sample.v1"
+        },
+        "collector_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "collector_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "command_events_required": {
+          "type": "boolean"
+        },
+        "raw_data_immutable": {
+          "const": true
+        }
+      }
+    },
+    "split_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_variant_group",
+        "workload_family_group",
+        "command_template_group",
+        "collection_batch",
+        "environment_group"
+      ],
+      "properties": {
+        "scenario_variant_group": {
+          "$ref": "#/$defs/identifier"
+        },
+        "workload_family_group": {
+          "$ref": "#/$defs/identifier"
+        },
+        "command_template_group": {
+          "$ref": "#/$defs/identifier"
+        },
+        "collection_batch": {
+          "$ref": "#/$defs/identifier"
+        },
+        "environment_group": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bounded_benign_workload",
+        "actual_malware_used",
+        "public_or_third_party_target_used",
+        "default_deny_egress",
+        "egress_enforcement_scope",
+        "hard_resource_limits",
+        "watchdog_timeout_seconds"
+      ],
+      "properties": {
+        "bounded_benign_workload": {
+          "const": true
+        },
+        "actual_malware_used": {
+          "const": false
+        },
+        "public_or_third_party_target_used": {
+          "const": false
+        },
+        "default_deny_egress": {
+          "type": "boolean"
+        },
+        "egress_enforcement_scope": {
+          "enum": [
+            "not_applicable_no_execution",
+            "execution_boundary",
+            "host"
+          ]
+        },
+        "hard_resource_limits": {
+          "const": true
+        },
+        "watchdog_timeout_seconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 900
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "git_commit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+    },
+    "date_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "metric_scope": {
+      "enum": [
+        "pi_sensor",
+        "backend_guest",
+        "backend_cgroup",
+        "target_process",
+        "local_sink"
+      ]
+    },
+    "impact_label": {
+      "enum": [
+        "NO_MATERIAL_IMPACT",
+        "COMPUTE_SATURATION",
+        "MEMORY_PRESSURE",
+        "DISK_IO_PRESSURE",
+        "NETWORK_HIGH_THROUGHPUT",
+        "NETWORK_FLOOD_PATTERN",
+        "PROCESS_EXHAUSTION",
+        "SERVICE_PRESSURE",
+        "SERVICE_DEGRADATION",
+        "UNKNOWN"
+      ]
+    }
+  }
+}

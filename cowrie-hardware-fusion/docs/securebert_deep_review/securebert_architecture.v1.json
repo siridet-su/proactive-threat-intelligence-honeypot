@@ -1,0 +1,20 @@
+{
+  "schema_version":"securebert_architecture.v1",
+  "executable_model_class":"transformers.ModernBertForSequenceClassification",
+  "config_architecture":"ModernBertForSequenceClassification",
+  "model_type":"modernbert",
+  "hidden_size":768,
+  "layers":22,
+  "attention_heads":12,
+  "intermediate_size":1152,
+  "vocabulary_size":50368,
+  "maximum_positions":8192,
+  "classifier":{"pooling":"mean","activation":"gelu","dropout":0.0,"output_dimension":196,"tensors":{"weight":[196,768],"bias":[196]}},
+  "dropout":{"attention":0.0,"mlp":0.0,"embedding":0.0,"classifier":0.0},
+  "parameter_count_verified":149755588,
+  "checkpoint_tensor_count":138,
+  "checkpoint_format":"safetensors/PyTorch",
+  "classification":"project task-specific fine-tuned ModernBERT sequence classifier; not proven to be based on published SecureBERT",
+  "fine_tuning_evidence":"The 196-way ATT&CK head proves task specialization. Which base checkpoint and which layers were trained are unknown because the training receipt is missing.",
+  "not_safe_to_claim":["base SecureBERT architecture","published SecureBERT tokenizer","published SecureBERT accuracy transfers to this checkpoint"]
+}

@@ -1,0 +1,123 @@
+{
+  "schema_version": "hardware_telemetry_sample.v1",
+  "sample_id": "sample-v1-neutral-idle-0001-000000",
+  "run_id": "run-v1-neutral-idle-0001",
+  "experiment_id": "pilot-v1-20260901",
+  "phase": "baseline",
+  "metric_scope": "pi_sensor",
+  "subject_id": "pi-host-pseudonymous-01",
+  "time": {
+    "observed_at": "2026-09-01T08:00:00Z",
+    "monotonic_ns": 1000000000,
+    "boot_id_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sequence": 0,
+    "sample_interval_seconds": 1,
+    "ntp_synchronized": true,
+    "clock_error_bound_ms": null
+  },
+  "collector": {
+    "collector_id": "experimental-telemetry-collector",
+    "version": "0.1.0",
+    "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "feature_schema_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "correlation": {
+    "sensor_id": "sensor-redacted",
+    "state": "no_active_session",
+    "canonical_session_ids": [],
+    "command_event_ids": []
+  },
+  "cpu": {
+    "utilization_semantics": "aggregate_busy_percent_0_100",
+    "core_count": 4,
+    "total_percent": 12.5,
+    "per_core_percent": [10.0, 15.0, 11.0, 14.0],
+    "user_percent": 8.0,
+    "system_percent": 3.0,
+    "iowait_percent": 1.0,
+    "irq_percent": 0.5,
+    "steal_percent": 0.0,
+    "load_1m": 0.4,
+    "load_5m": 0.3,
+    "load_15m": 0.2,
+    "frequency_mhz": 1800.0,
+    "context_switches_total": 1000
+  },
+  "memory": {
+    "total_bytes": 8322752512,
+    "available_bytes": 6385618944,
+    "used_bytes": 1937133568,
+    "used_percent": 23.3,
+    "cache_bytes": 2240790528,
+    "swap_total_bytes": 0,
+    "swap_used_bytes": 0,
+    "page_faults_total": 10000,
+    "major_page_faults_total": 10,
+    "oom_kills_total": 0
+  },
+  "disk": {
+    "root_used_bytes": 54062821376,
+    "root_used_percent": 45.0,
+    "devices": [
+      {
+        "device_id": "mmcblk0",
+        "read_bytes_total": 1000000,
+        "write_bytes_total": 2000000,
+        "read_bytes_per_second": 1000.0,
+        "write_bytes_per_second": 2000.0,
+        "reads_per_second": 2.0,
+        "writes_per_second": 3.0,
+        "io_time_percent": 1.0
+      }
+    ]
+  },
+  "network": {
+    "interfaces": [
+      {
+        "name": "wlan0",
+        "accounting_role": "primary_physical",
+        "include_in_aggregate": true,
+        "up": true,
+        "rx_bytes_total": 1000000,
+        "tx_bytes_total": 500000,
+        "rx_bytes_per_second": 1200.0,
+        "tx_bytes_per_second": 800.0,
+        "rx_packets_total": 10000,
+        "tx_packets_total": 7000,
+        "rx_packets_per_second": 12.0,
+        "tx_packets_per_second": 8.0,
+        "rx_errors_total": 0,
+        "tx_errors_total": 0,
+        "rx_drops_total": 0,
+        "tx_drops_total": 0
+      }
+    ],
+    "connection_count": 20,
+    "socket_count": 40,
+    "unique_destination_count": 0,
+    "dns_queries_per_second": 0.0
+  },
+  "thermal": {
+    "temperature_c": 49.2,
+    "throttled": false,
+    "undervoltage": false
+  },
+  "process": {
+    "process_count": 150,
+    "thread_count": 420,
+    "target": null
+  },
+  "privacy": {
+    "contains_raw_command": false,
+    "contains_credentials": false,
+    "contains_raw_ip": false
+  },
+  "quality": {
+    "valid": true,
+    "missing_fields": [],
+    "counter_resets": [],
+    "sample_late": false,
+    "late_by_ms": 0.0,
+    "collector_errors": []
+  }
+}
