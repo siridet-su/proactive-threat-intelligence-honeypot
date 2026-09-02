@@ -863,3 +863,43 @@ cleanup/receipts ก่อน transfer กลับ Arch เพื่อสร�
 
 รายละเอียด matrix, intensity semantics, commands และ selection gate:
 [service_pressure_instrumentation_pilot.v1.md](../service_pressure_instrumentation_pilot.v1.md)
+
+## 23. Service-pressure instrumentation result — 2026-09-02
+
+สถานะ: `7/7 COMPLETE / TELEMETRY PASS / SERVICE-TREATMENT GATE NOT PASSED`
+
+ส่วนนี้ supersede “7 PI RUNS NOT STARTED” ใน Section 22:
+
+- deploy source/control archives ไป isolated Pi directory โดย source/control SHA-256 ตรง
+  Arch/Pi และไม่แก้ production worktree หรือ services
+- preflight ผ่าน NTP, interfaces/disk, cgroup v2, Docker seccomp, ARM64 image identity,
+  RAM/disk/load/temperature gates ก่อน execution
+- รัน 7/7 scenarios ได้ 630/630 valid samples; baseline/workload/recovery 210/210/210,
+  missing/error/reset 0, completed manifests 7, segments 21 และ controlled cleanup 6/6
+- มี late sample 1 จุดที่ service-low workload sequence แรก 1,148.257 ms เพราะ Docker
+  lifecycle hook ใช้เวลาหลัง deadline ถูกกำหนด ต้อง reset deadline หลัง hook ก่อนเก็บ
+  development sequence
+- service high เทียบ low: cgroup CPU usage ~27.5×, CPU PSI ~11.3×, memory ~2.3×;
+  benign/T1499 high pair ต่างกันเพียง ~0.32%, 1.69%, 3.77% ตามลำดับ จึงยืนยันว่า
+  collector เห็น target resource response และ matched treatment ทำงาน
+- target TCP total/established/socket คงที่ 3/2/5, queue/drop rates เป็นศูนย์,
+  memory/I/O PSI เป็นศูนย์ และ execution errors 0 ทั้ง service-high pair จึงยังไม่มี
+  evidence แข็งแรงพอรองรับ `SERVICE_PRESSURE` label
+- compute-low ที่ full duty ภายใต้ quota 0.25 core มี throttled time/CPU PSI สูงกว่า
+  compute-high 0.75 core เป็น inverse-throttling simulator artifact; ห้ามใช้ cgroup pressure
+  ชุดนี้ฝึก class โดยไม่แก้ treatment
+- Pi→Arch result archive SHA-256 ตรงกันคือ
+  `4feddbda88b3207d3e9f8a0ca264f38d3843edda164205b0749d6a11e0e7a360`;
+  Arch regenerate reports หลัง verify receipt/raw schema แล้วได้ไฟล์ตรง Pi ทุก byte
+- candidate ที่นำไปทดสอบซ้ำคือ cgroup CPU usage, CPU PSI, memory current และ host CPU PSI
+  delta; ยังไม่เพิ่มเข้า frozen feature profiles และ 7 runs ยังคง excluded
+- ไม่มี malware/miner/external target/Redis/MongoDB/Atlas write, ไม่มี experiment container
+  ค้าง; production 9 containers, hardware service inactive และ processor active
+
+ขั้นถัดไปคือแก้ phase scheduler, เปลี่ยน compute treatment จาก quota artifact เป็น bounded
+duty/worker allocation, เพิ่ม bounded short-lived loopback connection/concurrency พร้อม
+latency/error evidence gate แล้ว freeze workload image/spec revision ใหม่เพื่อ rerun excluded
+pilot ก่อนเริ่ม development 70 runs Training v2 และ final test ยังไม่เริ่ม
+
+รายละเอียด evidence hashes, operation counts, signal table และ gate decision:
+[service_pressure_instrumentation_results_2026-09-02.md](../service_pressure_instrumentation_results_2026-09-02.md)

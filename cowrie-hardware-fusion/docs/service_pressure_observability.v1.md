@@ -102,6 +102,10 @@ profiles เพื่อไม่เลือก feature จาก canary แล
 run แล้ววัด coverage และ baseline→workload deltas ของ candidate metrics หาก signal เหมาะสม
 จึง freeze protocol/feature profile revision ใหม่ก่อนเริ่ม development wave 70 runs
 
+งานนี้รันเสร็จแล้ว แต่ service treatment gate ยังไม่ผ่าน ดูผลและเหตุผลที่ยังไม่ freeze
+feature ได้ที่
+[service_pressure_instrumentation_results_2026-09-02.md](service_pressure_instrumentation_results_2026-09-02.md)
+
 ## Verification
 
 - Python tests: `52 passed`

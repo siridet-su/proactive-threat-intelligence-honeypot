@@ -1,6 +1,6 @@
 # Service-pressure instrumentation pilot v1
 
-> สถานะ: `TOOLING READY / PI RUNS NOT STARTED`
+> สถานะ: `SUPERSEDED BY COMPLETED RESULT / SERVICE-TREATMENT GATE NOT PASSED`
 > วันที่: `2026-09-02`
 > ขอบเขต: 7 runs สำหรับตรวจ signal เท่านั้น, `pilot_only=true`, ห้ามใช้ train
 
@@ -145,5 +145,5 @@ runs
 - CLI prepare/preflight/collect/finalize/summarize commands
 - automated matrix, matched-pair และ signal-summary tests
 
-ขั้นถัดไปคือ query ARM64 image/environment identity จาก Pi, freeze repository commit,
-generate matrix จริง แล้วรัน preflight ก่อนเริ่ม run แรก
+Pilot รันครบแล้ว ผลจริงและ gate decision อยู่ที่
+[service_pressure_instrumentation_results_2026-09-02.md](service_pressure_instrumentation_results_2026-09-02.md)
