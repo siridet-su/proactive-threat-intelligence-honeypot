@@ -55,6 +55,7 @@ def _receipt(
             "python_version": "3.12.3",
             "psutil_version": "7.2.2",
             "collector_repo_commit": "2" * 40,
+            "source_archive_sha256": "9" * 64,
             "collector_source_sha256": "3" * 64,
             "telemetry_schema_sha256": "4" * 64,
         },

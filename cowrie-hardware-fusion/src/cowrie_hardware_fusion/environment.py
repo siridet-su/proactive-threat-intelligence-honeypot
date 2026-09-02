@@ -289,6 +289,7 @@ def capture_pi_environment_receipt(
     sensor_id: str,
     subject_id: str,
     collector_repo_commit: str,
+    collector_source_archive: Path,
     production_repo: Path,
     runner_image_id: str,
     schema_dir: Path,
@@ -346,6 +347,9 @@ def capture_pi_environment_receipt(
         "python_version": platform.python_version(),
         "psutil_version": str(psutil.__version__),
         "collector_repo_commit": collector_repo_commit,
+        "source_archive_sha256": sha256(
+            collector_source_archive.read_bytes()
+        ).hexdigest(),
         "collector_source_sha256": collector_source_sha256(),
         "telemetry_schema_sha256": telemetry_schema_sha256(schema_dir),
     }

@@ -13,7 +13,8 @@ environment_signature_sha256 ผูกกับ:
 - hash ของ boot ID โดยไม่เก็บ raw boot ID
 - architecture, kernel, CPU model/count, total RAM/swap และ root device
 - interface names และ NTP synchronization state โดยไม่เก็บ IP
-- Python/psutil, collector repo/source และ telemetry-schema identities
+- Python/psutil, embedded collector repo commit, source-archive/source-code และ
+  telemetry-schema identities
 - production repo commit/clean flag, service states และ running container image IDs
 - reviewed workload image ID, architecture, user, entrypoint และ binary hash
 
@@ -43,7 +44,8 @@ workload เท่านั้น
 
     python -m cowrie_hardware_fusion.cli capture-pi-environment-receipt \
       --config pi-collector-config.json \
-      --collector-repo-commit <deployed-source-commit> \
+      --collector-repo-commit-file DEPLOYED_COMMIT \
+      --collector-source-archive ../source-with-identity.tar.gz \
       --production-repo /home/cpe27/proactive-threat-intelligence-honeypot \
       --runner-image-id sha256:<reviewed-image-id> \
       --output environment-receipt.v2.json
@@ -55,3 +57,6 @@ workload เท่านั้น
 
 ขั้นถัดไปคือ commit/deploy source แบบ isolated ไป Pi, capture receipt และใช้ค่า
 environment_signature_sha256 ใน development matrix ที่ regenerate ใหม่
+
+DEPLOYED_COMMIT ต้องถูก embed ตอนสร้าง Git archive และ capture CLI อ่านจากไฟล์นี้โดยตรง
+แทนการพิมพ์ full hash ด้วยมือ Receipt ยังบันทึก SHA-256 ของ archive ที่ deploy จริง

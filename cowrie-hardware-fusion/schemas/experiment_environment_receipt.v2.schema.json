@@ -45,11 +45,12 @@
     "collector_runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["python_version", "psutil_version", "collector_repo_commit", "collector_source_sha256", "telemetry_schema_sha256"],
+      "required": ["python_version", "psutil_version", "collector_repo_commit", "source_archive_sha256", "collector_source_sha256", "telemetry_schema_sha256"],
       "properties": {
         "python_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
         "psutil_version": {"type": "string", "minLength": 1, "maxLength": 32},
         "collector_repo_commit": {"$ref": "#/$defs/git_commit"},
+        "source_archive_sha256": {"$ref": "#/$defs/sha256"},
         "collector_source_sha256": {"$ref": "#/$defs/sha256"},
         "telemetry_schema_sha256": {"$ref": "#/$defs/sha256"}
       }

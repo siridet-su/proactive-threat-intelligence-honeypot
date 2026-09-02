@@ -133,10 +133,14 @@ def _capture_pi_environment_receipt(args: argparse.Namespace) -> int:
         args.schema_dir / "experimental_collector_config.v1.schema.json",
         str(args.config),
     )
+    collector_repo_commit = args.collector_repo_commit_file.read_text(
+        encoding="ascii"
+    ).strip()
     receipt = capture_pi_environment_receipt(
         sensor_id=config["sensor_id"],
         subject_id=config["subject_id"],
-        collector_repo_commit=args.collector_repo_commit,
+        collector_repo_commit=collector_repo_commit,
+        collector_source_archive=args.collector_source_archive,
         production_repo=args.production_repo,
         runner_image_id=args.runner_image_id,
         schema_dir=args.schema_dir,
@@ -1516,7 +1520,12 @@ def _parser() -> argparse.ArgumentParser:
         help="capture a privacy-bounded, hash-bound Pi runtime/environment receipt",
     )
     environment_capture.add_argument("--config", type=Path, required=True)
-    environment_capture.add_argument("--collector-repo-commit", required=True)
+    environment_capture.add_argument(
+        "--collector-repo-commit-file", type=Path, required=True
+    )
+    environment_capture.add_argument(
+        "--collector-source-archive", type=Path, required=True
+    )
     environment_capture.add_argument("--production-repo", type=Path, required=True)
     environment_capture.add_argument("--runner-image-id", required=True)
     environment_capture.add_argument("--output", type=Path, required=True)

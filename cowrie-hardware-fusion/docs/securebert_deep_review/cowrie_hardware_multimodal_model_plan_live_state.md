@@ -1087,6 +1087,9 @@ no-collection preflight กับ idle/compute/service อย่างละห�
 - เพิ่ม capture/validate CLI แบบ exclusive output และ full suite ผ่าน 79 tests
 - production repo บน Pi ที่ตรวจพบแบบ read-only คือ
   /home/cpe27/proactive-threat-intelligence-honeypot
+- receipt แรกหลัง deploy ถูก reject จากการกรอก suffix ของ full commit ผิดแม้รูปแบบผ่าน;
+  จึงเปลี่ยน capture contract ให้อ่าน commit จาก `DEPLOYED_COMMIT` ที่ embed ใน Git archive
+  และบันทึก source-archive SHA-256 เพิ่ม แทนการรับ commit ที่พิมพ์ด้วยมือ
 
 ขั้นถัดไปคือ commit/push, deploy source archive แบบ isolated, capture receipt v2 แล้ว
 regenerate development controls จาก signature ใหม่ก่อนทำ runtime preflight
