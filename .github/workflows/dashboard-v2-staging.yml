@@ -195,6 +195,7 @@ jobs:
           ssh_target="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
           remote_archive="/opt/honeypot-dashboard-v2-staging/incoming/dashboard-v2-staging-${GITHUB_SHA}.tar.gz"
           ssh_opts=(
+            -i "$STAGING_SSH_KEY"
             -p "$STAGING_SSH_PORT"
             -o BatchMode=yes
             -o IdentitiesOnly=yes
@@ -206,6 +207,7 @@ jobs:
           }
           trap cleanup EXIT
           scp -P "$STAGING_SSH_PORT" \
+            -i "$STAGING_SSH_KEY" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
