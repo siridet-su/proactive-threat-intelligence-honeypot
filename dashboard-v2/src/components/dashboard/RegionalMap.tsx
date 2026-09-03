@@ -15,6 +15,7 @@ export default function RegionalMap() {
         if (res.ok) {
           const data = await res.json();
           const newMarkers = data.map((threat: any) => ({
+            id: threat.id,
             name: `${threat.src_ip} (${threat.geo.country}) - ${threat.event_type}`,
             coordinates: [threat.geo.lon, threat.geo.lat],
             status: threat.severity === "Critical" ? "failed" : threat.severity === "High" ? "failed" : "running"
@@ -91,15 +92,15 @@ export default function RegionalMap() {
             }
           </Geographies>
 
-          {markers.map(({ name, coordinates, status }) => (
-            <Marker key={name} coordinates={coordinates as [number, number]}>
-              <circle r={4} fill={
-                status === "running" ? "#34d399" : 
-                status === "failed" ? "#f87171" : "#a855f7"
-              } />
-              {status === "running" && (
-                <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
-              )}
+          {markers.map(({ id, name, coordinates, status }, index) => (
+            <Marker key={id || index} coordinates={coordinates as [number, number]}>
+            <circle r={4} fill={
+              status === "running" ? "#34d399" : 
+              status === "failed" ? "#f87171" : "#a855f7"
+            } />
+            {status === "running" && (
+              <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
+            )}
             </Marker>
           ))}
         </ZoomableGroup>

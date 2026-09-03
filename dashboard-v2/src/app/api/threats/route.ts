@@ -4,64 +4,95 @@ import geoip from 'geoip-lite';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const range = searchParams.get('range');
+
     const client = await clientPromise;
-    const db = client.db('honeypot_db');
-    
-    const events = await db
-      .collection('events')
-      .find({})
-      .sort({ timestamp: -1 })
-      .limit(100)
+    const db = client.db('honeypot_canonical_v1'); 
+
+    let query: any = {};
+    if (range === '7days') {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      query = { start_time: { $gte: sevenDaysAgo.toISOString() } };
+    }
+
+    const limitCount = range === 'all' ? 2000 : 100;
+
+    const sessionDocs = await db.collection('sessions')
+      .find(query)
+      .sort({ start_time: -1 })
+      .limit(limitCount)
       .toArray();
 
-    const threats = events.map(event => {
-      let lat = 0;
-      let lon = 0;
-      let country = 'Unknown';
-      let city = 'Unknown';
-      
-      const ip = event.src_ip || event.source_ip || event.ip || 'Unknown';
+    // ระบบจดจำพิกัด IP (Cache) เพื่อไม่ต้องประมวลผล IP เดิมซ้ำ
+    const ipCache = new Map();
+
+    const threats = sessionDocs.map(session => {
+      let lat = 0, lon = 0, country = 'Unknown', city = 'Unknown';
+      const ip = session.src_ip || 'Unknown';
       
       if (ip !== 'Unknown') {
-        const geo = geoip.lookup(ip);
-        if (geo) {
-          lat = geo.ll[0];
-          lon = geo.ll[1];
-          country = geo.country;
-          city = geo.city;
+        if (ipCache.has(ip)) {
+          const cached = ipCache.get(ip);
+          lat = cached.lat; lon = cached.lon;
+          country = cached.country; city = cached.city;
+        } else {
+          const geo = geoip.lookup(ip);
+          if (geo) {
+            lat = geo.ll[0]; lon = geo.ll[1];
+            country = geo.country; city = geo.city;
+            ipCache.set(ip, { lat, lon, country, city });
+          } else {
+            ipCache.set(ip, { lat: 0, lon: 0, country: 'Unknown', city: 'Unknown' });
+          }
         }
       }
 
-      const sensorName = typeof event.sensor === 'object' && event.sensor !== null
-        ? (event.sensor.name || 'Unknown') 
-        : (event.sensor || 'Unknown');
+      let dateObj = new Date();
+      if (session.start_time) {
+        const parsed = new Date(session.start_time);
+        if (!isNaN(parsed.getTime())) dateObj = parsed;
+      }
 
-      const payloadStr = typeof event.payload === 'object' && event.payload !== null
-        ? JSON.stringify(event.payload) 
-        : (event.payload || '');
+      const severity = session.max_confirmed_severity || 'Medium';
+      let classification = 'SCRIPT KIDDIE';
+      let typeColor = 'bg-amber-950/40 text-amber-400 border-amber-900/50';
+      
+      if (severity === 'Critical') {
+        classification = 'APT';
+        typeColor = 'bg-red-950/40 text-red-400 border-red-900/50';
+      } else if (severity === 'High') {
+        classification = 'BOT';
+        typeColor = 'bg-slate-800 text-slate-300 border-slate-700';
+      }
 
       return {
-        id: event._id.toString(),
-        timestamp: event.timestamp || new Date().toISOString(),
-        sensor: sensorName,
-        event_type: event.event_type || event.event || 'Unknown',
+        id: session.session_id || session._id?.toString() || Math.random().toString(),
+        timestamp: dateObj.toISOString(),
+        date: dateObj.toLocaleDateString('en-GB'),
+        time: dateObj.toLocaleTimeString('en-US', { hour12: false }) + " UTC",
+        sensor: session.session_source || 'Unknown',
         src_ip: ip,
         sourceIp: ip,
-        protocol: event.protocol || 'TCP',
-        payloadPreview: payloadStr.substring(0, 80) || 'No payload data',
-        severity: event.severity || (sensorName.toLowerCase().includes('cowrie') ? 'High' : 'Medium'),
+        severity: severity,
+        classification: classification,
+        typeColor: typeColor,
+        duration: 'Active',
         geo: { lat, lon, country, city }
       };
     });
 
-    return NextResponse.json(threats);
+    // ตั้งค่า Cache 5 วินาที ลดการดึงข้อมูลซ้ำซ้อนจากหลายคอมโพเนนต์
+    return NextResponse.json(threats, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=10',
+      },
+    });
   } catch (error: any) {
-    console.error('Failed to fetch threats:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Failed to fetch threats' }, 
-      { status: 500 }
-    );
+    console.error('[THREATS API ERROR]', error);
+    return NextResponse.json({ error: error?.message || 'Failed' }, { status: 500 });
   }
 }

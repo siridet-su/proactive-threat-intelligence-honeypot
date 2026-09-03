@@ -1,18 +1,40 @@
 "use client";
-import { use } from "react";
+import { use, useState, useEffect } from "react";
 import { Download, MapPin, Terminal, Activity, FileText, ChevronRight, AlertTriangle } from "lucide-react";
 import Link from "next/link";
-// นำเข้าไลบรารีสำหรับสร้างแผนที่
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 
-// URL สำหรับดึงข้อมูลวาดแผนที่โลก
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const sessionId = resolvedParams.id;
 
-  // Mock Data สำหรับหน้านี้
+  const [threatData, setThreatData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchThreatDetail = async () => {
+      try {
+        // ดึงข้อมูลทั้งหมดมาก่อน แล้วหา ID ที่ตรงกับ URL (เพราะยังไม่มี API ดึงรายตัว)
+        const res = await fetch("/api/threats");
+        if (res.ok) {
+          const data = await res.json();
+          const found = data.find((t: any) => t.id === sessionId);
+          if (found) {
+            setThreatData(found);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch threat details", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchThreatDetail();
+  }, [sessionId]);
+
+  // ข้อมูลที่ต้องรอ API ในอนาคต (Mock Data)
   const shellLogs = [
     { time: "10:42:01", cmd: "$ whoami", action: "Deceive", actionDesc: "(root)", color: "text-purple-400 border-purple-900/50 bg-purple-900/20" },
     { time: "10:42:15", cmd: "$ cat /etc/passwd", action: "Lure", actionDesc: "(Fake File)", color: "text-amber-400 border-amber-900/50 bg-amber-900/20" },
@@ -22,6 +44,24 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
     { time: "10:45:12", cmd: "$ nmap -sV 10.0.0.0/24", action: "Analyzing...", actionDesc: "", color: "text-slate-500 border-transparent bg-transparent animate-pulse" },
   ];
 
+  if (loading) {
+    return <div className="flex h-full items-center justify-center text-slate-500 font-mono text-sm animate-pulse min-h-[500px]">RETRIEVING FORENSIC DATA...</div>;
+  }
+
+  if (!threatData) {
+    return <div className="flex h-full items-center justify-center text-red-500 font-mono text-sm min-h-[500px]">ERROR: SESSION ARCHIVED OR NOT FOUND</div>;
+  }
+
+  // เตรียมข้อมูลจริงสำหรับแสดงผล
+  const originIp = threatData?.sourceIp || "Unknown";
+  const country = threatData?.geo?.country || "Unknown";
+  const city = threatData?.geo?.city || "Unknown";
+  const lat = threatData?.geo?.lat || 0;
+  const lon = threatData?.geo?.lon || 0;
+  const severity = threatData?.severity?.toUpperCase() || "UNKNOWN";
+  const classification = threatData?.classification || "UNKNOWN";
+  const confidenceScore = severity === "CRITICAL" ? "94%" : severity === "HIGH" ? "78%" : "45%";
+  
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10 max-w-[1400px] mx-auto">
       
@@ -30,7 +70,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
            <Link href="/dashboard" className="hover:text-purple-400">SESSION ANALYSIS</Link> 
            <ChevronRight className="w-3 h-3" /> 
-           <span className="text-purple-400">{sessionId}</span>
+           <span className="text-purple-400 uppercase">{sessionId.substring(0, 8)}...</span>
         </div>
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold text-white flex items-center gap-3">
@@ -55,28 +95,28 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div>
               <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">ORIGIN IP</p>
-              <p className="text-lg font-mono text-purple-300">192.168.4.212</p>
+              <p className="text-lg font-mono text-purple-300">{originIp}</p>
             </div>
             <div>
               <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">GEO-LOCATION</p>
               <p className="text-sm text-slate-200 flex items-start gap-1">
                  <MapPin className="w-3 h-3 text-slate-500 mt-1 shrink-0" />
-                 Moscow, Russia<br/>(RU)
+                 {city !== "Unknown" ? `${city}, ` : ""}{country}
               </p>
             </div>
             <div>
               <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">SESSION DURATION</p>
-              <p className="text-lg font-mono text-slate-200">14m 22s</p>
+              <p className="text-lg font-mono text-slate-200">-</p> {/* รอข้อมูลจริง */}
             </div>
           </div>
           
-          {/* แผนที่ (Interactive Map) */}
+          {/* แผนที่ข้อมูลจริง */}
           <div className="w-full h-[120px] bg-[#09090b] border border-slate-800/50 rounded-lg relative overflow-hidden mt-4">
             <ComposableMap
               projection="geoMercator"
               projectionConfig={{
-                scale: 1200, // ระดับการซูม
-                center: [37.6173, 55.7558] // จัดกึ่งกลางไปทางพิกัดของรัสเซีย (Longitude, Latitude)
+                scale: 1200, 
+                center: [lon, lat] // ใช้พิกัดจริงจากข้อมูล
               }}
               style={{ width: "100%", height: "100%", outline: "none" }}
             >
@@ -99,24 +139,26 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                 }
               </Geographies>
               
-              {/* จุดแจ้งเตือนพิกัด Moscow */}
-              <Marker coordinates={[37.6173, 55.7558]}>
-                <circle r={20} fill="#a855f7" />
-                <circle r={30} fill="#a855f7" opacity={0.4} className="animate-ping" />
-                <text
-                  textAnchor="middle"
-                  y={-52} /* ขยับตัวหนังสือขึ้นด้านบนให้พ้นจุด Ping */
-                  style={{ 
-                    fontFamily: "monospace", 
-                    fontSize: "60px", /* เพิ่มขนาดตัวอักษรให้ใหญ่และชัดเจนขึ้น */
-                    fill: "#ffffff", /* ปรับให้เป็นสีขาวสว่างที่สุด */
-                    fontWeight: "bold",
-                    textShadow: "2px 2px 4px rgba(0,0,0,0.9), -1px -1px 0 #000" /* เพิ่มเงาดำหนาๆ ให้ตัดกับแผนที่ */
-                  }}
-                >
-                  MOSCOW_NODE_01
-                </text>
-              </Marker>
+              {/* จุดแจ้งเตือนตามพิกัดจริง */}
+              {(lat !== 0 && lon !== 0) && (
+                <Marker coordinates={[lon, lat]}>
+                  <circle r={6} fill="#a855f7" />
+                  <circle r={14} fill="#a855f7" opacity={0.4} className="animate-ping" />
+                  <text
+                    textAnchor="middle"
+                    y={-22}
+                    style={{ 
+                      fontFamily: "monospace", 
+                      fontSize: "22px", 
+                      fill: "#ffffff", 
+                      fontWeight: "bold",
+                      textShadow: "2px 2px 4px rgba(0,0,0,0.9), -1px -1px 0 #000" 
+                    }}
+                  >
+                    TARGET_NODE
+                  </text>
+                </Marker>
+              )}
             </ComposableMap>
             
             <div className="absolute bottom-3 right-4 text-[9px] font-mono text-slate-600 tracking-widest pointer-events-none">
@@ -133,25 +175,31 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           <div className="flex justify-between items-end mb-8">
              <div>
                <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">CLASSIFICATION</p>
-               <p className="text-3xl font-bold text-slate-200">APT-28</p>
+               <p className="text-3xl font-bold text-slate-200">{classification}</p>
              </div>
              <div className="text-right">
                <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">CRITICALITY</p>
-               <p className="text-xs font-mono font-bold text-red-400 border border-red-900 bg-red-950/30 px-2 py-0.5 rounded">HIGH</p>
+               <p className={`text-xs font-mono font-bold px-2 py-0.5 rounded border ${
+                 severity === 'CRITICAL' ? 'text-red-400 border-red-900 bg-red-950/30' : 
+                 severity === 'HIGH' ? 'text-orange-400 border-orange-900 bg-orange-950/30' : 
+                 'text-amber-400 border-amber-900 bg-amber-950/30'
+               }`}>
+                 {severity}
+               </p>
              </div>
           </div>
           <div>
              <div className="flex justify-between text-xs font-mono text-slate-400 mb-2">
                <span>Confidence Score</span>
-               <span>94%</span>
+               <span>{confidenceScore}</span>
              </div>
              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-purple-500 w-[94%] shadow-[0_0_8px_#a855f7]"></div>
+                <div className="h-full bg-purple-500 shadow-[0_0_8px_#a855f7]" style={{ width: confidenceScore }}></div>
              </div>
           </div>
         </div>
 
-        {/* ---------------- Live Interaction Shell ---------------- */}
+        {/* ---------------- Live Interaction Shell (MOCK) ---------------- */}
         <div className="lg:col-span-2 bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
           <div className="flex justify-between items-center mb-6">
              <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
@@ -162,7 +210,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
              </span>
           </div>
           
-          {/* หน้าจอ Terminal */}
           <div className="bg-[#0a0a0c] border border-slate-800/50 rounded-lg p-4 font-mono text-xs overflow-x-auto">
              <table className="w-full text-left border-collapse">
                <thead>
@@ -192,7 +239,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
 
-        {/* ---------------- Predict Next Step ---------------- */}
+        {/* ---------------- Predict Next Step (MOCK) ---------------- */}
         <div className="bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
           <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2 mb-6">
              <Activity className="w-5 h-5 text-purple-400" /> Predict Next Step
@@ -229,7 +276,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
 
-        {/* ---------------- Threat Hypothesis Summary ---------------- */}
+        {/* ---------------- Threat Hypothesis Summary (MOCK) ---------------- */}
         <div className="lg:col-span-3 bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
           <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2 mb-4">
              <AlertTriangle className="w-5 h-5 text-amber-500" /> Threat Hypothesis Summary
