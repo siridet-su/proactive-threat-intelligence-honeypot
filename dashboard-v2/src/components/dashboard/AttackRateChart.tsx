@@ -8,23 +8,23 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-// ข้อมูลจำลองสำหรับแสดงในกราฟ (เวลา และปริมาณการโจมตี)
-const data = [
-  { time: "22:00", rate: 2.5 },
-  { time: "02:00", rate: 2.1 },
-  { time: "06:00", rate: 6.8 },
-  { time: "10:00", rate: 14.2 }, // จุดพีคตามภาพดีไซน์
-  { time: "14:00", rate: 5.4 },
-  { time: "18:00", rate: 9.8 },
-  { time: "22:00", rate: 11.5 },
-];
+export interface ActivityPoint {
+  time: string;
+  rate: number;
+}
 
-export default function AttackRateChart() {
+export default function AttackRateChart({ data }: { data: ActivityPoint[] }) {
+  if (!data.length) {
+    return (
+      <div className="h-full flex items-center justify-center text-center text-[11px] text-slate-500">
+        No session observations in the selected 24-hour window.
+      </div>
+    );
+  }
+
   return (
-    // ResponsiveContainer ช่วยให้กราฟยืดหดตามขนาดของกล่อง div ที่ครอบมันอยู่
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
-        {/* ตั้งค่าการไล่สี (Gradient) จากม่วงสว่าง ไปโปร่งใส */}
         <defs>
           <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="#a855f7" stopOpacity={0.6} />
@@ -32,7 +32,6 @@ export default function AttackRateChart() {
           </linearGradient>
         </defs>
         
-        {/* แกน X แสดงเวลาซ่อนเส้นและปรับสีตัวหนังสือให้กลืนกับพื้นหลัง */}
         <XAxis 
           dataKey="time" 
           axisLine={false} 
@@ -41,7 +40,6 @@ export default function AttackRateChart() {
           dy={10}
         />
         
-        {/* ป๊อปอัปเมื่อเอาเมาส์ชี้ (Tooltip) */}
         <Tooltip
           contentStyle={{
             backgroundColor: "#111116",
@@ -53,7 +51,6 @@ export default function AttackRateChart() {
           itemStyle={{ color: "#a855f7" }}
         />
         
-        {/* ตัวกราฟพื้นที่ type="monotone" คือทำให้เส้นโค้งมน */}
         <Area
           type="monotone"
           dataKey="rate"

@@ -35,6 +35,9 @@ from production.utils.serialization import stable_id, stable_json, utc_now
 SCHEMA_VERSION = "response_guidance.v3"
 CANONICAL_EVIDENCE_SCHEMA_VERSION = "response_guidance_evidence.v1"
 LEGACY_ADAPTER_SCHEMA_VERSION = "response_guidance_legacy_adapter.v1"
+BINDING_SCHEMA_VERSION = "response_guidance_binding.v1"
+DURABLE_PREFIX_SCHEMA_VERSION = "response_guidance_durable_prefix.v1"
+REFERENCE_RESOLUTION_SCHEMA_VERSION = "response_guidance_reference_resolution.v1"
 CANONICAL_EVIDENCE_SCOPE = "observed_behavior"
 SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -162,6 +165,16 @@ def _document_sha256(document: Mapping[str, Any]) -> str:
     return _sha256_bytes(stable_json(document).encode("utf-8"))
 
 
+def _valid_sha256(value: Any) -> bool:
+    return SHA256_RE.fullmatch(_clean(value).lower()) is not None
+
+
+def _hash_without_key(value: Mapping[str, Any], key: str) -> str:
+    copied = deepcopy(dict(value))
+    copied.pop(key, None)
+    return _document_sha256(copied)
+
+
 def _path_label(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(PROJECT_ROOT))
@@ -183,7 +196,12 @@ def _evidence_refs_from_item(item: Mapping[str, Any]) -> Set[str]:
     for key in ("evidence_id", "evidence_ref"):
         if _clean(item.get(key)):
             refs.add(_clean(item.get(key)))
-    for key in ("evidence_refs", "source_evidence_refs"):
+    for key in (
+        "evidence_refs",
+        "source_evidence_refs",
+        "classification_event_refs",
+        "command_evidence_refs",
+    ):
         refs.update(_texts(item.get(key) or []))
     for mapping in item.get("trusted_attck_mappings") or []:
         if isinstance(mapping, dict) and _clean(mapping.get("evidence_ref")):
@@ -240,6 +258,9 @@ def canonical_evidence_snapshot(observed_behavior: Any) -> Dict[str, Any]:
         "cowrie_event_evidence": _canonical_mapping_list(observed.get("cowrie_event_evidence")),
         "transfer_event_observations": _canonical_mapping_list(observed.get("transfer_event_observations")),
         "trusted_attck_candidates": _canonical_mapping_list(observed.get("trusted_attck_candidates")),
+        "observed_trusted_ttps": _canonical_mapping_list(
+            observed.get("observed_trusted_ttps")
+        ),
         "connected_behavior_chains": _canonical_mapping_list(observed.get("connected_behavior_chains")),
         "behavior_relationships": _canonical_mapping_list(observed.get("behavior_relationships")),
     }
@@ -283,6 +304,7 @@ def canonical_behavioral_evidence_refs(observed_behavior: Any) -> Set[str]:
         ("cowrie_event_evidence", "direct_cowrie_events"),
         ("transfer_event_observations", "transfer_observations"),
         ("trusted_attck_candidates", "trusted_attck_candidates"),
+        ("observed_trusted_ttps", "observed_trusted_ttps"),
         ("connected_behavior_chains", "connected_behavior_chains"),
         ("behavior_relationships", "relationships"),
     ):
@@ -497,7 +519,16 @@ def _context_values(snapshot: Dict[str, Any], facts: Dict[str, Any]) -> Dict[str
     return values
 
 
-def _policy_metadata(document: Dict[str, Any], digest: str, source: str, status: str, errors: List[str]) -> Dict[str, Any]:
+def _policy_metadata(
+    document: Dict[str, Any],
+    digest: str,
+    source: str,
+    status: str,
+    errors: List[str],
+    *,
+    path: str = "",
+    document_sha256: str = "",
+) -> Dict[str, Any]:
     return {
         "schema_version": _clean(document.get("schema_version")),
         "policy_id": _clean(document.get("policy_id")),
@@ -506,6 +537,8 @@ def _policy_metadata(document: Dict[str, Any], digest: str, source: str, status:
         "review_expires_at": _clean(document.get("review_expires_at")),
         "sha256": digest,
         "source": source,
+        "path": path,
+        "document_sha256": document_sha256 or (_document_sha256(document) if document else ""),
         "status": status,
         "validation_errors": list(errors),
     }
@@ -536,6 +569,8 @@ def load_response_guidance_policy(path_text: str = "") -> Dict[str, Any]:
             "document": document,
             "sha256": _sha256_bytes(raw),
             "source": _path_label(path),
+            "path": str(path.resolve()),
+            "document_sha256": _document_sha256(document),
             "status": "valid" if not errors else "invalid",
             "validation_errors": errors,
         }
@@ -544,6 +579,8 @@ def load_response_guidance_policy(path_text: str = "") -> Dict[str, Any]:
             "document": {},
             "sha256": "",
             "source": _path_label(path),
+            "path": str(path.resolve()),
+            "document_sha256": "",
             "status": "unavailable",
             "validation_errors": [f"policy load failed: {exc.__class__.__name__}"],
         }
@@ -586,6 +623,423 @@ def load_response_guidance_asset_profile(path_text: str = "") -> Dict[str, Any]:
         }
 
 
+def _durable_prefix_binding(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
+    """Describe the exact durable manifest carried by canonical evidence.
+
+    The manifest is intentionally hashed as the object that is actually
+    carried in the report.  We do not synthesize a received timestamp or an
+    event entry that the producer did not persist.  A complete runtime
+    manifest is ``verified``; an absent/legacy compact manifest is explicit
+    ``partial`` rather than being presented as a full replay proof.
+    """
+
+    manifest = snapshot.get("durable_event_manifest")
+    if not isinstance(manifest, dict):
+        manifest = {}
+    content_sha = _document_sha256(manifest)
+    session_id = _clean(snapshot.get("session_id"))
+    manifest_session = _clean(manifest.get("session_id"))
+    through_event_id = _clean(manifest.get("through_event_id"))
+    through_received_at = _clean(manifest.get("through_received_at"))
+    event_entries = manifest.get("event_entries")
+    # Runtime analysis jobs currently carry a compact manifest summary while
+    # storage snapshots may carry the complete ordered entries.  A compact
+    # summary is deliberately only ``partial``: a digest-shaped watermark is
+    # not itself proof that the underlying prefix content was resolved.
+    event_count = manifest.get("event_count")
+    if not isinstance(event_count, int) or isinstance(event_count, bool):
+        event_count = snapshot.get("event_count")
+    manifest_basis = {
+        "schema_version": _clean(manifest.get("schema_version")),
+        "session_id": manifest_session,
+        "through_event_id": through_event_id,
+        "through_received_at": through_received_at,
+        "event_entries": event_entries,
+    }
+    manifest_hash_matches = (
+        _valid_sha256(manifest.get("manifest_sha256"))
+        and _document_sha256(manifest_basis)
+        == _clean(manifest.get("manifest_sha256")).lower()
+    )
+    entries_valid = (
+        isinstance(event_entries, list)
+        and all(
+            isinstance(entry, dict)
+            and bool(_clean(entry.get("event_id")))
+            and bool(_clean(entry.get("received_at")))
+            and _valid_sha256(entry.get("payload_sha256"))
+            for entry in event_entries
+        )
+    )
+    complete = (
+        _clean(manifest.get("schema_version")) == "durable_session_event_manifest.v1"
+        and bool(manifest_session)
+        and manifest_session == session_id
+        and bool(through_event_id)
+        and bool(through_received_at)
+        and entries_valid
+        and isinstance(event_count, int)
+        and not isinstance(event_count, bool)
+        and event_count == len(event_entries)
+        and manifest_hash_matches
+    )
+    partial = bool(manifest) and bool(session_id) and bool(content_sha)
+    return {
+        "schema_version": DURABLE_PREFIX_SCHEMA_VERSION,
+        "status": "verified" if complete else ("partial" if partial else "unverified"),
+        "session_id": session_id,
+        "manifest_sha256": _clean(manifest.get("manifest_sha256")).lower(),
+        "content_sha256": content_sha,
+        "manifest_hash_matches": manifest_hash_matches,
+        "through_event_id": through_event_id,
+        "through_received_at": through_received_at,
+        "event_count": event_count if isinstance(event_count, int) and not isinstance(event_count, bool) else None,
+        "source_schema_version": _clean(manifest.get("schema_version")),
+    }
+
+
+def _snapshot_reference_candidates(
+    snapshot: Mapping[str, Any],
+) -> Dict[str, List[Tuple[str, Dict[str, Any]]]]:
+    """Index canonical evidence IDs without trusting hash-shaped references."""
+
+    collections = (
+        ("observations", "observations"),
+        ("ordered_command_observations", "ordered_command_observations"),
+        ("transfer_observations", "transfer_observations"),
+        ("transfer_event_observations", "transfer_event_observations"),
+        ("direct_cowrie_events", "direct_cowrie_events"),
+        ("cowrie_event_evidence", "cowrie_event_evidence"),
+        ("trusted_attck_candidates", "trusted_attck_candidates"),
+        ("classification_events", "classification_events"),
+    )
+    indexed: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+    for collection, source in collections:
+        for item in snapshot.get(collection) or []:
+            if not isinstance(item, dict):
+                continue
+            ids = {
+                _clean(item.get("evidence_id")),
+                _clean(item.get("evidence_ref")),
+            }
+            for evidence_id in sorted(item for item in ids if item):
+                indexed.setdefault(evidence_id, []).append((source, deepcopy(item)))
+    return indexed
+
+
+_REFERENCE_SOURCE_PRIORITY = (
+    "direct_cowrie_events",
+    "observations",
+    "ordered_command_observations",
+    "transfer_event_observations",
+    "transfer_observations",
+    "cowrie_event_evidence",
+    "trusted_attck_candidates",
+    "classification_events",
+)
+
+
+def _preferred_reference_candidates(
+    candidates: Iterable[Tuple[str, Dict[str, Any]]],
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """Select one canonical projection without hiding same-source conflicts.
+
+    The evidence snapshot intentionally carries raw Cowrie events alongside
+    derived command/transfer projections that reuse the same evidence ID.  A
+    deterministic source precedence keeps that normal representation from
+    becoming an artificial ambiguity, while two different contents in the
+    same projection remain an explicit fail-closed conflict.
+    """
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for source, item in candidates:
+        grouped.setdefault(source, []).append(item)
+    for source in _REFERENCE_SOURCE_PRIORITY:
+        values = grouped.get(source) or []
+        if not values:
+            continue
+        unique = {
+            _document_sha256(item): item
+            for item in values
+        }
+        if len(unique) != 1:
+            return source, []
+        return source, [next(iter(unique.values()))]
+    return "", []
+
+
+def _reference_resolution(
+    snapshot: Mapping[str, Any],
+    *,
+    findings: Iterable[Mapping[str, Any]],
+    actions: Iterable[Mapping[str, Any]],
+    semantic_traces: Mapping[str, Mapping[str, Any]],
+    typed_semantic_fact_set: Optional[Mapping[str, Any]],
+    graph: Any,
+) -> Dict[str, Any]:
+    """Resolve each response reference to bounded content and a recomputable hash."""
+
+    evidence_ids: Set[str] = set()
+    for item in list(findings) + list(actions):
+        if isinstance(item, Mapping):
+            evidence_ids.update(_texts(item.get("supporting_evidence_refs") or []))
+            evidence_ids.update(_texts(item.get("evidence_refs") or []))
+    for trace in semantic_traces.values():
+        for match in (trace or {}).get("matches") or []:
+            if isinstance(match, Mapping):
+                evidence_ids.update(_texts(match.get("supporting_evidence_refs") or []))
+
+    indexed = _snapshot_reference_candidates(snapshot)
+    required: List[Dict[str, str]] = [
+        {"reference_type": "evidence", "reference_id": value}
+        for value in sorted(evidence_ids)
+    ]
+    resolved: List[Dict[str, Any]] = []
+    unresolved: List[Dict[str, str]] = []
+    for evidence_id in sorted(evidence_ids):
+        candidates = indexed.get(evidence_id) or []
+        source, preferred = _preferred_reference_candidates(candidates)
+        if len(preferred) != 1:
+            unresolved.append({
+                "reference_type": "evidence",
+                "reference_id": evidence_id,
+                "reason": "missing" if not candidates else "ambiguous_content",
+            })
+            continue
+        content = preferred[0]
+        content_sha = _document_sha256(content)
+        resolved.append({
+            "reference_type": "evidence",
+            "reference_id": evidence_id,
+            "content_sha256": content_sha,
+            "source": source,
+            "content": content,
+        })
+
+    typed = typed_semantic_fact_set if isinstance(typed_semantic_fact_set, Mapping) else {}
+    facts = [item for item in typed.get("facts") or [] if isinstance(item, dict)]
+    typed_validation_errors: List[str] = []
+    if typed:
+        try:
+            # Resolve/validate the supplied fact set independently of the
+            # response-policy selector.  This catches a hash-shaped
+            # ``fact_set_sha256`` whose aggregate content was never actually
+            # validated, while preserving the Phase 4B fact-set contract.
+            from production.reporting.typed_semantic_facts import (
+                validate_typed_semantic_fact_set,
+            )
+
+            typed_validation_errors = list(validate_typed_semantic_fact_set(typed))
+        except Exception as exc:  # pragma: no cover - defensive import boundary
+            typed_validation_errors = [f"typed fact set validation unavailable: {exc.__class__.__name__}"]
+    for fact in sorted(facts, key=lambda item: _clean(item.get("fact_id"))):
+        fact_id = _clean(fact.get("fact_id"))
+        if not fact_id:
+            unresolved.append({
+                "reference_type": "typed_fact",
+                "reference_id": "",
+                "reason": "missing_id",
+            })
+            continue
+        required.append({"reference_type": "typed_fact", "reference_id": fact_id})
+        content = deepcopy(fact)
+        content.pop("fact_id", None)
+        expected_id = stable_id("typed_semantic_fact", content)
+        if expected_id != fact_id:
+            unresolved.append({
+                "reference_type": "typed_fact",
+                "reference_id": fact_id,
+                "reason": "content_id_mismatch",
+            })
+            continue
+        resolved.append({
+            "reference_type": "typed_fact",
+            "reference_id": fact_id,
+            "fact_set_sha256": _clean(typed.get("fact_set_sha256")),
+            "content_sha256": _document_sha256(content),
+            "source": "typed_semantic_fact_set.v2",
+            "content": content,
+        })
+
+    typed_fact_projection = {
+        "schema_version": _clean(typed.get("schema_version")),
+        "session_id": _clean(typed.get("session_id")),
+        "facts": [
+            {
+                "fact_id": _clean(item.get("reference_id")),
+                **deepcopy(item.get("content") or {}),
+            }
+            for item in sorted(
+                (
+                    item
+                    for item in resolved
+                    if item.get("reference_type") == "typed_fact"
+                ),
+                key=lambda item: _clean(item.get("reference_id")),
+            )
+        ],
+    }
+    typed_context = {
+        "status": (
+            "verified"
+            if typed and not typed_validation_errors
+            else ("unverified" if typed else "not_supplied")
+        ),
+        "schema_version": _clean(typed.get("schema_version")),
+        "session_id": _clean(typed.get("session_id")),
+        "fact_set_sha256": _clean(typed.get("fact_set_sha256")).lower(),
+        "fact_count": len(facts),
+        "fact_projection_sha256": _document_sha256(typed_fact_projection),
+        "canonical_evidence_sha256": _clean(
+            (typed.get("provenance") or {}).get("canonical_evidence_sha256")
+        ).lower(),
+        "source_evidence_sha256": _clean(
+            (typed.get("provenance") or {}).get("source_evidence_sha256")
+        ).lower(),
+        "validation_errors": typed_validation_errors,
+    }
+    typed_prefix_hashes = {
+        _clean(snapshot.get("evidence_sha256")).lower(),
+        _clean(snapshot.get("observed_evidence_sha256")).lower(),
+    }
+    typed_canonical_hash = typed_context.get("canonical_evidence_sha256")
+    if (
+        typed_context.get("status") == "verified"
+        and typed_canonical_hash
+        and typed_canonical_hash not in typed_prefix_hashes
+    ):
+        # A fact set can be valid in isolation yet originate from a different
+        # evidence representation (for example, a legacy observed-behaviour
+        # caller rather than a v3 canonical snapshot).  Keep it available for
+        # compatibility, but never present it as verified for this output.
+        typed_context["status"] = "unverified"
+        typed_context["validation_errors"] = [
+            "typed fact-set canonical evidence prefix does not match output"
+        ]
+        unresolved.append({
+            "reference_type": "typed_fact_set",
+            "reference_id": _clean(typed.get("fact_set_sha256")),
+            "reason": "cross_evidence_prefix",
+        })
+    if typed_validation_errors:
+        unresolved.append({
+            "reference_type": "typed_fact_set",
+            "reference_id": _clean(typed.get("fact_set_sha256")),
+            "reason": "fact_set_validation_failed",
+        })
+
+    graph_value = graph if isinstance(graph, dict) else None
+    if graph_value is not None:
+        graph_id = _clean(graph_value.get("graph_sha256"))
+        required.append({"reference_type": "semantic_graph", "reference_id": graph_id})
+        graph_content_sha = _document_sha256(graph_value)
+        if not _valid_sha256(graph_id) or _hash_without_key(graph_value, "graph_sha256") != graph_id:
+            unresolved.append({
+                "reference_type": "semantic_graph",
+                "reference_id": graph_id,
+                "reason": "content_hash_mismatch",
+            })
+        else:
+            resolved.append({
+                "reference_type": "semantic_graph",
+                "reference_id": graph_id,
+                "content_sha256": graph_content_sha,
+                "source": "canonical_evidence.semantic_graph",
+                "content": deepcopy(graph_value),
+            })
+    status = "verified" if not unresolved else ("partial" if resolved else "unverified")
+    return {
+        "schema_version": REFERENCE_RESOLUTION_SCHEMA_VERSION,
+        "status": status,
+        "required": sorted(required, key=lambda item: (item["reference_type"], item["reference_id"])),
+        "resolved": sorted(resolved, key=lambda item: (item["reference_type"], item["reference_id"])),
+        "unresolved": sorted(unresolved, key=lambda item: (item["reference_type"], item["reference_id"], item["reason"])),
+        "typed_fact_set": typed_context,
+    }
+
+
+def _build_binding(
+    snapshot: Mapping[str, Any],
+    *,
+    assessment_id: str,
+    assessment_context: Optional[Mapping[str, Any]],
+    policy: Mapping[str, Any],
+    policy_sha256: str,
+    policy_source: str,
+    policy_path: str,
+    policy_status: str,
+    policy_document_sha256: str,
+    findings: Iterable[Mapping[str, Any]],
+    actions: Iterable[Mapping[str, Any]],
+    semantic_traces: Mapping[str, Mapping[str, Any]],
+    typed_semantic_fact_set: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    graph = snapshot.get("semantic_graph")
+    graph_errors = validate_canonical_semantic_graph(graph) if isinstance(graph, dict) else []
+    graph_binding = {
+        "status": "verified" if isinstance(graph, dict) and not graph_errors else ("not_available" if graph is None else "invalid"),
+        "graph_sha256": _clean((graph or {}).get("graph_sha256")) if isinstance(graph, dict) else "",
+        "content_sha256": _document_sha256(graph) if isinstance(graph, dict) else "",
+        "validation_errors": list(graph_errors),
+    }
+    assessment = deepcopy(dict(assessment_context)) if isinstance(assessment_context, Mapping) else {}
+    if assessment_id:
+        assessment.setdefault("assessment_id", assessment_id)
+    assessment_binding = {
+        "status": "verified" if assessment_id and assessment else ("not_supplied" if not assessment_id else "unverified"),
+        "assessment_id": _clean(assessment.get("assessment_id") or assessment_id),
+        "content_sha256": _document_sha256(assessment) if assessment else "",
+        "source": "session_assessment_v4" if assessment else "",
+        "content": assessment,
+    }
+    policy_binding_status = (
+        "verified"
+        if policy_path and policy_status == "valid" and policy and _valid_sha256(policy_sha256)
+        else ("partial" if policy and policy_status == "valid" else "unverified")
+    )
+    reference_resolution = _reference_resolution(
+        snapshot,
+        findings=findings,
+        actions=actions,
+        semantic_traces=semantic_traces,
+        typed_semantic_fact_set=typed_semantic_fact_set,
+        graph=graph if isinstance(graph, dict) else None,
+    )
+    components = [
+        _durable_prefix_binding(snapshot)["status"],
+        assessment_binding["status"],
+        graph_binding["status"],
+        policy_binding_status,
+        reference_resolution["status"],
+        (reference_resolution.get("typed_fact_set") or {}).get(
+            "status", "not_supplied"
+        ),
+    ]
+    overall = "verified" if all(item == "verified" for item in components) else (
+        "partial" if any(item in {"verified", "partial", "not_available", "not_supplied"} for item in components) else "unverified"
+    )
+    return {
+        "schema_version": BINDING_SCHEMA_VERSION,
+        "status": overall,
+        "session_id": _clean(snapshot.get("session_id")) or "unknown",
+        "durable_prefix": _durable_prefix_binding(snapshot),
+        "assessment": assessment_binding,
+        "graph": graph_binding,
+        "policy": {
+            "status": policy_binding_status,
+            "file_sha256": _clean(policy_sha256).lower(),
+            "document_sha256": policy_document_sha256 or (_document_sha256(policy) if policy else ""),
+            "source": policy_source,
+            "path": policy_path,
+            "policy_id": _clean(policy.get("policy_id")),
+            "version": _clean(policy.get("version")),
+            "schema_version": _clean(policy.get("schema_version")),
+            "content_resolution": "actual_file_bytes" if policy_path else "in_memory_document",
+        },
+        "reference_resolution": reference_resolution,
+    }
+
+
 def _guidance_identity(
     *,
     session_id: str,
@@ -599,6 +1053,7 @@ def _guidance_identity(
     triage: Dict[str, Any],
     safety: Dict[str, Any],
     typed_semantics: Dict[str, Any],
+    binding: Optional[Mapping[str, Any]] = None,
 ) -> str:
     return stable_id("response_guidance_v3", {
         "schema_version": SCHEMA_VERSION,
@@ -613,6 +1068,7 @@ def _guidance_identity(
         "triage": deepcopy(triage),
         "safety": deepcopy(safety),
         "typed_semantics": deepcopy(typed_semantics),
+        "binding": deepcopy(dict(binding)) if isinstance(binding, Mapping) else {},
     })
 
 
@@ -657,7 +1113,288 @@ def _legacy_guidance_identity(
     })
 
 
-def validate_response_guidance_v3(value: Any) -> List[str]:
+def _validate_binding(
+    value: Mapping[str, Any],
+    binding: Any,
+    *,
+    expected_session_id: str = "",
+    expected_assessment_id: str = "",
+) -> List[str]:
+    """Independently validate response-guidance content bindings."""
+
+    errors: List[str] = []
+    policy_metadata = ((value.get("provenance") or {}).get("policy") or {})
+    policy_version = _clean(policy_metadata.get("version"))
+    historical_policy = policy_version.startswith(
+        ("3.0.", "3.1.", "3.2.", "3.3.", "3.4.", "3.5.", "3.6.")
+    )
+    if not isinstance(binding, dict):
+        # v1/v2 and pre-binding v3 records remain readable through the
+        # historical adapter.  They are never treated as fully verified.
+        if historical_policy:
+            return []
+        return ["response guidance binding metadata is required for current output"]
+    if historical_policy:
+        # Historical v3 records may carry a binding-shaped field from a later
+        # producer, but their pre-binding identity and semantics remain
+        # read-only compatibility data.  Do not upgrade or revalidate them as
+        # current fully verified outputs.
+        return []
+    if binding.get("schema_version") != BINDING_SCHEMA_VERSION:
+        errors.append("response guidance binding schema is invalid")
+    binding_status = _clean(binding.get("status"))
+    if binding_status not in {"verified", "partial", "unverified"}:
+        errors.append("response guidance binding status is invalid")
+    session_id = _clean(value.get("session_id")) or "unknown"
+    if _clean(binding.get("session_id")) != session_id:
+        errors.append("response guidance binding session mismatch")
+    if expected_session_id and session_id != _clean(expected_session_id):
+        errors.append("response guidance session does not match requested session")
+
+    evidence = value.get("canonical_evidence") or {}
+    expected_prefix = _durable_prefix_binding(evidence)
+    prefix = binding.get("durable_prefix")
+    if not isinstance(prefix, dict):
+        errors.append("durable prefix binding is required")
+        prefix = {}
+    else:
+        if prefix.get("schema_version") != DURABLE_PREFIX_SCHEMA_VERSION:
+            errors.append("durable prefix binding schema is invalid")
+        for key in (
+            "status",
+            "session_id",
+            "manifest_sha256",
+            "content_sha256",
+            "manifest_hash_matches",
+            "through_event_id",
+            "through_received_at",
+            "event_count",
+            "source_schema_version",
+        ):
+            if prefix.get(key) != expected_prefix.get(key):
+                errors.append(f"durable prefix binding {key} is inconsistent")
+        if prefix.get("status") == "verified" and expected_prefix.get("status") != "verified":
+            errors.append("durable prefix claims verified without a complete manifest")
+        if prefix.get("status") == "verified" and not _valid_sha256(prefix.get("content_sha256")):
+            errors.append("verified durable prefix requires resolved content")
+        if prefix.get("status") == "verified" and prefix.get("manifest_hash_matches") is not True:
+            errors.append("verified durable prefix requires a matching manifest hash")
+    if binding_status == "verified" and prefix.get("status") != "verified":
+        errors.append("fully verified guidance requires a verified durable prefix")
+
+    assessment = binding.get("assessment")
+    if not isinstance(assessment, dict):
+        errors.append("assessment binding is required")
+        assessment = {}
+    assessment_status = _clean(assessment.get("status"))
+    if assessment_status == "verified":
+        content = assessment.get("content")
+        if not isinstance(content, dict) or not _valid_sha256(assessment.get("content_sha256")):
+            errors.append("verified assessment requires resolved content")
+        else:
+            if _document_sha256(content) != _clean(assessment.get("content_sha256")):
+                errors.append("assessment content hash mismatch")
+            if _clean(content.get("assessment_id")) != _clean(assessment.get("assessment_id")):
+                errors.append("assessment content identity mismatch")
+    elif assessment_status not in {"not_supplied", "unverified"}:
+        errors.append("assessment binding status is invalid")
+    if expected_assessment_id and assessment_status == "verified" and _clean(assessment.get("assessment_id")) != _clean(expected_assessment_id):
+        errors.append("assessment binding does not match stored assessment")
+    if binding_status == "verified" and assessment_status != "verified":
+        errors.append("fully verified guidance requires a verified assessment")
+
+    graph = evidence.get("semantic_graph")
+    graph_binding = binding.get("graph")
+    if not isinstance(graph_binding, dict):
+        errors.append("graph binding is required")
+        graph_binding = {}
+    if isinstance(graph, dict):
+        graph_errors = validate_canonical_semantic_graph(graph)
+        errors.extend(f"response guidance graph: {error}" for error in graph_errors)
+        if graph_binding.get("status") != "verified":
+            errors.append("canonical graph must be represented as verified when present")
+        if graph_binding.get("graph_sha256") != _clean(graph.get("graph_sha256")):
+            errors.append("graph binding identity mismatch")
+        if graph_binding.get("content_sha256") != _document_sha256(graph):
+            errors.append("graph binding content hash mismatch")
+    elif _clean(graph_binding.get("status")) == "verified":
+        errors.append("graph binding claims verified without graph content")
+    if binding_status == "verified" and _clean(graph_binding.get("status")) != "verified":
+        errors.append("fully verified guidance requires a verified graph")
+
+    policy_binding = binding.get("policy")
+    if not isinstance(policy_binding, dict):
+        errors.append("policy content binding is required")
+        policy_binding = {}
+    if _clean(policy_binding.get("status")) == "verified":
+        policy_path = _clean(policy_binding.get("path"))
+        if not policy_path:
+            errors.append("verified policy binding requires a source path")
+        else:
+            path = Path(policy_path)
+            try:
+                raw = path.read_bytes()
+                document = json.loads(raw.decode("utf-8"))
+                if not isinstance(document, dict):
+                    raise ValueError("policy root must be an object")
+                policy_errors = validate_response_guidance_policy(document)
+                if policy_errors:
+                    errors.extend(f"resolved policy: {error}" for error in policy_errors)
+                raw_sha = _sha256_bytes(raw)
+                document_sha = _document_sha256(document)
+                if raw_sha != _clean(policy_binding.get("file_sha256")):
+                    errors.append("resolved policy file hash mismatch")
+                if document_sha != _clean(policy_binding.get("document_sha256")):
+                    errors.append("resolved policy canonical hash mismatch")
+                for key in ("schema_version", "policy_id", "version"):
+                    if _clean(document.get(key)) != _clean(policy_binding.get(key)):
+                        errors.append(f"resolved policy {key} mismatch")
+                if raw_sha != _clean(policy_metadata.get("sha256")):
+                    errors.append("resolved policy does not match output policy hash")
+                if document_sha != _clean(policy_metadata.get("document_sha256")):
+                    errors.append("resolved policy does not match output document hash")
+            except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+                errors.append(f"resolved policy unavailable: {exc.__class__.__name__}")
+    elif _clean(policy_binding.get("status")) not in {"partial", "unverified"}:
+        errors.append("policy content binding status is invalid")
+    if binding_status == "verified" and _clean(policy_binding.get("status")) != "verified":
+        errors.append("fully verified guidance requires resolved policy content")
+
+    resolution = binding.get("reference_resolution")
+    if not isinstance(resolution, dict):
+        errors.append("reference resolution is required")
+        resolution = {}
+    if resolution.get("schema_version") != REFERENCE_RESOLUTION_SCHEMA_VERSION:
+        errors.append("reference resolution schema is invalid")
+    required = resolution.get("required") if isinstance(resolution.get("required"), list) else []
+    resolved = resolution.get("resolved") if isinstance(resolution.get("resolved"), list) else []
+    unresolved = resolution.get("unresolved") if isinstance(resolution.get("unresolved"), list) else []
+    typed_context = resolution.get("typed_fact_set")
+    if not isinstance(typed_context, dict):
+        errors.append("typed fact-set resolution is required")
+        typed_context = {}
+    required_keys = {(item.get("reference_type"), item.get("reference_id")) for item in required if isinstance(item, dict)}
+    resolved_by_key: Dict[Tuple[Any, Any], Dict[str, Any]] = {}
+    for item in resolved:
+        if not isinstance(item, dict):
+            errors.append("resolved reference must be an object")
+            continue
+        key = (item.get("reference_type"), item.get("reference_id"))
+        if key in resolved_by_key:
+            errors.append("duplicate resolved reference")
+        resolved_by_key[key] = item
+    if len(required_keys) != len(required):
+        errors.append("required references are duplicated or malformed")
+    if len(resolved_by_key) != len(resolved):
+        errors.append("resolved references are duplicated or malformed")
+    indexed = _snapshot_reference_candidates(evidence)
+    typed = ((value.get("provenance") or {}).get("typed_semantics") or {})
+    typed_resolved = sorted(
+        (
+            item
+            for item in resolved
+            if isinstance(item, dict)
+            and item.get("reference_type") == "typed_fact"
+        ),
+        key=lambda item: _clean(item.get("reference_id")),
+    )
+    typed_projection = {
+        "schema_version": _clean(typed_context.get("schema_version")),
+        "session_id": _clean(typed_context.get("session_id")),
+        "facts": [
+            {
+                "fact_id": _clean(item.get("reference_id")),
+                **deepcopy(item.get("content") or {}),
+            }
+            for item in typed_resolved
+        ],
+    }
+    if _clean(typed_context.get("status")) == "verified":
+        if _clean(typed_context.get("schema_version")) != "typed_semantic_fact_set.v2":
+            errors.append("verified typed fact-set schema is invalid")
+        if _clean(typed_context.get("session_id")) != _clean(evidence.get("session_id")):
+            errors.append("verified typed fact-set session mismatch")
+        if not _valid_sha256(typed_context.get("fact_set_sha256")):
+            errors.append("verified typed fact-set hash is invalid")
+        expected_evidence_hashes = {
+            _clean(evidence.get("evidence_sha256")).lower(),
+            _clean(evidence.get("observed_evidence_sha256")).lower(),
+        }
+        if _clean(typed_context.get("canonical_evidence_sha256")).lower() not in expected_evidence_hashes:
+            errors.append("verified typed fact-set crosses the evidence prefix")
+        if typed_context.get("fact_count") != len(typed_resolved):
+            errors.append("verified typed fact-set count is inconsistent")
+        if _clean(typed_context.get("fact_projection_sha256")) != _document_sha256(typed_projection):
+            errors.append("verified typed fact projection hash mismatch")
+        if typed_context.get("validation_errors"):
+            errors.append("verified typed fact-set contains validation errors")
+    elif _clean(typed_context.get("status")) not in {"not_supplied", "unverified"}:
+        errors.append("typed fact-set resolution status is invalid")
+    for item in required:
+        if not isinstance(item, dict):
+            errors.append("required reference must be an object")
+            continue
+        key = (item.get("reference_type"), item.get("reference_id"))
+        resolved_item = resolved_by_key.get(key)
+        if resolved_item is None:
+            errors.append(f"required reference is unresolved: {key[0]}:{key[1]}")
+            continue
+        ref_type, ref_id = key
+        content = resolved_item.get("content")
+        if not isinstance(content, dict):
+            errors.append(f"resolved reference lacks content: {ref_type}:{ref_id}")
+            continue
+        if not _valid_sha256(resolved_item.get("content_sha256")):
+            errors.append(f"resolved reference hash is invalid: {ref_type}:{ref_id}")
+            continue
+        if _document_sha256(content) != _clean(resolved_item.get("content_sha256")):
+            errors.append(f"resolved reference content hash mismatch: {ref_type}:{ref_id}")
+        if ref_type == "evidence":
+            candidates = indexed.get(_clean(ref_id), [])
+            _source, preferred = _preferred_reference_candidates(candidates)
+            candidate_hashes = {
+                _document_sha256(candidate)
+                for candidate in preferred
+            }
+            if len(preferred) != 1:
+                errors.append(f"evidence reference content is ambiguous: {ref_id}")
+            if _clean(resolved_item.get("content_sha256")) not in candidate_hashes:
+                errors.append(f"evidence reference content is not canonical: {ref_id}")
+        elif ref_type == "typed_fact":
+            content_without_id = deepcopy(content)
+            content_without_id.pop("fact_id", None)
+            if stable_id("typed_semantic_fact", content_without_id) != _clean(ref_id):
+                errors.append(f"typed fact reference identity mismatch: {ref_id}")
+            if (
+                _clean(typed.get("fact_set_sha256"))
+                and _clean(resolved_item.get("fact_set_sha256"))
+                != _clean(typed.get("fact_set_sha256"))
+            ):
+                errors.append(f"typed fact set binding mismatch: {ref_id}")
+        elif ref_type == "semantic_graph":
+            if validate_canonical_semantic_graph(content):
+                errors.append(f"semantic graph reference is invalid: {ref_id}")
+            if _clean(content.get("graph_sha256")) != _clean(ref_id):
+                errors.append(f"semantic graph reference identity mismatch: {ref_id}")
+        else:
+            errors.append(f"unknown response reference type: {ref_type}")
+    if unresolved and binding_status == "verified":
+        errors.append("fully verified guidance contains unresolved references")
+    if _clean(resolution.get("status")) == "verified" and unresolved:
+        errors.append("reference resolution claims verified with unresolved references")
+    if binding_status == "verified" and _clean(resolution.get("status")) != "verified":
+        errors.append("fully verified guidance requires verified reference resolution")
+    if binding_status == "verified" and _clean(typed_context.get("status")) != "verified":
+        errors.append("fully verified guidance requires verified typed fact-set resolution")
+    return errors
+
+
+def validate_response_guidance_v3(
+    value: Any,
+    *,
+    expected_session_id: str = "",
+    expected_assessment_id: str = "",
+) -> List[str]:
     """Validate the immutable-evidence and no-automation v3 output contract."""
 
     errors: List[str] = []
@@ -910,8 +1647,15 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
             )
     else:
         errors.append("typed semantic provenance status is invalid")
-    allowed_refs = canonical_behavioral_evidence_refs(evidence)
-    transfer_refs = canonical_transfer_evidence_refs(evidence)
+    try:
+        allowed_refs = canonical_behavioral_evidence_refs(evidence)
+        transfer_refs = canonical_transfer_evidence_refs(evidence)
+    except (TypeError, ValueError, KeyError) as exc:
+        # A malformed v3 snapshot must be represented as a validation failure,
+        # not escape through dashboard/report consumers as an operational 500.
+        errors.append(f"canonical evidence is invalid: {exc}")
+        allowed_refs = set()
+        transfer_refs = set()
     actions = value.get("advisory_actions")
     if not isinstance(actions, list):
         errors.append("advisory_actions must be an array")
@@ -1079,6 +1823,14 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
     }
     if triage != expected_triage:
         errors.append("triage is inconsistent with grounded findings")
+    binding = value.get("binding")
+    binding_errors = _validate_binding(
+        value,
+        binding,
+        expected_session_id=expected_session_id,
+        expected_assessment_id=expected_assessment_id,
+    )
+    errors.extend(binding_errors)
     identity_arguments = {
         "session_id": _clean(value.get("session_id")) or "unknown",
         "evidence_sha256": recorded_evidence_hash,
@@ -1097,6 +1849,14 @@ def validate_response_guidance_v3(value: Any) -> List[str]:
             triage=triage,
             safety=value.get("safety") or {},
             typed_semantics=typed,
+            binding=(
+                binding
+                if isinstance(binding, Mapping)
+                and not policy_version.startswith(
+                    ("3.0.", "3.1.", "3.2.", "3.3.", "3.4.", "3.5.", "3.6.")
+                )
+                else None
+            ),
         )
     )
     if _clean(value.get("guidance_id")) != expected_id:
@@ -1110,6 +1870,8 @@ def build_response_guidance_v3(
     policy: Optional[Dict[str, Any]] = None,
     policy_sha256: str = "",
     policy_source: str = "",
+    policy_path: str = "",
+    policy_document_sha256: str = "",
     policy_status: str = "valid",
     policy_validation_errors: Optional[List[str]] = None,
     asset_profile: Optional[Dict[str, Any]] = None,
@@ -1121,6 +1883,8 @@ def build_response_guidance_v3(
     forecast_context: Any = None,
     enrichment_context: Any = None,
     typed_semantic_fact_set: Optional[Dict[str, Any]] = None,
+    assessment_id: str = "",
+    assessment_context: Optional[Dict[str, Any]] = None,
     activated_semantic_families: Iterable[str] = (),
     blocked_policy_rule_ids: Iterable[str] = (),
 ) -> Dict[str, Any]:
@@ -1439,6 +2203,21 @@ def build_response_guidance_v3(
         triage=triage,
         safety=safety,
         typed_semantics=typed_provenance,
+        binding=(binding := _build_binding(
+            snapshot,
+            assessment_id=assessment_id,
+            assessment_context=assessment_context,
+            policy=document,
+            policy_sha256=digest,
+            policy_source=policy_source,
+            policy_path=policy_path,
+            policy_status=policy_status,
+            policy_document_sha256=policy_document_sha256,
+            findings=findings,
+            actions=actions,
+            semantic_traces=semantic_traces,
+            typed_semantic_fact_set=typed_semantic_fact_set,
+        )),
     )
     guidance = {
         "schema_version": SCHEMA_VERSION,
@@ -1449,6 +2228,7 @@ def build_response_guidance_v3(
         "authority": authority,
         "session_id": _clean(snapshot.get("session_id")) or "unknown",
         "canonical_evidence": snapshot,
+        "binding": binding,
         "findings": findings,
         "triage": triage,
         "advisory_actions": actions,
@@ -1459,7 +2239,15 @@ def build_response_guidance_v3(
         },
         "provenance": {
             "canonical_evidence_sha256": evidence_sha256,
-            "policy": _policy_metadata(document, digest, policy_source, policy_status, policy_errors),
+            "policy": _policy_metadata(
+                document,
+                digest,
+                policy_source,
+                policy_status,
+                policy_errors,
+                path=policy_path,
+                document_sha256=policy_document_sha256,
+            ),
             "asset_profile": _profile_metadata(profile_document, profile_digest, asset_profile_source, asset_profile_status, profile_errors),
             "selection_authority": "deterministic_canonical_observed_evidence_only",
             "forecast_authority": "non_authoritative_context_only",
@@ -1471,6 +2259,8 @@ def build_response_guidance_v3(
             "legacy_v1_v2_records_read_only": True,
             "historical_records_recomputed": False,
             "prediction_snapshot_embedding": "prohibited",
+            "binding_status": binding.get("status"),
+            "historical_unverified_binding": False,
         },
     }
     validation_errors = validate_response_guidance_v3(guidance)
@@ -1498,6 +2288,7 @@ def build_response_guidance_v3(
             triage=guidance["triage"],
             safety=guidance["safety"],
             typed_semantics=typed_provenance,
+            binding=binding,
         )
     guidance["validation"] = {"status": "valid" if not validation_errors else "rejected", "errors": validation_errors}
     return guidance
@@ -1508,6 +2299,8 @@ def build_response_guidance_v3_from_paths(
     *,
     policy_path: str = "",
     asset_profile_path: str = "",
+    assessment_id: str = "",
+    assessment_context: Optional[Dict[str, Any]] = None,
     session_context: Optional[Dict[str, Any]] = None,
     forecast_context: Any = None,
     enrichment_context: Any = None,
@@ -1524,6 +2317,8 @@ def build_response_guidance_v3_from_paths(
         policy=loaded_policy["document"],
         policy_sha256=loaded_policy["sha256"],
         policy_source=loaded_policy["source"],
+        policy_path=loaded_policy.get("path", ""),
+        policy_document_sha256=loaded_policy.get("document_sha256", ""),
         policy_status=loaded_policy["status"],
         policy_validation_errors=loaded_policy["validation_errors"],
         asset_profile=loaded_profile["document"],
@@ -1535,6 +2330,8 @@ def build_response_guidance_v3_from_paths(
         forecast_context=forecast_context,
         enrichment_context=enrichment_context,
         typed_semantic_fact_set=typed_semantic_fact_set,
+        assessment_id=assessment_id,
+        assessment_context=assessment_context,
         activated_semantic_families=activated_semantic_families,
         blocked_policy_rule_ids=blocked_policy_rule_ids,
     )
@@ -1549,6 +2346,8 @@ def build_response_guidance_v3_from_session(
     behavior_policy_document: Optional[Dict[str, Any]] = None,
     behavior_policy_path: str = "",
     classification_policy_path: str = "",
+    assessment_id: str = "",
+    assessment_context: Optional[Dict[str, Any]] = None,
     forecast_context: Any = None,
     enrichment_context: Any = None,
 ) -> Dict[str, Any]:
@@ -1607,6 +2406,8 @@ def build_response_guidance_v3_from_session(
         forecast_context=forecast_context,
         enrichment_context=enrichment_context,
         typed_semantic_fact_set=typed_fact_set,
+        assessment_id=assessment_id,
+        assessment_context=assessment_context,
         activated_semantic_families=(
             CURRENT_ACTIVATED_SEMANTIC_FAMILIES
         ),

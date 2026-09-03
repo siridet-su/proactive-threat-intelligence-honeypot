@@ -138,6 +138,61 @@ def _ordered_behavior_chain(classification_events: List[Dict[str, Any]]) -> List
     return chain
 
 
+def _chronology_metadata(
+    classification_events: List[Dict[str, Any]],
+) -> Dict[str, str]:
+    """Describe whether ordered evidence is timestamp-supported or degraded.
+
+    The existing ordering algorithm is intentionally unchanged: when every
+    classification event has a valid timestamp it sorts by UTC time, otherwise
+    it preserves input/fragment order.  This metadata makes that distinction
+    visible to consumers instead of implying an elapsed-time or causal claim.
+    """
+
+    if not classification_events:
+        return {
+            "chronology_quality": "not_available",
+            "chronology_basis": "no_classification_events",
+        }
+    parsed: List[datetime] = []
+    invalid_nonempty = False
+    for event in classification_events:
+        raw = _clean_text(event.get("event_timestamp"))
+        if not raw:
+            continue
+        try:
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            invalid_nonempty = True
+            continue
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        parsed.append(value.astimezone(timezone.utc))
+    if len(parsed) == len(classification_events):
+        quality = (
+            "timestamp_supported_with_ties"
+            if len({value for value in parsed}) < len(parsed)
+            else "timestamp_supported"
+        )
+        return {
+            "chronology_quality": quality,
+            "chronology_basis": "all_classification_timestamps_valid_utc",
+        }
+    if parsed:
+        return {
+            "chronology_quality": "mixed_timestamp_input_order",
+            "chronology_basis": "some_classification_timestamps_missing_or_invalid",
+        }
+    return {
+        "chronology_quality": "input_order_fallback",
+        "chronology_basis": (
+            "classification_timestamps_invalid"
+            if invalid_nonempty
+            else "classification_timestamps_missing"
+        ),
+    }
+
+
 def _safe_event_fields(event: Dict[str, Any]) -> Dict[str, Any]:
     allowed = {
         "eventid",
@@ -390,6 +445,7 @@ def build_session_evidence_graph(
         for item in raw_events
         if _clean_text(item.get("eventid"))
     ]
+    chronology = _chronology_metadata(classification_events)
     login_failures = sum(1 for eventid in eventids if eventid == "cowrie.login.failed")
     graph = {
         "schema_version": SCHEMA_VERSION,
@@ -419,6 +475,7 @@ def build_session_evidence_graph(
         "behavior_relationships": relationship_analysis["behavior_relationships"],
         "connected_behavior_chains": relationship_analysis["connected_behavior_chains"],
         "relationship_semantics": relationship_analysis["semantics"],
+        **chronology,
         "edges": _edges(commands, classification_events, raw_events, observable_nodes),
         "sequences": {
             "commands": commands,
@@ -438,6 +495,7 @@ def build_session_evidence_graph(
             "raw_events": len(raw_events),
             "observables": len(observable_nodes),
             "login_failures": login_failures,
+            "chronology_quality": chronology["chronology_quality"],
         },
         "flags": {
             "has_commands": bool(commands),
@@ -482,4 +540,6 @@ def summarize_evidence_graph(graph: Dict[str, Any]) -> Dict[str, Any]:
         "last_trusted_tactic": _clean_text((graph.get("ordered_behavior_chain") or [{}])[-1].get("tactic")),
         "last_trusted_ttp": _clean_text((graph.get("ordered_behavior_chain") or [{}])[-1].get("ttp")),
         "evidence_flags": {k: v for k, v in flags.items() if v},
+        "chronology_quality": graph.get("chronology_quality") or "not_available",
+        "chronology_basis": graph.get("chronology_basis") or "",
     }

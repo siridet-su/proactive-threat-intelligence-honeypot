@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -27,6 +28,7 @@ from production.semantics.command_operations import (
 )
 from production.classification.authority import (
     CLASSIFICATION_EVENT_SCHEMA_VERSION,
+    REVIEWED_OPERATION_CONTEXT,
     SCHEMA_VERSION as AUTHORITY_DECISION_SCHEMA,
     candidate_authority_decision,
     command_authority_decision,
@@ -44,6 +46,7 @@ class TTPPrediction:
     rule_id: str = ""
     evidence_type: str = ""
     authority_decision: Optional[Dict[str, Any]] = None
+    inference_metadata: Optional[Dict[str, Any]] = None
 
     def to_event(self, command: str, tactic: str = "unknown") -> Dict[str, Any]:
         event = {
@@ -62,6 +65,8 @@ class TTPPrediction:
             event["evidence_type"] = self.evidence_type
         if self.authority_decision is not None:
             event["authority_decision"] = dict(self.authority_decision)
+        if self.inference_metadata is not None:
+            event["model_inference"] = dict(self.inference_metadata)
         return event
 
 
@@ -73,11 +78,30 @@ class MergedResult:
     source: str
 
     @property
-    def final_ttps(self) -> List[TTPPrediction]:
-        # Notebook behavior: rules are authoritative for raw shell commands.
+    def selected_command_ttps(self) -> List[TTPPrediction]:
+        """Return the internal high-confidence command-level selection.
+
+        Rules remain preferred for raw shell commands and SecureBERT is used
+        only when no rule prediction exists.  This is a compatibility
+        selection, not attacker ground truth, a session-final TTP set, or a
+        correlation-confirmed result.
+        """
+
         if self.rule_ttps:
             return [prediction for prediction in self.rule_ttps if prediction.high_conf]
-        return [p for p in self.bert_ttps if p.high_conf]
+        return [prediction for prediction in self.bert_ttps if prediction.high_conf]
+
+    @property
+    def final_ttps(self) -> List[TTPPrediction]:
+        """Backward-compatible alias for :attr:`selected_command_ttps`.
+
+        The historic name is intentionally retained for callers, but it must
+        never be interpreted as persisted final ATT&CK truth.  Session
+        observed TTPs are built separately from trusted classification events;
+        contextual correlation hypotheses are never included here.
+        """
+
+        return self.selected_command_ttps
 
 
 @dataclass
@@ -233,12 +257,63 @@ def _policy_rules(document: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [dict(rule) for rule in body.get("rules") or [] if isinstance(rule, dict)]
 
 
+_READ_CONTEXT_TTPS = {
+    "T1003", "T1016", "T1033", "T1049", "T1057", "T1069", "T1082",
+    "T1083", "T1087", "T1552",
+}
+_WRITE_CONTEXT_TTPS = {
+    "T1027", "T1053", "T1059", "T1070", "T1098", "T1136", "T1140",
+    "T1222", "T1543", "T1546", "T1547", "T1548", "T1560", "T1562",
+}
+
+
+def _reviewed_operation_context(rule: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive explicit local operation-context metadata for a reviewed rule.
+
+    The context is a candidate authority aid, not an ATT&CK accuracy claim.
+    It is derived only for rules already in the policy-level reviewed fallback
+    allow-list and whose provenance is marked reviewed.
+    """
+
+    ttp = _clean_text(rule.get("ttp")).upper()
+    pattern = _clean_text(rule.get("pattern")).lower()
+    pattern_read_tokens = (
+        r"\bcat\b",
+        r"\bgrep\b",
+        r"\bnetstat\b",
+        r"\bifconfig\b",
+        r"ps\b",
+        r"\bls\b",
+    )
+    if ttp in _READ_CONTEXT_TTPS or any(
+        token in pattern for token in pattern_read_tokens
+    ):
+        context_class = "read_observation"
+    elif ttp in _WRITE_CONTEXT_TTPS:
+        context_class = "write_or_change"
+    elif ttp in {"T1105", "T1021", "T1059"}:
+        context_class = "direct_execution_or_transfer"
+    else:
+        context_class = "direct_reviewed_invocation"
+    return {
+        "context_class": context_class,
+        "basis": "reviewed local command-operation context; syntax only, no success or host-effect claim",
+        "positive_context": "rule pattern directly names the reviewed command family or explicit operation form",
+        "negative_context": "inert mention, read-only path, unresolved syntax, or unreviewed provenance remains audit-only",
+    }
+
+
 def _rule_metadata_by_spec(document: Dict[str, Any]) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
     """Index policy metadata without changing the public three-tuple API."""
 
     indexed: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
     body = document.get("policy", document)
     authority = body.get("runtime_authority") if isinstance(body, dict) else {}
+    candidate_authority_scope = (
+        authority.get("candidate_authority_scope")
+        if isinstance(authority, dict)
+        else None
+    )
     approved = set()
     if isinstance(authority, dict):
         approved = {
@@ -264,6 +339,17 @@ def _rule_metadata_by_spec(document: Dict[str, Any]) -> Dict[Tuple[str, str, str
                 "reviewed": _clean_text(item.get("rule_id")) in approved,
                 "safety_class": "literal_unambiguous",
             }
+        else:
+            runtime_authority = dict(runtime_authority)
+        if (
+            candidate_authority_scope is None
+            and _clean_text(item.get("rule_id")) in approved
+            and (item.get("provenance") or {}).get("reviewed") is True
+        ):
+            runtime_authority.setdefault("operation_class", REVIEWED_OPERATION_CONTEXT)
+            runtime_authority.setdefault(
+                "operation_context", _reviewed_operation_context(item)
+            )
         item["runtime_authority"] = runtime_authority
         indexed[(pattern, tid, name)] = item
     return indexed
@@ -713,10 +799,36 @@ class NotebookParityClassifier:
         try:
             tid, confidence = self.bert_fn(command)
             confidence = float(confidence or 0.0)
+            adapter = getattr(self.bert_fn, "__securebert_classifier__", None)
+            inference_metadata = getattr(
+                adapter, "last_inference_metadata", None
+            ) or getattr(self.bert_fn, "last_inference_metadata", None)
+            if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+                return TTPPrediction(
+                    "T0000_UNKNOWN",
+                    "SecureBERT invalid numeric output",
+                    0.0,
+                    False,
+                    "securebert_error",
+                    evidence_type="securebert",
+                    inference_metadata={
+                        **(
+                            dict(inference_metadata)
+                            if isinstance(inference_metadata, dict)
+                            else {}
+                        ),
+                        "status": "MODEL_INVALID_NUMERIC_OUTPUT",
+                    },
+                )
             if tid and confidence >= self.high_confidence:
                 return TTPPrediction(
                     tid, self._technique_name(tid), round(confidence, 4), True,
                     "securebert", evidence_type="securebert",
+                    inference_metadata=(
+                        dict(inference_metadata)
+                        if isinstance(inference_metadata, dict)
+                        else None
+                    ),
                 )
             return TTPPrediction(
                 tid or "T0000_UNKNOWN",
@@ -725,6 +837,11 @@ class NotebookParityClassifier:
                 False,
                 "securebert_low_confidence",
                 evidence_type="securebert",
+                inference_metadata=(
+                    dict(inference_metadata)
+                    if isinstance(inference_metadata, dict)
+                    else None
+                ),
             )
         except Exception:
             return TTPPrediction(
@@ -835,6 +952,11 @@ class NotebookParityClassifier:
                     "bert_ttp": None if bert_prediction.tid == "T0000_UNKNOWN" else bert_prediction.tid,
                     "bert_tactic": bert_tactic,
                     "bert_confidence": bert_prediction.confidence,
+                    **(
+                        {"model_inference": dict(bert_prediction.inference_metadata)}
+                        if isinstance(bert_prediction.inference_metadata, dict)
+                        else {}
+                    ),
                     **self._policy_provenance(),
                 }
                 events.append(event)
@@ -887,6 +1009,20 @@ class NotebookParityClassifier:
                     item["subcommand_count"] = fragment.count
                     item["operator_before"] = fragment.operator_before
                     item["operator_after"] = fragment.operator_after
+                    if fragment.index > 0 and fragment.operator_before in {"&&", "||"}:
+                        item["fragment_execution"] = "conditional_unproven"
+                        item["high_confidence"] = False
+                        authority = item.get("authority_decision")
+                        if isinstance(authority, dict):
+                            authority = dict(authority)
+                            authority["decision"] = "audit_only"
+                            authority["trusted_eligible"] = False
+                            reasons = list(authority.get("reasons") or [])
+                            reasons.append("conditional_execution_unproven")
+                            authority["reasons"] = sorted(
+                                {str(reason) for reason in reasons if str(reason).strip()}
+                            )
+                            item["authority_decision"] = authority
                 events.append(item)
         return events
 

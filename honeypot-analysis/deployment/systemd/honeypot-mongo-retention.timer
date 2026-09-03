@@ -1,0 +1,13 @@
+[Unit]
+Description=Honeypot Mongo retention planning timer (inactive template)
+ConditionPathExists=/etc/honeypot/retention-policy.json
+ConditionPathExists=/etc/honeypot/retention-planner.enabled
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=false
+Unit=honeypot-mongo-retention.service
+
+[Install]
+# Deliberately no WantedBy: this template is not enabled by finalization.

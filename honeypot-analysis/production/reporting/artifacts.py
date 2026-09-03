@@ -53,10 +53,21 @@ def _safe_artifact_mapping(value: Any, label: str) -> Dict[str, Any]:
         )
 
         validate_session_assessment_v4(value, raise_on_error=True)
-        # Canonical evidence and its content IDs are already safe.  The
-        # non-authoritative compatibility/audit context is still an artifact
-        # input and must pass the shared command-text boundary sanitizer.
-        return sanitize_artifact_boundary(value)
+        # Canonical evidence and the response-guidance binding contain the
+        # exact content whose hashes/IDs were just verified.  Applying the
+        # command-text projection recursively to those content-addressed
+        # branches would change their hashes and make a valid report appear
+        # tampered.  Preserve them byte-for-byte and sanitize only the
+        # non-authoritative compatibility/context branches.
+        safe = sanitize_artifact_boundary(value)
+        safe["canonical_evidence"] = deepcopy(value["canonical_evidence"])
+        safe_guidance = deepcopy(value["response_guidance_v3"])
+        if isinstance(safe_guidance.get("non_authoritative_context"), dict):
+            safe_guidance["non_authoritative_context"] = sanitize_artifact_boundary(
+                safe_guidance["non_authoritative_context"]
+            )
+        safe["response_guidance_v3"] = safe_guidance
+        return safe
     try:
         redacted = redact_for_artifact(value)
     except Exception:
@@ -466,13 +477,24 @@ def _evidence_layer_summary_lines(report: Dict[str, Any]) -> List[str]:
 def _trusted_ttp_ids(report: Dict[str, Any], session_payload: Dict[str, Any]) -> List[str]:
     if report.get("schema_version") == "session_assessment.v4":
         evidence = report.get("canonical_evidence") or {}
+        observed = evidence.get("observed_trusted_ttps") or []
+        if observed:
+            return list(dict.fromkeys(
+                str(item.get("technique_id") or "").strip()
+                for item in observed
+                if isinstance(item, dict) and str(item.get("technique_id") or "").strip()
+            ))
         return list(dict.fromkeys(
             str(item.get("technique_id") or "").strip()
             for item in evidence.get("trusted_attck_candidates") or []
             if isinstance(item, dict) and str(item.get("technique_id") or "").strip()
         ))
     observed = report.get("observed_behavior") or {}
-    candidates = observed.get("trusted_attck_candidates") if isinstance(observed, dict) else []
+    candidates = (
+        observed.get("observed_trusted_ttps") or observed.get("trusted_attck_candidates")
+        if isinstance(observed, dict)
+        else []
+    )
     if report.get("schema_version") == "threat_hypothesis.v2":
         return list(dict.fromkeys(
             str(item.get("technique_id") or "").strip()
@@ -640,6 +662,14 @@ def _build_identity(now: str, session_payload: Dict[str, Any]) -> Dict[str, Any]
 
 
 def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -> Dict[str, Any]:
+    # Validate and capture trusted policy actions from the canonical report
+    # before the artifact privacy projection.  V4 canonical evidence is
+    # content-addressed; the privacy projection intentionally redacts command
+    # text inside typed facts, so validating the projected copy would make an
+    # otherwise trusted action disappear merely because it was serialized for
+    # a public artifact.  Only the small, policy-derived action fields used by
+    # STIX are carried forward and are redacted independently below.
+    trusted_actions = _trusted_recommendation_actions(report)
     report = _safe_artifact_mapping(report, "report")
     session_payload = _safe_artifact_mapping(session_payload, "session")
     now = _artifact_timestamp(report, session_payload)
@@ -897,7 +927,8 @@ def build_stix_bundle(report: Dict[str, Any], session_payload: Dict[str, Any]) -
                 "target_ref": attack_pattern["id"],
             }, seen_ids, reference_from_report=False)
 
-    for action in _trusted_recommendation_actions(report):
+    for raw_action in trusted_actions:
+        action = _safe_artifact_mapping(raw_action, "action")
         action_id_value = str(action.get("action_id") or action.get("rule_id") or action.get("description") or stable_json(action))
         coa_id = _stix_id("course-of-action", "policy-action:" + action_id_value)
         coa = {
@@ -964,13 +995,13 @@ def write_stix_bundle(
     *,
     artifact_version: str = "",
 ) -> str:
-    report = _safe_artifact_mapping(report, "report")
-    session_payload = _safe_artifact_mapping(session_payload, "session")
-    session_id = session_payload.get("session_id", report.get("session_id", "unknown"))
+    safe_report = _safe_artifact_mapping(report, "report")
+    safe_session_payload = _safe_artifact_mapping(session_payload, "session")
+    session_id = safe_session_payload.get("session_id", safe_report.get("session_id", "unknown"))
     version = _resolve_artifact_version(
         artifact_version,
-        report,
-        session_payload,
+        safe_report,
+        safe_session_payload,
     )
     filename = f"{_safe_name(session_id)}_{version}_threat_bundle.json"
     rendered = json.dumps(
@@ -1090,10 +1121,11 @@ def write_markdown_report(
         if correlated_items:
             lines.append("")
             lines.append("### Session-Correlated TTPs")
+            lines.append("Correlation values below are developer-defined heuristic policy strengths, not probabilities.")
             for item in correlated_items[:20]:
                 lines.append(
                     f"- {item.get('main_ttp', '')} | {item.get('predicted_technique', {}).get('tactic', item.get('tactic', ''))} | "
-                    f"source_type={item.get('source_type', '')} | confidence={item.get('confidence', '-')}"
+                    f"source_type={item.get('source_type', '')} | heuristic_strength_not_probability={item.get('confidence', '-')}"
                 )
         prediction_items = _layer_items(report, "prediction_only_hypotheses")
         if prediction_items:
@@ -1458,6 +1490,8 @@ def validate_report_artifact_manifest(path_text: str | Path) -> List[str]:
 
 
 def attach_report_artifacts(report: Dict[str, Any], session_payload: Dict[str, Any], config: ProductionConfig) -> Dict[str, Any]:
+    source_report = report
+    source_session_payload = session_payload
     safe_report = _safe_artifact_mapping(report, "report")
     if not config.enable_artifacts:
         return safe_report
@@ -1483,8 +1517,8 @@ def attach_report_artifacts(report: Dict[str, Any], session_payload: Dict[str, A
         if config.enable_stix_export:
             try:
                 artifacts["stix"] = write_stix_bundle(
-                    safe_report,
-                    safe_session,
+                    source_report,
+                    source_session_payload,
                     output_dir,
                     artifact_version=artifact_version,
                 )

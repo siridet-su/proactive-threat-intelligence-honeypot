@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 
@@ -65,7 +65,6 @@ export default function RegionalMap() {
   }
 
   return (
-    // คง touchAction: "none" ไว้เพื่อป้องกันเบราว์เซอร์ซูมหน้าจอ
     <div className="w-full h-full relative bg-[#09090b] cursor-grab active:cursor-grabbing" style={{ touchAction: "none" }}>
       <ComposableMap 
         projection="geoMercator" 
@@ -74,7 +73,7 @@ export default function RegionalMap() {
         <ZoomableGroup 
           zoom={position.zoom} 
           center={position.coordinates} 
-          onMoveEnd={handleMoveEnd} // เปลี่ยนกลับมาใช้ onMoveEnd
+          onMoveEnd={handleMoveEnd}
           minZoom={1} 
           maxZoom={8}
         >
@@ -127,6 +126,15 @@ export default function RegionalMap() {
           style={{ top: tooltip.y, left: tooltip.x }}
         >
           {tooltip.content}
+        </div>
+      )}
+
+      {!markers.length && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-[#111116]/90 border border-slate-800 rounded-md px-4 py-3 text-center">
+            <p className="text-[11px] text-slate-300">No verified public coordinates</p>
+            <p className="text-[10px] text-slate-500 mt-1">The API returned no map-safe geolocation for this window.</p>
+          </div>
         </div>
       )}
 

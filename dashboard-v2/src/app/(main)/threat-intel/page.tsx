@@ -96,6 +96,13 @@ export default function ThreatIntelPage() {
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse mt-1"></span>
           </div>
         </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <MetricCard label="TOTAL SESSIONS" value={totalSessions.toLocaleString()} detail={`${sessions.length.toLocaleString()} shown from canonical API`} icon={<Database className="w-4 h-4 text-purple-400" />} />
+        <MetricCard label="PREDICTION SNAPSHOTS" value={predictionCount.toLocaleString()} detail="Bounded rows · model output" icon={<Brain className="w-4 h-4 text-amber-400" />} tone="amber" />
+        <MetricCard label="LATEST OBSERVATION" value={latestObserved ? ageLabel(latestObserved, asOf) : "—"} detail={formatTimestamp(latestObserved)} icon={<Clock3 className="w-4 h-4 text-slate-300" />} />
+        <MetricCard label="HISTORICAL CRITICAL ALERTS" value={criticalAlerts.toLocaleString()} detail="Legacy alert authority only" icon={<ShieldAlert className="w-4 h-4 text-red-400" />} tone="red" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -131,8 +138,8 @@ export default function ThreatIntelPage() {
         <div className="lg:col-span-2 bg-[#111116] border border-slate-800/50 rounded-xl flex flex-col overflow-hidden">
           <div className="p-6 border-b border-slate-800/50 flex justify-between items-start">
             <div>
-              <h3 className="text-base font-semibold text-white mb-1">Live Incursion Log</h3>
-              <p className="text-xs text-slate-500">Real-time packet interception & origin analysis</p>
+              <h3 className="text-base font-semibold text-white mb-1">Observed Session Log</h3>
+              <p className="text-xs text-slate-500">Canonical session records · source labels are not actor attribution</p>
             </div>
           </div>
           
@@ -141,8 +148,8 @@ export default function ThreatIntelPage() {
               <thead className="text-[10px] uppercase text-slate-500 font-mono border-b border-slate-800/50">
                 <tr>
                   <th className="px-6 py-4 font-normal">TIMESTAMP</th>
-                  <th className="px-6 py-4 font-normal">HACKER IP</th>
-                  <th className="px-6 py-4 font-normal">CLASSIFICATION</th>
+                  <th className="px-6 py-4 font-normal">SOURCE</th>
+                  <th className="px-6 py-4 font-normal">ANALYSIS STATUS</th>
                   <th className="px-6 py-4 font-normal text-right">ACTION</th>
                 </tr>
               </thead>

@@ -52,9 +52,9 @@ export default function LoginForm() {
 
         {/* Title */}
         <h2 className="text-xl text-white font-semibold tracking-[0.2em] mb-1">ACCESS CONTROL</h2>
-        <p className="text-[10px] text-slate-500 font-mono mb-8 tracking-widest">SECURE TERMINAL NODE: 0x8F-B22</p>
+        <p className="text-[10px] text-slate-500 font-mono mb-8 tracking-widest">READ-ONLY API SESSION</p>
 
-        <div className="w-full flex flex-col gap-5">
+        <form onSubmit={handleAuthenticate} className="w-full flex flex-col gap-5">
           
           {/* Operator ID Input */}
           <div>
@@ -68,7 +68,7 @@ export default function LoginForm() {
               </div>
               <input 
                 type="text" 
-                placeholder="admin"
+                placeholder="OP_XXXX"
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
@@ -90,7 +90,7 @@ export default function LoginForm() {
               </div>
               <input 
                 type="password" 
-                placeholder="admin"
+                placeholder="••••••••••••"
                 value={accessKey}
                 onChange={(e) => setAccessKey(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
@@ -115,15 +115,14 @@ export default function LoginForm() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
           </button>
 
-        </div>
+        </form>
 
         {/* Footer Warning */}
         <div className="mt-8 text-center flex flex-col gap-2">
           <a href="#" className="text-[10px] text-slate-400 font-mono hover:text-purple-400 transition-colors">FORGOT ACCESS KEY?</a>
           <p className="text-[9px] text-slate-600 font-mono mt-4 max-w-[250px] leading-relaxed">
-            WARNING: UNAUTHORIZED ACCESS ATTEMPTS ARE MONITORED AND LOGGED. FEDERAL PROSECUTION MAY APPLY.
+            WARNING: DEPLOYMENT AUTHENTICATION MUST BE CONFIGURED BEFORE THIS INTERFACE IS EXPOSED.
           </p>
-          <a href="/dashboard" className="text-[10px] text-purple-600/50 hover:text-purple-400 font-mono underline mt-2">EMERGENCY BYPASS (DEV ONLY)</a>
         </div>
 
       </div>

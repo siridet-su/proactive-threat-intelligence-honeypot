@@ -18,6 +18,9 @@ from production.prediction.trusted_history import (
     validate_prediction_trusted_history_manifest,
 )
 from production.prediction.evidence_cutoff import make_evidence_cutoff
+from production.reporting.typed_semantic_chain_selection import (
+    chronology_quality_for_records,
+)
 from production.utils.serialization import stable_id, stable_json
 from production.utils.sensitive_data import redact_for_artifact
 
@@ -167,7 +170,15 @@ def reclassify_durable_prefix(
                 or command
             )
             classification["cowrie_eventid"] = eventid
-            classification["event_timestamp"] = _text(event.get("timestamp"))
+            # Prefer the event's own timestamp, but preserve the canonical
+            # durable receipt timestamp when the event payload does not carry
+            # one.  ``received_at`` is authoritative storage provenance; it
+            # is never synthesized by replay and keeps the V3 history
+            # manifest valid while exposing the fallback in chronology
+            # metadata below.
+            classification["event_timestamp"] = _text(
+                event.get("timestamp") or durable_order.get("received_at")
+            )
             classification["durable_evidence_order"] = durable_order
             classification["command_outcome"] = _command_outcome(event)
             classification["compound_command_index"] = command_count - 1
@@ -287,10 +298,19 @@ def reclassify_durable_prefix(
             + "; ".join(manifest_errors)
         )
     reconstructed["prediction_trusted_history_manifest"] = history_manifest
+    chronology_records = []
+    for index, event in enumerate(events):
+        item = dict(event)
+        if not _text(item.get("timestamp")) and index < len(entries):
+            item["received_at"] = _text(entries[index].get("received_at"))
+        chronology_records.append(item)
+    chronology = chronology_quality_for_records(chronology_records)
     reconstructed["classification_replay"] = {
         "schema_version": CLASSIFICATION_REPLAY_SCHEMA,
         "durable_event_manifest_sha256": _text(durable_snapshot.get("manifest_sha256")),
         "classifier_environment_sha256": _text(current_identity.get("environment_sha256")),
         "status": "replayed_exact_durable_prefix",
+        "chronology_quality": chronology["quality"],
+        "chronology_basis": chronology["ordering_basis"],
     }
     return reconstructed

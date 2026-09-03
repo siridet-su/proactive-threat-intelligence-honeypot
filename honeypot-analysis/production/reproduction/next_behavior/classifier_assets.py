@@ -22,6 +22,7 @@ SCHEMA_VERSION = "next_behavior_classifier_environment.v3"
 COMPATIBILITY_SCHEMA_VERSION = "next_behavior_classifier_environment.v2"
 LEGACY_SCHEMA_VERSION = "next_behavior_classifier_environment.v1"
 SOURCE_IDENTITY_SCHEMA_VERSION = "classifier_source_identity.v1"
+RUNTIME_ASSET_CONTRACT_SCHEMA_VERSION = "securebert_runtime_asset_contract.v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LEGACY_TOP_LEVEL_FIELDS = frozenset(
     {
@@ -51,6 +52,12 @@ _CLASSIFIER_FIELDS = frozenset(
         "max_length",
         "files",
     }
+)
+_RUNTIME_CONTRACT_CLASSIFIER_FIELDS = frozenset(
+    {"runtime_asset_contract_path", "runtime_asset_contract_sha256"}
+)
+_CLASSIFIER_FIELDS_WITH_RUNTIME_CONTRACT = (
+    _CLASSIFIER_FIELDS | _RUNTIME_CONTRACT_CLASSIFIER_FIELDS
 )
 _POLICY_FIELDS = frozenset(
     {
@@ -124,6 +131,13 @@ _CLASSIFIER_ADAPTER = (
 _COMPOUND_SPLITTER = (
     "production.classification.classification_pipeline.split_compound_command"
 )
+
+MODEL_ARCHITECTURE = "ModernBertForSequenceClassification"
+MODEL_TYPE = "modernbert"
+MODEL_TASK = "SINGLE_LABEL_MULTICLASS"
+MODEL_LABEL_COUNT = 196
+MODEL_PARAMETER_COUNT = 149755588
+MODEL_MAX_TOKENS = 128
 
 
 class ClassifierAssetError(ValueError):
@@ -243,7 +257,15 @@ def validate_classifier_manifest(value: Any) -> list[str]:
     classifier_fields = _CLASSIFIER_FIELDS
     if schema == LEGACY_SCHEMA_VERSION:
         classifier_fields = _CLASSIFIER_FIELDS - {"splitter_sha256"}
-    if not isinstance(classifier, dict) or set(classifier) != classifier_fields:
+    valid_classifier_field_sets = {classifier_fields}
+    # A historical v3 receipt may predate the explicit runtime asset contract.
+    # The current runtime receipt uses the extended set; retaining the old set
+    # here keeps archived evidence parseable without weakening current loading.
+    if schema in {SCHEMA_VERSION, COMPATIBILITY_SCHEMA_VERSION}:
+        valid_classifier_field_sets.add(
+            classifier_fields | _RUNTIME_CONTRACT_CLASSIFIER_FIELDS
+        )
+    if not isinstance(classifier, dict) or set(classifier) not in valid_classifier_field_sets:
         errors.append("classifier fields are invalid")
     else:
         if classifier.get("adapter") != _CLASSIFIER_ADAPTER:
@@ -283,6 +305,12 @@ def validate_classifier_manifest(value: Any) -> list[str]:
                     or not _is_sha256(digest)
                 ):
                     errors.append("classifier.files contains an unsafe receipt")
+        if _RUNTIME_CONTRACT_CLASSIFIER_FIELDS.issubset(classifier):
+            contract_path = Path(_clean(classifier.get("runtime_asset_contract_path")))
+            if not _safe_relative_path(contract_path):
+                errors.append("classifier.runtime_asset_contract_path is unsafe")
+            if not _is_sha256(classifier.get("runtime_asset_contract_sha256")):
+                errors.append("classifier.runtime_asset_contract_sha256 is invalid")
 
     policy = value.get("classification_policy")
     policy_fields = _POLICY_FIELDS
@@ -438,6 +466,262 @@ def _verify_file(path: Path, expected_sha256: str, label: str) -> Dict[str, Any]
     return {"sha256": actual, "size_bytes": path.stat().st_size}
 
 
+def ordered_label_sha256(labels: Sequence[str]) -> str:
+    """Return the stable identity of an ordered classifier label list."""
+
+    encoded = json.dumps(
+        [str(label) for label in labels],
+        ensure_ascii=True,
+        sort_keys=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _safe_relative_path(value: Any) -> bool:
+    path = Path(_clean(value))
+    return bool(_clean(value)) and not path.is_absolute() and ".." not in path.parts
+
+
+def validate_securebert_runtime_contract(value: Any) -> list[str]:
+    """Validate the model/tokenizer/label contract without touching model bytes."""
+
+    if not isinstance(value, Mapping):
+        return ["SecureBERT runtime asset contract must be an object"]
+    errors: list[str] = []
+    if value.get("schema_version") != RUNTIME_ASSET_CONTRACT_SCHEMA_VERSION:
+        errors.append("SecureBERT runtime asset contract schema is invalid")
+    if _clean(value.get("legacy_project_identifier")) != "securebert":
+        errors.append("legacy SecureBERT identifier is invalid")
+    if _clean(value.get("verified_model_architecture")) != MODEL_ARCHITECTURE:
+        errors.append("verified model architecture is invalid")
+    if _clean(value.get("model_type")) != MODEL_TYPE:
+        errors.append("verified model type is invalid")
+    if _clean(value.get("task")) != MODEL_TASK:
+        errors.append("SecureBERT task contract is invalid")
+    if _clean(value.get("published_securebert_lineage")) not in {
+        "UNPROVEN",
+        "UNKNOWN",
+        "MISSING",
+    }:
+        errors.append("published SecureBERT lineage must remain unproven")
+    for field, expected in (
+        ("num_labels", MODEL_LABEL_COUNT),
+        ("parameter_count", MODEL_PARAMETER_COUNT),
+        ("max_model_tokens", MODEL_MAX_TOKENS),
+    ):
+        if value.get(field) != expected:
+            errors.append(f"{field} does not match the reviewed model contract")
+    if _clean(value.get("confidence_semantics")) != "uncalibrated_top_softmax_score":
+        errors.append("confidence semantics must be uncalibrated_top_softmax_score")
+    if value.get("temperature_applied") is not False:
+        errors.append("command classifier temperature must be disabled")
+
+    checkpoint = value.get("checkpoint")
+    if not isinstance(checkpoint, Mapping):
+        errors.append("checkpoint contract is invalid")
+    else:
+        if not _safe_relative_path(checkpoint.get("path")):
+            errors.append("checkpoint path is unsafe")
+        if not _is_sha256(checkpoint.get("sha256")):
+            errors.append("checkpoint SHA-256 is invalid")
+
+    model_config = value.get("model_config")
+    if not isinstance(model_config, Mapping):
+        errors.append("model config contract is invalid")
+    else:
+        files = model_config.get("files")
+        if not isinstance(files, Mapping) or set(files) != {
+            "config.json",
+            "checkpoint-6765/config.json",
+        }:
+            errors.append("model config contract must bind both config files")
+        else:
+            for relative, digest in files.items():
+                if not _safe_relative_path(relative) or not _is_sha256(digest):
+                    errors.append("model config contract contains an unsafe file")
+
+    tokenizer = value.get("tokenizer")
+    if not isinstance(tokenizer, Mapping):
+        errors.append("tokenizer contract is invalid")
+    else:
+        files = tokenizer.get("files")
+        expected_files = {
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "checkpoint-6765/tokenizer.json",
+            "checkpoint-6765/tokenizer_config.json",
+        }
+        if not isinstance(files, Mapping) or set(files) != expected_files:
+            errors.append("tokenizer contract must bind the reviewed tokenizer files")
+        else:
+            for relative, digest in files.items():
+                if not _safe_relative_path(relative) or not _is_sha256(digest):
+                    errors.append("tokenizer contract contains an unsafe file")
+        if tokenizer.get("normalizer") != "NFC":
+            errors.append("tokenizer normalizer is not the reviewed NFC contract")
+        if tokenizer.get("lowercase") is not False:
+            errors.append("tokenizer lowercase contract is invalid")
+        if tokenizer.get("truncation_side") != "right":
+            errors.append("tokenizer truncation side is invalid")
+        if tokenizer.get("padding_side") != "right":
+            errors.append("tokenizer padding side is invalid")
+
+    label_space = value.get("label_space")
+    if not isinstance(label_space, Mapping):
+        errors.append("label-space contract is invalid")
+    else:
+        if not _safe_relative_path(label_space.get("path")):
+            errors.append("label-space path is unsafe")
+        if not _is_sha256(label_space.get("sha256")):
+            errors.append("label-space SHA-256 is invalid")
+        if label_space.get("label_count") != MODEL_LABEL_COUNT:
+            errors.append("label-space count is invalid")
+        if not _is_sha256(label_space.get("ordered_labels_sha256")):
+            errors.append("ordered label SHA-256 is invalid")
+    preprocessing = value.get("preprocessing")
+    if not isinstance(preprocessing, Mapping):
+        errors.append("preprocessing contract is invalid")
+    else:
+        if preprocessing.get("strip") is not True:
+            errors.append("preprocessing strip contract is invalid")
+        if preprocessing.get("split_operators") != ["\\n", ";", "&&", "||"]:
+            errors.append("preprocessing split contract is invalid")
+        if preprocessing.get("split_pipes") is not False:
+            errors.append("preprocessing pipe contract is invalid")
+    return errors
+
+
+def load_securebert_runtime_contract(path: Path) -> Dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ClassifierAssetError("SecureBERT runtime asset contract unavailable") from exc
+    errors = validate_securebert_runtime_contract(value)
+    if errors:
+        raise ClassifierAssetError("; ".join(errors))
+    return dict(value)
+
+
+def _mapping_from_config(value: Mapping[str, Any]) -> Dict[str, str]:
+    raw = value.get("id2label")
+    if not isinstance(raw, Mapping):
+        raise ClassifierAssetError("classifier config id2label is invalid")
+    normalized: Dict[str, str] = {}
+    for index in range(MODEL_LABEL_COUNT):
+        key = str(index)
+        label = raw.get(key, raw.get(index))
+        if not isinstance(label, str) or not label.strip():
+            raise ClassifierAssetError("classifier config label order is incomplete")
+        normalized[key] = label.strip()
+    return normalized
+
+
+def _verify_json_file(path: Path, expected_sha256: str, label: str) -> Dict[str, Any]:
+    verified = _verify_file(path, expected_sha256, label)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ClassifierAssetError(f"{label} is not valid JSON") from exc
+    if not isinstance(value, Mapping):
+        raise ClassifierAssetError(f"{label} must contain an object")
+    verified["json"] = True
+    return verified
+
+
+def verify_securebert_runtime_assets(
+    contract: Mapping[str, Any],
+    *,
+    model_root: Path,
+) -> Dict[str, Any]:
+    """Verify all model-side bytes and their architecture/label identity."""
+
+    errors = validate_securebert_runtime_contract(contract)
+    if errors:
+        raise ClassifierAssetError("; ".join(errors))
+    root = Path(model_root)
+    checkpoint = contract["checkpoint"]
+    model_config = contract["model_config"]
+    tokenizer = contract["tokenizer"]
+    label_space = contract["label_space"]
+    verified: Dict[str, Any] = {}
+    verified["checkpoint"] = _verify_file(
+        root / checkpoint["path"], checkpoint["sha256"], "SecureBERT checkpoint"
+    )
+    configs: Dict[str, Any] = {}
+    for relative, digest in model_config["files"].items():
+        configs[relative] = _verify_json_file(
+            root / relative, digest, f"SecureBERT model config {relative}"
+        )
+    tokenizers: Dict[str, Any] = {}
+    for relative, digest in tokenizer["files"].items():
+        tokenizers[relative] = _verify_json_file(
+            root / relative, digest, f"SecureBERT tokenizer asset {relative}"
+        )
+    label_path = root / label_space["path"]
+    label_receipt = _verify_json_file(
+        label_path, label_space["sha256"], "SecureBERT label mapping"
+    )
+    try:
+        config_values = [
+            json.loads((root / relative).read_text(encoding="utf-8"))
+            for relative in model_config["files"]
+        ]
+        label_mapping = json.loads(label_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ClassifierAssetError("SecureBERT model identity JSON is unreadable") from exc
+    if not isinstance(label_mapping, Mapping):
+        raise ClassifierAssetError("SecureBERT label mapping is invalid")
+    if set(str(key) for key in label_mapping) != {str(i) for i in range(MODEL_LABEL_COUNT)}:
+        raise ClassifierAssetError("SecureBERT label mapping count is invalid")
+    ordered = [str(label_mapping[str(index)]).strip() for index in range(MODEL_LABEL_COUNT)]
+    if any(not label for label in ordered) or len(set(ordered)) != MODEL_LABEL_COUNT:
+        raise ClassifierAssetError("SecureBERT labels are missing or duplicated")
+    if ordered_label_sha256(ordered) != label_space["ordered_labels_sha256"]:
+        raise ClassifierAssetError("SecureBERT ordered label identity mismatch")
+    for config_value in config_values:
+        if not isinstance(config_value, Mapping):
+            raise ClassifierAssetError("SecureBERT model config is invalid")
+        architectures = config_value.get("architectures") or []
+        if MODEL_ARCHITECTURE not in architectures:
+            raise ClassifierAssetError("SecureBERT model architecture mismatch")
+        if config_value.get("model_type") != MODEL_TYPE:
+            raise ClassifierAssetError("SecureBERT model type mismatch")
+        config_labels = _mapping_from_config(config_value)
+        if [config_labels[str(index)] for index in range(MODEL_LABEL_COUNT)] != ordered:
+            raise ClassifierAssetError("SecureBERT config label order mismatch")
+        label2id = config_value.get("label2id")
+        normalized_label2id = {}
+        if isinstance(label2id, Mapping):
+            for label, value in label2id.items():
+                try:
+                    normalized_label2id[str(label)] = int(value)
+                except (TypeError, ValueError):
+                    normalized_label2id[str(label)] = -1
+        if normalized_label2id != {
+            str(label): int(index) for index, label in enumerate(ordered)
+        }:
+            raise ClassifierAssetError("SecureBERT config inverse label mapping mismatch")
+    if label_mapping != {str(index): label for index, label in enumerate(ordered)}:
+        raise ClassifierAssetError("SecureBERT external label mapping is not canonical")
+    verified["model_configs"] = configs
+    verified["tokenizer_files"] = tokenizers
+    verified["label_mapping"] = label_receipt
+    return {
+        "schema_version": RUNTIME_ASSET_CONTRACT_SCHEMA_VERSION,
+        "status": "runtime_model_assets_verified",
+        "model_root": str(root.resolve()),
+        "checkpoint_sha256": checkpoint["sha256"],
+        "architecture": MODEL_ARCHITECTURE,
+        "model_type": MODEL_TYPE,
+        "num_labels": MODEL_LABEL_COUNT,
+        "parameter_count": MODEL_PARAMETER_COUNT,
+        "max_model_tokens": MODEL_MAX_TOKENS,
+        "ordered_labels_sha256": label_space["ordered_labels_sha256"],
+        "verified": verified,
+    }
+
+
 def verify_classifier_assets(
     manifest: Mapping[str, Any],
     *,
@@ -492,6 +776,20 @@ def verify_classifier_assets(
     checkpoint_receipt = verified_model_files["checkpoint-6765/model.safetensors"]
     if checkpoint_receipt["sha256"] != classifier["checkpoint_sha256"]:
         raise ClassifierAssetError("checkpoint receipt is inconsistent")
+    runtime_contract = None
+    if _RUNTIME_CONTRACT_CLASSIFIER_FIELDS.issubset(classifier):
+        contract_path = repository_root / classifier["runtime_asset_contract_path"]
+        contract_receipt = _verify_json_file(
+            contract_path,
+            classifier["runtime_asset_contract_sha256"],
+            "SecureBERT runtime asset contract",
+        )
+        runtime_contract = load_securebert_runtime_contract(contract_path)
+        verified["runtime_asset_contract"] = contract_receipt
+        verified["runtime_model_identity"] = verify_securebert_runtime_assets(
+            runtime_contract,
+            model_root=model_root,
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "assets_verified",
@@ -502,6 +800,18 @@ def verify_classifier_assets(
             "label_count": classifier["label_count"],
             "max_length": classifier["max_length"],
             "device": classifier["device"],
+            **(
+                {
+                    "runtime_asset_contract_path": classifier[
+                        "runtime_asset_contract_path"
+                    ],
+                    "runtime_asset_contract_sha256": classifier[
+                        "runtime_asset_contract_sha256"
+                    ],
+                }
+                if runtime_contract is not None
+                else {}
+            ),
         },
         "verified": verified,
     }
@@ -517,11 +827,18 @@ def run_smoke_test(
     )
 
     classifier_config = manifest["classifier"]
+    contract = None
+    contract_path_text = classifier_config.get("runtime_asset_contract_path")
+    if contract_path_text:
+        contract = load_securebert_runtime_contract(
+            Path(__file__).resolve().parents[3] / contract_path_text
+        )
     classifier = SecureBertCommandClassifier(
         model_path=str(model_root),
         checkpoint_path=str(model_root / "checkpoint-6765"),
         device=classifier_config["device"],
         max_length=classifier_config["max_length"],
+        runtime_asset_contract=contract,
     )
     first = classifier.classify("uname -a")
     second = classifier.classify("uname -a")

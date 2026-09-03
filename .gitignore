@@ -34,10 +34,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-<<<<<<< HEAD
-
 migrate-data/
-=======
 # Retained project preparation/recovery artifacts are intentionally local
 /gate-phase7-reprepared/classification.json
 /gate-phase7-reprepared/current_semantics.sqlite
@@ -61,4 +58,16 @@ migrate-data/
 /honeypot-analysis-stage/honeypot-analysis/production/classification/classification_pipeline.py
 /honeypot-analysis-stage/honeypot-analysis/production/classification/trust.py
 /honeypot-analysis-stage/honeypot-analysis/production/semantics/command_operations.py
->>>>>>> origin/main
+
+# Forensically classified local-only dependencies and redundant runtime copies
+# (repository_uncommitted_cleanup_audit_20260831)
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+/.experiment-work/parent-unixcoder-venv/
+/.experiment-work/encoder-family-tmp/
+/.experiment-work/encoder-family-models/
+/honeypot-analysis/.hf-small-model-cache/
+/honeypot-cold-archive-backup/
