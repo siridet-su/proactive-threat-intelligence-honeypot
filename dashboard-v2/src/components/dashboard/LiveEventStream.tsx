@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
-import { ThreatEvent } from '@/types/honeypot';
+import { isDashboardThreatEvent } from '@/lib/dashboardTypes';
+import type { DashboardThreatEvent } from '@/lib/dashboardTypes';
 import { SeverityBadge } from './SeverityBadge';
 import { Terminal } from 'lucide-react';
 
 export function LiveEventStream() {
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<DashboardThreatEvent[]>([]);
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          setEvents(data.slice(0, 50)); // Show latest 50 events
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            setEvents(data.filter(isDashboardThreatEvent).slice(0, 50)); // Show latest 50 events
+          }
         }
       } catch (err) {
         console.error("Failed to fetch events:", err);
@@ -36,7 +39,14 @@ export function LiveEventStream() {
       </div>
       
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {events.map((event) => (
+        {events.map((event) => {
+          const abuseScore = event.abuseipdb?.abuseConfidenceScore ?? 0;
+          const virusStats = event.virustotal?.attributes?.stats;
+          const maliciousCount = virusStats?.malicious ?? 0;
+          const undetectedCount = virusStats?.undetected ?? 0;
+          const meaningfulName = event.virustotal?.attributes?.meaningful_name || 'Malware';
+
+          return (
           <div key={event.id} className="group flex flex-col sm:flex-row sm:items-start gap-2 hover:bg-slate-900/50 p-2 rounded transition-colors border border-transparent hover:border-slate-800/80">
             <div className="flex-shrink-0 text-slate-500 w-20" suppressHydrationWarning>
               {new Date(event.timestamp).toLocaleTimeString([], { hour12: false })}
@@ -47,9 +57,9 @@ export function LiveEventStream() {
                 <span className="text-purple-400">{event.protocol}</span>
                 <span className="text-slate-300">from</span>
                 <span className="text-amber-400">{event.sourceIp}</span>
-                {event.abuseipdb && event.abuseipdb.abuseConfidenceScore > 0 && (
-                  <span className={`text-[10px] px-1.5 rounded border ${event.abuseipdb.abuseConfidenceScore > 80 ? 'text-red-400 border-red-500/50 bg-red-500/10' : 'text-orange-400 border-orange-500/50 bg-orange-500/10'}`}>
-                    Risk: {event.abuseipdb.abuseConfidenceScore}%
+                {event.abuseipdb && abuseScore > 0 && (
+                  <span className={`text-[10px] px-1.5 rounded border ${abuseScore > 80 ? 'text-red-400 border-red-500/50 bg-red-500/10' : 'text-orange-400 border-orange-500/50 bg-orange-500/10'}`}>
+                    Risk: {abuseScore}%
                   </span>
                 )}
               </div>
@@ -58,10 +68,10 @@ export function LiveEventStream() {
                   <span className="text-slate-500 mr-2">&gt;</span>
                   {event.payloadPreview}
                 </span>
-                {event.virustotal?.attributes?.stats?.malicious > 0 && (
+                {maliciousCount > 0 && (
                   <span className="text-red-400 text-[10px] ml-1 border border-red-500/50 bg-red-500/10 px-1.5 py-0.5 rounded flex items-center gap-1">
-                    <span className="text-xs">🦠</span> {event.virustotal.attributes.meaningful_name || 'Malware'}
-                    ({event.virustotal.attributes.stats.malicious} / {event.virustotal.attributes.stats.malicious + event.virustotal.attributes.stats.undetected})
+                    <span className="text-xs">🦠</span> {meaningfulName}
+                    ({maliciousCount} / {maliciousCount + undetectedCount})
                   </span>
                 )}
               </div>
@@ -70,7 +80,8 @@ export function LiveEventStream() {
                <SeverityBadge severity={event.severity} className="text-[10px] px-2 py-0" />
             </div>
           </div>
-        ))}
+          );
+        })}
         {events.length === 0 && (
           <div className="text-slate-500 text-center py-8">No recent events</div>
         )}

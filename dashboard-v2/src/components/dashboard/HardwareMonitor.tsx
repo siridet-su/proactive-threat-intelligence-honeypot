@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from "recharts";
 import { Cpu, MemoryStick, HardDrive, Thermometer, Wifi } from "lucide-react";
+import { formatHardwareMetric, parseHardwareStreamMessage } from "@/lib/dashboardTypes";
+import type { HardwareChartRecord } from "@/lib/dashboardTypes";
 
 export function HardwareMonitor() {
-  const [metrics, setMetrics] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<HardwareChartRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -14,27 +16,18 @@ export function HardwareMonitor() {
 
     eventSource.onmessage = (event) => {
       try {
-        const parsed = JSON.parse(event.data);
+        const parsed = parseHardwareStreamMessage(JSON.parse(event.data) as unknown);
+        if (!parsed) throw new Error("invalid hardware SSE payload");
         
         if (parsed.type === "initial") {
           // Load the initial historical data (latest 30 items)
-          const formatted = parsed.data.map((d: any) => {
-            const date = new Date(d.timestamp);
-            return {
-              ...d,
-              time: `${date.getHours()}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`,
-            };
-          });
+          const formatted = parsed.data.map(formatHardwareMetric);
           setMetrics(formatted);
           setLoading(false);
         } else if (parsed.type === "update") {
           // Push a new real-time insert onto the array and slice it to keep only 30 items
           const d = parsed.data;
-          const date = new Date(d.timestamp);
-          const newMetric = {
-            ...d,
-            time: `${date.getHours()}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`,
-          };
+          const newMetric = formatHardwareMetric(d);
           
           setMetrics((prev) => {
             const updated = [...prev, newMetric];

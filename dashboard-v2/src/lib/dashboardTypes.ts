@@ -1,5 +1,171 @@
 export type JsonRecord = Record<string, unknown>;
 
+export interface DashboardAbuseIpdbSummary {
+  abuseConfidenceScore?: number;
+  isp?: string | null;
+}
+
+export interface DashboardVirusTotalSummary {
+  attributes?: {
+    meaningful_name?: string | null;
+    stats?: {
+      malicious?: number;
+      undetected?: number;
+    };
+  };
+}
+
+export interface DashboardThreatGeo {
+  lat: number;
+  lon: number;
+  country: string;
+  city: string;
+}
+
+/** The stable response shape emitted by /api/threats for dashboard clients. */
+export interface DashboardThreatEvent {
+  id: string;
+  timestamp: string | number;
+  sensor: string;
+  event_type: string;
+  src_ip: string;
+  sourceIp: string;
+  protocol: string;
+  payloadPreview: string;
+  severity: string;
+  abuseipdb?: DashboardAbuseIpdbSummary | null;
+  virustotal?: DashboardVirusTotalSummary | null;
+  geo: DashboardThreatGeo;
+}
+
+export interface AttackerSummary {
+  ip: string;
+  country: string;
+  asn: string;
+  mainTechnique: string;
+  attackCount: number;
+  riskScore: number;
+  status: string;
+}
+
+/** Raw hardware documents retain additional agent-specific metrics. */
+export interface HardwareTelemetry extends JsonRecord {
+  timestamp?: string | number | Date;
+  cpu_percent?: number | string | null;
+  mem_percent?: number | string | null;
+  disk_percent?: number | string | null;
+  temperature?: number | string | null;
+  net_wlan0_rx_mbps?: number | string | null;
+  net_wlan0_tx_mbps?: number | string | null;
+}
+
+export interface HardwareChartRecord extends HardwareTelemetry {
+  time: string;
+}
+
+export type HardwareStreamMessage =
+  | { type: "initial"; data: HardwareTelemetry[] }
+  | { type: "update"; data: HardwareTelemetry };
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringOrNumber(value: unknown): value is string | number {
+  return typeof value === "string" || typeof value === "number";
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return value === undefined || typeof value === "number";
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isOptionalMetricValue(value: unknown): boolean {
+  return value === undefined || value === null || isStringOrNumber(value) || value instanceof Date;
+}
+
+function isValidThreatGeo(value: unknown): value is DashboardThreatGeo {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.lat === "number" &&
+    typeof value.lon === "number" &&
+    typeof value.country === "string" &&
+    typeof value.city === "string"
+  );
+}
+
+function isValidAbuseIpdb(value: unknown): value is DashboardAbuseIpdbSummary {
+  if (!isRecord(value)) return false;
+  return isOptionalNumber(value.abuseConfidenceScore) && isOptionalString(value.isp);
+}
+
+function isValidVirusTotal(value: unknown): value is DashboardVirusTotalSummary {
+  if (!isRecord(value)) return false;
+  if (value.attributes === undefined || value.attributes === null) return true;
+  if (!isRecord(value.attributes)) return false;
+  if (!isOptionalString(value.attributes.meaningful_name)) return false;
+  if (value.attributes.stats === undefined || value.attributes.stats === null) return true;
+  if (!isRecord(value.attributes.stats)) return false;
+  return (
+    isOptionalNumber(value.attributes.stats.malicious) &&
+    isOptionalNumber(value.attributes.stats.undetected)
+  );
+}
+
+export function isDashboardThreatEvent(value: unknown): value is DashboardThreatEvent {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    isStringOrNumber(value.timestamp) &&
+    typeof value.sensor === "string" &&
+    typeof value.event_type === "string" &&
+    typeof value.src_ip === "string" &&
+    typeof value.sourceIp === "string" &&
+    typeof value.protocol === "string" &&
+    typeof value.payloadPreview === "string" &&
+    typeof value.severity === "string" &&
+    isValidThreatGeo(value.geo) &&
+    (value.abuseipdb === undefined || value.abuseipdb === null || isValidAbuseIpdb(value.abuseipdb)) &&
+    (value.virustotal === undefined || value.virustotal === null || isValidVirusTotal(value.virustotal))
+  );
+}
+
+export function isHardwareTelemetry(value: unknown): value is HardwareTelemetry {
+  if (!isRecord(value)) return false;
+  return (
+    isOptionalMetricValue(value.timestamp) &&
+    isOptionalMetricValue(value.cpu_percent) &&
+    isOptionalMetricValue(value.mem_percent) &&
+    isOptionalMetricValue(value.disk_percent) &&
+    isOptionalMetricValue(value.temperature) &&
+    isOptionalMetricValue(value.net_wlan0_rx_mbps) &&
+    isOptionalMetricValue(value.net_wlan0_tx_mbps)
+  );
+}
+
+export function parseHardwareStreamMessage(value: unknown): HardwareStreamMessage | null {
+  if (!isRecord(value) || (value.type !== "initial" && value.type !== "update")) return null;
+  if (value.type === "initial") {
+    if (!Array.isArray(value.data)) return null;
+    return {
+      type: "initial",
+      data: value.data.filter(isHardwareTelemetry),
+    };
+  }
+  return isHardwareTelemetry(value.data) ? { type: "update", data: value.data } : null;
+}
+
+export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRecord {
+  const date = metric.timestamp instanceof Date ? metric.timestamp : new Date(metric.timestamp ?? "");
+  return {
+    ...metric,
+    time: `${date.getHours()}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`,
+  };
+}
+
 export interface GeoPoint {
   latitude?: number;
   longitude?: number;
