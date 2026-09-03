@@ -74,6 +74,14 @@ def test_staging_wrapper_has_no_production_restart_or_unbounded_root_input() -> 
     assert "rm -rf \"$RELEASE_ROOT" not in wrapper
 
 
+def test_staging_health_probe_matches_explicit_runtime_routes() -> None:
+    wrapper = (DEPLOYMENT / "deploy-staging").read_text(encoding="utf-8")
+    assert "http://127.0.0.1:3001/api/auth/login" in wrapper
+    assert "route_status" in wrapper
+    assert "route_status\" == '405'" in wrapper
+    assert "http://127.0.0.1:3001/api/health" not in wrapper
+
+
 def test_staging_artifact_contains_only_non_secret_identity_fields() -> None:
     package_script = (DASHBOARD / "scripts/package-staging.mjs").read_text(encoding="utf-8")
     env_example = (DEPLOYMENT / "dashboard-v2-staging.env.example").read_text(encoding="utf-8")
