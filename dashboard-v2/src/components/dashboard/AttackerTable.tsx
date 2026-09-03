@@ -1,17 +1,21 @@
 import { useState, useEffect, useMemo } from 'react';
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import type { AttackerSummary, DashboardThreatEvent } from "@/lib/dashboardTypes";
 import { SeverityBadge } from './SeverityBadge';
 import { Search } from 'lucide-react';
 
 export function AttackerTable() {
-  const [threats, setThreats] = useState<any[]>([]);
+  const [threats, setThreats] = useState<DashboardThreatEvent[]>([]);
 
   useEffect(() => {
     const fetchThreats = async () => {
       try {
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          setThreats(data);
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            setThreats(data.filter(isDashboardThreatEvent));
+          }
         }
       } catch (err) {
         console.error("Failed to fetch threats for table:", err);
@@ -24,30 +28,24 @@ export function AttackerTable() {
   }, []);
 
   const attackers = useMemo(() => {
-    const map = new Map<string, any>();
+    const map = new Map<string, AttackerSummary>();
     for (const t of threats) {
       if (!t.src_ip) continue;
       if (!map.has(t.src_ip)) {
         map.set(t.src_ip, {
           ip: t.src_ip,
           country: t.geo.country || 'Unknown',
-          asn: t.abuseipdb?.isp || t.geo.city || 'Unknown',
-          mainTechnique: t.event_type,
+          asn: t.geo.city || 'Unknown',
+          mainTechnique: t.event_type || t.classification,
           attackCount: 1,
-          riskScore: t.abuseipdb?.abuseConfidenceScore ?? Math.min(100, 50),
+          riskScore: 50,
           status: t.severity
         });
       } else {
         const existing = map.get(t.src_ip);
+        if (!existing) continue;
         existing.attackCount += 1;
-
-        if (t.abuseipdb?.abuseConfidenceScore !== undefined) {
-           existing.riskScore = Math.max(existing.riskScore, t.abuseipdb.abuseConfidenceScore);
-           if (t.abuseipdb.isp) existing.asn = t.abuseipdb.isp;
-        } else {
-           existing.riskScore = Math.min(100, existing.riskScore + 5);
-        }
-
+        existing.riskScore = Math.min(100, existing.riskScore + 5);
         if (t.severity === 'Critical') existing.status = 'Critical';
         else if (t.severity === 'High' && existing.status !== 'Critical') existing.status = 'High';
       }

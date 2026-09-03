@@ -9,24 +9,34 @@ export default function LoginForm() {
   const [error, setError] = useState("");
   const router = useRouter();
 
-  const handleAuthenticate = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAuthenticate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setError("");
-    void fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ operator_id: operatorId, access_key: accessKey }),
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          throw new Error(typeof body.error === "string" ? body.error : "Authentication failed.");
-        }
-        router.push("/dashboard");
-      })
-      .catch((authError: unknown) => {
-        setError(authError instanceof Error ? authError.message : "Authentication failed.");
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operatorId, password: accessKey }),
       });
+      const data = await res.json();
+
+      if (data.success) {
+        // เก็บ Role ไว้ใน localStorage เพื่อใช้เช็คสิทธิ์ (จำลอง Session)
+        localStorage.setItem("userRole", data.role);
+        localStorage.setItem("operatorId", data.operatorId || operatorId);
+
+        if (data.isFirstLogin) {
+          router.push("/change-password"); // พาไปหน้าเปลี่ยนรหัส
+        } else {
+          router.push("/dashboard");
+        }
+      } else {
+        setError(data.error || "ACCESS DENIED: Invalid Credentials.");
+      }
+    } catch (err) {
+      setError("System Offline: Database Connection Failed.");
+    }
   };
 
   return (
@@ -61,6 +71,7 @@ export default function LoginForm() {
                 placeholder="OP_XXXX"
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
                 required
               />
@@ -82,6 +93,7 @@ export default function LoginForm() {
                 placeholder="••••••••••••"
                 value={accessKey}
                 onChange={(e) => setAccessKey(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
                 required
               />
@@ -95,7 +107,8 @@ export default function LoginForm() {
 
           {/* Submit Button */}
           <button 
-            type="submit" 
+            type="button" 
+            onClick={() => void handleAuthenticate()}
             className="mt-4 w-full bg-purple-700 hover:bg-purple-600 text-white font-medium rounded-md text-sm px-5 py-3 text-center flex justify-center items-center gap-2 transition-all shadow-[0_0_15px_rgba(126,34,206,0.3)] hover:shadow-[0_0_25px_rgba(126,34,206,0.5)] font-mono tracking-wider"
           >
             AUTHENTICATE

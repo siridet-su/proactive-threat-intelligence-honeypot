@@ -1,85 +1,100 @@
 "use client";
-
+import { useState, useEffect } from "react";
+import TargetLandscapeChart from "@/components/threat-intel/TargetLandscapeChart";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { Brain, Clock3, Database, MapPin, ShieldAlert } from "lucide-react";
-import TargetLandscapeChart, { type LandscapeDatum } from "@/components/threat-intel/TargetLandscapeChart";
-import { apiErrorMessage, fetchDashboardJson } from "@/lib/api";
-import {
-  ageLabel,
-  asStringList,
-  buildStatusData,
-  buildTacticData,
-  formatTimestamp,
-  isFresh,
-  listRows,
-  sessionStatus,
-  statusTextColor,
-  text,
-} from "@/lib/dashboardData";
-import type { AlertRow, SessionOverview, SessionsResponse, TableResponse } from "@/lib/dashboardTypes";
-
-interface ThreatIntelState {
-  sessions: SessionsResponse | null;
-  alerts: TableResponse<AlertRow> | null;
-  predictions: TableResponse | null;
-  errors: string[];
-}
-
-const EMPTY_STATE: ThreatIntelState = { sessions: null, alerts: null, predictions: null, errors: [] };
-const EMPTY_SESSIONS: SessionOverview[] = [];
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import type { DashboardChartDatum, DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 export default function ThreatIntelPage() {
-  const [state, setState] = useState<ThreatIntelState>(EMPTY_STATE);
-  const [loading, setLoading] = useState(true);
+  const [logs, setLogs] = useState<DashboardThreatEvent[]>([]);
+  const [stats, setStats] = useState({ total: 0, proxies: 0, critical: 0 });
+  const [chartData, setChartData] = useState<DashboardChartDatum[]>([]);
+  
+  // กำหนดให้แสดงสูงสุด 5 รายการต่อหน้า
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5; 
 
   useEffect(() => {
-    const controller = new AbortController();
-    async function load() {
-      const results = await Promise.allSettled([
-        fetchDashboardJson<SessionsResponse>("/api/sessions?limit=100&offset=0", controller.signal),
-        fetchDashboardJson<TableResponse<AlertRow>>("/api/alerts?limit=100", controller.signal),
-        fetchDashboardJson<TableResponse>("/api/prediction-snapshots?limit=100", controller.signal),
-      ]);
-      if (controller.signal.aborted) return;
-      const errors = results
-        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-        .map((result) => apiErrorMessage(result.reason));
-      setState({
-        sessions: results[0].status === "fulfilled" ? results[0].value : null,
-        alerts: results[1].status === "fulfilled" ? results[1].value : null,
-        predictions: results[2].status === "fulfilled" ? results[2].value : null,
-        errors: [...new Set(errors)],
-      });
-      setLoading(false);
-    }
-    void load();
-    return () => controller.abort();
+    const fetchThreats = async () => {
+      try {
+        const res = await fetch("/api/threats");
+        if (res.ok) {
+          const data: unknown = await res.json();
+          if (!Array.isArray(data)) return;
+          const threats = data.filter(isDashboardThreatEvent);
+
+          // คำนวณสถิติภาพรวม
+          setStats({
+            total: threats.length,
+            proxies: threats.filter((d) => d.classification === 'BOT').length,
+            critical: threats.filter((d) => d.severity === 'Critical' || d.severity === 'High').length
+          });
+          setLogs(threats);
+
+          // คำนวณข้อมูลจริงสำหรับ Target Landscape
+          const aptCount = threats.filter((d) => d.classification === 'APT').length;
+          const botCount = threats.filter((d) => d.classification === 'BOT').length;
+          const scriptCount = threats.filter((d) => d.classification === 'SCRIPT KIDDIE').length;
+          const otherCount = threats.length - (aptCount + botCount + scriptCount);
+
+          setChartData([
+            { name: "APT", value: aptCount, color: "#a855f7" },
+            { name: "Bot", value: botCount, color: "#d946ef" },
+            { name: "Script", value: scriptCount, color: "#64748b" },
+            { name: "Other", value: otherCount, color: "#d97706" }
+          ]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch threats", err);
+      }
+    };
+    fetchThreats();
+    const interval = setInterval(fetchThreats, 15000);
+    return () => clearInterval(interval);
   }, []);
 
-  const sessions = listRows<SessionOverview>(state.sessions?.sessions) || EMPTY_SESSIONS;
-  const summary = state.sessions?.summary || {};
-  const asOf = state.sessions?.timestamp;
-  const statusData = useMemo((): LandscapeDatum[] => buildStatusData(sessions).map((entry) => ({
-    name: capitalize(entry.name),
-    value: entry.value,
-    color: entry.color,
-  })), [sessions]);
-  const tacticData = useMemo(() => buildTacticData(sessions), [sessions]);
-  const latestObserved = latestSessionTimestamp(sessions);
-  const freshness = isFresh(latestObserved, asOf);
-  const criticalAlerts = listRows<AlertRow>(state.alerts?.items).filter(
-    (alert) => text(alert.severity, "").toLowerCase() === "critical",
-  ).length;
-  const totalSessions = typeof summary.total_sessions === "number" ? summary.total_sessions : sessions.length;
-  const predictionCount = listRows(state.predictions?.items).length;
+  const totalPages = Math.ceil(logs.length / itemsPerPage);
+  const currentLogs = logs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  const getPageNumbers = () => {
+    let start = Math.max(1, currentPage - 2);
+    const end = Math.min(totalPages, start + 4);
+    if (end - start < 4) start = Math.max(1, end - 4);
+    return Array.from({ length: Math.max(0, end - start + 1) }, (_, i) => start + i);
+  };
+
+  // ใช้ข้อมูลเปอร์เซ็นต์จริงสำหรับแสดงคำบรรยายใต้แผนภูมิ
+  const getPercent = (val: number) => stats.total > 0 ? Math.round((val / stats.total) * 100) : 0;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10">
-      {state.errors.length > 0 && (
-        <div className="bg-amber-950/20 border border-amber-900/50 rounded-xl px-5 py-4 text-xs text-amber-200">
-          <p className="font-semibold tracking-wide">THREAT INTELLIGENCE BACKEND PARTIALLY UNAVAILABLE</p>
-          <p className="mt-1 text-amber-300/70">{state.errors.join(" · ")}</p>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl flex flex-col justify-between">
+          <span className="text-[10px] text-slate-500 tracking-wider mb-2">TOTAL SESSIONS</span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold text-white">{stats.total.toLocaleString()}</span>
+          </div>
+        </div>
+        <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl flex flex-col justify-between">
+          <span className="text-[10px] text-slate-500 tracking-wider mb-2">AUTOMATED BOTS</span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold text-white">{stats.proxies}</span>
+            <span className="text-[10px] text-amber-500 font-bold">DETECTED</span>
+          </div>
+        </div>
+        <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl flex flex-col justify-between">
+          <span className="text-[10px] text-slate-500 tracking-wider mb-2">DETECTION LATENCY</span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold text-white">12ms</span>
+            <span className="text-[10px] text-slate-400">AVG</span>
+          </div>
+        </div>
+        <div className="bg-[#1a1111] border border-red-900/50 p-5 rounded-xl flex flex-col justify-between relative shadow-[0_0_15px_rgba(153,27,27,0.1)]">
+          <span className="text-[10px] text-slate-400 tracking-wider mb-2">CRITICAL THREATS</span>
+          <div className="flex items-center gap-2">
+            <span className="text-3xl font-bold text-[#fca5a5]">{(stats.critical).toString().padStart(2, '0')}</span>
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse mt-1"></span>
+          </div>
         </div>
       )}
 
@@ -91,27 +106,31 @@ export default function ThreatIntelPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-[#111116] border border-slate-800/50 p-6 rounded-xl flex flex-col">
+        <div className="bg-[#111116] border border-slate-800/50 p-6 rounded-xl flex flex-col h-fit">
           <div className="flex justify-between items-center mb-8">
-            <div>
-              <h3 className="text-base font-semibold text-white">Observed Session Status</h3>
-              <p className="text-[10px] text-slate-500 mt-1">Derived from returned analysis status fields</p>
-            </div>
-            <span className="text-slate-500 text-sm" title="No actor attribution is inferred">ⓘ</span>
+            <h3 className="text-base font-semibold text-white">Target Landscape</h3>
           </div>
           <div className="flex-1 flex flex-col items-center justify-center">
             <div className="relative w-full max-w-[200px] mb-8">
-              <div className="absolute inset-0 bg-[#1e1e2d]/40 rounded-xl border border-slate-800/50 scale-90" />
-              <TargetLandscapeChart data={statusData} totalLabel={sessions.length.toLocaleString()} />
+              <div className="absolute inset-0 bg-[#1e1e2d]/40 rounded-xl border border-slate-800/50 scale-90"></div>
+              {/* ส่งข้อมูลจริงไปยัง Chart */}
+              <TargetLandscapeChart data={chartData} total={stats.total} />
             </div>
+            
+            {/* แสดงค่าเปอร์เซ็นต์จริงใต้แผนภูมิ */}
             <div className="grid grid-cols-2 gap-y-3 gap-x-6 w-full text-xs font-mono text-slate-300 px-4">
-              {statusData.map((entry) => (
-                <div key={entry.name} className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
-                  {entry.name} ({entry.value})
-                </div>
-              ))}
-              {statusData.length === 0 && <span className="col-span-2 text-center text-slate-500">No status data returned.</span>}
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#a855f7]"></span>APT ({chartData[0]?.value ? getPercent(chartData[0].value) : 0}%)
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#d946ef]"></span>Bot ({chartData[1]?.value ? getPercent(chartData[1].value) : 0}%)
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#64748b]"></span>Script ({chartData[2]?.value ? getPercent(chartData[2].value) : 0}%)
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#d97706]"></span>Other ({chartData[3]?.value ? getPercent(chartData[3].value) : 0}%)
+              </div>
             </div>
           </div>
         </div>
@@ -122,11 +141,9 @@ export default function ThreatIntelPage() {
               <h3 className="text-base font-semibold text-white mb-1">Observed Session Log</h3>
               <p className="text-xs text-slate-500">Canonical session records · source labels are not actor attribution</p>
             </div>
-            <span className={`text-[10px] font-mono uppercase ${freshness === false ? "text-amber-400" : freshness === true ? "text-emerald-400" : "text-slate-500"}`}>
-              {freshness === false ? "STALE DATA" : freshness === true ? "CURRENT DATA" : "FRESHNESS UNKNOWN"}
-            </span>
           </div>
-          <div className="flex-1 overflow-x-auto">
+          
+          <div className="flex-1 flex flex-col justify-between overflow-x-auto min-h-[500px]">
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="text-[10px] uppercase text-slate-500 font-mono border-b border-slate-800/50">
                 <tr>
@@ -137,110 +154,48 @@ export default function ThreatIntelPage() {
                 </tr>
               </thead>
               <tbody>
-                {sessions.map((session, index) => {
-                  const id = text(session.session_id, "");
-                  const status = sessionStatus(session);
-                  return (
-                    <tr key={id || index} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                      <td className="px-6 py-4 font-mono text-[11px] text-slate-400">
-                        <div>{formatTimestamp(session.updated_at || session.start_time)}</div>
-                        <div className="text-slate-600">{text(session.sensor_id || session.sensor, "sensor unavailable")}</div>
-                      </td>
-                      <td className="px-6 py-4 font-mono text-purple-300 text-xs">
-                        <div>{text(session.src_ip, "source unavailable")}</div>
-                        <div className="text-[10px] text-slate-600 mt-1">{session.src_ip_scope || "scope unavailable"}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 text-[9px] font-bold border rounded-sm ${statusBadge(status)}`}>
-                          {status.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        {id ? <Link href={`/threat-intel/${encodeURIComponent(id)}`} className="border border-slate-700 bg-slate-900/50 text-slate-400 px-3 py-1.5 rounded text-[10px] hover:text-white transition">View Details ›</Link> : <span className="text-slate-600 text-[10px]">Unavailable</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!loading && sessions.length === 0 && (
-                  <tr><td colSpan={4} className="px-6 py-12 text-center text-[11px] text-slate-500">No canonical sessions were returned.</td></tr>
-                )}
-                {loading && (
-                  <tr><td colSpan={4} className="px-6 py-12 text-center text-[11px] text-slate-500">Reading canonical session telemetry…</td></tr>
-                )}
+                {currentLogs.map((log) => (
+                  <tr key={log.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors h-[65px]">
+                    <td className="px-6 py-2 font-mono text-[11px] text-slate-400">
+                      <div>{log.date}</div>
+                      <div className="text-slate-600">{log.time}</div>
+                    </td>
+                    <td className="px-6 py-2 font-mono text-[#a855f7] text-xs">{log.sourceIp}</td>
+                    <td className="px-6 py-2">
+                      <span className={`px-2 py-1 text-[9px] font-bold border rounded-sm flex items-center gap-1.5 w-max ${log.typeColor}`}>
+                        {log.classification}
+                      </span>
+                    </td>
+                    <td className="px-6 py-2 text-right">
+                      <Link href={`/threat-intel/${log.id}`} className="border border-slate-700 bg-slate-900/50 text-slate-400 px-3 py-1.5 rounded text-[10px] hover:text-white transition">
+                        View Details
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+                {/* สร้างช่องว่างให้เต็ม 5 แถวเสมอเมื่อข้อมูลหน้าสุดท้ายไม่ถึง 5 รายการ */}
+                {Array.from({ length: Math.max(0, itemsPerPage - currentLogs.length) }).map((_, idx) => (
+                  <tr key={`empty-${idx}`} className="h-[65px]">
+                    <td colSpan={4}></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
+            
+            {totalPages > 1 && (
+              <div className="p-4 border-t border-slate-800/50 bg-[#0a0a0c] flex justify-end items-center gap-2 font-mono text-xs">
+                <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 disabled:opacity-50 transition-colors">Prev</button>
+                {getPageNumbers().map(pageNum => (
+                  <button key={pageNum} onClick={() => setCurrentPage(pageNum)} className={`px-3 py-1.5 rounded transition-colors ${currentPage === pageNum ? 'bg-purple-600 text-white font-bold' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                    {pageNum}
+                  </button>
+                ))}
+                <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 disabled:opacity-50 transition-colors">Next</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-2">
-        <InfoCard title="Top recorded tactic" desc={tacticData[0] ? `${tacticData[0].label} · ${tacticData[0].count} shown` : "Not recorded"} icon={<Brain className="w-4 h-4 text-purple-400" />} />
-        <InfoCard title="TTP field coverage" desc={`${sessions.filter((session) => asStringList(session.ttps).length > 0).length} shown sessions with TTP fields`} icon={<ShieldAlert className="w-4 h-4 text-amber-500" />} highlight />
-        <InfoCard title="Public map coverage" desc={`${sessions.filter((session) => session.geo?.latitude !== undefined || session.source_geo?.latitude !== undefined).length} shown sessions with map fields`} icon={<MapPin className="w-4 h-4 text-purple-400" />} />
-        <InfoCard title="Canonical data freshness" desc={freshness === false ? "Data present but stale" : freshness === true ? "Within 24 hours" : "Timestamp unavailable"} icon={<Clock3 className="w-4 h-4 text-slate-300" />} />
-      </div>
-
-      <div className="bg-[#111116] border border-purple-900/30 p-5 rounded-xl">
-        <div className="flex items-start gap-3">
-          <Brain className="w-4 h-4 text-purple-400 mt-0.5 shrink-0" />
-          <div>
-            <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Evidence lanes</h4>
-            <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
-              Trusted ATT&amp;CK observations, model advisory predictions, and correlation hypotheses are separate API namespaces. A correlation strength is a developer-defined heuristic, not a probability; a model score is not promoted to actor attribution or response authority.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function latestSessionTimestamp(sessions: SessionOverview[]): string {
-  return sessions.map((session) => text(session.updated_at || session.start_time, "")).filter(Boolean).sort().at(-1) || "";
-}
-
-function capitalize(value: string): string {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : "Unknown";
-}
-
-function statusBadge(status: string): string {
-  switch (status) {
-    case "completed": return "text-purple-200 bg-purple-950/40 border-purple-900/50";
-    case "running": return "text-emerald-200 bg-emerald-950/40 border-emerald-900/50";
-    case "failed": return "text-red-200 bg-red-950/40 border-red-900/50";
-    case "queued": return "text-slate-300 bg-slate-800/50 border-slate-700";
-    default: return `${statusTextColor(status)} bg-slate-900/80 border-slate-700/50`;
-  }
-}
-
-function MetricCard({
-  label,
-  value,
-  detail,
-  icon,
-  tone = "normal",
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  icon: React.ReactNode;
-  tone?: "normal" | "amber" | "red";
-}) {
-  const valueColor = tone === "red" ? "text-[#fca5a5]" : tone === "amber" ? "text-amber-300" : "text-white";
-  return (
-    <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl flex flex-col justify-between min-h-[132px]">
-      <div className="flex items-center justify-between"><span className="text-[10px] text-slate-500 tracking-wider">{label}</span><span>{icon}</span></div>
-      <div className="flex items-baseline gap-2 mt-3"><span className={`text-2xl font-bold ${valueColor}`}>{value}</span></div>
-      <span className="text-[10px] text-slate-500 mt-2">{detail}</span>
-    </div>
-  );
-}
-
-function InfoCard({ title, desc, icon, highlight = false }: { title: string; desc: string; icon: React.ReactNode; highlight?: boolean }) {
-  return (
-    <div className="bg-[#111116] border border-slate-800/50 p-4 rounded-xl flex items-center gap-4 relative overflow-hidden group">
-      <div className="w-10 h-10 rounded-lg bg-[#1e1e2d] border border-slate-700/50 flex items-center justify-center shrink-0">{icon}</div>
-      <div><h4 className="text-[11px] font-bold text-white mb-0.5">{title}</h4><p className={`text-[10px] font-mono ${highlight ? "text-amber-500/80" : "text-slate-400"}`}>{desc}</p></div>
     </div>
   );
 }

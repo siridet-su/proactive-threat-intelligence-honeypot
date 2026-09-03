@@ -2,18 +2,50 @@
 
 import { useState } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
-import type { ZoomableGroupProps } from "react-simple-maps";
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+
+interface MapMarker {
+  id: string;
+  name: string;
+  coordinates: [number, number];
+  status: "failed" | "running" | "other";
+}
+
+interface MapPosition {
+  coordinates: [number, number];
+  zoom: number;
+}
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
-export interface RegionalMarker {
-  name: string;
-  coordinates: [number, number];
-  status: string;
-  count: number;
-}
+export default function RegionalMap() {
+  const [markers, setMarkers] = useState<MapMarker[]>([]);
 
-export default function RegionalMap({ markers }: { markers: RegionalMarker[] }) {
+  useEffect(() => {
+    const fetchThreats = async () => {
+      try {
+        const res = await fetch("/api/threats");
+        if (res.ok) {
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            const newMarkers = data.filter(isDashboardThreatEvent).map((threat) => ({
+              id: threat.id,
+              name: ` () - `,
+              coordinates: [threat.geo.lon, threat.geo.lat] as [number, number],
+              status: threat.severity === "Critical" || threat.severity === "High" ? "failed" as const : "running" as const
+            })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0);
+            setMarkers(newMarkers);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch threats for map:", err);
+      }
+    };
+    
+    fetchThreats();
+    const interval = setInterval(fetchThreats, 5000); // refresh every 5s
+    return () => clearInterval(interval);
+  }, []);
   const [position, setPosition] = useState({ coordinates: [0, 20] as [number, number], zoom: 1 });
   const [tooltip, setTooltip] = useState({ show: false, content: "", x: 0, y: 0 });
 
@@ -28,7 +60,7 @@ export default function RegionalMap({ markers }: { markers: RegionalMarker[] }) 
   }
 
   // ใช้ onMoveEnd แทน onMove เพื่อให้ Trackpad สามารถซูมและเลื่อนได้ลื่นไหล
-  function handleMoveEnd(newPosition: Parameters<NonNullable<ZoomableGroupProps["onMoveEnd"]>>[0]) {
+  function handleMoveEnd(newPosition: MapPosition) {
     setPosition(newPosition);
   }
 
@@ -74,16 +106,15 @@ export default function RegionalMap({ markers }: { markers: RegionalMarker[] }) 
             }
           </Geographies>
 
-          {markers.map(({ name, coordinates, status, count }) => (
-            <Marker key={name} coordinates={coordinates as [number, number]}>
-              <circle r={4} fill={
-                status === "running" ? "#34d399" : 
-                status === "failed" ? "#f87171" : "#a855f7"
-              } />
-              {status === "running" && (
-                <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
-              )}
-              <title>{`${name} · ${count} shown sessions`}</title>
+          {markers.map(({ id, name, coordinates, status }, index) => (
+            <Marker key={id || index} coordinates={coordinates}>
+            <circle r={4} fill={
+              status === "running" ? "#34d399" : 
+              status === "failed" ? "#f87171" : "#a855f7"
+            } />
+            {status === "running" && (
+              <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
+            )}
             </Marker>
           ))}
         </ZoomableGroup>
