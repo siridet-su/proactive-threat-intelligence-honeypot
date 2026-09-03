@@ -2,25 +2,40 @@
 
 import { useState, useEffect } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+
+interface MapMarker {
+  id: string;
+  name: string;
+  coordinates: [number, number];
+  status: "failed" | "running" | "other";
+}
+
+interface MapPosition {
+  coordinates: [number, number];
+  zoom: number;
+}
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 export default function RegionalMap() {
-  const [markers, setMarkers] = useState<any[]>([]);
+  const [markers, setMarkers] = useState<MapMarker[]>([]);
 
   useEffect(() => {
     const fetchThreats = async () => {
       try {
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          const newMarkers = data.map((threat: any) => ({
-            id: threat.id,
-            name: `${threat.src_ip} (${threat.geo.country}) - ${threat.event_type}`,
-            coordinates: [threat.geo.lon, threat.geo.lat],
-            status: threat.severity === "Critical" ? "failed" : threat.severity === "High" ? "failed" : "running"
-          })).filter((m: any) => m.coordinates[0] !== 0 && m.coordinates[1] !== 0);
-          setMarkers(newMarkers);
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            const newMarkers = data.filter(isDashboardThreatEvent).map((threat) => ({
+              id: threat.id,
+              name: ` () - `,
+              coordinates: [threat.geo.lon, threat.geo.lat] as [number, number],
+              status: threat.severity === "Critical" || threat.severity === "High" ? "failed" as const : "running" as const
+            })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0);
+            setMarkers(newMarkers);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch threats for map:", err);
@@ -45,7 +60,7 @@ export default function RegionalMap() {
   }
 
   // ใช้ onMoveEnd แทน onMove เพื่อให้ Trackpad สามารถซูมและเลื่อนได้ลื่นไหล
-  function handleMoveEnd(newPosition: any) {
+  function handleMoveEnd(newPosition: MapPosition) {
     setPosition(newPosition);
   }
 
@@ -93,7 +108,7 @@ export default function RegionalMap() {
           </Geographies>
 
           {markers.map(({ id, name, coordinates, status }, index) => (
-            <Marker key={id || index} coordinates={coordinates as [number, number]}>
+            <Marker key={id || index} coordinates={coordinates}>
             <circle r={4} fill={
               status === "running" ? "#34d399" : 
               status === "failed" ? "#f87171" : "#a855f7"

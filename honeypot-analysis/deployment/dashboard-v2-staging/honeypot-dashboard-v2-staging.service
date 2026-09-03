@@ -1,0 +1,27 @@
+[Unit]
+Description=Honeypot dashboard-v2 team staging frontend
+After=network-online.target honeypot-monitor-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honeypot
+Group=honeypot
+WorkingDirectory=/opt/honeypot-dashboard-v2-staging/current
+EnvironmentFile=/etc/honeypot/services/dashboard-v2-staging.env
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=HOSTNAME=127.0.0.1
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/opt/honeypot-dashboard-v2/node-v24.18.0/bin/node /opt/honeypot-dashboard-v2-staging/current/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

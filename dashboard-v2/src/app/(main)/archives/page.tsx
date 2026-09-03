@@ -2,9 +2,11 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Download, Filter, Search, Calendar, Shield, Globe } from "lucide-react";
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 export default function ArchivesPage() {
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<DashboardThreatEvent[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Pagination State
@@ -20,8 +22,10 @@ export default function ArchivesPage() {
         // ดึงข้อมูลทั้งหมดโดยส่ง range=all
         const res = await fetch("/api/threats?range=all");
         if (res.ok) {
-          const data = await res.json();
-          setSessions(data);
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            setSessions(data.filter(isDashboardThreatEvent));
+          }
         }
       } catch (err) {
         console.error("Failed to fetch archive:", err);
@@ -37,7 +41,7 @@ export default function ArchivesPage() {
 
   const getPageNumbers = () => {
     let start = Math.max(1, currentPage - 2);
-    let end = Math.min(totalPages, start + 4);
+    const end = Math.min(totalPages, start + 4);
     if (end - start < 4) start = Math.max(1, end - 4);
     return Array.from({ length: Math.max(0, end - start + 1) }, (_, i) => start + i);
   };

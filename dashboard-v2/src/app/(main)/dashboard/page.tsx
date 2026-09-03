@@ -3,9 +3,11 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import RegionalMap from "@/components/dashboard/RegionalMap";
 import { Activity, AlertTriangle, ActivitySquare, Filter, Download, Maximize, Minimize } from "lucide-react";
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 export default function DashboardPage() {
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<DashboardThreatEvent[]>([]);
   const [stats, setStats] = useState({ total: "-", active: "-", critical: 0, health: "-" });
   const [isFullScreen, setIsFullScreen] = useState(false);
   
@@ -18,17 +20,20 @@ export default function DashboardPage() {
       try {
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          const criticalCount = data.filter((d: any) => d.severity === 'Critical' || d.severity === 'High').length;
-          
-          setStats(prev => ({
-             ...prev,
-             total: data.length > 0 ? data.length.toString() : "0",
-             active: data.length > 0 ? data.length.toString() : "0",
-             critical: criticalCount,
-             health: "99.9%"
-          }));
-          setSessions(data);
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            const threats = data.filter(isDashboardThreatEvent);
+            const criticalCount = threats.filter((d) => d.severity === 'Critical' || d.severity === 'High').length;
+
+            setStats((prev) => ({
+              ...prev,
+              total: threats.length > 0 ? threats.length.toString() : "0",
+              active: threats.length > 0 ? threats.length.toString() : "0",
+              critical: criticalCount,
+              health: "99.9%"
+            }));
+            setSessions(threats);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch threats:", err);
@@ -46,7 +51,7 @@ export default function DashboardPage() {
   // สร้างปุ่มเลขหน้า (แสดงสูงสุด 5 หน้าใกล้เคียงเพื่อไม่ให้ล้น)
   const getPageNumbers = () => {
     let start = Math.max(1, currentPage - 2);
-    let end = Math.min(totalPages, start + 4);
+    const end = Math.min(totalPages, start + 4);
     if (end - start < 4) start = Math.max(1, end - 4);
     return Array.from({ length: (end - start) + 1 }, (_, i) => start + i);
   };

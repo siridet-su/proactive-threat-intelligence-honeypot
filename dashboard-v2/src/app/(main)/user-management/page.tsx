@@ -2,16 +2,18 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Users, Briefcase, UserPlus, Edit2, ShieldX, X, Lock } from "lucide-react";
+import { isDashboardUser } from "@/lib/dashboardTypes";
+import type { DashboardUser } from "@/lib/dashboardTypes";
 
 export default function UserManagementPage() {
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<DashboardUser[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   
   // เก็บข้อมูลผู้ใช้ที่กำลังล็อกอิน
-  const [currentUserId, setCurrentUserId] = useState("");
-  const [currentUserRole, setCurrentUserRole] = useState("");
+  const [currentUserId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem("operatorId") || "");
+  const [currentUserRole] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem("userRole") || "");
 
   const [formData, setFormData] = useState({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter" });
   
@@ -19,14 +21,10 @@ export default function UserManagementPage() {
   const [editFormData, setEditFormData] = useState({ operatorId: "", fullName: "", email: "", position: "", role: "", newPassword: "" });
 
   useEffect(() => {
-    // ดึงข้อมูลว่าใครกำลังล็อกอินอยู่
-    setCurrentUserId(localStorage.getItem("operatorId") || "");
-    setCurrentUserRole(localStorage.getItem("userRole") || "");
-
     const loadUsers = async () => {
       const res = await fetch("/api/users");
-      const data = await res.json();
-      if(Array.isArray(data)) setUsers(data);
+      const data: unknown = await res.json();
+      if (Array.isArray(data)) setUsers(data.filter(isDashboardUser));
     };
     loadUsers();
   }, [refreshKey]);
@@ -48,7 +46,7 @@ export default function UserManagementPage() {
   };
 
   // ฟังก์ชันเปิดหน้าแก้ไข
-  const openEditModal = (user: any) => {
+  const openEditModal = (user: DashboardUser) => {
     setEditFormData({ ...user, newPassword: "" });
     setIsEditModalOpen(true);
   };

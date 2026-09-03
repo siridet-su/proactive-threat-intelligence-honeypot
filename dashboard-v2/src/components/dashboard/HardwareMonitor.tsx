@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from "recharts";
 import { Cpu, MemoryStick, HardDrive, Thermometer, Wifi } from "lucide-react";
+import { formatHardwareMetric, isHardwareTelemetry } from "@/lib/dashboardTypes";
+import type { HardwareChartRecord } from "@/lib/dashboardTypes";
 
 export function HardwareMonitor() {
-  const [metrics, setMetrics] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<HardwareChartRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -13,16 +15,10 @@ export function HardwareMonitor() {
       try {
         const res = await fetch("/api/hardware");
         if (res.ok) {
-          const data = await res.json();
-          // Format timestamps for chart
-          const formatted = data.map((d: any) => {
-            const date = new Date(d.timestamp);
-            return {
-              ...d,
-              time: `${date.getHours()}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`,
-            };
-          });
-          setMetrics(formatted);
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            setMetrics(data.filter(isHardwareTelemetry).map(formatHardwareMetric));
+          }
         }
       } catch (err) {
         console.error("Fetch metrics error:", err);

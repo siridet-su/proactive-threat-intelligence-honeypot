@@ -1,9 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
 import { Settings, User, ShieldCheck, Key, Edit2, X, Info } from "lucide-react";
+import { isDashboardUser } from "@/lib/dashboardTypes";
+import type { DashboardProfile } from "@/lib/dashboardTypes";
 
 export default function ProfilePage() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<DashboardProfile | null>(null);
   const [loading, setLoading] = useState(true);
   
   // Modals state
@@ -22,9 +24,11 @@ export default function ProfilePage() {
     try {
       const res = await fetch(`/api/users/${operatorId}`);
       if (res.ok) {
-        const data = await res.json();
-        setUser(data);
-        setInfoForm({ fullName: data.fullName, email: data.email });
+        const data: unknown = await res.json();
+        if (isDashboardUser(data)) {
+          setUser(data);
+          setInfoForm({ fullName: data.fullName, email: data.email });
+        }
       }
     } catch (err) {
       console.error("Failed to load profile");
@@ -40,6 +44,7 @@ export default function ProfilePage() {
 
   const handleInfoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     const res = await fetch("/api/users", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -61,6 +66,7 @@ export default function ProfilePage() {
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordError("Passwords do not match.");
       return;

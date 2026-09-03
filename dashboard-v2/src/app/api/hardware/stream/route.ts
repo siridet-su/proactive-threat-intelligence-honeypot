@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import type { ChangeStreamDocument, Document } from 'mongodb';
 import clientPromise from '@/lib/mongodb';
+import { isHardwareTelemetry } from '@/lib/dashboardTypes';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,14 +11,14 @@ export async function GET(req: Request) {
     const db = client.db('honeypot_db');
     const collection = db.collection('hardware_metrics');
 
-    const stream = new ReadableStream({
+    const stream = new ReadableStream<string>({
       async start(controller) {
         // 1. Send the initial payload (latest 30 items) so the chart isn't empty
-        const initialData = await collection
+        const initialData = (await collection
           .find({})
           .sort({ timestamp: -1 })
           .limit(30)
-          .toArray();
+          .toArray()).filter(isHardwareTelemetry);
         
         // Reverse so the oldest of the 30 is first
         const reversed = initialData.reverse();
@@ -25,8 +27,8 @@ export async function GET(req: Request) {
         // 2. Open a Change Stream to listen for new inserts in real-time
         const changeStream = collection.watch([{ $match: { operationType: 'insert' } }]);
 
-        changeStream.on('change', (change: any) => {
-          if (change.operationType === 'insert') {
+        changeStream.on('change', (change: ChangeStreamDocument<Document>) => {
+          if (change.operationType === 'insert' && isHardwareTelemetry(change.fullDocument)) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'update', data: change.fullDocument })}\n\n`);
           }
         });
@@ -51,8 +53,9 @@ export async function GET(req: Request) {
         'Connection': 'keep-alive',
       },
     });
-  } catch (e: any) {
-    console.error('Failed to initialize SSE stream:', e);
-    return NextResponse.json({ error: e.message || 'Failed to start stream' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('Failed to initialize SSE stream:', error);
+    const message = error instanceof Error ? error.message : 'Failed to start stream';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
