@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
+import subprocess
+import tarfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -83,10 +86,13 @@ def test_staging_artifact_contains_only_non_secret_identity_fields() -> None:
     assert "CLOUDFLARE_API_TOKEN" not in package_script
     assert package_script.index("await mkdir(outputRoot") < package_script.index("await runArchive")
     assert '"--use-compress-program=gzip -n -9"' in package_script
+    assert '"--hard-dereference"' in package_script
     assert 'execFileSync("tar", tarArgs' in package_script
     assert 'spawn("tar"' not in package_script
     assert 'title=staging packaging failed' in package_script
     assert 'standalone copy failed' in package_script
+    assert "symlink_count_before" in package_script
+    assert (DASHBOARD / "scripts/staging-archive-policy.mjs").exists()
 
 
 def test_staging_deploy_identity_restricts_the_ci_ssh_key() -> None:
@@ -95,3 +101,61 @@ def test_staging_deploy_identity_restricts_the_ci_ssh_key() -> None:
     assert "sudo_scope=only root-owned staging deployment wrapper" in identity
     assert "docker" not in identity
     assert "sudo ALL" not in identity
+
+
+def _add_regular(archive: tarfile.TarFile, name: str, content: bytes = b"x") -> None:
+    member = tarfile.TarInfo(name)
+    member.mode = 0o644
+    member.size = len(content)
+    archive.addfile(member, io.BytesIO(content))
+
+
+def _add_directory(archive: tarfile.TarFile, name: str) -> None:
+    member = tarfile.TarInfo(name.rstrip("/") + "/")
+    member.type = tarfile.DIRTYPE
+    member.mode = 0o755
+    archive.addfile(member)
+
+
+def test_staging_archive_validator_rejects_symlinks_and_accepts_materialized_tree(
+    tmp_path: Path,
+) -> None:
+    validator = DASHBOARD / "scripts/staging-archive-policy.mjs"
+    symlink_archive = tmp_path / "contains-link.tar.gz"
+    with tarfile.open(symlink_archive, "w:gz") as archive:
+        _add_directory(archive, ".next")
+        _add_directory(archive, "node_modules")
+        _add_regular(archive, "server.js")
+        _add_regular(archive, "build-metadata.json", b"{}")
+        _add_regular(archive, "package.json", b"{}")
+        link = tarfile.TarInfo(".next/node_modules/escaped")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../outside"
+        archive.addfile(link)
+
+    rejected = subprocess.run(
+        ["node", str(validator), str(symlink_archive)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert "unsupported member type" in rejected.stderr
+
+    materialized_archive = tmp_path / "materialized.tar.gz"
+    with tarfile.open(materialized_archive, "w:gz") as archive:
+        _add_directory(archive, ".next")
+        _add_directory(archive, "node_modules")
+        _add_regular(archive, "server.js")
+        _add_regular(archive, "build-metadata.json", b"{}")
+        _add_regular(archive, "package.json", b"{}")
+        _add_regular(archive, ".next/node_modules/materialized", b"dependency bytes")
+
+    accepted = subprocess.run(
+        ["node", str(validator), str(materialized_archive)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert '"archive_symlink_count":0' in accepted.stdout

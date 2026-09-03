@@ -75,15 +75,25 @@ lock_sha="${lock_sha,,}"
 actual_sha="$($SHA256SUM "$artifact" | awk '{print $1}')"
 [[ "$actual_sha" == "$artifact_sha" ]] || die 'artifact SHA-256 does not match the CI manifest'
 
+archive_paths="$($TAR -tzf "$artifact")" || die 'archive listing failed'
 while IFS= read -r entry; do
   entry="${entry#./}"
   [[ -n "$entry" ]] || continue
-  [[ "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'archive contains a path traversal entry'
+  [[ "$entry" != /* && "$entry" != .. && "$entry" != ../* && "$entry" != */.. && "$entry" != */../* ]] || die 'archive contains a path traversal entry'
   case "$entry" in
     server.js|build-metadata.json|package.json|.next|.next/*|node_modules|node_modules/*|public|public/*) ;;
     *) die "archive contains an unexpected path: $entry" ;;
   esac
-done < <($TAR -tzf "$artifact")
+done <<< "$archive_paths"
+
+archive_verbose="$($TAR -tvzf "$artifact")" || die 'archive type listing failed'
+while IFS= read -r listing; do
+  [[ -n "$listing" ]] || continue
+  case "$(printf '%s' "$listing" | /usr/bin/cut -c1)" in
+    -|d) ;;
+    *) die 'archive contains an unsupported member type' ;;
+  esac
+done <<< "$archive_verbose"
 
 candidate="$(/usr/bin/mktemp -d "$RELEASES/.incoming.XXXXXX")"
 cleanup_candidate() {
