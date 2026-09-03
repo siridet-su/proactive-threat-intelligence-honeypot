@@ -67,8 +67,10 @@ curl --fail --silent --show-error http://127.0.0.1:3001/
 
 The listener must be exactly `127.0.0.1:3001`; no firewall rule or public
 listener is part of this setup. The page carries a visible `STAGING` marker
-and a short build identity. `/api/health` must return `401` without the
-dashboard application cookie.
+and a short build identity. The current explicit-route dashboard has no
+legacy `/api/health` catch-all endpoint, so the wrapper probes `GET
+/api/auth/login` and requires `405` (method not allowed) as a
+backend-independent router check.
 
 ## Rollback
 

@@ -192,9 +192,13 @@ check_health() {
             --output "$health_page" http://127.0.0.1:3001/ \
             && /usr/bin/grep -Fq 'STAGING' "$health_page" \
             && /usr/bin/grep -Fq "$expected_short" "$health_page"; then
-            local unauth_status
-            unauth_status="$($CURL --silent --show-error --max-time 3 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3001/api/health || true)"
-            if [[ "$unauth_status" == '401' ]]; then
+            # The current dashboard uses explicit route handlers and no
+            # legacy catch-all /api/health route. Probe a backend-independent
+            # explicit route with an unsupported method so a 405 proves the
+            # Next runtime/router is serving the packaged release.
+            local route_status
+            route_status="$($CURL --silent --show-error --max-time 3 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3001/api/auth/login || true)"
+            if [[ "$route_status" == '405' ]]; then
               healthy=1
               break
             fi
