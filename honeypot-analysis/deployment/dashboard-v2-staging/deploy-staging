@@ -79,7 +79,7 @@ archive_paths="$($TAR -tzf "$artifact")" || die 'archive listing failed'
 while IFS= read -r entry; do
   entry="${entry#./}"
   [[ -n "$entry" ]] || continue
-  [[ "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'archive contains a path traversal entry'
+  [[ "$entry" != /* && "$entry" != .. && "$entry" != ../* && "$entry" != */.. && "$entry" != */../* ]] || die 'archive contains a path traversal entry'
   case "$entry" in
     server.js|build-metadata.json|package.json|.next|.next/*|node_modules|node_modules/*|public|public/*) ;;
     *) die "archive contains an unexpected path: $entry" ;;
