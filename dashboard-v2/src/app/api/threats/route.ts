@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import geoip from 'geoip-lite';
+import type { Filter, Document } from "mongodb";
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
     const client = await clientPromise;
     const db = client.db('honeypot_canonical_v1'); 
 
-    let query: any = {};
+    let query: Filter<Document> = {};
     if (range === '7days') {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -91,8 +92,9 @@ export async function GET(request: Request) {
         'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=10',
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[THREATS API ERROR]', error);
-    return NextResponse.json({ error: error?.message || 'Failed' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

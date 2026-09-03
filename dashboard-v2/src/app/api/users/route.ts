@@ -54,7 +54,7 @@ export async function PUT(request: Request) {
     const db = client.db("honeypot_db");
 
     // สร้าง object สำหรับอัปเดตข้อมูลทั่วไป
-    const updateData: any = {
+    const updateData: Record<string, unknown> = {
       fullName: data.fullName,
       email: data.email,
       position: data.position,

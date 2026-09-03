@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
-import { ThreatEvent } from '@/types/honeypot';
+import { isDashboardThreatEvent } from '@/lib/dashboardTypes';
+import type { DashboardThreatEvent } from '@/lib/dashboardTypes';
 import { SeverityBadge } from './SeverityBadge';
 import { Terminal } from 'lucide-react';
 
 export function LiveEventStream() {
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<DashboardThreatEvent[]>([]);
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          setEvents(data.slice(0, 50)); // Show latest 50 events
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            setEvents(data.filter(isDashboardThreatEvent).slice(0, 50)); // Show latest 50 events
+          }
         }
       } catch (err) {
         console.error("Failed to fetch events:", err);
@@ -44,14 +47,14 @@ export function LiveEventStream() {
             <div className="flex-1 flex flex-col gap-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-cyan-400 font-bold">[{event.sensor}]</span>
-                <span className="text-purple-400">{event.protocol}</span>
+                <span className="text-purple-400">{event.protocol ?? "unknown"}</span>
                 <span className="text-slate-300">from</span>
                 <span className="text-amber-400">{event.sourceIp}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-slate-400 group-hover:text-slate-300 transition-colors truncate">
                   <span className="text-slate-500 mr-2">&gt;</span>
-                  {event.payloadPreview}
+                  {event.payloadPreview ?? "—"}
                 </span>
               </div>
             </div>

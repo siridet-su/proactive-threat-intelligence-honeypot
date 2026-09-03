@@ -3,6 +3,8 @@ import { use, useState, useEffect } from "react";
 import { Download, MapPin, Terminal, Activity, FileText, ChevronRight, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
@@ -10,7 +12,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const resolvedParams = use(params);
   const sessionId = resolvedParams.id;
 
-  const [threatData, setThreatData] = useState<any>(null);
+  const [threatData, setThreatData] = useState<DashboardThreatEvent | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,8 +21,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         // ดึงข้อมูลทั้งหมดมาก่อน แล้วหา ID ที่ตรงกับ URL (เพราะยังไม่มี API ดึงรายตัว)
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          const found = data.find((t: any) => t.id === sessionId);
+          const data: unknown = await res.json();
+          const found = Array.isArray(data) ? data.filter(isDashboardThreatEvent).find((t) => t.id === sessionId) : undefined;
           if (found) {
             setThreatData(found);
           }

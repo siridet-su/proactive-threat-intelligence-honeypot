@@ -9,8 +9,8 @@ export default function LoginForm() {
   const [error, setError] = useState("");
   const router = useRouter();
 
-  const handleAuthenticate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAuthenticate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setError("");
 
     try {
@@ -71,7 +71,7 @@ export default function LoginForm() {
                 placeholder="admin"
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAuthenticate(e as any)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
                 required
               />
@@ -93,7 +93,7 @@ export default function LoginForm() {
                 placeholder="admin"
                 value={accessKey}
                 onChange={(e) => setAccessKey(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAuthenticate(e as any)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
                 className="w-full bg-[#111116] border border-slate-800 text-slate-300 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block pl-10 p-2.5 font-mono outline-none transition-colors"
                 required
               />
@@ -108,7 +108,7 @@ export default function LoginForm() {
           {/* Submit Button */}
           <button 
             type="button" 
-            onClick={handleAuthenticate}
+            onClick={() => void handleAuthenticate()}
             className="mt-4 w-full bg-purple-700 hover:bg-purple-600 text-white font-medium rounded-md text-sm px-5 py-3 text-center flex justify-center items-center gap-2 transition-all shadow-[0_0_15px_rgba(126,34,206,0.3)] hover:shadow-[0_0_25px_rgba(126,34,206,0.5)] font-mono tracking-wider"
           >
             AUTHENTICATE

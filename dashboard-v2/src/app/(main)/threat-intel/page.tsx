@@ -2,11 +2,13 @@
 import { useState, useEffect } from "react";
 import TargetLandscapeChart from "@/components/threat-intel/TargetLandscapeChart";
 import Link from "next/link";
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import type { DashboardChartDatum, DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 export default function ThreatIntelPage() {
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<DashboardThreatEvent[]>([]);
   const [stats, setStats] = useState({ total: 0, proxies: 0, critical: 0 });
-  const [chartData, setChartData] = useState<any[]>([]);
+  const [chartData, setChartData] = useState<DashboardChartDatum[]>([]);
   
   // กำหนดให้แสดงสูงสุด 5 รายการต่อหน้า
   const [currentPage, setCurrentPage] = useState(1);
@@ -17,21 +19,23 @@ export default function ThreatIntelPage() {
       try {
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          
+          const data: unknown = await res.json();
+          if (!Array.isArray(data)) return;
+          const threats = data.filter(isDashboardThreatEvent);
+
           // คำนวณสถิติภาพรวม
           setStats({
-            total: data.length,
-            proxies: data.filter((d: any) => d.classification === 'BOT').length,
-            critical: data.filter((d: any) => d.severity === 'Critical' || d.severity === 'High').length
+            total: threats.length,
+            proxies: threats.filter((d) => d.classification === 'BOT').length,
+            critical: threats.filter((d) => d.severity === 'Critical' || d.severity === 'High').length
           });
-          setLogs(data);
+          setLogs(threats);
 
           // คำนวณข้อมูลจริงสำหรับ Target Landscape
-          const aptCount = data.filter((d: any) => d.classification === 'APT').length;
-          const botCount = data.filter((d: any) => d.classification === 'BOT').length;
-          const scriptCount = data.filter((d: any) => d.classification === 'SCRIPT KIDDIE').length;
-          const otherCount = data.length - (aptCount + botCount + scriptCount);
+          const aptCount = threats.filter((d) => d.classification === 'APT').length;
+          const botCount = threats.filter((d) => d.classification === 'BOT').length;
+          const scriptCount = threats.filter((d) => d.classification === 'SCRIPT KIDDIE').length;
+          const otherCount = threats.length - (aptCount + botCount + scriptCount);
 
           setChartData([
             { name: "APT", value: aptCount, color: "#a855f7" },
@@ -54,7 +58,7 @@ export default function ThreatIntelPage() {
 
   const getPageNumbers = () => {
     let start = Math.max(1, currentPage - 2);
-    let end = Math.min(totalPages, start + 4);
+    const end = Math.min(totalPages, start + 4);
     if (end - start < 4) start = Math.max(1, end - 4);
     return Array.from({ length: Math.max(0, end - start + 1) }, (_, i) => start + i);
   };
