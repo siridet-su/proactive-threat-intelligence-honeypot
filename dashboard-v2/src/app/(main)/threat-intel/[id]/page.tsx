@@ -200,16 +200,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
              </div>
           </div>
         </div>
-      )}
-
-      {detail && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <DetailMetric label="SOURCE" value={text(overview.src_ip, "unavailable")} detail={text(overview.src_ip_scope, "scope unavailable")} icon={<Database className="w-4 h-4 text-purple-400" />} />
-            <DetailMetric label="ANALYSIS STATUS" value={status} detail={text(overview.job_status || overview.analysis_status, "not recorded")} icon={<ShieldCheck className="w-4 h-4 text-emerald-400" />} tone={status === "failed" ? "red" : "normal"} />
-            <DetailMetric label="COMMAND EVENTS" value={String(overview.command_count ?? "—")} detail="Text remains redacted by API boundary" icon={<GitBranch className="w-4 h-4 text-amber-400" />} tone="amber" />
-            <DetailMetric label="SESSION START" value={formatTimestamp(overview.start_time)} detail={`Updated ${formatTimestamp(overview.updated_at)}`} icon={<CheckCircle2 className="w-4 h-4 text-slate-300" />} />
-          </div>
 
         {/* ---------------- Live Interaction Shell (MOCK) ---------------- */}
         <div className="lg:col-span-2 bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
@@ -299,76 +289,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         </div>
 
       </div>
-      <p className="text-[10px] text-slate-600 mt-3 leading-relaxed">
-        {failClosed
-          ? "Policy flags unavailable or unverified; display is fail-closed to manual-only and is not execution authorization."
-          : "Stored policy flags are displayed as advisory metadata; this dashboard cannot execute actions."}
-      </p>
     </div>
   );
-}
-
-function EvidencePanel({ title, subtitle, icon, tone, children }: { title: string; subtitle: string; icon: React.ReactNode; tone: "emerald" | "amber" | "purple"; children: React.ReactNode }) {
-  const border = tone === "emerald" ? "border-emerald-900/40" : tone === "amber" ? "border-amber-900/40" : "border-purple-900/40";
-  return (
-    <div className={`bg-[#111116] border ${border} p-5 rounded-xl min-h-[220px]`}>
-      <div className="flex items-start gap-3 mb-4"><span className="mt-0.5">{icon}</span><div><h3 className="text-sm font-semibold text-white">{title}</h3><p className="text-[10px] text-slate-500 mt-1 leading-relaxed">{subtitle}</p></div></div>
-      <div className="space-y-2">{children}</div>
-    </div>
-  );
-}
-
-function EvidenceRow({ item }: { item: unknown }) {
-  const record = asRecord(item);
-  return <div className="bg-[#18181b] border border-slate-800/60 rounded px-3 py-2"><div className="text-xs text-emerald-200">{safeLabel(item)}</div><div className="text-[10px] text-slate-500 mt-1">{text(record.tactic || record.source || record.evidence_tier, "trace metadata unavailable")}</div></div>;
-}
-
-function PredictionRow({ item }: { item: JsonRecord }) {
-  const score = item.score ?? item.weighted_score;
-  return <div className="bg-[#18181b] border border-slate-800/60 rounded px-3 py-2"><div className="flex justify-between gap-3 text-xs text-amber-200"><span>{safeLabel(item)}</span>{score !== undefined && <span className="font-mono text-amber-300/80">score {String(score)}</span>}</div><div className="text-[10px] text-slate-500 mt-1">{text(item.source_types || item.sources, "model source metadata unavailable")}</div></div>;
-}
-
-function CorrelationRow({ item }: { item: JsonRecord }) {
-  const strength = item.strength ?? item.confidence;
-  return <div className="bg-[#18181b] border border-slate-800/60 rounded px-3 py-2"><div className="flex justify-between gap-3 text-xs text-purple-200"><span>{safeLabel(item)}</span>{strength !== undefined && <span className="font-mono text-purple-300/80">strength {String(strength)}</span>}</div><div className="text-[10px] text-slate-500 mt-1">{text(item.confidence_semantics, "developer-defined heuristic")}</div></div>;
-}
-
-function EventRow({ event }: { event: EventView }) {
-  return <tr className="border-b border-slate-800/60"><td className="py-3 pr-4 text-slate-400">{formatTimestamp(event.timestamp || event.received_at)}</td><td className="py-3 pr-4 text-purple-300">{text(event.eventid || event.event_id, "unknown")}</td><td className="py-3 pr-4 text-slate-400">{text(event.sensor_id || event.sensor, "unknown")}</td><td className="py-3 pr-4 text-slate-400">{text(event.src_ip, "unavailable")}</td><td className="py-3 text-slate-500">{event.command_event ? "yes · text redacted" : "no"}</td></tr>;
-}
-
-function DetailMetric({ label, value, detail, icon, tone = "normal" }: { label: string; value: string; detail: string; icon: React.ReactNode; tone?: "normal" | "amber" | "red" }) {
-  const valueColor = tone === "red" ? "text-[#fca5a5]" : tone === "amber" ? "text-amber-300" : "text-white";
-  return <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl min-h-[132px]"><div className="flex items-center justify-between"><span className="text-[10px] text-slate-500 tracking-wider">{label}</span>{icon}</div><div className={`text-lg font-bold mt-3 ${valueColor} truncate`}>{value}</div><div className="text-[10px] text-slate-500 mt-2 truncate">{detail}</div></div>;
-}
-
-function KeyValue({ label, value }: { label: string; value: string }) {
-  return <div className="flex justify-between gap-4"><span className="text-slate-500">{label}</span><span className="text-slate-300 text-right truncate">{value}</span></div>;
-}
-
-function EmptyState({ text: message }: { text: string }) {
-  return <div className="text-[11px] text-slate-500 text-center py-6">{message}</div>;
-}
-
-function asRecord(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
-}
-
-function predictionRanking(prediction: JsonRecord | null): JsonRecord[] {
-  if (!prediction) return [];
-  const ranking = prediction.final_ranking || prediction.prediction;
-  return Array.isArray(ranking) ? ranking.filter((item): item is JsonRecord => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
-}
-
-function buildTimeline(events: EventView[]) {
-  return events.slice(0, 50).reverse().map((event, index) => ({
-    time: shortTime(event.timestamp || event.received_at, index),
-    events: index + 1,
-  }));
-}
-
-function shortTime(value: unknown, fallback: number): string {
-  const parsed = new Date(text(value, "")).getTime();
-  if (!Number.isFinite(parsed)) return `#${fallback + 1}`;
-  return new Date(parsed).toISOString().slice(11, 19);
 }
