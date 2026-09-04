@@ -40,6 +40,7 @@ from production.api.security import (
 from production.classification.classification_evaluation import classification_metrics
 from production.utils.config import ProductionConfig
 from production.prediction.prediction_health import infer_prediction_paths, load_prediction_health
+from production.prediction_next_distinct_poc.dashboard_adapter import build_dashboard_prediction
 from production.reporting.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
 from production.utils.feedback import normalize_submitted_feedback_payload
 from production.utils.http_security import (
@@ -489,17 +490,29 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         session_id = query.get("session_id", [""])[0].strip()
         if not session_id:
             return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
-        snapshot = storage.get_current_prediction_snapshot(session_id)
-        if not snapshot:
-            return HTTPStatus.NOT_FOUND, {"error": "prediction not found", "session_id": session_id, "timestamp": utc_now()}
-        feedback_rows = [
-            row for row in storage.list_rows("analyst_feedback", limit=1000)
-            if str(row.get("session_id") or "") == session_id
-        ]
+        # The current Dashboard prediction is a read-only view of the
+        # isolated Final next-distinct sidecar. Do not fall back to the legacy
+        # prediction_snapshots table: that would silently change task
+        # semantics and could make an old canonical row look current.
+        session_row: Dict[str, Any] = {}
+        get_session = getattr(storage, "get_session", None)
+        if callable(get_session):
+            try:
+                session_row = get_session(session_id) or {}
+            except Exception:
+                session_row = {}
+        final_poc = build_dashboard_prediction(session_id, session_row)
+        guidance_snapshot = {"session_id": session_id, "payload": {}}
         return HTTPStatus.OK, {
-            "item": api_row_view("prediction_snapshots", snapshot),
-            "current_prediction": _current_prediction_payload(snapshot, feedback_rows),
-            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
+            "item": {
+                "schema_version": final_poc.get("schema_version"),
+                "session_id": session_id,
+                "source": "FINAL_POC",
+                "payload": final_poc,
+            },
+            "current_prediction": final_poc,
+            "prediction_source": "FINAL_POC",
+            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, guidance_snapshot),
             "session_id": session_id,
             "timestamp": utc_now(),
         }

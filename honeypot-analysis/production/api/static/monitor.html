@@ -2219,8 +2219,6 @@
         const legacyEvents = arrayMaybe(detail?.events_table_rows);
         const events = canonicalEvents.length ? canonicalEvents : legacyEvents;
         state.detailEvents = events;
-        const snapshots = (detail && detail.prediction_snapshots) || [];
-        const ranking = snapshots[0]?.payload?.final_ranking || [];
         const cp = predResult?.current_prediction || {};
         const smb = predResult?.response_guidance || {};
 
@@ -2241,12 +2239,15 @@
         const feedbackSummary = cp.feedback_summary || {};
         const calibrationStatus = cp.calibration_status || {};
         const weightCalibration = cp.weight_calibration || {};
-        const predictionStatus = cp.prediction_status || (cp.final_ranking?.length ? 'predicted' : 'abstained');
+        const predictionStatus = cp.prediction_status || (Array.isArray(cp.prediction) && cp.prediction.length ? 'predicted' : 'abstained');
         const predictionStatusReason = cp.prediction_status_reason || '';
         const externalArtifact = cp.external_artifact || {};
         const genericProgressionPrior = cp.generic_progression_prior || {};
 
-        const finalRanking = cp.final_ranking?.length ? cp.final_ranking : ranking;
+        // The Final PoC route is authoritative for this panel.  Never fall
+        // back to legacy prediction_snapshots: those rows have different
+        // task semantics and may be unavailable or stale.
+        const finalRanking = Array.isArray(cp.prediction) ? cp.prediction : [];
 
         // Prefer the privacy-safe semantic marker from the API. Older API
         // responses remain compatible when their event id is available.
