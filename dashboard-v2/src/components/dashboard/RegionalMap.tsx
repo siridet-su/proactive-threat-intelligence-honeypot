@@ -1,19 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
-import type { ZoomableGroupProps } from "react-simple-maps";
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+
+interface MapMarker {
+  id: string;
+  name: string;
+  coordinates: [number, number];
+  status: "failed" | "running" | "other";
+}
+
+interface MapPosition {
+  coordinates: [number, number];
+  zoom: number;
+}
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
-export interface RegionalMarker {
-  name: string;
-  coordinates: [number, number];
-  status: string;
-  count: number;
-}
+export default function RegionalMap() {
+  const [markers, setMarkers] = useState<MapMarker[]>([]);
 
-export default function RegionalMap({ markers }: { markers: RegionalMarker[] }) {
+  useEffect(() => {
+    const fetchThreats = async () => {
+      try {
+        const res = await fetch("/api/threats");
+        if (res.ok) {
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            const newMarkers = data.filter(isDashboardThreatEvent).map((threat) => ({
+              id: threat.id,
+              name: ` () - `,
+              coordinates: [threat.geo.lon, threat.geo.lat] as [number, number],
+              status: threat.severity === "Critical" || threat.severity === "High" ? "failed" as const : "running" as const
+            })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0);
+            setMarkers(newMarkers);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch threats for map:", err);
+      }
+    };
+
+    fetchThreats();
+    const interval = setInterval(fetchThreats, 5000); // refresh every 5s
+    return () => clearInterval(interval);
+  }, []);
   const [position, setPosition] = useState({ coordinates: [0, 20] as [number, number], zoom: 1 });
   const [tooltip, setTooltip] = useState({ show: false, content: "", x: 0, y: 0 });
 
@@ -28,21 +60,22 @@ export default function RegionalMap({ markers }: { markers: RegionalMarker[] }) 
   }
 
   // ใช้ onMoveEnd แทน onMove เพื่อให้ Trackpad สามารถซูมและเลื่อนได้ลื่นไหล
-  function handleMoveEnd(newPosition: Parameters<NonNullable<ZoomableGroupProps["onMoveEnd"]>>[0]) {
+  function handleMoveEnd(newPosition: MapPosition) {
     setPosition(newPosition);
   }
 
   return (
+    // คง touchAction: "none" ไว้เพื่อป้องกันเบราว์เซอร์ซูมหน้าจอ
     <div className="w-full h-full relative bg-[#09090b] cursor-grab active:cursor-grabbing" style={{ touchAction: "none" }}>
-      <ComposableMap 
-        projection="geoMercator" 
+      <ComposableMap
+        projection="geoMercator"
         style={{ width: "100%", height: "100%", outline: "none" }}
       >
-        <ZoomableGroup 
-          zoom={position.zoom} 
-          center={position.coordinates} 
-          onMoveEnd={handleMoveEnd}
-          minZoom={1} 
+        <ZoomableGroup
+          zoom={position.zoom}
+          center={position.coordinates}
+          onMoveEnd={handleMoveEnd} // เปลี่ยนกลับมาใช้ onMoveEnd
+          minZoom={1}
           maxZoom={8}
         >
           <Geographies geography={geoUrl}>
@@ -74,36 +107,26 @@ export default function RegionalMap({ markers }: { markers: RegionalMarker[] }) 
             }
           </Geographies>
 
-          {markers.map(({ name, coordinates, status, count }) => (
-            <Marker key={name} coordinates={coordinates as [number, number]}>
-              <circle r={4} fill={
-                status === "running" ? "#34d399" : 
-                status === "failed" ? "#f87171" : "#a855f7"
-              } />
-              {status === "running" && (
-                <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
-              )}
-              <title>{`${name} · ${count} shown sessions`}</title>
+          {markers.map(({ id, name, coordinates, status }, index) => (
+            <Marker key={id || index} coordinates={coordinates}>
+            <circle r={4} fill={
+              status === "running" ? "#34d399" :
+              status === "failed" ? "#f87171" : "#a855f7"
+            } />
+            {status === "running" && (
+              <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
+            )}
             </Marker>
           ))}
         </ZoomableGroup>
       </ComposableMap>
-      
+
       {tooltip.show && (
-        <div 
+        <div
           className="fixed z-50 px-3 py-1.5 bg-[#111116] border border-slate-700 text-slate-200 text-xs rounded-md shadow-[0_0_15px_rgba(0,0,0,0.5)] font-sans pointer-events-none transform -translate-x-1/2 -translate-y-[150%]"
           style={{ top: tooltip.y, left: tooltip.x }}
         >
           {tooltip.content}
-        </div>
-      )}
-
-      {!markers.length && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="bg-[#111116]/90 border border-slate-800 rounded-md px-4 py-3 text-center">
-            <p className="text-[11px] text-slate-300">No verified public coordinates</p>
-            <p className="text-[10px] text-slate-500 mt-1">The API returned no map-safe geolocation for this window.</p>
-          </div>
         </div>
       )}
 

@@ -29,23 +29,13 @@ def test_staging_workflow_is_scoped_to_dashboard_and_staging_pushes() -> None:
     assert "CLOUDFLARE_API_TOKEN" not in workflow
 
 
-def test_staging_bff_rejects_state_changing_methods_and_keeps_auth_local() -> None:
-    proxy = (DASHBOARD / "src/app/api/[...path]/route.ts").read_text(encoding="utf-8")
-    auth = (DASHBOARD / "src/app/api/auth/route.ts").read_text(encoding="utf-8")
-    assert 'export async function GET' in proxy
-    assert 'export async function HEAD' in proxy
-    assert 'export async function POST' in proxy
-    assert 'export async function PUT' in proxy
-    assert 'export async function PATCH' in proxy
-    assert 'export async function DELETE' in proxy
-    assert 'method: "GET"' in proxy
-    assert 'redirect: "error"' in proxy
-    assert 'response.headers.set("allow", "GET, HEAD")' in proxy
-    assert 'method: "POST"' not in proxy
-    assert 'method: "PUT"' not in proxy
-    assert 'method: "PATCH"' not in proxy
-    assert 'method: "DELETE"' not in proxy
-    assert "fetch(" not in auth
+def test_staging_uses_explicit_direct_api_handlers_without_bff_proxy() -> None:
+    api_root = DASHBOARD / "src/app/api"
+    assert not (api_root / "[...path]/route.ts").exists()
+    for relative in ("threats/route.ts", "hardware/route.ts", "malware/route.ts", "users/route.ts"):
+        route = (api_root / relative).read_text(encoding="utf-8")
+        assert "export async function GET" in route
+        assert "clientPromise" in route
 
 
 def test_staging_unit_is_non_root_and_loopback_only() -> None:

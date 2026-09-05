@@ -1,53 +1,51 @@
 import { useState, useEffect, useMemo } from 'react';
+import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import type { AttackerSummary, DashboardThreatEvent } from "@/lib/dashboardTypes";
 import { SeverityBadge } from './SeverityBadge';
 import { Search } from 'lucide-react';
 
 export function AttackerTable() {
-  const [threats, setThreats] = useState<any[]>([]);
+  const [threats, setThreats] = useState<DashboardThreatEvent[]>([]);
 
   useEffect(() => {
     const fetchThreats = async () => {
       try {
         const res = await fetch("/api/threats");
         if (res.ok) {
-          const data = await res.json();
-          setThreats(data);
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            setThreats(data.filter(isDashboardThreatEvent));
+          }
         }
       } catch (err) {
         console.error("Failed to fetch threats for table:", err);
       }
     };
-    
+
     fetchThreats();
     const interval = setInterval(fetchThreats, 5000);
     return () => clearInterval(interval);
   }, []);
 
   const attackers = useMemo(() => {
-    const map = new Map<string, any>();
+    const map = new Map<string, AttackerSummary>();
     for (const t of threats) {
       if (!t.src_ip) continue;
       if (!map.has(t.src_ip)) {
         map.set(t.src_ip, {
           ip: t.src_ip,
           country: t.geo.country || 'Unknown',
-          asn: t.abuseipdb?.isp || t.geo.city || 'Unknown',
-          mainTechnique: t.event_type,
+          asn: t.geo.city || 'Unknown',
+          mainTechnique: t.event_type || t.classification,
           attackCount: 1,
-          riskScore: t.abuseipdb?.abuseConfidenceScore ?? Math.min(100, 50),
+          riskScore: 50,
           status: t.severity
         });
       } else {
         const existing = map.get(t.src_ip);
+        if (!existing) continue;
         existing.attackCount += 1;
-
-        if (t.abuseipdb?.abuseConfidenceScore !== undefined) {
-           existing.riskScore = Math.max(existing.riskScore, t.abuseipdb.abuseConfidenceScore);
-           if (t.abuseipdb.isp) existing.asn = t.abuseipdb.isp;
-        } else {
-           existing.riskScore = Math.min(100, existing.riskScore + 5);
-        }
-
+        existing.riskScore = Math.min(100, existing.riskScore + 5);
         if (t.severity === 'Critical') existing.status = 'Critical';
         else if (t.severity === 'High' && existing.status !== 'Critical') existing.status = 'High';
       }
@@ -59,14 +57,14 @@ export function AttackerTable() {
       <div className="flex items-center justify-between">
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input 
-            type="text" 
-            placeholder="Search IPs, ASNs..." 
+          <input
+            type="text"
+            placeholder="Search IPs, ASNs..."
             className="bg-slate-900/50 border border-slate-700 text-sm rounded-md pl-9 pr-4 py-1.5 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 text-slate-300 w-64 transition-all"
           />
         </div>
       </div>
-      
+
       <div className="flex-1 overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="text-xs text-slate-400 uppercase bg-slate-800/50 border-y border-slate-700/50">

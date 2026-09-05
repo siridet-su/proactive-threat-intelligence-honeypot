@@ -3,59 +3,34 @@
 import { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from "recharts";
 import { Cpu, MemoryStick, HardDrive, Thermometer, Wifi } from "lucide-react";
+import { formatHardwareMetric, isHardwareTelemetry } from "@/lib/dashboardTypes";
+import type { HardwareChartRecord } from "@/lib/dashboardTypes";
 
 export function HardwareMonitor() {
-  const [metrics, setMetrics] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<HardwareChartRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Open a persistent connection to the Server-Sent Events (SSE) stream
-    const eventSource = new EventSource("/api/hardware/stream");
-
-    eventSource.onmessage = (event) => {
+    const fetchMetrics = async () => {
       try {
-        const parsed = JSON.parse(event.data);
-        
-        if (parsed.type === "initial") {
-          // Load the initial historical data (latest 30 items)
-          const formatted = parsed.data.map((d: any) => {
-            const date = new Date(d.timestamp);
-            return {
-              ...d,
-              time: `${date.getHours()}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`,
-            };
-          });
-          setMetrics(formatted);
-          setLoading(false);
-        } else if (parsed.type === "update") {
-          // Push a new real-time insert onto the array and slice it to keep only 30 items
-          const d = parsed.data;
-          const date = new Date(d.timestamp);
-          const newMetric = {
-            ...d,
-            time: `${date.getHours()}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`,
-          };
-          
-          setMetrics((prev) => {
-            const updated = [...prev, newMetric];
-            return updated.length > 30 ? updated.slice(updated.length - 30) : updated;
-          });
+        const res = await fetch("/api/hardware");
+        if (res.ok) {
+          const data: unknown = await res.json();
+          if (Array.isArray(data)) {
+            setMetrics(data.filter(isHardwareTelemetry).map(formatHardwareMetric));
+          }
         }
       } catch (err) {
-        console.error("SSE parse error:", err);
+        console.error("Fetch metrics error:", err);
+      } finally {
+        setLoading(false);
       }
     };
 
-    eventSource.onerror = (err) => {
-      console.error("SSE connection error:", err);
-      eventSource.close();
-      setLoading(false);
-    };
-
-    // Cleanup when component unmounts
-    return () => {
-      eventSource.close();
-    };
+    fetchMetrics();
+    // Poll every 10 seconds (matches hardware-agent interval)
+    const interval = setInterval(fetchMetrics, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   if (loading && metrics.length === 0) {
