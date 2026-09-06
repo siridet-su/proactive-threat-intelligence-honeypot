@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import DeploymentBadge from "@/components/layout/DeploymentBadge";
+import ThemeProvider from "@/components/theme/ThemeProvider";
+import { themeBootstrap } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,10 +15,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
+      </head>
       <body className="min-h-full flex flex-col">
-        <DeploymentBadge />
-        {children}
+        <ThemeProvider>
+          <DeploymentBadge />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

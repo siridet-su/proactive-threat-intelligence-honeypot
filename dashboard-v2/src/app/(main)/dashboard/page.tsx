@@ -1,12 +1,18 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import RegionalMap from "@/components/dashboard/RegionalMap";
-import { Activity, AlertTriangle, ActivitySquare, Filter, Download, Maximize, Minimize } from "lucide-react";
+import { Activity, AlertTriangle, ActivitySquare, Filter, Download, Maximize, Minimize, Globe, Radio } from "lucide-react";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
+import { RegionState, RefreshStatus, type RegionStatus } from "@/components/ui/RegionState";
+import { classificationBadgeClass } from "@/lib/presentation";
+
 export default function DashboardPage() {
+  const [status, setStatus] = useState<RegionStatus>("loading");
+  const hasResult = useRef(false);
+  const mapPanel = useRef<HTMLDivElement>(null);
   const [sessions, setSessions] = useState<DashboardThreatEvent[]>([]);
   const [stats, setStats] = useState({ total: "-", active: "-", critical: 0, health: "-" });
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -17,8 +23,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchThreats = async () => {
+      setStatus(hasResult.current ? "refreshing" : "loading");
       try {
         const res = await fetch("/api/threats");
+        if (!res.ok) throw new Error("Threat request failed");
         if (res.ok) {
           const data: unknown = await res.json();
           if (Array.isArray(data)) {
@@ -33,16 +41,43 @@ export default function DashboardPage() {
               health: "99.9%"
             }));
             setSessions(threats);
+            hasResult.current = true;
+            setStatus("ready");
+          } else {
+            throw new Error("Threat response unavailable");
           }
         }
-      } catch (err) {
-        console.error("Failed to fetch threats:", err);
+      } catch {
+        // The API reports the underlying failure server-side. Keep this expected
+        // polling failure in the visible region state instead of triggering the
+        // Next.js development error overlay on every retry.
+        setStatus(hasResult.current ? "stale" : "error");
       }
     };
     fetchThreats();
     const interval = setInterval(fetchThreats, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!isFullScreen) return;
+    const panel = mapPanel.current;
+    const previous = document.activeElement as HTMLElement | null;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panel?.querySelector<HTMLButtonElement>("button")?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsFullScreen(false);
+      if (event.key !== "Tab") return;
+      const controls = panel?.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]');
+      if (!controls?.length) return;
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => { document.body.style.overflow = oldOverflow; document.removeEventListener("keydown", onKey); previous?.focus(); };
+  }, [isFullScreen]);
 
   // คำนวณข้อมูลสำหรับแสดงในหน้าปัจจุบัน
   const totalPages = Math.ceil(sessions.length / itemsPerPage);
@@ -57,165 +92,96 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-10 max-w-[1400px] mx-auto">
-      {/* 1. Global Attack Distribution */}
-      <div
-        className={`bg-[#0f0f13] border border-slate-800/80 overflow-hidden shadow-lg flex flex-col transition-all duration-300 ${
-          isFullScreen
-            ? 'fixed inset-0 z-[100] rounded-none h-screen w-screen'
-            : 'rounded-xl h-[350px]'
-        }`}
-      >
-        <div className="px-6 py-4 flex justify-between items-center z-10 bg-gradient-to-b from-[#0a0a0c] to-transparent">
-          <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <span className="w-4 h-4 rounded-full bg-purple-900/50 flex items-center justify-center">
-              <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-            </span>
-            Global Attack Distribution
-          </h2>
-          <div className="flex items-center gap-4 text-xs font-mono text-slate-400">
-             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-400"></span>Critical</span>
-             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-400"></span>Active</span>
-             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-600"></span>Dormant</span>
-
-             {/* เส้นคั่นและปุ่ม Full Screen */}
-             <div className="w-px h-4 bg-slate-700 mx-1"></div>
-             <button
-               onClick={() => setIsFullScreen(!isFullScreen)}
-               className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-colors"
-               title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-             >
-               {isFullScreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
-             </button>
-          </div>
-        </div>
-        <div className="flex-1 w-full -mt-12">
-           <RegionalMap />
-        </div>
-      </div>
-
-      {/* Header Overview */}
-      <div className="pt-4 flex justify-between items-end">
+    <div className="space-y-6 pb-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white">Overview Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-1">Real-time session monitoring and threat directory.</p>
+          <h1 className="text-[28px] font-semibold leading-9 tracking-tight">Overview Dashboard</h1>
+          <p className="mt-2 text-base text-text-muted">Real-time session monitoring and threat directory.</p>
         </div>
-        <div className="flex items-center gap-2 text-xs font-mono text-purple-400">
-          <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span> Live Feed Active
-        </div>
-      </div>
-
-      {/* 2. Overview Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md flex flex-col justify-between">
-           <div className="flex justify-between items-start mb-4">
-             <span className="text-xs font-mono text-slate-400 tracking-wider">TOTAL SESSIONS</span>
-             <ActivitySquare className="w-4 h-4 text-slate-500" />
-           </div>
-           <div>
-             <div className="text-4xl font-bold text-white">{stats.total}</div>
-           </div>
-        </div>
-        <div className="bg-[#150e11] border border-red-900/50 rounded-xl p-6 shadow-[0_0_15px_rgba(153,27,27,0.1)] flex flex-col justify-between relative overflow-hidden">
-           <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 blur-[50px] rounded-full"></div>
-           <div className="flex justify-between items-start mb-4 relative z-10">
-             <span className="text-xs font-mono text-red-500 tracking-wider font-semibold">ACTIVE INCURSIONS</span>
-             <AlertTriangle className="w-4 h-4 text-red-500" />
-           </div>
-           <div className="relative z-10">
-             <div className="text-4xl font-bold text-[#fca5a5]">{stats.active}</div>
-             <div className="text-xs font-mono text-slate-400 mt-2 flex items-center gap-2">
-               <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> {stats.critical} Critical Severity
-             </div>
-           </div>
-        </div>
-        <div className="bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md flex flex-col justify-between">
-           <div className="flex justify-between items-start mb-4">
-             <span className="text-xs font-mono text-slate-400 tracking-wider">HONEYPOT HEALTH</span>
-             <Activity className="w-4 h-4 text-slate-500" />
-           </div>
-           <div>
-             <div className="text-4xl font-bold text-white flex items-baseline gap-2">
-                {stats.health} {stats.health !== "-" && <span className="text-sm font-normal text-slate-400">Uptime</span>}
-             </div>
-             <div className="w-full h-1.5 bg-slate-800 rounded-full mt-4 overflow-hidden">
-                <div className="h-full bg-purple-400 rounded-full shadow-[0_0_10px_rgba(192,132,252,0.5)]" style={{ width: stats.health !== "-" ? stats.health : "0%" }}></div>
-             </div>
-           </div>
+        <div className="flex flex-col items-start gap-1 sm:items-end">
+          <span className="ui-badge border-info-border bg-info-subtle text-info"><Radio className="h-3.5 w-3.5" aria-hidden="true" />Live Feed Active</span>
+          <RefreshStatus status={status} />
         </div>
       </div>
 
-      {/* 3. Live Incursion Directory พร้อม Pagination */}
-      <div className="bg-[#111116] border border-slate-800/80 rounded-xl overflow-hidden shadow-xl mt-6">
-        <div className="p-5 border-b border-slate-800/80 flex justify-between items-center bg-[#15151c]">
-          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-            <span className="text-purple-400">⚡</span> Live Incursion Directory
-          </h3>
+      <section aria-label="Overview metrics" aria-busy={status === "loading" || status === "refreshing"} className="grid grid-cols-1 gap-5 sm:grid-cols-3 lg:gap-6">
+        {[
+          { title: "TOTAL SESSIONS", value: stats.total, icon: ActivitySquare },
+          { title: "ACTIVE INCURSIONS", value: stats.active, icon: AlertTriangle },
+          { title: "HONEYPOT HEALTH", value: stats.health, icon: Activity },
+        ].map(({ title, value, icon: Icon }, index) => (
+          <div key={title} className={`ui-panel min-h-40 p-7 ${status === "error" ? "border-danger-border bg-danger-subtle" : ""}`}>
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold tracking-wide text-text-muted">{title}</h2>
+              <span className={`grid h-9 w-9 place-items-center rounded-xl border ${index === 1 || status === "error" ? "border-danger-border bg-danger-subtle text-danger" : "border-primary-border bg-primary-subtle text-primary"}`}><Icon className="h-4 w-4 shrink-0" aria-hidden="true" /></span>
+            </div>
+            {status === "loading" ? <div className="space-y-3" aria-label="Loading metric"><div className="ui-skeleton h-9 w-24" /><div className="ui-skeleton h-4 w-36" /></div> : status === "error" ? <p className="text-[15px] font-medium text-danger">Unavailable · request failed</p> : <>
+              <div className="flex flex-wrap items-baseline gap-2 text-[32px] font-semibold leading-10 tabular-nums">{value}{index === 2 && stats.health !== "-" && <span className="text-base font-normal text-text-muted">Uptime</span>}</div>
+              {index === 1 && <p className="mt-2 flex items-center gap-2 text-sm text-danger"><AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />{stats.critical} Critical Severity</p>}
+              {index === 2 && <div aria-hidden="true" className="mt-4 h-2 overflow-hidden rounded-full bg-border"><div className="h-full rounded-full bg-primary" style={{ width: stats.health !== "-" ? stats.health : "0%" }} /></div>}
+            </>}
+          </div>
+        ))}
+      </section>
+
+      <div ref={mapPanel} role={isFullScreen ? "dialog" : undefined} aria-modal={isFullScreen ? true : undefined} aria-labelledby="distribution-title" className={`ui-panel flex flex-col overflow-hidden ${isFullScreen ? "fixed inset-0 z-[100] h-dvh w-screen rounded-none" : "h-[430px] sm:h-[400px]"}`}>
+        <div className="z-10 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-6 py-5">
+          <h2 id="distribution-title" className="flex items-center gap-2 text-lg font-semibold"><Globe className="h-5 w-5 text-primary" aria-hidden="true" />Global Attack Distribution</h2>
+          <div className="flex flex-wrap items-center gap-4 text-sm text-text-muted">
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rotate-45 bg-danger" />Critical</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-info" />Active</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 border border-neutral" />Dormant</span>
+            <button onClick={() => setIsFullScreen(!isFullScreen)} className="ui-button" title={isFullScreen ? "Exit Full Screen" : "Full Screen"} aria-label={isFullScreen ? "Exit Full Screen" : "Full Screen"}>
+              {isFullScreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+        <div className="min-h-0 w-full flex-1 bg-surface-subtle"><RegionalMap /></div>
+      </div>
+
+      <section className="ui-panel overflow-hidden" aria-labelledby="directory-title" aria-busy={status === "loading" || status === "refreshing"}>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-6 py-5">
+          <h2 id="directory-title" className="flex items-center gap-2 text-lg font-semibold"><Activity className="h-5 w-5 text-primary" aria-hidden="true" />Live Incursion Directory</h2>
           <div className="flex gap-3">
-             <button className="flex items-center gap-2 text-xs font-mono text-slate-300 bg-slate-800/50 border border-slate-700 px-3 py-1.5 rounded hover:bg-slate-700 transition">
-               <Filter className="w-3 h-3" /> Filter
-             </button>
-             <button className="flex items-center gap-2 text-xs font-mono text-slate-300 bg-slate-800/50 border border-slate-700 px-3 py-1.5 rounded hover:bg-slate-700 transition">
-               <Download className="w-3 h-3" /> Export
-             </button>
+            <button className="ui-button"><Filter className="h-4 w-4" aria-hidden="true" />Filter</button>
+            <button className="ui-button"><Download className="h-4 w-4" aria-hidden="true" />Export</button>
           </div>
         </div>
-
-        <table className="w-full text-left text-sm">
-          <thead className="text-[10px] uppercase text-slate-500 font-mono border-b border-slate-800/50 bg-[#0a0a0c]">
-            <tr>
-              <th className="px-6 py-4 font-semibold">SESSION ID</th>
-              <th className="px-6 py-4 font-semibold">ORIGIN IP</th>
-              <th className="px-6 py-4 font-semibold">ATTACKER TYPE</th>
-              <th className="px-6 py-4 font-semibold">DATE & TIME</th>
-              <th className="px-6 py-4 font-semibold">DURATION</th>
-              <th className="px-6 py-4 text-right font-semibold">ACTION</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/50">
-            {currentData.map((session, i) => (
-              <tr key={i} className="hover:bg-slate-800/20 text-slate-300 transition-colors">
-                <td className="px-6 py-4 font-mono font-medium flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
-                  {session.id.substring(0, 10).toUpperCase()}...
-                </td>
-                <td className="px-6 py-4 font-mono">{session.ip || session.sourceIp}</td>
-                <td className="px-6 py-4">
-                  <span className={`px-2 py-1 text-[10px] font-mono font-bold border rounded-sm ${session.typeColor}`}>
-                    {session.classification}
-                  </span>
-                </td>
-                <td className="px-6 py-4 font-mono text-[11px] text-slate-400">
-                  <div>{session.date}</div>
-                  <div className="text-slate-600">{session.time}</div>
-                </td>
-                <td className="px-6 py-4 font-mono text-xs text-slate-400">{session.duration}</td>
-                <td className="px-6 py-4 text-right">
-                   <Link href={`/threat-intel/${session.id}`} className="text-[10px] font-mono border border-slate-700 bg-slate-900 px-3 py-1.5 rounded hover:text-white transition-colors">
-                     View Details
-                   </Link>
-                </td>
-              </tr>
-            ))}
-            {sessions.length === 0 && (
-              <tr><td colSpan={6} className="text-center py-8 text-slate-500 font-mono">NO ACTIVE SESSIONS</td></tr>
-            )}
-          </tbody>
-        </table>
-
-        {/* ระบบเปลี่ยนหน้า (Pagination Controls) */}
-        {totalPages > 1 && (
-          <div className="p-4 border-t border-slate-800/50 bg-[#0a0a0c] flex justify-end items-center gap-2 font-mono text-xs">
-            <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 disabled:opacity-50 transition-colors">Prev</button>
-            {getPageNumbers().map(pageNum => (
-              <button key={pageNum} onClick={() => setCurrentPage(pageNum)} className={`px-3 py-1.5 rounded transition-colors ${currentPage === pageNum ? 'bg-purple-600 text-white font-bold' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
-                {pageNum}
-              </button>
-            ))}
-            <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 disabled:opacity-50 transition-colors">Next</button>
-          </div>
-        )}
-      </div>
+        <div className="relative h-[420px]">
+        <div className="ui-scroll-region h-full" role="region" aria-label="Incursion directory table. Scroll to view all rows and columns." tabIndex={0}>
+          <table className="ui-table min-w-[880px]">
+            <thead><tr>{["SESSION ID", "ORIGIN IP", "ATTACKER TYPE", "DATE & TIME", "DURATION", "ACTION"].map(label => <th key={label} scope="col" className={label === "ACTION" ? "text-right" : ""}>{label}</th>)}</tr></thead>
+            <tbody>
+              {status === "loading" && Array.from({ length: 5 }, (_, row) => (
+                <tr key={`loading-${row}`} aria-hidden="true">
+                  {Array.from({ length: 6 }, (_, column) => <td key={column} className="h-[72px]"><div className="ui-skeleton h-4 w-full" /></td>)}
+                </tr>
+              ))}
+              {currentData.map((session, i) => (
+                <tr key={i} className="text-text-muted">
+                  <td className="font-mono font-medium"><span className="inline-flex items-center gap-2" title={session.id} tabIndex={0} aria-label={session.id}><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" aria-hidden="true" />{session.id.substring(0, 10).toUpperCase()}...</span></td>
+                  <td className="font-mono">{session.ip || session.sourceIp}</td>
+                  <td><span className={`ui-badge ${classificationBadgeClass(session.typeColor)}`}>{session.classification}</span></td>
+                  <td className="font-mono text-xs"><div>{session.date}</div><div className="mt-1 text-text-subtle">{session.time}</div></td>
+                  <td className="font-mono text-xs">{session.duration}</td>
+                  <td className="text-right"><Link href={`/threat-intel/${session.id}`} className="ui-button text-xs">View Details</Link></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {status === "loading" && <p className="sr-only" role="status">Loading sessions…</p>}
+        <div className="absolute inset-x-0 top-[52px] bottom-0 pointer-events-none [&>div]:h-full">
+        {status === "error" && <RegionState kind="error" title="Sessions unavailable" description="We couldn’t load the session directory. The next automatic refresh will try again." />}
+        {status !== "loading" && status !== "error" && sessions.length === 0 && <RegionState kind="empty" title="NO ACTIVE SESSIONS" description="No sessions were returned in the last successful response." />}
+        </div>
+        </div>
+        {totalPages > 1 && <nav aria-label="Directory pages" className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-subtle p-4">
+          <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="ui-button text-xs">Prev</button>
+          {getPageNumbers().map(pageNum => <button key={pageNum} onClick={() => setCurrentPage(pageNum)} aria-current={currentPage === pageNum ? "page" : undefined} aria-label={`Page ${pageNum}`} className="ui-button text-xs">{pageNum}</button>)}
+          <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="ui-button text-xs">Next</button>
+        </nav>}
+      </section>
     </div>
   );
 }

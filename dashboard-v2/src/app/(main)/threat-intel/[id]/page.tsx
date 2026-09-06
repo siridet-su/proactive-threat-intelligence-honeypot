@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
+import { RegionState } from "@/components/ui/RegionState";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
@@ -14,21 +15,22 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
   const [threatData, setThreatData] = useState<DashboardThreatEvent | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
 
   useEffect(() => {
     const fetchThreatDetail = async () => {
       try {
         // ดึงข้อมูลทั้งหมดมาก่อน แล้วหา ID ที่ตรงกับ URL (เพราะยังไม่มี API ดึงรายตัว)
         const res = await fetch("/api/threats");
-        if (res.ok) {
-          const data: unknown = await res.json();
-          const found = Array.isArray(data) ? data.filter(isDashboardThreatEvent).find((t) => t.id === sessionId) : undefined;
-          if (found) {
-            setThreatData(found);
-          }
+        if (!res.ok) throw new Error("Threat detail request failed");
+        const data: unknown = await res.json();
+        if (!Array.isArray(data)) throw new Error("Threat detail response unavailable");
+        const found = data.filter(isDashboardThreatEvent).find((t) => t.id === sessionId);
+        if (found) {
+          setThreatData(found);
         }
-      } catch (error) {
-        console.error("Failed to fetch threat details", error);
+      } catch {
+        setFetchFailed(true);
       } finally {
         setLoading(false);
       }
@@ -50,8 +52,12 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
     return <div className="flex h-full items-center justify-center text-slate-500 font-mono text-sm animate-pulse min-h-[500px]">RETRIEVING FORENSIC DATA...</div>;
   }
 
+  if (fetchFailed) {
+    return <div className="min-h-[500px] py-16"><RegionState kind="error" title="Threat intelligence unavailable" description="This session could not be loaded because the session directory is currently unavailable." /></div>;
+  }
+
   if (!threatData) {
-    return <div className="flex h-full items-center justify-center text-red-500 font-mono text-sm min-h-[500px]">ERROR: SESSION ARCHIVED OR NOT FOUND</div>;
+    return <div className="min-h-[500px] py-16"><RegionState kind="empty" title="SESSION ARCHIVED OR NOT FOUND" description="The session was not included in the latest successful directory response." /></div>;
   }
 
   // เตรียมข้อมูลจริงสำหรับแสดงผล

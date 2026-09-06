@@ -1,10 +1,24 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, ShieldCheck, LayoutDashboard, Brain, Search, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Users, ShieldCheck, LayoutDashboard, Brain, Search, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Menu, X } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+
+import ThemeToggle from "@/components/theme/ThemeToggle";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const drawer = useRef<HTMLDialogElement>(null);
+  const navigationTrigger = useRef<HTMLButtonElement>(null);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
+  const closeNavigation = () => { drawer.current?.close(); setNavigationOpen(false); };
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onResize = () => { if (desktop.matches) closeNavigation(); };
+    desktop.addEventListener("change", onResize);
+    return () => desktop.removeEventListener("change", onResize);
+  }, []);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -42,14 +56,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, []);
 
   const handleLogout = () => {
-    if (window.confirm("Confirm secure logout?")) {
-      router.push("/");
-    }
+    setLogoutConfirmationOpen(true);
   };
 
   const handleBack = () => {
     if (pathname === "/dashboard") {
-      if (window.confirm("Confirm secure logout?")) router.push("/");
+      setLogoutConfirmationOpen(true);
     } else {
       router.back();
     }
@@ -66,113 +78,82 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return 'System Overview';
   };
 
+  const navigation = (
+    <>
+      <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto px-4 py-6">
+        <p className="mb-4 px-3 text-xs font-medium text-text-subtle">Vigilance Protocol</p>
+        {[
+          { href: "/dashboard", title: "Dashboard", icon: LayoutDashboard, active: pathname === "/dashboard" },
+          { href: "/threat-intel", title: "Threat Intel", icon: Brain, active: pathname.includes("/threat-intel") },
+          { href: "/archives", title: "Archives", icon: Archive, active: pathname.includes("/archives") },
+          { href: "/malware-vault", title: "Malware Vault", icon: Bug, active: pathname.includes("/malware-vault") },
+          { href: "/system-health", title: "System Health", icon: Activity, active: pathname.includes("/system-health") },
+          ...((userRole === "Admin" || userRole === "admin") ? [{ href: "/user-management", title: "User Management", icon: Users, active: pathname.includes("/user-management") }] : []),
+        ].map(({ href, title, icon: Icon, active }) => (
+          <Link key={href} href={href} className="ui-nav-link" aria-current={active ? "page" : undefined} onClick={closeNavigation}>
+            <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span>{title}</span>
+          </Link>
+        ))}
+      </nav>
+      <div className="space-y-3 border-t border-border p-4">
+        <Link href="/profile" onClick={closeNavigation} aria-current={pathname.includes("/profile") ? "page" : undefined} className="ui-nav-link border border-border bg-surface-subtle">
+          <User className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="break-words font-semibold text-text">{userName || operatorId || "Operator"}</p>
+            <p className="text-xs text-text-subtle">{userRole === "Admin" ? "LVL-4 ACCESS" : "LVL-2 ACCESS"}</p>
+          </div>
+          <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
+        </Link>
+        <button onClick={handleLogout} className="ui-button w-full"><LogOut className="h-4 w-4" aria-hidden="true" />Logout</button>
+      </div>
+    </>
+  );
+
   return (
-    <div className="flex h-screen bg-[#0a0a0c] text-white overflow-hidden font-mono selection:bg-purple-500/30">
-
-      {/* ---------------- Sidebar ---------------- */}
-      <aside className="w-64 bg-[#111116] border-r border-slate-800/50 flex flex-col z-50 shrink-0">
-        <div className="h-20 flex items-center px-6 border-b border-slate-800/50">
-          <div className="w-8 h-8 rounded-lg bg-purple-900/30 border border-purple-500/30 flex items-center justify-center shrink-0">
-            <ShieldCheck className="w-4 h-4 text-purple-400" />
-          </div>
-          <span className="ml-3 font-bold text-lg text-purple-200 tracking-wider">PTI-Honeypot</span>
+    <div className="min-h-dvh bg-canvas text-text">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[120] focus:rounded-lg focus:bg-surface focus:p-3">Skip to content</a>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-border bg-surface lg:flex">
+        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-6">
+          <ShieldCheck className="h-6 w-6 text-primary" aria-hidden="true" />
+          <span className="text-base font-semibold">PTI-Honeypot</span>
         </div>
-
-        <nav className="flex-1 px-4 py-6 overflow-y-auto space-y-2">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 px-2 mb-4">Vigilance Protocol</div>
-
-          <Link href="/dashboard" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-            pathname === "/dashboard" ? 'bg-purple-900/20 text-purple-300 border-l-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'
-          }`}>
-            <LayoutDashboard className="w-[18px] h-[18px]" /> <span className="text-sm">Dashboard</span>
-          </Link>
-
-          <Link href="/threat-intel" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-            pathname.includes("/threat-intel") ? 'bg-purple-900/20 text-purple-300 border-l-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'
-          }`}>
-            <Brain className="w-[18px] h-[18px]" /> <span className="text-sm">Threat Intel</span>
-          </Link>
-
-          <Link href="/archives" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-            pathname.includes("/archives") ? 'bg-purple-900/20 text-purple-300 border-l-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'
-          }`}>
-            <Archive className="w-[18px] h-[18px]" /> <span className="text-sm">Archives</span>
-          </Link>
-
-          <Link href="/malware-vault" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-            pathname.includes("/malware-vault") ? 'bg-red-900/20 text-red-400 border-l-2 border-red-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'
-          }`}>
-            <Bug className="w-[18px] h-[18px]" /> <span className="text-sm">Malware Vault</span>
-          </Link>
-
-          <Link href="/system-health" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-            pathname.includes("/system-health") ? 'bg-purple-900/20 text-purple-300 border-l-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'
-          }`}>
-            <Activity className="w-[18px] h-[18px]" /> <span className="text-sm">System Health</span>
-          </Link>
-
-          {(userRole === "Admin" || userRole === "admin") && (
-            <Link href="/user-management" className={`flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-              pathname.includes("/user-management") ? 'bg-purple-900/20 text-purple-300 border-l-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-2 border-transparent'
-            }`}>
-              <Users className="w-[18px] h-[18px]" /> <span className="text-sm">User Management</span>
-            </Link>
-          )}
-        </nav>
-
-        <div className="p-4 border-t border-slate-800/50 flex flex-col gap-2">
-          <Link href="/profile" className="flex items-center gap-3 px-4 py-3 bg-slate-900/50 hover:bg-slate-800 rounded-lg transition-colors border border-slate-800">
-            <div className="w-8 h-8 rounded-full bg-purple-900/50 border border-purple-500/30 flex items-center justify-center text-xs text-purple-300">
-              <User className="w-4 h-4"/>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-200 truncate">{userName || operatorId || "Operator"}</p>
-              <p className="text-[10px] text-slate-500">{userRole === "Admin" ? "LVL-4 ACCESS" : "LVL-2 ACCESS"}</p>
-            </div>
-            <Settings className="w-4 h-4 text-slate-500" />
-          </Link>
-          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2 hover:bg-red-900/20 text-slate-400 hover:text-red-400 rounded-lg text-sm transition-colors">
-            <LogOut className="w-4 h-4" /> <span>Logout</span>
-          </button>
-        </div>
+        {navigation}
       </aside>
-
-      {/* ---------------- Main Content ---------------- */}
-      <main className="flex-1 flex flex-col min-w-0 bg-[#0a0a0c]">
-        {/* Topbar */}
-        <header className="h-20 bg-[#0a0a0c]/90 backdrop-blur-xl border-b border-slate-800/50 flex items-center justify-between px-8 shrink-0">
-          <div className="flex items-center text-sm gap-4 text-slate-400">
-            <button
-              onClick={handleBack}
-              className="p-2 bg-slate-900/50 hover:bg-slate-800 border border-slate-800 rounded-full transition-colors text-slate-400 hover:text-white"
-              title="Go Back"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-
-            <span className="text-white font-medium text-lg">
-              {getPageTitle()}
-            </span>
+      <dialog ref={drawer} className="ui-drawer" aria-label="Navigation" onClose={() => { setNavigationOpen(false); if (!window.matchMedia("(min-width: 1024px)").matches) navigationTrigger.current?.focus(); }} onClick={event => { if (event.target === event.currentTarget && event.clientX > event.currentTarget.getBoundingClientRect().right) closeNavigation(); }}>
+        <div className="flex h-full flex-col">
+          <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
+            <span className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" />PTI-Honeypot</span>
+            <button className="ui-button" onClick={closeNavigation} aria-label="Close navigation"><X className="h-4 w-4" /></button>
           </div>
-          <div className="flex items-center gap-6">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input type="text" placeholder="Scan nodes..." className="bg-[#111116] border border-slate-800 rounded-full pl-10 pr-4 py-2 text-sm text-slate-300 w-72 focus:outline-none focus:border-purple-500 transition-all font-sans" />
+          {navigation}
+        </div>
+      </dialog>
+      <div className="min-w-0 lg:ml-60">
+        <header className="sticky top-0 z-20 border-b border-border bg-surface">
+          <div className="flex min-h-16 items-center justify-between gap-3 px-4 lg:px-8">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <button ref={navigationTrigger} className="ui-button px-2 lg:hidden" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={() => { drawer.current?.showModal(); setNavigationOpen(true); }}><Menu className="h-4 w-4" /></button>
+              <button onClick={handleBack} className="ui-button px-2" title="Go Back" aria-label="Go Back"><ArrowLeft className="h-4 w-4" /></button>
+              <span className="text-xs font-medium sm:text-sm">{getPageTitle()}</span>
             </div>
-            <div className="w-px h-6 bg-slate-800"></div>
-            <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-              <Clock className="w-4 h-4" />
-              <span>{time || "00:00:00"}</span>
+            <div className="flex items-center gap-6">
+              <div className="hidden xl:block"><SearchField /></div>
+              <div className="hidden items-center gap-2 text-xs text-text-muted xl:flex"><Clock className="h-4 w-4" aria-hidden="true" /><time aria-label="Current time" className="font-mono tabular-nums">{time || "00:00:00"}</time></div>
+              <ThemeToggle />
             </div>
+          </div>
+          <div className="flex items-center gap-4 border-t border-border px-4 py-3 xl:hidden">
+            <div className="min-w-0 flex-1"><SearchField /></div>
+            <div className="flex items-center gap-2 text-xs text-text-muted"><Clock className="h-4 w-4" aria-hidden="true" /><time aria-label="Current time" className="font-mono tabular-nums">{time || "00:00:00"}</time></div>
           </div>
         </header>
-
-        <div className="flex-1 overflow-y-auto p-6 lg:p-8">
-          <div className="max-w-[1600px] mx-auto w-full h-full">
-            {children}
-          </div>
-        </div>
-      </main>
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] p-4 md:p-6 lg:p-8">{children}</main>
+      </div>
+      <ConfirmDialog open={logoutConfirmationOpen} onOpenChange={setLogoutConfirmationOpen} onConfirm={() => router.push("/")} title="Sign out of PTI-Honeypot?" description="Your current dashboard session will end and you will return to the sign-in screen." confirmLabel="Sign out" />
     </div>
   );
+}
+
+function SearchField() {
+  return <label className="relative block"><span className="sr-only">Scan nodes</span><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><input type="text" placeholder="Scan nodes..." className="ui-field pl-10 xl:w-52" /></label>;
 }

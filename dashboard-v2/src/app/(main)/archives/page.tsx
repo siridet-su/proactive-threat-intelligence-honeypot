@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Download, Filter, Search, Calendar, Shield, Globe } from "lucide-react";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
+import { classificationBadgeClass } from "@/lib/presentation";
 
 export default function ArchivesPage() {
   const [sessions, setSessions] = useState<DashboardThreatEvent[]>([]);
@@ -47,29 +48,29 @@ export default function ArchivesPage() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-10 max-w-[1400px] mx-auto">
+    <div className="mx-auto max-w-[1400px] space-y-6 pb-8">
 
       {/* Header */}
-      <div className="flex justify-between items-end mb-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Security Incursion Archive</h1>
-          <p className="text-slate-400 text-sm">Total Archived Sessions: {sessions.length.toLocaleString()}</p>
+          <h1 className="text-2xl font-semibold">Security incursion archive</h1>
+          <p className="mt-2 text-sm text-text-muted">Total archived sessions: {sessions.length.toLocaleString()}</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white rounded-md text-sm transition-colors">
+        <button className="ui-button ui-button-primary">
           <Download className="w-4 h-4" /> Export Archive
         </button>
       </div>
 
-      <div className="bg-[#111116] border border-slate-800/80 rounded-xl overflow-hidden shadow-xl">
+      <div className="ui-panel overflow-hidden">
 
         {/* Filters Bar */}
-        <div className="p-5 border-b border-slate-800/80 bg-[#15151c] space-y-4">
+        <div className="space-y-4 border-b border-border bg-surface-subtle p-5 sm:p-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-slate-500 font-mono uppercase">Date Range</label>
+              <label className="text-xs font-medium text-text-muted">Date range</label>
               <div className="relative">
-                <Calendar className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <select className="w-full bg-[#0a0a0c] border border-slate-800 rounded-md pl-9 pr-3 py-2 text-sm text-slate-300 appearance-none focus:outline-none focus:border-purple-500">
+                <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-subtle" />
+                <select className="ui-field appearance-none pl-9">
                   <option>Last 30 Days</option>
                   <option>Last 6 Months</option>
                   <option>All Time</option>
@@ -77,10 +78,10 @@ export default function ArchivesPage() {
               </div>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-slate-500 font-mono uppercase">Attacker Type</label>
+              <label className="text-xs font-medium text-text-muted">Attacker type</label>
               <div className="relative">
-                <Shield className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <select className="w-full bg-[#0a0a0c] border border-slate-800 rounded-md pl-9 pr-3 py-2 text-sm text-slate-300 appearance-none focus:outline-none focus:border-purple-500">
+                <Shield className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-subtle" />
+                <select className="ui-field appearance-none pl-9">
                   <option>All Types</option>
                   <option>APT</option>
                   <option>Botnet</option>
@@ -89,8 +90,8 @@ export default function ArchivesPage() {
               </div>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-slate-500 font-mono uppercase">Criticality</label>
-              <select className="w-full bg-[#0a0a0c] border border-slate-800 rounded-md px-3 py-2 text-sm text-slate-300 appearance-none focus:outline-none focus:border-purple-500">
+              <label className="text-xs font-medium text-text-muted">Criticality</label>
+              <select className="ui-field appearance-none">
                 <option>All Levels</option>
                 <option>Critical</option>
                 <option>High</option>
@@ -98,59 +99,46 @@ export default function ArchivesPage() {
               </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-slate-500 font-mono uppercase">Region</label>
+              <label className="text-xs font-medium text-text-muted">Region</label>
               <div className="relative">
-                <Globe className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input type="text" placeholder="Search region..." className="w-full bg-[#0a0a0c] border border-slate-800 rounded-md pl-9 pr-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-purple-500" />
+                <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-subtle" />
+                <input type="text" placeholder="Search region..." className="ui-field pl-9" />
               </div>
             </div>
           </div>
 
-          <button className="flex items-center gap-2 text-xs font-mono text-slate-300 bg-slate-800/50 border border-slate-700 px-4 py-2 rounded hover:bg-slate-700 transition w-max">
+          <button className="ui-button w-max text-xs">
             <Filter className="w-3 h-3" /> Filter
           </button>
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto min-h-[400px]">
-          <table className="w-full text-left text-sm">
-            <thead className="text-[10px] uppercase text-slate-500 font-mono border-b border-slate-800/50 bg-[#0a0a0c]">
+        <div className="ui-scroll-region min-h-[360px]">
+          <table className="ui-table min-w-[900px]">
+            <thead>
               <tr>
-                <th className="px-6 py-4 font-semibold">SESSION ID</th>
-                <th className="px-6 py-4 font-semibold">TIMESTAMP (UTC)</th>
-                <th className="px-6 py-4 font-semibold">ORIGIN IP</th>
-                <th className="px-6 py-4 font-semibold">ATTACKER TYPE</th>
-                <th className="px-6 py-4 font-semibold">CRITICALITY</th>
-                <th className="px-6 py-4 text-right font-semibold">ACTIONS</th>
+                <th scope="col">Session ID</th><th scope="col">Timestamp (UTC)</th><th scope="col">Origin IP</th><th scope="col">Attacker type</th><th scope="col">Criticality</th><th scope="col" className="text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50">
+            <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-12 text-slate-500">Loading archives...</td></tr>
+                <tr><td colSpan={6} className="py-12 text-center text-text-muted">Loading archives...</td></tr>
               ) : currentData.map((session, i) => (
-                <tr key={i} className="hover:bg-slate-800/20 text-slate-300 transition-colors h-[60px]">
-                  <td className="px-6 py-3 font-mono text-slate-400">
+                <tr key={i} className="text-text-muted">
+                  <td className="font-mono text-xs">
                     {session.id.substring(0, 10).toUpperCase()}
                   </td>
-                  <td className="px-6 py-3 font-mono text-[11px] text-slate-400">
+                  <td className="font-mono text-xs">
                     {session.date} {session.time}
                   </td>
-                  <td className="px-6 py-3 font-mono text-slate-300">{session.sourceIp}</td>
-                  <td className="px-6 py-3">
-                    <span className="text-xs text-slate-300 capitalize">{session.classification.toLowerCase()}</span>
+                  <td className="font-mono text-xs text-text">{session.sourceIp}</td>
+                  <td><span className="text-xs capitalize text-text">{session.classification.toLowerCase()}</span>
                   </td>
-                  <td className="px-6 py-3">
-                     <span className={`px-2 py-1 text-[9px] font-mono font-bold border rounded flex items-center gap-1.5 w-max ${
-                        session.severity === 'Critical' ? 'bg-red-950/40 text-red-400 border-red-900' :
-                        session.severity === 'High' ? 'bg-orange-950/40 text-orange-400 border-orange-900' :
-                        'bg-slate-800 text-slate-400 border-slate-700'
-                     }`}>
-                       {session.severity === 'Critical' && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
+                  <td><span className={`ui-badge ${classificationBadgeClass(session.typeColor)}`}>
                        {session.severity.toUpperCase()}
                      </span>
                   </td>
-                  <td className="px-6 py-3 text-right">
-                     <Link href={`/threat-intel/${session.id}`} className="text-[11px] text-slate-400 hover:text-white transition-colors">
+                  <td className="text-right"><Link href={`/threat-intel/${session.id}`} className="ui-button min-h-9 px-3 text-xs">
                        View
                      </Link>
                   </td>
@@ -162,18 +150,18 @@ export default function ArchivesPage() {
 
         {/* Pagination */}
         {totalPages > 0 && (
-          <div className="p-4 border-t border-slate-800/50 bg-[#15151c] flex justify-between items-center text-xs font-mono text-slate-500">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface-subtle p-4 text-xs text-text-muted">
             <div>
                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, sessions.length)} of {sessions.length.toLocaleString()} entries
             </div>
-            <div className="flex gap-1">
-              <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="px-3 py-1.5 bg-[#0a0a0c] border border-slate-800 text-slate-400 rounded hover:bg-slate-800 disabled:opacity-50 transition-colors">&lt;</button>
+            <div className="flex gap-2">
+              <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="ui-button min-h-9 px-3">&lt;</button>
               {getPageNumbers().map(pageNum => (
-                <button key={pageNum} onClick={() => setCurrentPage(pageNum)} className={`px-3 py-1.5 rounded transition-colors ${currentPage === pageNum ? 'bg-purple-700 text-white font-bold' : 'bg-[#0a0a0c] border border-slate-800 text-slate-400 hover:bg-slate-800'}`}>
+                <button key={pageNum} onClick={() => setCurrentPage(pageNum)} aria-current={currentPage === pageNum ? "page" : undefined} className="ui-button min-h-9 px-3">
                   {pageNum}
                 </button>
               ))}
-              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="px-3 py-1.5 bg-[#0a0a0c] border border-slate-800 text-slate-400 rounded hover:bg-slate-800 disabled:opacity-50 transition-colors">&gt;</button>
+              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="ui-button min-h-9 px-3">&gt;</button>
             </div>
           </div>
         )}

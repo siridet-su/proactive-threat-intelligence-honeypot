@@ -1,9 +1,21 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Users, Briefcase, UserPlus, Edit2, ShieldX, X, Lock } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardUser } from "@/lib/dashboardTypes";
+
+const subscribeToSession = (onChange: () => void) => {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === "operatorId" || event.key === "userRole" || event.key === null) onChange();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+};
+
+const getCurrentUserId = () => localStorage.getItem("operatorId") || "";
+const getCurrentUserRole = () => localStorage.getItem("userRole") || "";
+const getEmptySessionValue = () => "";
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<DashboardUser[]>([]);
@@ -11,9 +23,10 @@ export default function UserManagementPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // เก็บข้อมูลผู้ใช้ที่กำลังล็อกอิน
-  const [currentUserId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem("operatorId") || "");
-  const [currentUserRole] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem("userRole") || "");
+  // Keep the first server and client render identical. Browser session values are
+  // read after hydration, so this route cannot rebuild the theme bootstrapped in <head>.
+  const currentUserId = useSyncExternalStore(subscribeToSession, getCurrentUserId, getEmptySessionValue);
+  const currentUserRole = useSyncExternalStore(subscribeToSession, getCurrentUserRole, getEmptySessionValue);
 
   const [formData, setFormData] = useState({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter" });
 
@@ -98,20 +111,20 @@ export default function UserManagementPage() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-10">
+    <div className="space-y-6 pb-8">
       {/* Header (แสดงปุ่ม Add เฉพาะ Admin) */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">User Management</h1>
-          <p className="text-slate-400 text-sm">Manage operator access permissions and security clearances.</p>
+          <h1 className="text-2xl font-semibold">User management</h1>
+          <p className="mt-2 text-sm text-text-muted">Manage operator access permissions and security clearances.</p>
         </div>
         <div className="flex gap-4">
           {currentUserRole === "Admin" && (
             <>
-              <Link href="/user-management/positions" className="flex items-center gap-2 px-6 py-3 border border-slate-700 hover:border-purple-500 text-slate-300 rounded-lg transition-colors bg-[#111116] shadow-md">
+              <Link href="/user-management/positions" className="ui-button">
                 <Briefcase className="w-4 h-4" /> Manage Positions
               </Link>
-              <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 px-6 py-3 bg-[#e9d5ff] hover:bg-[#d8b4fe] text-purple-950 font-semibold rounded-lg transition-colors shadow-[0_0_15px_rgba(216,180,254,0.3)]">
+              <button onClick={() => setIsAddModalOpen(true)} className="ui-button ui-button-primary">
                 <UserPlus className="w-4 h-4" /> Add New Operator
               </button>
             </>
@@ -120,13 +133,13 @@ export default function UserManagementPage() {
       </div>
 
       {/* Table Section */}
-      <div className="bg-[#111116] border border-slate-800/80 rounded-xl overflow-hidden mt-8 shadow-xl">
-        <div className="p-5 border-b border-slate-800/80 flex justify-between items-center bg-[#15151c]">
-          <h2 className="text-lg font-semibold text-slate-200">Active Operator Roster</h2>
+      <div className="ui-panel mt-8 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border bg-surface-subtle p-5 sm:p-6">
+          <h2 className="text-base font-semibold">Active operator roster</h2>
         </div>
 
         <table className="w-full text-left text-sm">
-          <thead className="text-[10px] uppercase text-slate-500 font-mono border-b border-slate-800/50 bg-[#0a0a0c]">
+          <thead className="bg-surface-subtle text-xs text-text-muted">
             <tr>
               <th className="px-6 py-4">OPERATOR ID</th>
               <th className="px-6 py-4">FULL NAME</th>
@@ -143,13 +156,12 @@ export default function UserManagementPage() {
               const canDelete = currentUserRole === "Admin" && user.operatorId !== currentUserId;
 
               return (
-                <tr key={i} className="hover:bg-slate-800/20 text-slate-300 transition-colors">
-                  <td className="px-6 py-4 font-mono text-purple-400 font-medium">
-                    {user.operatorId} {user.operatorId === currentUserId && <span className="text-[9px] text-slate-500 ml-1">(YOU)</span>}
+                <tr key={i} className="text-text-muted transition-colors hover:bg-surface-hover">
+                  <td className="px-6 py-4 font-mono font-medium text-primary">
+                    {user.operatorId} {user.operatorId === currentUserId && <span className="ml-1 text-xs text-text-subtle">(YOU)</span>}
                   </td>
                   <td className="px-6 py-4">{user.fullName}</td>
-                  <td className="px-6 py-4 text-slate-400">{user.position}</td>
-                  <td className="px-6 py-4 text-slate-400">{user.role}</td>
+                  <td className="px-6 py-4 text-text-muted">{user.position}</td><td className="px-6 py-4 text-text-muted">{user.role}</td>
                   <td className="px-6 py-4">
                     <span className="flex items-center gap-2 text-xs">
                       <span className={`w-2 h-2 rounded-full ${user.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
@@ -158,10 +170,10 @@ export default function UserManagementPage() {
                   </td>
                   <td className="px-6 py-4 text-right flex justify-end gap-4">
                     {canEdit && (
-                       <button onClick={() => openEditModal(user)} className="text-slate-500 hover:text-white transition"><Edit2 className="w-4 h-4" /></button>
+                       <button onClick={() => openEditModal(user)} className="ui-button min-h-9 px-2" aria-label={`Edit ${user.operatorId}`}><Edit2 className="w-4 h-4" /></button>
                     )}
                     {canDelete && (
-                       <button onClick={() => handleDelete(user.operatorId)} className="text-slate-500 hover:text-red-400 transition"><ShieldX className="w-4 h-4" /></button>
+                       <button onClick={() => handleDelete(user.operatorId)} className="ui-button min-h-9 px-2 text-danger" aria-label={`Delete ${user.operatorId}`}><ShieldX className="w-4 h-4" /></button>
                     )}
                   </td>
                 </tr>
@@ -173,24 +185,20 @@ export default function UserManagementPage() {
 
       {/* Modal Add User (อันเดิม) */}
       {isAddModalOpen && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#111116] border border-slate-800 p-6 rounded-xl w-full max-w-md shadow-2xl">
+         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]">
              <div className="flex justify-between items-center mb-6">
-               <h3 className="text-lg font-bold text-white">Add New Operator</h3>
-               <button onClick={() => setIsAddModalOpen(false)} className="text-slate-500 hover:text-white"><X className="w-5 h-5"/></button>
+               <h3 className="text-lg font-semibold">Add new operator</h3><button onClick={() => setIsAddModalOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close add operator dialog"><X className="w-5 h-5"/></button>
              </div>
              <form onSubmit={handleAddUser} className="space-y-4">
                <div>
-                 <label className="text-xs text-slate-400 font-mono">FULL NAME</label>
-                 <input type="text" value={formData.fullName} onChange={(e) => setFormData({...formData, fullName: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                 <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={formData.fullName} onChange={(e) => setFormData({...formData, fullName: e.target.value})} required className="ui-field mt-1" />
                </div>
                <div>
-                 <label className="text-xs text-slate-400 font-mono">EMAIL</label>
-                 <input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                 <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required className="ui-field mt-1" />
                </div>
                <div>
-                 <label className="text-xs text-slate-400 font-mono">POSITION</label>
-                 <select value={formData.position} onChange={(e) => setFormData({...formData, position: e.target.value})} className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none">
+                 <label className="text-xs font-medium text-text-muted">Position</label><select value={formData.position} onChange={(e) => setFormData({...formData, position: e.target.value})} className="ui-field mt-1">
                    <option value="Lead Sentinel">Lead Sentinel</option>
                    <option value="Data Guardian">Data Guardian</option>
                    <option value="Network Shield">Network Shield</option>
@@ -198,13 +206,12 @@ export default function UserManagementPage() {
                  </select>
                </div>
                <div>
-                 <label className="text-xs text-slate-400 font-mono">ROLE</label>
-                 <select value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none">
+                 <label className="text-xs font-medium text-text-muted">Role</label><select value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} className="ui-field mt-1">
                    <option value="Admin">Admin</option>
                    <option value="Supporter">Supporter</option>
                  </select>
                </div>
-               <button type="submit" className="w-full bg-purple-700 hover:bg-purple-600 text-white py-3 rounded-lg font-bold tracking-wider mt-4">
+               <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
                  CREATE OPERATOR
                </button>
              </form>
@@ -214,29 +221,25 @@ export default function UserManagementPage() {
 
       {/* Modal Edit User */}
       {isEditModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#111116] border border-slate-800 p-6 rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Edit2 className="w-5 h-5 text-purple-400"/> Edit Operator [{editFormData.operatorId}]
+              <h3 className="flex items-center gap-2 text-lg font-semibold"><Edit2 className="w-5 h-5 text-primary"/> Edit operator [{editFormData.operatorId}]
               </h3>
-              <button onClick={() => setIsEditModalOpen(false)} className="text-slate-500 hover:text-white"><X className="w-5 h-5"/></button>
+              <button onClick={() => setIsEditModalOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close edit operator dialog"><X className="w-5 h-5"/></button>
             </div>
 
             <form onSubmit={handleEditSubmit} className="space-y-4">
               <div>
-                <label className="text-xs text-slate-400 font-mono">FULL NAME</label>
-                <input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="ui-field mt-1" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 font-mono">EMAIL</label>
-                <input type="email" value={editFormData.email} onChange={(e) => setEditFormData({...editFormData, email: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={editFormData.email} onChange={(e) => setEditFormData({...editFormData, email: e.target.value})} required className="ui-field mt-1" />
               </div>
 
               {/* ให้ Admin เท่านั้นที่เปลี่ยนตำแหน่งและ Role ได้ */}
               <div>
-                <label className="text-xs text-slate-400 font-mono">POSITION</label>
-                <select disabled={currentUserRole !== "Admin"} value={editFormData.position} onChange={(e) => setEditFormData({...editFormData, position: e.target.value})} className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none disabled:opacity-50">
+                <label className="text-xs font-medium text-text-muted">Position</label><select disabled={currentUserRole !== "Admin"} value={editFormData.position} onChange={(e) => setEditFormData({...editFormData, position: e.target.value})} className="ui-field mt-1">
                   <option value="Lead Sentinel">Lead Sentinel</option>
                   <option value="Data Guardian">Data Guardian</option>
                   <option value="Network Shield">Network Shield</option>
@@ -244,8 +247,7 @@ export default function UserManagementPage() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-slate-400 font-mono">ROLE</label>
-                <select disabled={currentUserRole !== "Admin"} value={editFormData.role} onChange={(e) => setEditFormData({...editFormData, role: e.target.value})} className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none disabled:opacity-50">
+                <label className="text-xs font-medium text-text-muted">Role</label><select disabled={currentUserRole !== "Admin"} value={editFormData.role} onChange={(e) => setEditFormData({...editFormData, role: e.target.value})} className="ui-field mt-1">
                   <option value="Admin">Admin</option>
                   <option value="Supporter">Supporter</option>
                 </select>
@@ -253,15 +255,14 @@ export default function UserManagementPage() {
 
               {/* ส่วนเปลี่ยนรหัสผ่าน (แสดงเฉพาะตอนแก้ไขบัญชีตัวเอง) */}
               {editFormData.operatorId === currentUserId && (
-                <div className="pt-4 mt-4 border-t border-slate-800">
-                  <label className="text-xs text-amber-500 font-mono flex items-center gap-1 mb-2">
+                <div className="mt-4 border-t border-border pt-4"><label className="mb-2 flex items-center gap-1 text-xs font-medium text-warning">
                     <Lock className="w-3 h-3"/> CHANGE PASSWORD (OPTIONAL)
                   </label>
-                  <input type="password" placeholder="Leave blank to keep current password" value={editFormData.newPassword} onChange={(e) => setEditFormData({...editFormData, newPassword: e.target.value})} className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 focus:border-amber-500 outline-none" />
+                  <input type="password" placeholder="Leave blank to keep current password" value={editFormData.newPassword} onChange={(e) => setEditFormData({...editFormData, newPassword: e.target.value})} className="ui-field" />
                 </div>
               )}
 
-              <button type="submit" className="w-full bg-purple-700 hover:bg-purple-600 text-white py-3 rounded-lg font-bold tracking-wider mt-4 transition-colors">
+              <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
                 SAVE CHANGES
               </button>
             </form>

@@ -1,11 +1,15 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import TargetLandscapeChart from "@/components/threat-intel/TargetLandscapeChart";
 import Link from "next/link";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { DashboardChartDatum, DashboardThreatEvent } from "@/lib/dashboardTypes";
+import { RefreshStatus, RegionState, type RegionStatus } from "@/components/ui/RegionState";
+import { classificationBadgeClass } from "@/lib/presentation";
 
 export default function ThreatIntelPage() {
+  const [status, setStatus] = useState<RegionStatus>("loading");
+  const hasResult = useRef(false);
   const [logs, setLogs] = useState<DashboardThreatEvent[]>([]);
   const [stats, setStats] = useState({ total: 0, proxies: 0, critical: 0 });
   const [chartData, setChartData] = useState<DashboardChartDatum[]>([]);
@@ -16,36 +20,38 @@ export default function ThreatIntelPage() {
 
   useEffect(() => {
     const fetchThreats = async () => {
+      setStatus(hasResult.current ? "refreshing" : "loading");
       try {
         const res = await fetch("/api/threats");
-        if (res.ok) {
-          const data: unknown = await res.json();
-          if (!Array.isArray(data)) return;
-          const threats = data.filter(isDashboardThreatEvent);
+        if (!res.ok) throw new Error("Threat intelligence request failed");
+        const data: unknown = await res.json();
+        if (!Array.isArray(data)) throw new Error("Threat intelligence response unavailable");
+        const threats = data.filter(isDashboardThreatEvent);
 
-          // คำนวณสถิติภาพรวม
-          setStats({
-            total: threats.length,
-            proxies: threats.filter((d) => d.classification === 'BOT').length,
-            critical: threats.filter((d) => d.severity === 'Critical' || d.severity === 'High').length
-          });
-          setLogs(threats);
+        // คำนวณสถิติภาพรวม
+        setStats({
+          total: threats.length,
+          proxies: threats.filter((d) => d.classification === 'BOT').length,
+          critical: threats.filter((d) => d.severity === 'Critical' || d.severity === 'High').length
+        });
+        setLogs(threats);
 
-          // คำนวณข้อมูลจริงสำหรับ Target Landscape
-          const aptCount = threats.filter((d) => d.classification === 'APT').length;
-          const botCount = threats.filter((d) => d.classification === 'BOT').length;
-          const scriptCount = threats.filter((d) => d.classification === 'SCRIPT KIDDIE').length;
-          const otherCount = threats.length - (aptCount + botCount + scriptCount);
+        // คำนวณข้อมูลจริงสำหรับ Target Landscape
+        const aptCount = threats.filter((d) => d.classification === 'APT').length;
+        const botCount = threats.filter((d) => d.classification === 'BOT').length;
+        const scriptCount = threats.filter((d) => d.classification === 'SCRIPT KIDDIE').length;
+        const otherCount = threats.length - (aptCount + botCount + scriptCount);
 
-          setChartData([
-            { name: "APT", value: aptCount, color: "#a855f7" },
-            { name: "Bot", value: botCount, color: "#d946ef" },
-            { name: "Script", value: scriptCount, color: "#64748b" },
-            { name: "Other", value: otherCount, color: "#d97706" }
-          ]);
-        }
-      } catch (err) {
-        console.error("Failed to fetch threats", err);
+        setChartData([
+          { name: "APT", value: aptCount, color: "var(--chart-4)" },
+          { name: "Bot", value: botCount, color: "var(--chart-2)" },
+          { name: "Script", value: scriptCount, color: "var(--neutral)" },
+          { name: "Other", value: otherCount, color: "var(--chart-3)" }
+        ]);
+        hasResult.current = true;
+        setStatus("ready");
+      } catch {
+        setStatus(hasResult.current ? "stale" : "error");
       }
     };
     fetchThreats();
@@ -65,130 +71,124 @@ export default function ThreatIntelPage() {
 
   // ใช้ข้อมูลเปอร์เซ็นต์จริงสำหรับแสดงคำบรรยายใต้แผนภูมิ
   const getPercent = (val: number) => stats.total > 0 ? Math.round((val / stats.total) * 100) : 0;
+  const isInitialLoad = status === "loading";
+  const isUnavailable = status === "error";
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-10">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl flex flex-col justify-between">
-          <span className="text-[10px] text-slate-500 tracking-wider mb-2">TOTAL SESSIONS</span>
-          <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white">{stats.total.toLocaleString()}</span>
-          </div>
-        </div>
-        <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl flex flex-col justify-between">
-          <span className="text-[10px] text-slate-500 tracking-wider mb-2">AUTOMATED BOTS</span>
-          <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white">{stats.proxies}</span>
-            <span className="text-[10px] text-amber-500 font-bold">DETECTED</span>
-          </div>
-        </div>
-        <div className="bg-[#111116] border border-slate-800/50 p-5 rounded-xl flex flex-col justify-between">
-          <span className="text-[10px] text-slate-500 tracking-wider mb-2">DETECTION LATENCY</span>
-          <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white">12ms</span>
-            <span className="text-[10px] text-slate-400">AVG</span>
-          </div>
-        </div>
-        <div className="bg-[#1a1111] border border-red-900/50 p-5 rounded-xl flex flex-col justify-between relative shadow-[0_0_15px_rgba(153,27,27,0.1)]">
-          <span className="text-[10px] text-slate-400 tracking-wider mb-2">CRITICAL THREATS</span>
-          <div className="flex items-center gap-2">
-            <span className="text-3xl font-bold text-[#fca5a5]">{(stats.critical).toString().padStart(2, '0')}</span>
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse mt-1"></span>
-          </div>
-        </div>
-      </div>
+    <div className="space-y-6 pb-8">
+      <section aria-label="Threat intelligence overview" aria-busy={isInitialLoad} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricSummary label="Total sessions" value={stats.total.toLocaleString()} loading={isInitialLoad} unavailable={isUnavailable} />
+        <MetricSummary label="Automated bots" value={stats.proxies.toString()} loading={isInitialLoad} unavailable={isUnavailable} annotation="Detected" annotationClass="text-warning" />
+        <MetricSummary label="Detection latency" value="12ms" loading={isInitialLoad} unavailable={isUnavailable} annotation="Avg" />
+        <MetricSummary label="Critical threats" value={stats.critical.toString().padStart(2, "0")} loading={isInitialLoad} unavailable={isUnavailable} annotation="Critical severity" annotationClass="text-danger" valueClass="text-danger" />
+      </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-[#111116] border border-slate-800/50 p-6 rounded-xl flex flex-col h-fit">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="text-base font-semibold text-white">Target Landscape</h3>
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        <div className="ui-panel flex min-h-[340px] flex-col p-5 sm:p-6 xl:col-span-4">
+          <div className="mb-3 flex items-start justify-between gap-4">
+            <div><h2 className="text-base font-semibold">Target landscape</h2><p className="mt-1 text-xs text-text-muted">Classification distribution</p></div>
+            <RefreshStatus status={status} />
           </div>
-          <div className="flex-1 flex flex-col items-center justify-center">
-            <div className="relative w-full max-w-[200px] mb-8">
-              <div className="absolute inset-0 bg-[#1e1e2d]/40 rounded-xl border border-slate-800/50 scale-90"></div>
-              {/* ส่งข้อมูลจริงไปยัง Chart */}
-              <TargetLandscapeChart data={chartData} total={stats.total} />
-            </div>
-
-            {/* แสดงค่าเปอร์เซ็นต์จริงใต้แผนภูมิ */}
-            <div className="grid grid-cols-2 gap-y-3 gap-x-6 w-full text-xs font-mono text-slate-300 px-4">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#a855f7]"></span>APT ({chartData[0]?.value ? getPercent(chartData[0].value) : 0}%)
+          <div className="min-h-0 flex-1">
+            {isInitialLoad && <RegionState kind="loading" title="Loading threat distribution" />}
+            {isUnavailable && <RegionState kind="error" title="Distribution unavailable" description="The latest session directory could not be loaded." />}
+            {!isInitialLoad && !isUnavailable && <div className="flex h-full flex-col justify-between">
+              <div className="mx-auto w-full max-w-[230px]"><TargetLandscapeChart data={chartData} total={stats.total} /></div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 text-xs text-text-muted">
+                <LegendItem color="var(--chart-4)" label={`APT (${chartData[0]?.value ? getPercent(chartData[0].value) : 0}%)`} />
+                <LegendItem color="var(--chart-2)" label={`Bot (${chartData[1]?.value ? getPercent(chartData[1].value) : 0}%)`} />
+                <LegendItem color="var(--neutral)" label={`Script (${chartData[2]?.value ? getPercent(chartData[2].value) : 0}%)`} />
+                <LegendItem color="var(--chart-3)" label={`Other (${chartData[3]?.value ? getPercent(chartData[3].value) : 0}%)`} />
               </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#d946ef]"></span>Bot ({chartData[1]?.value ? getPercent(chartData[1].value) : 0}%)
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#64748b]"></span>Script ({chartData[2]?.value ? getPercent(chartData[2].value) : 0}%)
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#d97706]"></span>Other ({chartData[3]?.value ? getPercent(chartData[3].value) : 0}%)
-              </div>
-            </div>
+            </div>}
           </div>
         </div>
 
-        <div className="lg:col-span-2 bg-[#111116] border border-slate-800/50 rounded-xl flex flex-col overflow-hidden">
-          <div className="p-6 border-b border-slate-800/50 flex justify-between items-start">
+        <div className="ui-panel flex min-h-[340px] flex-col overflow-hidden xl:col-span-8">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5 sm:p-6">
             <div>
-              <h3 className="text-base font-semibold text-white mb-1">Live Incursion Log</h3>
-              <p className="text-xs text-slate-500">Real-time packet interception & origin analysis</p>
+              <h2 className="text-base font-semibold">Live incursion log</h2>
+              <p className="mt-1 text-xs text-text-muted">Real-time packet interception and origin analysis.</p>
             </div>
+            <RefreshStatus status={status} />
           </div>
 
-          <div className="flex-1 flex flex-col justify-between overflow-x-auto min-h-[500px]">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="text-[10px] uppercase text-slate-500 font-mono border-b border-slate-800/50">
+          <div className="relative min-h-0 flex-1" aria-busy={status === "loading" || status === "refreshing"}>
+            <div className="ui-scroll-region h-full" role="region" aria-label="Live incursion log. Scroll to view all columns." tabIndex={0}>
+            <table className="ui-table min-w-[680px]">
+              <thead>
                 <tr>
-                  <th className="px-6 py-4 font-normal">TIMESTAMP</th>
-                  <th className="px-6 py-4 font-normal">HACKER IP</th>
-                  <th className="px-6 py-4 font-normal">CLASSIFICATION</th>
-                  <th className="px-6 py-4 font-normal text-right">ACTION</th>
+                  <th scope="col">Timestamp</th>
+                  <th scope="col">Hacker IP</th>
+                  <th scope="col">Classification</th>
+                  <th scope="col" className="text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {currentLogs.map((log) => (
-                  <tr key={log.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors h-[65px]">
-                    <td className="px-6 py-2 font-mono text-[11px] text-slate-400">
+                {isInitialLoad && Array.from({ length: itemsPerPage }, (_, index) => (
+                  <tr key={`loading-${index}`} aria-hidden="true">
+                    {Array.from({ length: 4 }, (_, column) => <td key={column}><div className="ui-skeleton h-4 w-full" /></td>)}
+                  </tr>
+                ))}
+                {!isInitialLoad && currentLogs.map((log) => (
+                  <tr key={log.id} className="text-text-muted">
+                    <td className="font-mono text-xs">
                       <div>{log.date}</div>
-                      <div className="text-slate-600">{log.time}</div>
+                      <div className="mt-1 text-text-subtle">{log.time}</div>
                     </td>
-                    <td className="px-6 py-2 font-mono text-[#a855f7] text-xs">{log.sourceIp}</td>
-                    <td className="px-6 py-2">
-                      <span className={`px-2 py-1 text-[9px] font-bold border rounded-sm flex items-center gap-1.5 w-max ${log.typeColor}`}>
+                    <td className="font-mono text-xs text-text">{log.sourceIp}</td>
+                    <td>
+                      <span className={`ui-badge ${classificationBadgeClass(log.typeColor)}`}>
                         {log.classification}
                       </span>
                     </td>
-                    <td className="px-6 py-2 text-right">
-                      <Link href={`/threat-intel/${log.id}`} className="border border-slate-700 bg-slate-900/50 text-slate-400 px-3 py-1.5 rounded text-[10px] hover:text-white transition">
+                    <td className="text-right">
+                      <Link href={`/threat-intel/${log.id}`} className="ui-button min-h-9 px-3 text-xs">
                         View Details
                       </Link>
                     </td>
                   </tr>
                 ))}
                 {/* สร้างช่องว่างให้เต็ม 5 แถวเสมอเมื่อข้อมูลหน้าสุดท้ายไม่ถึง 5 รายการ */}
-                {Array.from({ length: Math.max(0, itemsPerPage - currentLogs.length) }).map((_, idx) => (
-                  <tr key={`empty-${idx}`} className="h-[65px]">
+                {!isInitialLoad && Array.from({ length: Math.max(0, itemsPerPage - currentLogs.length) }).map((_, idx) => (
+                  <tr key={`empty-${idx}`}>
                     <td colSpan={4}></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
 
-            {totalPages > 1 && (
-              <div className="p-4 border-t border-slate-800/50 bg-[#0a0a0c] flex justify-end items-center gap-2 font-mono text-xs">
-                <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 disabled:opacity-50 transition-colors">Prev</button>
+            <div className="pointer-events-none absolute inset-x-0 top-[52px] bottom-0 [&>div]:h-full">
+              {status === "error" && <RegionState kind="error" title="Threat intelligence unavailable" description="The latest session directory could not be loaded. The next automatic refresh will try again." />}
+              {status === "ready" && logs.length === 0 && <RegionState kind="empty" title="NO THREAT INTELLIGENCE AVAILABLE" description="No sessions were returned in the last successful response." />}
+            </div>
+
+          </div>
+          {!isInitialLoad && totalPages > 1 && (
+              <nav aria-label="Incursion log pages" className="flex flex-wrap justify-end gap-2 border-t border-border bg-surface-subtle p-4">
+                <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="ui-button min-h-9 px-3 text-xs">Prev</button>
                 {getPageNumbers().map(pageNum => (
-                  <button key={pageNum} onClick={() => setCurrentPage(pageNum)} className={`px-3 py-1.5 rounded transition-colors ${currentPage === pageNum ? 'bg-purple-600 text-white font-bold' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                  <button key={pageNum} onClick={() => setCurrentPage(pageNum)} aria-current={currentPage === pageNum ? "page" : undefined} aria-label={`Page ${pageNum}`} className="ui-button min-h-9 px-3 text-xs">
                     {pageNum}
                   </button>
                 ))}
-                <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 disabled:opacity-50 transition-colors">Next</button>
-              </div>
-            )}
-          </div>
+                <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="ui-button min-h-9 px-3 text-xs">Next</button>
+              </nav>
+          )}
         </div>
-      </div>
+      </section>
     </div>
   );
+}
+
+function MetricSummary({ label, value, loading, unavailable, annotation, annotationClass = "text-text-subtle", valueClass = "text-text" }: { label: string; value: string; loading: boolean; unavailable: boolean; annotation?: string; annotationClass?: string; valueClass?: string }) {
+  return <div className="ui-panel flex min-h-[116px] flex-col justify-between p-5">
+    <h2 className="text-xs font-medium text-text-muted">{label}</h2>
+    {loading ? <div className="ui-skeleton h-8 w-20" aria-label={`Loading ${label}`} /> : unavailable ? <p className="text-sm text-text-muted">Unavailable</p> : <div className="flex flex-wrap items-baseline gap-2"><span className={`text-[28px] font-semibold leading-9 tabular-nums ${valueClass}`}>{value}</span>{annotation && <span className={`text-xs font-medium ${annotationClass}`}>{annotation}</span>}</div>}
+  </div>;
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return <span className="flex items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />{label}</span>;
 }

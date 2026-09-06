@@ -6,6 +6,7 @@ import { Search } from 'lucide-react';
 
 export function AttackerTable() {
   const [threats, setThreats] = useState<DashboardThreatEvent[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchThreats = async () => {
@@ -17,8 +18,10 @@ export function AttackerTable() {
             setThreats(data.filter(isDashboardThreatEvent));
           }
         }
-      } catch (err) {
-        console.error("Failed to fetch threats for table:", err);
+      } catch {
+        // The empty table remains usable when this periodic request fails.
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -56,18 +59,18 @@ export function AttackerTable() {
     <div className="flex flex-col h-full gap-4">
       <div className="flex items-center justify-between">
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-subtle" />
           <input
             type="text"
             placeholder="Search IPs, ASNs..."
-            className="bg-slate-900/50 border border-slate-700 text-sm rounded-md pl-9 pr-4 py-1.5 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 text-slate-300 w-64 transition-all"
+            className="ui-field w-64 pl-9"
           />
         </div>
       </div>
 
       <div className="flex-1 overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead className="text-xs text-slate-400 uppercase bg-slate-800/50 border-y border-slate-700/50">
+        <table className="ui-table min-w-[680px]">
+          <thead>
             <tr>
               <th className="px-4 py-3 font-medium">Source IP</th>
               <th className="px-4 py-3 font-medium">Location</th>
@@ -78,19 +81,17 @@ export function AttackerTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
-            {attackers.map((attacker, i) => (
-              <tr key={i} className="hover:bg-slate-800/30 transition-colors group">
-                <td className="px-4 py-3 font-mono text-cyan-400 group-hover:text-cyan-300">{attacker.ip}</td>
+            {loading && Array.from({ length: 5 }, (_, index) => <tr key={`loading-${index}`} aria-hidden="true">{Array.from({ length: 6 }, (_, column) => <td key={column}><div className="ui-skeleton h-4 w-full" /></td>)}</tr>)}
+            {!loading && attackers.map((attacker, i) => (
+            <tr key={i} className="group text-text-muted"><td className="font-mono text-xs text-primary">{attacker.ip}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-col">
-                    <span className="text-slate-300">{attacker.country}</span>
-                    <span className="text-xs text-slate-500">{attacker.asn}</span>
+                    <span className="text-text">{attacker.country}</span><span className="text-xs text-text-subtle">{attacker.asn}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-slate-400">{attacker.mainTechnique}</td>
-                <td className="px-4 py-3 text-right font-medium text-slate-300">{attacker.attackCount.toLocaleString()}</td>
+                <td className="text-text-muted">{attacker.mainTechnique}</td><td className="text-right font-medium text-text">{attacker.attackCount.toLocaleString()}</td>
                 <td className="px-4 py-3 text-center">
-                  <span className={`font-bold ${attacker.riskScore > 80 ? 'text-red-400' : attacker.riskScore > 50 ? 'text-orange-400' : 'text-emerald-400'}`}>
+                    <span className={`font-semibold ${attacker.riskScore > 80 ? 'text-danger' : attacker.riskScore > 50 ? 'text-warning' : 'text-success'}`}>
                     {attacker.riskScore}
                   </span>
                 </td>

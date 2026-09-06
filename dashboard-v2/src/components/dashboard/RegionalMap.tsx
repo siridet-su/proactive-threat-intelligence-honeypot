@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+
+import { RefreshStatus, type RegionStatus } from "@/components/ui/RegionState";
 
 interface MapMarker {
   id: string;
@@ -19,12 +21,16 @@ interface MapPosition {
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 export default function RegionalMap() {
+  const [status, setStatus] = useState<RegionStatus>("loading");
+  const hasResult = useRef(false);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
 
   useEffect(() => {
     const fetchThreats = async () => {
+      setStatus(hasResult.current ? "refreshing" : "loading");
       try {
         const res = await fetch("/api/threats");
+        if (!res.ok) throw new Error("Map request failed");
         if (res.ok) {
           const data: unknown = await res.json();
           if (Array.isArray(data)) {
@@ -35,10 +41,16 @@ export default function RegionalMap() {
               status: threat.severity === "Critical" || threat.severity === "High" ? "failed" as const : "running" as const
             })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0);
             setMarkers(newMarkers);
+            hasResult.current = true;
+            setStatus("ready");
+          } else {
+            throw new Error("Map response unavailable");
           }
         }
-      } catch (err) {
-        console.error("Failed to fetch threats for map:", err);
+      } catch {
+        // The dashboard region already communicates this recoverable polling
+        // failure. Server-side logging retains the diagnostic detail.
+        setStatus(hasResult.current ? "stale" : "error");
       }
     };
 
@@ -60,16 +72,36 @@ export default function RegionalMap() {
   }
 
   // ใช้ onMoveEnd แทน onMove เพื่อให้ Trackpad สามารถซูมและเลื่อนได้ลื่นไหล
-  function handleMoveEnd(newPosition: MapPosition) {
-    setPosition(newPosition);
-  }
+  const handleMoveEnd = useCallback((newPosition: MapPosition) => {
+    setPosition((currentPosition) => {
+      const [currentLongitude, currentLatitude] = currentPosition.coordinates;
+      const [nextLongitude, nextLatitude] = newPosition.coordinates;
+
+      // react-simple-maps can report the controlled position again after a
+      // parent render. Returning the existing object prevents that report from
+      // becoming a render → effect → render loop in React 19.
+      if (
+        currentLongitude === nextLongitude &&
+        currentLatitude === nextLatitude &&
+        currentPosition.zoom === newPosition.zoom
+      ) {
+        return currentPosition;
+      }
+
+      return newPosition;
+    });
+  }, []);
 
   return (
     // คง touchAction: "none" ไว้เพื่อป้องกันเบราว์เซอร์ซูมหน้าจอ
-    <div className="w-full h-full relative bg-[#09090b] cursor-grab active:cursor-grabbing" style={{ touchAction: "none" }}>
+    <div aria-label="Attack distribution map" aria-busy={status === "loading" || status === "refreshing"} className="ui-map w-full h-full relative bg-canvas cursor-grab active:cursor-grabbing" style={{ touchAction: "none" }}>
       <ComposableMap
         projection="geoMercator"
-        style={{ width: "100%", height: "100%", outline: "none" }}
+        width={1000}
+        height={460}
+        projectionConfig={{ scale: 125 }}
+        aria-label="World attack distribution. Use the zoom controls to adjust the view."
+        style={{ width: "100%", height: "100%" }}
       >
         <ZoomableGroup
           zoom={position.zoom}
@@ -84,9 +116,12 @@ export default function RegionalMap() {
                 <Geography
                   key={geo.rsmKey}
                   geography={geo}
-                  fill="#16161d"
-                  stroke="#27272a"
-                  strokeWidth={0.5}
+                  tabIndex={-1}
+                  aria-label={geo.properties.name}
+                  fill="var(--map-land)"
+                  stroke="var(--map-border)"
+                  strokeWidth={0.75}
+                  vectorEffect="non-scaling-stroke"
                   onMouseEnter={(e) => {
                     const { name } = geo.properties;
                     setTooltip({ show: true, content: name, x: e.clientX, y: e.clientY });
@@ -98,24 +133,19 @@ export default function RegionalMap() {
                     setTooltip({ show: false, content: "", x: 0, y: 0 });
                   }}
                   style={{
-                    default: { outline: "none", transition: "fill 0.2s" },
-                    hover: { fill: "#27272a", outline: "none", cursor: "crosshair" },
-                    pressed: { outline: "none" },
+                    default: { transition: "fill 150ms" },
+                    hover: { fill: "var(--map-hover)", cursor: "crosshair" },
+                    pressed: { fill: "var(--map-hover)" },
                   }}
                 />
               ))
             }
           </Geographies>
 
-          {markers.map(({ id, name, coordinates, status }, index) => (
-            <Marker key={id || index} coordinates={coordinates}>
-            <circle r={4} fill={
-              status === "running" ? "#34d399" :
-              status === "failed" ? "#f87171" : "#a855f7"
-            } />
-            {status === "running" && (
-              <circle r={8} fill="#34d399" opacity={0.4} className="animate-ping" />
-            )}
+          {markers.map(({ id, coordinates, status }, index) => (
+            <Marker key={id || index} coordinates={coordinates} tabIndex={0} aria-label={`${status === "failed" ? "Critical" : status === "running" ? "Active" : "Dormant"} · ${id}`}>
+              <title>{`${status === "failed" ? "Critical" : status === "running" ? "Active" : "Dormant"} · ${id}`}</title>
+              {status === "failed" ? <path d="M 0 -5 L 5 0 L 0 5 L -5 0 Z" fill="var(--danger)" stroke="var(--surface)" /> : status === "running" ? <circle r={4} fill="var(--info)" stroke="var(--surface)" /> : <rect x={-4} y={-4} width={8} height={8} fill="var(--neutral)" stroke="var(--surface)" />}
             </Marker>
           ))}
         </ZoomableGroup>
@@ -123,16 +153,19 @@ export default function RegionalMap() {
 
       {tooltip.show && (
         <div
-          className="fixed z-50 px-3 py-1.5 bg-[#111116] border border-slate-700 text-slate-200 text-xs rounded-md shadow-[0_0_15px_rgba(0,0,0,0.5)] font-sans pointer-events-none transform -translate-x-1/2 -translate-y-[150%]"
+          className="fixed z-[110] px-3 py-2 bg-surface-raised border border-border text-text text-xs rounded-lg shadow-[var(--shadow-raised)] pointer-events-none -translate-x-1/2 -translate-y-[150%]"
           style={{ top: tooltip.y, left: tooltip.x }}
         >
           {tooltip.content}
         </div>
       )}
 
-      <div className="absolute bottom-4 right-4 flex flex-col bg-[#111116] border border-slate-800 rounded-md overflow-hidden text-slate-400">
-         <button onClick={handleZoomIn} className="px-3 py-1.5 hover:bg-slate-800 hover:text-white border-b border-slate-800 focus:outline-none">+</button>
-         <button onClick={handleZoomOut} className="px-3 py-1.5 hover:bg-slate-800 hover:text-white focus:outline-none">-</button>
+      <div className="pointer-events-none absolute bottom-4 left-4 max-w-[calc(100%-88px)] rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-muted" role={status === "error" ? "alert" : "status"}>
+        {status === "loading" ? "Loading attack locations…" : status === "error" ? <span className="text-danger">Attack locations unavailable. Retrying automatically.</span> : status === "refreshing" || status === "stale" ? <RefreshStatus status={status} /> : markers.length === 0 ? "No attack locations in the last successful response." : "Drag to explore · scroll to zoom"}
+      </div>
+      <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+        <button onClick={handleZoomIn} disabled={position.zoom >= 8} aria-label="Zoom in" className="ui-button h-10 w-10 text-base">+</button>
+        <button onClick={handleZoomOut} disabled={position.zoom <= 1} aria-label="Zoom out" className="ui-button h-10 w-10 text-base">−</button>
       </div>
     </div>
   );

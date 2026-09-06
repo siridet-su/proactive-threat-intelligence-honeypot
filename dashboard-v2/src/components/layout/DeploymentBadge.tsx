@@ -8,7 +8,7 @@ export default function DeploymentBadge() {
   return (
     <div
       aria-label={safeBuildId ? `Staging build ${safeBuildId}` : "Staging build"}
-      className="fixed right-3 top-3 z-[100] rounded border border-amber-400/60 bg-amber-950/90 px-2 py-1 text-[10px] font-bold tracking-[0.18em] text-amber-200 shadow-lg"
+      className="w-full border-b border-warning-border bg-warning-subtle px-4 py-2 text-center text-xs font-semibold text-warning"
       data-deployment-environment="staging"
     >
       STAGING{safeBuildId ? ` · ${safeBuildId}` : ""}

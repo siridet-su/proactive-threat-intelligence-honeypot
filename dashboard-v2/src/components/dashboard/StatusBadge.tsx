@@ -7,17 +7,17 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const colors = {
-    Online: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    Degraded: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    Offline: 'bg-red-500/10 text-red-400 border-red-500/20',
+    Online: 'bg-success-subtle text-success border-success-border',
+    Degraded: 'bg-warning-subtle text-warning border-warning-border',
+    Offline: 'bg-danger-subtle text-danger border-danger-border',
   };
 
   return (
-    <span className={cn('flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border', colors[status], className)}>
+    <span className={cn('ui-badge', colors[status], className)}>
       <span className={cn('w-1.5 h-1.5 rounded-full', {
-        'bg-emerald-400 animate-pulse': status === 'Online',
-        'bg-amber-400': status === 'Degraded',
-        'bg-red-400': status === 'Offline',
+        'bg-success': status === 'Online',
+        'bg-warning': status === 'Degraded',
+        'bg-danger': status === 'Offline',
       })} />
       {status}
     </span>
