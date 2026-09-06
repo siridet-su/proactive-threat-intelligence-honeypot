@@ -22,9 +22,8 @@ import {
 
 import RegionalMap from "@/components/dashboard/RegionalMap";
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
-import { RegionState, RefreshStatus, type RegionStatus } from "@/components/ui/RegionState";
-import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
-import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
+import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
+import { RegionState, RefreshStatus } from "@/components/ui/RegionState";
 import { classificationBadgeClass } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
 
@@ -34,57 +33,18 @@ const ITEMS_PER_PAGE = 10;
 const severityOptions: SeverityFilter[] = ["All", "Critical", "High", "Medium", "Low"];
 
 export default function DashboardPage() {
-  const [status, setStatus] = useState<RegionStatus>("loading");
-  const hasResult = useRef(false);
+  const { threats: sessions, status, lastUpdated, refresh } = useThreatFeed();
   const mapPanel = useRef<HTMLDivElement>(null);
-  const [sessions, setSessions] = useState<DashboardThreatEvent[]>([]);
-  const [stats, setStats] = useState({ total: "-", active: "-", critical: 0, health: "-" });
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [query, setQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("All");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-  const refreshRequest = useRef<(() => void) | null>(null);
-
-  useEffect(() => {
-    const fetchThreats = async () => {
-      setStatus(hasResult.current ? "refreshing" : "loading");
-      try {
-        const res = await fetch("/api/threats");
-        if (!res.ok) throw new Error("Threat request failed");
-
-        const data: unknown = await res.json();
-        if (!Array.isArray(data)) throw new Error("Threat response unavailable");
-
-        const threats = data.filter(isDashboardThreatEvent);
-        const criticalCount = threats.filter((event) => event.severity === "Critical" || event.severity === "High").length;
-
-        setStats((prev) => ({
-          ...prev,
-          total: threats.length > 0 ? threats.length.toString() : "0",
-          active: threats.length > 0 ? threats.length.toString() : "0",
-          critical: criticalCount,
-          health: "99.9%"
-        }));
-        setSessions(threats);
-        hasResult.current = true;
-        setLastUpdated(Date.now());
-        setStatus("ready");
-      } catch {
-        // Keep the recoverable polling failure inside the affected regions.
-        setStatus(hasResult.current ? "stale" : "error");
-      }
-    };
-
-    refreshRequest.current = fetchThreats;
-    fetchThreats();
-    const interval = setInterval(fetchThreats, 15000);
-    return () => {
-      refreshRequest.current = null;
-      clearInterval(interval);
-    };
-  }, []);
+  const stats = useMemo(() => {
+    const critical = sessions.filter((event) => event.severity === "Critical" || event.severity === "High").length;
+    const total = sessions.length.toString();
+    return { total, active: total, critical, health: "99.9%" };
+  }, [sessions]);
 
   useEffect(() => {
     if (!isFullScreen) return;
@@ -210,7 +170,7 @@ export default function DashboardPage() {
           <RefreshStatus status={status} />
           <button
             type="button"
-            onClick={() => refreshRequest.current?.()}
+            onClick={() => void refresh()}
             disabled={isUpdating}
             className="ui-button min-h-9 px-3 text-xs"
             aria-label="Refresh dashboard data"

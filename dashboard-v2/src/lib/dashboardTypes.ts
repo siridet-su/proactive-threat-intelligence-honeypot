@@ -68,6 +68,12 @@ export type HardwareStreamMessage =
   | { type: "initial"; data: HardwareTelemetry[] }
   | { type: "update"; data: HardwareTelemetry };
 
+/** Messages emitted by the shared live threat feed. */
+export type ThreatStreamMessage =
+  | { type: "snapshot"; data: DashboardThreatEvent[] }
+  | { type: "threat.upsert"; data: DashboardThreatEvent }
+  | { type: "heartbeat"; data: { at: string } };
+
 export interface DashboardUser extends JsonRecord {
   operatorId: string;
   fullName: string;
@@ -143,6 +149,25 @@ export function parseHardwareStreamMessage(value: unknown): HardwareStreamMessag
     return { type: "initial", data: value.data.filter(isHardwareTelemetry) };
   }
   return isHardwareTelemetry(value.data) ? { type: "update", data: value.data } : null;
+}
+
+export function parseThreatStreamMessage(value: unknown): ThreatStreamMessage | null {
+  if (!isRecord(value) || typeof value.type !== "string") return null;
+
+  if (value.type === "snapshot") {
+    if (!Array.isArray(value.data)) return null;
+    return { type: "snapshot", data: value.data.filter(isDashboardThreatEvent) };
+  }
+
+  if (value.type === "threat.upsert") {
+    return isDashboardThreatEvent(value.data) ? { type: "threat.upsert", data: value.data } : null;
+  }
+
+  if (value.type === "heartbeat" && isRecord(value.data) && typeof value.data.at === "string") {
+    return { type: "heartbeat", data: { at: value.data.at } };
+  }
+
+  return null;
 }
 
 export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRecord {

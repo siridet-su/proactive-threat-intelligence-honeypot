@@ -1,64 +1,36 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useMemo, useState } from "react";
 import TargetLandscapeChart from "@/components/threat-intel/TargetLandscapeChart";
 import Link from "next/link";
-import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
-import type { DashboardChartDatum, DashboardThreatEvent } from "@/lib/dashboardTypes";
-import { RefreshStatus, RegionState, type RegionStatus } from "@/components/ui/RegionState";
+import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
+import type { DashboardChartDatum } from "@/lib/dashboardTypes";
+import { RefreshStatus, RegionState } from "@/components/ui/RegionState";
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { classificationBadgeClass } from "@/lib/presentation";
 
 export default function ThreatIntelPage() {
-  const [status, setStatus] = useState<RegionStatus>("loading");
-  const hasResult = useRef(false);
-  const [logs, setLogs] = useState<DashboardThreatEvent[]>([]);
-  const [stats, setStats] = useState({ total: 0, proxies: 0, critical: 0 });
-  const [chartData, setChartData] = useState<DashboardChartDatum[]>([]);
+  const { threats: logs, status } = useThreatFeed();
 
   // กำหนดให้แสดงสูงสุด 5 รายการต่อหน้า
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  useEffect(() => {
-    const fetchThreats = async () => {
-      setStatus(hasResult.current ? "refreshing" : "loading");
-      try {
-        const res = await fetch("/api/threats");
-        if (!res.ok) throw new Error("Threat intelligence request failed");
-        const data: unknown = await res.json();
-        if (!Array.isArray(data)) throw new Error("Threat intelligence response unavailable");
-        const threats = data.filter(isDashboardThreatEvent);
-
-        // คำนวณสถิติภาพรวม
-        setStats({
-          total: threats.length,
-          proxies: threats.filter((d) => d.classification === 'BOT').length,
-          critical: threats.filter((d) => d.severity === 'Critical' || d.severity === 'High').length
-        });
-        setLogs(threats);
-
-        // คำนวณข้อมูลจริงสำหรับ Target Landscape
-        const aptCount = threats.filter((d) => d.classification === 'APT').length;
-        const botCount = threats.filter((d) => d.classification === 'BOT').length;
-        const scriptCount = threats.filter((d) => d.classification === 'SCRIPT KIDDIE').length;
-        const otherCount = threats.length - (aptCount + botCount + scriptCount);
-
-        setChartData([
-          { name: "APT", value: aptCount, color: "var(--chart-4)" },
-          { name: "Bot", value: botCount, color: "var(--chart-2)" },
-          { name: "Script", value: scriptCount, color: "var(--neutral)" },
-          { name: "Other", value: otherCount, color: "var(--chart-3)" }
-        ]);
-        hasResult.current = true;
-        setStatus("ready");
-      } catch {
-        setStatus(hasResult.current ? "stale" : "error");
-      }
-    };
-    fetchThreats();
-    const interval = setInterval(fetchThreats, 15000);
-    return () => clearInterval(interval);
-  }, []);
+  const stats = useMemo(() => ({
+    total: logs.length,
+    proxies: logs.filter((entry) => entry.classification === "BOT").length,
+    critical: logs.filter((entry) => entry.severity === "Critical" || entry.severity === "High").length,
+  }), [logs]);
+  const chartData = useMemo<DashboardChartDatum[]>(() => {
+    const aptCount = logs.filter((entry) => entry.classification === "APT").length;
+    const botCount = logs.filter((entry) => entry.classification === "BOT").length;
+    const scriptCount = logs.filter((entry) => entry.classification === "SCRIPT KIDDIE").length;
+    return [
+      { name: "APT", value: aptCount, color: "var(--chart-4)" },
+      { name: "Bot", value: botCount, color: "var(--chart-2)" },
+      { name: "Script", value: scriptCount, color: "var(--neutral)" },
+      { name: "Other", value: logs.length - (aptCount + botCount + scriptCount), color: "var(--chart-3)" },
+    ];
+  }, [logs]);
 
   const totalPages = Math.ceil(logs.length / itemsPerPage);
   const currentLogs = logs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);

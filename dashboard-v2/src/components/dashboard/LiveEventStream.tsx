@@ -1,35 +1,13 @@
-import { useState, useEffect } from 'react';
-import { isDashboardThreatEvent } from '@/lib/dashboardTypes';
-import type { DashboardThreatEvent } from '@/lib/dashboardTypes';
+import { useThreatFeed } from '@/components/threat/ThreatFeedProvider';
 import { SeverityBadge } from './SeverityBadge';
 import { Terminal } from 'lucide-react';
 import { RegionState } from '@/components/ui/RegionState';
 
 export function LiveEventStream() {
-  const [events, setEvents] = useState<DashboardThreatEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchFailed, setFetchFailed] = useState(false);
-
-  useEffect(() => {
-    const fetchEvents = async () => {
-      try {
-        const res = await fetch("/api/threats");
-        if (!res.ok) throw new Error("Event request failed");
-        const data: unknown = await res.json();
-        if (!Array.isArray(data)) throw new Error("Event response unavailable");
-        setEvents(data.filter(isDashboardThreatEvent).slice(0, 50)); // Show latest 50 events
-        setFetchFailed(false);
-      } catch {
-        setFetchFailed(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchEvents();
-    const interval = setInterval(fetchEvents, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  const { threats, status } = useThreatFeed();
+  const events = threats.slice(0, 50);
+  const loading = status === "loading";
+  const fetchFailed = status === "error";
   return (
     <div className="ui-panel flex h-full flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border bg-surface-subtle px-5 py-4">

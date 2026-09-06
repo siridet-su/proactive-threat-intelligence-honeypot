@@ -1,36 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
-import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
-import type { AttackerSummary, DashboardThreatEvent } from "@/lib/dashboardTypes";
+import { useState, useMemo } from 'react';
+import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
+import type { AttackerSummary } from "@/lib/dashboardTypes";
 import { SeverityBadge } from './SeverityBadge';
 import { Search } from 'lucide-react';
 import { RegionState } from '@/components/ui/RegionState';
 
 export function AttackerTable() {
-  const [threats, setThreats] = useState<DashboardThreatEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchFailed, setFetchFailed] = useState(false);
+  const { threats, status } = useThreatFeed();
   const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    const fetchThreats = async () => {
-      try {
-        const res = await fetch("/api/threats");
-        if (!res.ok) throw new Error("Attacker request failed");
-        const data: unknown = await res.json();
-        if (!Array.isArray(data)) throw new Error("Attacker response unavailable");
-        setThreats(data.filter(isDashboardThreatEvent));
-        setFetchFailed(false);
-      } catch {
-        setFetchFailed(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchThreats();
-    const interval = setInterval(fetchThreats, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  const loading = status === "loading";
+  const fetchFailed = status === "error";
 
   const attackers = useMemo(() => {
     const map = new Map<string, AttackerSummary>();

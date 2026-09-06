@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { LocateFixed } from "lucide-react";
-import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
+import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 
-import { RefreshStatus, type RegionStatus } from "@/components/ui/RegionState";
+import { RefreshStatus } from "@/components/ui/RegionState";
 
 interface MapMarker {
   id: string;
@@ -23,44 +23,14 @@ const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 const defaultPosition: MapPosition = { coordinates: [0, 20], zoom: 1 };
 
 export default function RegionalMap() {
-  const [status, setStatus] = useState<RegionStatus>("loading");
-  const hasResult = useRef(false);
-  const [markers, setMarkers] = useState<MapMarker[]>([]);
+  const { threats, status } = useThreatFeed();
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchThreats = async () => {
-      setStatus(hasResult.current ? "refreshing" : "loading");
-      try {
-        const res = await fetch("/api/threats");
-        if (!res.ok) throw new Error("Map request failed");
-        if (res.ok) {
-          const data: unknown = await res.json();
-          if (Array.isArray(data)) {
-            const newMarkers = data.filter(isDashboardThreatEvent).map((threat) => ({
-              id: threat.id,
-              name: [threat.geo.city, threat.geo.country].filter(Boolean).join(" · ") || "Unknown location",
-              coordinates: [threat.geo.lon, threat.geo.lat] as [number, number],
-              status: threat.severity === "Critical" || threat.severity === "High" ? "failed" as const : "running" as const
-            })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0);
-            setMarkers(newMarkers);
-            hasResult.current = true;
-            setStatus("ready");
-          } else {
-            throw new Error("Map response unavailable");
-          }
-        }
-      } catch {
-        // The dashboard region already communicates this recoverable polling
-        // failure. Server-side logging retains the diagnostic detail.
-        setStatus(hasResult.current ? "stale" : "error");
-      }
-    };
-
-    fetchThreats();
-    const interval = setInterval(fetchThreats, 5000); // refresh every 5s
-    return () => clearInterval(interval);
-  }, []);
+  const markers = useMemo<MapMarker[]>(() => threats.map((threat) => ({
+    id: threat.id,
+    name: [threat.geo.city, threat.geo.country].filter(Boolean).join(" · ") || "Unknown location",
+    coordinates: [threat.geo.lon, threat.geo.lat] as [number, number],
+    status: threat.severity === "Critical" || threat.severity === "High" ? "failed" as const : "running" as const,
+  })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0), [threats]);
   const [position, setPosition] = useState(defaultPosition);
   const [tooltip, setTooltip] = useState({ show: false, content: "", x: 0, y: 0 });
 

@@ -5,6 +5,7 @@ import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, B
 import { useEffect, useState, useRef } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
+import { ThreatFeedProvider } from "@/components/threat/ThreatFeedProvider";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -106,6 +107,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   );
 
   return (
+    <ThreatFeedProvider>
     <div className="min-h-dvh bg-canvas text-text">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[120] focus:rounded-lg focus:bg-surface focus:p-3">Skip to content</a>
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-border bg-surface lg:flex">
@@ -142,5 +144,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
       <ConfirmDialog open={logoutConfirmationOpen} onOpenChange={setLogoutConfirmationOpen} onConfirm={() => router.push("/")} title="Sign out of PTI-Honeypot?" description="Your current dashboard session will end and you will return to the sign-in screen." confirmLabel="Sign out" />
     </div>
+    </ThreatFeedProvider>
   );
 }

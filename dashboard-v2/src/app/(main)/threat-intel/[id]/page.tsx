@@ -1,46 +1,23 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useMemo } from "react";
 import { AlertTriangle, ChevronRight, Download, FileText, MapPin, Terminal } from "lucide-react";
 import Link from "next/link";
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
+import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RegionState } from "@/components/ui/RegionState";
-import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
-import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const sessionId = resolvedParams.id;
-
-  const [threatData, setThreatData] = useState<DashboardThreatEvent | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchFailed, setFetchFailed] = useState(false);
-
-  useEffect(() => {
-    const fetchThreatDetail = async () => {
-      try {
-        // ดึงข้อมูลทั้งหมดมาก่อน แล้วหา ID ที่ตรงกับ URL (เพราะยังไม่มี API ดึงรายตัว)
-        const res = await fetch("/api/threats");
-        if (!res.ok) throw new Error("Threat detail request failed");
-        const data: unknown = await res.json();
-        if (!Array.isArray(data)) throw new Error("Threat detail response unavailable");
-        const found = data.filter(isDashboardThreatEvent).find((t) => t.id === sessionId);
-        if (found) {
-          setThreatData(found);
-          setFetchFailed(false);
-        }
-      } catch {
-        setFetchFailed(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchThreatDetail();
-  }, [sessionId]);
+  const { threats, status } = useThreatFeed();
+  const threatData = useMemo(() => threats.find((threat) => threat.id === sessionId) ?? null, [sessionId, threats]);
+  const loading = status === "loading";
+  const fetchFailed = status === "error";
 
   if (loading) {
     return <div className="min-h-[500px] py-16"><RegionState kind="loading" title="Loading session analysis" description="Retrieving the latest evidence for this session." /></div>;
