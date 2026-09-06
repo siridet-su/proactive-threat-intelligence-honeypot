@@ -19,13 +19,14 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState("");
 
   const fetchProfile = async () => {
-    const operatorId = localStorage.getItem("operatorId");
-    if (!operatorId) {
-      setLoading(false);
-      return;
-    }
-
     try {
+      const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
+      if (!sessionResponse.ok) throw new Error("Session unavailable");
+      const session: unknown = await sessionResponse.json();
+      if (!session || typeof session !== "object" || typeof (session as { operatorId?: unknown }).operatorId !== "string") {
+        throw new Error("Session unavailable");
+      }
+      const operatorId = (session as { operatorId: string }).operatorId;
       const res = await fetch(`/api/users/${operatorId}`);
       if (res.ok) {
         const data: unknown = await res.json();
@@ -35,7 +36,7 @@ export default function ProfilePage() {
         }
       }
     } catch {
-      console.error("Failed to load profile");
+      setUser(null);
     } finally {
       setLoading(false);
     }

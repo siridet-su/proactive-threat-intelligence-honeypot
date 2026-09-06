@@ -1,22 +1,10 @@
 "use client";
-import { useState, useEffect, useSyncExternalStore } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Briefcase, UserPlus, Edit2, ShieldX, X, Lock } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardUser } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
-
-const subscribeToSession = (onChange: () => void) => {
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === "operatorId" || event.key === "userRole" || event.key === null) onChange();
-  };
-  window.addEventListener("storage", onStorage);
-  return () => window.removeEventListener("storage", onStorage);
-};
-
-const getCurrentUserId = () => localStorage.getItem("operatorId") || "";
-const getCurrentUserRole = () => localStorage.getItem("userRole") || "";
-const getEmptySessionValue = () => "";
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<DashboardUser[]>([]);
@@ -25,16 +13,30 @@ export default function UserManagementPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetchFailed, setFetchFailed] = useState(false);
-
-  // Keep the first server and client render identical. Browser session values are
-  // read after hydration, so this route cannot rebuild the theme bootstrapped in <head>.
-  const currentUserId = useSyncExternalStore(subscribeToSession, getCurrentUserId, getEmptySessionValue);
-  const currentUserRole = useSyncExternalStore(subscribeToSession, getCurrentUserRole, getEmptySessionValue);
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [currentUserRole, setCurrentUserRole] = useState("");
 
   const [formData, setFormData] = useState({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter" });
 
   // State สำหรับแก้ไขข้อมูล
   const [editFormData, setEditFormData] = useState({ operatorId: "", fullName: "", email: "", position: "", role: "", newPassword: "" });
+
+  useEffect(() => {
+    const loadSession = async () => {
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!response.ok) return;
+        const data: unknown = await response.json();
+        if (!data || typeof data !== "object") return;
+        const session = data as { operatorId?: unknown; role?: unknown };
+        if (typeof session.operatorId === "string") setCurrentUserId(session.operatorId);
+        if (typeof session.role === "string") setCurrentUserRole(session.role);
+      } catch {
+        // The server-side route guard remains authoritative.
+      }
+    };
+    void loadSession();
+  }, []);
 
   useEffect(() => {
     const loadUsers = async () => {

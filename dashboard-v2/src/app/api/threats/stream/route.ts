@@ -1,4 +1,5 @@
 import { getThreatSnapshot, subscribeThreatUpdates } from "@/lib/threat-server";
+import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,6 +11,10 @@ function formatEvent(event: string, value: unknown): Uint8Array {
 }
 
 export async function GET(request: Request) {
+  const initialSession = await getSessionFromRequest(request);
+  if (!initialSession || initialSession.mustChangePassword) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   let unsubscribe: (() => void) | null = null;
   const pending: Uint8Array[] = [];
   let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
@@ -36,6 +41,11 @@ export async function GET(request: Request) {
         const heartbeat = setInterval(() => {
           if (!closed) controller.enqueue(formatEvent("heartbeat", { type: "heartbeat", data: { at: new Date().toISOString() } }));
         }, 20_000);
+        const sessionCheck = setInterval(() => {
+          void getSessionFromRequest(request).then((session) => {
+            if (!session || session.mustChangePassword) close();
+          }).catch(() => close());
+        }, 60_000);
 
         close = () => {
           if (closed) return;
@@ -43,6 +53,7 @@ export async function GET(request: Request) {
           streamClosed = true;
           streamController = null;
           clearInterval(heartbeat);
+          clearInterval(sessionCheck);
           unsubscribe?.();
           unsubscribe = null;
           try {

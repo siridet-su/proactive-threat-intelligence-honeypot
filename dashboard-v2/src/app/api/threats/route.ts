@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
+import { getSessionFromRequest } from "@/lib/auth/session";
 import { getThreatSnapshot } from "@/lib/threat-server";
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  const session = await getSessionFromRequest(request);
+  if (!session || session.mustChangePassword) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { searchParams } = new URL(request.url);
     const range = searchParams.get('range');

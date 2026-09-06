@@ -29,35 +29,42 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [userName, setUserName] = useState(""); // State สำหรับเก็บชื่อหน้า
 
   useEffect(() => {
-    const currentRole = localStorage.getItem("userRole") || "";
-    const currentOpId = localStorage.getItem("operatorId") || "";
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setUserRole(currentRole);
-    setOperatorId(currentOpId);
-
-    // ดึงข้อมูลโปรไฟล์เพื่อเอาชื่อจริง
-    if (currentOpId && currentOpId !== "admin") {
-      fetch(`/api/users/${currentOpId}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.fullName) {
-            // ตัดข้อความด้วยช่องว่าง แล้วเอาเฉพาะคำแรก (ชื่อข้างหน้า)
-            setUserName(data.fullName.split(" ")[0]);
-          }
-        })
-        .catch(err => console.error(err));
-    } else if (currentOpId === "admin") {
-      setUserName("Admin");
-    }
+    let cancelled = false;
+    const loadSession = async () => {
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!response.ok) throw new Error("Session unavailable");
+        const data: unknown = await response.json();
+        if (!data || typeof data !== "object") throw new Error("Session unavailable");
+        const session = data as { operatorId?: unknown; role?: unknown; fullName?: unknown };
+        if (typeof session.operatorId !== "string" || typeof session.role !== "string") throw new Error("Session unavailable");
+        if (cancelled) return;
+        setOperatorId(session.operatorId);
+        setUserRole(session.role);
+        setUserName(typeof session.fullName === "string" ? session.fullName.split(" ")[0] : session.operatorId);
+      } catch {
+        if (!cancelled) router.replace("/login");
+      }
+    };
+    void loadSession();
 
     const timer = setInterval(() => {
       setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
     }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [router]);
 
   const handleLogout = () => {
     setLogoutConfirmationOpen(true);
+  };
+
+  const confirmLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      router.push("/");
+      router.refresh();
+    }
   };
 
   const handleBack = () => {
@@ -142,7 +149,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </header>
         <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] p-4 md:p-6 lg:p-8">{children}</main>
       </div>
-      <ConfirmDialog open={logoutConfirmationOpen} onOpenChange={setLogoutConfirmationOpen} onConfirm={() => router.push("/")} title="Sign out of PTI-Honeypot?" description="Your current dashboard session will end and you will return to the sign-in screen." confirmLabel="Sign out" />
+      <ConfirmDialog open={logoutConfirmationOpen} onOpenChange={setLogoutConfirmationOpen} onConfirm={() => void confirmLogout()} title="Sign out of PTI-Honeypot?" description="Your current dashboard session will end and you will return to the sign-in screen." confirmLabel="Sign out" />
     </div>
     </ThreatFeedProvider>
   );

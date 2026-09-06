@@ -22,10 +22,6 @@ export default function LoginForm() {
       const data = await res.json();
 
       if (data.success) {
-        // เก็บ Role ไว้ใน localStorage เพื่อใช้เช็คสิทธิ์ (จำลอง Session)
-        localStorage.setItem("userRole", data.role);
-        localStorage.setItem("operatorId", data.operatorId || operatorId);
-
         if (data.isFirstLogin) {
           router.push("/change-password"); // พาไปหน้าเปลี่ยนรหัส
         } else {
@@ -126,7 +122,6 @@ export default function LoginForm() {
           <p className="max-w-xs text-xs leading-5 text-text-subtle">
             Unauthorized access attempts may be monitored and logged.
           </p>
-          {process.env.NODE_ENV !== "production" && <a href="/dashboard" className="mt-1 text-xs font-medium text-primary hover:underline">Development shortcut</a>}
         </div>
 
       </div>

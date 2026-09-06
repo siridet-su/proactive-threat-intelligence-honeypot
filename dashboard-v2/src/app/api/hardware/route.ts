@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { isHardwareTelemetry } from '@/lib/dashboardTypes';
+import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const session = await getSessionFromRequest(request);
+  if (!session || session.mustChangePassword) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const client = await clientPromise;
     // Assuming the database is "honeypot" and collection is "hardware_metrics" or "metrics"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { ShieldAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -12,14 +12,6 @@ export default function ChangePasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
-  const [operatorId, setOperatorId] = useState("");
-
-  useEffect(() => {
-    const id = localStorage.getItem("operatorId");
-    if (!id) router.push("/login");
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    else setOperatorId(id);
-  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +25,7 @@ export default function ChangePasswordPage() {
       const res = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operatorId, newPassword }),
+        body: JSON.stringify({ newPassword }),
       });
 
       if (res.ok) {
