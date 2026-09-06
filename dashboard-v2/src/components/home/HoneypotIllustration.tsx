@@ -1,7 +1,13 @@
 export default function HoneypotIllustration() {
   return (
-    <div className="pti-honeypot-scene relative mx-auto w-full max-w-xl" aria-hidden="true">
-      <svg viewBox="0 0 560 440" className="h-auto w-full" role="presentation">
+    <div className="pti-honeypot-scene relative mx-auto w-full max-w-xl">
+      <div className="ui-panel overflow-hidden p-3 sm:p-4">
+        <div className="flex items-center justify-between gap-3 border-b border-border pb-3 text-xs">
+          <span className="flex items-center gap-2 font-semibold text-text"><span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />Operator workspace</span>
+          <span className="ui-badge border-primary-border bg-primary-subtle text-primary">Read-only</span>
+        </div>
+        <div className="mt-3 rounded-lg border border-border bg-surface-subtle p-2 sm:p-3">
+          <svg viewBox="0 0 560 440" className="h-auto w-full" role="img" aria-label="Illustration of a honeypot decoy attracting an attacker">
         <circle cx="280" cy="220" r="190" fill="var(--primary-subtle)" />
         <circle cx="280" cy="220" r="142" fill="var(--surface)" stroke="var(--primary-border)" strokeWidth="2" />
         <path d="M143 316 H417" stroke="var(--border)" strokeWidth="2" strokeLinecap="round" />
@@ -34,9 +40,17 @@ export default function HoneypotIllustration() {
         <g fill="var(--primary)" opacity="0.78">
           <circle cx="130" cy="132" r="4" /><circle cx="408" cy="118" r="4" /><circle cx="444" cy="273" r="3" />
         </g>
-      </svg>
-      <div className="pointer-events-none absolute inset-x-10 bottom-1 rounded-xl border border-border bg-surface-raised px-4 py-3 text-center text-sm font-medium text-text shadow-[var(--shadow-card)]">
-        A convincing decoy, built to be investigated.
+          </svg>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+          <div className="rounded-lg border border-border bg-surface p-3"><span className="block text-text-subtle">01</span><span className="mt-1 block font-medium text-text">Session evidence</span></div>
+          <div className="rounded-lg border border-border bg-surface p-3"><span className="block text-text-subtle">02</span><span className="mt-1 block font-medium text-text">Origin context</span></div>
+          <div className="rounded-lg border border-border bg-surface p-3"><span className="block text-text-subtle">03</span><span className="mt-1 block font-medium text-text">Review queue</span></div>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 px-1 text-sm text-text-muted">
+        <span>A convincing decoy, built to be investigated.</span>
+        <span className="font-mono text-xs text-text-subtle">PTI / OPS</span>
       </div>
     </div>
   );

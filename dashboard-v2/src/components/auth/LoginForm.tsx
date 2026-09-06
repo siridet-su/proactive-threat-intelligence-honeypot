@@ -34,14 +34,14 @@ export default function LoginForm() {
       } else {
         setError(data.error || "ACCESS DENIED: Invalid Credentials.");
       }
-    } catch (err) {
+    } catch {
       setError("System Offline: Database Connection Failed.");
     }
   };
 
   return (
-    <div className="ui-panel w-full max-w-md">
-      <div className="p-6 sm:p-8 flex flex-col items-center">
+    <section aria-labelledby="login-title" className="ui-panel w-full max-w-md">
+      <div className="flex flex-col items-center p-6 sm:p-8">
 
         {/* Shield Icon */}
         <div className="mb-4 text-primary">
@@ -51,10 +51,10 @@ export default function LoginForm() {
         </div>
 
         {/* Title */}
-        <h1 className="text-2xl leading-8 text-text font-semibold mb-2">ACCESS CONTROL</h1>
-        <p className="text-xs text-text-subtle font-mono mb-8">SECURE TERMINAL NODE: 0x8F-B22</p>
+        <h1 id="login-title" className="text-2xl leading-8 text-text font-semibold">Operator sign in</h1>
+        <p className="mt-2 text-sm text-text-muted">Use your authorized operator credentials to access the read-only workspace.</p>
 
-        <div className="w-full flex flex-col gap-5">
+        <form onSubmit={(event) => void handleAuthenticate(event)} className="mt-8 flex w-full flex-col gap-5">
 
           {/* Operator ID Input */}
           <div>
@@ -74,7 +74,8 @@ export default function LoginForm() {
                 placeholder="admin"
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
+                name="operatorId"
+                autoComplete="username"
                 className="ui-field pl-10 font-mono"
                 required
               />
@@ -99,7 +100,8 @@ export default function LoginForm() {
                 placeholder="admin"
                 value={accessKey}
                 onChange={(e) => setAccessKey(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e?.preventDefault(); void handleAuthenticate(); } }}
+                name="accessKey"
+                autoComplete="current-password"
                 className="ui-field pl-10 font-mono"
                 required
               />
@@ -112,27 +114,22 @@ export default function LoginForm() {
           )}
 
           {/* Submit Button */}
-          <button
-            type="button"
-            onClick={() => void handleAuthenticate()}
-            className="ui-button ui-button-primary mt-4 w-full"
-          >
-            AUTHENTICATE
+          <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
+            Authenticate
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
           </button>
 
-        </div>
+        </form>
 
-        {/* Footer Warning */}
-        <div className="mt-8 text-center flex flex-col gap-2">
-          <a href="#" className="text-xs text-text-muted hover:text-primary">FORGOT ACCESS KEY?</a>
-          <p className="text-xs text-text-subtle mt-4 max-w-xs leading-5">
-            WARNING: UNAUTHORIZED ACCESS ATTEMPTS ARE MONITORED AND LOGGED. FEDERAL PROSECUTION MAY APPLY.
+        <div className="mt-8 flex flex-col gap-3 text-center">
+          <p className="text-sm text-text-muted">Need a reset? Contact your system administrator.</p>
+          <p className="max-w-xs text-xs leading-5 text-text-subtle">
+            Unauthorized access attempts may be monitored and logged.
           </p>
-          <a href="/dashboard" className="text-xs text-primary hover:underline mt-2">EMERGENCY BYPASS (DEV ONLY)</a>
+          {process.env.NODE_ENV !== "production" && <a href="/dashboard" className="mt-1 text-xs font-medium text-primary hover:underline">Development shortcut</a>}
         </div>
 
       </div>
-    </div>
+    </section>
   );
 }

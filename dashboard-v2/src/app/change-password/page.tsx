@@ -1,7 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { ShieldAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+import ThemeToggle from "@/components/theme/ThemeToggle";
 
 export default function ChangePasswordPage() {
   const [newPassword, setNewPassword] = useState("");
@@ -19,47 +23,62 @@ export default function ChangePasswordPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     if (newPassword !== confirmPassword) {
-      setError("Passwords do not match!");
+      setError("Passwords do not match.");
       return;
     }
 
-    const res = await fetch("/api/auth/change-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operatorId, newPassword }),
-    });
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operatorId, newPassword }),
+      });
 
-    if (res.ok) {
-      alert("Password updated successfully. Access Granted.");
-      router.push("/dashboard");
-    } else {
-      setError("Failed to update password.");
+      if (res.ok) {
+        router.push("/dashboard");
+      } else {
+        setError("Failed to update password. Please try again.");
+      }
+    } catch {
+      setError("The password service is unavailable. Please try again.");
     }
   };
 
   return (
-    <main className="min-h-screen bg-[#050507] flex items-center justify-center p-4">
-      <div className="bg-[#0a0a0c] p-10 rounded-xl border border-purple-900/50 shadow-2xl max-w-md w-full">
-        <div className="flex flex-col items-center mb-8">
-          <ShieldAlert className="w-10 h-10 text-amber-500 mb-4" />
-          <h2 className="text-xl text-white font-semibold">FIRST LOGIN DETECTED</h2>
-          <p className="text-xs text-slate-400 mt-2 text-center">Security protocol requires you to update your default access key before proceeding.</p>
-        </div>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label className="text-xs text-slate-400 font-mono">NEW ACCESS KEY</label>
-            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required className="w-full bg-[#111116] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+    <main className="min-h-dvh bg-canvas text-text">
+      <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border bg-surface px-4 py-3 sm:px-8">
+        <Link href="/" className="flex items-center gap-3 text-base font-semibold">
+          <span className="grid h-8 w-8 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-primary" aria-hidden="true">P</span>
+          PTI-Honeypot
+        </Link>
+        <ThemeToggle />
+      </header>
+
+      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center px-4 py-12 sm:py-16">
+        <section aria-labelledby="change-password-title" className="ui-panel w-full max-w-md">
+          <div className="p-6 sm:p-8">
+            <div className="flex flex-col items-center text-center">
+              <span className="grid h-11 w-11 place-items-center rounded-xl border border-warning-border bg-warning-subtle text-warning" aria-hidden="true"><ShieldAlert className="h-5 w-5" /></span>
+              <h1 id="change-password-title" className="mt-5 text-2xl font-semibold leading-8">Update access key</h1>
+              <p className="mt-2 text-sm leading-6 text-text-muted">Your first sign-in requires a new access key before you can continue.</p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5">
+              <div>
+                <label htmlFor="new-access-key" className="text-sm font-medium text-text-muted">New access key</label>
+                <input id="new-access-key" type="password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required className="ui-field mt-2 font-mono" />
+              </div>
+              <div>
+                <label htmlFor="confirm-access-key" className="text-sm font-medium text-text-muted">Confirm access key</label>
+                <input id="confirm-access-key" type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="ui-field mt-2 font-mono" />
+              </div>
+              {error && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{error}</p>}
+              <button type="submit" className="ui-button ui-button-primary mt-2 w-full">Update and continue</button>
+            </form>
           </div>
-          <div>
-            <label className="text-xs text-slate-400 font-mono">CONFIRM ACCESS KEY</label>
-            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="w-full bg-[#111116] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
-          </div>
-          {error && <p className="text-red-500 text-xs text-center">{error}</p>}
-          <button type="submit" className="mt-4 w-full bg-purple-700 hover:bg-purple-600 text-white py-3 rounded text-sm font-bold tracking-widest transition-colors">
-            UPDATE & PROCEED
-          </button>
-        </form>
+        </section>
       </div>
     </main>
   );

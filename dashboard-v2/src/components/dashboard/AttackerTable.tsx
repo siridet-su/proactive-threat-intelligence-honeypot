@@ -3,23 +3,25 @@ import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { AttackerSummary, DashboardThreatEvent } from "@/lib/dashboardTypes";
 import { SeverityBadge } from './SeverityBadge';
 import { Search } from 'lucide-react';
+import { RegionState } from '@/components/ui/RegionState';
 
 export function AttackerTable() {
   const [threats, setThreats] = useState<DashboardThreatEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     const fetchThreats = async () => {
       try {
         const res = await fetch("/api/threats");
-        if (res.ok) {
-          const data: unknown = await res.json();
-          if (Array.isArray(data)) {
-            setThreats(data.filter(isDashboardThreatEvent));
-          }
-        }
+        if (!res.ok) throw new Error("Attacker request failed");
+        const data: unknown = await res.json();
+        if (!Array.isArray(data)) throw new Error("Attacker response unavailable");
+        setThreats(data.filter(isDashboardThreatEvent));
+        setFetchFailed(false);
       } catch {
-        // The empty table remains usable when this periodic request fails.
+        setFetchFailed(true);
       } finally {
         setLoading(false);
       }
@@ -55,6 +57,12 @@ export function AttackerTable() {
     }
     return Array.from(map.values()).sort((a, b) => b.attackCount - a.attackCount).slice(0, 50);
   }, [threats]);
+  const filteredAttackers = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return attackers;
+    return attackers.filter((attacker) => [attacker.ip, attacker.country, attacker.asn, attacker.mainTechnique, attacker.status]
+      .some((value) => value.toLowerCase().includes(normalizedQuery)));
+  }, [attackers, query]);
   return (
     <div className="flex flex-col h-full gap-4">
       <div className="flex items-center justify-between">
@@ -63,6 +71,9 @@ export function AttackerTable() {
           <input
             type="text"
             placeholder="Search IPs, ASNs..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search top threat actors"
             className="ui-field w-64 pl-9"
           />
         </div>
@@ -80,9 +91,11 @@ export function AttackerTable() {
               <th className="px-4 py-3 font-medium">Risk</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody>
             {loading && Array.from({ length: 5 }, (_, index) => <tr key={`loading-${index}`} aria-hidden="true">{Array.from({ length: 6 }, (_, column) => <td key={column}><div className="ui-skeleton h-4 w-full" /></td>)}</tr>)}
-            {!loading && attackers.map((attacker, i) => (
+            {!loading && fetchFailed && <tr><td colSpan={6} className="p-4"><RegionState kind="error" title="Threat actors unavailable" description="The latest session directory could not be loaded." /></td></tr>}
+            {!loading && !fetchFailed && filteredAttackers.length === 0 && <tr><td colSpan={6} className="p-4"><RegionState kind="empty" title={query ? "No matching threat actors" : "No threat actors"} description={query ? "Try a different search term." : "No source IPs were returned in the last successful response."} /></td></tr>}
+            {!loading && !fetchFailed && filteredAttackers.map((attacker, i) => (
             <tr key={i} className="group text-text-muted"><td className="font-mono text-xs text-primary">{attacker.ip}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-col">

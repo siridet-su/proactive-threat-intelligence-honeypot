@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, ShieldCheck, LayoutDashboard, Brain, Search, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Menu, X } from "lucide-react";
+import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Menu, X } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
@@ -60,11 +60,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   const handleBack = () => {
-    if (pathname === "/dashboard") {
-      setLogoutConfirmationOpen(true);
-    } else {
-      router.back();
-    }
+    router.back();
   };
 
   const getPageTitle = () => {
@@ -133,18 +129,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex min-h-16 items-center justify-between gap-3 px-4 lg:px-8">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <button ref={navigationTrigger} className="ui-button px-2 lg:hidden" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={() => { drawer.current?.showModal(); setNavigationOpen(true); }}><Menu className="h-4 w-4" /></button>
-              <button onClick={handleBack} className="ui-button px-2" title="Go Back" aria-label="Go Back"><ArrowLeft className="h-4 w-4" /></button>
+              {pathname !== "/dashboard" && <button onClick={handleBack} className="ui-button px-2" title="Go back" aria-label="Go back"><ArrowLeft className="h-4 w-4" /></button>}
               <span className="text-xs font-medium sm:text-sm">{getPageTitle()}</span>
             </div>
             <div className="flex items-center gap-6">
-              <div className="hidden xl:block"><SearchField /></div>
-              <div className="hidden items-center gap-2 text-xs text-text-muted xl:flex"><Clock className="h-4 w-4" aria-hidden="true" /><time aria-label="Current time" className="font-mono tabular-nums">{time || "00:00:00"}</time></div>
+              <div className="hidden items-center gap-2 text-xs text-text-muted sm:flex"><Clock className="h-4 w-4" aria-hidden="true" /><span>Local time</span><time aria-label="Current local time" className="font-mono tabular-nums">{time || "00:00:00"}</time></div>
               <ThemeToggle />
             </div>
-          </div>
-          <div className="flex items-center gap-4 border-t border-border px-4 py-3 xl:hidden">
-            <div className="min-w-0 flex-1"><SearchField /></div>
-            <div className="flex items-center gap-2 text-xs text-text-muted"><Clock className="h-4 w-4" aria-hidden="true" /><time aria-label="Current time" className="font-mono tabular-nums">{time || "00:00:00"}</time></div>
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] p-4 md:p-6 lg:p-8">{children}</main>
@@ -152,8 +143,4 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <ConfirmDialog open={logoutConfirmationOpen} onOpenChange={setLogoutConfirmationOpen} onConfirm={() => router.push("/")} title="Sign out of PTI-Honeypot?" description="Your current dashboard session will end and you will return to the sign-in screen." confirmLabel="Sign out" />
     </div>
   );
-}
-
-function SearchField() {
-  return <label className="relative block"><span className="sr-only">Scan nodes</span><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><input type="text" placeholder="Scan nodes..." className="ui-field pl-10 xl:w-52" /></label>;
 }

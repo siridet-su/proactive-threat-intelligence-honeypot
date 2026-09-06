@@ -2,16 +2,16 @@
 
 :root, :root[data-theme="light"] {
   color-scheme: light;
-  --canvas: #EEF3F8;
+  --canvas: #F4F7FB;
   --surface: #FFFFFF;
-  --surface-subtle: #F4F7FB;
+  --surface-subtle: #F8FAFC;
   --surface-raised: #FFFFFF;
-  --surface-hover: #E7EEF7;
+  --surface-hover: #EEF3F8;
   --text: #0F172A;
   --text-muted: #475569;
   --text-subtle: #64748B;
-  --border: #C3D0E0;
-  --border-strong: #8EA3BB;
+  --border: #CBD5E1;
+  --border-strong: #94A3B8;
   --primary: #1D4ED8;
   --primary-action: #1D4ED8;
   --primary-action-hover: #1E40AF;
@@ -28,8 +28,8 @@
   --chart-4: #7C3AED;
   --chart-5: #BE123C;
   --chart-6: #0369A1;
-  --shadow-card: 0 2px 4px rgb(15 23 42 / 0.06), 0 8px 18px rgb(15 23 42 / 0.05);
-  --shadow-raised: 0 3px 6px rgb(15 23 42 / 0.08), 0 14px 30px rgb(15 23 42 / 0.08);
+  --shadow-card: 0 1px 3px rgb(15 23 42 / 0.08);
+  --shadow-raised: 0 8px 24px rgb(15 23 42 / 0.05);
   --scrim: rgb(15 23 42 / 0.4);
   --map-land: #E2E8F0;
   --illustration-honey: #D97706;
@@ -134,30 +134,32 @@
 }
 
 @layer base {
-  body { background: var(--canvas); color: var(--text); font-family: var(--font-sans); font-size: 16px; line-height: 24px; }
+  body { background: var(--canvas); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 20px; }
   ::selection { background: var(--primary-subtle); color: var(--text); }
   :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-  button, a, input, select { transition: color 150ms, background-color 150ms, border-color 150ms; }
+  button, a, input, select { transition: color 150ms, background-color 150ms, border-color 150ms, box-shadow 150ms; }
   button:not(:disabled), select { cursor: pointer; }
   button:disabled { cursor: not-allowed; }
 }
 
 @layer components {
-  .ui-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-card); transition: background-color 150ms, border-color 150ms, box-shadow 150ms; }
-  .ui-panel:hover { border-color: var(--border-strong); box-shadow: var(--shadow-raised); }
-  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 9px 15px; border: 1px solid var(--control-border); border-radius: 10px; background: var(--surface); color: var(--text-muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
-  .ui-button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); box-shadow: 0 1px 2px rgb(15 23 42 / 0.10); }
+  .ui-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-card); transition: background-color 150ms, border-color 150ms, box-shadow 150ms; }
+  .ui-panel-interactive:hover { border-color: var(--border-strong); box-shadow: var(--shadow-raised); }
+  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 14px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface); color: var(--text-muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
+  .ui-button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); box-shadow: var(--shadow-card); }
   .ui-button:active:not(:disabled) { background: var(--surface-subtle); }
   .ui-button:disabled { color: var(--text-subtle); background: var(--surface-subtle); border-color: var(--border); }
   .ui-button-primary { background: var(--primary-action); color: var(--on-primary); border-color: var(--primary-action); }
   .ui-button-primary:hover:not(:disabled) { background: var(--primary-action-hover); color: var(--on-primary); }
   .ui-button-primary:active:not(:disabled) { background: var(--primary-action-hover); color: var(--on-primary); }
   .ui-button[aria-current="page"] { color: var(--primary); border-color: var(--primary); background: var(--primary-subtle); }
-  .ui-field { min-height: 42px; width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--control-border); border-radius: 10px; padding: 9px 12px; font-size: 14px; }
+  .ui-field { min-height: 40px; width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--control-border); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
   .ui-field::placeholder { color: var(--text-subtle); }
   .ui-field:hover { border-color: var(--border-strong); box-shadow: inset 0 0 0 1px transparent; }
   .ui-field:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 18%, transparent); }
   .ui-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--neutral-border); border-radius: 999px; padding: 3px 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--neutral); background: var(--neutral-subtle); }
+  summary { cursor: pointer; }
+  summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
   .ui-table { width: 100%; text-align: left; font-variant-numeric: tabular-nums; }
   .ui-table th { background: var(--surface-subtle); color: var(--text-muted); font-size: 13px; font-weight: 600; padding: 16px 24px; white-space: nowrap; }
   .ui-table td { height: 56px; padding: 16px 24px; border-top: 1px solid var(--border); }
@@ -203,11 +205,11 @@
 }
 
 .pti-bee { transform-box: fill-box; transform-origin: center; }
-.pti-bee-one { animation: pti-bee-flight-one 5.2s ease-in-out infinite; }
-.pti-bee-two { animation: pti-bee-flight-two 4.4s ease-in-out infinite; }
-.pti-bee-wing { transform-box: fill-box; transform-origin: center; animation: pti-bee-wing 180ms ease-in-out infinite; }
-.pti-honeypot-scene:hover .pti-bee-one { animation-duration: 3.4s; }
-.pti-honeypot-scene:hover .pti-bee-two { animation-duration: 3s; }
+.pti-bee-one { transform: translate(130px, 126px) rotate(-10deg); transition: transform 180ms ease-out; }
+.pti-bee-two { transform: translate(405px, 165px) rotate(18deg); transition: transform 180ms ease-out; }
+.pti-bee-wing { transform-box: fill-box; transform-origin: center; }
+.pti-honeypot-scene:hover .pti-bee-one { transform: translate(145px, 140px) rotate(8deg); }
+.pti-honeypot-scene:hover .pti-bee-two { transform: translate(390px, 180px) rotate(-8deg); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

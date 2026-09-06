@@ -1,9 +1,10 @@
 "use client";
 import { useState, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Users, Briefcase, UserPlus, Edit2, ShieldX, X, Lock } from "lucide-react";
+import { Briefcase, UserPlus, Edit2, ShieldX, X, Lock } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardUser } from "@/lib/dashboardTypes";
+import { RegionState } from "@/components/ui/RegionState";
 
 const subscribeToSession = (onChange: () => void) => {
   const onStorage = (event: StorageEvent) => {
@@ -22,6 +23,8 @@ export default function UserManagementPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
 
   // Keep the first server and client render identical. Browser session values are
   // read after hydration, so this route cannot rebuild the theme bootstrapped in <head>.
@@ -35,9 +38,18 @@ export default function UserManagementPage() {
 
   useEffect(() => {
     const loadUsers = async () => {
-      const res = await fetch("/api/users");
-      const data: unknown = await res.json();
-      if (Array.isArray(data)) setUsers(data.filter(isDashboardUser));
+      try {
+        const res = await fetch("/api/users");
+        if (!res.ok) throw new Error("User request failed");
+        const data: unknown = await res.json();
+        if (!Array.isArray(data)) throw new Error("User response unavailable");
+        setUsers(data.filter(isDashboardUser));
+        setFetchFailed(false);
+      } catch {
+        setFetchFailed(true);
+      } finally {
+        setLoading(false);
+      }
     };
     loadUsers();
   }, [refreshKey]);
@@ -113,12 +125,12 @@ export default function UserManagementPage() {
   return (
     <div className="space-y-6 pb-8">
       {/* Header (แสดงปุ่ม Add เฉพาะ Admin) */}
-      <div className="flex justify-between items-start">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <h1 className="text-2xl font-semibold">User management</h1>
           <p className="mt-2 text-sm text-text-muted">Manage operator access permissions and security clearances.</p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-3">
           {currentUserRole === "Admin" && (
             <>
               <Link href="/user-management/positions" className="ui-button">
@@ -138,49 +150,60 @@ export default function UserManagementPage() {
           <h2 className="text-base font-semibold">Active operator roster</h2>
         </div>
 
-        <table className="w-full text-left text-sm">
-          <thead className="bg-surface-subtle text-xs text-text-muted">
+        <div className="ui-scroll-region">
+        <table className="ui-table min-w-[860px]">
+          <thead>
             <tr>
-              <th className="px-6 py-4">OPERATOR ID</th>
-              <th className="px-6 py-4">FULL NAME</th>
-              <th className="px-6 py-4">POSITION</th>
-              <th className="px-6 py-4">ROLE</th>
-              <th className="px-6 py-4">STATUS</th>
-              <th className="px-6 py-4 text-right">ACTIONS</th>
+              <th scope="col">OPERATOR ID</th>
+              <th scope="col">FULL NAME</th>
+              <th scope="col">POSITION</th>
+              <th scope="col">ROLE</th>
+              <th scope="col">STATUS</th>
+              <th scope="col" className="text-right">ACTIONS</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/50">
-            {users.map((user, i) => {
+          <tbody>
+            {loading && Array.from({ length: 5 }, (_, index) => (
+              <tr key={`user-loading-${index}`} aria-hidden="true">
+                {Array.from({ length: 6 }, (_, column) => <td key={column}><div className="ui-skeleton h-4 w-full" /></td>)}
+              </tr>
+            ))}
+            {!loading && fetchFailed && <tr><td colSpan={6} className="p-4"><RegionState kind="error" title="Operator roster unavailable" description="The user directory could not be loaded." /></td></tr>}
+            {!loading && !fetchFailed && users.length === 0 && <tr><td colSpan={6} className="p-4"><RegionState kind="empty" title="No operators" description="No operator accounts were returned in the last successful response." /></td></tr>}
+            {!loading && !fetchFailed && users.map((user, i) => {
               // เช็คสิทธิ์: เป็น Admin หรือเป็นตัวเอง
               const canEdit = currentUserRole === "Admin" || user.operatorId === currentUserId;
               const canDelete = currentUserRole === "Admin" && user.operatorId !== currentUserId;
 
               return (
-                <tr key={i} className="text-text-muted transition-colors hover:bg-surface-hover">
-                  <td className="px-6 py-4 font-mono font-medium text-primary">
+                <tr key={i}>
+                  <td className="font-mono text-sm font-medium text-primary">
                     {user.operatorId} {user.operatorId === currentUserId && <span className="ml-1 text-xs text-text-subtle">(YOU)</span>}
                   </td>
-                  <td className="px-6 py-4">{user.fullName}</td>
-                  <td className="px-6 py-4 text-text-muted">{user.position}</td><td className="px-6 py-4 text-text-muted">{user.role}</td>
-                  <td className="px-6 py-4">
-                    <span className="flex items-center gap-2 text-xs">
-                      <span className={`w-2 h-2 rounded-full ${user.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                  <td className="text-text">{user.fullName}</td>
+                  <td className="text-text-muted">{user.position}</td><td className="text-text-muted">{user.role}</td>
+                  <td>
+                    <span className={`ui-badge ${user.status === "Active" ? "border-success-border bg-success-subtle text-success" : "border-danger-border bg-danger-subtle text-danger"}`}>
+                      <span className={`h-2 w-2 rounded-full ${user.status === 'Active' ? 'bg-success' : 'bg-danger'}`} aria-hidden="true"></span>
                       {user.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-right flex justify-end gap-4">
+                  <td className="text-right">
+                    <div className="flex justify-end gap-2">
                     {canEdit && (
-                       <button onClick={() => openEditModal(user)} className="ui-button min-h-9 px-2" aria-label={`Edit ${user.operatorId}`}><Edit2 className="w-4 h-4" /></button>
+                       <button onClick={() => openEditModal(user)} className="ui-button min-h-9 px-2" aria-label={`Edit ${user.operatorId}`}><Edit2 className="h-4 w-4" aria-hidden="true" /></button>
                     )}
                     {canDelete && (
-                       <button onClick={() => handleDelete(user.operatorId)} className="ui-button min-h-9 px-2 text-danger" aria-label={`Delete ${user.operatorId}`}><ShieldX className="w-4 h-4" /></button>
+                       <button onClick={() => handleDelete(user.operatorId)} className="ui-button min-h-9 px-2 text-danger" aria-label={`Delete ${user.operatorId}`}><ShieldX className="h-4 w-4" aria-hidden="true" /></button>
                     )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Modal Add User (อันเดิม) */}

@@ -10,9 +10,11 @@ export function SeverityBadge({ severity, className }: { severity: RiskLevel | s
   };
 
   const badgeColor = colors[severity as keyof typeof colors] || "bg-neutral-subtle text-neutral border-neutral-border";
+  const markerClass = severity === 'Critical' ? 'rounded-sm' : severity === 'High' ? 'rounded-[3px]' : 'rounded-full';
 
   return (
-    <span className={cn('ui-badge', badgeColor, className)}>
+    <span className={cn('ui-badge', badgeColor, className)} aria-label={`Severity ${severity}`}>
+      <span aria-hidden="true" className={cn('h-2 w-2 shrink-0 bg-current', markerClass)} />
       {severity}
     </span>
   );

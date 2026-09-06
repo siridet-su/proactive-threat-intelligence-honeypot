@@ -5,6 +5,7 @@ import Link from "next/link";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { DashboardChartDatum, DashboardThreatEvent } from "@/lib/dashboardTypes";
 import { RefreshStatus, RegionState, type RegionStatus } from "@/components/ui/RegionState";
+import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { classificationBadgeClass } from "@/lib/presentation";
 
 export default function ThreatIntelPage() {
@@ -79,7 +80,7 @@ export default function ThreatIntelPage() {
       <section aria-label="Threat intelligence overview" aria-busy={isInitialLoad} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricSummary label="Total sessions" value={stats.total.toLocaleString()} loading={isInitialLoad} unavailable={isUnavailable} />
         <MetricSummary label="Automated bots" value={stats.proxies.toString()} loading={isInitialLoad} unavailable={isUnavailable} annotation="Detected" annotationClass="text-warning" />
-        <MetricSummary label="Detection latency" value="12ms" loading={isInitialLoad} unavailable={isUnavailable} annotation="Avg" />
+        <MetricSummary label="Detection latency" value="Unavailable" loading={isInitialLoad} unavailable={isUnavailable} reported={false} />
         <MetricSummary label="Critical threats" value={stats.critical.toString().padStart(2, "0")} loading={isInitialLoad} unavailable={isUnavailable} annotation="Critical severity" annotationClass="text-danger" valueClass="text-danger" />
       </section>
 
@@ -115,19 +116,20 @@ export default function ThreatIntelPage() {
 
           <div className="relative min-h-0 flex-1" aria-busy={status === "loading" || status === "refreshing"}>
             <div className="ui-scroll-region h-full" role="region" aria-label="Live incursion log. Scroll to view all columns." tabIndex={0}>
-            <table className="ui-table min-w-[680px]">
+            <table className="ui-table min-w-[760px]">
               <thead>
                 <tr>
                   <th scope="col">Timestamp</th>
                   <th scope="col">Hacker IP</th>
                   <th scope="col">Classification</th>
+                  <th scope="col">Severity</th>
                   <th scope="col" className="text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {isInitialLoad && Array.from({ length: itemsPerPage }, (_, index) => (
                   <tr key={`loading-${index}`} aria-hidden="true">
-                    {Array.from({ length: 4 }, (_, column) => <td key={column}><div className="ui-skeleton h-4 w-full" /></td>)}
+                    {Array.from({ length: 5 }, (_, column) => <td key={column}><div className="ui-skeleton h-4 w-full" /></td>)}
                   </tr>
                 ))}
                 {!isInitialLoad && currentLogs.map((log) => (
@@ -142,6 +144,7 @@ export default function ThreatIntelPage() {
                         {log.classification}
                       </span>
                     </td>
+                    <td><SeverityBadge severity={log.severity} /></td>
                     <td className="text-right">
                       <Link href={`/threat-intel/${log.id}`} className="ui-button min-h-9 px-3 text-xs">
                         View Details
@@ -152,7 +155,7 @@ export default function ThreatIntelPage() {
                 {/* สร้างช่องว่างให้เต็ม 5 แถวเสมอเมื่อข้อมูลหน้าสุดท้ายไม่ถึง 5 รายการ */}
                 {!isInitialLoad && Array.from({ length: Math.max(0, itemsPerPage - currentLogs.length) }).map((_, idx) => (
                   <tr key={`empty-${idx}`}>
-                    <td colSpan={4}></td>
+                    <td colSpan={5}></td>
                   </tr>
                 ))}
               </tbody>
@@ -182,10 +185,10 @@ export default function ThreatIntelPage() {
   );
 }
 
-function MetricSummary({ label, value, loading, unavailable, annotation, annotationClass = "text-text-subtle", valueClass = "text-text" }: { label: string; value: string; loading: boolean; unavailable: boolean; annotation?: string; annotationClass?: string; valueClass?: string }) {
+function MetricSummary({ label, value, loading, unavailable, reported = true, annotation, annotationClass = "text-text-subtle", valueClass = "text-text" }: { label: string; value: string; loading: boolean; unavailable: boolean; reported?: boolean; annotation?: string; annotationClass?: string; valueClass?: string }) {
   return <div className="ui-panel flex min-h-[116px] flex-col justify-between p-5">
-    <h2 className="text-xs font-medium text-text-muted">{label}</h2>
-    {loading ? <div className="ui-skeleton h-8 w-20" aria-label={`Loading ${label}`} /> : unavailable ? <p className="text-sm text-text-muted">Unavailable</p> : <div className="flex flex-wrap items-baseline gap-2"><span className={`text-[28px] font-semibold leading-9 tabular-nums ${valueClass}`}>{value}</span>{annotation && <span className={`text-xs font-medium ${annotationClass}`}>{annotation}</span>}</div>}
+    <h2 className="text-sm font-medium text-text-muted">{label}</h2>
+    {loading ? <div className="ui-skeleton h-8 w-20" aria-label={`Loading ${label}`} /> : unavailable || !reported ? <p className="text-sm text-text-muted">{reported ? "Unavailable" : "Not reported"}</p> : <div className="flex flex-wrap items-baseline gap-2"><span className={`text-[28px] font-semibold leading-9 tabular-nums ${valueClass}`}>{value}</span>{annotation && <span className={`text-xs font-medium ${annotationClass}`}>{annotation}</span>}</div>}
   </div>;
 }
 
