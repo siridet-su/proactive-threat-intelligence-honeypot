@@ -135,6 +135,10 @@ export async function getThreatSnapshot(range: string | null = null): Promise<Da
       .find(queryForRange(range))
       .sort({ start_time: -1 })
       .limit(limitForRange(range))
+      // MongoDB chooses `start_time_desc` automatically when the deployment has
+      // it. Disk use keeps the feed available while an index is absent or still
+      // being built, rather than failing the entire dashboard at Atlas' sort cap.
+      .allowDiskUse(true)
       .toArray();
     const threats = normalizeThreats(sessions);
 
