@@ -12,11 +12,11 @@
   --text-subtle: #64748B;
   --border: #CBD5E1;
   --border-strong: #94A3B8;
-  --primary: #1D4ED8;
-  --primary-action: #1D4ED8;
-  --primary-action-hover: #1E40AF;
+  --primary: #B45309;
+  --primary-action: #D97706;
+  --primary-action-hover: #B45309;
   --on-primary: #FFFFFF;
-  --focus-ring: #2563EB;
+  --focus-ring: #F59E0B;
   --success: #15803D;
   --warning: #B45309;
   --danger: #B91C1C;
@@ -49,11 +49,11 @@
   --text-subtle: #94A3B8;
   --border: #334155;
   --border-strong: #475569;
-  --primary: #60A5FA;
-  --primary-action: #2563EB;
-  --primary-action-hover: #1D4ED8;
+  --primary: #FBBF24;
+  --primary-action: #F59E0B;
+  --primary-action-hover: #D97706;
   --on-primary: #FFFFFF;
-  --focus-ring: #93C5FD;
+  --focus-ring: #FDE68A;
   --success: #4ADE80;
   --warning: #FBBF24;
   --danger: #F87171;
@@ -225,15 +225,15 @@
 /* Public landing: Cyber-Honeycomb. The palette is deliberately scoped so the
    authenticated operational console keeps its existing semantics. */
 .pti-cyber-landing {
-  --canvas: #fffaf0;
-  --surface: #fffdf8;
-  --surface-subtle: #fff7e6;
+  --canvas: #ffffff;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
   --surface-raised: #ffffff;
-  --surface-hover: #fff1d0;
+  --surface-hover: #fff7e6;
   --text: #24180a;
   --text-muted: #664b25;
   --text-subtle: #8a6a3d;
-  --border: #e7cf9d;
+  --border: #dbe3ee;
   --border-strong: #c9953d;
   --primary: #b45309;
   --primary-action: #d97706;
@@ -341,6 +341,64 @@
 .pti-hive-callout::after { content: ""; position: absolute; width: 15rem; height: 15rem; right: -6rem; bottom: -8rem; border: 1px solid var(--primary-border); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); opacity: 0.45; pointer-events: none; }
 .pti-cyber-landing footer { position: relative; overflow: hidden; background: color-mix(in srgb, var(--surface) 86%, var(--canvas)); }
 .pti-cyber-landing footer::after { content: ""; position: absolute; right: -2rem; bottom: -6rem; width: 14rem; height: 14rem; border: 1px solid var(--primary-border); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); opacity: 0.26; pointer-events: none; }
+
+/* Operator entry uses the same honeycomb language as the public landing while
+   remaining a focused, task-oriented authentication surface. */
+.pti-auth-entry {
+  --canvas: #fffaf0;
+  --surface: #fffdf8;
+  --surface-subtle: #fff7e6;
+  --surface-raised: #ffffff;
+  --surface-hover: #fff1d0;
+  --text: #24180a;
+  --text-muted: #664b25;
+  --text-subtle: #8a6a3d;
+  --border: #e7cf9d;
+  --border-strong: #c9953d;
+  --primary: #b45309;
+  --primary-action: #d97706;
+  --primary-action-hover: #b45309;
+  --focus-ring: #f59e0b;
+  --primary-subtle: color-mix(in srgb, var(--primary) 11%, var(--surface));
+  --primary-border: color-mix(in srgb, var(--primary) 48%, var(--border));
+  --entry-glow: color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+:root[data-theme="dark"] .pti-auth-entry {
+  --canvas: #0b0f19;
+  --surface: #141d2d;
+  --surface-subtle: #1b2739;
+  --surface-raised: #202d40;
+  --surface-hover: #26364d;
+  --text: #f8fafc;
+  --text-muted: #cbd5e1;
+  --text-subtle: #94a3b8;
+  --border: #334155;
+  --border-strong: #56657a;
+  --primary: #fbbf24;
+  --primary-action: #f59e0b;
+  --primary-action-hover: #d97706;
+  --focus-ring: #fde68a;
+  --primary-subtle: color-mix(in srgb, var(--primary) 13%, var(--surface));
+  --primary-border: color-mix(in srgb, var(--primary) 54%, var(--border));
+  --entry-glow: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.pti-auth-entry .ui-button-primary { box-shadow: 0 7px 20px var(--entry-glow); }
+.pti-auth-entry .ui-button-primary:hover:not(:disabled) { box-shadow: 0 10px 28px var(--entry-glow); }
+.pti-auth-entry a:focus-visible, .pti-auth-entry button:focus-visible, .pti-auth-entry input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pti-auth-stage { position: relative; overflow: hidden; background: radial-gradient(circle at 12% 10%, var(--entry-glow), transparent 28rem), radial-gradient(circle at 88% 86%, var(--entry-glow), transparent 30rem); }
+.pti-auth-stage::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.2; background-image: linear-gradient(30deg, transparent 48%, var(--primary-border) 49% 51%, transparent 52%), linear-gradient(150deg, transparent 48%, var(--primary-border) 49% 51%, transparent 52%), linear-gradient(90deg, transparent 48%, var(--primary-border) 49% 51%, transparent 52%); background-size: 8rem 7rem; mask-image: linear-gradient(to right, black, transparent 70%); }
+.pti-auth-stage > * { position: relative; }
+.pti-auth-card { border-color: var(--primary-border); box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 13%, transparent), 0 16px 38px var(--entry-glow); }
+.pti-auth-trust-grid > div { min-height: 7.5rem; border-top: 1px solid var(--primary-border); padding-top: 0.9rem; }
+.pti-auth-trust-grid span { display: block; font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; }
+.pti-auth-trust-grid p { margin-top: 0.65rem; font-size: 0.875rem; line-height: 1.35; color: var(--text-muted); }
+.pti-auth-hive-mark { position: relative; width: 18rem; height: 12rem; margin-top: 2.5rem; opacity: 0.8; }
+.pti-auth-hive-mark span { position: absolute; width: 8rem; aspect-ratio: 1 / 0.87; border: 1px solid var(--primary-border); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); }
+.pti-auth-hive-mark span:nth-child(1) { left: 0; top: 1.5rem; }
+.pti-auth-hive-mark span:nth-child(2) { left: 5.9rem; top: 0; background: color-mix(in srgb, var(--primary-subtle) 66%, transparent); }
+.pti-auth-hive-mark span:nth-child(3) { left: 11.8rem; top: 1.5rem; }
 
 @keyframes pti-hive-spark-forward { to { stroke-dashoffset: -100; } }
 @keyframes pti-hive-spark-reverse { to { stroke-dashoffset: 100; } }

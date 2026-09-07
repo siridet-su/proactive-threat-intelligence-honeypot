@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, ChevronDown, UserRound } from "lucide-react";
+import { ArrowUpRight, ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import SessionAwareLink from "@/components/auth/SessionAwareLink";
 import ThemeToggle from "@/components/theme/ThemeToggle";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/utils";
 
 const topics = [
@@ -46,7 +48,10 @@ export default function Navbar() {
   const [activeTopic, setActiveTopic] = useState<TopicId>("overview");
   const [session, setSession] = useState<PublicSession | null>(null);
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
+  const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const navbar = useRef<HTMLElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -150,6 +155,19 @@ export default function Navbar() {
     setOpenMenu(null);
   };
 
+  const confirmLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      setSession(null);
+      setLogoutConfirmationOpen(false);
+      router.replace("/");
+      router.refresh();
+    }
+  };
+
   const accountName = session ? getAccountName(session) : "";
   const accountInitial = accountName.charAt(0).toUpperCase() || "O";
 
@@ -204,7 +222,7 @@ export default function Navbar() {
                 </span>
                 <ChevronDown className="h-4 w-4 shrink-0 text-text-subtle" aria-hidden="true" />
               </summary>
-              <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-2 shadow-[var(--shadow-raised)]" role="menu" aria-label="Profile menu">
+              <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-xl border border-border bg-surface-raised p-2 shadow-[var(--shadow-raised)]" role="menu" aria-label="Profile menu">
                 <div className="rounded-lg bg-surface-subtle p-3">
                   <div className="flex items-center gap-3">
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-sm font-semibold text-primary" aria-hidden="true">
@@ -215,7 +233,11 @@ export default function Navbar() {
                       <p className="mt-0.5 text-xs text-text-muted">{session.role} operator</p>
                     </div>
                   </div>
-                  <p className="mt-3 border-t border-border pt-2 text-xs text-text-subtle">Operator ID <span className="ml-1 font-mono text-text">{session.operatorId}</span></p>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border pt-3 text-xs">
+                    <div><dt className="text-text-subtle">Operator ID</dt><dd className="mt-0.5 truncate font-mono text-text">{session.operatorId}</dd></div>
+                    <div><dt className="text-text-subtle">Session</dt><dd className="mt-0.5 inline-flex items-center gap-1 font-medium text-success"><span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />Active</dd></div>
+                    <div className="col-span-2"><dt className="text-text-subtle">Access scope</dt><dd className="mt-0.5 inline-flex items-center gap-1 font-medium text-text"><ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Read-only operator workspace</dd></div>
+                  </dl>
                 </div>
                 <div className="mt-1 grid gap-1">
                   <Link href="/profile" role="menuitem" className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-text" onClick={closeMenus}>
@@ -225,6 +247,9 @@ export default function Navbar() {
                     <span className="inline-flex items-center gap-2"><ArrowUpRight className="h-4 w-4 text-primary" aria-hidden="true" />Open operator console</span>
                     <ArrowUpRight className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
                   </Link>
+                  <button type="button" role="menuitem" className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-left text-sm font-medium text-danger transition-colors duration-150 hover:bg-danger-subtle" onClick={() => { closeMenus(); setLogoutConfirmationOpen(true); }}>
+                    <LogOut className="h-4 w-4" aria-hidden="true" />Sign out
+                  </button>
                 </div>
               </div>
             </details>
@@ -277,6 +302,10 @@ export default function Navbar() {
                       <UserRound className="h-4 w-4" aria-hidden="true" />
                       View profile
                     </Link>
+                    <button type="button" className="ui-button w-full justify-start border-danger-border text-danger hover:bg-danger-subtle" onClick={() => { closeMenus(); setLogoutConfirmationOpen(true); }}>
+                      <LogOut className="h-4 w-4" aria-hidden="true" />
+                      Sign out
+                    </button>
                   </>
                 ) : (
                   <Link href="/login" className="ui-button ui-button-primary mt-1 w-full" onClick={closeMenus}>Sign in</Link>
@@ -286,6 +315,14 @@ export default function Navbar() {
           </details>
         </div>
       </nav>
+      <ConfirmDialog
+        open={logoutConfirmationOpen}
+        onOpenChange={setLogoutConfirmationOpen}
+        onConfirm={() => void confirmLogout()}
+        title="Sign out of PTI-Honeypot?"
+        description="Your current session will end and you will return to the landing page."
+        confirmLabel={isLoggingOut ? "Signing out…" : "Sign out"}
+      />
     </header>
   );
 }

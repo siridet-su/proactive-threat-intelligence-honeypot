@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Briefcase, UserPlus, Edit2, ShieldX, X, Lock } from "lucide-react";
+import { Briefcase, CheckCircle2, Edit2, KeyRound, Lock, ShieldCheck, ShieldX, UserPlus, X } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardUser } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
@@ -16,7 +16,10 @@ export default function UserManagementPage() {
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState("");
 
-  const [formData, setFormData] = useState({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter" });
+  const [formData, setFormData] = useState({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter", initialPassword: "" });
+  const [createError, setCreateError] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [createdOperatorId, setCreatedOperatorId] = useState("");
 
   // State สำหรับแก้ไขข้อมูล
   const [editFormData, setEditFormData] = useState({ operatorId: "", fullName: "", email: "", position: "", role: "", newPassword: "" });
@@ -59,17 +62,47 @@ export default function UserManagementPage() {
   // ฟังก์ชันเพิ่มผู้ใช้
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(formData)
-    });
-    if (res.ok) {
-      setIsAddModalOpen(false);
-      setFormData({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter" });
-      setRefreshKey(prev => prev + 1);
-      alert("New Operator Added. Default Password is: default123");
+    if (isCreating) return;
+    setCreateError("");
+    setIsCreating(true);
+
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+      const data: unknown = await res.json();
+      if (!res.ok || !data || typeof data !== "object") {
+        const message = data && typeof data === "object" && "error" in data && typeof data.error === "string"
+          ? data.error
+          : "The operator account could not be created.";
+        setCreateError(message);
+        return;
+      }
+
+      const candidate = data as { user?: { operatorId?: unknown } };
+      setCreatedOperatorId(typeof candidate.user?.operatorId === "string" ? candidate.user.operatorId : "New operator");
+      setRefreshKey((previous) => previous + 1);
+    } catch {
+      setCreateError("The operator account could not be created. Please try again.");
+    } finally {
+      setIsCreating(false);
     }
+  };
+
+  const openCreateOperator = () => {
+    setCreateError("");
+    setCreatedOperatorId("");
+    setFormData({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter", initialPassword: "" });
+    setIsAddModalOpen(true);
+  };
+
+  const closeCreateOperator = () => {
+    if (isCreating) return;
+    setIsAddModalOpen(false);
+    setCreateError("");
+    setCreatedOperatorId("");
   };
 
   // ฟังก์ชันเปิดหน้าแก้ไข
@@ -138,7 +171,7 @@ export default function UserManagementPage() {
               <Link href="/user-management/positions" className="ui-button">
                 <Briefcase className="w-4 h-4" /> Manage Positions
               </Link>
-              <button onClick={() => setIsAddModalOpen(true)} className="ui-button ui-button-primary">
+              <button onClick={openCreateOperator} className="ui-button ui-button-primary">
                 <UserPlus className="w-4 h-4" /> Add New Operator
               </button>
             </>
@@ -208,40 +241,78 @@ export default function UserManagementPage() {
         </div>
       </div>
 
-      {/* Modal Add User (อันเดิม) */}
       {isAddModalOpen && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]">
-             <div className="flex justify-between items-center mb-6">
-               <h3 className="text-lg font-semibold">Add new operator</h3><button onClick={() => setIsAddModalOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close add operator dialog"><X className="w-5 h-5"/></button>
-             </div>
-             <form onSubmit={handleAddUser} className="space-y-4">
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={formData.fullName} onChange={(e) => setFormData({...formData, fullName: e.target.value})} required className="ui-field mt-1" />
-               </div>
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required className="ui-field mt-1" />
-               </div>
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Position</label><select value={formData.position} onChange={(e) => setFormData({...formData, position: e.target.value})} className="ui-field mt-1">
-                   <option value="Lead Sentinel">Lead Sentinel</option>
-                   <option value="Data Guardian">Data Guardian</option>
-                   <option value="Network Shield">Network Shield</option>
-                   <option value="Threat Hunter">Threat Hunter</option>
-                 </select>
-               </div>
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Role</label><select value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} className="ui-field mt-1">
-                   <option value="Admin">Admin</option>
-                   <option value="Supporter">Supporter</option>
-                 </select>
-               </div>
-               <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
-                 CREATE OPERATOR
-               </button>
-             </form>
-           </div>
-         </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <section className="w-full max-w-xl overflow-hidden rounded-2xl border border-primary-border bg-surface shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="create-operator-title">
+            <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle p-5 sm:p-6">
+              <div className="flex gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary-border bg-primary-subtle text-primary" aria-hidden="true"><ShieldCheck className="h-5 w-5" /></span>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Admin onboarding</p>
+                  <h2 id="create-operator-title" className="mt-1 text-lg font-semibold">Create operator</h2>
+                  <p className="mt-1 text-sm text-text-muted">Provision an account for the read-only intelligence workspace.</p>
+                </div>
+              </div>
+              <button onClick={closeCreateOperator} className="ui-button min-h-9 px-2" aria-label="Close create operator dialog" disabled={isCreating}><X className="h-5 w-5" /></button>
+            </header>
+
+            {createdOperatorId ? (
+              <div className="p-5 sm:p-6">
+                <div className="rounded-xl border border-success-border bg-success-subtle p-5 text-center">
+                  <CheckCircle2 className="mx-auto h-7 w-7 text-success" aria-hidden="true" />
+                  <h3 className="mt-3 text-base font-semibold text-text">Operator created</h3>
+                  <p className="mt-2 text-sm text-text-muted">Assigned operator ID</p>
+                  <p className="mt-1 font-mono text-lg font-semibold text-primary">{createdOperatorId}</p>
+                  <p className="mx-auto mt-4 max-w-sm text-sm leading-6 text-text-muted">Share the temporary access key through an approved secure channel. The operator will be required to change it at first sign-in.</p>
+                </div>
+                <button type="button" className="ui-button ui-button-primary mt-5 w-full" onClick={closeCreateOperator}>Done</button>
+              </div>
+            ) : (
+              <form onSubmit={handleAddUser} className="grid gap-5 p-5 sm:grid-cols-2 sm:p-6" aria-busy={isCreating}>
+                <div className="sm:col-span-2">
+                  <label htmlFor="create-full-name" className="text-xs font-medium text-text-muted">Full name</label>
+                  <input id="create-full-name" type="text" value={formData.fullName} onChange={(event) => setFormData({ ...formData, fullName: event.target.value })} required className="ui-field mt-1" disabled={isCreating} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label htmlFor="create-email" className="text-xs font-medium text-text-muted">Email</label>
+                  <input id="create-email" type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} required className="ui-field mt-1" disabled={isCreating} />
+                </div>
+                <div>
+                  <label htmlFor="create-position" className="text-xs font-medium text-text-muted">Position</label>
+                  <select id="create-position" value={formData.position} onChange={(event) => setFormData({ ...formData, position: event.target.value })} className="ui-field mt-1" disabled={isCreating}>
+                    <option value="Lead Sentinel">Lead Sentinel</option>
+                    <option value="Data Guardian">Data Guardian</option>
+                    <option value="Network Shield">Network Shield</option>
+                    <option value="Threat Hunter">Threat Hunter</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="create-role" className="text-xs font-medium text-text-muted">Role</label>
+                  <select id="create-role" value={formData.role} onChange={(event) => setFormData({ ...formData, role: event.target.value })} className="ui-field mt-1" disabled={isCreating}>
+                    <option value="Supporter">Supporter</option>
+                    <option value="Admin">Admin</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label htmlFor="create-access-key" className="text-xs font-medium text-text-muted">Temporary access key</label>
+                    <span className="text-xs text-text-subtle">At least 8 characters</span>
+                  </div>
+                  <div className="relative mt-1">
+                    <KeyRound className="pointer-events-none absolute inset-y-0 left-4 my-auto h-4 w-4 text-text-subtle" aria-hidden="true" />
+                    <input id="create-access-key" type="password" value={formData.initialPassword} onChange={(event) => setFormData({ ...formData, initialPassword: event.target.value })} minLength={8} required className="ui-field pl-11 font-mono" autoComplete="new-password" disabled={isCreating} />
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-text-subtle">The operator must change this key on their first sign-in.</p>
+                </div>
+                {createError && <p role="alert" className="sm:col-span-2 rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{createError}</p>}
+                <div className="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:col-span-2 sm:flex-row sm:justify-end">
+                  <button type="button" className="ui-button" onClick={closeCreateOperator} disabled={isCreating}>Cancel</button>
+                  <button type="submit" className="ui-button ui-button-primary" disabled={isCreating}><UserPlus className="h-4 w-4" aria-hidden="true" />{isCreating ? "Creating operator…" : "Create operator"}</button>
+                </div>
+              </form>
+            )}
+          </section>
+        </div>
       )}
 
       {/* Modal Edit User */}

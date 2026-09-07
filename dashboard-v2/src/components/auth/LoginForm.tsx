@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff, KeyRound, ShieldCheck, UserRound } from "lucide-react";
 
 function getSafeNextDestination() {
   const next = new URLSearchParams(window.location.search).get("next");
@@ -13,11 +14,17 @@ export default function LoginForm() {
   const [operatorId, setOperatorId] = useState("");
   const [accessKey, setAccessKey] = useState("");
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAccessKeyVisible, setIsAccessKeyVisible] = useState(false);
+  const submitButton = useRef<HTMLButtonElement>(null);
   const router = useRouter();
 
-  const handleAuthenticate = async (e?: React.FormEvent) => {
-    e?.preventDefault();
+  const handleAuthenticate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (isSubmitting) return;
+
     setError("");
+    setIsSubmitting(true);
 
     try {
       const res = await fetch("/api/auth/login", {
@@ -28,46 +35,36 @@ export default function LoginForm() {
       const data = await res.json();
 
       if (data.success) {
-        if (data.isFirstLogin) {
-          router.push("/change-password"); // พาไปหน้าเปลี่ยนรหัส
-        } else {
-          router.push(getSafeNextDestination());
-        }
+        router.push(data.isFirstLogin ? "/change-password" : getSafeNextDestination());
       } else {
         setError(data.error || "ACCESS DENIED: Invalid Credentials.");
       }
     } catch {
       setError("System Offline: Database Connection Failed.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <section aria-labelledby="login-title" className="ui-panel w-full max-w-md">
-      <div className="flex flex-col items-center p-6 sm:p-8">
-
-        {/* Shield Icon */}
-        <div className="mb-4 text-primary">
-          <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-1.998A11.954 11.954 0 0110 1.944z" clipRule="evenodd" />
-          </svg>
+    <section aria-labelledby="login-title" className="pti-auth-card ui-panel w-full max-w-md">
+      <div className="flex flex-col p-6 sm:p-8">
+        <div className="flex items-center justify-between gap-4">
+          <span className="grid h-11 w-11 place-items-center rounded-xl border border-primary-border bg-primary-subtle text-primary" aria-hidden="true"><ShieldCheck className="h-5 w-5" /></span>
+          <span className="ui-badge border-primary-border bg-primary-subtle text-primary">Operator access</span>
         </div>
 
-        {/* Title */}
-        <h1 id="login-title" className="text-2xl leading-8 text-text font-semibold">Operator sign in</h1>
-        <p className="mt-2 text-sm text-text-muted">Use your authorized operator credentials to access the read-only workspace.</p>
+        <h1 id="login-title" className="mt-6 text-2xl font-semibold leading-8 text-text">Operator sign in</h1>
+        <p className="mt-2 text-sm leading-6 text-text-muted">Use your authorized operator credentials to access the read-only workspace.</p>
 
-        <form onSubmit={(event) => void handleAuthenticate(event)} className="mt-8 flex w-full flex-col gap-5">
-
-          {/* Operator ID Input */}
+        <form onSubmit={(event) => void handleAuthenticate(event)} className="mt-8 flex w-full flex-col gap-5" aria-busy={isSubmitting}>
           <div>
-            <div className="flex justify-between mb-2">
-              <label htmlFor="operator-id" className="text-xs text-text-muted font-medium">OPERATOR ID</label>
+            <div className="mb-2 flex justify-between">
+              <label htmlFor="operator-id" className="text-xs font-medium text-text-muted">OPERATOR ID</label>
               <span className="text-xs text-text-subtle">REQUIRED</span>
             </div>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-subtle">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              </div>
+              <UserRound className="pointer-events-none absolute inset-y-0 left-4 my-auto h-4 w-4 text-text-subtle" aria-hidden="true" />
               <input
                 id="operator-id"
                 aria-invalid={Boolean(error)}
@@ -75,61 +72,70 @@ export default function LoginForm() {
                 type="text"
                 placeholder="admin"
                 value={operatorId}
-                onChange={(e) => setOperatorId(e.target.value)}
+                onChange={(event) => setOperatorId(event.target.value)}
                 name="operatorId"
                 autoComplete="username"
-                className="ui-field pl-10 font-mono"
+                className="ui-field pl-11 font-mono"
+                disabled={isSubmitting}
                 required
               />
             </div>
           </div>
 
-          {/* Access Key Input */}
           <div>
-             <div className="flex justify-between mb-2">
-              <label htmlFor="access-key" className="text-xs text-text-muted font-medium">ACCESS KEY</label>
+            <div className="mb-2 flex justify-between">
+              <label htmlFor="access-key" className="text-xs font-medium text-text-muted">ACCESS KEY</label>
               <span className="text-xs text-text-subtle">ENCRYPTED</span>
             </div>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-subtle">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
-              </div>
+              <KeyRound className="pointer-events-none absolute inset-y-0 left-4 my-auto h-4 w-4 text-text-subtle" aria-hidden="true" />
               <input
                 id="access-key"
                 aria-invalid={Boolean(error)}
                 aria-describedby={error ? "login-error" : undefined}
-                type="password"
+                type={isAccessKeyVisible ? "text" : "password"}
                 placeholder="admin"
                 value={accessKey}
-                onChange={(e) => setAccessKey(e.target.value)}
+                onChange={(event) => setAccessKey(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Tab" && !event.shiftKey) {
+                    event.preventDefault();
+                    submitButton.current?.focus();
+                  }
+                }}
                 name="accessKey"
                 autoComplete="current-password"
-                className="ui-field pl-10 font-mono"
+                className="ui-field pl-11 pr-11 font-mono"
+                disabled={isSubmitting}
                 required
               />
+              <button
+                type="button"
+                className="absolute inset-y-0 right-1 grid w-10 place-items-center rounded-md text-text-subtle transition-colors duration-150 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                onClick={() => setIsAccessKeyVisible((visible) => !visible)}
+                aria-label={isAccessKeyVisible ? "Hide access key" : "Show access key"}
+                aria-pressed={isAccessKeyVisible}
+                disabled={isSubmitting}
+              >
+                {isAccessKeyVisible ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+              </button>
             </div>
           </div>
 
-          {/* Error Message */}
           {error && (
             <p id="login-error" role="alert" className="rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{error}</p>
           )}
 
-          {/* Submit Button */}
-          <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
-            Authenticate
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+          <button ref={submitButton} type="submit" className="ui-button ui-button-primary mt-4 w-full" disabled={isSubmitting}>
+            {isSubmitting ? "Authenticating…" : "Authenticate"}
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
           </button>
-
         </form>
 
-        <div className="mt-8 flex flex-col gap-3 text-center">
+        <div className="mt-8 flex flex-col gap-3 border-t border-border pt-5 text-center">
           <p className="text-sm text-text-muted">Need a reset? Contact your system administrator.</p>
-          <p className="max-w-xs text-xs leading-5 text-text-subtle">
-            Unauthorized access attempts may be monitored and logged.
-          </p>
+          <p className="max-w-xs self-center text-xs leading-5 text-text-subtle">Unauthorized access attempts may be monitored and logged.</p>
         </div>
-
       </div>
     </section>
   );
