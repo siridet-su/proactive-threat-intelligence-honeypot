@@ -3,8 +3,12 @@
 import { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from "recharts";
 import { Cpu, MemoryStick, HardDrive, Thermometer, Wifi } from "lucide-react";
-import { formatHardwareMetric, isHardwareTelemetry } from "@/lib/dashboardTypes";
-import type { HardwareChartRecord } from "@/lib/dashboardTypes";
+import {
+  formatHardwareMetric,
+  isHardwareTelemetry,
+  parseHardwareStreamMessage,
+} from "@/lib/dashboardTypes";
+import type { HardwareChartRecord, HardwareTelemetry } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
 
 export function HardwareMonitor() {
@@ -13,25 +17,103 @@ export function HardwareMonitor() {
   const [fetchFailed, setFetchFailed] = useState(false);
 
   useEffect(() => {
-    const fetchMetrics = async () => {
+    let disposed = false;
+    let source: EventSource | null = null;
+    let reconnectTimer: number | null = null;
+    let fallbackTimer: number | null = null;
+    let hasSnapshot = false;
+
+    const replaceMetrics = (incoming: HardwareTelemetry[]) => {
+      hasSnapshot = true;
+      setMetrics(incoming.filter(isHardwareTelemetry).map(formatHardwareMetric).slice(-30));
+      setFetchFailed(false);
+      setLoading(false);
+    };
+
+    const appendMetric = (incoming: HardwareTelemetry) => {
+      hasSnapshot = true;
+      setMetrics((current) => [...current, formatHardwareMetric(incoming)].slice(-30));
+      setFetchFailed(false);
+      setLoading(false);
+    };
+
+    const fetchSnapshot = async () => {
       try {
         const res = await fetch("/api/hardware");
         if (!res.ok) throw new Error("Hardware request failed");
         const data: unknown = await res.json();
         if (!Array.isArray(data)) throw new Error("Hardware response unavailable");
-        setMetrics(data.filter(isHardwareTelemetry).map(formatHardwareMetric));
-        setFetchFailed(false);
+        replaceMetrics(data.filter(isHardwareTelemetry));
       } catch {
-        setFetchFailed(true);
+        if (!hasSnapshot) setFetchFailed(true);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchMetrics();
-    // Poll every 10 seconds (matches hardware-agent interval)
-    const interval = setInterval(fetchMetrics, 10000);
-    return () => clearInterval(interval);
+    const stopFallback = () => {
+      if (fallbackTimer === null) return;
+      window.clearInterval(fallbackTimer);
+      fallbackTimer = null;
+    };
+
+    const startFallback = () => {
+      if (fallbackTimer !== null) return;
+      void fetchSnapshot();
+      fallbackTimer = window.setInterval(() => void fetchSnapshot(), 15_000);
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer !== null) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 5_000);
+    };
+
+    const connect = () => {
+      if (disposed) return;
+      source?.close();
+      const connection = new EventSource("/api/hardware/stream");
+      source = connection;
+
+      connection.onmessage = (event) => {
+        try {
+          const message = parseHardwareStreamMessage(JSON.parse(event.data));
+          if (!message) return;
+          if (message.type === "initial") replaceMetrics(message.data);
+          else appendMetric(message.data);
+        } catch {
+          // Retain the last valid telemetry point when one SSE message is malformed.
+        }
+      };
+
+      connection.onopen = () => {
+        if (disposed) return;
+        stopFallback();
+      };
+
+      connection.onerror = () => {
+        if (disposed || source !== connection) return;
+        connection.close();
+        source = null;
+        if (!hasSnapshot) {
+          setFetchFailed(true);
+          setLoading(false);
+        }
+        startFallback();
+        scheduleReconnect();
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      source?.close();
+      stopFallback();
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+    };
   }, []);
 
   if (loading && metrics.length === 0) {
