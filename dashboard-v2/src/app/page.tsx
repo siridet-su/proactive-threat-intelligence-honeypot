@@ -48,7 +48,11 @@ export default function Home() {
                     <h3 className="text-base font-semibold">{title}</h3>
                     <p className="mt-1 text-sm leading-6 text-text-muted">{description}</p>
                   </div>
-                  {index < 2 && <span className="pti-flow-connector pointer-events-none absolute left-9 top-full z-10 h-3 w-px bg-border" aria-hidden="true"><span className="pti-flow-pulse absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 rounded-full bg-primary" /></span>}
+                  {index < 2 && (
+                    <span className="pti-flow-connector pointer-events-none absolute left-9 top-full z-10" aria-hidden="true">
+                      <span className="pti-flow-rail" />
+                    </span>
+                  )}
                 </li>
                 ))}
               </ol>

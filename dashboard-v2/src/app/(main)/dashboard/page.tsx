@@ -24,6 +24,7 @@ import RegionalMap from "@/components/dashboard/RegionalMap";
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RegionState, RefreshStatus } from "@/components/ui/RegionState";
+import { SelectMenu } from "@/components/ui/SelectMenu";
 import { classificationBadgeClass } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
 
@@ -381,16 +382,15 @@ export default function DashboardPage() {
 
           {filterOpen && (
             <div id="incursion-filter-panel" className="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-surface-subtle p-3 sm:flex-row sm:items-center sm:justify-between">
-              <label className="flex items-center gap-3 text-sm font-medium text-text-muted">
-                Severity
-                <select
+              <div className="flex items-center gap-3 text-sm font-medium text-text-muted">
+                <span>Severity</span>
+                <SelectMenu
                   value={severityFilter}
-                  onChange={(event) => { setSeverityFilter(event.target.value as SeverityFilter); setCurrentPage(1); }}
-                  className="ui-field w-auto min-w-32"
-                >
-                  {severityOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              </label>
+                  onValueChange={(value) => { setSeverityFilter(value as SeverityFilter); setCurrentPage(1); }}
+                  options={severityOptions}
+                  className="min-w-32"
+                />
+              </div>
               <div className="flex items-center justify-between gap-3 text-xs text-text-muted sm:justify-end">
                 <span>{filteredSessions.length} matching session{filteredSessions.length === 1 ? "" : "s"}</span>
                 {(query || severityFilter !== "All") && (

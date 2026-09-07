@@ -1,15 +1,19 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Briefcase, CheckCircle2, Edit2, KeyRound, Lock, ShieldCheck, ShieldX, UserPlus, X } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardUser } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
+import { SelectMenu } from "@/components/ui/SelectMenu";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<DashboardUser[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddModalPresent, setIsAddModalPresent] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditModalPresent, setIsEditModalPresent] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetchFailed, setFetchFailed] = useState(false);
@@ -23,6 +27,14 @@ export default function UserManagementPage() {
 
   // State สำหรับแก้ไขข้อมูล
   const [editFormData, setEditFormData] = useState({ operatorId: "", fullName: "", email: "", position: "", role: "", newPassword: "" });
+  const createDialogCloseTimer = useRef<number | null>(null);
+  const editDialogCloseTimer = useRef<number | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<DashboardUser | null>(null);
+
+  useEffect(() => () => {
+    if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
+    if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
+  }, []);
 
   useEffect(() => {
     const loadSession = async () => {
@@ -92,23 +104,35 @@ export default function UserManagementPage() {
   };
 
   const openCreateOperator = () => {
+    if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
     setCreateError("");
     setCreatedOperatorId("");
     setFormData({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter", initialPassword: "" });
-    setIsAddModalOpen(true);
+    setIsAddModalPresent(true);
+    window.requestAnimationFrame(() => setIsAddModalOpen(true));
   };
 
   const closeCreateOperator = () => {
     if (isCreating) return;
     setIsAddModalOpen(false);
+    if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
+    createDialogCloseTimer.current = window.setTimeout(() => setIsAddModalPresent(false), 180);
     setCreateError("");
     setCreatedOperatorId("");
   };
 
   // ฟังก์ชันเปิดหน้าแก้ไข
   const openEditModal = (user: DashboardUser) => {
+    if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
     setEditFormData({ ...user, newPassword: "" });
-    setIsEditModalOpen(true);
+    setIsEditModalPresent(true);
+    window.requestAnimationFrame(() => setIsEditModalOpen(true));
+  };
+
+  const closeEditModal = () => {
+    setIsEditModalOpen(false);
+    if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
+    editDialogCloseTimer.current = window.setTimeout(() => setIsEditModalPresent(false), 180);
   };
 
   // ฟังก์ชันบันทึกการแก้ไข
@@ -135,25 +159,29 @@ export default function UserManagementPage() {
         alert("Profile updated successfully.");
       }
 
-      setIsEditModalOpen(false);
+      closeEditModal();
       setRefreshKey(prev => prev + 1);
     }
   };
 
   // ฟังก์ชันลบผู้ใช้
-  const handleDelete = async (operatorId: string) => {
-    if (operatorId === currentUserId) {
-      alert("You cannot delete your own account.");
-      return;
-    }
+  const requestDelete = (user: DashboardUser) => {
+    if (user.operatorId === currentUserId) return;
+    setDeleteCandidate(user);
+  };
 
-    if (confirm("Are you sure you want to terminate this operator's access?")) {
+  const confirmDelete = async () => {
+    if (!deleteCandidate) return;
+    const operatorId = deleteCandidate.operatorId;
+    try {
       const res = await fetch("/api/users", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operatorId })
       });
       if (res.ok) setRefreshKey(prev => prev + 1);
+    } finally {
+      setDeleteCandidate(null);
     }
   };
 
@@ -229,7 +257,7 @@ export default function UserManagementPage() {
                        <button onClick={() => openEditModal(user)} className="ui-button min-h-9 px-2" aria-label={`Edit ${user.operatorId}`}><Edit2 className="h-4 w-4" aria-hidden="true" /></button>
                     )}
                     {canDelete && (
-                       <button onClick={() => handleDelete(user.operatorId)} className="ui-button min-h-9 px-2 text-danger" aria-label={`Delete ${user.operatorId}`}><ShieldX className="h-4 w-4" aria-hidden="true" /></button>
+                       <button onClick={() => requestDelete(user)} className="ui-button min-h-9 px-2 text-danger" aria-label={`Delete ${user.operatorId}`}><ShieldX className="h-4 w-4" aria-hidden="true" /></button>
                     )}
                     </div>
                   </td>
@@ -241,9 +269,9 @@ export default function UserManagementPage() {
         </div>
       </div>
 
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
-          <section className="w-full max-w-xl overflow-hidden rounded-2xl border border-primary-border bg-surface shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="create-operator-title">
+      {isAddModalPresent && (
+        <div data-open={isAddModalOpen} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <section data-open={isAddModalOpen} className="pti-modal-panel w-full max-w-xl overflow-hidden rounded-2xl border border-primary-border bg-surface shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="create-operator-title">
             <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle p-5 sm:p-6">
               <div className="flex gap-3">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary-border bg-primary-subtle text-primary" aria-hidden="true"><ShieldCheck className="h-5 w-5" /></span>
@@ -279,19 +307,11 @@ export default function UserManagementPage() {
                 </div>
                 <div>
                   <label htmlFor="create-position" className="text-xs font-medium text-text-muted">Position</label>
-                  <select id="create-position" value={formData.position} onChange={(event) => setFormData({ ...formData, position: event.target.value })} className="ui-field mt-1" disabled={isCreating}>
-                    <option value="Lead Sentinel">Lead Sentinel</option>
-                    <option value="Data Guardian">Data Guardian</option>
-                    <option value="Network Shield">Network Shield</option>
-                    <option value="Threat Hunter">Threat Hunter</option>
-                  </select>
+                  <SelectMenu id="create-position" value={formData.position} onValueChange={(position) => setFormData({ ...formData, position })} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={isCreating} />
                 </div>
                 <div>
                   <label htmlFor="create-role" className="text-xs font-medium text-text-muted">Role</label>
-                  <select id="create-role" value={formData.role} onChange={(event) => setFormData({ ...formData, role: event.target.value })} className="ui-field mt-1" disabled={isCreating}>
-                    <option value="Supporter">Supporter</option>
-                    <option value="Admin">Admin</option>
-                  </select>
+                  <SelectMenu id="create-role" value={formData.role} onValueChange={(role) => setFormData({ ...formData, role })} options={["Supporter", "Admin"]} className="mt-1" disabled={isCreating} />
                 </div>
                 <div className="sm:col-span-2">
                   <div className="flex items-center justify-between gap-3">
@@ -316,13 +336,13 @@ export default function UserManagementPage() {
       )}
 
       {/* Modal Edit User */}
-      {isEditModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]">
+      {isEditModalPresent && (
+        <div data-open={isEditModalOpen} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
+          <div data-open={isEditModalOpen} className="pti-modal-panel max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="edit-operator-title">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="flex items-center gap-2 text-lg font-semibold"><Edit2 className="w-5 h-5 text-primary"/> Edit operator [{editFormData.operatorId}]
+              <h3 id="edit-operator-title" className="flex items-center gap-2 text-lg font-semibold"><Edit2 className="w-5 h-5 text-primary"/> Edit operator [{editFormData.operatorId}]
               </h3>
-              <button onClick={() => setIsEditModalOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close edit operator dialog"><X className="w-5 h-5"/></button>
+              <button onClick={closeEditModal} className="ui-button min-h-9 px-2" aria-label="Close edit operator dialog"><X className="w-5 h-5"/></button>
             </div>
 
             <form onSubmit={handleEditSubmit} className="space-y-4">
@@ -335,18 +355,10 @@ export default function UserManagementPage() {
 
               {/* ให้ Admin เท่านั้นที่เปลี่ยนตำแหน่งและ Role ได้ */}
               <div>
-                <label className="text-xs font-medium text-text-muted">Position</label><select disabled={currentUserRole !== "Admin"} value={editFormData.position} onChange={(e) => setEditFormData({...editFormData, position: e.target.value})} className="ui-field mt-1">
-                  <option value="Lead Sentinel">Lead Sentinel</option>
-                  <option value="Data Guardian">Data Guardian</option>
-                  <option value="Network Shield">Network Shield</option>
-                  <option value="Threat Hunter">Threat Hunter</option>
-                </select>
+                <label className="text-xs font-medium text-text-muted">Position</label><SelectMenu value={editFormData.position} onValueChange={(position) => setEditFormData({...editFormData, position})} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={currentUserRole !== "Admin"} />
               </div>
               <div>
-                <label className="text-xs font-medium text-text-muted">Role</label><select disabled={currentUserRole !== "Admin"} value={editFormData.role} onChange={(e) => setEditFormData({...editFormData, role: e.target.value})} className="ui-field mt-1">
-                  <option value="Admin">Admin</option>
-                  <option value="Supporter">Supporter</option>
-                </select>
+                <label className="text-xs font-medium text-text-muted">Role</label><SelectMenu value={editFormData.role} onValueChange={(role) => setEditFormData({...editFormData, role})} options={["Admin", "Supporter"]} className="mt-1" disabled={currentUserRole !== "Admin"} />
               </div>
 
               {/* ส่วนเปลี่ยนรหัสผ่าน (แสดงเฉพาะตอนแก้ไขบัญชีตัวเอง) */}
@@ -365,6 +377,15 @@ export default function UserManagementPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={Boolean(deleteCandidate)}
+        onOpenChange={(open) => { if (!open) setDeleteCandidate(null); }}
+        onConfirm={() => void confirmDelete()}
+        title="Remove operator access?"
+        description={deleteCandidate ? `This will remove ${deleteCandidate.fullName || deleteCandidate.operatorId} from the operator roster. This action cannot be undone.` : ""}
+        confirmLabel="Remove operator"
+        confirmVariant="danger"
+      />
     </div>
   );
 }

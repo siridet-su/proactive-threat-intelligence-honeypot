@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Monitor, Moon, Sun } from "lucide-react";
 
 import { useThemePreference } from "./ThemeProvider";
-import { setThemePreference, type ThemePreference } from "@/lib/theme";
+import { requestThemePreference, type ThemePreference } from "@/lib/theme";
 
 const themeOptions: Array<{
   value: ThemePreference;
@@ -24,7 +24,7 @@ interface ThemeToggleProps {
 
 export default function ThemeToggle({ open, onOpenChange }: ThemeToggleProps) {
   const preference = useThemePreference();
-  const menu = useRef<HTMLDetailsElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const selectedTheme = themeOptions.find((option) => option.value === preference) ?? themeOptions[0];
   const SelectedIcon = selectedTheme.icon;
@@ -53,24 +53,21 @@ export default function ThemeToggle({ open, onOpenChange }: ThemeToggleProps) {
   }, [isOpen, setMenuOpen]);
 
   return (
-    <details
-      ref={menu}
-      open={isOpen}
-      className="relative shrink-0"
-    >
-      <summary
+    <div ref={menu} className="relative shrink-0">
+      <button
+        type="button"
         className="ui-button h-9 min-h-9 list-none gap-2 px-2.5 text-xs [&::-webkit-details-marker]:hidden"
         aria-label={`Theme: ${selectedTheme.label}`}
-        onClick={(event) => {
-          event.preventDefault();
-          setMenuOpen(!isOpen);
-        }}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-controls="pti-theme-menu"
+        onClick={() => setMenuOpen(!isOpen)}
       >
         <SelectedIcon className="h-4 w-4 text-primary" aria-hidden="true" />
         <span className="hidden sm:inline">{selectedTheme.label}</span>
         <ChevronDown className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
-      </summary>
-      <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-1.5 shadow-[var(--shadow-raised)]" role="menu" aria-label="Theme preference">
+      </button>
+      <div id="pti-theme-menu" data-open={isOpen} className="ui-dropdown-menu absolute right-0 top-[calc(100%+8px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-1.5 shadow-[var(--shadow-raised)]" role="menu" aria-label="Theme preference">
         <p className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-text-subtle">Appearance</p>
         {themeOptions.map(({ value, label, description, icon: Icon }) => {
           const selected = value === preference;
@@ -81,7 +78,7 @@ export default function ThemeToggle({ open, onOpenChange }: ThemeToggleProps) {
               role="menuitemradio"
               aria-checked={selected}
               onClick={() => {
-                setThemePreference(value);
+                requestThemePreference(value);
                 setMenuOpen(false);
               }}
               className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm text-text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-text"
@@ -96,6 +93,6 @@ export default function ThemeToggle({ open, onOpenChange }: ThemeToggleProps) {
           );
         })}
       </div>
-    </details>
+    </div>
   );
 }

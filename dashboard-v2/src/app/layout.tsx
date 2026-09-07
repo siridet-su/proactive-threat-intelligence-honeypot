@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import DeploymentBadge from "@/components/layout/DeploymentBadge";
 import ThemeProvider from "@/components/theme/ThemeProvider";
 import { themeBootstrap } from "@/lib/theme";
@@ -17,7 +18,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
+        <Script id="pti-theme-bootstrap" strategy="beforeInteractive">
+          {themeBootstrap}
+        </Script>
       </head>
       <body className="min-h-full flex flex-col">
         <ThemeProvider>

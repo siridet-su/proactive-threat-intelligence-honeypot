@@ -6,6 +6,7 @@ import { Calendar, Download, Filter, Search, Shield } from "lucide-react";
 
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { RegionState } from "@/components/ui/RegionState";
+import { SelectMenu } from "@/components/ui/SelectMenu";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
@@ -112,15 +113,15 @@ export default function ArchivesPage() {
             </button>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Date range
-              <span className="relative"><Calendar className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><select value={filters.dateRange} onChange={(event) => updateFilter("dateRange", event.target.value)} className="ui-field appearance-none pl-9"><option>Last 30 Days</option><option>Last 6 Months</option><option>All Time</option></select></span>
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Attacker type
-              <span className="relative"><Shield className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><select value={filters.attackerType} onChange={(event) => updateFilter("attackerType", event.target.value)} className="ui-field appearance-none pl-9"><option>All Types</option><option>APT</option><option>Botnet</option><option>Script Kiddie</option></select></span>
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Criticality
-              <select value={filters.criticality} onChange={(event) => updateFilter("criticality", event.target.value)} className="ui-field appearance-none"><option>All Levels</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
-            </label>
+            <div className="flex flex-col gap-2 text-sm font-medium text-text-muted"><span>Date range</span>
+              <SelectMenu value={filters.dateRange} onValueChange={(value) => updateFilter("dateRange", value)} options={["Last 30 Days", "Last 6 Months", "All Time"]} leadingIcon={<Calendar className="h-4 w-4" />} />
+            </div>
+            <div className="flex flex-col gap-2 text-sm font-medium text-text-muted"><span>Attacker type</span>
+              <SelectMenu value={filters.attackerType} onValueChange={(value) => updateFilter("attackerType", value)} options={["All Types", "APT", "Botnet", "Script Kiddie"]} leadingIcon={<Shield className="h-4 w-4" />} />
+            </div>
+            <div className="flex flex-col gap-2 text-sm font-medium text-text-muted"><span>Criticality</span>
+              <SelectMenu value={filters.criticality} onValueChange={(value) => updateFilter("criticality", value)} options={["All Levels", "Critical", "High", "Medium", "Low"]} />
+            </div>
             <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Region
               <span className="relative"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><input value={filters.region} onChange={(event) => updateFilter("region", event.target.value)} type="search" placeholder="Search region..." className="ui-field pl-9" /></span>
             </label>

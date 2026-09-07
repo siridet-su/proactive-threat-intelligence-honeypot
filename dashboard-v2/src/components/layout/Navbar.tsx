@@ -203,15 +203,15 @@ export default function Navbar() {
         <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle open={openMenu === "theme"} onOpenChange={(open) => setOpenMenu(open ? "theme" : null)} />
           {session ? (
-            <details open={openMenu === "account"} className="relative hidden lg:block">
-              <summary
+            <div className="relative hidden lg:block">
+              <button
+                type="button"
                 className="ui-button list-none gap-2 px-2.5 [&::-webkit-details-marker]:hidden"
                 aria-haspopup="menu"
                 aria-label={`Open profile menu for ${accountName}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  setOpenMenu((menu) => menu === "account" ? null : "account");
-                }}
+                aria-expanded={openMenu === "account"}
+                aria-controls="pti-profile-menu"
+                onClick={() => setOpenMenu((menu) => menu === "account" ? null : "account")}
               >
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-primary-border bg-primary-subtle text-xs font-semibold text-primary" aria-hidden="true">
                   {accountInitial}
@@ -221,8 +221,8 @@ export default function Navbar() {
                   <span className="block truncate text-xs leading-4 text-text-subtle">{session.role}</span>
                 </span>
                 <ChevronDown className="h-4 w-4 shrink-0 text-text-subtle" aria-hidden="true" />
-              </summary>
-              <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-xl border border-border bg-surface-raised p-2 shadow-[var(--shadow-raised)]" role="menu" aria-label="Profile menu">
+              </button>
+              <div id="pti-profile-menu" data-open={openMenu === "account"} className="ui-dropdown-menu absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-xl border border-border bg-surface-raised p-2 shadow-[var(--shadow-raised)]" role="menu" aria-label="Profile menu">
                 <div className="rounded-lg bg-surface-subtle p-3">
                   <div className="flex items-center gap-3">
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-sm font-semibold text-primary" aria-hidden="true">
@@ -252,16 +252,13 @@ export default function Navbar() {
                   </button>
                 </div>
               </div>
-            </details>
+            </div>
           ) : (
             <Link href="/login" className="ui-button ui-button-primary hidden px-5 sm:inline-flex">Sign in</Link>
           )}
-          <details open={openMenu === "mobile"} className="relative lg:hidden">
-            <summary className="ui-button list-none px-3 [&::-webkit-details-marker]:hidden" onClick={(event) => {
-              event.preventDefault();
-              setOpenMenu((menu) => menu === "mobile" ? null : "mobile");
-            }}>Menu</summary>
-            <div className="absolute right-0 top-[calc(100%+8px)] z-50 min-w-56 rounded-xl border border-border bg-surface p-2 shadow-[var(--shadow-raised)]">
+          <div className="relative lg:hidden">
+            <button type="button" className="ui-button px-3" aria-haspopup="menu" aria-expanded={openMenu === "mobile"} aria-controls="pti-mobile-menu" onClick={() => setOpenMenu((menu) => menu === "mobile" ? null : "mobile")}>Menu</button>
+            <div id="pti-mobile-menu" data-open={openMenu === "mobile"} className="ui-dropdown-menu absolute right-0 top-[calc(100%+8px)] z-50 min-w-56 rounded-xl border border-border bg-surface p-2 shadow-[var(--shadow-raised)]" role="menu" aria-label="Mobile navigation">
               <div className="flex flex-col gap-1 text-sm font-medium text-text-muted">
                 {topics.map((topic) => {
                   const active = activeTopic === topic.id;
@@ -312,7 +309,7 @@ export default function Navbar() {
                 )}
               </div>
             </div>
-          </details>
+          </div>
         </div>
       </nav>
       <ConfirmDialog

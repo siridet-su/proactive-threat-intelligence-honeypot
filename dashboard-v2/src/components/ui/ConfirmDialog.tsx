@@ -9,9 +9,10 @@ interface ConfirmDialogProps {
   title: string;
   description: string;
   confirmLabel: string;
+  confirmVariant?: "primary" | "danger";
 }
 
-export function ConfirmDialog({ open, onOpenChange, onConfirm, title, description, confirmLabel }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, onOpenChange, onConfirm, title, description, confirmLabel, confirmVariant = "primary" }: ConfirmDialogProps) {
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>
@@ -21,7 +22,7 @@ export function ConfirmDialog({ open, onOpenChange, onConfirm, title, descriptio
           <AlertDialog.Description className="mt-2 text-sm leading-6 text-text-muted">{description}</AlertDialog.Description>
           <div className="mt-6 flex flex-wrap justify-end gap-3">
             <AlertDialog.Cancel asChild><button className="ui-button">Cancel</button></AlertDialog.Cancel>
-            <AlertDialog.Action asChild><button onClick={onConfirm} className="ui-button ui-button-primary">{confirmLabel}</button></AlertDialog.Action>
+            <AlertDialog.Action asChild><button onClick={onConfirm} className={confirmVariant === "danger" ? "ui-button ui-button-danger" : "ui-button ui-button-primary"}>{confirmLabel}</button></AlertDialog.Action>
           </div>
         </AlertDialog.Content>
       </AlertDialog.Portal>
