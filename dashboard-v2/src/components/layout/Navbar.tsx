@@ -4,14 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, ChevronDown, UserRound } from "lucide-react";
 
+import SessionAwareLink from "@/components/auth/SessionAwareLink";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { cn } from "@/lib/utils";
 
 const topics = [
-  { id: "overview", href: "#overview", label: "Overview" },
-  { id: "capabilities", href: "#capabilities", label: "Capabilities" },
-  { id: "how-it-works", href: "#how-it-works", label: "How it works" },
-  { id: "documentation", href: "#documentation", label: "Documentation" },
+  { id: "overview", href: "#overview", label: "Overview", requiresSession: false },
+  { id: "capabilities", href: "#capabilities", label: "Capabilities", requiresSession: true },
+  { id: "how-it-works", href: "#how-it-works", label: "How it works", requiresSession: false },
+  { id: "documentation", href: "#documentation", label: "Documentation", requiresSession: true },
 ] as const;
 
 type TopicId = (typeof topics)[number]["id"];
@@ -160,13 +161,14 @@ export default function Navbar() {
           PTI-Honeypot
         </Link>
 
-        <div className="hidden items-center gap-1 text-sm font-medium text-text-muted md:flex">
+        <div className="hidden items-center gap-1 text-sm font-medium text-text-muted lg:flex">
           {topics.map((topic) => {
             const active = activeTopic === topic.id;
             return (
-              <Link
+              <SessionAwareLink
                 key={topic.id}
                 href={topic.href}
+                requiresSession={topic.requiresSession}
                 className={topicLinkClass(active)}
                 aria-current={active ? "location" : undefined}
                 aria-label={`${topic.label}${active ? " (current topic)" : ""}`}
@@ -175,7 +177,7 @@ export default function Navbar() {
                 {topic.label}
                 <span aria-hidden="true" className={cn("absolute inset-x-3 bottom-1 h-0.5 rounded-full transition-colors duration-150", active ? "bg-primary" : "bg-transparent group-hover:bg-border-strong")} />
                 {active && <span className="sr-only">Current topic</span>}
-              </Link>
+              </SessionAwareLink>
             );
           })}
         </div>
@@ -183,7 +185,7 @@ export default function Navbar() {
         <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle open={openMenu === "theme"} onOpenChange={(open) => setOpenMenu(open ? "theme" : null)} />
           {session ? (
-            <details open={openMenu === "account"} className="relative hidden md:block">
+            <details open={openMenu === "account"} className="relative hidden lg:block">
               <summary
                 className="ui-button list-none gap-2 px-2.5 [&::-webkit-details-marker]:hidden"
                 aria-haspopup="menu"
@@ -229,7 +231,7 @@ export default function Navbar() {
           ) : (
             <Link href="/login" className="ui-button ui-button-primary hidden px-5 sm:inline-flex">Sign in</Link>
           )}
-          <details open={openMenu === "mobile"} className="relative md:hidden">
+          <details open={openMenu === "mobile"} className="relative lg:hidden">
             <summary className="ui-button list-none px-3 [&::-webkit-details-marker]:hidden" onClick={(event) => {
               event.preventDefault();
               setOpenMenu((menu) => menu === "mobile" ? null : "mobile");
@@ -239,9 +241,10 @@ export default function Navbar() {
                 {topics.map((topic) => {
                   const active = activeTopic === topic.id;
                   return (
-                    <Link
+                    <SessionAwareLink
                       key={topic.id}
                       href={topic.href}
+                      requiresSession={topic.requiresSession}
                       className={cn("flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 transition-colors duration-150", active ? "border-primary-border bg-primary-subtle text-primary" : "border-transparent hover:border-border hover:bg-surface-hover hover:text-text")}
                       aria-current={active ? "location" : undefined}
                       aria-label={`${topic.label}${active ? " (current topic)" : ""}`}
@@ -249,7 +252,7 @@ export default function Navbar() {
                     >
                       <span>{topic.label}</span>
                       {active && <span className="ui-badge border-primary-border bg-surface text-primary">Current</span>}
-                    </Link>
+                    </SessionAwareLink>
                   );
                 })}
                 {session ? (

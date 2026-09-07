@@ -3,6 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+function getSafeNextDestination() {
+  const next = new URLSearchParams(window.location.search).get("next");
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/dashboard";
+  return next;
+}
+
 export default function LoginForm() {
   const [operatorId, setOperatorId] = useState("");
   const [accessKey, setAccessKey] = useState("");
@@ -25,7 +31,7 @@ export default function LoginForm() {
         if (data.isFirstLogin) {
           router.push("/change-password"); // พาไปหน้าเปลี่ยนรหัส
         } else {
-          router.push("/dashboard");
+          router.push(getSafeNextDestination());
         }
       } else {
         setError(data.error || "ACCESS DENIED: Invalid Credentials.");

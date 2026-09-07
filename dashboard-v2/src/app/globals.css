@@ -222,6 +222,158 @@
 .pti-telemetry-path-three { animation-delay: -3.1s; }
 .pti-flow-pulse { animation: pti-flow-pulse 2.4s ease-in-out infinite; }
 
+/* Public landing: Cyber-Honeycomb. The palette is deliberately scoped so the
+   authenticated operational console keeps its existing semantics. */
+.pti-cyber-landing {
+  --canvas: #fffaf0;
+  --surface: #fffdf8;
+  --surface-subtle: #fff7e6;
+  --surface-raised: #ffffff;
+  --surface-hover: #fff1d0;
+  --text: #24180a;
+  --text-muted: #664b25;
+  --text-subtle: #8a6a3d;
+  --border: #e7cf9d;
+  --border-strong: #c9953d;
+  --primary: #b45309;
+  --primary-action: #d97706;
+  --primary-action-hover: #b45309;
+  --focus-ring: #f59e0b;
+  --primary-subtle: color-mix(in srgb, var(--primary) 11%, var(--surface));
+  --primary-border: color-mix(in srgb, var(--primary) 48%, var(--border));
+  --illustration-honey: #d97706;
+  --illustration-honey-light: #fbbf24;
+  --illustration-honey-deep: #92400e;
+  --hive-glow: color-mix(in srgb, var(--primary) 30%, transparent);
+  background: var(--canvas);
+}
+
+:root[data-theme="dark"] .pti-cyber-landing {
+  --canvas: #0b0f19;
+  --surface: #141d2d;
+  --surface-subtle: #1b2739;
+  --surface-raised: #202d40;
+  --surface-hover: #26364d;
+  --text: #f8fafc;
+  --text-muted: #cbd5e1;
+  --text-subtle: #94a3b8;
+  --border: #334155;
+  --border-strong: #56657a;
+  --primary: #fbbf24;
+  --primary-action: #f59e0b;
+  --primary-action-hover: #d97706;
+  --focus-ring: #fde68a;
+  --primary-subtle: color-mix(in srgb, var(--primary) 13%, var(--surface));
+  --primary-border: color-mix(in srgb, var(--primary) 54%, var(--border));
+  --illustration-honey: #f59e0b;
+  --illustration-honey-light: #fde68a;
+  --illustration-honey-deep: #b45309;
+  --hive-glow: color-mix(in srgb, var(--primary) 38%, transparent);
+}
+
+.pti-cyber-landing .ui-panel { box-shadow: 0 8px 26px rgb(15 23 42 / 0.11); }
+.pti-cyber-landing .ui-button-primary { box-shadow: 0 7px 20px var(--hive-glow); }
+.pti-cyber-landing .ui-button-primary:hover:not(:disabled) { box-shadow: 0 10px 28px var(--hive-glow); }
+.pti-cyber-landing .ui-button:focus-visible,
+.pti-cyber-landing a:focus-visible { outline-color: var(--focus-ring); }
+
+.pti-hive-hero { background: var(--canvas); }
+.pti-hive-hero-grid { opacity: 0.96; mask-image: linear-gradient(to bottom, black, transparent 94%); }
+.pti-hive-grid-spark { stroke-linecap: round; stroke-dasharray: 3 97; filter: drop-shadow(0 0 3px currentColor); }
+.pti-hive-grid-spark-a { animation: pti-hive-spark-forward 13.7s linear infinite; }
+.pti-hive-grid-spark-b { animation: pti-hive-spark-reverse 17.3s linear infinite; }
+.pti-hive-grid-spark-c { animation: pti-hive-spark-wander 21.1s ease-in-out infinite; }
+.pti-hive-hero-orb { width: 28rem; height: 28rem; border-radius: 50%; background: radial-gradient(circle, var(--hive-glow), transparent 68%); filter: blur(1px); opacity: 0.65; }
+.pti-hive-hero-orb-one { top: -13rem; right: 2%; }
+.pti-hive-hero-orb-two { bottom: -16rem; left: -8rem; opacity: 0.34; }
+.pti-hive-primary-cta { border-color: var(--primary-action); }
+.pti-hive-secondary-cta { border-color: color-mix(in srgb, var(--info) 58%, var(--border)); color: var(--info); }
+.pti-hive-secondary-cta:hover:not(:disabled) { border-color: var(--info); color: var(--info); }
+.pti-cyber-landing .pti-honeypot-scene > .ui-panel { border-color: var(--primary-border); background: var(--surface); box-shadow: var(--shadow-card); }
+.pti-honeypot-asset-stage { position: relative; min-height: clamp(19rem, 34vw, 25rem); overflow: hidden; isolation: isolate; border: 1px solid var(--border); border-radius: 0.75rem; background: radial-gradient(circle at 50% 54%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 42%), linear-gradient(145deg, color-mix(in srgb, var(--surface-subtle) 94%, var(--canvas)), var(--surface)); }
+.pti-honeypot-asset-stage::before { content: ""; position: absolute; inset: 1rem; z-index: -1; border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border)); border-radius: 50%; opacity: 0.72; transform: scaleX(0.86); }
+.pti-honeypot-device-frame { position: absolute; z-index: 2; bottom: -14%; left: 50%; width: min(82%, 29rem); transform: translateX(-50%); }
+.pti-honeypot-device { transform-origin: center bottom; }
+.pti-honeypot-device img { width: 100%; height: auto; }
+.pti-honeypot-device img { filter: drop-shadow(0 1.15rem 1.2rem rgb(15 23 42 / 0.32)); transition: filter 240ms ease, scale 240ms ease; }
+.pti-honeypot-asset-stage:hover .pti-honeypot-device img { filter: drop-shadow(0 1.3rem 1.55rem color-mix(in srgb, var(--primary) 30%, transparent)); scale: 1.015; }
+.pti-honeypot-bee { position: absolute; z-index: 3; width: clamp(8rem, 21%, 10.8rem); transform-origin: center; pointer-events: none; filter: drop-shadow(0 0.6rem 0.55rem rgb(15 23 42 / 0.36)); }
+.pti-honeypot-bee img { width: 100%; height: auto; }
+.pti-honeypot-bee-one { top: 12%; left: 6%; }
+.pti-honeypot-bee-two { top: 6%; right: 5%; width: clamp(7.1rem, 18%, 9.6rem); }
+.pti-honeypot-bee-three { right: 7%; bottom: 20%; width: clamp(6.5rem, 16%, 8.6rem); }
+.pti-honeypot-orbit { position: absolute; z-index: 0; left: 50%; top: 50%; border: 1px solid color-mix(in srgb, var(--primary) 62%, var(--border)); border-radius: 50%; pointer-events: none; }
+.pti-honeypot-orbit-one { width: 56%; aspect-ratio: 1; transform: translate(-50%, -48%); opacity: 0.86; }
+.pti-honeypot-orbit-two { width: 75%; aspect-ratio: 0.48; transform: translate(-50%, -36%) rotate(-17deg); opacity: 0.42; border-style: dashed; }
+.pti-honeypot-signal { position: absolute; z-index: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--primary), transparent); transform-origin: left center; opacity: 0.8; }
+.pti-honeypot-signal-one { width: 34%; top: 37%; left: 10%; transform: rotate(23deg); }
+.pti-honeypot-signal-two { width: 29%; top: 33%; right: 9%; transform: rotate(-24deg); }
+.pti-honeypot-node { position: absolute; z-index: 1; width: 0.55rem; height: 0.55rem; border: 2px solid var(--primary); border-radius: 999px; background: var(--surface); box-shadow: 0 0 0 0.35rem var(--primary-subtle); }
+.pti-honeypot-node-one { left: 14%; top: 42%; }
+.pti-honeypot-node-two { right: 16%; top: 49%; }
+.pti-honeypot-stage-label { position: absolute; z-index: 4; font-family: var(--font-mono); font-size: 0.58rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-subtle); }
+.pti-honeypot-stage-label-top { top: 1.1rem; left: 1.15rem; }
+.pti-honeypot-stage-label-bottom { right: 1.15rem; bottom: 1rem; }
+
+.pti-hive-section { background: color-mix(in srgb, var(--surface-subtle) 82%, var(--canvas)); }
+.pti-hive-section-mark { position: absolute; width: 16rem; height: 18rem; border: 1px solid var(--primary-border); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); opacity: 0.33; }
+.pti-hive-section-mark-left { top: -9rem; left: -8rem; }
+.pti-hive-cluster { position: relative; }
+.pti-hive-feature-wrap { min-width: 0; }
+.pti-hive-feature { display: block; min-height: 19.5rem; padding: 2rem 2.25rem; border: 1px solid var(--primary-border); background: color-mix(in srgb, var(--surface) 92%, transparent); clip-path: polygon(50% 0%, 100% 12%, 100% 88%, 50% 100%, 0% 88%, 0% 12%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 13%, transparent); transition: box-shadow 180ms ease, filter 180ms ease, background-color 180ms ease; }
+.pti-hive-feature:hover { background: var(--surface-raised); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent), 0 0 24px var(--hive-glow); }
+.pti-hive-feature:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+.pti-hive-cluster:has(.pti-hive-feature:hover) .pti-hive-feature:not(:hover) { filter: saturate(0.74); opacity: 0.68; }
+.pti-hive-icon { transition: transform 180ms ease, box-shadow 180ms ease; }
+.pti-hive-feature:hover .pti-hive-icon { transform: rotate(-5deg) scale(1.06); box-shadow: 0 0 18px var(--hive-glow); }
+.pti-hive-arrow { transition: transform 150ms ease; }
+.pti-hive-feature:hover .pti-hive-arrow { transform: translateX(4px); }
+
+.pti-threat-preview { background: var(--canvas); }
+.pti-threat-preview-map { box-shadow: 0 12px 34px rgb(15 23 42 / 0.12), inset 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent); }
+.pti-preview-stream { stroke-dasharray: 5 12; animation: pti-preview-stream 3.8s linear infinite; }
+.pti-preview-stream-delayed { animation-delay: -1.8s; }
+.pti-preview-connector { stroke-dasharray: 3 8; animation: pti-preview-stream 3.2s linear infinite; }
+.pti-preview-marker { transform-origin: center; animation: pti-preview-marker 2.5s ease-in-out infinite; }
+.pti-preview-marker-two { animation-delay: -0.85s; }
+.pti-preview-marker-three { animation-delay: -1.55s; }
+.pti-hive-callout { position: relative; background: color-mix(in srgb, var(--surface) 92%, transparent); }
+.pti-hive-callout::after { content: ""; position: absolute; width: 15rem; height: 15rem; right: -6rem; bottom: -8rem; border: 1px solid var(--primary-border); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); opacity: 0.45; pointer-events: none; }
+.pti-cyber-landing footer { position: relative; overflow: hidden; background: color-mix(in srgb, var(--surface) 86%, var(--canvas)); }
+.pti-cyber-landing footer::after { content: ""; position: absolute; right: -2rem; bottom: -6rem; width: 14rem; height: 14rem; border: 1px solid var(--primary-border); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); opacity: 0.26; pointer-events: none; }
+
+@keyframes pti-hive-spark-forward { to { stroke-dashoffset: -100; } }
+@keyframes pti-hive-spark-reverse { to { stroke-dashoffset: 100; } }
+@keyframes pti-hive-spark-wander {
+  0%, 100% { stroke-dashoffset: 0; }
+  31% { stroke-dashoffset: -56; }
+  67% { stroke-dashoffset: 34; }
+}
+@keyframes pti-preview-stream { to { stroke-dashoffset: -34; } }
+@keyframes pti-preview-marker { 50% { opacity: 0.66; } }
+
+@media (min-width: 1024px) {
+  .pti-hive-feature-wrap:nth-child(2), .pti-hive-feature-wrap:nth-child(4) { transform: translateY(2.5rem); }
+  .pti-hive-feature-wrap + .pti-hive-feature-wrap { margin-left: -1.9rem; }
+  .pti-hive-feature { min-height: 21.5rem; padding: 2.4rem 2.15rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pti-hive-grid-spark, .pti-preview-stream, .pti-preview-connector, .pti-preview-marker { animation: none; }
+  .pti-hive-feature:hover .pti-hive-icon, .pti-hive-feature:hover .pti-hive-arrow { transform: none; }
+  .pti-honeypot-asset-stage:hover .pti-honeypot-device img { scale: 1; }
+}
+
+@media (max-width: 639px) {
+  .pti-hive-hero-orb { width: 20rem; height: 20rem; }
+  .pti-hive-feature { min-height: 17rem; padding: 1.8rem 2rem; }
+  .pti-honeypot-asset-stage { min-height: 18.5rem; }
+  .pti-honeypot-device-frame { width: 96%; bottom: -7%; }
+  .pti-honeypot-bee-one { left: -2%; top: 8%; }
+  .pti-honeypot-bee-two { right: -3%; top: 7%; }
+  .pti-honeypot-bee-three { right: -4%; bottom: 22%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .ui-scroll-reveal, .ui-scroll-reveal-hidden, .ui-scroll-reveal-visible { opacity: 1; transform: none; }
