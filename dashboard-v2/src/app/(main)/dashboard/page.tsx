@@ -36,15 +36,24 @@ export default function DashboardPage() {
   const { threats: sessions, status, lastUpdated, refresh } = useThreatFeed();
   const mapPanel = useRef<HTMLDivElement>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [query, setQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("All");
   const [filterOpen, setFilterOpen] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setIsHydrated(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  const renderedSessions = useMemo(() => isHydrated ? sessions : [], [isHydrated, sessions]);
+  const renderedStatus = isHydrated ? status : "loading";
+  const renderedLastUpdated = isHydrated ? lastUpdated : null;
   const stats = useMemo(() => {
-    const critical = sessions.filter((event) => event.severity === "Critical" || event.severity === "High").length;
-    const total = sessions.length.toString();
+    const critical = renderedSessions.filter((event) => event.severity === "Critical" || event.severity === "High").length;
+    const total = renderedSessions.length.toString();
     return { total, active: total, critical, health: "99.9%" };
-  }, [sessions]);
+  }, [renderedSessions]);
 
   useEffect(() => {
     if (!isFullScreen) return;
@@ -84,7 +93,7 @@ export default function DashboardPage() {
   const filteredSessions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return sessions.filter((session) => {
+    return renderedSessions.filter((session) => {
       const matchesSeverity = severityFilter === "All" || session.severity === severityFilter;
       if (!matchesSeverity) return false;
       if (!normalizedQuery) return true;
@@ -92,21 +101,22 @@ export default function DashboardPage() {
       return [session.id, session.sourceIp, session.sensor, session.classification, session.severity]
         .some((value) => value.toLowerCase().includes(normalizedQuery));
     });
-  }, [query, sessions, severityFilter]);
+  }, [query, renderedSessions, severityFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredSessions.length / ITEMS_PER_PAGE));
   const displayPage = Math.min(currentPage, totalPages);
   const currentData = filteredSessions.slice((displayPage - 1) * ITEMS_PER_PAGE, displayPage * ITEMS_PER_PAGE);
-  const isInitialLoad = status === "loading";
-  const isUpdating = status === "loading" || status === "refreshing";
-  const isUnavailable = status === "error";
-  const feedState = status === "error"
+  const isInitialLoad = renderedStatus === "loading";
+  const isUpdating = renderedStatus === "loading" || renderedStatus === "refreshing";
+  const isRefreshDisabled = !isHydrated || isUpdating;
+  const isUnavailable = renderedStatus === "error";
+  const feedState = renderedStatus === "error"
     ? { label: "Feed unavailable", className: "border-danger-border bg-danger-subtle text-danger" }
-    : status === "stale"
+    : renderedStatus === "stale"
       ? { label: "Feed stale", className: "border-warning-border bg-warning-subtle text-warning" }
-      : status === "refreshing"
+      : renderedStatus === "refreshing"
         ? { label: "Refreshing feed", className: "border-info-border bg-info-subtle text-info" }
-        : status === "loading"
+        : renderedStatus === "loading"
           ? { label: "Connecting to feed", className: "border-info-border bg-info-subtle text-info" }
           : { label: "Live feed active", className: "border-success-border bg-success-subtle text-success" };
 
@@ -163,15 +173,15 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3 xl:justify-end">
           <span role="status" aria-live="polite" className={cn("ui-badge", feedState.className)}>
-            {status === "refreshing" ? <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> : <Radio className="h-3.5 w-3.5" aria-hidden="true" />}
+            {renderedStatus === "refreshing" ? <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> : <Radio className="h-3.5 w-3.5" aria-hidden="true" />}
             {feedState.label}
           </span>
-          <span className="font-mono text-xs text-text-subtle">{formatUpdatedAt(lastUpdated)}</span>
-          <RefreshStatus status={status} />
+          <span className="font-mono text-xs text-text-subtle">{formatUpdatedAt(renderedLastUpdated)}</span>
+          <RefreshStatus status={renderedStatus} />
           <button
             type="button"
             onClick={() => void refresh()}
-            disabled={isUpdating}
+            disabled={isRefreshDisabled}
             className="ui-button min-h-9 px-3 text-xs"
             aria-label="Refresh dashboard data"
           >
@@ -276,10 +286,10 @@ export default function DashboardPage() {
             <span
               className={cn(
                 "mt-1 flex h-2.5 w-2.5 shrink-0 rounded-full",
-                status === "error" ? "bg-danger" : status === "stale" ? "bg-warning" : status === "ready" ? "bg-success" : "bg-info",
+                renderedStatus === "error" ? "bg-danger" : renderedStatus === "stale" ? "bg-warning" : renderedStatus === "ready" ? "bg-success" : "bg-info",
               )}
-              title={status === "error" ? "Feed unavailable" : status === "stale" ? "Feed stale" : status === "ready" ? "Feed active" : "Feed connecting"}
-              aria-label={status === "error" ? "Feed unavailable" : status === "stale" ? "Feed stale" : status === "ready" ? "Feed active" : "Feed connecting"}
+              title={renderedStatus === "error" ? "Feed unavailable" : renderedStatus === "stale" ? "Feed stale" : renderedStatus === "ready" ? "Feed active" : "Feed connecting"}
+              aria-label={renderedStatus === "error" ? "Feed unavailable" : renderedStatus === "stale" ? "Feed stale" : renderedStatus === "ready" ? "Feed active" : "Feed connecting"}
             />
           </div>
 
@@ -295,8 +305,8 @@ export default function DashboardPage() {
               </div>
             ))}
             {!isInitialLoad && isUnavailable && <RegionState kind="error" title="Signals unavailable" description="The latest session directory could not be loaded." />}
-            {!isInitialLoad && !isUnavailable && sessions.length === 0 && <RegionState kind="empty" title="No recent sessions" description="No sessions were returned in the last successful response." />}
-            {!isInitialLoad && !isUnavailable && sessions.slice(0, 5).map((session) => (
+            {!isInitialLoad && !isUnavailable && renderedSessions.length === 0 && <RegionState kind="empty" title="No recent sessions" description="No sessions were returned in the last successful response." />}
+            {!isInitialLoad && !isUnavailable && renderedSessions.slice(0, 5).map((session) => (
               <Link
                 key={session.id}
                 href={`/threat-intel/${session.id}`}
@@ -439,9 +449,9 @@ export default function DashboardPage() {
           </div>
 
           <div className="pointer-events-none absolute inset-x-0 top-[57px] bottom-0 p-4 sm:p-6 [&>div]:h-full">
-            {status === "error" && <RegionState kind="error" title="Sessions unavailable" description="We couldn’t load the session directory. The next automatic refresh will try again." />}
-            {status !== "loading" && status !== "error" && sessions.length === 0 && <RegionState kind="empty" title="No active sessions" description="No sessions were returned in the last successful response." />}
-            {status !== "loading" && status !== "error" && sessions.length > 0 && filteredSessions.length === 0 && <RegionState kind="empty" title="No matching sessions" description="Try a different search or severity filter." />}
+            {renderedStatus === "error" && <RegionState kind="error" title="Sessions unavailable" description="We couldn’t load the session directory. The next automatic refresh will try again." />}
+            {renderedStatus !== "loading" && renderedStatus !== "error" && renderedSessions.length === 0 && <RegionState kind="empty" title="No active sessions" description="No sessions were returned in the last successful response." />}
+            {renderedStatus !== "loading" && renderedStatus !== "error" && renderedSessions.length > 0 && filteredSessions.length === 0 && <RegionState kind="empty" title="No matching sessions" description="Try a different search or severity filter." />}
           </div>
         </div>
 

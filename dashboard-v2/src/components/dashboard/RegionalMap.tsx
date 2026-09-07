@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { LocateFixed } from "lucide-react";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
@@ -24,15 +24,25 @@ const defaultPosition: MapPosition = { coordinates: [0, 20], zoom: 1 };
 
 export default function RegionalMap() {
   const { threats, status } = useThreatFeed();
+  const [isHydrated, setIsHydrated] = useState(false);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
-  const markers = useMemo<MapMarker[]>(() => threats.map((threat) => ({
+  const [position, setPosition] = useState(defaultPosition);
+  const [tooltip, setTooltip] = useState({ show: false, content: "", x: 0, y: 0 });
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setIsHydrated(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  const renderedThreats = useMemo(() => isHydrated ? threats : [], [isHydrated, threats]);
+  const renderedStatus = isHydrated ? status : "loading";
+  const renderedPosition = isHydrated ? position : defaultPosition;
+  const markers = useMemo<MapMarker[]>(() => renderedThreats.map((threat) => ({
     id: threat.id,
     name: [threat.geo.city, threat.geo.country].filter(Boolean).join(" · ") || "Unknown location",
     coordinates: [threat.geo.lon, threat.geo.lat] as [number, number],
     status: threat.severity === "Critical" || threat.severity === "High" ? "failed" as const : "running" as const,
-  })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0), [threats]);
-  const [position, setPosition] = useState(defaultPosition);
-  const [tooltip, setTooltip] = useState({ show: false, content: "", x: 0, y: 0 });
+  })).filter((marker) => marker.coordinates[0] !== 0 && marker.coordinates[1] !== 0), [renderedThreats]);
 
   function handleZoomIn() {
     if (position.zoom >= 8) return;
@@ -71,7 +81,7 @@ export default function RegionalMap() {
 
   return (
     // คง touchAction: "none" ไว้เพื่อป้องกันเบราว์เซอร์ซูมหน้าจอ
-    <div aria-label="Attack distribution map" aria-busy={status === "loading" || status === "refreshing"} className="ui-map relative h-full w-full cursor-grab bg-surface-subtle active:cursor-grabbing" style={{ touchAction: "none" }}>
+    <div aria-label="Attack distribution map" aria-busy={renderedStatus === "loading" || renderedStatus === "refreshing"} className="ui-map relative h-full w-full cursor-grab bg-surface-subtle active:cursor-grabbing" style={{ touchAction: "none" }}>
       <ComposableMap
         projection="geoMercator"
         width={1000}
@@ -81,8 +91,8 @@ export default function RegionalMap() {
         style={{ width: "100%", height: "100%" }}
       >
         <ZoomableGroup
-          zoom={position.zoom}
-          center={position.coordinates}
+          zoom={renderedPosition.zoom}
+          center={renderedPosition.coordinates}
           onMoveEnd={handleMoveEnd} // เปลี่ยนกลับมาใช้ onMoveEnd
           minZoom={1}
           maxZoom={8}
@@ -164,12 +174,12 @@ export default function RegionalMap() {
         </div>
       )}
 
-      <div className="pointer-events-none absolute bottom-4 left-4 max-w-[calc(100%-88px)] rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-muted" role={status === "error" ? "alert" : "status"}>
-        {status === "loading" ? "Loading attack locations…" : status === "error" ? <span className="text-danger">Attack locations unavailable. Retrying automatically.</span> : status === "refreshing" || status === "stale" ? <RefreshStatus status={status} /> : markers.length === 0 ? "No attack locations in the last successful response." : "Drag to explore · scroll to zoom"}
+      <div className="pointer-events-none absolute bottom-4 left-4 max-w-[calc(100%-88px)] rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-muted" role={renderedStatus === "error" ? "alert" : "status"}>
+        {renderedStatus === "loading" ? "Loading attack locations…" : renderedStatus === "error" ? <span className="text-danger">Attack locations unavailable. Retrying automatically.</span> : renderedStatus === "refreshing" || renderedStatus === "stale" ? <RefreshStatus status={renderedStatus} /> : markers.length === 0 ? "No attack locations in the last successful response." : "Drag to explore · scroll to zoom"}
       </div>
       <div className="absolute bottom-4 right-4 flex flex-col gap-2">
-        <button onClick={handleZoomIn} disabled={position.zoom >= 8} aria-label="Zoom in" className="ui-button h-10 w-10 text-base">+</button>
-        <button onClick={handleZoomOut} disabled={position.zoom <= 1} aria-label="Zoom out" className="ui-button h-10 w-10 text-base">−</button>
+        <button onClick={handleZoomIn} disabled={!isHydrated || position.zoom >= 8} aria-label="Zoom in" className="ui-button h-10 w-10 text-base">+</button>
+        <button onClick={handleZoomOut} disabled={!isHydrated || position.zoom <= 1} aria-label="Zoom out" className="ui-button h-10 w-10 text-base">−</button>
         <button onClick={handleReset} aria-label="Reset map view" className="ui-button h-10 w-10 p-0">
           <LocateFixed className="h-4 w-4" aria-hidden="true" />
         </button>
