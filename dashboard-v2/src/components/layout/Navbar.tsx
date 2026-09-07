@@ -15,6 +15,7 @@ const topics = [
 ] as const;
 
 type TopicId = (typeof topics)[number]["id"];
+type OpenMenu = "theme" | "account" | "mobile" | null;
 
 type PublicSession = {
   operatorId: string;
@@ -43,8 +44,8 @@ function getAccountName(session: PublicSession) {
 export default function Navbar() {
   const [activeTopic, setActiveTopic] = useState<TopicId>("overview");
   const [session, setSession] = useState<PublicSession | null>(null);
-  const mobileMenu = useRef<HTMLDetailsElement>(null);
-  const accountMenu = useRef<HTMLDetailsElement>(null);
+  const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
+  const navbar = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -123,21 +124,36 @@ export default function Navbar() {
     };
   }, []);
 
+  useEffect(() => {
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !navbar.current?.contains(event.target)) setOpenMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenMenu(null);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
   const handleTopicClick = (topic: TopicId) => {
     setActiveTopic(topic);
-    mobileMenu.current?.removeAttribute("open");
+    setOpenMenu(null);
   };
 
   const closeMenus = () => {
-    mobileMenu.current?.removeAttribute("open");
-    accountMenu.current?.removeAttribute("open");
+    setOpenMenu(null);
   };
 
   const accountName = session ? getAccountName(session) : "";
   const accountInitial = accountName.charAt(0).toUpperCase() || "O";
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-surface shadow-[var(--shadow-card)]">
+    <header ref={navbar} className="sticky top-0 z-40 border-b border-border bg-surface shadow-[var(--shadow-card)]">
       <nav aria-label="Public navigation" className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
         <Link href="/" className="flex items-center gap-3 text-base font-semibold tracking-tight text-text">
           <span className="grid h-8 w-8 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-primary" aria-hidden="true">P</span>
@@ -165,13 +181,17 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <ThemeToggle />
+          <ThemeToggle open={openMenu === "theme"} onOpenChange={(open) => setOpenMenu(open ? "theme" : null)} />
           {session ? (
-            <details ref={accountMenu} className="relative hidden md:block">
+            <details open={openMenu === "account"} className="relative hidden md:block">
               <summary
                 className="ui-button list-none gap-2 px-2.5 [&::-webkit-details-marker]:hidden"
                 aria-haspopup="menu"
                 aria-label={`Open profile menu for ${accountName}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setOpenMenu((menu) => menu === "account" ? null : "account");
+                }}
               >
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-primary-border bg-primary-subtle text-xs font-semibold text-primary" aria-hidden="true">
                   {accountInitial}
@@ -182,28 +202,26 @@ export default function Navbar() {
                 </span>
                 <ChevronDown className="h-4 w-4 shrink-0 text-text-subtle" aria-hidden="true" />
               </summary>
-              <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-xl border border-border bg-surface-raised p-2 shadow-[var(--shadow-raised)]">
-                <div className="rounded-lg border border-border bg-surface-subtle p-3">
+              <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-2 shadow-[var(--shadow-raised)]" role="menu" aria-label="Profile menu">
+                <div className="rounded-lg bg-surface-subtle p-3">
                   <div className="flex items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-primary-border bg-primary-subtle font-semibold text-primary" aria-hidden="true">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-sm font-semibold text-primary" aria-hidden="true">
                       {accountInitial}
                     </span>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-text">{accountName}</p>
-                      <p className="mt-0.5 text-xs text-text-muted">{session.role}</p>
+                      <p className="mt-0.5 text-xs text-text-muted">{session.role} operator</p>
                     </div>
                   </div>
-                  <p className="mt-3 text-xs text-text-subtle">Operator ID</p>
-                  <p className="mt-1 break-all font-mono text-xs text-text">{session.operatorId}</p>
+                  <p className="mt-3 border-t border-border pt-2 text-xs text-text-subtle">Operator ID <span className="ml-1 font-mono text-text">{session.operatorId}</span></p>
                 </div>
-                <div className="mt-2 grid gap-1">
-                  <Link href="/profile" className="ui-button w-full justify-between" onClick={closeMenus}>
-                    <span className="inline-flex items-center gap-2"><UserRound className="h-4 w-4" aria-hidden="true" />View profile</span>
-                    <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+                <div className="mt-1 grid gap-1">
+                  <Link href="/profile" role="menuitem" className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-text" onClick={closeMenus}>
+                    <UserRound className="h-4 w-4 text-primary" aria-hidden="true" />View profile
                   </Link>
-                  <Link href="/dashboard" className="ui-button ui-button-primary w-full justify-between" onClick={closeMenus}>
-                    <span>Open operator console</span>
-                    <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+                  <Link href="/dashboard" role="menuitem" className="flex min-h-10 items-center justify-between gap-2 rounded-lg px-3 text-sm font-medium text-text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-text" onClick={closeMenus}>
+                    <span className="inline-flex items-center gap-2"><ArrowUpRight className="h-4 w-4 text-primary" aria-hidden="true" />Open operator console</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
                   </Link>
                 </div>
               </div>
@@ -211,8 +229,11 @@ export default function Navbar() {
           ) : (
             <Link href="/login" className="ui-button ui-button-primary hidden px-5 sm:inline-flex">Sign in</Link>
           )}
-          <details ref={mobileMenu} className="relative md:hidden">
-            <summary className="ui-button list-none px-3 [&::-webkit-details-marker]:hidden">Menu</summary>
+          <details open={openMenu === "mobile"} className="relative md:hidden">
+            <summary className="ui-button list-none px-3 [&::-webkit-details-marker]:hidden" onClick={(event) => {
+              event.preventDefault();
+              setOpenMenu((menu) => menu === "mobile" ? null : "mobile");
+            }}>Menu</summary>
             <div className="absolute right-0 top-[calc(100%+8px)] z-50 min-w-56 rounded-xl border border-border bg-surface p-2 shadow-[var(--shadow-raised)]">
               <div className="flex flex-col gap-1 text-sm font-medium text-text-muted">
                 {topics.map((topic) => {

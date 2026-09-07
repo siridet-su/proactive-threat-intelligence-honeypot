@@ -59,13 +59,14 @@ export default function Home() {
                   ["Observe", "Capture sessions and keep the live feed understandable as activity changes."],
                   ["Investigate", "Open the session detail view when a record needs deeper review."],
                 ].map(([title, description], index) => (
-                  <li key={title} className="flex gap-4 rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] sm:p-6">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-primary-border bg-primary-subtle font-mono text-sm font-semibold text-primary">{String(index + 1).padStart(2, "0")}</span>
-                    <div>
-                      <h3 className="text-base font-semibold">{title}</h3>
-                      <p className="mt-1 text-sm leading-6 text-text-muted">{description}</p>
-                    </div>
-                  </li>
+                <li key={title} className="relative flex gap-4 rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] sm:p-6">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-primary-border bg-primary-subtle font-mono text-sm font-semibold text-primary">{String(index + 1).padStart(2, "0")}</span>
+                  <div>
+                    <h3 className="text-base font-semibold">{title}</h3>
+                    <p className="mt-1 text-sm leading-6 text-text-muted">{description}</p>
+                  </div>
+                  {index < 2 && <span className="pti-flow-connector pointer-events-none absolute left-9 top-full z-10 h-3 w-px bg-border" aria-hidden="true"><span className="pti-flow-pulse absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 rounded-full bg-primary" /></span>}
+                </li>
                 ))}
               </ol>
             </ScrollReveal>

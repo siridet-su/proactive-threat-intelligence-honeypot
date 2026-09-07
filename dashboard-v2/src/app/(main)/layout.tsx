@@ -106,13 +106,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ))}
       </nav>
       <div className="space-y-3 border-t border-border p-4">
-        <Link href="/profile" onClick={closeNavigation} aria-current={pathname.includes("/profile") ? "page" : undefined} className="ui-nav-link border border-border bg-surface-subtle">
+        <Link href="/profile" onClick={closeNavigation} aria-current={pathname.includes("/profile") ? "page" : undefined} className="ui-nav-link group border border-border bg-surface-subtle transition-transform duration-150 hover:-translate-y-px">
           <User className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="break-words font-semibold text-text">{userName || operatorId || "Operator"}</p>
             <p className="text-xs text-text-subtle">{userRole === "Admin" ? "LVL-4 ACCESS" : "LVL-2 ACCESS"}</p>
           </div>
-          <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <Settings className="h-4 w-4 shrink-0 text-text-subtle transition-colors duration-150 group-hover:text-primary" aria-hidden="true" />
         </Link>
         <button onClick={handleLogout} className="ui-button w-full"><LogOut className="h-4 w-4" aria-hidden="true" />Logout</button>
       </div>
