@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Menu, X } from "lucide-react";
+import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Home, Menu, X } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
@@ -85,6 +85,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navigation = (
     <>
       <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto px-4 py-6">
+        <div className="mb-5 border-b border-border pb-4">
+          <Link href="/" className="ui-nav-link" onClick={closeNavigation} aria-label="Open PTI-Honeypot landing page">
+            <Home className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+            <span>Landing page</span>
+          </Link>
+        </div>
         <p className="mb-4 px-3 text-xs font-medium text-text-subtle">Vigilance Protocol</p>
         {[
           { href: "/dashboard", title: "Dashboard", icon: LayoutDashboard, active: pathname === "/dashboard" },

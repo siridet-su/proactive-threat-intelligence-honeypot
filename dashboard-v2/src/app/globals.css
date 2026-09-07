@@ -166,6 +166,9 @@
   .ui-table tbody tr { transition: background-color 150ms; }
   .ui-table tbody tr:hover { background: var(--surface-hover); box-shadow: inset 3px 0 0 var(--primary); }
   .ui-skeleton { background: var(--border); border-radius: 4px; animation: pti-skeleton-pulse 1.8s ease-in-out infinite; }
+  .ui-scroll-reveal { --scroll-reveal-delay: 0ms; transition: opacity 180ms ease-out, transform 180ms ease-out; transition-delay: var(--scroll-reveal-delay); }
+  .ui-scroll-reveal-hidden { opacity: 0; transform: translateY(16px); }
+  .ui-scroll-reveal-visible { opacity: 1; transform: translateY(0); }
   .ui-nav-link { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 12px; border-left: 3px solid transparent; border-radius: 8px; color: var(--text-muted); }
   .ui-nav-link:hover { background: var(--surface-hover); color: var(--text); box-shadow: inset 2px 0 0 var(--border-strong); }
   .ui-nav-link[aria-current="page"] { border-left-color: var(--primary); background: var(--primary-subtle); color: var(--primary); font-weight: 600; }
@@ -213,4 +216,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .ui-scroll-reveal, .ui-scroll-reveal-hidden, .ui-scroll-reveal-visible { opacity: 1; transform: none; }
 }
