@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { ChangeStreamDocument, Document } from 'mongodb';
-import clientPromise from '@/lib/mongodb';
+import { getMongoClient } from '@/lib/mongodb';
 import { isHardwareTelemetry } from '@/lib/dashboardTypes';
 import { getSessionFromRequest } from "@/lib/auth/session";
 
@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db('honeypot_db');
     const collection = db.collection('hardware_metrics');
 

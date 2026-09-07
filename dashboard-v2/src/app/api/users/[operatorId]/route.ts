@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import clientPromise from "@/lib/mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
 
 export async function GET(request: Request, { params }: { params: Promise<{ operatorId: string }> }) {
@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ oper
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
     // 2. ใช้ operatorId ที่แกะมาแล้วในการค้นหา

@@ -4,7 +4,7 @@ import geoip from "geoip-lite";
 import type { ChangeStream, Document, Filter } from "mongodb";
 
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
-import clientPromise from "@/lib/mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 
 const DATABASE_NAME = "honeypot_canonical_v1";
 const COLLECTION_NAME = "sessions";
@@ -130,7 +130,7 @@ export async function getThreatSnapshot(range: string | null = null): Promise<Da
   if (inflight) return inflight;
 
   const request = (async () => {
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const sessions = await client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME)
       .find(queryForRange(range))
       .sort({ start_time: -1 })
@@ -185,7 +185,7 @@ async function ensureThreatChangeStream(): Promise<void> {
   if (runtime.opening) return runtime.opening;
 
   runtime.opening = (async () => {
-    const client = await clientPromise;
+    const client = await getMongoClient();
     if (!runtime.subscribers.size || runtime.stream) return;
 
     const stream = client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME).watch(

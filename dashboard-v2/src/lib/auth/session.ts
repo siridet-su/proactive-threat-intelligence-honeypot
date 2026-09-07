@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomUUID } from "crypto";
 
-import clientPromise from "@/lib/mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 import {
   SESSION_COOKIE_NAME,
   signSessionToken,
@@ -49,7 +49,7 @@ let sessionIndexes: Promise<void> | null = null;
 async function ensureSessionIndexes() {
   if (sessionIndexes) return sessionIndexes;
   sessionIndexes = (async () => {
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const collection = client.db(DATABASE_NAME).collection(SESSIONS_COLLECTION);
     await Promise.all([
       collection.createIndex({ sessionIdHash: 1 }, { unique: true, name: "session_id_hash_unique" }),
@@ -71,7 +71,7 @@ export async function createSession(input: Omit<AuthSession, "sessionId" | "expi
     mustChangePassword: input.mustChangePassword,
     expiresAt: expiresAt.getTime(),
   });
-  const client = await clientPromise;
+  const client = await getMongoClient();
   await client.db(DATABASE_NAME).collection(SESSIONS_COLLECTION).insertOne({
     sessionIdHash: hashSessionId(sessionId),
     operatorId: input.operatorId,
@@ -99,7 +99,7 @@ export async function getSessionFromRequest(request: Request): Promise<AuthSessi
   const payload = await verifySessionToken(readCookie(request, SESSION_COOKIE_NAME));
   if (!payload) return null;
 
-  const client = await clientPromise;
+  const client = await getMongoClient();
   const db = client.db(DATABASE_NAME);
   const sessionRecord = await db.collection(SESSIONS_COLLECTION).findOne({
     sessionIdHash: hashSessionId(payload.sessionId),
@@ -152,14 +152,14 @@ export async function refreshSessionToken(session: AuthSession): Promise<string>
 export async function destroySessionFromRequest(request: Request): Promise<void> {
   const payload = await verifySessionToken(readCookie(request, SESSION_COOKIE_NAME));
   if (!payload) return;
-  const client = await clientPromise;
+  const client = await getMongoClient();
   await client.db(DATABASE_NAME).collection(SESSIONS_COLLECTION).deleteOne({
     sessionIdHash: hashSessionId(payload.sessionId),
   });
 }
 
 export async function revokeOperatorSessions(operatorId: string): Promise<void> {
-  const client = await clientPromise;
+  const client = await getMongoClient();
   await client.db(DATABASE_NAME).collection(SESSIONS_COLLECTION).deleteMany({ operatorId });
 }
 

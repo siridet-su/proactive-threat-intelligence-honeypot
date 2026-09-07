@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import clientPromise from "@/lib/mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 import { getSessionFromRequest, isAdmin, revokeOperatorSessions } from "@/lib/auth/session";
 
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   if (!session || session.mustChangePassword) return unauthorized();
   if (!isAdmin(session)) return forbidden();
   try {
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
     const users = await db.collection("users").find({}).toArray();
     return NextResponse.json(users.map((user) => ({
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   if (!isAdmin(session)) return forbidden();
   try {
     const data = await request.json();
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
     // สุ่ม Operator ID เช่น OP_4402
@@ -80,7 +80,7 @@ export async function PUT(request: Request) {
     }
     const administrator = isAdmin(session);
     if (!administrator && data.operatorId !== session.operatorId) return forbidden();
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
     const updateData: Record<string, unknown> = {
@@ -119,7 +119,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Invalid operator ID" }, { status: 400 });
     }
     if (operatorId === session.operatorId) return NextResponse.json({ error: "You cannot delete your own account" }, { status: 400 });
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
     await db.collection("users").deleteOne({ operatorId });
