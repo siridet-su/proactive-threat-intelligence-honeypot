@@ -275,6 +275,14 @@ func processMessage(
 		return fmt.Errorf("mongo upsert event failed: %w", err)
 	}
 
+	// CWD is stored as an operational projection in honeypot_db, separate from
+	// canonical analysis. Only Cowrie-emitted CWD fields are eligible.
+	if observation, ok := cwdObservationFromEvent(enriched, payload); ok {
+		if err := mw.recordCwdObservation(ctx, observation, cfg.EventRetention); err != nil {
+			return fmt.Errorf("record CWD observation: %w", err)
+		}
+	}
+
 	// Threat-intelligence calls must not delay or block ingestion. The worker
 	// receives one idempotent job per supported observable after MongoDB has the
 	// canonical event, and attaches its result later.
@@ -890,7 +898,23 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
-	return ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes)
+	if err := ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes); err != nil {
+		return err
+	}
+
+	cwdEventIndexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}}},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+	if err := ensureIndexModels(ctx, mw.db.Collection("cwd_events"), cwdEventIndexes); err != nil {
+		return err
+	}
+
+	cwdStateIndexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "cwdState.path", Value: 1}, {Key: "updatedAt", Value: -1}}},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+	return ensureIndexModels(ctx, mw.db.Collection("cwd_session_state"), cwdStateIndexes)
 }
 
 func loadLookups(dir string) LookupStore {

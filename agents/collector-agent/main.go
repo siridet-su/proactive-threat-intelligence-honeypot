@@ -193,6 +193,21 @@ func tailSource(ctx context.Context, rdb *redis.Client, cfg AppConfig, src LogSo
 				"payload":     text,
 			}
 
+			// Keep the raw Cowrie line intact in payload, but duplicate the small,
+			// non-secret CWD envelope as stream fields. This lets consumers select
+			// CWD events without parsing unbounded raw JSON from Redis first.
+			if src.Name == "cowrie" {
+				values["cowrie_eventid"] = getString(payload, "eventid")
+				values["cowrie_session"] = getString(payload, "session")
+				values["cwd_before"] = getString(payload, "cwd_before")
+				values["cwd_after"] = firstNonEmptyString(
+					getString(payload, "cwd"),
+					getString(payload, "cwd_after"),
+				)
+				values["cwd_action"] = getString(payload, "cwd_action")
+				values["cwd_status"] = getString(payload, "cwd_status")
+			}
+
 			id, err := rdb.XAdd(ctx, &redis.XAddArgs{
 				Stream: src.Stream,
 				MaxLen: cfg.StreamMaxLen,

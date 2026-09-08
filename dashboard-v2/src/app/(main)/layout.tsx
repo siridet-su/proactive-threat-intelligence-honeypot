@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Home, Menu, X } from "lucide-react";
+import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Home, Menu, X, FolderTree } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
@@ -77,6 +77,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (pathname.includes('/malware-vault')) return 'Malware Vault';
     if (pathname.includes('/user-management')) return 'User Management';
     if (pathname.includes('/archives')) return 'Security Archive';
+    if (pathname.includes('/filesystem-activity')) return 'Filesystem Activity';
     if (pathname.includes('/threat-intel/')) return 'Session Analysis';
     if (pathname.includes('/threat-intel')) return 'Threat Intelligence';
     return 'System Overview';
@@ -96,6 +97,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           { href: "/dashboard", title: "Dashboard", icon: LayoutDashboard, active: pathname === "/dashboard" },
           { href: "/threat-intel", title: "Threat Intel", icon: Brain, active: pathname.includes("/threat-intel") },
           { href: "/archives", title: "Archives", icon: Archive, active: pathname.includes("/archives") },
+          { href: "/filesystem-activity", title: "Filesystem Activity", icon: FolderTree, active: pathname.includes("/filesystem-activity") },
           { href: "/malware-vault", title: "Malware Vault", icon: Bug, active: pathname.includes("/malware-vault") },
           { href: "/system-health", title: "System Health", icon: Activity, active: pathname.includes("/system-health") },
           ...((userRole === "Admin" || userRole === "admin") ? [{ href: "/user-management", title: "User Management", icon: Users, active: pathname.includes("/user-management") }] : []),

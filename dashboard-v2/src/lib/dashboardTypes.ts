@@ -103,6 +103,53 @@ export interface DashboardUser extends JsonRecord {
 
 export type DashboardProfile = DashboardUser;
 
+export type CwdObservationStatus = "observed" | "confirmed" | "conditional_candidate" | "unknown";
+
+/** Canonical, server-derived working-directory state for a Cowrie session. */
+export interface SessionCwdState {
+  path: string | null;
+  status: CwdObservationStatus;
+  observedAt: string | null;
+  sourceEventId: string | null;
+}
+
+export interface FilesystemTopologyNode {
+  path: string;
+  parentPath: string | null;
+  depth: number;
+  sessionIds: string[];
+  observedAt: string | null;
+}
+
+export interface FilesystemTopologySession {
+  sessionId: string;
+  sourceIp: string;
+  cwdState: SessionCwdState;
+}
+
+export interface FilesystemTopologySnapshot {
+  nodes: FilesystemTopologyNode[];
+  sessions: FilesystemTopologySession[];
+  generatedAt: string;
+}
+
+export interface SessionCwdHistoryEvent {
+  id: string;
+  sessionId: string;
+  sequence: number | null;
+  at: string;
+  fromPath: string | null;
+  toPath: string | null;
+  action: "entered" | "changed" | "failed_change";
+  status: CwdObservationStatus;
+  sourceEventId: string | null;
+}
+
+export interface SessionCwdHistoryPage {
+  items: SessionCwdHistoryEvent[];
+  nextCursor: string | null;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
