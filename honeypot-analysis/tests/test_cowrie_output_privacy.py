@@ -253,6 +253,30 @@ def test_short_credentials_do_not_corrupt_event_identity_or_benign_commands(
 
 
 @pytest.mark.parametrize(
+    "event",
+    [
+        {
+            "eventid": "cowrie.command.input",
+            "session": "session-cwd",
+            "cwd": "/home/operator",
+            "cwd_status": "confirmed",
+        },
+        {
+            "eventid": "cowrie.session.cwd",
+            "session": "session-cwd",
+            "cwd_before": "/home/operator",
+            "cwd_after": "/var/tmp",
+            "cwd_action": "changed",
+            "cwd_status": "confirmed",
+        },
+    ],
+)
+def test_authoritative_cwd_fields_survive_sanitized_persistence(event: dict) -> None:
+    decoded = json.loads(serialize_cowrie_event_for_persistence(event))
+    assert decoded == event
+
+
+@pytest.mark.parametrize(
     ("text", "safe_fragment"),
     [
         ("PASSWORD=marker-password", "PASSWORD=[REDACTED]"),

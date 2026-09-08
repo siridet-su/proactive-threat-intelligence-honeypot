@@ -903,7 +903,7 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 	}
 
 	cwdEventIndexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}}},
+		{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
 	if err := ensureIndexModels(ctx, mw.db.Collection("cwd_events"), cwdEventIndexes); err != nil {
@@ -911,7 +911,8 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 	}
 
 	cwdStateIndexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "cwdState.path", Value: 1}, {Key: "updatedAt", Value: -1}}},
+		{Keys: bson.D{{Key: "updatedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
+		{Keys: bson.D{{Key: "cwdState.path", Value: 1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
 	return ensureIndexModels(ctx, mw.db.Collection("cwd_session_state"), cwdStateIndexes)

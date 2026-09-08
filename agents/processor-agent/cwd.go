@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,8 +14,8 @@ import (
 )
 
 const (
-	cwdEventSchemaVersion = "cwd_event.v1"
-	cwdStateSchemaVersion = "cwd_session_state.v1"
+	cwdEventSchemaVersion = "cwd_event.v2"
+	cwdStateSchemaVersion = "cwd_session_state.v2"
 )
 
 type cwdObservation struct {
@@ -52,18 +53,35 @@ func cwdObservationFromEvent(event map[string]any, payload map[string]any) (cwdO
 
 	switch getPayloadString(payload, "eventid") {
 	case "cowrie.command.input":
-		cwd := canonicalCwd(getPayloadString(payload, "cwd_before"))
+		// The reviewed Cowrie patch emits cwd directly from protocol.cwd before
+		// command execution. cwd_before remains accepted for the original draft
+		// contract, but command text is never parsed as a fallback.
+		directCwd := canonicalCwd(getPayloadString(payload, "cwd"))
+		cwd := directCwd
+		if cwd == "" {
+			cwd = canonicalCwd(getPayloadString(payload, "cwd_before"))
+		}
 		if cwd == "" {
 			return cwdObservation{}, false
 		}
-		base.Path, base.Action, base.Status = cwd, "observed", "observed"
+		rawStatus := cleanText(getPayloadString(payload, "cwd_status"))
+		status := cwdStatus(rawStatus)
+		if rawStatus == "" {
+			if directCwd != "" {
+				status = "confirmed"
+			} else {
+				status = "observed"
+			}
+		}
+		base.Path, base.Action, base.Status = cwd, "observed", status
 		return base, true
 	case "cowrie.session.cwd":
 		base.Action = cwdAction(getPayloadString(payload, "cwd_action"))
-		base.Status = cwdStatus(getPayloadString(payload, "cwd_status"))
+		rawStatus := cleanText(getPayloadString(payload, "cwd_status"))
+		base.Status = cwdStatus(rawStatus)
 		base.FromPath = canonicalCwd(getPayloadString(payload, "cwd_before"))
 		base.Path = canonicalCwd(firstNonEmpty(
-			getPayloadString(payload, "cwd"), getPayloadString(payload, "cwd_after"),
+			getPayloadString(payload, "cwd_after"), getPayloadString(payload, "cwd"),
 		))
 		if base.Action == "failed_change" {
 			// A failed cd retains Cowrie's known previous directory; never store a
@@ -115,28 +133,84 @@ func cwdStatus(value string) string {
 
 func cleanText(value string) string { return strings.TrimSpace(value) }
 
-func statusRank(status string) int {
-	switch status {
-	case "confirmed":
-		return 3
-	case "observed":
-		return 2
-	case "conditional_candidate":
-		return 1
-	default:
-		return 0
+func cwdStateOrderFilter(observation cwdObservation) bson.M {
+	sequence := observation.At.UnixNano()
+	return bson.M{
+		"_id": observation.SessionID,
+		"$or": bson.A{
+			bson.M{"stateSequence": bson.M{"$lt": sequence}},
+			bson.M{
+				"stateSequence":      sequence,
+				"stateSourceEventId": bson.M{"$lt": observation.SourceEventID},
+			},
+			// Documents written by cwd_session_state.v1 did not have an order
+			// key. Allow one v2 observation to migrate them in place.
+			bson.M{"stateSequence": bson.M{"$exists": false}},
+		},
 	}
 }
 
-func statePath(document bson.M) (string, string) {
-	state, _ := document["cwdState"].(bson.M)
-	if state == nil {
-		if mapped, ok := document["cwdState"].(map[string]any); ok {
-			return cleanText(valueToString(mapped["path"])), cleanText(valueToString(mapped["status"]))
-		}
-		return "", ""
+func cwdStateDocument(observation cwdObservation, retention time.Duration) bson.M {
+	return bson.M{
+		"_id":                observation.SessionID,
+		"schemaVersion":      cwdStateSchemaVersion,
+		"sessionId":          observation.SessionID,
+		"sourceIp":           observation.SourceIP,
+		"stateSequence":      observation.At.UnixNano(),
+		"stateSourceEventId": observation.SourceEventID,
+		"cwdState": bson.M{
+			"path":          observation.Path,
+			"status":        observation.Status,
+			"observedAt":    observation.At,
+			"sourceEventId": observation.SourceEventID,
+		},
+		"updatedAt":  observation.At,
+		"expires_at": expiryAt(observation.At, retention),
 	}
-	return cleanText(valueToString(state["path"])), cleanText(valueToString(state["status"]))
+}
+
+func cwdStateUpdate(observation cwdObservation, retention time.Duration) bson.M {
+	document := cwdStateDocument(observation, retention)
+	delete(document, "_id")
+	return bson.M{
+		"$set": bson.M{
+			"schemaVersion":      document["schemaVersion"],
+			"sessionId":          document["sessionId"],
+			"sourceIp":           document["sourceIp"],
+			"stateSequence":      document["stateSequence"],
+			"stateSourceEventId": document["stateSourceEventId"],
+			"cwdState":           document["cwdState"],
+			"updatedAt":          document["updatedAt"],
+			"expires_at":         document["expires_at"],
+		},
+	}
+}
+
+// updateLatestCwdState performs a compare-and-set without a read/write race.
+// Update-first handles existing sessions; insert-then-retry handles concurrent
+// first observations without allowing a stale observation to win permanently.
+func updateLatestCwdState(ctx context.Context, states *mongo.Collection, observation cwdObservation, retention time.Duration) error {
+	filter := cwdStateOrderFilter(observation)
+	update := cwdStateUpdate(observation, retention)
+	result, err := states.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount > 0 {
+		return nil
+	}
+
+	if _, err := states.InsertOne(ctx, cwdStateDocument(observation, retention)); err == nil {
+		return nil
+	} else if !mongo.IsDuplicateKeyError(err) {
+		return err
+	}
+
+	// Another worker inserted the session between UpdateOne and InsertOne. A
+	// final ordered update makes the newer observation win; zero matches means
+	// this observation is stale and is intentionally ignored.
+	_, err = states.UpdateOne(ctx, filter, update)
+	return err
 }
 
 func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwdObservation, retention time.Duration) error {
@@ -144,60 +218,22 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		return fmt.Errorf("MongoDB is disabled; refusing to acknowledge CWD telemetry")
 	}
 
-	states := mw.db.Collection("cwd_session_state")
-	var previous bson.M
-	err := states.FindOne(ctx, bson.M{"_id": observation.SessionID}).Decode(&previous)
-	if err != nil && err != mongo.ErrNoDocuments {
-		return fmt.Errorf("read CWD state: %w", err)
-	}
-	previousPath, previousStatus := statePath(previous)
-
-	action := observation.Action
-	eventFromPath := observation.FromPath
-	eventToPath := observation.Path
-	shouldRecord := action != "observed"
-	if action == "observed" && observation.Path != previousPath {
-		shouldRecord = true
-		if previousPath == "" {
-			action = "entered"
-		} else {
-			action = "changed"
-			eventFromPath = previousPath
-		}
-	}
-	if action == "failed_change" {
-		eventToPath = ""
-	}
-
-	stateStatus := observation.Status
-	if previousPath == observation.Path && statusRank(previousStatus) > statusRank(stateStatus) {
-		stateStatus = previousStatus
-	}
-	state := bson.M{
-		"path":          observation.Path,
-		"status":        stateStatus,
-		"observedAt":    observation.At.Format(time.RFC3339Nano),
-		"sourceEventId": observation.SourceEventID,
-	}
-	stateUpdate := bson.M{
-		"$set": bson.M{
-			"sessionId":  observation.SessionID,
-			"sourceIp":   observation.SourceIP,
-			"cwdState":   state,
-			"updatedAt":  observation.At,
-			"expires_at": expiryAt(observation.At, retention),
-		},
-		"$setOnInsert": bson.M{"schemaVersion": cwdStateSchemaVersion},
-	}
-	if _, err := states.UpdateOne(ctx, bson.M{"_id": observation.SessionID}, stateUpdate, options.Update().SetUpsert(true)); err != nil {
+	if err := updateLatestCwdState(ctx, mw.db.Collection("cwd_session_state"), observation, retention); err != nil {
 		return fmt.Errorf("update CWD state: %w", err)
 	}
 
-	if !shouldRecord {
+	// Command observations update only current state. History is reserved for
+	// Cowrie-emitted transitions so the audit trail never infers cd semantics
+	// from attacker-controlled command text or cross-event state changes.
+	if observation.Action == "observed" {
 		return nil
 	}
 
 	eventID := "cwd:" + observation.SourceEventID
+	eventToPath := observation.Path
+	if observation.Action == "failed_change" {
+		eventToPath = ""
+	}
 	event := bson.M{
 		"_id":           eventID,
 		"schemaVersion": cwdEventSchemaVersion,
@@ -205,12 +241,12 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		"sourceEventId": observation.SourceEventID,
 		"sessionId":     observation.SessionID,
 		"at":            observation.At,
-		// Nanoseconds are a stable ordering key derived from the observed source
-		// timestamp; sourceEventId remains the idempotency key for ties.
-		"sequence":   observation.At.UnixNano(),
-		"fromPath":   eventFromPath,
+		// Keep the nanosecond sequence as a decimal string. JavaScript cannot
+		// represent current Unix nanoseconds safely as a Number.
+		"sequence":   strconv.FormatInt(observation.At.UnixNano(), 10),
+		"fromPath":   observation.FromPath,
 		"toPath":     eventToPath,
-		"action":     action,
+		"action":     observation.Action,
 		"status":     observation.Status,
 		"expires_at": expiryAt(observation.At, retention),
 	}

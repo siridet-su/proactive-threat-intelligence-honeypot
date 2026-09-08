@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Honeypot Pipeline <noreply@example.invalid>
+Date: Wed, 9 Sep 2026 00:00:00 +0700
+Subject: [PATCH] Emit authoritative virtual CWD telemetry
+
+Base: Cowrie 575146bc6b24d70082527d66cd805d9bae0e0db4
+
+diff --git a/src/cowrie/commands/fs.py b/src/cowrie/commands/fs.py
+index d615b29..4622e2d 100644
+--- a/src/cowrie/commands/fs.py
++++ b/src/cowrie/commands/fs.py
+@@ -261,7 +261,18 @@ class Command_cd(HoneyPotCommand):
+     cd command
+     """
+
++    def log_cwd(self, before: str, action: str) -> None:
++        log.msg(
++            eventid="cowrie.session.cwd",
++            cwd_before=before,
++            cwd_after=self.protocol.cwd,
++            cwd_action=action,
++            cwd_status="confirmed",
++            format="CWD %(cwd_action)s: %(cwd_before)s -> %(cwd_after)s",
++        )
++
+     def call(self) -> None:
++        before = self.protocol.cwd
+         if not self.args or self.args[0] == "~":
+             pname = self.protocol.user.avatar.home
+         else:
+@@ -273,14 +284,18 @@ class Command_cd(HoneyPotCommand):
+             inode = None
+         if pname == "-":
+             self.errorWrite("bash: cd: OLDPWD not set\n")
++            self.log_cwd(before, "failed_change")
+             return
+         if inode is None or inode is False:
+             self.errorWrite(f"bash: cd: {pname}: No such file or directory\n")
++            self.log_cwd(before, "failed_change")
+             return
+         if inode[fs.A_TYPE] != fs.T_DIR:
+             self.errorWrite(f"bash: cd: {pname}: Not a directory\n")
++            self.log_cwd(before, "failed_change")
+             return
+         self.protocol.cwd = newpath
++        self.log_cwd(before, "changed")
+
+
+ commands["cd"] = Command_cd
+diff --git a/src/cowrie/shell/honeypot.py b/src/cowrie/shell/honeypot.py
+index 1c71b5b..cd7b88e 100644
+--- a/src/cowrie/shell/honeypot.py
++++ b/src/cowrie/shell/honeypot.py
+@@ -37,7 +37,13 @@ class HoneyPotShell:
+         self.showPrompt()
+
+     def lineReceived(self, line: str) -> None:
+-        log.msg(eventid="cowrie.command.input", input=line, format="CMD: %(input)s")
++        log.msg(
++            eventid="cowrie.command.input",
++            input=line,
++            cwd=self.protocol.cwd,
++            cwd_status="confirmed",
++            format="CMD: %(input)s",
++        )
+         self.lexer = shlex.shlex(instream=line, punctuation_chars=True, posix=True)
+         # Add these special characters that are not in the default lexer
+         self.lexer.wordchars += "@%{}=$:+^,()`"

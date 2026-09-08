@@ -3,7 +3,6 @@ import "server-only";
 import type { ChangeStream, Document } from "mongodb";
 
 import type {
-  CwdObservationStatus,
   FilesystemTopologyNode,
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
@@ -11,6 +10,14 @@ import type {
   SessionCwdHistoryPage,
   SessionCwdState,
 } from "@/lib/dashboardTypes";
+import {
+  asDateString,
+  asStatus,
+  asString,
+  buildSessionCwdHistoryQuery,
+  encodeHistoryCursor,
+  normalizeHistoryEvent,
+} from "@/lib/filesystem-data";
 import { getMongoClient } from "@/lib/mongodb";
 
 // CWD is operational Cowrie telemetry. It intentionally remains outside the
@@ -20,15 +27,15 @@ const SESSIONS_COLLECTION = "cwd_session_state";
 const HISTORY_COLLECTION = "cwd_events";
 const TOPOLOGY_LIMIT = 500;
 const HISTORY_PAGE_SIZE = 80;
-const STREAM_RETRY_MS = 5_000;
-
-type TopologySubscriber = () => void;
+interface TopologySubscriber {
+  changed: () => void;
+  unavailable: () => void;
+}
 
 interface FilesystemRuntime {
   subscribers: Set<TopologySubscriber>;
   stream: ChangeStream<Document> | null;
   opening: Promise<void> | null;
-  reconnectTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const globalScope = globalThis as typeof globalThis & { __ptiFilesystemRuntime?: FilesystemRuntime };
@@ -36,26 +43,9 @@ const runtime: FilesystemRuntime = globalScope.__ptiFilesystemRuntime ?? {
   subscribers: new Set(),
   stream: null,
   opening: null,
-  reconnectTimer: null,
 };
 
 globalScope.__ptiFilesystemRuntime = runtime;
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function asStatus(value: unknown): CwdObservationStatus {
-  return value === "observed" || value === "confirmed" || value === "conditional_candidate" || value === "unknown"
-    ? value
-    : "unknown";
-}
-
-function asDateString(value: unknown): string | null {
-  if (typeof value !== "string" && !(value instanceof Date)) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
 
 function normalizeCwdState(value: unknown): SessionCwdState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -107,7 +97,7 @@ export async function getFilesystemTopology(): Promise<FilesystemTopologySnapsho
   const client = await getMongoClient();
   const documents = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION)
     .find({ "cwdState.path": { $type: "string", $ne: "" } })
-    .sort({ "cwdState.observedAt": -1, start_time: -1 })
+    .sort({ updatedAt: -1, sessionId: -1 })
     .limit(TOPOLOGY_LIMIT)
     .allowDiskUse(true)
     .toArray();
@@ -141,83 +131,36 @@ export async function getFilesystemTopology(): Promise<FilesystemTopologySnapsho
   };
 }
 
-function decodeCursor(cursor: string | null): { at: string; id: string } | null {
-  if (!cursor) return null;
-  try {
-    const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { at?: unknown; id?: unknown };
-    if (typeof decoded.at !== "string" || typeof decoded.id !== "string") return null;
-    return { at: decoded.at, id: decoded.id };
-  } catch {
-    return null;
-  }
-}
-
-function encodeCursor(event: SessionCwdHistoryEvent): string {
-  return Buffer.from(JSON.stringify({ at: event.at, id: event.id })).toString("base64url");
-}
-
-function normalizeHistoryEvent(document: Document): SessionCwdHistoryEvent | null {
-  const sessionId = asString(document.sessionId) ?? asString(document.session_id);
-  const at = asDateString(document.at) ?? asDateString(document.timestamp);
-  const id = asString(document.eventId) ?? asString(document._id?.toString());
-  const action = document.action;
-  if (!sessionId || !at || !id || (action !== "entered" && action !== "changed" && action !== "failed_change")) return null;
-  const sequence = typeof document.sequence === "number" && Number.isFinite(document.sequence) ? document.sequence : null;
-  return {
-    id,
-    sessionId,
-    sequence,
-    at,
-    fromPath: asString(document.fromPath),
-    toPath: asString(document.toPath),
-    action,
-    status: asStatus(document.status),
-    sourceEventId: asString(document.sourceEventId),
-  };
-}
-
 export async function getSessionCwdHistory(sessionId: string, cursor: string | null): Promise<SessionCwdHistoryPage> {
   const sanitizedSessionId = sessionId.trim().slice(0, 300);
   if (!sanitizedSessionId) return { items: [], nextCursor: null };
-  const decodedCursor = decodeCursor(cursor);
-  const query: Document = { $or: [{ sessionId: sanitizedSessionId }, { session_id: sanitizedSessionId }] };
-  if (decodedCursor) {
-    // The CWD writer stores observed timestamps. Keep the cursor on the indexed
-    // timestamp rather than comparing serialized ObjectIds on the API.
-    const cursorAt = new Date(decodedCursor.at);
-    if (!Number.isNaN(cursorAt.getTime())) query.$and = [{ at: { $lt: cursorAt } }];
-  }
+  const query = buildSessionCwdHistoryQuery(sanitizedSessionId, cursor);
 
   const client = await getMongoClient();
   const documents = await client.db(DATABASE_NAME).collection<Document>(HISTORY_COLLECTION)
     .find(query)
-    .sort({ at: -1, _id: -1 })
+    .sort({ at: -1, eventId: -1 })
     .limit(HISTORY_PAGE_SIZE + 1)
     .allowDiskUse(true)
     .toArray();
   const events = documents.map(normalizeHistoryEvent).filter((item): item is SessionCwdHistoryEvent => item !== null);
   const hasMore = events.length > HISTORY_PAGE_SIZE;
   const items = events.slice(0, HISTORY_PAGE_SIZE);
-  return { items, nextCursor: hasMore && items.length ? encodeCursor(items.at(-1)!) : null };
+  return { items, nextCursor: hasMore && items.length ? encodeHistoryCursor(items.at(-1)!) : null };
 }
 
 function broadcast() {
-  for (const subscriber of runtime.subscribers) subscriber();
-}
-
-function scheduleReconnect() {
-  if (!runtime.subscribers.size || runtime.reconnectTimer) return;
-  runtime.reconnectTimer = setTimeout(() => {
-    runtime.reconnectTimer = null;
-    void ensureFilesystemChangeStream();
-  }, STREAM_RETRY_MS);
+  for (const subscriber of runtime.subscribers) subscriber.changed();
 }
 
 function detachStream(stream: ChangeStream<Document>) {
   if (runtime.stream !== stream) return;
   runtime.stream = null;
   void stream.close().catch(() => undefined);
-  scheduleReconnect();
+  // Closing every dependent SSE response exposes the outage to EventSource.
+  // The browser performs the bounded reconnect and obtains a fresh snapshot,
+  // instead of receiving heartbeats from a silently dead MongoDB stream.
+  for (const subscriber of [...runtime.subscribers]) subscriber.unavailable();
 }
 
 async function ensureFilesystemChangeStream(): Promise<void> {
@@ -256,8 +199,6 @@ export async function subscribeFilesystemUpdates(subscriber: TopologySubscriber)
   return () => {
     runtime.subscribers.delete(subscriber);
     if (runtime.subscribers.size) return;
-    if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
-    runtime.reconnectTimer = null;
     const stream = runtime.stream;
     runtime.stream = null;
     if (stream) void stream.close().catch(() => undefined);

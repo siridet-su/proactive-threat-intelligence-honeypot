@@ -136,7 +136,8 @@ export interface FilesystemTopologySnapshot {
 export interface SessionCwdHistoryEvent {
   id: string;
   sessionId: string;
-  sequence: number | null;
+  /** Lossless decimal representation of the MongoDB Int64/Unix nanoseconds. */
+  sequence: string | null;
   at: string;
   fromPath: string | null;
   toPath: string | null;

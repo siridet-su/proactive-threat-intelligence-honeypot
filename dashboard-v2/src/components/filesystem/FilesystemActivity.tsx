@@ -59,6 +59,7 @@ export function FilesystemActivity() {
   const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
+  const historyRequest = useRef<{ generation: number; sessionId: string; controller: AbortController } | null>(null);
 
   const refresh = useCallback(async () => {
     setRegionStatus((current) => snapshot ? "refreshing" : current === "error" ? "loading" : current);
@@ -126,17 +127,31 @@ export function FilesystemActivity() {
   }, []);
 
   const loadHistory = useCallback(async (sessionId: string, cursor: string | null, append = false) => {
+    const generation = (historyRequest.current?.generation ?? 0) + 1;
+    historyRequest.current?.controller.abort();
+    const controller = new AbortController();
+    historyRequest.current = { generation, sessionId, controller };
+    if (!append) {
+      setHistory([]);
+      setHistoryCursor(null);
+    }
     setHistoryStatus(append ? "refreshing" : "loading");
     try {
       const params = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cwd-history${params}`, { cache: "no-store" });
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cwd-history${params}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
       if (!response.ok) throw new Error("History request failed");
       const data: unknown = await response.json();
       if (!isHistoryPage(data)) throw new Error("History response unavailable");
+      const active = historyRequest.current;
+      if (!active || active.generation !== generation || active.sessionId !== sessionId) return;
       setHistory((current) => append ? [...current, ...data.items] : data.items);
       setHistoryCursor(data.nextCursor);
       setHistoryStatus("ready");
     } catch {
+      if (controller.signal.aborted || historyRequest.current?.generation !== generation) return;
       setHistoryStatus("error");
     }
   }, []);
@@ -146,7 +161,10 @@ export function FilesystemActivity() {
       return;
     }
     const request = window.setTimeout(() => { void loadHistory(selectedSessionId, null); }, 0);
-    return () => window.clearTimeout(request);
+    return () => {
+      window.clearTimeout(request);
+      if (historyRequest.current?.sessionId === selectedSessionId) historyRequest.current.controller.abort();
+    };
   }, [loadHistory, selectedSessionId]);
 
   const selectedSession = useMemo(() => snapshot?.sessions.find((session) => session.sessionId === selectedSessionId) ?? null, [selectedSessionId, snapshot]);
@@ -165,6 +183,9 @@ export function FilesystemActivity() {
 
   const selectSession = (sessionId: string) => {
     const session = sessionById.get(sessionId);
+    historyRequest.current?.controller.abort();
+    setHistory([]);
+    setHistoryCursor(null);
     setSelectedSessionId(sessionId);
     if (session?.cwdState.path) setSelectedPath(session.cwdState.path);
   };

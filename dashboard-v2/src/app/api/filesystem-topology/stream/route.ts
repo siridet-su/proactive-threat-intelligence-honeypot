@@ -20,39 +20,51 @@ export async function GET(request: Request) {
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
   let closed = false;
   const pending: Uint8Array[] = [];
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let sessionCheck: ReturnType<typeof setInterval> | null = null;
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (heartbeat) clearInterval(heartbeat);
+    if (sessionCheck) clearInterval(sessionCheck);
+    heartbeat = null;
+    sessionCheck = null;
+    unsubscribe?.();
+    unsubscribe = null;
+    const controller = controllerRef;
+    controllerRef = null;
+    try { controller?.close(); } catch { /* client may have disconnected */ }
+  };
 
   try {
-    unsubscribe = await subscribeFilesystemUpdates(() => {
-      void getFilesystemTopology().then((snapshot) => {
-        const payload = formatEvent("topology.update", { type: "topology.update", data: snapshot });
-        if (controllerRef && !closed) controllerRef.enqueue(payload);
-        else pending.push(payload);
-      }).catch(() => undefined);
+    unsubscribe = await subscribeFilesystemUpdates({
+      changed: () => {
+        void getFilesystemTopology().then((snapshot) => {
+          const payload = formatEvent("topology.update", { type: "topology.update", data: snapshot });
+          if (controllerRef && !closed) controllerRef.enqueue(payload);
+          else if (!closed) pending.push(payload);
+        }).catch(() => close());
+      },
+      unavailable: close,
     });
     const snapshot = await getFilesystemTopology();
 
-    let close = () => undefined;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
+        if (closed) {
+          controller.close();
+          return;
+        }
         controllerRef = controller;
-        const heartbeat = setInterval(() => {
+        heartbeat = setInterval(() => {
           if (!closed) controller.enqueue(formatEvent("heartbeat", { type: "heartbeat", data: { at: new Date().toISOString() } }));
         }, 20_000);
-        const sessionCheck = setInterval(() => {
+        sessionCheck = setInterval(() => {
           void getSessionFromRequest(request).then((session) => {
             if (!session || session.mustChangePassword) close();
           }).catch(() => close());
         }, 60_000);
-        close = () => {
-          if (closed) return;
-          closed = true;
-          controllerRef = null;
-          clearInterval(heartbeat);
-          clearInterval(sessionCheck);
-          unsubscribe?.();
-          unsubscribe = null;
-          try { controller.close(); } catch { /* client may have disconnected */ }
-        };
         controller.enqueue(encoder.encode("retry: 5000\n\n"));
         controller.enqueue(formatEvent("snapshot", { type: "snapshot", data: snapshot }));
         for (const item of pending.splice(0)) controller.enqueue(item);

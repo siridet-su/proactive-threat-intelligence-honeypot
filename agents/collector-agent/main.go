@@ -197,15 +197,7 @@ func tailSource(ctx context.Context, rdb *redis.Client, cfg AppConfig, src LogSo
 			// non-secret CWD envelope as stream fields. This lets consumers select
 			// CWD events without parsing unbounded raw JSON from Redis first.
 			if src.Name == "cowrie" {
-				values["cowrie_eventid"] = getString(payload, "eventid")
-				values["cowrie_session"] = getString(payload, "session")
-				values["cwd_before"] = getString(payload, "cwd_before")
-				values["cwd_after"] = firstNonEmptyString(
-					getString(payload, "cwd"),
-					getString(payload, "cwd_after"),
-				)
-				values["cwd_action"] = getString(payload, "cwd_action")
-				values["cwd_status"] = getString(payload, "cwd_status")
+				addCowrieEnvelope(values, payload)
 			}
 
 			id, err := rdb.XAdd(ctx, &redis.XAddArgs{
@@ -234,6 +226,26 @@ func tailSource(ctx context.Context, rdb *redis.Client, cfg AppConfig, src LogSo
 		log.Printf("[%s/%s] tail stopped, restarting", src.Name, src.LogType)
 		time.Sleep(2 * time.Second)
 	}
+}
+
+func addCowrieEnvelope(values map[string]any, payload map[string]any) {
+	eventID := getString(payload, "eventid")
+	directCwd := getString(payload, "cwd")
+	values["cowrie_eventid"] = eventID
+	values["cowrie_session"] = getString(payload, "session")
+	values["cwd_before"] = getString(payload, "cwd_before")
+	values["cwd_after"] = firstNonEmptyString(
+		getString(payload, "cwd_after"),
+		directCwd,
+	)
+	if eventID == "cowrie.command.input" && values["cwd_before"] == "" {
+		// The command-input contract names Cowrie's authoritative pre-command
+		// protocol.cwd simply "cwd". Mirror it as cwd_before in the bounded
+		// envelope while leaving the raw JSON payload untouched.
+		values["cwd_before"] = directCwd
+	}
+	values["cwd_action"] = getString(payload, "cwd_action")
+	values["cwd_status"] = getString(payload, "cwd_status")
 }
 
 type EventMeta struct {
