@@ -15,10 +15,10 @@ from statistics import fmean, pstdev
 from typing import Any
 
 
-BUILDER_VERSION = "0.1.0"
-WINDOW_SCHEMA_VERSION = "derived_training_window.v1"
-FEATURE_SCHEMA_VERSION = "xgboost_hardware_features.v1"
-CHANNEL_SCHEMA_VERSION = "tcn_hardware_channels.v1"
+BUILDER_VERSION = "0.2.0"
+WINDOW_SCHEMA_VERSION = "derived_training_window.v2"
+FEATURE_SCHEMA_VERSION = "xgboost_hardware_features.v2"
+CHANNEL_SCHEMA_VERSION = "tcn_hardware_channels.v2"
 
 
 class DatasetContractError(ValueError):
@@ -125,6 +125,15 @@ def _optional_number(value: Any, path: str) -> float | None:
     if value is None:
         return None
     return _number(value, path)
+
+
+def _optional_nested_number(document: Mapping[str, Any], path: str) -> float | None:
+    current: Any = document
+    for component in path.split("."):
+        if not isinstance(current, Mapping) or component not in current:
+            return None
+        current = current[component]
+    return _optional_number(current, path)
 
 
 def _validate_manifest(manifest: Mapping[str, Any]) -> None:
@@ -252,6 +261,18 @@ def _target_value(sample: Mapping[str, Any], field: str) -> float | None:
     return _optional_number(target.get(field), f"process.target.{field}")
 
 
+def _target_nested_value(sample: Mapping[str, Any], path: str) -> float | None:
+    target = sample["process"].get("target")
+    if not isinstance(target, Mapping):
+        return None
+    current: Any = target
+    for component in path.split("."):
+        if not isinstance(current, Mapping) or component not in current:
+            return None
+        current = current[component]
+    return _optional_number(current, f"process.target.{path}")
+
+
 def _temperature(sample: Mapping[str, Any]) -> float | None:
     return _optional_number(sample["thermal"].get("temperature_c"), "thermal.temperature_c")
 
@@ -283,6 +304,18 @@ def _aggregate_features(
     cpu_points = points(lambda sample: _nested_number(sample, "cpu.total_percent"))
     cpu = _values(cpu_points)
     baseline_cpu = baseline_values(lambda sample: _nested_number(sample, "cpu.total_percent"))
+    host_cpu_psi = _values(
+        points(
+            lambda sample: _optional_nested_number(
+                sample, "cpu.pressure.some.stall_usec_per_second"
+            )
+        )
+    )
+    baseline_host_cpu_psi = baseline_values(
+        lambda sample: _optional_nested_number(
+            sample, "cpu.pressure.some.stall_usec_per_second"
+        )
+    )
     core_imbalance = _values(points(_per_core_imbalance))
 
     memory_percent = _values(points(lambda sample: _nested_number(sample, "memory.used_percent")))
@@ -319,6 +352,33 @@ def _aggregate_features(
     target_cpu = _values(points(lambda sample: _target_value(sample, "cpu_percent_single_core_basis")))
     target_rss = _values(points(lambda sample: _target_value(sample, "rss_bytes")))
     target_sockets = _values(points(lambda sample: _target_value(sample, "socket_count")))
+    target_tcp_time_wait = _values(
+        points(lambda sample: _target_nested_value(sample, "tcp_states.time_wait"))
+    )
+    target_sockets_used = _values(
+        points(lambda sample: _target_nested_value(sample, "socket_summary.sockets_used"))
+    )
+    target_cgroup_cpu_usage = _values(
+        points(
+            lambda sample: _target_nested_value(
+                sample, "cgroup.cpu.usage_usec_per_second"
+            )
+        )
+    )
+    target_cgroup_cpu_psi = _values(
+        points(
+            lambda sample: _target_nested_value(
+                sample, "cgroup.pressure.cpu.some.stall_usec_per_second"
+            )
+        )
+    )
+    target_cgroup_memory_current = _values(
+        points(
+            lambda sample: _target_nested_value(
+                sample, "cgroup.memory.current_bytes"
+            )
+        )
+    )
 
     valid_count = max(len(valid_target), 1)
     features = {
@@ -330,6 +390,11 @@ def _aggregate_features(
         "cpu_std": _std_or_zero(cpu),
         "cpu_slope_per_second": _slope(cpu_points),
         "cpu_delta_from_baseline_mean": _mean_or_zero(cpu) - _mean_or_zero(baseline_cpu),
+        "host_cpu_psi_some_delta_from_baseline_mean": (
+            _mean_or_zero(host_cpu_psi) - _mean_or_zero(baseline_host_cpu_psi)
+        ),
+        "host_cpu_psi_some_mean": _mean_or_zero(host_cpu_psi),
+        "host_cpu_psi_some_p95": _p95_or_zero(host_cpu_psi),
         "cpu_seconds_above_70": sum(interval for value in cpu if value > 70.0),
         "cpu_seconds_above_90": sum(interval for value in cpu if value > 90.0),
         "per_core_imbalance_mean": _mean_or_zero(core_imbalance),
@@ -382,6 +447,28 @@ def _aggregate_features(
         "target_rss_bytes_p95": _p95_or_zero(target_rss),
         "target_rss_bytes_max": _max_or_zero(target_rss),
         "target_socket_count_max": _max_or_zero(target_sockets),
+        "target_tcp_time_wait_mean": _mean_or_zero(target_tcp_time_wait),
+        "target_tcp_time_wait_p95": _p95_or_zero(target_tcp_time_wait),
+        "target_sockets_used_mean": _mean_or_zero(target_sockets_used),
+        "target_sockets_used_p95": _p95_or_zero(target_sockets_used),
+        "target_cgroup_cpu_usage_usec_per_second_mean": _mean_or_zero(
+            target_cgroup_cpu_usage
+        ),
+        "target_cgroup_cpu_usage_usec_per_second_p95": _p95_or_zero(
+            target_cgroup_cpu_usage
+        ),
+        "target_cgroup_cpu_psi_some_usec_per_second_mean": _mean_or_zero(
+            target_cgroup_cpu_psi
+        ),
+        "target_cgroup_cpu_psi_some_usec_per_second_p95": _p95_or_zero(
+            target_cgroup_cpu_psi
+        ),
+        "target_cgroup_memory_current_bytes_mean": _mean_or_zero(
+            target_cgroup_memory_current
+        ),
+        "target_cgroup_memory_current_bytes_p95": _p95_or_zero(
+            target_cgroup_memory_current
+        ),
     }
     return {name: float(value) for name, value in sorted(features.items())}
 
@@ -403,6 +490,24 @@ _SEQUENCE_EXTRACTORS: dict[str, Callable[[Mapping[str, Any]], float | None]] = {
     "target_cpu_percent": lambda sample: _target_value(sample, "cpu_percent_single_core_basis"),
     "target_rss_bytes": lambda sample: _target_value(sample, "rss_bytes"),
     "target_socket_count": lambda sample: _target_value(sample, "socket_count"),
+    "host_cpu_psi_some_usec_per_second": lambda sample: _optional_nested_number(
+        sample, "cpu.pressure.some.stall_usec_per_second"
+    ),
+    "target_tcp_time_wait": lambda sample: _target_nested_value(
+        sample, "tcp_states.time_wait"
+    ),
+    "target_sockets_used": lambda sample: _target_nested_value(
+        sample, "socket_summary.sockets_used"
+    ),
+    "target_cgroup_cpu_usage_usec_per_second": lambda sample: _target_nested_value(
+        sample, "cgroup.cpu.usage_usec_per_second"
+    ),
+    "target_cgroup_cpu_psi_some_usec_per_second": lambda sample: _target_nested_value(
+        sample, "cgroup.pressure.cpu.some.stall_usec_per_second"
+    ),
+    "target_cgroup_memory_current_bytes": lambda sample: _target_nested_value(
+        sample, "cgroup.memory.current_bytes"
+    ),
 }
 
 
@@ -425,6 +530,68 @@ def _sequence_channels(
             channel_present[name].append(1 if value is not None else 0)
 
     return channels, sample_present, channel_present
+
+
+def validate_derived_window_identity(record: Mapping[str, Any]) -> None:
+    """Verify v2 feature/channel ordering, masks, lengths, and content identity."""
+
+    _require(
+        record.get("schema_version") == WINDOW_SCHEMA_VERSION,
+        "unsupported derived window identity version",
+    )
+    xgboost = record.get("xgboost")
+    _require(isinstance(xgboost, Mapping), "xgboost block is missing")
+    features = xgboost.get("features")
+    feature_order = xgboost.get("feature_order")
+    _require(isinstance(features, Mapping) and features, "xgboost features are missing")
+    _require(isinstance(feature_order, list), "xgboost feature order is missing")
+    _require(
+        feature_order == sorted(features),
+        "xgboost feature order does not exactly match sorted features",
+    )
+    _require(
+        xgboost.get("feature_order_sha256") == _canonical_sha256(feature_order),
+        "xgboost feature order hash does not match",
+    )
+
+    tcn = record.get("tcn")
+    _require(isinstance(tcn, Mapping), "tcn block is missing")
+    channel_order = tcn.get("channel_order")
+    channels = tcn.get("channels")
+    channel_present = tcn.get("channel_present")
+    sample_present = tcn.get("sample_present")
+    _require(isinstance(channel_order, list), "tcn channel order is missing")
+    _require(isinstance(channels, Mapping) and channels, "tcn channels are missing")
+    _require(isinstance(channel_present, Mapping), "tcn channel masks are missing")
+    _require(isinstance(sample_present, list), "tcn sample mask is missing")
+    _require(
+        channel_order == list(_SEQUENCE_EXTRACTORS)
+        and set(channel_order) == set(channels)
+        and set(channel_order) == set(channel_present),
+        "tcn channel order/masks do not exactly match channels",
+    )
+    _require(
+        tcn.get("channel_order_sha256") == _canonical_sha256(channel_order),
+        "tcn channel order hash does not match",
+    )
+    expected_length = len(sample_present)
+    _require(
+        all(len(values) == expected_length for values in channels.values()),
+        "tcn channel lengths do not match sample mask",
+    )
+    _require(
+        all(len(values) == expected_length for values in channel_present.values()),
+        "tcn channel-mask lengths do not match sample mask",
+    )
+
+    claimed_record_hash = record.get("record_sha256")
+    without_hash = dict(record)
+    without_hash.pop("record_sha256", None)
+    _require(
+        isinstance(claimed_record_hash, str)
+        and claimed_record_hash == _canonical_sha256(without_hash),
+        "derived window record hash does not match",
+    )
 
 
 def build_training_window(
@@ -553,6 +720,8 @@ def build_training_window(
         "collector_error_count": sum(len(sample["quality"].get("collector_errors", [])) for sample in target),
     }
 
+    feature_order = sorted(features)
+    channel_order = list(_SEQUENCE_EXTRACTORS)
     record: dict[str, Any] = {
         "schema_version": WINDOW_SCHEMA_VERSION,
         "record_id": f"{manifest['run_id']}:{metric_scope}:{phase}:{horizon_seconds}s",
@@ -575,11 +744,14 @@ def build_training_window(
         "split_groups": dict(manifest["split_groups"]),
         "xgboost": {
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "feature_order": feature_order,
+            "feature_order_sha256": _canonical_sha256(feature_order),
             "features": features,
         },
         "tcn": {
             "channel_schema_version": CHANNEL_SCHEMA_VERSION,
-            "channel_order": list(_SEQUENCE_EXTRACTORS),
+            "channel_order": channel_order,
+            "channel_order_sha256": _canonical_sha256(channel_order),
             "channels": channels,
             "sample_present": sample_present,
             "channel_present": channel_present,
@@ -592,4 +764,5 @@ def build_training_window(
         },
     }
     record["record_sha256"] = _canonical_sha256(record)
+    validate_derived_window_identity(record)
     return record

@@ -22,6 +22,7 @@ AUDIT_ONLY_CLASSIFICATION_SOURCES = {
 AUTHORITY_DECISION_SCHEMA = "command_authority_decision.v1"
 CLASSIFICATION_EVENT_SCHEMA = "classification_event.v2"
 MIN_TRUSTED_SECUREBERT_CONFIDENCE = 0.55
+_SUPPORTED_FRAGMENT_EXECUTION = {"conditional_unproven"}
 _OPAQUE_BUSYBOX_APPLET_RE = re.compile(
     r"^(?:/bin/)?busybox\s+[A-Z]{4,12}(?:\s|$)",
 )
@@ -63,6 +64,16 @@ def classification_evidence_tier(event: Dict[str, Any]) -> str:
         authority = event.get("authority_decision")
         if not isinstance(authority, dict):
             return "audit_only_candidate"
+        fragment_execution = event.get("fragment_execution")
+        if fragment_execution is not None:
+            if not isinstance(fragment_execution, str):
+                return "audit_only_candidate"
+            if fragment_execution not in _SUPPORTED_FRAGMENT_EXECUTION:
+                return "audit_only_candidate"
+            # Conditional RHS fragments are retained for audit and replay
+            # provenance, but never constitute trusted observed behavior.
+            if fragment_execution == "conditional_unproven":
+                return "audit_only_candidate"
         if authority.get("schema_version") != AUTHORITY_DECISION_SCHEMA:
             return "audit_only_candidate"
         if authority.get("decision") != "trusted" or authority.get("trusted_eligible") is not True:
@@ -91,6 +102,8 @@ def classification_evidence_tier(event: Dict[str, Any]) -> str:
         # observation by itself, regardless of confidence or model agreement.
         return "audit_only_candidate"
     ttp = str(event.get("ttp") or "").strip().lower()
+    if ttp in {"unknown", "t0000_unknown"}:
+        return "audit_only_candidate"
     tactic = str(event.get("tactic") or "").strip().lower()
     if not ((ttp and ttp != "unknown") or (tactic and tactic != "unknown")):
         return "audit_only_candidate"

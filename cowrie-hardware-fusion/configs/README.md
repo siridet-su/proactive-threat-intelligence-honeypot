@@ -16,3 +16,10 @@ configuration ทุก config ที่มีผลต่อ dataset/model iden
   parameters, leakage/safety controls และ promotion gates; validate content hash ก่อนเก็บข้อมูล
 - [Scenario catalog v1](scenario_catalog.v1.json) มี Pi-specific paired controls สำหรับ
   `T1496.001` และ `T1499.002`; runtime spec/manifests จะ generate หลัง freeze ARM64 image ID
+- Scenario catalog เดียวกันมี protocol-v2 allowlist 7 scenarios สำหรับ excluded
+  service-pressure instrumentation pilot; matrix/spec จะผูก catalog byte hash ทุกครั้ง
+- [Model feature contract v1](model_feature_contract.v1.json) — freeze input profiles
+  สำหรับ XGBoost (`go_agent_overlap_v1`, `host_extended_v3`, `target_augmented_v3`)
+  และ TCN (`host_extended_v3`, `target_augmented_v3`) โดยผูกกับ builder v2 และหลักฐาน
+  instrumentation pilot รวมทั้ง Experiment Protocol v2; receipt, label, identity และ
+  simulator-only presence flag เป็น forbidden model inputs

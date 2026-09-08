@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:experiment-environment-receipt:v2",
+  "title": "Experiment environment receipt v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "observed_at", "sensor_id", "subject_id", "signature_schema_version", "environment_signature_sha256", "boot_id_sha256", "host", "network", "collector_runtime", "production_context", "reviewed_runner", "headroom", "privacy", "receipt_sha256"],
+  "properties": {
+    "schema_version": {"const": "experiment_environment_receipt.v2"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "sensor_id": {"$ref": "#/$defs/identifier"},
+    "subject_id": {"$ref": "#/$defs/identifier"},
+    "signature_schema_version": {"const": "experiment_environment_signature.v1"},
+    "environment_signature_sha256": {"$ref": "#/$defs/sha256"},
+    "boot_id_sha256": {"$ref": "#/$defs/sha256"},
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architecture", "kernel_release", "cpu_model", "logical_cpu_count", "memory_total_bytes", "swap_total_bytes", "root_device"],
+      "properties": {
+        "architecture": {"const": "aarch64"},
+        "kernel_release": {"type": "string", "minLength": 1, "maxLength": 128},
+        "cpu_model": {"type": "string", "minLength": 1, "maxLength": 128},
+        "logical_cpu_count": {"const": 4},
+        "memory_total_bytes": {"type": "integer", "minimum": 4294967296},
+        "swap_total_bytes": {"type": "integer", "minimum": 0},
+        "root_device": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_interfaces", "ntp_synchronized"],
+      "properties": {
+        "observed_interfaces": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "contains": {"const": "wlan0"},
+          "items": {"$ref": "#/$defs/interface_name"}
+        },
+        "ntp_synchronized": {"const": true}
+      }
+    },
+    "collector_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python_version", "psutil_version", "collector_repo_commit", "source_archive_sha256", "collector_source_sha256", "telemetry_schema_sha256"],
+      "properties": {
+        "python_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "psutil_version": {"type": "string", "minLength": 1, "maxLength": 32},
+        "collector_repo_commit": {"$ref": "#/$defs/git_commit"},
+        "source_archive_sha256": {"$ref": "#/$defs/sha256"},
+        "collector_source_sha256": {"$ref": "#/$defs/sha256"},
+        "telemetry_schema_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "production_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo_commit", "working_tree_clean", "services", "containers"],
+      "properties": {
+        "repo_commit": {"$ref": "#/$defs/git_commit"},
+        "working_tree_clean": {"const": true},
+        "services": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cowrie", "honeypot_collector", "honeypot_processor", "honeypot_sensor_forwarder", "zeek", "honeypot_hardware", "hardware_metrics", "hardware_metrics_processor"],
+          "properties": {
+            "cowrie": {"$ref": "#/$defs/service_state"},
+            "honeypot_collector": {"$ref": "#/$defs/service_state"},
+            "honeypot_processor": {"$ref": "#/$defs/service_state"},
+            "honeypot_sensor_forwarder": {"$ref": "#/$defs/service_state"},
+            "zeek": {"$ref": "#/$defs/service_state"},
+            "honeypot_hardware": {"$ref": "#/$defs/service_state"},
+            "hardware_metrics": {"$ref": "#/$defs/service_state"},
+            "hardware_metrics_processor": {"$ref": "#/$defs/service_state"}
+          }
+        },
+        "containers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "image_reference", "image_id"],
+            "properties": {
+              "name": {"$ref": "#/$defs/identifier"},
+              "image_reference": {"type": "string", "minLength": 1, "maxLength": 512},
+              "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+            }
+          }
+        }
+      }
+    },
+    "reviewed_runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_id", "architecture", "user", "entrypoint", "implementation_sha256"],
+      "properties": {
+        "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "architecture": {"const": "arm64"},
+        "user": {"const": "65532:65532"},
+        "entrypoint": {"const": ["/poc-workload"]},
+        "implementation_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "headroom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available_memory_bytes", "root_free_bytes", "load_1m", "temperature_c"],
+      "properties": {
+        "available_memory_bytes": {"type": "integer", "minimum": 0},
+        "root_free_bytes": {"type": "integer", "minimum": 0},
+        "load_1m": {"type": "number", "minimum": 0},
+        "temperature_c": {"type": "number", "minimum": -20, "maximum": 120}
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contains_credentials", "contains_raw_ip", "contains_hostname"],
+      "properties": {
+        "contains_credentials": {"const": false},
+        "contains_raw_ip": {"const": false},
+        "contains_hostname": {"const": false}
+      }
+    },
+    "receipt_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "interface_name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,31}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "git_commit": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
+    "service_state": {"enum": ["active", "inactive", "failed", "activating", "deactivating", "reloading", "unknown"]}
+  }
+}

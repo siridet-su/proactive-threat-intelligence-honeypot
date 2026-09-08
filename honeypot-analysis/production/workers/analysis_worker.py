@@ -23,6 +23,9 @@ from production.reporting.canonical_pipeline import (
     CanonicalAssessmentCoordinator,
     build_session_correlation_hunting_context,
 )
+from production.correlation.session_ttp_correlation import (
+    build_observed_trusted_ttps,
+)
 from production.enrichment.mitre_attack_loader import load_mitre_attack_db
 from production.workers.session_monitor import SessionState, build_pipeline_trigger
 from production.enrichment.threat_feed_loader import load_threat_feeds
@@ -67,6 +70,20 @@ def _safe_exception_text(exc: BaseException) -> str:
 
 def _safe_error_text(value: Any) -> str:
     return redact_error_for_log(value)
+
+
+def _load_securebert_for_replay(
+    config: ProductionConfig,
+    classifier_environment: Dict[str, Any],
+) -> Any:
+    """Keep SecureBERT available only for explicit historical replay opt-in."""
+
+    if not bool(getattr(config, "enable_securebert", False)):
+        return None
+    return load_securebert_classifier(
+        config,
+        classifier_environment=classifier_environment,
+    )
 
 
 def _safe_log_json(value: Any) -> str:
@@ -225,7 +242,36 @@ def _direct_command_ttp_layer(session_payload: Dict[str, Any]) -> Dict[str, Any]
     return {
         "status": "available" if items else "not_available",
         "count": len(items),
-        "description": "Direct command-level TTPs produced by rules and/or SecureBERT.",
+        "description": (
+            "Trusted command/event ATT&CK mappings selected by the local authority "
+            "and trust contract; they are observed evidence, not session-final truth."
+        ),
+        "items": items,
+    }
+
+
+def _observed_trusted_ttp_layer(session_payload: Dict[str, Any]) -> Dict[str, Any]:
+    items = session_payload.get("observed_trusted_ttps")
+    if not isinstance(items, list) or (
+        not items and session_payload.get("classification_events")
+    ):
+        items = build_observed_trusted_ttps(session_payload)
+    items = [item for item in items if isinstance(item, dict)]
+    return {
+        "status": "available" if items else "not_available",
+        "count": len(items),
+        "description": (
+            "Deterministically deduplicated trusted command/event observations. "
+            "Correlation hypotheses and model-only candidates are excluded."
+        ),
+        "authority": {
+            "status": "trusted_observation",
+            "correlation_may_override": False,
+            "correlation_may_remove": False,
+            "correlation_may_promote": False,
+            "may_authorize_response": False,
+            "canonical_write_allowed": False,
+        },
         "items": items,
     }
 
@@ -270,9 +316,20 @@ def _session_correlated_ttp_layer(hunting_context: Dict[str, Any]) -> Dict[str, 
         "status": "available" if correlations else "not_available",
         "count": len(correlations),
         "description": (
-            "Session-level TTPs inferred from the whole session pattern. These are "
-            "threat-hunting correlations, not raw command classifications."
+            "Session-level contextual hypotheses emitted by matched predicates. "
+            "They are non-authoritative correlations, not raw command classifications "
+            "or trusted observed ATT&CK facts."
         ),
+        "output_namespace": "correlated_ttp_hypotheses",
+        "authority": {
+            "status": "non_authoritative",
+            "can_override_trusted": False,
+            "can_remove_trusted": False,
+            "can_promote_trusted": False,
+            "may_drive_prediction": False,
+            "may_authorize_response": False,
+            "canonical_write_allowed": False,
+        },
         "correlation_rules_fired": hunting_context.get("correlation_rules_fired") or [],
         "source_type_counts": hunting_context.get("source_type_counts") or {},
         "items": correlations,
@@ -335,6 +392,7 @@ def build_threat_evidence_layers(
         session_payload.get("session_id", "unknown"),
     )
     direct = _direct_command_ttp_layer(session_payload)
+    observed = _observed_trusted_ttp_layer(session_payload)
     audit_only = _audit_only_classification_layer(session_payload)
     correlated = _session_correlated_ttp_layer(hunting)
     prediction = _prediction_hypothesis_layer(prediction_snapshot)
@@ -347,11 +405,14 @@ def build_threat_evidence_layers(
             "correlations, and forecasts."
         ),
         "direct_command_ttps": direct,
+        "observed_trusted_ttps": observed,
         "audit_only_classification_candidates": audit_only,
         "session_correlated_ttps": correlated,
+        "correlated_ttp_hypotheses": correlated,
         "prediction_only_hypotheses": prediction,
         "summary": {
             "direct_command_ttp_count": direct["count"],
+            "observed_trusted_ttp_count": observed["count"],
             "audit_only_classification_count": audit_only["count"],
             "session_correlated_ttp_count": correlated["count"],
             "prediction_hypothesis_count": prediction["count"],
@@ -615,7 +676,10 @@ async def analyze_job(
         verify_assets=True,
     )
     replay_classifier = NotebookParityClassifier(
-        bert_fn=load_securebert_classifier(config),
+        bert_fn=_load_securebert_for_replay(
+            config,
+            classifier_environment,
+        ),
         mitre_db=context["mitre_attack"],
         high_confidence=float(
             config.classification_policy.get("bert_min_confidence", 0.55)

@@ -1,7 +1,7 @@
 # Experimental 1 Hz Collector v1
 
 > สถานะ: `ISOLATED IDLE VERIFIED / CONTROLLED PI POC IMPLEMENTED / NOT A SERVICE`
-> Runtime version: `0.3.0`
+> Runtime version: `0.4.1` (`0.4.0` telemetry + protocol-v2 scenario allowlist)
 > ขอบเขต: `pi_sensor` สำหรับ neutral idle และ fixed `poc_pi_*` safe-container runs
 
 ## Safety boundary
@@ -50,6 +50,17 @@ Spool ไม่มีการ overwrite หรือ resume แบบเดา�
 - temperature เมื่อ sysfs รองรับ
 - process/thread counts; controlled workload phase เพิ่ม target process CPU แบบ
   single-core basis, RSS, threads, socket count และ pseudonymous process/cgroup identity
+- host CPU/memory/I/O PSI ทั้ง rolling averages, cumulative stall และ per-second stall
+- TCP state/socket summary และ kernel listen/backlog/queue/memory-pressure counters
+- target process context switches และ target network namespace TCP pressure
+- target cgroup v2 CPU usage/throttling, memory/current/peak/events, PID usage/events และ
+  aggregate I/O counters/rates รวมทั้ง CPU/memory/I/O PSI
+
+metric ชุด service-pressure ที่เริ่มใน `0.4.0` และคงเดิมใน `0.4.1` มาจาก read-only
+`/proc` และ cgroup v2 เท่านั้น Patch `0.4.1` เพิ่มเฉพาะ fail-closed scenario allowlist และ
+instrumentation flow ไม่เปลี่ยน raw metric semantics
+ไม่อ่าน socket address, payload, command หรือ simulator operation count และยังไม่ถูกเพิ่มเข้า
+frozen model feature profile จนกว่า instrumentation pilot จะพิสูจน์ coverage/signal
 
 `wlan0` เป็น aggregate interface ส่วน `tailscale0` และ `lo` เป็น observability-only
 เพื่อป้องกันการนับ traffic ซ้ำ Dataset builder บังคับอ่านเฉพาะ interface ที่มี
@@ -91,6 +102,9 @@ cowrie-hardware-dataset snapshot-experimental-hardware \
   --interval-seconds 2 \
   --output experimental-snapshot.json
 ```
+
+สำหรับ reviewed target process canary เพิ่ม `--target-pid <host-pid>` ได้ PID ใช้เฉพาะ
+เลือก process ขณะรันและไม่ถูก persist; output เก็บเพียง boot-bound SHA-256 identity
 
 Snapshot นี้ใช้ audit semantics/plumbing เท่านั้น ห้ามใช้เป็น training sample Full dataset
 ยังต้องมาจาก manifest/schema/receipt-bound collection workflow ด้านล่าง และ experimental

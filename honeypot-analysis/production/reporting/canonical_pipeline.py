@@ -13,6 +13,7 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
+from production.correlation.semantics import resolve_confidence_semantics
 from production.utils.sensitive_data import redact_for_artifact
 
 
@@ -76,8 +77,57 @@ def build_session_correlation_hunting_context(
                 or "parent",
                 "source_type": source_type,
                 "confidence": item.get("confidence"),
+                "strength": item.get("strength", item.get("confidence")),
+                "strength_semantics": resolve_confidence_semantics(
+                    item.get("strength_semantics")
+                    or item.get("confidence_semantics")
+                ),
+                "confidence_semantics": resolve_confidence_semantics(
+                    item.get("confidence_semantics")
+                ),
+                "numeric_provenance": _clean(
+                    item.get("numeric_provenance") or "PROJECT_LOCAL_HEURISTIC"
+                ),
+                "output_namespace": "correlated_ttp_hypotheses",
+                "correlation_kind": "contextual",
+                "rule_type": _clean(item.get("rule_type")) or "SESSION_CONTEXT_RULE",
+                "claim_status": _clean(item.get("claim_status")) or "CONTEXTUAL_ONLY",
+                "ontology_status": _clean(item.get("ontology_status")) or "not_applicable",
+                "ontology_binding": deepcopy(item.get("ontology_binding") or {}),
+                "optional_pack_status": _clean(item.get("optional_pack_status")),
+                "authority": deepcopy(item.get("authority") or {
+                    "status": "non_authoritative",
+                    "can_override_trusted": False,
+                    "can_remove_trusted": False,
+                    "can_promote_trusted": False,
+                    "may_drive_prediction": False,
+                    "may_authorize_response": False,
+                    "canonical_write_allowed": False,
+                }),
                 "evidence_type": _clean(item.get("evidence_type")),
-                "temporal_claim": bool(item.get("temporal_claim", False)),
+                # Compatibility field: only a real elapsed-time predicate may
+                # set this true.  Ordered subsequences are represented by the
+                # explicit relationship below.
+                "temporal_claim": bool(item.get("temporal_window_present", False)),
+                "temporal_semantics": _clean(
+                    item.get("temporal_semantics")
+                    or (
+                        "ordered_sequence"
+                        if item.get("temporal_claim")
+                        else "session_scoped_no_elapsed_window"
+                    )
+                ),
+                "temporal_relationship": _clean(
+                    item.get("temporal_relationship")
+                    or (
+                        "ORDERED_SAME_SESSION_RELATIONSHIP"
+                        if _clean(item.get("temporal_semantics")) == "ordered_sequence"
+                        else "SAME_SESSION_SCOPE_NO_ELAPSED_WINDOW"
+                    )
+                ),
+                "temporal_window_present": bool(
+                    item.get("temporal_window_present", False)
+                ),
                 "apply_to_prediction": False,
                 "reason": _clean(item.get("reason")),
                 "evidence": _correlation_evidence(item),
@@ -96,7 +146,9 @@ def build_session_correlation_hunting_context(
         "status": "available" if findings else "not_available",
         "interpretation": (
             "Session correlations are non-authoritative post-session hunting "
-            "context and cannot change canonical findings or hypotheses."
+            "context and cannot change canonical findings or hypotheses. "
+            "Their numeric confidence values are developer-defined heuristic "
+            "policy strengths, not probabilities."
         ),
         "correlation_count": len(findings),
         "correlation_rules_fired": [
@@ -108,6 +160,7 @@ def build_session_correlation_hunting_context(
         "source_type_counts": dict(sorted(source_counts.items())),
         "tactic_counts": dict(sorted(tactic_counts.items())),
         "session_correlations": findings,
+        "correlated_ttp_hypotheses": findings,
     }
 
 

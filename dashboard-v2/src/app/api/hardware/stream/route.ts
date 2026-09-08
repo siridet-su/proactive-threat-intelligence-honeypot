@@ -2,10 +2,15 @@ import { NextResponse } from 'next/server';
 import type { ChangeStreamDocument, Document } from 'mongodb';
 import clientPromise from '@/lib/mongodb';
 import { isHardwareTelemetry } from '@/lib/dashboardTypes';
+import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  const session = await getSessionFromRequest(req);
+  if (!session || session.mustChangePassword) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const client = await clientPromise;
     const db = client.db('honeypot_db');
@@ -19,7 +24,7 @@ export async function GET(req: Request) {
           .sort({ timestamp: -1 })
           .limit(30)
           .toArray()).filter(isHardwareTelemetry);
-        
+
         // Reverse so the oldest of the 30 is first
         const reversed = initialData.reverse();
         controller.enqueue(`data: ${JSON.stringify({ type: 'initial', data: reversed })}\n\n`);
@@ -38,8 +43,21 @@ export async function GET(req: Request) {
           controller.close();
         });
 
+        const sessionCheck = setInterval(() => {
+          void getSessionFromRequest(req).then((currentSession) => {
+            if (!currentSession || currentSession.mustChangePassword) {
+              void changeStream.close();
+              controller.close();
+            }
+          }).catch(() => {
+            void changeStream.close();
+            controller.close();
+          });
+        }, 60_000);
+
         // 3. Clean up when the client disconnects (e.g., user closes browser tab)
         req.signal.addEventListener('abort', () => {
+          clearInterval(sessionCheck);
           changeStream.close();
           controller.close();
         });

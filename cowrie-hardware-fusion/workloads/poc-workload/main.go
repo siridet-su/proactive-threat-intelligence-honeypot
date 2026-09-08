@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -19,10 +20,13 @@ import (
 )
 
 const (
-	maxDuration       = 180 * time.Second
-	maxWorkers        = 4
-	maxRequestsPerSec = 200
-	maxWorkIterations = 20000
+	maxDuration        = 180 * time.Second
+	maxComputeWorkers  = 4
+	maxWorkers         = 8
+	maxRequestsPerSec  = 200
+	maxWorkIterations  = 20000
+	maxServiceCapacity = 8
+	maxHandlerDelay    = 250 * time.Millisecond
 )
 
 type configuration struct {
@@ -33,15 +37,21 @@ type configuration struct {
 	dutyPeriod        time.Duration
 	requestsPerSecond int
 	workIterations    int
+	connectionMode    string
+	serviceCapacity   int
+	handlerDelay      time.Duration
 	seed              uint64
 }
 
 type summary struct {
-	SchemaVersion string `json:"schema_version"`
-	Mode          string `json:"mode"`
-	ElapsedMS     int64  `json:"elapsed_ms"`
-	Operations    uint64 `json:"operations"`
-	Errors        uint64 `json:"errors"`
+	SchemaVersion string  `json:"schema_version"`
+	Mode          string  `json:"mode"`
+	ElapsedMS     int64   `json:"elapsed_ms"`
+	Operations    uint64  `json:"operations"`
+	Errors        uint64  `json:"errors"`
+	Attempts      uint64  `json:"attempts"`
+	Rejected      uint64  `json:"rejected"`
+	LatencyP95MS  float64 `json:"latency_p95_ms"`
 }
 
 func parseConfiguration(arguments []string) (configuration, error) {
@@ -55,6 +65,9 @@ func parseConfiguration(arguments []string) (configuration, error) {
 	flags.DurationVar(&config.dutyPeriod, "duty-period", 100*time.Millisecond, "compute duty period")
 	flags.IntVar(&config.requestsPerSecond, "requests-per-second", 10, "total local request rate")
 	flags.IntVar(&config.workIterations, "work-iterations", 1000, "hash iterations per request")
+	flags.StringVar(&config.connectionMode, "connection-mode", "reuse", "loopback HTTP connection mode: reuse or close")
+	flags.IntVar(&config.serviceCapacity, "service-capacity", 2, "maximum concurrent service handlers")
+	flags.DurationVar(&config.handlerDelay, "handler-delay", 0, "bounded delay per accepted service request")
 	flags.Uint64Var(&config.seed, "seed", 20260902, "deterministic workload seed")
 	if err := flags.Parse(arguments); err != nil {
 		return configuration{}, err
@@ -71,6 +84,9 @@ func parseConfiguration(arguments []string) (configuration, error) {
 	if config.workers < 1 || config.workers > maxWorkers {
 		return configuration{}, fmt.Errorf("workers must be between 1 and %d", maxWorkers)
 	}
+	if config.mode == "compute" && config.workers > maxComputeWorkers {
+		return configuration{}, fmt.Errorf("compute workers must be between 1 and %d", maxComputeWorkers)
+	}
 	if config.dutyPercent < 1 || config.dutyPercent > 100 {
 		return configuration{}, errors.New("duty-percent must be between 1 and 100")
 	}
@@ -82,6 +98,15 @@ func parseConfiguration(arguments []string) (configuration, error) {
 	}
 	if config.workIterations < 1 || config.workIterations > maxWorkIterations {
 		return configuration{}, fmt.Errorf("work-iterations must be between 1 and %d", maxWorkIterations)
+	}
+	if config.connectionMode != "reuse" && config.connectionMode != "close" {
+		return configuration{}, errors.New("connection-mode must be reuse or close")
+	}
+	if config.serviceCapacity < 1 || config.serviceCapacity > maxServiceCapacity {
+		return configuration{}, fmt.Errorf("service-capacity must be between 1 and %d", maxServiceCapacity)
+	}
+	if config.handlerDelay < 0 || config.handlerDelay > maxHandlerDelay {
+		return configuration{}, fmt.Errorf("handler-delay must be between 0 and %s", maxHandlerDelay)
 	}
 	return config, nil
 }
@@ -144,19 +169,61 @@ func requestWork(seed uint64, iterations int) {
 	}
 }
 
-func runService(ctx context.Context, config configuration) (uint64, uint64, error) {
+func latencyP95Millis(values []time.Duration) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	ordered := append([]time.Duration(nil), values...)
+	sort.Slice(ordered, func(left, right int) bool { return ordered[left] < ordered[right] })
+	position := float64(len(ordered)-1) * 0.95
+	lower := int(position)
+	upper := lower
+	if float64(lower) < position {
+		upper++
+	}
+	value := float64(ordered[lower])
+	if upper != lower {
+		weight := position - float64(lower)
+		value = value*(1-weight) + float64(ordered[upper])*weight
+	}
+	return value / float64(time.Millisecond)
+}
+
+func runService(ctx context.Context, config configuration) (uint64, uint64, uint64, uint64, float64, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return 0, 0, fmt.Errorf("create loopback listener: %w", err)
+		return 0, 0, 0, 0, 0, fmt.Errorf("create loopback listener: %w", err)
 	}
 	var operations atomic.Uint64
 	var failures atomic.Uint64
+	var attempts atomic.Uint64
+	var rejected atomic.Uint64
+	serviceSlots := make(chan struct{}, config.serviceCapacity)
+	var latencyMu sync.Mutex
+	latencies := make([]time.Duration, 0, config.requestsPerSecond*int(config.duration/time.Second))
 	server := &http.Server{
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if request.URL.Path != "/work" {
 				http.NotFound(writer, request)
 				return
+			}
+			select {
+			case serviceSlots <- struct{}{}:
+				defer func() { <-serviceSlots }()
+			default:
+				rejected.Add(1)
+				http.Error(writer, "service capacity reached", http.StatusServiceUnavailable)
+				return
+			}
+			if config.handlerDelay > 0 {
+				timer := time.NewTimer(config.handlerDelay)
+				select {
+				case <-request.Context().Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
 			}
 			requestWork(config.seed+operations.Load(), config.workIterations)
 			operations.Add(1)
@@ -174,7 +241,7 @@ func runService(ctx context.Context, config configuration) (uint64, uint64, erro
 
 	transport := &http.Transport{
 		Proxy:               nil,
-		DisableKeepAlives:   false,
+		DisableKeepAlives:   config.connectionMode == "close",
 		MaxIdleConns:        config.workers,
 		MaxIdleConnsPerHost: config.workers,
 	}
@@ -193,16 +260,23 @@ func runService(ctx context.Context, config configuration) (uint64, uint64, erro
 			clients.Wait()
 			transport.CloseIdleConnections()
 			if serverError := <-serverErrors; serverError != nil {
-				return operations.Load(), failures.Load(), serverError
+				return operations.Load(), failures.Load(), attempts.Load(), rejected.Load(), latencyP95Millis(latencies), serverError
 			}
-			return operations.Load(), failures.Load(), nil
+			return operations.Load(), failures.Load(), attempts.Load(), rejected.Load(), latencyP95Millis(latencies), nil
 		case <-ticker.C:
+			attempts.Add(1)
 			select {
 			case requestSlots <- struct{}{}:
 				clients.Add(1)
 				go func() {
 					defer clients.Done()
 					defer func() { <-requestSlots }()
+					started := time.Now()
+					defer func() {
+						latencyMu.Lock()
+						latencies = append(latencies, time.Since(started))
+						latencyMu.Unlock()
+					}()
 					request, requestError := http.NewRequestWithContext(
 						ctx,
 						http.MethodGet,
@@ -215,9 +289,7 @@ func runService(ctx context.Context, config configuration) (uint64, uint64, erro
 					}
 					response, requestError := client.Do(request)
 					if requestError != nil {
-						if ctx.Err() == nil {
-							failures.Add(1)
-						}
+						failures.Add(1)
 						return
 					}
 					_ = response.Body.Close()
@@ -248,20 +320,27 @@ func run(arguments []string) error {
 	started := time.Now()
 	var operations uint64
 	var failures uint64
+	var attempts uint64
+	var rejected uint64
+	var latencyP95MS float64
 	if config.mode == "compute" {
 		operations, failures = runCompute(ctx, config)
+		attempts = operations + failures
 	} else {
-		operations, failures, err = runService(ctx, config)
+		operations, failures, attempts, rejected, latencyP95MS, err = runService(ctx, config)
 		if err != nil {
 			return err
 		}
 	}
 	result := summary{
-		SchemaVersion: "poc_workload_summary.v1",
+		SchemaVersion: "poc_workload_summary.v2",
 		Mode:          config.mode,
 		ElapsedMS:     time.Since(started).Milliseconds(),
 		Operations:    operations,
 		Errors:        failures,
+		Attempts:      attempts,
+		Rejected:      rejected,
+		LatencyP95MS:  latencyP95MS,
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)

@@ -6,9 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:ensure-session-start-time-index": "node --env-file=.env.local scripts/ensure-session-start-time-index.mjs"
   },
   "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.1.23",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "fast-geoip": "^1.1.88",

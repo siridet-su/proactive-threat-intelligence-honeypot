@@ -137,7 +137,25 @@ def prepare_smoke_rows(
         features = xgboost_block.get("features")
         if not isinstance(features, dict) or not features:
             raise DatasetContractError(f"window has no XGBoost features: {run_id}")
-        current_names = tuple(sorted(features))
+        if current_schema == "xgboost_hardware_features.v2":
+            declared_order = xgboost_block.get("feature_order")
+            if not isinstance(declared_order, list) or any(
+                not isinstance(name, str) for name in declared_order
+            ):
+                raise DatasetContractError(f"window has no valid feature order: {run_id}")
+            current_names = tuple(declared_order)
+            if (
+                len(current_names) != len(set(current_names))
+                or set(current_names) != set(features)
+                or current_names != tuple(sorted(current_names))
+            ):
+                raise DatasetContractError(f"feature order does not match features: {run_id}")
+            if xgboost_block.get("feature_order_sha256") != canonical_sha256(
+                list(current_names)
+            ):
+                raise DatasetContractError(f"feature order hash does not match: {run_id}")
+        else:
+            current_names = tuple(sorted(features))
         if feature_names is None:
             feature_names = current_names
             feature_schema_version = str(current_schema)

@@ -16,6 +16,9 @@ from production.utils.sensitive_data import (
     redact_for_log,
     sanitize_url,
 )
+from production.correlation.semantics import (
+    resolve_confidence_semantics,
+)
 
 
 @dataclass(frozen=True)
@@ -343,6 +346,9 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                 ),
             )
         )
+        view["confidence_semantics"] = resolve_confidence_semantics(
+            item.get("confidence_semantics") or payload.get("confidence_semantics")
+        )
     elif table == "campaigns":
         view.update(
             _pick(
@@ -361,6 +367,9 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
     elif table == "campaign_sessions":
         view.update(_pick(item, ("campaign_id", "session_id", "confidence")))
         view["match_reasons"] = item.get("match_reasons") or []
+        view["confidence_semantics"] = resolve_confidence_semantics(
+            item.get("confidence_semantics") or payload.get("confidence_semantics")
+        )
     elif table == "feed_status":
         view.update(
             {
@@ -460,10 +469,246 @@ def _redact_public_command_text(value: Any, key: str = "") -> Any:
     return value
 
 
-def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
+_COMPACT_SESSION_DETAIL_EVENT_LIMIT = 100
+_COMPACT_SESSION_DETAIL_TRUSTED_LIMIT = 50
+_COMPACT_SESSION_DETAIL_CORRELATION_LIMIT = 20
+
+
+def _compact_session_guidance(guidance: Any) -> Dict[str, Any]:
+    """Project safety/authority metadata without shipping historical evidence."""
+
+    source = dict(guidance) if isinstance(guidance, Mapping) else {}
+    safety = source.get("safety") if isinstance(source.get("safety"), Mapping) else {}
+    binding = source.get("binding") if isinstance(source.get("binding"), Mapping) else {}
+    assessment = binding.get("assessment") if isinstance(binding.get("assessment"), Mapping) else {}
+    validation = source.get("validation") if isinstance(source.get("validation"), Mapping) else {}
+    presentation = (
+        source.get("presentation_semantics")
+        if isinstance(source.get("presentation_semantics"), Mapping)
+        else {}
+    )
+    manual = source.get("requires_manual_approval")
+    if not isinstance(manual, bool):
+        manual = safety.get("manual_approval_required")
+    manual = manual if isinstance(manual, bool) else True
+    auto_execute = source.get("safe_to_auto_execute")
+    if not isinstance(auto_execute, bool):
+        auto_execute = safety.get("automatic_execution")
+    auto_execute = bool(auto_execute) if not manual and isinstance(auto_execute, bool) else False
+    result = {
+        "schema_version": source.get("schema_version") or "response_guidance.v3",
+        "guidance_id": source.get("guidance_id") or "",
+        "status": source.get("status") or "unavailable",
+        "guidance_state": source.get("guidance_state") or "stored_guidance_unverified",
+        "authority": source.get("authority") or "policy_unavailable",
+        "session_id": source.get("session_id") or "",
+        "requires_manual_approval": manual,
+        "safe_to_auto_execute": auto_execute,
+        "safety": {
+            "automatic_execution": False,
+            "manual_approval_required": manual,
+            "alerting_side_effect": bool(safety.get("alerting_side_effect", False)),
+            "response_action_side_effect": bool(safety.get("response_action_side_effect", False)),
+            "execution_integration": safety.get("execution_integration") or "not_implemented",
+        },
+        "binding": {
+            "schema_version": binding.get("schema_version") or "response_guidance_binding.v1",
+            "status": binding.get("status") or "unverified",
+            "session_id": binding.get("session_id") or source.get("session_id") or "",
+            "assessment": {
+                "status": assessment.get("status") or "unverified",
+                "assessment_id": assessment.get("assessment_id") or "",
+            },
+        },
+        "validation": {
+            "status": validation.get("status") or "unverified",
+            "error_count": len(validation.get("errors") or []) if isinstance(validation.get("errors"), list) else 0,
+        },
+        "presentation_semantics": {
+            "mode": presentation.get("mode") or "stored_guidance_unverified",
+            "historical_record": bool(presentation.get("historical_record", False)),
+            "stored_report": bool(presentation.get("stored_report", False)),
+            "recomputed": bool(presentation.get("recomputed", False)),
+        },
+        "finding_count": len(source.get("findings") or []) if isinstance(source.get("findings"), list) else 0,
+        "advisory_action_count": len(source.get("advisory_actions") or []) if isinstance(source.get("advisory_actions"), list) else 0,
+    }
+    return public_payload(result)
+
+
+def _compact_trusted_observations(items: Any) -> list[Dict[str, Any]]:
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        projected = _pick(
+            item,
+            (
+                "technique_id",
+                "ttp",
+                "tactic",
+                "tactics",
+                "trust_tier",
+                "authority",
+                "confidence",
+                "confidence_semantics",
+                "mapping_scope",
+                "mapping_semantics",
+                "observation_namespace",
+                "evidence_tier",
+            ),
+        )
+        if isinstance(item.get("commands"), list):
+            projected["command_count"] = len(item["commands"])
+        if isinstance(item.get("evidence_refs"), list):
+            projected["evidence_ref_count"] = len(item["evidence_refs"])
+        output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_TRUSTED_LIMIT:
+            break
+    return output
+
+
+def _compact_correlations(items: Any) -> list[Dict[str, Any]]:
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        projected = _pick(
+            item,
+            (
+                "correlation_id",
+                "ttp",
+                "source_ttp",
+                "technique_name",
+                "tactic",
+                "strength",
+                "confidence",
+                "strength_semantics",
+                "confidence_semantics",
+                "claim_status",
+                "authority",
+                "prediction_eligibility",
+                "evidence_type",
+                "correlation_kind",
+                "influence_scope",
+                "output_namespace",
+                "ontology_status",
+                "temporal_relationship",
+                "temporal_semantics",
+                "temporal_window_present",
+                "reason",
+            ),
+        )
+        for source_key, count_key in (
+            ("evidence", "evidence_count"),
+            ("references", "reference_count"),
+            ("matched_conditions", "matched_condition_count"),
+        ):
+            if isinstance(item.get(source_key), list):
+                projected[count_key] = len(item[source_key])
+        output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_CORRELATION_LIMIT:
+            break
+    return output
+
+
+def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return the bounded v1 public contract for the new detail endpoint."""
+
+    session_payload = detail.get("session_payload")
+    if not isinstance(session_payload, Mapping):
+        session_payload = {}
+    source_event_rows = detail.get("events_table_rows")
+    if source_event_rows is None:
+        source_event_rows = detail.get("events") or []
+    command_count = count_command_events(source_event_rows)
+    event_rows = event_views(list(source_event_rows)[:_COMPACT_SESSION_DETAIL_EVENT_LIMIT])
+    overview = _redact_public_command_text(dict(detail.get("overview") or {}))
+    overview["command_count"] = command_count
+    raw_correlations = detail.get("session_ttp_correlations") or detail.get("correlated_ttp_hypotheses") or []
+    result: Dict[str, Any] = {
+        "ok": True,
+        "schema_version": detail.get("schema_version") or "monitor.dashboard_session_detail.v1",
+        "timestamp": detail.get("timestamp"),
+        "session_id": detail.get("session_id"),
+        "overview": overview,
+        "source_geo": detail.get("source_geo") or {},
+        "source_geo_context": detail.get("source_geo_context") or {},
+        "observables": detail.get("observables") or [],
+        "commands": _redact_public_command_text({"commands": detail.get("commands") or []})["commands"],
+        "observed_trusted_ttps": _compact_trusted_observations(
+            detail.get("observed_trusted_ttps") or session_payload.get("observed_trusted_ttps") or []
+        ),
+        "correlated_ttp_hypotheses": _compact_correlations(raw_correlations),
+        "session_ttp_correlation_summary": _pick(
+            detail.get("session_ttp_correlation_summary") or {},
+            (
+                "status",
+                "correlation_authority",
+                "correlation_count",
+                "observed_trusted_ttp_count",
+                "confidence_semantics",
+                "temporal_semantics",
+                "output_namespace",
+                "observed_output_namespace",
+                "correlation_output_namespace",
+                "prediction_input_count",
+            ),
+        ),
+        "tactics": detail.get("tactics") or [],
+        "ttps": detail.get("ttps") or [],
+        "enrichment_status": detail.get("enrichment_status") or {},
+        "session": {
+            "session_id": session_payload.get("session_id"),
+            "sensor_id": session_payload.get("sensor_id") or session_payload.get("sensor"),
+            "src_ip": session_payload.get("src_ip"),
+            "start_time": session_payload.get("start_time"),
+            "duration": session_payload.get("duration"),
+            "is_ended": session_payload.get("is_ended"),
+            "command_count": command_count,
+            "analysis_status": session_payload.get("analysis_status") or session_payload.get("status"),
+        },
+        "events": event_rows,
+        "prediction_snapshots": [
+            api_row_view("prediction_snapshots", row)
+            for row in (detail.get("prediction_snapshots") or [])[:50]
+        ],
+        "latest_prediction_snapshot": api_row_view(
+            "prediction_snapshots", (detail.get("prediction_snapshots") or [])[0]
+        ) if detail.get("prediction_snapshots") else {},
+        "analysis_jobs": [
+            api_row_view("analysis_jobs", row)
+            for row in (detail.get("analysis_jobs") or [])[:50]
+        ],
+        "reports": [
+            api_row_view("reports", row)
+            for row in (detail.get("reports") or [])[:50]
+        ],
+        "report_summary": detail.get("report_summary") or {},
+        "response_guidance": _compact_session_guidance(detail.get("response_guidance")),
+        "counts": {
+            "events": len(source_event_rows),
+            "events_returned": len(event_rows),
+            "events_truncated": len(source_event_rows) > len(event_rows),
+            "classification_events": len(detail.get("classification_events") or []),
+            "trusted_observations": len(detail.get("observed_trusted_ttps") or []),
+            "correlations": len(raw_correlations),
+        },
+        "errors": detail.get("errors") or {},
+    }
+    return public_payload(_redact_public_command_text(result))
+
+
+def session_detail_view(
+    detail: Mapping[str, Any],
+    *,
+    compact: bool = False,
+) -> Dict[str, Any]:
     """Return useful session analysis without raw events or storage documents."""
     if not detail.get("ok"):
         return public_payload(dict(detail))
+    if compact:
+        return _compact_session_detail_view(detail)
     session_payload = detail.get("session_payload")
     if not isinstance(session_payload, Mapping):
         session_payload = {}
@@ -477,6 +722,30 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     public_commands = _redact_public_command_text(
         {"commands": detail.get("commands") or []}
     )["commands"]
+    raw_correlations = detail.get("session_ttp_correlations") or []
+    public_correlations = []
+    for item in raw_correlations:
+        if not isinstance(item, Mapping):
+            continue
+        projected = dict(item)
+        projected["confidence_semantics"] = resolve_confidence_semantics(
+            item.get("confidence_semantics")
+        )
+        public_correlations.append(projected)
+    raw_correlation_summary = detail.get("session_ttp_correlation_summary") or {}
+    public_correlation_summary = (
+        dict(raw_correlation_summary)
+        if isinstance(raw_correlation_summary, Mapping)
+        else {}
+    )
+    public_correlation_summary["confidence_semantics"] = resolve_confidence_semantics(
+        public_correlation_summary.get("confidence_semantics")
+    )
+    observed_trusted_ttps = _redact_public_command_text(
+        detail.get("observed_trusted_ttps")
+        or session_payload.get("observed_trusted_ttps")
+        or []
+    )
     output: Dict[str, Any] = {
         "ok": True,
         "timestamp": detail.get("timestamp"),
@@ -489,8 +758,10 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "classification_events": _redact_public_command_text(
             detail.get("classification_events") or []
         ),
-        "session_ttp_correlations": detail.get("session_ttp_correlations") or [],
-        "session_ttp_correlation_summary": detail.get("session_ttp_correlation_summary") or {},
+        "observed_trusted_ttps": observed_trusted_ttps,
+        "correlated_ttp_hypotheses": public_correlations,
+        "session_ttp_correlations": public_correlations,
+        "session_ttp_correlation_summary": public_correlation_summary,
         "tactics": detail.get("tactics") or [],
         "ttps": detail.get("ttps") or [],
         "ttp_command_map": _redact_public_command_text(
@@ -562,6 +833,8 @@ def session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "response_guidance": detail.get("response_guidance") or {},
         "errors": detail.get("errors") or {},
     }
+    if detail.get("schema_version"):
+        output["schema_version"] = detail.get("schema_version")
     # Apply the command-specific boundary after assembling every consumer
     # field.  Correlations and legacy compatibility structures can carry a
     # command-shaped value even when the primary fields are empty.

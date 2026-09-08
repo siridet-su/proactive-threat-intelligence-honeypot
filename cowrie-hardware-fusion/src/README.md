@@ -18,11 +18,15 @@ smoke evaluation แล้ว โดยยังไม่มี production infer
 - validate frozen hardware-impact protocol v2 ทั้ง schema, content hash, label authority,
   matched controls, split waves และ feature leakage invariants
 - สร้าง read-only no-sink collector snapshots และ hash-bound common-metric parity report
+- เก็บ host/target Linux PSI, TCP pressure/state/socket summary และ cgroup v2
+  CPU/memory/PID/I/O observations โดยไม่ persist address/raw PID
+- สร้าง hash-bound 7-scenario instrumentation matrix/spec และสรุป candidate signal
+  coverage/phase delta โดยบังคับ excluded-from-training semantics
 
 ขอบเขต implementation ถัดไป:
 
 - authenticated batch upload และ Cowrie command correlation adapters
-- service-pressure observability และ receipt-bound development-wave acquisition
+- รัน 7-scenario service-pressure instrumentation pilot ก่อน freeze feature revision
 - disposable backend runtime/telemetry adapters หลัง review execution boundary
 - train-only preprocessing
 - production-eligible XGBoost baseline หลังเพิ่ม independent data

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:service-pressure-signal-report:v1",
+  "title": "Service-pressure candidate signal report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_id", "run_id", "experiment_id", "purpose", "model_feature_eligible", "changes_frozen_feature_set", "source_binding", "evaluation_context", "quality", "signals", "report_sha256"],
+  "properties": {
+    "schema_version": {"const": "service_pressure_signal_report.v1"},
+    "report_id": {"$ref": "#/$defs/identifier"},
+    "run_id": {"$ref": "#/$defs/identifier"},
+    "experiment_id": {"$ref": "#/$defs/identifier"},
+    "purpose": {"const": "candidate_availability_and_delta_review"},
+    "model_feature_eligible": {"const": false},
+    "changes_frozen_feature_set": {"const": false},
+    "source_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_content_sha256", "collection_receipt_sha256", "segments"],
+      "properties": {
+        "manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+        "collection_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "segments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["filename", "sha256"],
+            "properties": {
+              "filename": {"type": "string", "minLength": 1, "maxLength": 256},
+              "sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      }
+    },
+    "evaluation_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_id", "primary_impact", "scenario_disposition", "excluded_from_candidate_values"],
+      "properties": {
+        "scenario_id": {"$ref": "#/$defs/identifier"},
+        "primary_impact": {"enum": ["NO_MATERIAL_IMPACT", "COMPUTE_SATURATION", "SERVICE_PRESSURE"]},
+        "scenario_disposition": {"enum": ["neutral_baseline", "benign_control", "malicious_simulation"]},
+        "excluded_from_candidate_values": {"const": true}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase_coverage", "candidate_signal_count", "feature_freeze_review_eligible_count"],
+      "properties": {
+        "phase_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["baseline", "workload", "recovery"],
+          "properties": {
+            "baseline": {"$ref": "#/$defs/phase_quality"},
+            "workload": {"$ref": "#/$defs/phase_quality"},
+            "recovery": {"$ref": "#/$defs/phase_quality"}
+          }
+        },
+        "candidate_signal_count": {"type": "integer", "minimum": 1},
+        "feature_freeze_review_eligible_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "signals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signal_id", "path", "scope", "unit", "baseline_applicable", "baseline", "workload", "recovery", "workload_delta_from_baseline_mean", "workload_delta_from_baseline_p95", "eligible_for_feature_freeze_review"],
+        "properties": {
+          "signal_id": {"$ref": "#/$defs/identifier"},
+          "path": {"type": "string", "pattern": "^[a-z0-9_.]+$"},
+          "scope": {"enum": ["host", "target"]},
+          "unit": {"$ref": "#/$defs/identifier"},
+          "baseline_applicable": {"type": "boolean"},
+          "baseline": {"$ref": "#/$defs/phase_stats"},
+          "workload": {"$ref": "#/$defs/phase_stats"},
+          "recovery": {"$ref": "#/$defs/phase_stats"},
+          "workload_delta_from_baseline_mean": {"$ref": "#/$defs/nullable_number"},
+          "workload_delta_from_baseline_p95": {"$ref": "#/$defs/nullable_number"},
+          "eligible_for_feature_freeze_review": {"type": "boolean"}
+        }
+      }
+    },
+    "report_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "nullable_number": {"type": ["number", "null"]},
+    "phase_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_samples", "valid_samples", "valid_sample_coverage"],
+      "properties": {
+        "expected_samples": {"type": "integer", "minimum": 1},
+        "valid_samples": {"type": "integer", "minimum": 0},
+        "valid_sample_coverage": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "phase_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_samples", "observed_samples", "coverage", "mean", "p95", "max"],
+      "properties": {
+        "expected_samples": {"type": "integer", "minimum": 1},
+        "observed_samples": {"type": "integer", "minimum": 0},
+        "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "mean": {"$ref": "#/$defs/nullable_number"},
+        "p95": {"$ref": "#/$defs/nullable_number"},
+        "max": {"$ref": "#/$defs/nullable_number"}
+      }
+    }
+  }
+}

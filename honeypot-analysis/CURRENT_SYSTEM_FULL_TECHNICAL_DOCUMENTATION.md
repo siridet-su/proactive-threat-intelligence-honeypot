@@ -1,14 +1,40 @@
 # Current honeypot-analysis system: full technical documentation
 
-**System state described:** 2026-08-25 (Asia/Bangkok)  
+**System state described:** 2026-08-31 (Asia/Bangkok)
 **Runtime authority:** active GCP deployment and its exact content-addressed source tree  
-**Active release:** `00d7e9594b11505c167f4e03bb3efffd9a90144b`  
+**Active release:** `eaf8b81df3b76a601d2370566e3098a641709881`
 **Recovery release:** `403c989d9cfe7e7726610018345352e76bfd5d7f`  
 **Document status:** current-system technical reference; secrets and raw sensitive observations intentionally omitted
 
-> **2026-08-25 live-state addendum.** Release
-> `00d7e9594b11505c167f4e03bb3efffd9a90144b` is active after the final bounded
-> live validation completed with all 50 invariants true. Its immutable package
+> **Final learned-model alignment (2026-09-01; source change not deployed).**
+> The repository's final architecture now defaults to deterministic reviewed
+> rules for trusted ATT&CK observations and treats FINAL_S1 LinearSVC as the
+> sole learned model, advisory-only, with raw uncalibrated decision margins.
+> SecureBERT remains retained for historical/replay/research compatibility but
+> is disabled in the aligned source by default. The active eaf8 deployment
+> remains unchanged until a separately reviewed release is built and promoted;
+> this note does not claim a production cutover.
+
+> **2026-08-31 current-runtime correction.** The live capstone selector resolves
+> to `eaf8b81df3b76a601d2370566e3098a641709881`, with epoch
+> `mongodb-target-a-honeypot-db-20260831` and canonical database
+> `honeypot_canonical_v1`. The effective production environment selects
+> MongoDB; the base JSON's SQLite value is not effective. A read-only,
+> authenticated Atlas control-plane verification confirms `Honeypot-DB` is
+> Flex (AWS `AP_EAST_1`, 5-GB storage limit, backup enabled). MongoDB Atlas
+> Flex is therefore the active canonical datastore for the final PoC; the
+> epoch-bound SQLite mirror is recovery-only. The former M0/512-MiB capacity
+> observation and the earlier unauthenticated/blocked receipt remain
+> historical evidence, not current-tier constraints. The custom Pi
+> cold-storage/automatic-retention subsystem is absent from the active release
+> and remains only as preserved historical evidence. The post-upgrade evidence
+> and bounded limitations are recorded in
+> `evaluation/current_policy_remediation_20260827/target_a_flex_mongo_only_post_upgrade_20260831/FINALIZATION_REPORT.md`.
+
+> **2026-08-25 historical live-state addendum.** Release
+> `00d7e9594b11505c167f4e03bb3efffd9a90144b` was active during the final
+> bounded live validation on 2026-08-25, which completed with all 50
+> invariants true. Its immutable package
 > SHA-256 is `4597c15dfbcc69030097d6fa2a0f55ab8f8df366d15f2a60445842dbe9945fae`,
 > deployed tree is `d061bb3b0cbb73d348d2748ee98b0404138f5096`, and release-manifest SHA-256
 > is `e125c19c94dce085f276ae8d903e508b8c8574c89243182e03f62f9b36e0373e`.
@@ -16,9 +42,11 @@
 > `/var/lib/honeypot/validator_io_00d7_session_links_reconciled_20260825/final_live_invariant_receipt.json`
 > (SHA-256 `b4cf0da8f5839bf36be22203a220ff48e50cb72541901adc717f77fcba2254c5`).
 > Sections below that explicitly describe 403c or the 2026-08-24 inspection are
-> retained as historical source/deployment evidence; this addendum supersedes
-> only their statements that 403c is presently active. Full reconciliation is
-> in `cleanup_audit/session_links_delta_reconciliation_20260825.md`.
+> retained as historical source/deployment evidence; this addendum superseded
+> only their statements that 403c was then active. The later eaf8 release is
+> the current selector target; the 00d7 material remains historical evidence.
+> Full reconciliation is in
+> `cleanup_audit/session_links_delta_reconciliation_20260825.md`.
 >
 > The authoritative controlled Cowrie endpoint is `100.118.43.30:22` over
 > Tailscale. The former public `:2222` relay is not the current Cowrie path.
@@ -48,7 +76,11 @@ The document is deliberately more precise than a general architecture summary. I
 | **DEVELOPMENT / TEST-ONLY** | A harness, fixture, synthetic benchmark, or offline artifact that does not consume or alter live canonical state. |
 | **LIMITATION / INTERPRETATION** | A bounded conclusion from the evidence; it is not presented as a direct observation. |
 
-### 1.2 How the 2026-08-24 baseline was established
+### 1.2 Historical 2026-08-24 baseline (not current)
+
+This subsection is preserved historical evidence. It describes the release that
+was active during the 2026-08-24 inspection and must not be read as the current
+selector state. The current release reconciliation is in §1.3 below.
 
 The then-active system was inspected read-only through the approved management path. The `/opt/honeypot` selector resolved to:
 
@@ -75,6 +107,43 @@ evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/
 ```
 
 Repository HEAD is useful for surrounding history and tests, but it is not substituted for this deployed tree when the two differ.
+
+### 1.3 Historical 00d7 reconciliation (2026-08-26; not current)
+
+The 00d7 selector and final live receipt superseded the historical 403c
+baseline at the time of that record. They are retained unchanged as historical
+evidence; the 2026-08-31 correction above supersedes this subsection for the
+current deployment identity.
+
+| Current identity | Verified value |
+|---|---|
+| Active selector | `/opt/honeypot-releases/00d7e9594b11505c167f4e03bb3efffd9a90144b` |
+| Active release ID | `00d7e9594b11505c167f4e03bb3efffd9a90144b` |
+| Immutable package SHA-256 | `4597c15dfbcc69030097d6fa2a0f55ab8f8df366d15f2a60445842dbe9945fae` |
+| Deployed tree SHA-1 | `d061bb3b0cbb73d348d2748ee98b0404138f5096` |
+| Release-manifest SHA-256 | `e125c19c94dce085f276ae8d903e508b8c8574c89243182e03f62f9b36e0373e` |
+| Final invariant receipt | `/var/lib/honeypot/validator_io_00d7_session_links_reconciled_20260825/final_live_invariant_receipt.json` |
+| Final invariant receipt SHA-256 | `b4cf0da8f5839bf36be22203a220ff48e50cb72541901adc717f77fcba2254c5` |
+| Recovery release | `403c989d9cfe7e7726610018345352e76bfd5d7f` (recovery only) |
+| Effective backend | MongoDB (`DATABASE_BACKEND=mongodb` in `/etc/honeypot/common.env`) |
+| Current rollback mirror | `/var/lib/honeypot/mongodb_epoch_retry_49f9b74.db` (epoch-bound; not canonical authority) |
+| Current predictor policy hash | `1aaae2aee0988b2c4f0733e29e15b2f0d47507f8cbd1d1925bac47efe88f2c3b` |
+| Current predictor policy version | `2026-08-25-v3-environment-rebind` |
+| Controlled Cowrie endpoint | `100.118.43.30:22` over Tailscale |
+| Live validation status | PASS; 50 invariants, zero errors |
+
+The generic current `canonical_storage_epoch.v2` receipt remains readable and
+binds the Mongo schema, epoch, rollback mirror, and durability identity. The
+Phase 0 recheck observed its candidate-specific fields `release_id`,
+`release_sha256`, `tree_sha256`, `storage_backend`, and `manifest_sha256` as
+null. The historical 00d7 record therefore bound its application identity
+through the selector, release markers, source hashes, and final invariant
+receipt; it did not claim that the generic epoch JSON carried those 00d7
+fields. The current eaf8 deployment is independently bound by its selector,
+release manifest, and the Target-A Flex post-upgrade receipt. That historical
+metadata discrepancy remains recorded and was not retroactively changed. No
+other `403c` statement is current unless it is explicitly labelled recovery,
+historical, or failed-candidate evidence.
 
 ## 2. Executive technical determination
 
@@ -283,7 +352,9 @@ The controlled-provenance entry point wraps the normal worker; it does not repla
 4. Loads and records the data-lifecycle policy idempotently.
 5. Verifies snapshot retention is compatible with the lifecycle policy.
 6. Loads and validates the classifier environment and every bound asset hash.
-7. Constructs `NotebookParityClassifier`, including the optional SecureBERT candidate source.
+7. Constructs the deterministic-rule `NotebookParityClassifier`; an explicit
+   FINAL_S1 advisory overlay is separate, while SecureBERT is compatibility-only
+   and not loaded by the aligned final default.
 8. Loads cached feed context in its allowed offline mode.
 9. Constructs the canonical internal next-behavior runtime or a fail-closed disabled engine.
 10. Creates `SessionMonitor` and the close-time callbacks.
@@ -307,7 +378,13 @@ For each claimed event, the worker reasserts that `session_source` comes from th
 
 Command text is sanitized for reporting. Outcomes are normalized to explicit values such as `cowrie_reported_success`, `cowrie_reported_failure`, or `unknown`; the system does not infer real host effects from a Cowrie shell transcript.
 
-For command-bearing events, the monitor calls the current hybrid command classifier. Every classification candidate remains auditable, but only labels passing the command-authority and trust contracts enter `state.ttps`, tactic history, technique maps, or trusted prediction phases. Audit-only candidates are counted separately and cannot evict trusted history.
+For command-bearing events, the monitor calls the deterministic-rule
+`NotebookParityClassifier` and may attach an explicitly enabled FINAL_S1
+advisory view. Every classification candidate remains auditable, but only
+labels passing the command-authority and trust contracts enter `state.ttps`,
+tactic history, technique maps, or trusted prediction phases. Advisory and
+historical SecureBERT candidates are counted separately and cannot evict
+trusted history.
 
 The live state is bounded (10,000 events); canonical durable events remain the authority for full reconstruction. Closing the session triggers terminal processing and removes the in-memory state after successful persistence.
 
@@ -517,6 +594,12 @@ The table below reflects live unit inspection, not only checked-in unit template
 | `honeypot-session-count-monitor.service/.timer` | GCP VM | `honeypot` | service timer-triggered; timer active | `production.workers.session_count_monitor` | canonical counts/health | monitoring status/logs | Operational monitoring only. |
 | `honeypot-ai-advisory-worker.service` | GCP VM | `honeypot` | static/inactive | `production.workers.ai_advisory_worker` | would read advisory outbox | would write isolated advisory records | Disabled: `enable_ai_advisory=false`, provider disabled, no current calls. |
 
+The feeder executable path shown above retains the historical `403c` suffix
+from its content-addressed shadow materialization. It is a current running
+sidecar path under the eaf8 deployment, not evidence that 403c is the selected
+application release; the selector and post-upgrade Flex receipt are
+authoritative for current release identity.
+
 ### 5.1 Service interaction model
 
 ```mermaid
@@ -576,13 +659,14 @@ The effective configuration is the validated combination of `/etc/honeypot/produ
 |---|---|---|
 | Environment | `production` | Production validation, storage, privacy, and authority gates apply. |
 | Canonical backend | environment selects `mongodb`; DB `honeypot_canonical_v1` | SQLite value in base JSON is not effective. |
-| Storage epoch | `/etc/honeypot/canonical_storage_epoch.v2.json` | Startup binds Mongo/schema/release/mirror. |
+| Storage epoch | `/etc/honeypot/canonical_storage_epoch.v2.json` | Startup binds the current Mongo/schema/epoch/mirror contract; application release identity is bound separately by the eaf8 selector/source/release evidence. |
 | Ingest | private-overlay bind, port 8080 | Sensor transport is not the public dashboard/predictor surface. |
 | Dashboard | loopback port 8081 | Local/proxied read view only. |
 | Monitor | loopback port 8090 | Local operational view only. |
 | Sidecar predictor | loopback port 18082 | No public prediction listener. |
-| Command classification | `notebook_merge`, minimum model confidence 0.55, reviewed rules only | Rules retain trust authority; model candidate is bounded. |
-| SecureBERT | enabled, max length 128, device `auto`, content-bound checkpoint | Candidate/corroborating classifier only. |
+| Command classification | `notebook_merge`, reviewed rules only; aligned source disables SecureBERT by default | Deterministic rules retain trust authority; the deployed eaf8 profile remains pre-alignment until a new release. |
+| FINAL_S1 LinearSVC | optional explicit advisory package, raw `linear_svc_decision_margin`, stable top-k | Sole learned model in the aligned final architecture; advisory/context only, never trusted or canonical. |
+| Private ModernBERT command classifier (legacy identifier `securebert`) | disabled in aligned source; content-bound assets retained for historical/replay/research opt-in | Non-active compatibility path; its 0.55 candidate threshold is historical and does not define an S1 gate. |
 | Session worker | batch 100, poll 2 s; leader 90 s/heartbeat 10 s; event lease 60 s/heartbeat 20 s | Bounded work and reclaimable ownership. |
 | Event retry | max 5; exponential delay bounded roughly 5–300 s | Transient faults retry; exhaustion is recorded. |
 | Analysis | batch 1, max 3, deterministic fallback enabled | Limits resource use; invalid primary analysis does not become success. |
@@ -606,9 +690,19 @@ The effective configuration is the validated combination of `/etc/honeypot/produ
 honeypot_canonical_v1
 ```
 
-The storage binding is `canonical_storage_epoch.v2`. It binds the Mongo runtime identity (`mongodb_runtime_identity.v2`), schema manifest (`mongodb_canonical_schema_manifest.v1`), provider/deployment identity without exposing its secret endpoint, capacity policy, and a separately verified rollback-mirror identity.
+The storage binding is `canonical_storage_epoch.v2`. It binds the Mongo runtime
+identity (`mongodb_runtime_identity.v2`), schema manifest
+(`mongodb_canonical_schema_manifest.v1`), provider/deployment identity without
+exposing its secret endpoint, capacity policy, and a separately verified
+rollback-mirror identity. Application release identity is independently bound
+by the eaf8 selector, release manifest, and post-upgrade evidence.
 
-The capacity policy records a 512 MiB intended cap and warning/high/fail-safe thresholds of 60/75/85 percent. It does not authorize automatic deletion or provider upgrades. Lifecycle policy also disallows automatic evidence deletion.
+The historical M0 capacity policy recorded a 512 MiB intended cap and
+warning/high/fail-safe thresholds of 60/75/85 percent. It is no longer the
+active provider limit: the current Flex baseline is 5 GB and is recorded in
+the post-upgrade evidence namespace above. The policy does not authorize
+automatic deletion or provider upgrades. Lifecycle policy also disallows
+automatic evidence deletion.
 
 ### 6.2 Live collection inventory
 
@@ -692,13 +786,13 @@ All paths below are relative to the active release. A file existing in `configs/
 | `configs/cowrie_output_privacy.v1.json` | `cowrie_pre_persistence_credentials` / `1.0.1` | Sensor/worker privacy loaders; forwarder and session runtime | Which credential-related fields may persist and how secrets are transformed/redacted | Invalid policy prevents safe runtime use. Authoritative for privacy, not classification. |
 | `configs/data_lifecycle_policy.v1.json` | `honeypot-thesis-data-lifecycle` / `1.0.0` | lifecycle loader during `SessionWorker` startup; Mongo lifecycle ledger | Retention, deletion approval, protected categories, backup/restore requirements, privacy lifecycle | Hash/version is startup-bound and recorded idempotently. No automatic deletion. Authoritative for retention constraints. |
 | `configs/classification_rules.trusted.json` | `honeypot-command-classification-rules` / `2026-08-11-operation-aware-v3` | `classification_pipeline.py`, policy validator; `NotebookParityClassifier` | Reviewed operation/regex mappings to ATT&CK technique/tactic, thresholds, literal fallback grants | Schema/hash/review failure blocks trusted rule use. Authoritative only through command-authority/trust gates. |
-| `configs/next_behavior_classifier_environment.v1.json` | schema `next_behavior_classifier_environment.v3`; source identity bound | `classification/environment.py` at worker startup | Content-addressed identity for parser, splitter, classifier, trust code, rules, ATT&CK map, SecureBERT, trusted-history source | Missing/tampered/mismatched source or receipt causes fatal startup failure. Identity contract, not a label policy itself. |
+| `configs/next_behavior_classifier_environment.v1.json` | schema `next_behavior_classifier_environment.v3`; source identity bound | `classification/environment.py` at worker startup | Content-addressed identity for parser, splitter, classifier, trust code, rules, ATT&CK map, and retained SecureBERT compatibility assets | Missing/tampered/mismatched source or receipt causes fatal startup failure. Identity contract, not a label policy itself; SecureBERT binding is retained for replay/research provenance and does not activate the final model. |
 | `configs/alert_authority_policy.v1.json` | `observational-signals-no-automatic-alerts` / `2026-07-30` | session/analysis/alert path | Whether signals may create alerts, external delivery, or response | Current values prohibit all automatic alert/delivery/response. Authoritative safety gate. |
 | `configs/response_guidance_policy.v3.json` | `cowrie-observed-evidence-response-guidance` / `3.7.0` | `response_guidance_v3.py` | Evidence-to-guidance selection, exact support, priority, manual task constraints | Invalid/missing policy yields no authoritative guidance; tasks remain manual and `safe_to_auto_execute=false`. |
-| `configs/session_ttp_correlation.trusted.json` | `honeypot-session-ttp-correlation-trusted` / `2026-07-12-conservative-correlation-semantics` | session/report/correlation loaders | Bounded post-session correlation semantics and explicit non-probabilistic interpretation | Validation failure removes correlation contribution; `apply_to_prediction=false`. Contextual only. |
+| `configs/session_ttp_correlation.trusted.json` | `honeypot-session-ttp-correlation-trusted` / `2026-07-12-conservative-correlation-semantics` | session/report/correlation loaders | Session-scoped contextual correlation; separate `observed_trusted_ttps` and `correlated_ttp_hypotheses` namespaces; explicit non-probabilistic interpretation | Validation failure removes correlation contribution; `apply_to_prediction=false`. Contextual only; it cannot override trusted command mappings. |
 | `configs/threat_hypothesis_behavior.trusted.json` | `cowrie-ssh-threat-hypothesis-behavior` / `2026-08-11-typed-connected-chain-v2` | `reporting/threat_hypothesis.py` | Which typed, connected evidence chains may support a bounded hypothesis | Missing linked support causes abstention; no intent/actor certainty. Controls analytic wording, not response. |
 | `configs/typed_semantic_vocabulary.v1.json` | `honeypot-typed-semantic-vocabulary` / `2.0.0`; schema v2 | typed parser/fact/selection modules | Supported semantic families, operations, entity/relationship vocabulary, parsing constraints | Unsupported/ambiguous constructs abstain. Authoritative only for typed semantic representation. |
-| `configs/prediction_policy.transformer_poc.trusted.json` | `professor-approved-corrected-target-transformer-poc` / `2026-07-27-frozen-seed-20260721` | canonical `next_behavior_runtime.py` | Existing internal prediction features, checkpoint, label/target contract, calibration and rollout restrictions | Hash/checkpoint mismatch disables/fails prediction, never classification. Non-authoritative. |
+| `configs/prediction_policy.transformer_poc.trusted.json` | `professor-approved-corrected-target-transformer-poc` / `2026-08-25-v3-environment-rebind` | canonical `next_behavior_runtime.py` | Existing internal prediction features, checkpoint, label/target contract, calibration and rollout restrictions | Hash/checkpoint mismatch disables/fails prediction, never classification. Non-authoritative. Current file SHA-256: `1aaae2aee0988b2c4f0733e29e15b2f0d47507f8cbd1d1925bac47efe88f2c3b`. |
 | `configs/ai_advisory_policy.v1.json` | `cowrie-constrained-ai-advisory` / `1.0.0` | AI advisory contract/worker if enabled | Provider projection/output validation and authority denial | **CURRENT CONFIG DISABLED**; policy exists but no AI service is active and collections are empty. |
 
 ### 7.1 Lifecycle policy semantics
@@ -717,6 +811,10 @@ Response guidance is a defensible analyst aid, not an actuator. Guidance items m
 - V1/V2 trusted-history source files remain as compatibility/history. The active source emits V3; the shadow feeder rejects V2.
 - Earlier response-guidance and typed-semantic versions may remain for validation/adapters. The current canonical report path is V3 guidance with the active v3.7.0 policy and typed vocabulary v2.
 - AI advisory source/policy exists, but the worker is inactive and provider use disabled. It must not be depicted as current AI analysis.
+
+The predictor version `2026-07-27-frozen-seed-20260721` is retained only as a
+historical pre-00d7 inventory value. It is not the active policy version and
+must not be used for current-release identity claims.
 
 ## 8. Current schema and contract inventory
 
@@ -756,7 +854,7 @@ This is the important contract inventory, not an exhaustive list of every intern
 | `report_artifact_manifest.v1` | artifact writer | auditors/UI | artifact names, types, SHA-256, report/assessment identity | Binds JSON/MD/PDF/STIX outputs to the same assessment. |
 | `mongodb_canonical_schema_manifest.v1` | schema/bootstrap tooling | Mongo startup validator | collection/index definitions, manifest hash | Detects missing/wrong canonical indexes before safe operation. |
 | `mongodb_runtime_identity.v2` | deployment/storage tooling | startup | database/provider/deployment identity without secret URI | Prevents connecting a receipt to the wrong database. |
-| `canonical_storage_epoch.v2` | deployment receipt | startup storage gate | backend identity, release/tree, schema, mirror, capacity, receipt hash | Authorizes this release/storage combination. Mismatch is fatal. |
+| `canonical_storage_epoch.v2` | deployment receipt | startup storage gate | epoch/backend/schema/mirror/capacity and receipt identity; current candidate release fields observed null | Authorizes the storage/epoch combination. Application release identity is checked separately by selector/release/source bindings; mismatches fail closed. |
 | `rollback_mirror_identity.v1` / `sqlite_rollback_mirror_durability.v1` | mirror preparation | storage-epoch validator | path/device/schema/size/hash/durability | Proves recovery mirror identity; does not make it live authority. |
 | `mongodb_lifecycle_ledger.v1` | worker startup | startup/audit | `_id=policy_sha256`, ID/version, first path, activation time | Immutable record of lifecycle policy activation. |
 | `gcp_cowrie_shadow_mongo_feeder_config.v1` | deployment bundle | `MongoShadowFeeder` | endpoint, DB/collection, checkpoint/T, deployment/root, bounds | Fails feeder startup on a different endpoint/model/config. |
@@ -830,18 +928,57 @@ Event exceptions call storage failure logic with a redacted error category. A re
 
 ## 10. Classification, ATT&CK mapping, and trust
 
-### 10.1 The two different learned classifiers must not be confused
+### 10.1 Learned classifier paths and final binding
 
-1. **SecureBERT command classifier:** used inside live command classification as a candidate/corroborating technique predictor. It receives command text (bounded at 128 tokens) and returns a technique candidate plus confidence. It is never independently trusted.
-2. **Next-distinct Transformer:** an isolated research model receiving only trusted tactic labels and predicting the next distinct tactic. It has no role in classifying a command, producing canonical ATT&CK evidence, or changing SessionMonitor trust.
+1. **FINAL_S1 LinearSVC:** the sole learned model selected for the final
+   architecture. It is an explicitly enabled advisory overlay, returns stable
+   top-k labels with raw `linear_svc_decision_margin` values, and has no
+   calibrated probability, confidence threshold, trusted eligibility,
+   canonical-write permission, or response authority. It cannot alter a
+   deterministic rule mapping when the two views disagree.
+2. **Private ModernBERT-based command classifier (legacy project identifier
+   `securebert`):** a retained compatibility/research candidate path, not
+   loaded by the aligned final runtime. The verified executable architecture
+   is `ModernBertForSequenceClassification`; lineage to a published SecureBERT
+   checkpoint is unproven. Its checkpoint, environment receipt, and historical
+   score semantics remain available for explicit replay/research opt-in only.
+3. **Next-distinct Transformer:** an isolated research model receiving only
+   trusted tactic labels and predicting the next distinct tactic. It has no
+   role in classifying a command, producing canonical ATT&CK evidence, or
+   changing SessionMonitor trust.
+
+The active eaf8 deployment record predates this source alignment and still
+describes the compatibility candidate. That historical deployment identity is
+preserved; the aligned source requires a new content-addressed release before
+it can become a production claim.
 
 ### 10.2 Current `NotebookParityClassifier`
 
 **Implementation:** `production/classification/classification_pipeline.py::NotebookParityClassifier`  
 **Build path:** `production/classification/classification_evaluation.py::build_classifier()`  
-**Rule policy:** `classification_rule_policy.v3`, 115 reviewed enabled rules in the active asset (4 operation-aware and 111 regex), `reviewed_only=true`  
+**Rule policy:** `classification_rule_policy.v3`, 115 enabled policy entries in the active asset (4 operation-aware and 111 regex), `reviewed_only=true`; 88 entries have `provenance.reviewed=true` and 27 are marked `needs_semantic_review` and excluded from trusted authority.
 **Strategy:** `notebook_merge`  
-**Minimum configured model confidence:** `0.55`
+**Historical SecureBERT candidate threshold:** `0.55` (compatibility/research
+metadata only; not an S1 decision or abstention threshold)
+
+**FINAL_S1 score contract:** raw LinearSVC decision margins with deterministic
+stable top-k ordering; `calibrated_probability=null` and no S1 threshold or
+abstention gate.
+
+The 84 reviewed regex entries in `runtime_authority.trusted_literal_fallback_rule_ids`
+are a separate allowlist from the four reviewed structural rules. The allowlist
+is a project-authored authority grant, not an ATT&CK validation result. All 115
+entries have deterministic rule `confidence=1.0`; this is a match/policy field,
+not a calibrated probability or semantic-correctness measure. Five entries
+(`cmd-rule-108-t1083-mounted-filesystem-discovery`,
+`cmd-rule-109-t1082-linux-system-files`,
+`cmd-rule-110-t1083-executable-path-discovery`,
+`cmd-rule-111-t1033-logged-in-user-discovery`, and
+`cmd-rule-112-t1082-filesystem-capacity-discovery`) record AI-assisted
+creation/review provenance. They are currently reviewed and allowlisted under
+the current eaf8-bound policy (the 00d7 policy bytes are retained as historical
+evidence), but are not independently domain-validated or ground truth and
+require blind Phase 2 adjudication.
 
 The classifier returns a list of structured `ClassificationResult`/dictionary records, not one opaque class. A command can map to multiple ATT&CK techniques/tactics if independently supported fragments exist.
 
@@ -862,16 +999,80 @@ Operation-aware rules bind a reviewed parser operation to a technique/tactic. Re
 
 Parser abstention therefore blocks regex promotion. This prevents a broad expression from acquiring authority over shell behavior the parser cannot interpret.
 
-### 10.5 SecureBERT path
+### 10.5 Historical SecureBERT compatibility path
 
-`SecureBertCommandClassifier.classify()` produces a technique ID/candidate and confidence. It is loaded from the exact checkpoint/config bound in the classifier environment. Outcomes are:
+`SecureBertCommandClassifier.classify()` (the compatibility name for the private
+ModernBERT adapter) produces a technique ID/candidate and an
+`uncalibrated_top_softmax_score`. It is not loaded by the aligned final runtime.
+When explicitly enabled for historical/research replay, it is loaded only
+after the classifier environment and the explicit runtime model-asset contract
+verify the checkpoint, tokenizer, model config, label mapping/order,
+architecture, and label count. Historical outcomes are:
 
 - **rule and model agree:** record may use source `rule_model_agreement`, but the reviewed rule remains the authority;
 - **model only:** audit-only, regardless of confidence;
 - **rule/model disagree:** audit-only disagreement evidence;
 - **below threshold/unavailable:** no learned candidate or audit-only status.
 
-Thus “hybrid” means the model can corroborate or reveal disagreement; it does not mean two weak sources automatically create trusted evidence.
+Thus the retained historical “hybrid” path means the model can corroborate or
+reveal disagreement; it does not mean two weak sources automatically create
+trusted evidence. It is not the selected final learned-model architecture.
+
+The current private ModernBERT binding is checkpoint
+`securebert_ttp_model_v2/checkpoint-6765` with checkpoint SHA-256
+`dc3a4e2a57a70c4c7cb5f769b6399f32b2b51f0245025653e0b72f6d025a759b`, 196
+labels, and a maximum input length of 128 tokens. The current eaf8 classifier
+environment is content-bound to the current environment receipt and its
+eleven-file source identity. The runtime model-asset contract is
+`configs/securebert_runtime_asset_contract.v1.json` and binds the checkpoint,
+tokenizer assets, model configuration, and ordered label mapping.
+The retained model/checkpoint/config/tokenizer/label-map bytes are identified,
+but authoritative training-corpus membership, split/leakage evidence, complete
+label lineage, full training configuration, and independent checkpoint-bound
+evaluation are not established. The defensible status is
+`PROVENANCE_NOT_RECOVERABLE_FROM_RETAINED_EVIDENCE` unless a future versioned
+reconciliation recovers those items. Historical environment hashes
+`cbdef20f...edb4` and `3b241b86...b90a` remain unchanged historical evidence;
+they do not replace the current eaf8 hash.
+
+The historical SecureBERT `0.55` is a local candidate-admission threshold, not
+an optimal or calibrated correctness probability, and it is not translated
+into an S1 margin threshold. Metadata field
+`trusted_model_only_threshold=0.9` does not grant model-only authority, and the
+legacy/noncanonical `0.45` compatibility path is not the selected eaf8 worker
+path. These values are retained unchanged and require Phase 2 sensitivity and
+legacy-path isolation evidence.
+
+The command classifier has no temperature step (`temperature_applied=false`);
+`0.6990670591704266` belongs only to the separate next-distinct prediction
+model. Runtime classification evidence may include pre-truncation and effective
+token counts, but truncation telemetry describes tokenizer input completeness and
+does not claim semantic completeness of the attacker behavior.
+
+### 10.5a Classifier score representation (AI-02)
+
+The monitor's classification tables expose distinct numeric fields so the
+stored classifier contract is not collapsed into a generic probabilistic
+"confidence" value. **Rule/policy value** is the deterministic value emitted
+by a reviewed rule-policy match (currently often `1.0`); it denotes a policy
+match and is not a calibrated probability, empirical accuracy, or semantic
+correctness measure. **FINAL_S1 decision score** is a raw LinearSVC margin with
+`score_type=linear_svc_decision_margin`; it is not a calibrated probability and
+has no configured threshold. Historical **SecureBERT score** fields may still
+appear in retained records and retain their uncalibrated top-softmax semantics.
+The UI labels each field with its score semantics and states that it is not a
+calibrated probability.
+
+For rule/model agreement, the reviewed rule remains the authoritative source;
+the model score is shown separately and agreement does not create a stronger
+authority tier. A model-only result, rule/model disagreement, unavailable
+model, below-threshold result, malformed provenance, or missing optional model
+score remains audit-only or unresolved according to the existing authority
+contract. Presentation does not alter candidates, rule IDs, ATT&CK mappings,
+thresholds, parser decisions, trusted state, prediction history, response
+guidance eligibility, or alert authority. This representation therefore makes
+no claim about classifier accuracy, score calibration, threshold optimality,
+or independent SecureBERT authority; those remain Phase 2 validation targets.
 
 ### 10.6 Authority and trust result
 
@@ -883,6 +1084,26 @@ Trusted events are limited to sources such as:
 - `rule_model_agreement` with valid reviewed rule authority.
 
 Audit-only reasons include model-only, unreviewed, disagreement, parser abstention, shell noise, opaque BusyBox/random applets, missing asset hash, or insufficient confidence. Both categories remain observable for quality review, but only trusted events enter tactic/technique state and prediction history.
+
+The strong current boundaries are intentional: `reviewed_only` excludes all 27
+`needs_semantic_review` entries; parser ambiguity, dynamic/unresolved/wildcard
+or malformed input abstains; model-only and rule/model disagreement remain
+audit-only; missing or invalid policy provenance fails closed; emergency
+fallback is audit-only; and audit-only events cannot enter trusted state,
+typed-semantic eligibility, findings, hypotheses, response guidance, prediction
+inputs, alerts, or canonical writes.
+
+The focused authority suite currently reproduces four closure discrepancies
+that are documented rather than repaired in 00d7: inert/search/quoted text can
+overmatch trusted regexes (for example `echo whoami`, quoted `wget`, `grep
+xmrig`, `echo crontab`, and `grep NOPASSWD`); read-only references to
+persistence targets can satisfy trusted modification/persistence regexes;
+conditional RHS fragments (`true || /tmp/a.sh` and `false && /tmp/a.sh`) lack
+the intended explicit conditional-execution metadata and can receive trusted
+execution evidence; and trusted-regex authority metadata lacks the expected
+explicit operation-context field. These are reproducible
+implementation/representation/semantic-validation discrepancies, not
+SecureBERT authority bypasses, and are Phase 2 validation/remediation targets.
 
 ### 10.7 Deduplication and phase construction
 
@@ -903,19 +1124,32 @@ The V3 list adds `ordered_trusted_phases_sha256` and a whole-manifest hash. That
 
 An ATT&CK technique mapping says that observed command evidence is consistent with a reviewed technique rule. It does not prove intent, actor identity, campaign identity, success on a real host, or the next action. Cowrie-reported command outcome is retained separately. Reports must use bounded observational language and exact evidence references.
 
+ATT&CK Enterprise v14.1 is the primary external behavior/technique reference:
+it supplies vocabulary, technique meaning, and procedure context. Exact regex
+and structural predicates, shell splitting, normalization, path/entity
+resolution, outcome interpretation, local ATT&CK mapping decisions,
+confidence/threshold values, and the authority/trust lattice are
+project-authored. For those exact local detector predicates the source boundary
+is **NO DIRECT EXTERNAL SOURCE FOUND**. NIST AI RMF 1.0 supplies AI-governance
+and risk-management context; Cawley–Talbot, Kaufman et al., Saito–Rehmsmeier,
+and Cerqueira et al. support only the corresponding model-selection, leakage,
+imbalance, and temporal-evaluation methodology claims. None validates the
+local classifier rules or thresholds.
+
 ```mermaid
 flowchart TD
     C[Sanitized command event] --> S[Conservative fragment splitter]
     S --> P[Structural operation parser]
     S --> R[Reviewed rule candidates]
-    S --> B[SecureBERT candidate]
-    P & R & B --> M[NotebookParityClassifier merge]
+    S --> M[NotebookParityClassifier rules-only final path]
     M --> A[command_authority_decision.v1]
     A -->|reviewed structural/literal authority| T[classification_event.v2\nTRUSTED]
     A -->|model-only, disagreement, abstention, unreviewed| O[classification_event.v2\nAUDIT-ONLY]
     T --> TP[Trusted techniques/tactics]
     TP --> PH[Adjacent tactic phases\nmax visible 8]
     O -. never enters .-> PH
+    M -. optional advisory .-> S1[FINAL_S1 LinearSVC raw margins]
+    S1 -. never authority .-> O
 ```
 
 ## 11. Semantic analysis, correlation, findings, severity, and guidance
@@ -940,6 +1174,65 @@ Safety limits include at most 2,048 facts, 8,192 entities, 8,192 relationships, 
 ### 11.2 Canonical semantic graph
 
 `build_canonical_semantic_graph()` turns the fact set into `canonical_semantic_graph.v1`. Nodes and edges retain evidence references and stable identities. It resolves references, deduplicates equivalent facts, and surfaces conflicts instead of hiding them. Behavioral chain selection requires connected facts/relationships, not just co-occurrence in the same report.
+
+### 11.2a Correlation score and observational-similarity claim boundary
+
+The active session correlation policy (`configs/session_ttp_correlation.trusted.json`)
+declares `confidence_semantics` as
+`developer_defined_heuristic_policy_strength_not_probability`. Every current
+serialized correlation result, report/hunting context, campaign similarity
+score/link, threat-hunt relationship signal, and public API projection carries
+that declaration when available. Historical records that predate the field are
+resolved as `legacy_unresolved_correlation_score_semantics`; they are not
+retroactively reinterpreted. The numeric values (for example `0.88`, `0.70`,
+and `0.65`) remain unchanged and are not calibrated probabilities, likelihoods,
+posteriors, or measured detection accuracy. `temporal_claim=true` denotes an
+ordered/temporal interpretation supplied by a rule and does not define an
+elapsed-time window.
+
+Correlation remains report/context oriented. The existing review and empirical
+evaluation gates continue to deny prediction, campaign, threat-hunt, and alert
+influence unless a rule explicitly permits the consumer and satisfies its
+authority contract. A malformed explicit score-semantics marker fails closed
+for stronger consumers; missing historical metadata remains explicitly
+unresolved for compatibility.
+
+Campaign clustering keeps its internal compatibility names (`campaign_id`,
+`campaign_sessions`, `campaign_summary`, and the existing clustering functions)
+and all frozen weights, thresholds, source-IP cap, limits, and membership
+behavior. User-facing campaign context is described as an **observational
+similarity cluster** or **similar-session grouping**. The emitted
+`correlation_signal.v1` with `signal_type=similar_session_pattern_observed` is
+observation-only: it cannot establish a shared actor, intent, tooling identity,
+or real-world campaign, create an alert, authorize response, or change
+canonical findings. Exact local score values, path/entity rules, thresholds,
+and severity remain project-authored validation targets; no external source is
+claimed to prove them.
+
+The session representation keeps two namespaces. `observed_trusted_ttps` is a
+deterministic, stable-order aggregation of only classification events that pass
+the command authority/trust contract. Each entry retains the source TTP (and
+sub-technique when present), classification/command evidence references,
+sequence positions, and authority metadata. Raw session aggregate fields and
+model-only or conditional-fragment candidates cannot populate this set.
+`correlated_ttp_hypotheses` is the report-visible contextual output of the
+session rules; the legacy `session_ttp_correlations` key remains a
+compatibility alias. Correlation entries are explicitly non-authoritative and
+cannot override, remove, or promote an observed mapping, drive prediction or
+response, or write canonical TTP truth. A correlation rule may be a
+`DIRECT_EVENT_RECONFIRMATION`, `DIRECT_COMMAND_RECONFIRMATION`,
+`GENUINE_MULTI_EVENT_CORRELATION`, or `SINGLE_SESSION_THRESHOLD`; a direct
+reconfirmation is not described as multi-event correlation.
+
+`MergedResult.final_ttps` remains a backward-compatible internal property for
+the selected/high-confidence command-level mapping list. It is not attacker
+ground truth, session-final TTP truth, or correlation-confirmed truth. The
+current policy is session-scoped and has no elapsed-time window: ordered rules
+are represented as `ordered_sequence`, while an explicit future maxspan would
+be a separate `time_bounded_correlation` contract. Local strengths, thresholds,
+weights, path/entity joins, and sufficiency counts carry
+`PROJECT_LOCAL_HEURISTIC` (or their separately declared safety/default class)
+and remain local validation targets, never externally validated probabilities.
 
 ### 11.3 Threat evidence layers
 
@@ -1352,13 +1645,19 @@ The scientifically accurate conclusion is: **the retained Transformer is a small
 
 ### 14.1 Release identity
 
-The active application is selected by the `/opt/honeypot` symlink, but that mutable selector is not the identity by itself. The target directory contains release markers and a manifest binding a stable source/config tree to full SHA-256 and a 40-hex release ID. Promotion validates the staged tree and receipt before changing the selector. A rollback restores the selector and unit files to the previously verified release.
+The active application is selected by the `/opt/honeypot` symlink, but that mutable selector is not the identity by itself. The target directory contains release markers and a manifest binding a stable source/config tree to full SHA-256 and a 40-hex release ID. Promotion validates the staged tree and receipt before changing the selector. A rollback restores the selector and unit files to the previously verified release. The current selector target is eaf8; the 00d7 selector details below are historical.
 
 This design prevented several failed candidates from becoming an ambiguous half-deployment: source-identity mismatch, worker startup failure, storage-epoch mismatch, and lifecycle idempotency failure each stopped activation and caused rollback.
 
 ### 14.2 Classifier identity
 
-The classifier environment binds an explicit set of classifier-relevant source/assets (11 bound source files in the final reviewed identity) rather than hashing “whatever happens to be imported.” It includes parser, splitter, authority/trust logic, rule policy, mapping assets, SecureBERT identity, and trusted-history source. The active classifier source identity is:
+The classifier environment binds an explicit set of classifier-relevant
+source/assets (11 bound source files in the final reviewed identity) rather than
+hashing “whatever happens to be imported.” It includes parser, splitter,
+authority/trust logic, rule policy, mapping assets, the retained SecureBERT
+compatibility identity, and trusted-history source. The aligned final active
+learned model is FINAL_S1; the SecureBERT binding remains for replay/research
+provenance. The active classifier source identity is:
 
 ```text
 9493daa3ccc10ac8fbd17f3596bc9a0c5811a81d22beadee9ffa9c73053f3a93
@@ -1368,7 +1667,17 @@ When V3 trusted-history source was first staged, the active receipt still named 
 
 ### 14.3 Storage epoch
 
-`canonical_storage_epoch.v2` answers a different question: may this release use this Mongo database, schema, capacity policy, and rollback mirror? It binds backend/runtime identity, release/tree/manifest, schema manifest, mirror identity, and receipt hash. An old epoch paired with a new release fails closed. This prevented content-addressed application promotion from silently drifting across storage authority.
+`canonical_storage_epoch.v2` answers a different question: may a selected
+application use this Mongo database, schema, capacity policy, and rollback
+mirror? The current receipt binds the epoch, schema, mirror identity, and
+durability contract. In the Phase 0 recheck its candidate-specific release,
+tree, backend, and manifest fields were null; the historical 00d7 application
+identity was therefore established by its selector, release markers, source
+hashes, and final invariant receipt rather than by those absent JSON fields.
+The current eaf8 deployment is bound by its own selector/release manifest and
+the Target-A Flex post-upgrade receipt. An old epoch paired with a new release
+must still fail closed. This distinction preserves the storage-authority safety
+claim without overstating the current receipt contents.
 
 ### 14.4 Lifecycle policy identity
 
@@ -1443,6 +1752,12 @@ Idempotency is not one mechanism:
 
 ## 16. Final controlled live E2E validation
 
+This section preserves the historical finalizer/E2E evidence chain. Its
+intermediate `403c...` release reference is a chronology of that earlier
+validation window, not the current selector; the eaf8 identity and post-upgrade
+Flex receipt are authoritative for the current deployment, while 00d7 remains
+historical evidence in §1.3 and §18.
+
 ### 16.1 What was verified live
 
 The final successful evidence is under:
@@ -1516,7 +1831,8 @@ Analysis/report artifacts were validated by source/tests and existing runtime re
 
 | Component or claim | Classification | Current truth |
 |---|---|---|
-| Release `00d7e95...` | **CURRENT ACTIVE** | Exact deployed selector/source after the successful 2026-08-25 final invariant validation. |
+| Release `eaf8b81...` | **CURRENT ACTIVE** | Current capstone selector/source after the Target-A MongoDB Atlas Flex transition; see the post-upgrade finalization report. |
+| Release `00d7e95...` | HISTORICAL VERIFIED | Exact deployed selector/source during the successful 2026-08-25 final invariant validation; retained as immutable evidence. |
 | Release `403c989...` | **CURRENT RECOVERY** | Previous active release retained intact as the verified rollback target. |
 | Release `ebe69a...` | HISTORICAL / SUPERSEDED successful repaired V3 candidate | Preceded finalizer repairs; no longer active. |
 | Release `49f9b74...` | HISTORICAL / rollback-era V2 release | Healthy rollback target during failed attempts, but not current. |
@@ -1541,6 +1857,10 @@ Analysis/report artifacts were validated by source/tests and existing runtime re
 
 ### 17.1 Major problems encountered and their evidence-preserving resolution
 
+This table is a historical chronology of failed candidates and their evidence-
+preserving resolutions. Its release names describe the sequence of attempts,
+not a claim that 403c is the current selector.
+
 | Problem | Root cause | Resolution / current status |
 |---|---|---|
 | V1 neural metrics looked suspiciously identical | V1 lacked per-case outputs and complete epoch instrumentation; its “shuffle” was actually reverse | V2 retrained from fresh seeds with complete histories, logits/probabilities, checkpoint hashes, per-case comparison, true shuffles, and runtime receipts. Training was genuine; labels really were identical. |
@@ -1557,7 +1877,11 @@ Analysis/report artifacts were validated by source/tests and existing runtime re
 
 The consistent engineering pattern was: observe read-only, classify the exact failing contract, prepare a minimal change in a new namespace/release, validate negative/tamper cases, attempt bounded activation, and roll back automatically if a health/identity gate failed. Historical receipts and failed candidates were preserved rather than rewritten to make the final narrative look linear.
 
-## 18. Current verified state
+## 18. Historical 00d7 verified state (not current)
+
+The following bullets preserve the 2026-08-25 00d7 live-validation evidence.
+They are not a statement about the 2026-08-31 selector; the current runtime
+correction at the top of this document supersedes them.
 
 After the final 2026-08-25 promotion and bounded live validation:
 
@@ -1635,7 +1959,7 @@ After the final 2026-08-25 promotion and bounded live validation:
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Authenticated ingest | **Yes** (after validation) | No | No | No | No | No | No |
 | Reviewed rule + authority gate | No | **Yes** | Support only | Support only | No | No | No |
-| SecureBERT model-only | No | **No; audit-only** | No | No | No | No | No |
+| Historical SecureBERT model-only | No | **No; audit-only** | No | No | No | No | No |
 | SessionWorker/Monitor | Reconstruct/read | Materializes trusted decision | Schedules only | No direct final authority | Prohibited by current alert policy | **Yes, non-authoritative** | No |
 | AnalysisWorker + `session_assessment.v4` | Read/verify | Read/verify | **Yes** | **Yes, evidence-bound/manual** | No automatic authority | Read as context only | No access |
 | EnrichmentWorker | No | No | Context only | Cannot independently escalate | No | No | No |
@@ -1684,7 +2008,10 @@ After the final 2026-08-25 promotion and bounded live validation:
 
 **Rollback mirror.** Identity-bound SQLite recovery asset for the current Mongo storage epoch. It is not a continuously selected canonical backend.
 
-**SecureBERT.** The learned command-to-technique candidate classifier used inside the hybrid command pipeline; model-only output is audit-only.
+**Private ModernBERT command classifier (legacy `SecureBERT` identifier).** A
+retained historical/research command-candidate path; disabled in the aligned
+final runtime, with model-only output audit-only and published SecureBERT
+lineage unproven.
 
 **SessionMonitor.** In-process ordered event state machine and classifier consumer.
 
@@ -1728,7 +2055,11 @@ The forwarder reconciles each batch index, while ingest constructs a determinist
 
 ### Q7. Is classification rule-based or machine-learning based?
 
-It is hybrid for candidate generation but rule-authoritative for trust. Reviewed structural/rule evidence can be trusted. SecureBERT supplies a candidate/corroboration; model-only or disagreement is audit-only regardless of confidence.
+The aligned final architecture is deterministic-rule authoritative with an
+optional FINAL_S1 LinearSVC advisory overlay. Reviewed structural/rule evidence
+can be trusted. S1 emits raw uncalibrated margins and cannot promote, demote, or
+remove trusted mappings. SecureBERT is retained only as a historical/research
+compatibility path; model-only or disagreement records remain audit-only.
 
 ### Q8. Why keep audit-only labels?
 
@@ -1840,9 +2171,13 @@ The project provides a content-addressed, provenance-aware Cowrie analysis pipel
 
 ## 24. Implementation and evidence traceability map
 
-### 24.1 Active runtime source
+### 24.1 Runtime source trace and historical materialization
 
-All listed runtime modules were inspected in the exact active-release materialization:
+The module map below is a role-level trace. The path that follows is the
+preserved 403c-era materialization used by the historical inspection; it is not
+the current selector target. Current release identity is established by the
+eaf8 selector, release manifest, source hashes, and post-upgrade Flex receipt;
+the 00d7 identity and receipt in §1.3 remain historical evidence.
 
 ```text
 evaluation/receipts/gcp_cowrie_shadow_v3_mongo_finalizer_20260824/
@@ -1905,7 +2240,7 @@ The earlier copies under `evaluation/receipts/` remain immutable deployment evid
 
 The current system is not a monolithic “AI honeypot.” Its core is a deterministic, authenticated, provenance- and policy-bound event pipeline. Machine learning is deliberately constrained:
 
-- SecureBERT can propose/corroborate ATT&CK technique candidates but cannot create trusted evidence by itself.
+- FINAL_S1 can provide advisory ATT&CK candidates with raw decision margins but cannot create trusted evidence by itself. SecureBERT remains historical/non-active compatibility evidence.
 - The canonical internal predictor creates non-authoritative snapshots but cannot change findings or actions.
 - The final next-distinct Transformer is isolated behind a read-only V3 feeder and localhost-only service and can write only a shadow record.
 - AI advisory is disabled.

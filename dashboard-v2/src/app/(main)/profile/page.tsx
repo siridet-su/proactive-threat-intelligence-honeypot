@@ -3,25 +3,30 @@ import { useState, useEffect } from "react";
 import { Settings, User, ShieldCheck, Key, Edit2, X, Info } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardProfile } from "@/lib/dashboardTypes";
+import { RegionState } from "@/components/ui/RegionState";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<DashboardProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  
+
   // Modals state
   const [isEditInfoOpen, setIsEditInfoOpen] = useState(false);
   const [isEditPasswordOpen, setIsEditPasswordOpen] = useState(false);
-  
+
   // Forms state
   const [infoForm, setInfoForm] = useState({ fullName: "", email: "" });
   const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
   const [passwordError, setPasswordError] = useState("");
 
   const fetchProfile = async () => {
-    const operatorId = localStorage.getItem("operatorId");
-    if (!operatorId) return;
-
     try {
+      const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
+      if (!sessionResponse.ok) throw new Error("Session unavailable");
+      const session: unknown = await sessionResponse.json();
+      if (!session || typeof session !== "object" || typeof (session as { operatorId?: unknown }).operatorId !== "string") {
+        throw new Error("Session unavailable");
+      }
+      const operatorId = (session as { operatorId: string }).operatorId;
       const res = await fetch(`/api/users/${operatorId}`);
       if (res.ok) {
         const data: unknown = await res.json();
@@ -30,8 +35,8 @@ export default function ProfilePage() {
           setInfoForm({ fullName: data.fullName, email: data.email });
         }
       }
-    } catch (err) {
-      console.error("Failed to load profile");
+    } catch {
+      setUser(null);
     } finally {
       setLoading(false);
     }
@@ -71,7 +76,7 @@ export default function ProfilePage() {
       setPasswordError("Passwords do not match.");
       return;
     }
-    
+
     const res = await fetch("/api/auth/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -86,42 +91,42 @@ export default function ProfilePage() {
     }
   };
 
-  if (loading) return <div className="text-slate-500 animate-pulse font-mono">LOADING PROFILE DATA...</div>;
-  if (!user) return <div className="text-red-500 font-mono">ERROR: PROFILE NOT FOUND</div>;
+  if (loading) return <div className="min-h-[360px] py-16"><RegionState kind="loading" title="Loading profile" description="Retrieving operator account details." /></div>;
+  if (!user) return <div className="min-h-[360px] py-16"><RegionState kind="error" title="Profile unavailable" description="The operator profile could not be loaded." /></div>;
 
   return (
-    <div className="animate-in fade-in duration-500 max-w-6xl">
+    <div className="max-w-6xl space-y-7 pb-10">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-8 border-b border-slate-800/50 pb-6">
-        <Settings className="w-8 h-8 text-slate-400" />
-        <h1 className="text-3xl font-bold text-white">User Profile</h1>
+      <div className="flex items-center gap-3 border-b border-border pb-6">
+        <Settings className="h-6 w-6 text-primary" aria-hidden="true" />
+        <h1 className="text-2xl font-semibold leading-8">User profile</h1>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left Column (Metadata) */}
-        <div className="lg:col-span-1 space-y-8">
-          <div className="bg-[#111116] border border-slate-800/50 rounded-xl p-6 shadow-lg">
-            <h2 className="text-2xl font-bold text-white mb-1">{user.fullName}</h2>
-            <p className="text-purple-400 text-sm font-mono mb-6">{user.position}</p>
-            
-            <div className="bg-[#0a0a0c] border border-slate-800 p-3 rounded flex items-center gap-2 text-xs font-mono text-slate-300 mb-8">
-              <User className="w-4 h-4 text-slate-500" />
+        <div className="space-y-6 lg:col-span-1">
+          <div className="ui-panel p-6">
+            <h2 className="text-2xl font-semibold text-text">{user.fullName}</h2>
+            <p className="mt-1 text-sm text-primary">{user.position}</p>
+
+            <div className="mt-6 flex items-center gap-2 rounded-lg border border-border bg-surface-subtle p-3 font-mono text-xs text-text">
+              <User className="h-4 w-4 text-text-subtle" aria-hidden="true" />
               OP-ID: {user.operatorId}
             </div>
 
-            <div className="flex items-center gap-2 text-white font-semibold mb-4 border-b border-slate-800 pb-2">
-              <Info className="w-4 h-4" /> Account Metadata
+            <div className="mt-8 flex items-center gap-2 border-b border-border pb-3 font-semibold text-text">
+              <Info className="h-4 w-4 text-primary" aria-hidden="true" /> Account metadata
             </div>
-            
-            <div className="space-y-4 text-sm">
+
+            <div className="mt-5 space-y-4 text-sm">
               <div>
-                <p className="text-slate-500 mb-1 text-xs">Account Created</p>
-                <p className="text-slate-300">{user.createdAt ? new Date(user.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' UTC' : 'N/A'}</p>
+                <p className="mb-1 text-xs text-text-subtle">Account created</p>
+                <p className="text-text">{user.createdAt ? new Date(user.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' UTC' : 'N/A'}</p>
               </div>
               <div>
-                <p className="text-slate-500 mb-1 text-xs">Clearance Level</p>
-                <p className="text-slate-300 flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${user.role === 'Admin' ? 'bg-purple-500' : 'bg-emerald-500'}`}></span>
+                <p className="mb-1 text-xs text-text-subtle">Clearance level</p>
+                <p className="flex items-center gap-2 text-text">
+                  <span className={`h-2 w-2 rounded-full ${user.role === 'Admin' ? 'bg-primary' : 'bg-success'}`} aria-hidden="true"></span>
                   {user.role === 'Admin' ? 'Tier 4 (Admin)' : 'Tier 2 (Supporter)'}
                 </p>
               </div>
@@ -130,50 +135,50 @@ export default function ProfilePage() {
         </div>
 
         {/* Right Column (Editable Info) */}
-        <div className="lg:col-span-2 space-y-8">
-          
+        <div className="space-y-6 lg:col-span-2">
+
           {/* Personal Information */}
-          <div className="bg-[#0a0a0c] border border-slate-800/50 rounded-xl p-6">
-            <div className="flex justify-between items-center mb-6 border-b border-slate-800/50 pb-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <User className="w-5 h-5 text-slate-400" /> Personal Information
+          <div className="ui-panel p-6">
+            <div className="mb-6 flex items-center justify-between gap-4 border-b border-border pb-4">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-text">
+                <User className="h-5 w-5 text-primary" aria-hidden="true" /> Personal information
               </h3>
-              <button onClick={() => setIsEditInfoOpen(true)} className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors">
-                <Edit2 className="w-3 h-3" /> Edit Information
+              <button onClick={() => setIsEditInfoOpen(true)} className="ui-button min-h-9 px-3 text-xs">
+                <Edit2 className="h-3.5 w-3.5" aria-hidden="true" /> Edit information
               </button>
             </div>
-            
-            <div className="grid grid-cols-2 gap-8 text-sm">
+
+            <div className="grid grid-cols-1 gap-6 text-sm sm:grid-cols-2">
               <div>
-                <p className="text-slate-500 text-xs mb-1 font-mono">Full Name</p>
-                <p className="text-slate-200">{user.fullName}</p>
+                <p className="mb-1 text-xs text-text-subtle">Full name</p>
+                <p className="text-text">{user.fullName}</p>
               </div>
               <div>
-                <p className="text-slate-500 text-xs mb-1 font-mono">Email Address</p>
-                <p className="text-slate-200">{user.email}</p>
+                <p className="mb-1 text-xs text-text-subtle">Email address</p>
+                <p className="break-all text-text">{user.email}</p>
               </div>
               <div>
-                <p className="text-slate-500 text-xs mb-1 font-mono">Position</p>
-                <p className="text-slate-200">{user.position}</p>
+                <p className="mb-1 text-xs text-text-subtle">Position</p>
+                <p className="text-text">{user.position}</p>
               </div>
             </div>
           </div>
 
           {/* Security Controls */}
-          <div className="bg-[#0a0a0c] border border-slate-800/50 rounded-xl p-6">
-            <div className="mb-6 border-b border-slate-800/50 pb-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-purple-400" /> Security Controls
+          <div className="ui-panel p-6">
+            <div className="mb-6 border-b border-border pb-4">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-text">
+                <ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" /> Security controls
               </h3>
             </div>
-            
-            <div className="flex justify-between items-center">
+
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <div>
-                <h4 className="text-slate-200 font-mono text-sm mb-1">Authentication Credentials</h4>
-                <p className="text-slate-500 text-xs">Update your access password regularly to maintain security.</p>
+                <h4 className="mb-1 text-sm font-semibold text-text">Authentication credentials</h4>
+                <p className="text-sm text-text-muted">Update your access key regularly to maintain security.</p>
               </div>
-              <button onClick={() => setIsEditPasswordOpen(true)} className="flex items-center gap-2 text-xs text-slate-400 hover:text-white border border-slate-700 px-4 py-2 rounded transition-colors bg-[#111116]">
-                <Key className="w-3 h-3" /> Change Password
+              <button onClick={() => setIsEditPasswordOpen(true)} className="ui-button shrink-0 px-3 text-xs">
+                <Key className="h-3.5 w-3.5" aria-hidden="true" /> Change password
               </button>
             </div>
           </div>
@@ -183,23 +188,23 @@ export default function ProfilePage() {
 
       {/* Modal: Edit Personal Info */}
       {isEditInfoOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#111116] border border-slate-800 p-6 rounded-xl w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-white">Edit Personal Info</h3>
-              <button onClick={() => setIsEditInfoOpen(false)} className="text-slate-500 hover:text-white"><X className="w-5 h-5"/></button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
+          <div className="ui-panel w-full max-w-md p-6 shadow-[var(--shadow-raised)]">
+            <div className="mb-6 flex items-center justify-between gap-4">
+              <h3 className="text-lg font-semibold text-text">Edit personal information</h3>
+              <button onClick={() => setIsEditInfoOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close edit personal information"><X className="h-5 w-5"/></button>
             </div>
             <form onSubmit={handleInfoSubmit} className="space-y-4">
               <div>
-                <label className="text-xs text-slate-400 font-mono">FULL NAME</label>
-                <input type="text" value={infoForm.fullName} onChange={(e) => setInfoForm({...infoForm, fullName: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                <label htmlFor="profile-full-name" className="text-sm font-medium text-text-muted">Full name</label>
+                <input id="profile-full-name" type="text" value={infoForm.fullName} onChange={(e) => setInfoForm({...infoForm, fullName: e.target.value})} required className="ui-field mt-2" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 font-mono">EMAIL</label>
-                <input type="email" value={infoForm.email} onChange={(e) => setInfoForm({...infoForm, email: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                <label htmlFor="profile-email" className="text-sm font-medium text-text-muted">Email</label>
+                <input id="profile-email" type="email" value={infoForm.email} onChange={(e) => setInfoForm({...infoForm, email: e.target.value})} required className="ui-field mt-2" />
               </div>
-              <button type="submit" className="w-full bg-purple-700 hover:bg-purple-600 text-white py-3 rounded-lg font-bold tracking-wider mt-4">
-                SAVE CHANGES
+              <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
+                Save changes
               </button>
             </form>
           </div>
@@ -208,24 +213,24 @@ export default function ProfilePage() {
 
       {/* Modal: Change Password */}
       {isEditPasswordOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#111116] border border-slate-800 p-6 rounded-xl w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-white">Change Password</h3>
-              <button onClick={() => setIsEditPasswordOpen(false)} className="text-slate-500 hover:text-white"><X className="w-5 h-5"/></button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
+          <div className="ui-panel w-full max-w-md p-6 shadow-[var(--shadow-raised)]">
+            <div className="mb-6 flex items-center justify-between gap-4">
+              <h3 className="text-lg font-semibold text-text">Change password</h3>
+              <button onClick={() => setIsEditPasswordOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close change password dialog"><X className="h-5 w-5"/></button>
             </div>
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
               <div>
-                <label className="text-xs text-slate-400 font-mono">NEW PASSWORD</label>
-                <input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                <label htmlFor="profile-new-password" className="text-sm font-medium text-text-muted">New password</label>
+                <input id="profile-new-password" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})} required className="ui-field mt-2" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 font-mono">CONFIRM PASSWORD</label>
-                <input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})} required className="w-full bg-[#0a0a0c] border border-slate-800 text-white rounded p-2 mt-1 focus:border-purple-500 outline-none" />
+                <label htmlFor="profile-confirm-password" className="text-sm font-medium text-text-muted">Confirm password</label>
+                <input id="profile-confirm-password" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})} required className="ui-field mt-2" />
               </div>
-              {passwordError && <p className="text-red-500 text-xs text-center">{passwordError}</p>}
-              <button type="submit" className="w-full bg-purple-700 hover:bg-purple-600 text-white py-3 rounded-lg font-bold tracking-wider mt-4">
-                UPDATE CREDENTIALS
+              {passwordError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{passwordError}</p>}
+              <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
+                Update credentials
               </button>
             </form>
           </div>

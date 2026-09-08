@@ -7,7 +7,10 @@ import copy
 import ipaddress
 import json
 import os
-from dataclasses import dataclass
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -20,6 +23,7 @@ from production.api.dashboard_api import (
     _current_decision_payload,
     _current_prediction_payload,
     _external_seed_health_payload,
+    _unverified_guidance_payload,
 )
 from production.api.security import (
     api_row_view,
@@ -88,6 +92,13 @@ class MonitorConfig:
     enable_response_guidance: bool = True
     refresh_seconds: int = DEFAULT_REFRESH_SECONDS
     production_config: Optional[ProductionConfig] = None
+    _storage: Any = field(default=None, init=False, repr=False, compare=False)
+    _storage_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
 
 def _sqlite_path(database_url: str) -> str:
@@ -183,9 +194,93 @@ def _monitor_database_display(config: MonitorConfig) -> str:
 
 
 def _open_monitor_storage(config: MonitorConfig) -> Any:
-    if config.production_config is not None:
-        return open_storage(config.production_config.database_settings())
-    return open_storage(_monitor_database_url(config))
+    """Return the process-owned monitor storage backend.
+
+    MongoClient is thread-safe and is intended to be long lived. Opening the
+    full epoch-bound adapter for every HTTP request repeats DNS/TLS, schema,
+    deployment, and rollback-mirror verification and can exceed the bounded
+    readiness caller deadline. Cache only within one immutable service
+    process; release activation restarts the service and therefore constructs a
+    fresh, strictly bound backend.
+    """
+
+    if config._storage is not None:
+        return config._storage
+    with config._storage_lock:
+        if config._storage is None:
+            if config.production_config is not None:
+                config._storage = open_storage(
+                    config.production_config.database_settings()
+                )
+            else:
+                config._storage = open_storage(_monitor_database_url(config))
+        return config._storage
+
+
+def _close_monitor_storage(config: MonitorConfig) -> None:
+    """Release the cached client once the monitor process stops."""
+
+    with config._storage_lock:
+        storage = config._storage
+        config._storage = None
+    if storage is None:
+        return
+    close = getattr(storage, "close", None)
+    if callable(close):
+        close()
+        return
+    mongo = getattr(storage, "mongo", None)
+    client = getattr(mongo, "client", None)
+    close_client = getattr(client, "close", None)
+    if callable(close_client):
+        close_client()
+
+
+def _safe_monitor_exception_class(exc: BaseException) -> str:
+    """Return an allowlisted class label without serializing exception data."""
+
+    allowed = {
+        "BrokenPipeError",
+        "ConnectionError",
+        "ConnectionResetError",
+        "NetworkTimeout",
+        "OperationFailure",
+        "ServerSelectionTimeoutError",
+        "TimeoutError",
+    }
+    name = type(exc).__name__
+    return name if name in allowed else "operation_failed"
+
+
+def _monitor_readiness(config: MonitorConfig) -> Tuple[bool, Dict[str, Any]]:
+    """Run readiness and return only secret-safe operational diagnostics."""
+
+    started = time.monotonic()
+    try:
+        storage = _open_monitor_storage(config)
+        storage_finished = time.monotonic()
+        result = storage.health_check()
+        finished = time.monotonic()
+        ready = bool(result.get("ok"))
+        backend = str(result.get("backend") or "unknown")
+        if backend not in {"mongodb", "sqlite"}:
+            backend = "unknown"
+        return ready, {
+            "operation": "storage_health_check",
+            "backend": backend,
+            "storage_open_latency_ms": round(
+                (storage_finished - started) * 1000.0, 3
+            ),
+            "health_latency_ms": round((finished - storage_finished) * 1000.0, 3),
+            "latency_ms": round((finished - started) * 1000.0, 3),
+        }
+    except Exception as exc:
+        finished = time.monotonic()
+        return False, {
+            "operation": "storage_health_check",
+            "exception_class": _safe_monitor_exception_class(exc),
+            "latency_ms": round((finished - started) * 1000.0, 3),
+        }
 
 
 def _monitor_runtime_config(config: MonitorConfig) -> ProductionConfig:
@@ -522,11 +617,9 @@ def _storage_session_rows(
     limit: int,
 ) -> Tuple[List[Dict[str, Any]], str]:
     if table == "prediction_snapshots":
-        prediction_loader = getattr(
-            storage,
-            "list_prediction_snapshots_for_session",
-            None,
-        )
+        prediction_loader = getattr(storage, "list_dashboard_session_detail_prediction_snapshots", None)
+        if prediction_loader is None:
+            prediction_loader = getattr(storage, "list_prediction_snapshots_for_session", None)
         if prediction_loader is not None:
             try:
                 rows = prediction_loader(session_id, limit=limit)
@@ -573,23 +666,39 @@ def _storage_enrichment_rows(
     normalized = [(str(t), str(v)) for t, v in observables if t and v]
     records: List[Dict[str, Any]] = []
     errors: List[str] = []
-    for observable_type, observable_value in normalized:
+    batch_loader = getattr(storage, "list_enrichment_records_for_observables", None)
+    if callable(batch_loader):
         try:
-            record = storage.get_enrichment_record(
-                observable_type,
-                observable_value,
-                allow_stale=True,
-            )
-        except Exception as exc:
-            errors.append(
-                _storage_error(
-                    f"enrichment record {observable_type}",
-                    exc,
+            records = [
+                dict(record)
+                for record in batch_loader(
+                    normalized,
+                    allow_stale=True,
                 )
-            )
-            continue
-        if record:
-            records.append(dict(record))
+                or []
+            ]
+        except Exception as exc:
+            errors.append(_storage_error("enrichment records batch query", exc))
+    else:
+        # Compatibility for injected pre-contract test doubles only. Runtime
+        # adapters implement the bounded batch method above.
+        for observable_type, observable_value in normalized:
+            try:
+                record = storage.get_enrichment_record(
+                    observable_type,
+                    observable_value,
+                    allow_stale=True,
+                )
+            except Exception as exc:
+                errors.append(
+                    _storage_error(
+                        f"enrichment record {observable_type}",
+                        exc,
+                    )
+                )
+                continue
+            if record:
+                records.append(dict(record))
 
     session_jobs, session_jobs_error = _storage_session_rows(
         storage,
@@ -1639,7 +1748,8 @@ def _render_report_evidence_layers(report_payload: Dict[str, Any], artifact_payl
     if correlated_rows:
         parts.append(
             "<h3>Session-Correlated TTPs</h3>"
-            "<table><thead><tr><th>main_ttp</th><th>rule</th><th>source_type</th><th>confidence</th><th>evidence</th></tr></thead><tbody>"
+            "<p>Session-correlated values are developer-defined heuristic policy strengths, not probabilities.</p>"
+            "<table><thead><tr><th>main_ttp</th><th>rule</th><th>source_type</th><th>heuristic strength (not probability)</th><th>evidence</th></tr></thead><tbody>"
             + "\n".join(correlated_rows)
             + "</tbody></table>"
         )
@@ -1942,6 +2052,182 @@ def _session_observables(payload: Dict[str, Any], session_id: str) -> List[Tuple
     return observables
 
 
+DASHBOARD_SESSION_DETAIL_SCHEMA = "monitor.dashboard_session_detail.v1"
+DASHBOARD_SESSION_DETAIL_TABLE_LIMITS = {
+    "events": MAX_SESSION_EVENTS,
+    "analysis_jobs": 50,
+    "reports": 50,
+    "prediction_snapshots": 50,
+}
+
+
+def _fail_closed_session_guidance(
+    session_id: str,
+    guidance: Any,
+) -> Dict[str, Any]:
+    """Expose stored guidance while making the public safety default explicit."""
+
+    if not isinstance(guidance, dict) or not guidance:
+        result = _unverified_guidance_payload(
+            session_id,
+            ["stored response guidance is unavailable"],
+        )
+    else:
+        result = copy.deepcopy(guidance)
+    safety = result.get("safety") if isinstance(result.get("safety"), dict) else {}
+    manual = result.get("requires_manual_approval")
+    auto_execute = result.get("safe_to_auto_execute")
+    if not isinstance(manual, bool):
+        manual = safety.get("manual_approval_required")
+    if not isinstance(auto_execute, bool):
+        auto_execute = safety.get("automatic_execution")
+    result["requires_manual_approval"] = manual if isinstance(manual, bool) else True
+    result["safe_to_auto_execute"] = (
+        bool(auto_execute)
+        if result["requires_manual_approval"] is False and isinstance(auto_execute, bool)
+        else False
+    )
+    if result["requires_manual_approval"]:
+        result["safe_to_auto_execute"] = False
+    return result
+
+
+def load_dashboard_session_detail(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Load the bounded session contract consumed by dashboard-v2.
+
+    This endpoint intentionally has a smaller initial contract than the
+    historical monitor detail view. Every selected collection is queried by
+    the exact session identity through the storage adapter; no generic table
+    route, global scan, correlation join, or observable enrichment lookup is
+    part of this request.
+    """
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {
+            "ok": False,
+            "error_code": "missing_session_id",
+            "error": "session_id is required",
+            "timestamp": utc_now(),
+        }
+    if len(clean_session_id) > 256 or any(
+        ord(character) < 0x20 or ord(character) == 0x7F
+        for character in clean_session_id
+    ):
+        return {
+            "ok": False,
+            "error_code": "malformed_session_id",
+            "error": "session_id is malformed",
+            "session_id": clean_session_id[:256],
+            "timestamp": utc_now(),
+        }
+    try:
+        storage = _storage or _open_monitor_storage(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("storage open", exc),
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+
+    session_rows, session_error = _storage_session_rows(
+        storage,
+        "sessions",
+        clean_session_id,
+        1,
+    )
+    if not session_rows:
+        return {
+            "ok": False,
+            "error_code": "session_not_found",
+            "error": session_error or "session was not found",
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+
+    def load_table(table: str) -> Tuple[str, List[Dict[str, Any]], str]:
+        rows, error = _storage_session_rows(
+            storage,
+            table,
+            clean_session_id,
+            DASHBOARD_SESSION_DETAIL_TABLE_LIMITS[table],
+        )
+        return table, rows, error
+
+    related: Dict[str, List[Dict[str, Any]]] = {}
+    errors: Dict[str, str] = {}
+    with ThreadPoolExecutor(
+        max_workers=len(DASHBOARD_SESSION_DETAIL_TABLE_LIMITS)
+    ) as pool:
+        futures = [pool.submit(load_table, table) for table in DASHBOARD_SESSION_DETAIL_TABLE_LIMITS]
+        for future in futures:
+            table, rows, error = future.result()
+            related[table] = rows
+            errors[table] = error
+
+    job_rows = related["analysis_jobs"]
+    report_rows = related["reports"]
+    event_rows = related["events"]
+    prediction_rows = related["prediction_snapshots"]
+    latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
+    latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
+    selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
+    selected["command_count"] = count_command_events(event_rows)
+    payload = selected["payload"]
+    report_payload = _report_payload(selected.get("report_row"))
+    historical_guidance = _historical_response_guidance_payload(report_payload)
+    response_guidance = _fail_closed_session_guidance(
+        clean_session_id,
+        historical_guidance,
+    )
+    detail = {
+        "ok": True,
+        "schema_version": DASHBOARD_SESSION_DETAIL_SCHEMA,
+        "timestamp": utc_now(),
+        "session_id": clean_session_id,
+        "overview": _session_overview(selected),
+        "source_geo": selected.get("geo") or (
+            _extract_geo(payload) if selected.get("src_ip_is_public") else {}
+        ),
+        "source_geo_context": selected.get("source_geo_context") or selected.get("geo_context") or {},
+        "observables": [
+            {"type": observable_type, "value": observable_value}
+            for observable_type, observable_value in _session_observables(payload, clean_session_id)
+        ],
+        "commands": payload.get("commands") or [],
+        "classification_events": payload.get("classification_events") or [],
+        "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
+        "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],
+        "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
+        "session_ttp_correlation_summary": payload.get("session_ttp_correlation_summary") or {},
+        "tactics": payload.get("tactics") or [],
+        "ttps": payload.get("ttps") or [],
+        "ttp_command_map": payload.get("ttp_command_map") or {},
+        "enrichment_status": payload.get("enrichment_status") or {},
+        "session_payload": payload,
+        "events_table_rows": [_row_with_payload(row) for row in event_rows],
+        "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
+        "latest_prediction_snapshot": _row_with_payload(prediction_rows[0]) if prediction_rows else {},
+        "analysis_jobs": [_row_with_payload(row) for row in job_rows],
+        "reports": [_row_with_payload(row) for row in report_rows],
+        "report_summary": _report_summary(report_payload, {}),
+        "response_guidance": response_guidance,
+        "errors": {
+            table: message
+            for table, message in errors.items()
+            if message
+        },
+    }
+    return _sanitize_public(detail)
+
+
 def load_session_detail(
     config: MonitorConfig,
     session_id: str,
@@ -2085,6 +2371,13 @@ def load_session_detail(
         "observables": [{"type": t, "value": v} for t, v in _session_observables(payload, session_id)],
         "commands": payload.get("commands") or [],
         "classification_events": payload.get("classification_events") or [],
+        # Keep trusted observed TTPs separate from contextual correlations in
+        # the API/reporting handoff.  The legacy correlation key remains for
+        # compatibility, but it is never the trusted observed namespace.
+        "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
+        "correlated_ttp_hypotheses": payload.get(
+            "correlated_ttp_hypotheses"
+        ) or payload.get("session_ttp_correlations") or [],
         "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
         "session_ttp_correlation_summary": payload.get("session_ttp_correlation_summary") or {},
         "tactics": payload.get("tactics") or [],
@@ -3166,9 +3459,14 @@ def _render_observable_sightings(detail: Dict[str, Any]) -> str:
             related_rows.append(
                 f"<tr><td>{_html(observable_type)}</td><td><code>{_html(observable_value)}</code></td><td>{links}</td></tr>"
             )
-        if related_rows:
-            parts.append("<h3>Related Sessions Sharing These Observables</h3>")
-            parts.append(
+    if related_rows:
+        parts.append("<h3>Related Sessions Sharing These Observables</h3>")
+        parts.append(
+            '<p class="muted">Shared-observable links are non-authoritative '
+            'similar-session context; any numeric link strength is a '
+            'developer-defined heuristic, not a probability.</p>'
+        )
+        parts.append(
                 "<table><thead><tr><th>type</th><th>value</th><th>other sessions</th></tr></thead><tbody>"
                 + "\n".join(related_rows)
                 + "</tbody></table>"
@@ -3188,6 +3486,11 @@ def _render_cross_session_hunting(detail: Dict[str, Any]) -> str:
 
     parts.append("<h3>Session Links</h3>")
     if links:
+        parts.append(
+            '<p class="muted">Session links are observational, non-authoritative '
+            'context. Link strength is a developer-defined heuristic, not a '
+            'probability, and does not establish actor or campaign identity.</p>'
+        )
         rows = []
         current = str(detail.get("session_id") or "")
         for row in links[:100]:
@@ -3205,7 +3508,7 @@ def _render_cross_session_hunting(detail: Dict[str, Any]) -> str:
                 "</tr>"
             )
         parts.append(
-            "<table><thead><tr><th>created</th><th>related session</th><th>type</th><th>observable type</th><th>observable value</th><th>confidence</th><th>evidence roles</th></tr></thead><tbody>"
+            "<table><thead><tr><th>created</th><th>related session</th><th>type</th><th>observable type</th><th>observable value</th><th>heuristic strength (not probability)</th><th>evidence roles</th></tr></thead><tbody>"
             + "\n".join(rows)
             + "</tbody></table>"
         )
@@ -3274,6 +3577,11 @@ def _render_campaign_panel(detail: Dict[str, Any]) -> str:
         ):
             parts.append(f'<div class="kv"><span>{_html(label)}</span><strong>{_html(value if value not in (None, "") else "-")}</strong></div>')
         parts.append("</div>")
+        parts.append(
+            '<p class="muted">This is an observational similarity cluster; '
+            'it is non-authoritative context and does not establish a shared '
+            'actor, intent, tooling identity, or real-world campaign.</p>'
+        )
         reasons = []
         for match in summary.get("matches") or []:
             if isinstance(match, dict):
@@ -3314,9 +3622,9 @@ def _render_campaign_panel(detail: Dict[str, Any]) -> str:
                 f"<td>{_html(_format_list(row.get('match_reasons') or [], limit=8))}</td>"
                 "</tr>"
             )
-        parts.append("<h3>Campaign Membership Evidence</h3>")
+        parts.append("<h3>Observational Similarity Membership Evidence</h3>")
         parts.append(
-            "<table><thead><tr><th>created</th><th>campaign</th><th>confidence</th><th>match reasons</th></tr></thead><tbody>"
+            "<table><thead><tr><th>created</th><th>similarity cluster</th><th>heuristic strength (not probability)</th><th>match reasons</th></tr></thead><tbody>"
             + "\n".join(rows)
             + "</tbody></table>"
         )
@@ -3337,36 +3645,152 @@ def _render_raw_api_panel(detail: Dict[str, Any]) -> str:
     )
 
 
+_CLASSIFICATION_SEMANTIC_LABELS = {
+    "reviewed_rule_policy_match_not_calibrated_probability": (
+        "reviewed rule policy match (not a calibrated probability)"
+    ),
+    "rule_model_agreement_not_calibrated_probability": (
+        "rule policy match; model score shown separately "
+        "(neither is a calibrated probability)"
+    ),
+    "conflicting_classifier_outputs_audit_only": (
+        "audit-only rule/model disagreement "
+        "(scores are not calibrated probabilities)"
+    ),
+    "model_score_not_calibrated_probability": (
+        "SecureBERT/model score (not a calibrated probability; audit-only)"
+    ),
+    "audit_only_model_score_not_calibrated_probability": (
+        "audit-only SecureBERT/model score (not a calibrated probability)"
+    ),
+    "audit_only_shell_noise": "audit-only shell noise (no classifier probability)",
+    "unreviewed_emergency_rule_audit_only": (
+        "unreviewed emergency rule candidate "
+        "(audit-only; not a calibrated probability)"
+    ),
+}
+_CLASSIFICATION_RULE_SEMANTICS = frozenset(
+    {
+        "reviewed_rule_policy_match_not_calibrated_probability",
+        "rule_model_agreement_not_calibrated_probability",
+        "conflicting_classifier_outputs_audit_only",
+        "unreviewed_emergency_rule_audit_only",
+    }
+)
+_CLASSIFICATION_MODEL_SEMANTICS = frozenset(
+    {
+        "model_score_not_calibrated_probability",
+        "audit_only_model_score_not_calibrated_probability",
+    }
+)
+_CLASSIFICATION_RULE_SOURCES = frozenset(
+    {
+        "rule",
+        "reviewed_rule",
+        "both",
+        "rule_securebert_disagreement",
+        "emergency_python_fallback",
+        "emergency_rule",
+    }
+)
+_CLASSIFICATION_MODEL_SOURCES = frozenset(
+    {
+        "securebert",
+        "securebert_low_confidence",
+        "securebert_error",
+        "securebert_unavailable",
+    }
+)
+
+
+def _classification_score_text(value: Any) -> str:
+    """Format a classifier value without assigning probabilistic meaning."""
+
+    if value in (None, ""):
+        return "-"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return _short(value, 80) or "-"
+
+
+def _classification_display_values(item: Dict[str, Any]) -> Tuple[str, str, str]:
+    """Return separate rule/model values and a bounded semantic label.
+
+    Classification events already carry the authority decision and source
+    fields.  This helper only projects those existing values for human-facing
+    HTML; it never promotes model-only/disagreement evidence or changes a
+    numeric value.
+    """
+
+    marker = _text(item.get("confidence_semantics")).strip()
+    source = _text(item.get("source")).strip().lower()
+    rule_value: Any = None
+    model_value: Any = None
+
+    if marker in _CLASSIFICATION_RULE_SEMANTICS or (
+        source in _CLASSIFICATION_RULE_SOURCES
+        and marker not in _CLASSIFICATION_MODEL_SEMANTICS
+    ):
+        rule_value = item.get("confidence")
+
+    if marker == "rule_model_agreement_not_calibrated_probability" or source in {
+        "both",
+        "rule_securebert_disagreement",
+    }:
+        model_value = item.get("bert_confidence")
+    elif marker in _CLASSIFICATION_MODEL_SEMANTICS or source in _CLASSIFICATION_MODEL_SOURCES:
+        model_value = item.get("confidence")
+
+    semantics = _CLASSIFICATION_SEMANTIC_LABELS.get(marker)
+    if not semantics:
+        semantics = "classifier score semantics unavailable (not a calibrated probability)"
+
+    return (
+        _classification_score_text(rule_value),
+        _classification_score_text(model_value),
+        semantics,
+    )
+
+
+def _classification_semantics_note() -> str:
+    return (
+        '<p class="classification-semantics-note"><strong>Classifier score semantics:</strong> '
+        "rule/policy values are deterministic reviewed-rule matches; model/SecureBERT "
+        "values are raw model scores. Neither value is a calibrated probability. "
+        "Model-only and disagreement entries remain audit-only.</p>"
+    )
+
+
 def _render_classifications(selected: Optional[Dict[str, Any]]) -> str:
     if not selected:
         return '<div class="empty">No selected session.</div>'
-    events = selected["payload"].get("classification_events") or []
+    events = (selected.get("payload") or {}).get("classification_events") or []
     if not events:
         return '<div class="empty">No classification events recorded.</div>'
     rows = []
     for item in events:
         if not isinstance(item, dict):
             continue
-        confidence = item.get("confidence", "")
-        try:
-            confidence_text = f"{float(confidence):.2f}"
-        except (TypeError, ValueError):
-            confidence_text = _text(confidence)
+        rule_value, model_value, semantics = _classification_display_values(item)
         rows.append(
-            "<tr><td><code>{command}</code></td><td>{ttp}</td><td>{source_ttp}</td><td>{tactic}</td><td>{source}</td><td>{confidence}</td><td>{error}</td></tr>".format(
+            "<tr><td><code>{command}</code></td><td>{ttp}</td><td>{source_ttp}</td><td>{tactic}</td><td>{source}</td><td class=\"num\">{rule_value}</td><td class=\"num\">{model_value}</td><td>{semantics}</td><td>{error}</td></tr>".format(
                 command=_html(_short(item.get("command"), 120)),
                 ttp=_html(item.get("ttp") or "-"),
                 source_ttp=_html(item.get("source_ttp") or item.get("source_subtechnique") or "-"),
                 tactic=_html(item.get("tactic") or "-"),
                 source=_html(item.get("source") or "-"),
-                confidence=_html(confidence_text or "-"),
+                rule_value=_html(rule_value),
+                model_value=_html(model_value),
+                semantics=_html(semantics),
                 error=_html(_short(item.get("error") or "", 80)),
             )
         )
     if not rows:
         return '<div class="empty">No parseable classification events recorded.</div>'
     return (
-        "<table><thead><tr><th>command</th><th>main ttp</th><th>source ttp</th><th>tactic</th><th>source</th><th>confidence</th><th>error</th></tr></thead><tbody>"
+        _classification_semantics_note()
+        + "<table><thead><tr><th>command</th><th>main ttp</th><th>source ttp</th><th>tactic</th><th>source</th><th>rule/policy value</th><th>model/SecureBERT score</th><th>score semantics</th><th>error</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table>"
     )
@@ -3403,6 +3827,7 @@ def _render_session_ttp_correlations(selected: Optional[Dict[str, Any]]) -> str:
         f'<div class="kv"><span>policies</span><strong>{_html(_format_list(summary.get("policy_ids") or [], limit=4))}</strong></div>'
         f'<div class="kv"><span>knowledge packs</span><strong>{_html(_format_list(summary.get("knowledge_pack_ids") or [], limit=4))}</strong></div>'
         f'<div class="kv"><span>correlations</span><strong>{_html(summary.get("correlation_count"))}</strong></div>'
+        f'<div class="kv"><span>score semantics</span><strong>{_html(summary.get("confidence_semantics") or "legacy_unresolved_correlation_score_semantics")}</strong></div>'
         f'<div class="kv"><span>prediction inputs</span><strong>{_html(summary.get("prediction_input_count"))}</strong></div>'
         f'<div class="kv"><span>manual/generated rules</span><strong>{_html(summary.get("manual_rule_count", 0))}/{_html(summary.get("generated_rule_count", 0))}</strong></div>'
         f'<div class="kv"><span>source types</span><strong>{_html(_format_list(summary.get("source_types") or [], limit=6))}</strong></div>'
@@ -3441,7 +3866,10 @@ def _render_session_ttp_correlations(selected: Optional[Dict[str, Any]]) -> str:
         details.append(
             f'<details class="scorer"><summary>{_html(item.get("rule_id") or item.get("ttp") or "correlation")}</summary>'
             f'<p>{_html(item.get("reason") or "")}</p>'
-            f'<p><strong>Temporal claim:</strong> {_html(item.get("temporal_claim"))} | '
+            f'<p><strong>Claim status:</strong> {_html(item.get("claim_status") or "CONTEXTUAL_ONLY")} | '
+            f'<strong>Temporal relationship:</strong> {_html(item.get("temporal_relationship") or "SAME_SESSION_SCOPE_NO_ELAPSED_WINDOW")} | '
+            f'<strong>Temporal claim:</strong> {_html(item.get("temporal_claim"))} | '
+            f'<strong>Score semantics:</strong> {_html(item.get("confidence_semantics") or "legacy_unresolved_correlation_score_semantics")} | '
             f'<strong>Granularity:</strong> {_html(item.get("technique_granularity") or "parent")} | '
             f'<strong>Source TTP:</strong> {_html(item.get("source_ttp") or item.get("ttp") or "-")} | '
             f'<strong>Policy:</strong> {_html(item.get("policy_id") or "-")} {_html(item.get("policy_version") or "")}</p>'
@@ -3455,7 +3883,7 @@ def _render_session_ttp_correlations(selected: Optional[Dict[str, Any]]) -> str:
         )
 
     table = (
-        "<table><thead><tr><th>main TTP</th><th>source sub-technique</th><th>technique</th><th>tactic</th><th>confidence</th>"
+        "<table><thead><tr><th>main TTP</th><th>source sub-technique</th><th>technique</th><th>tactic</th><th>heuristic strength (not probability)</th>"
         "<th>evidence type</th><th>source type</th><th>rule</th><th>prediction input</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table>"
@@ -3848,18 +4276,22 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     for event in features.get("classification_events") or []:
         if not isinstance(event, dict):
             continue
+        rule_value, model_value, semantics = _classification_display_values(event)
         classification_rows.append(
             "<tr>"
             f"<td><code>{_html(event.get('command') or '-')}</code></td>"
             f"<td>{_html(event.get('ttp') or '-')}</td>"
             f"<td>{_html(event.get('tactic') or '-')}</td>"
             f"<td>{_html(event.get('source') or '-')}</td>"
-            f"<td class=\"num\">{_html(event.get('confidence') if event.get('confidence') not in (None, '') else '-')}</td>"
+            f"<td class=\"num\">{_html(rule_value)}</td>"
+            f"<td class=\"num\">{_html(model_value)}</td>"
+            f"<td>{_html(semantics)}</td>"
             "</tr>"
         )
     classifications_html = (
-        "<table><thead><tr><th>command</th><th>TTP</th><th>tactic</th><th>source</th><th>confidence</th></tr></thead><tbody>"
-        + ("\n".join(classification_rows) or '<tr><td colspan="5" class="empty">No command classifications in feature snapshot.</td></tr>')
+        _classification_semantics_note()
+        + "<table><thead><tr><th>command</th><th>TTP</th><th>tactic</th><th>source</th><th>rule/policy value</th><th>model/SecureBERT score</th><th>score semantics</th></tr></thead><tbody>"
+        + ("\n".join(classification_rows) or '<tr><td colspan="7" class="empty">No command classifications in feature snapshot.</td></tr>')
         + "</tbody></table>"
     )
     why_html = (
@@ -4630,14 +5062,23 @@ class MonitorHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path in {"/health/ready", "/ready"}:
-            try:
-                ready = bool(
-                    _open_monitor_storage(self.monitor_config)
-                    .health_check()
-                    .get("ok")
-                )
-            except Exception:
-                ready = False
+            ready, diagnostic = _monitor_readiness(self.monitor_config)
+            print(
+                json.dumps(
+                    log_payload(
+                        {
+                            "service": "monitor_web",
+                            "event": "readiness_check",
+                            "ok": ready,
+                            "request_id": self._request_id(),
+                            "timestamp": utc_now(),
+                            **diagnostic,
+                        }
+                    ),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             self._send_json(
                 HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
                 {
@@ -4674,6 +5115,23 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
                 detail,
             )
+            return
+        if parsed.path == "/api/session-detail":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_dashboard_session_detail(
+                self.monitor_config,
+                session_id=session_id,
+            )
+            if detail.get("ok"):
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {"missing_session_id", "malformed_session_id"}:
+                status = HTTPStatus.BAD_REQUEST
+            elif detail.get("error_code") == "session_not_found":
+                status = HTTPStatus.NOT_FOUND
+            else:
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(status, session_detail_view(detail, compact=True))
             return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)
@@ -4768,13 +5226,15 @@ class MonitorHandler(BaseHTTPRequestHandler):
         )
 
     def _handle_unexpected_error(self, event: str, exc: BaseException) -> None:
+        disconnected = isinstance(exc, (BrokenPipeError, ConnectionResetError))
         print(
             json.dumps(
                 log_payload(
                     {
                         "service": "monitor_web",
-                        "event": event,
+                        "event": "client_disconnected" if disconnected else event,
                         "exception": exc,
+                        "exception_class": _safe_monitor_exception_class(exc),
                         "request_id": self._request_id(),
                         "timestamp": utc_now(),
                     }
@@ -4783,6 +5243,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
             ),
             flush=True,
         )
+        if disconnected:
+            return
         self._send_json(
             HTTPStatus.SERVICE_UNAVAILABLE,
             {
@@ -4887,6 +5349,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0 if snapshot.get("ok") else 1
 
+    # Warm and strictly validate the process-owned storage before accepting a
+    # request. The service manager/activation guard can retry a not-yet-bound
+    # process without racing the first readiness request against a cold
+    # MongoDB DNS/TLS/schema/epoch initialization.
+    _open_monitor_storage(config)
     server = build_server(args.host, args.port, config)
     print(
         json.dumps(
@@ -4902,7 +5369,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         flush=True,
     )
-    serve_http_until_stopped(server)
+    try:
+        serve_http_until_stopped(server)
+    finally:
+        _close_monitor_storage(config)
     return 0
 
 

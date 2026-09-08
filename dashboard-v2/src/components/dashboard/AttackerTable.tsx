@@ -1,31 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
-import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
-import type { AttackerSummary, DashboardThreatEvent } from "@/lib/dashboardTypes";
+import { useState, useMemo } from 'react';
+import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
+import type { AttackerSummary } from "@/lib/dashboardTypes";
 import { SeverityBadge } from './SeverityBadge';
 import { Search } from 'lucide-react';
+import { RegionState } from '@/components/ui/RegionState';
 
 export function AttackerTable() {
-  const [threats, setThreats] = useState<DashboardThreatEvent[]>([]);
-
-  useEffect(() => {
-    const fetchThreats = async () => {
-      try {
-        const res = await fetch("/api/threats");
-        if (res.ok) {
-          const data: unknown = await res.json();
-          if (Array.isArray(data)) {
-            setThreats(data.filter(isDashboardThreatEvent));
-          }
-        }
-      } catch (err) {
-        console.error("Failed to fetch threats for table:", err);
-      }
-    };
-    
-    fetchThreats();
-    const interval = setInterval(fetchThreats, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  const { threats, status } = useThreatFeed();
+  const [query, setQuery] = useState("");
+  const loading = status === "loading";
+  const fetchFailed = status === "error";
 
   const attackers = useMemo(() => {
     const map = new Map<string, AttackerSummary>();
@@ -52,22 +36,31 @@ export function AttackerTable() {
     }
     return Array.from(map.values()).sort((a, b) => b.attackCount - a.attackCount).slice(0, 50);
   }, [threats]);
+  const filteredAttackers = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return attackers;
+    return attackers.filter((attacker) => [attacker.ip, attacker.country, attacker.asn, attacker.mainTechnique, attacker.status]
+      .some((value) => value.toLowerCase().includes(normalizedQuery)));
+  }, [attackers, query]);
   return (
     <div className="flex flex-col h-full gap-4">
       <div className="flex items-center justify-between">
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input 
-            type="text" 
-            placeholder="Search IPs, ASNs..." 
-            className="bg-slate-900/50 border border-slate-700 text-sm rounded-md pl-9 pr-4 py-1.5 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 text-slate-300 w-64 transition-all"
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-subtle" />
+          <input
+            type="text"
+            placeholder="Search IPs, ASNs..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search top threat actors"
+            className="ui-field w-64 pl-9"
           />
         </div>
       </div>
-      
+
       <div className="flex-1 overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead className="text-xs text-slate-400 uppercase bg-slate-800/50 border-y border-slate-700/50">
+        <table className="ui-table min-w-[680px]">
+          <thead>
             <tr>
               <th className="px-4 py-3 font-medium">Source IP</th>
               <th className="px-4 py-3 font-medium">Location</th>
@@ -77,20 +70,20 @@ export function AttackerTable() {
               <th className="px-4 py-3 font-medium">Risk</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
-            {attackers.map((attacker, i) => (
-              <tr key={i} className="hover:bg-slate-800/30 transition-colors group">
-                <td className="px-4 py-3 font-mono text-cyan-400 group-hover:text-cyan-300">{attacker.ip}</td>
+          <tbody>
+            {loading && Array.from({ length: 5 }, (_, index) => <tr key={`loading-${index}`} aria-hidden="true">{Array.from({ length: 6 }, (_, column) => <td key={column}><div className="ui-skeleton h-4 w-full" /></td>)}</tr>)}
+            {!loading && fetchFailed && <tr><td colSpan={6} className="p-4"><RegionState kind="error" title="Threat actors unavailable" description="The latest session directory could not be loaded." /></td></tr>}
+            {!loading && !fetchFailed && filteredAttackers.length === 0 && <tr><td colSpan={6} className="p-4"><RegionState kind="empty" title={query ? "No matching threat actors" : "No threat actors"} description={query ? "Try a different search term." : "No source IPs were returned in the last successful response."} /></td></tr>}
+            {!loading && !fetchFailed && filteredAttackers.map((attacker, i) => (
+            <tr key={i} className="group text-text-muted"><td className="font-mono text-xs text-primary">{attacker.ip}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-col">
-                    <span className="text-slate-300">{attacker.country}</span>
-                    <span className="text-xs text-slate-500">{attacker.asn}</span>
+                    <span className="text-text">{attacker.country}</span><span className="text-xs text-text-subtle">{attacker.asn}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-slate-400">{attacker.mainTechnique}</td>
-                <td className="px-4 py-3 text-right font-medium text-slate-300">{attacker.attackCount.toLocaleString()}</td>
+                <td className="text-text-muted">{attacker.mainTechnique}</td><td className="text-right font-medium text-text">{attacker.attackCount.toLocaleString()}</td>
                 <td className="px-4 py-3 text-center">
-                  <span className={`font-bold ${attacker.riskScore > 80 ? 'text-red-400' : attacker.riskScore > 50 ? 'text-orange-400' : 'text-emerald-400'}`}>
+                    <span className={`font-semibold ${attacker.riskScore > 80 ? 'text-danger' : attacker.riskScore > 50 ? 'text-warning' : 'text-success'}`}>
                     {attacker.riskScore}
                   </span>
                 </td>

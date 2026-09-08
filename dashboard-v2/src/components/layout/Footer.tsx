@@ -1,16 +1,17 @@
+import Link from "next/link";
+
 export default function Footer() {
   return (
-    <footer className="w-full border-t border-slate-800/50 bg-slate-950/80 py-6 px-8 absolute bottom-0 flex flex-col md:flex-row items-center justify-between text-xs text-slate-500 font-mono">
+    <footer className="w-full border-t border-border bg-surface px-5 py-8 text-sm leading-6 text-text-muted sm:px-8">
       <div>
-        <p className="font-bold text-slate-300 mb-1">PTI-Honeypot</p>
-        <p>© 2024 PTI-Honeypot Cyber Defense. All Rights Reserved.</p>
-        <p>Security Clearance Level 4 Required.</p>
+        <p className="font-semibold text-text">PTI-Honeypot</p>
+        <p className="mt-1">Read-only threat intelligence for authorized operators.</p>
       </div>
-      <div className="flex gap-6 mt-4 md:mt-0">
-        <a href="#" className="hover:text-purple-400 transition">Privacy Policy</a>
-        <a href="#" className="hover:text-purple-400 transition">Terms of Engagement</a>
-        <a href="#" className="hover:text-purple-400 transition">Support</a>
-      </div>
+      <nav aria-label="Footer navigation" className="mt-6 flex flex-wrap gap-x-6 gap-y-2">
+        <Link href="#overview" className="hover:text-primary">Overview</Link>
+        <Link href="#documentation" className="hover:text-primary">Documentation</Link>
+        <Link href="/login" className="hover:text-primary">Operator sign in</Link>
+      </nav>
     </footer>
   );
 }

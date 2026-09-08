@@ -145,6 +145,42 @@ def _sha256_json(value: Any) -> str:
     return _sha256_bytes(stable_json(value).encode("utf-8"))
 
 
+def _canonical_observed_ttp_projection(value: Any) -> List[Dict[str, Any]]:
+    """Keep trusted mapping provenance without score-bearing model metadata.
+
+    ``observed_trusted_ttps`` is also exposed in the report view, where its
+    bounded local scores may be useful context.  The immutable canonical
+    evidence digest, however, must remain invariant when a classifier score or
+    other model-only field changes.  Only evidence identity, mapping identity,
+    ordering, and authority-boundary fields therefore enter that digest.
+    """
+
+    allowed = {
+        "observation_namespace",
+        "technique_id",
+        "source_ttp_values",
+        "source_subtechnique_values",
+        "tactics",
+        "classification_event_refs",
+        "command_evidence_refs",
+        "authority_decision_refs",
+        "evidence_refs",
+        "commands",
+        "sequence_indices",
+        "first_sequence_index",
+        "trust_tier",
+        "mapping_scope",
+        "mapping_semantics",
+        "authority",
+    }
+    output: List[Dict[str, Any]] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        output.append({key: deepcopy(item[key]) for key in sorted(allowed) if key in item})
+    return output
+
+
 def _source_payload(session: Any, raw_events: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     def get(name: str, default: Any) -> Any:
         return session.get(name, default) if isinstance(session, dict) else getattr(session, name, default)
@@ -259,6 +295,21 @@ def build_canonical_evidence_snapshot(
         "trusted_attck_candidates": deepcopy(
             authoritative.get("trusted_attck_candidates") or []
         ),
+        "observed_trusted_ttps": deepcopy(
+            _canonical_observed_ttp_projection(
+                observed.get("observed_trusted_ttps") or []
+            )
+        ),
+        "observed_ttp_contract": {
+            "namespace": "observed_trusted_ttps",
+            "authority": "trusted_observation",
+            "correlation_may_override": False,
+            "correlation_may_remove": False,
+            "correlation_may_promote": False,
+        },
+        "chronology_quality": _clean(observed.get("chronology_quality"))
+        or "not_available",
+        "chronology_basis": _clean(observed.get("chronology_basis")),
     }
     if snapshot_version == "canonical_evidence_snapshot.v2":
         snapshot["classification_environment"] = deepcopy(
@@ -1012,6 +1063,37 @@ def build_session_assessment_v4(
             "new_record_authority": SCHEMA_VERSION,
         },
     }
+    # The assessment identity is independent of response guidance.  Compute a
+    # provisional ID from the canonical record so guidance can bind to the
+    # exact assessment without introducing a circular hash dependency.
+    provisional_assessment_id = canonical_assessment_id(record)
+    assessment_binding_context = {
+        "assessment_id": provisional_assessment_id,
+        "evidence_sha256": _clean(snapshot.get("evidence_sha256")),
+        "behavior_policy_sha256": _clean(
+            (provenance.get("behavior_policy") or {}).get("sha256")
+        ),
+        "classification_policy_sha256": _clean(
+            (provenance.get("classification_policy") or {}).get("sha256")
+        ),
+        "evaluator_git_revision": _clean(provenance.get("evaluator_git_revision")),
+        "finding_ids": [
+            item.get("finding_id") for item in findings if isinstance(item, dict)
+        ],
+        "hypothesis_set_ids": [
+            item.get("hypothesis_set_id")
+            for item in hypothesis_sets
+            if isinstance(item, dict)
+        ],
+        "typed_semantic_fact_set_sha256": _clean(
+            (provenance.get("typed_semantics") or {}).get("fact_set_sha256")
+        ),
+        "typed_semantic_vocabulary_sha256": _clean(
+            ((provenance.get("typed_semantics") or {}).get("semantic_vocabulary") or {}).get(
+                "sha256"
+            )
+        ),
+    }
     guidance = build_response_guidance_v3_from_paths(
         snapshot,
         policy_path=response_guidance_policy_path,
@@ -1020,6 +1102,8 @@ def build_session_assessment_v4(
         forecast_context=prediction_context or {},
         enrichment_context=enrichment_context or {},
         typed_semantic_fact_set=typed_fact_set,
+        assessment_id=provisional_assessment_id,
+        assessment_context=assessment_binding_context,
         activated_semantic_families=(
             CURRENT_ACTIVATED_SEMANTIC_FAMILIES
         ),
@@ -1299,18 +1383,31 @@ def validate_session_assessment_v4(
             f"response_guidance_v3: {error}" for error in guidance_errors
         )
     observed_evidence = evidence or {}
-    evidence_refs = {
-        _clean(item.get("evidence_id"))
-        for key in (
-            "observations",
-            "transfer_observations",
-            "direct_cowrie_events",
-            "trusted_attck_candidates",
-            "audit_only_candidates",
-        )
-        for item in observed_evidence.get(key) or []
-        if isinstance(item, dict) and _clean(item.get("evidence_id"))
-    }
+    evidence_refs: set[str] = set()
+    for key in (
+        "observations",
+        "transfer_observations",
+        "direct_cowrie_events",
+        "trusted_attck_candidates",
+        "observed_trusted_ttps",
+        "audit_only_candidates",
+    ):
+        for item in observed_evidence.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            direct = _clean(item.get("evidence_id"))
+            if direct:
+                evidence_refs.add(direct)
+            for ref_key in (
+                "evidence_refs",
+                "classification_event_refs",
+                "command_evidence_refs",
+            ):
+                evidence_refs.update(
+                    _clean(ref)
+                    for ref in item.get(ref_key) or []
+                    if _clean(ref)
+                )
     graph = evidence.get("semantic_graph") or {}
     graph_relationship_refs = {
         _clean(item.get("relationship_id"))

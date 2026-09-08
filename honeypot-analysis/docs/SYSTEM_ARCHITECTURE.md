@@ -46,7 +46,7 @@ receipt.
 | --- | --- |
 | Observed Cowrie events | Canonical evidence, subject to ingest provenance |
 | Reviewed rule classifications | Trusted candidate evidence only when policy permits |
-| SecureBERT candidates, enrichment, correlations | Audit/context only |
+| FINAL_S1 LinearSVC advisory output; historical SecureBERT candidates, enrichment, correlations | Advisory/audit context only; SecureBERT is non-active in the aligned final runtime |
 | Transformer/VOMM predictions | Advisory prediction context only |
 | Findings and hypotheses | v4 whole-contract evaluator |
 | Guidance | v3 policy over immutable canonical evidence |

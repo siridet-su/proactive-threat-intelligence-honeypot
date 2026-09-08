@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proactive-threat-intelligence-honeypot:schema:hardware-impact-development-matrix:v1",
+  "title": "Hardware-impact development acquisition matrix v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "matrix_id", "experiment_id", "status", "partition", "purpose", "pilot_only", "training_eligible", "final_test_opened", "stop_after_wave", "repetitions_per_scenario", "minimum_distinct_days", "scenario_count", "run_count", "sample_interval_seconds", "seconds_per_run", "estimated_total_seconds", "schedule", "experiment_protocol", "model_feature_contract", "artifact_bindings", "runs", "matrix_sha256"],
+  "properties": {
+    "schema_version": {"const": "hardware_impact_development_matrix.v1"},
+    "matrix_id": {"$ref": "#/$defs/identifier"},
+    "experiment_id": {"$ref": "#/$defs/identifier"},
+    "status": {"const": "planned"},
+    "partition": {"const": "development_train"},
+    "purpose": {"const": "controlled_hardware_impact_model_development"},
+    "pilot_only": {"const": false},
+    "training_eligible": {"const": true},
+    "final_test_opened": {"const": false},
+    "stop_after_wave": {"const": true},
+    "repetitions_per_scenario": {"const": 10},
+    "minimum_distinct_days": {"const": 2},
+    "scenario_count": {"const": 7},
+    "run_count": {"const": 70},
+    "sample_interval_seconds": {"const": 1},
+    "seconds_per_run": {"const": 90},
+    "estimated_total_seconds": {"const": 6300},
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seed", "strategy", "day_slots"],
+      "properties": {
+        "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "strategy": {"const": "two-day-slots_repetition-blocked_hash-order"},
+        "day_slots": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["planned_day_slot", "repetitions"],
+            "properties": {
+              "planned_day_slot": {"type": "integer", "minimum": 1, "maximum": 2},
+              "repetitions": {"type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 10}}
+            }
+          }
+        }
+      }
+    },
+    "experiment_protocol": {"$ref": "#/$defs/protocol_binding"},
+    "model_feature_contract": {"$ref": "#/$defs/feature_contract_binding"},
+    "artifact_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_catalog_sha256", "collector_source_sha256", "telemetry_schema_sha256", "image_id", "implementation_sha256", "repo_commit", "environment_signature_sha256"],
+      "properties": {
+        "scenario_catalog_sha256": {"$ref": "#/$defs/sha256"},
+        "collector_source_sha256": {"$ref": "#/$defs/sha256"},
+        "telemetry_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "implementation_sha256": {"$ref": "#/$defs/sha256"},
+        "repo_commit": {"type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},
+        "environment_signature_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 70,
+      "maxItems": 70,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order", "repetition", "planned_day_slot", "run_id", "scenario_id", "controlled_workload", "workload_spec_id", "treatment_id", "primary_impact", "planned_manifest_sha256", "workload_spec_sha256"],
+        "properties": {
+          "order": {"type": "integer", "minimum": 1, "maximum": 70},
+          "repetition": {"type": "integer", "minimum": 1, "maximum": 10},
+          "planned_day_slot": {"type": "integer", "minimum": 1, "maximum": 2},
+          "run_id": {"$ref": "#/$defs/identifier"},
+          "scenario_id": {"$ref": "#/$defs/identifier"},
+          "controlled_workload": {"type": "boolean"},
+          "workload_spec_id": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]},
+          "treatment_id": {"$ref": "#/$defs/identifier"},
+          "primary_impact": {"enum": ["NO_MATERIAL_IMPACT", "COMPUTE_SATURATION", "SERVICE_PRESSURE"]},
+          "planned_manifest_sha256": {"$ref": "#/$defs/sha256"},
+          "workload_spec_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]}
+        }
+      }
+    },
+    "matrix_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "protocol_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "protocol_id", "protocol_sha256"],
+      "properties": {
+        "schema_version": {"const": "hardware_impact_experiment_protocol.v2"},
+        "protocol_id": {"$ref": "#/$defs/identifier"},
+        "protocol_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "feature_contract_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "contract_id", "contract_sha256"],
+      "properties": {
+        "schema_version": {"const": "model_feature_contract.v1"},
+        "contract_id": {"$ref": "#/$defs/identifier"},
+        "contract_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

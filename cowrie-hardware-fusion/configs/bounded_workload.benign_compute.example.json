@@ -1,7 +1,7 @@
 {
   "schema_version": "bounded_workload_spec.v1",
   "spec_id": "benign-compute-control-25pct-30s-example",
-  "scenario_catalog_sha256": "063089826ef32300f34812c9c86d0c25a631d380365d7be802010f31a58e89ea",
+  "scenario_catalog_sha256": "8793acf7a1ddddac22ce864cbbb9c45a1277891bf5e598d73d7a63ec85ad0ec9",
   "scenario_id": "benign_compute_control",
   "runner": {
     "kind": "oci_container_in_disposable_vm",

@@ -318,6 +318,10 @@ class SessionState:
     ttp_command_map:  Dict[str, List[str]] = field(default_factory=dict)
     ttp_sources:      Dict[str, List[str]] = field(default_factory=dict)
     classification_events: List[dict] = field(default_factory=list)
+    # Trusted command/event observations are kept separate from contextual
+    # session-correlation hypotheses.  Correlation cannot rewrite this set.
+    observed_trusted_ttps: List[dict] = field(default_factory=list)
+    correlated_ttp_hypotheses: List[dict] = field(default_factory=list)
     session_ttp_correlations: List[dict] = field(default_factory=list)
     session_ttp_correlation_summary: dict = field(default_factory=dict)
     session_evidence_graph: dict = field(default_factory=dict)
@@ -797,12 +801,51 @@ class SessionMonitor:
             "outcome_scope": classification.get("outcome_scope"),
             "fragment_execution": classification.get("fragment_execution"),
         }
+        same_command = False
+        if history:
+            try:
+                same_command = int(history[-1].get("end_command_index")) == command_index
+            except (TypeError, ValueError):
+                same_command = False
+        if same_command:
+            # A single Cowrie command can yield multiple trusted labels.  Keep
+            # every distinct label/evidence reference in the same phase rather
+            # than allowing the per-label callback to create duplicate phases.
+            merged = deepcopy(history[-1])
+            merged["labels"] = [*(merged.get("labels") or []), label]
+            merged["event_id"] = evidence_id or merged.get("event_id", "")
+            merged["end_timestamp"] = (
+                str(classification.get("event_timestamp") or "").strip()
+                or merged.get("end_timestamp", "")
+            )
+            # The callback is invoked once per trusted label, but the phase
+            # represents one observed command.  Keep observation_count tied to
+            # command observations rather than inflating it for multi-label
+            # classifier output; replay builds the same one-command phase.
+            merged["observation_count"] = max(
+                int(merged.get("observation_count") or 1), 1
+            )
+            merged["command_outcomes"] = [
+                *(merged.get("command_outcomes") or []),
+                str(classification.get("command_outcome") or "").strip(),
+            ]
+            merged["outcome_scopes"] = [
+                *(merged.get("outcome_scopes") or []),
+                str(classification.get("outcome_scope") or "").strip(),
+            ]
+            merged["fragment_execution_states"] = [
+                *(merged.get("fragment_execution_states") or []),
+                str(classification.get("fragment_execution") or "").strip(),
+            ]
+            phases_input = [*history[:-1], merged]
+        else:
+            phases_input = [*history, raw_phase]
         previous_tactics = history[-1].get("tactics") if history else None
         new_tactics = [tactic]
         state.prediction_trusted_history = normalize_trusted_phases(
-            [*history, raw_phase], cap=8
+            phases_input, cap=8
         )
-        if previous_tactics != new_tactics:
+        if not same_command and previous_tactics != new_tactics:
             state.prediction_trusted_phase_count = int(
                 getattr(state, "prediction_trusted_phase_count", 0) or 0
             ) + 1
@@ -823,6 +866,8 @@ class SessionMonitor:
             "commands_success",
             "commands_failed",
             "classification_events",
+            "observed_trusted_ttps",
+            "correlated_ttp_hypotheses",
             "sigma_hits",
             "kev_matches",
             "process_events",
@@ -1699,6 +1744,12 @@ def build_pipeline_trigger(
                     "classification_events": getattr(
                         state, "classification_events", []
                     ),
+                    "observed_trusted_ttps": getattr(
+                        state, "observed_trusted_ttps", []
+                    ),
+                    "correlated_ttp_hypotheses": getattr(
+                        state, "correlated_ttp_hypotheses", []
+                    ),
                     "raw_events": getattr(state, "raw_events", []),
                     "session_evidence_graph": getattr(
                         state, "session_evidence_graph", {}
@@ -1810,6 +1861,12 @@ def build_pipeline_trigger(
                 self.commands_success   = view.get('commands_success', [])
                 self.commands_failed    = view.get('commands_failed', [])
                 self.classification_events = view.get('classification_events', [])
+                self.observed_trusted_ttps = view.get(
+                    'observed_trusted_ttps', []
+                )
+                self.correlated_ttp_hypotheses = view.get(
+                    'correlated_ttp_hypotheses', []
+                )
                 self.raw_events          = view.get('raw_events', [])
                 self.canonical_event_manifest = view.get(
                     'canonical_event_manifest', {}

@@ -791,3 +791,308 @@ immutable receipt-bound spool ดังนั้น experimental collector ย�
 
 - [Hardware-impact experiment protocol v2](../hardware_impact_experiment_protocol.v2.md)
 - [Hardware Go Agent feature-parity audit](../hardware_agent_feature_parity_2026-09-02.md)
+
+## 21. Service-pressure observability implementation — 2026-09-02
+
+สถานะ: `COLLECTOR 0.4.0 IMPLEMENTED / PI CANARY PASS / SIGNAL PILOT NOT STARTED`
+
+ส่วนนี้ supersede ลำดับถัดไปข้อ 1 ใน Section 20:
+
+- experimental collector `0.4.0` เพิ่ม host CPU/memory/I/O PSI, TCP states, socket
+  allocation และ kernel listen/backlog/queue/memory-pressure totals/rates
+- target observation เพิ่ม context switches, network-namespace TCP states/socket/pressure
+  และ cgroup v2 CPU usage/throttling, memory events, PID usage, aggregate I/O และ
+  CPU/memory/I/O PSI
+- parser ไม่ persist address, port, raw IP, raw PID, command, credential หรือ simulator
+  operation count; collector source hash รวม module service-pressure แล้ว
+- Pi host no-sink snapshot valid โดย missing/error 0 และ target safe-container canary
+  revision 4 valid/schema-valid โดย missing/error 0
+- target canary เห็น TCP listen 1, established 2 และ cgroup blocks CPU/memory/PID/I/O/PSI
+  ครบ; readable empty `io.stat` ถูกนิยามเป็น zero I/O ไม่ใช่ missing
+- ทดลองอ่าน per-process FD/I/O แล้วพบ cross-UID permission boundary จึงตัด field นี้ออกและ
+  ไม่เพิ่ม root/ptrace capability; ใช้ cgroup I/O ที่อ่านได้โดยไม่ยกระดับสิทธิ์แทน
+- safe canary ใช้ `network=none`, read-only, non-root และ hard limits; cleanup ผ่าน,
+  production containers 9 ตัว, ไม่มี `chf-*` ค้าง และไม่มี Redis/MongoDB/Atlas write
+- automated tests ปัจจุบันผ่าน 52 tests
+
+Metric ใหม่ยังเป็น raw candidate observability และยังไม่ถูกเพิ่มเข้า frozen model feature
+profile เพราะ canary เดียวพิสูจน์ availability แต่ไม่พิสูจน์ class-separation signal ขั้นถัดไป
+คือสร้าง 7-scenario instrumentation matrix แบบ `pilot_only=true` scenario ละหนึ่ง run แล้ว
+วัด coverage/baseline deltas ก่อน freeze feature/profile revision และก่อน development wave
+70 runs
+
+รายละเอียด fields, privacy decision และ evidence hashes:
+[service_pressure_observability.v1.md](../service_pressure_observability.v1.md)
+
+## 22. Service-pressure instrumentation tooling — 2026-09-02
+
+สถานะ: `TOOLING READY / 7 PI RUNS NOT STARTED`
+
+ส่วนนี้ supersede “ขั้นถัดไป” ใน Section 21 เฉพาะงานเตรียม tooling:
+
+- เพิ่ม generator สำหรับ protocol-v2 scenarios ครบ 7 ตัว; scenario ละหนึ่ง run,
+  baseline/workload/recovery 30/30/30 วินาทีที่ 1 Hz รวม 630 planned samples
+- matrix ผูก canonical protocol hash, scenario catalog byte hash, collector source,
+  telemetry schema, ARM64 image/workload implementation, repository commit และ Pi
+  environment signature
+- matrix, manifests และ specs บังคับ `pilot_only=true`, `training_eligible=false` และ
+  `changes_frozen_feature_set=false`; 7 runs นี้ใช้ตัดสิน instrumentation เท่านั้น
+- compute high benign/T1496.001 และ service high benign/T1499.002 ใช้ hardware treatment
+  เดียวกันเป็น matched pairs; TTP/disposition ไม่ถูกใช้เป็น candidate value
+- แยก service `protocol_intensity=10/150 requests_per_second` จาก manifest assigned
+  service capacity 25/75% เพื่อไม่ตีความ 150 เป็น CPU percent
+- collector patch `0.4.1` เพิ่ม exact allowlist สำหรับ protocol-v2 idle/controlled
+  scenarios โดยไม่เปลี่ยน telemetry semantics; runtime ยังคง fixed image,
+  `network=none`, non-root, read-only และ hard limits
+- collector `0.4.1` source hash คือ
+  `f56cce1858f3d604e5e298258fc0d1af076fafaf03d9e3a6c17ae454e291d1a3`;
+  telemetry schema hash ยังคง `b99697c8...a4d4e` และ protocol canonical hash ยังคง
+  `8eb0786e...2471d`
+- เพิ่ม report builder สำหรับ host/target PSI, TCP state/socket/drop และ target cgroup
+  CPU/memory/PID/I/O metrics สรุป coverage/mean/p95/max/delta แยก phase
+- target ไม่มี baseline ตาม design จึงไม่สร้าง delta ปลอม; signal เข้า feature-freeze
+  review เมื่อ workload coverage ≥90% และ host signal ต้องมี baseline coverage ≥90%
+- report ผูก completed manifest/segment hashes และมี `model_feature_eligible=false` เสมอ;
+  simulator operation count ไม่ถูกใช้เป็น model feature
+- automated tests ปัจจุบันผ่าน 55 tests รวม matrix exclusion, schema bindings,
+  matched-pair invariants และ synthetic signal summary
+
+ขั้นถัดไปคือ query image/environment identity จริงจาก Pi หลัง freeze commit, generate
+control artifacts, รัน preflight แล้วจึงรัน 7 excluded instrumentation runs พร้อม verify
+cleanup/receipts ก่อน transfer กลับ Arch เพื่อสร้าง signal reports
+
+รายละเอียด matrix, intensity semantics, commands และ selection gate:
+[service_pressure_instrumentation_pilot.v1.md](../service_pressure_instrumentation_pilot.v1.md)
+
+## 23. Service-pressure instrumentation result — 2026-09-02
+
+สถานะ: `7/7 COMPLETE / TELEMETRY PASS / SERVICE-TREATMENT GATE NOT PASSED`
+
+ส่วนนี้ supersede “7 PI RUNS NOT STARTED” ใน Section 22:
+
+- deploy source/control archives ไป isolated Pi directory โดย source/control SHA-256 ตรง
+  Arch/Pi และไม่แก้ production worktree หรือ services
+- preflight ผ่าน NTP, interfaces/disk, cgroup v2, Docker seccomp, ARM64 image identity,
+  RAM/disk/load/temperature gates ก่อน execution
+- รัน 7/7 scenarios ได้ 630/630 valid samples; baseline/workload/recovery 210/210/210,
+  missing/error/reset 0, completed manifests 7, segments 21 และ controlled cleanup 6/6
+- มี late sample 1 จุดที่ service-low workload sequence แรก 1,148.257 ms เพราะ Docker
+  lifecycle hook ใช้เวลาหลัง deadline ถูกกำหนด ต้อง reset deadline หลัง hook ก่อนเก็บ
+  development sequence
+- service high เทียบ low: cgroup CPU usage ~27.5×, CPU PSI ~11.3×, memory ~2.3×;
+  benign/T1499 high pair ต่างกันเพียง ~0.32%, 1.69%, 3.77% ตามลำดับ จึงยืนยันว่า
+  collector เห็น target resource response และ matched treatment ทำงาน
+- target TCP total/established/socket คงที่ 3/2/5, queue/drop rates เป็นศูนย์,
+  memory/I/O PSI เป็นศูนย์ และ execution errors 0 ทั้ง service-high pair จึงยังไม่มี
+  evidence แข็งแรงพอรองรับ `SERVICE_PRESSURE` label
+- compute-low ที่ full duty ภายใต้ quota 0.25 core มี throttled time/CPU PSI สูงกว่า
+  compute-high 0.75 core เป็น inverse-throttling simulator artifact; ห้ามใช้ cgroup pressure
+  ชุดนี้ฝึก class โดยไม่แก้ treatment
+- Pi→Arch result archive SHA-256 ตรงกันคือ
+  `4feddbda88b3207d3e9f8a0ca264f38d3843edda164205b0749d6a11e0e7a360`;
+  Arch regenerate reports หลัง verify receipt/raw schema แล้วได้ไฟล์ตรง Pi ทุก byte
+- candidate ที่นำไปทดสอบซ้ำคือ cgroup CPU usage, CPU PSI, memory current และ host CPU PSI
+  delta; ยังไม่เพิ่มเข้า frozen feature profiles และ 7 runs ยังคง excluded
+- ไม่มี malware/miner/external target/Redis/MongoDB/Atlas write, ไม่มี experiment container
+  ค้าง; production 9 containers, hardware service inactive และ processor active
+
+ขั้นถัดไปคือแก้ phase scheduler, เปลี่ยน compute treatment จาก quota artifact เป็น bounded
+duty/worker allocation, เพิ่ม bounded short-lived loopback connection/concurrency พร้อม
+latency/error evidence gate แล้ว freeze workload image/spec revision ใหม่เพื่อ rerun excluded
+pilot ก่อนเริ่ม development 70 runs Training v2 และ final test ยังไม่เริ่ม
+
+รายละเอียด evidence hashes, operation counts, signal table และ gate decision:
+[service_pressure_instrumentation_results_2026-09-02.md](../service_pressure_instrumentation_results_2026-09-02.md)
+
+## 24. Service-pressure treatment revision v2 — 2026-09-02
+
+สถานะ: `IMPLEMENTED / LOCAL TEST PASS / EXCLUDED PI RERUN PENDING`
+
+ส่วนนี้ supersede ขั้นแก้ treatment ใน Section 23 แต่ยังไม่ supersede ผล pilot v1:
+
+- collector `0.4.2` reset sample deadline หลัง lifecycle hook เพื่อกัน Docker startup/stop
+  time สร้าง late sample ปลอม; slow-hook test ได้ 90/90 samples โดย late 0
+- compute low/high เปลี่ยนเป็น duty cycle 25/75% ภายใต้ hard ceiling 1 CPU เดียวกัน
+  แทน full-duty ที่ quota 0.25/0.75 ซึ่งสร้าง inverse-throttling artifact
+- service ใช้ short-lived loopback connections, client concurrency 8, server capacity 2,
+  bounded delay 40 ms และ low/high 10/150 requests/s; ยังคง `network=none`
+- workload summary v2 เพิ่ม attempts/rejected/p95 latency และ finalize gate บังคับให้
+  service-high มี error fraction ≥20%, rejection ≥1 และ p95 ≥20 ms; service-low ต้อง
+  rejection=0/error≤5%; summary เป็น label evidence และห้ามใช้เป็น model feature
+- เพิ่ม matrix/spec schema v2 โดยเก็บ v1 ไว้เป็น historical contract; entrypoint identity
+  เปลี่ยนเป็น `poc_workload_v2`
+- Python suite ผ่าน 58 tests; Go config/compute ผ่าน ส่วน loopback integration จะยืนยันบน Pi
+- revision นี้ยังเป็น `pilot_only=true`, `training_eligible=false`; ห้ามเริ่ม 70-run
+  development wave จนกว่า ARM64 image และ excluded 7-run rerun จะผ่าน treatment/telemetry gate
+
+ขั้นถัดไปคือ freeze commit, build/hash ARM64 image, ทำ service integration canary บน Pi,
+generate v2 artifacts แล้ว rerun 7 scenarios/630 samples ก่อนตัดสิน feature revision
+
+รายละเอียด treatment, evidence thresholds และ run order:
+[service_pressure_treatment_revision.v2.md](../service_pressure_treatment_revision.v2.md)
+
+## 25. Service-pressure v2 excluded pilot result — 2026-09-03
+
+สถานะ: `7/7 COMPLETE / QUALITY PASS / TREATMENT GATES PASS`
+
+ส่วนนี้ supersede `EXCLUDED PI RERUN PENDING` ใน Section 24:
+
+- freeze commit `95d7970`; ARM64 binary `c5ef621d...eb86`; final labeled image
+  `sha256:bcb5296b...e24c3`; matrix canonical hash `0c1bab3b...4e07`
+- image canary ตัวแรกไม่มี OCI revision label จึงถูก preflight ปฏิเสธก่อน collection;
+  rebuild จาก reviewed Dockerfile พร้อม binary-hash label แล้ว final preflight ผ่าน
+- รันครบ 7/7, 630/630 valid samples, phase 210/210/210, 21 segments,
+  late/missing/error/reset 0 และ controlled cleanup 6/6
+- service-low มี 301 attempts, rejection 0, error 0.33%, p95 ~41 ms; high benign/T1499
+  มี ~4,524 attempts, rejection ~3,200, error ~70.7%, p95 ~41.4 ms ทุก gate ผ่าน
+- compute cgroup CPU high/low ~2.97× และ throttling เป็นศูนย์ทั้งคู่ จึงแก้ quota artifact
+- service high/low: TIME_WAIT ~15.6×, CPU PSI ~9.4×, CPU usage ~8.4×,
+  memory ~1.6×; matched benign/T1499 signals หลักต่างประมาณ 0.1–2%
+- export Pi→Arch SHA-256 ตรงกัน `5570a87c...edf1`; audit summary byte-identical และ
+  Arch regenerate signal reports ตรง Pi 7/7
+- candidate review คือ cgroup CPU usage, TCP TIME_WAIT, target socket summary,
+  cgroup memory และ CPU PSI ablation; queue/drop เป็นศูนย์และ simulator receipt ยังคง
+  forbidden model input
+- ต้องแยก host-only กับ target/cgroup-required profiles; ห้ามอ้าง target profile deployable
+  กับ Cowrie production ก่อนทำ target mapping และ shadow availability test
+
+ขั้นถัดไปคือ freeze XGBoost aggregate features/TCN channels revision ใหม่จาก candidate ที่
+ผ่าน แล้วทดสอบ builder กับ raw pilot ก่อน generate development wave 70 runs โดย final test
+ยังคงปิด
+
+รายละเอียด hashes, execution evidence, signal table และ feature decision:
+[service_pressure_v2_pilot_results_2026-09-03.md](../service_pressure_v2_pilot_results_2026-09-03.md)
+
+## 26. Dataset builder v2 service-pressure revision — 2026-09-03
+
+สถานะ: `IMPLEMENTED / RAW PILOT REPLAY 7/7 PASS / PROFILE CONTRACT NEXT`
+
+- builder `0.2.0` สร้าง `derived_training_window.v2`, XGBoost features v2 จำนวน 67 ค่า
+  และ TCN channels v2 จำนวน 22 channels
+- เพิ่ม host CPU PSI aggregates 3 ค่า และ target cgroup CPU usage/CPU PSI/memory,
+  TCP TIME_WAIT/socket aggregates รวม 10 ค่า; ไม่เพิ่ม TCP total ที่ซ้ำสูงหรือ queue/drop
+  ที่ pilot เป็นศูนย์
+- TCN เพิ่ม host CPU PSI กับ target TCP/cgroup signals 6 channels โดยรักษา continuous
+  values และ per-channel missing masks
+- freeze feature-order hash `2cb0663c...f881b` และ channel-order hash
+  `0c9b4aa7...22256`; validator ตรวจ order/keys/masks/lengths/record hash แบบ fail closed
+- CLI build-window สร้าง schema v2; historical schema v1 ยังคงอยู่ และ smoke reader รองรับ
+  v1/v2 แต่ห้ามปน feature schema ใน evaluation เดียวกัน
+- replay raw excluded pilot 7/7 ผ่าน coverage 1.0 และ aggregates ตรง independent reports;
+  derived pilot records ยังห้าม train หรือใช้วัด accuracy
+- `target_process_present_fraction` ยัง output เพื่อ diagnostic/compatibility แต่ต้อง exclude
+  จาก model profile v3 เพราะอาจเรียน execution-boundary artifact
+- ขั้นถัดไปต้อง freeze host-only/target-required profiles และ deployment availability
+  ก่อนสร้าง development-wave controls; final test ยังปิด
+
+รายละเอียด feature/channel names, hashes, masking และ leakage boundary:
+[dataset_builder.v2.md](../dataset_builder.v2.md)
+
+## 27. Model feature contract v1 — 2026-09-03
+
+สถานะ: `FROZEN / 7 PILOT WINDOWS VALIDATED / AUDIT-ONLY`
+
+- freeze contract hash `def95353...f5666` ผูก Protocol v2 hash `8eb0786e...71d`,
+  builder `0.2.0`, window/features/channels v2,
+  feature/channel order hashes และ evidence hashes ของ excluded service-pressure pilot v2
+- XGBoost มี strict nested profiles: Go-agent overlap 25, host-extended 51 และ
+  target-augmented 66 features; ตัวสุดท้ายเป็น upper-bound ไม่ใช่ production-ready profile
+- TCN มี host-extended 14 และ target-augmented 22 channels พร้อมบังคับใช้ทั้ง
+  `sample_present`/`channel_present`; zero-imputation ไม่เท่ากับ observed zero
+- execution receipt, labels, identity/split fields และ `target_process_present_fraction`
+  เป็น forbidden model inputs; receipt ใช้ตรวจ treatment/label authority เท่านั้น
+- semantic validator ตรวจ contract/record hash, builder/schema/order identity, profile
+  availability/nesting, forbidden fields, mask policy และ fail-closed claims
+- ระหว่าง test พบและแก้ validator ที่เคยผูก TCN กับ insertion order ของ JSON object;
+  ตอนนี้ยึด frozen `channel_order` และ exact key sets จึง serialize/reload ได้ถูกต้อง
+- schema/semantic/CLI negative tests ผ่าน และ derived windows จาก Pi pilot v2 ผ่าน 7/7
+- deployment authority ยังคง `audit_only`, final test ยังปิด และ target profile ต้องผ่าน
+  Cowrie container/cgroup mapping กับ shadow availability test ก่อนอ้างว่า deploy ได้
+
+ขั้นถัดไปคือ generate/freeze development-wave 70-run controls จาก Protocol v2 แล้วตรวจ
+matrix โดยยังไม่เก็บ/เปิด final-test wave 35 runs จากนั้นจึงเก็บข้อมูลจริงและเปรียบเทียบ
+XGBoost สาม profile ตามลำดับ
+
+รายละเอียด exact inputs, counts, boundary และ validation command:
+[model_feature_contract.v1.md](../model_feature_contract.v1.md)
+
+## 28. Hardware-impact development-wave controls — 2026-09-03
+
+สถานะ: `GENERATOR PASS / 70 LOCAL CONTROLS / PI PREFLIGHT PENDING`
+
+- เพิ่ม matrix/spec schemas และ semantic generator สำหรับ development partition เท่านั้น:
+  7 scenarios × 10 repetitions = 70 runs/6,300 planned 1-Hz samples
+- schedule seed `20260903`; day slot 1 ใช้ repetitions 1/3/5/7/9 และ slot 2 ใช้
+  2/4/6/8/10 รวม slot ละ 35 runs; scenario order ภายใน repetition มาจาก canonical hash
+- exact scenario coverage 10 ครั้งต่อ scenario, matched benign/malicious treatment และ deterministic
+  regeneration ผ่าน; calibration/final-test ไม่มีใน output และ `final_test_opened=false`
+- spec/manifest ผูก Protocol v2, Model Feature Contract v1, catalog, collector/telemetry,
+  ARM64 image/binary, repo commit และ Pi environment signature
+- เพิ่ม protocol binding ที่ขาดใน Model Feature Contract ทำให้ contract hash ใหม่เป็น
+  `def95353...f5666`; binding นี้ถูกตรวจทั้งตอน validate contract และ generate matrix
+- local control set ที่ใช้ verified pilot identities มี matrix hash
+  `f22c5a17...5d959`, 70 manifests และ 60 workload specs; อยู่ใต้ ignored `data/`
+- generator/schema/negative tests รวมอยู่ใน suite 72 tests และ full suite ผ่านทั้งหมด
+- planned day slot ยังไม่พิสูจน์ distinct collection dates และ environment signature
+  ต้อง query Pi ใหม่ก่อน execute จึงยังไม่เริ่ม collection
+
+ขั้นถัดไปคือ commit/review tooling แล้ว audit Pi identities, เพิ่ม development-specific
+runtime preflight/collection/finalize commands และทำ preflight โดยไม่เก็บข้อมูลกับ run แรก
+ของ compute/service ก่อนเริ่ม day slot 1
+
+รายละเอียด control identity, schedule, safety และคำสั่ง generate:
+[hardware_impact_development_wave.v1.md](../hardware_impact_development_wave.v1.md)
+
+## 29. Development runtime และ Pi read-only preflight audit — 2026-09-03
+
+สถานะ: `RUNTIME IMPLEMENTED / PI HEADROOM PASS / FRESH SIGNATURE REQUIRED`
+
+- เพิ่ม matrix-wide loader/validator: ทุก run command ต้องอ่านและตรวจครบ 70 manifests/
+  60 specs, matrix hash, protocol/feature contract และ artifact bindings ก่อนเลือก run
+- เพิ่ม CLI preflight, collect และ finalize สำหรับ development โดย controlled 60 runs
+  ใช้ safe Docker lifecycle เดิม ส่วน idle 10 runs ไม่มี workload/execution receipt
+- finalize ตรวจ receipt content/control hashes และ observed-impact treatment gate ก่อน
+  เปลี่ยน manifest เป็น completed; final-test state คง false ใน output ทุกขั้น
+- development service spec ส่ง connection-mode/capacity/handler-delay เข้า workload v2
+  ครบ ไม่ถอยกลับเป็น service behavior รุ่นแรก
+- local round-trip control validation ผ่าน 70/70 และ mocked preflight dispatch ยืนยันว่า
+  controlled/idle เข้า validator ถูก branch โดยไม่เริ่ม collection
+- full suite ผ่าน 73 tests
+- SSH read-only audit เวลา 04:09 +07: Pi เป็น aarch64/kernel 6.8.0-1063, NTP sync,
+  load 0.10, available RAM ~6.41 GB, free disk ~65.33 GB, production containers 9,
+  Cowrie active และ experiment containers ค้าง 0
+- ARM64 image ID/user/entrypoint/revision ตรง; honeypot-hardware, hardware-metrics และ
+  hardware-metrics-processor inactive จึงไม่มี MongoDB/Atlas sink write จากการทดลอง
+- Pi uptime เพียง ~1 ชั่วโมง 18 นาทีหลัง reboot จึงห้าม reuse environment signature จาก
+  pilot เป็น fresh development identity
+
+ขั้นถัดไปคือ commit/deploy runtime tooling แบบ isolated, capture versioned environment
+receipt ใหม่, regenerate matrix ด้วย repo/environment identities ใหม่ แล้วรัน
+no-collection preflight กับ idle/compute/service อย่างละหนึ่ง run ก่อนพิจารณา day slot 1
+
+รายละเอียด runtime commands และ audit:
+[hardware_impact_development_wave.v1.md](../hardware_impact_development_wave.v1.md)
+
+## 30. Versioned environment receipt v2 — 2026-09-03
+
+สถานะ: TOOLING PASS / PI CAPTURE NEXT
+
+- เพิ่ม privacy-bounded receipt/schema/CLI ที่ capture boot hash, static host identity,
+  collector/runtime hashes, production services/container images และ reviewed runner
+- environment signature ไม่รวม capture time/headroom ชั่วขณะ จึงคงที่เมื่อ capture ซ้ำใน
+  boot/runtime state เดิม; receipt hash ครอบคลุม observed time และ headroom ทุกค่า
+- ไม่เก็บ hostname, raw IP, credentials, Cowrie command หรือ raw boot/container IDs
+- semantic safety gates บังคับ NTP/Cowrie, inactive hardware sinks, ไม่มี experiment
+  container ค้าง, RAM/disk/load/temperature และ exact ARM64 runner contract
+- เพิ่ม capture/validate CLI แบบ exclusive output และ full suite ผ่าน 79 tests
+- production repo บน Pi ที่ตรวจพบแบบ read-only คือ
+  /home/cpe27/proactive-threat-intelligence-honeypot
+- receipt แรกหลัง deploy ถูก reject จากการกรอก suffix ของ full commit ผิดแม้รูปแบบผ่าน;
+  จึงเปลี่ยน capture contract ให้อ่าน commit จาก `DEPLOYED_COMMIT` ที่ embed ใน Git archive
+  และบันทึก source-archive SHA-256 เพิ่ม แทนการรับ commit ที่พิมพ์ด้วยมือ
+
+ขั้นถัดไปคือ commit/push, deploy source archive แบบ isolated, capture receipt v2 แล้ว
+regenerate development controls จาก signature ใหม่ก่อนทำ runtime preflight
+
+รายละเอียด signature payload, safety และ privacy:
+[environment_receipt.v2.md](../environment_receipt.v2.md)

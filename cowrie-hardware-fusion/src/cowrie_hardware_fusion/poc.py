@@ -529,15 +529,12 @@ def _run_docker(
     return result
 
 
-def pi_poc_preflight(
+def safe_container_runtime_preflight(
     manifest: Mapping[str, Any],
     specification: Mapping[str, Any],
-    *,
-    catalog_path: Path,
 ) -> dict[str, Any]:
-    """Check image identity, Docker defenses, cgroup v2, and Pi headroom."""
+    """Check fixed image identity, Docker defenses, cgroup v2, and Pi headroom."""
 
-    validate_pi_poc_contract(manifest, specification, catalog_path=catalog_path)
     if shutil.which("docker") is None:
         raise DatasetContractError("Docker CLI is unavailable")
     if not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
@@ -607,6 +604,18 @@ def pi_poc_preflight(
     }
 
 
+def pi_poc_preflight(
+    manifest: Mapping[str, Any],
+    specification: Mapping[str, Any],
+    *,
+    catalog_path: Path,
+) -> dict[str, Any]:
+    """Validate the historical PoC contract, then check its Pi runtime."""
+
+    validate_pi_poc_contract(manifest, specification, catalog_path=catalog_path)
+    return safe_container_runtime_preflight(manifest, specification)
+
+
 class DockerWorkloadLifecycle:
     """Start exactly one fixed container during the workload phase and remove it."""
 
@@ -634,7 +643,7 @@ class DockerWorkloadLifecycle:
         parameters = self.specification["parameters"]
         timing = self.specification["timing"]
         duration = timing["workload_seconds"] + timing["binary_extra_seconds"]
-        return [
+        arguments = [
             f"--mode={parameters['mode']}",
             f"--duration={duration}s",
             f"--workers={parameters['workers']}",
@@ -644,6 +653,18 @@ class DockerWorkloadLifecycle:
             f"--work-iterations={parameters['work_iterations']}",
             f"--seed={parameters['deterministic_seed']}",
         ]
+        if self.specification.get("schema_version") in {
+            "service_pressure_workload_spec.v2",
+            "hardware_impact_development_workload_spec.v1",
+        }:
+            arguments.extend(
+                [
+                    f"--connection-mode={parameters['connection_mode']}",
+                    f"--service-capacity={parameters['service_capacity']}",
+                    f"--handler-delay={parameters['handler_delay_ms']}ms",
+                ]
+            )
+        return arguments
 
     def before_phase(self, phase: str, probe: Probe) -> None:
         if phase != "workload":

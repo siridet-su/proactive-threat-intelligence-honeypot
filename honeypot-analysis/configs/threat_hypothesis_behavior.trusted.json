@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-08-11-typed-connected-chain-v2",
+  "version": "2026-08-26-phase4b-semantic-replay-v1",
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -16,7 +16,8 @@
       "Observation-only typed filesystem-change activation decision",
       "Bounded typed Cowrie execution-attempt activation decision",
       "Attempt-only typed HTTP(S) command transfer decision",
-      "Exact-entity typed connected-chain and bounded incomplete-chain review"
+      "Exact-entity typed connected-chain and bounded incomplete-chain review",
+      "Phase 4B hypothesis derive/render versus select/authorize boundary"
     ],
     "reviewed": true,
     "reviewer": "project developer",
@@ -25,6 +26,15 @@
   },
   "policy": {
     "enabled": true,
+    "numeric_provenance": {
+      "minimum_incomplete_operation_count": "PROJECT_LOCAL_HEURISTIC",
+      "same_entity_required": "PROJECT_LOCAL_HEURISTIC"
+    },
+    "claim_boundary": {
+      "session_final_ttp_truth": false,
+      "correlation_confirmed_truth": false,
+      "insufficient_evidence_behavior": "fail_closed_bounded_hypothesis"
+    },
     "event_types": {
       "command": [
         "cowrie.command.input",
@@ -147,7 +157,13 @@
         "legacy_explicit_reviewed_fallback_rule_ids": [],
         "deferred_families": ["identity", "scheduled_task"],
         "typed_selection_required": true,
-        "regex_fallback_without_typed_support": "audit_only"
+        "regex_fallback_without_typed_support": "audit_only",
+        "hypothesis_authority": {
+          "may_derive_hypotheses": true,
+          "may_render_hypotheses": true,
+          "may_select_authoritative_hypothesis": false,
+          "may_authorize_response": false
+        }
       },
       "connected": [
         {

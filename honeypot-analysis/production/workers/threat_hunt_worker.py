@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from production.classification.trust import is_trusted_classification_event
 from production.correlation.session_ttp_correlation import correlation_allows_influence
+from production.correlation.semantics import CORRELATION_CONFIDENCE_SEMANTICS
 from production.utils.config import ProductionConfig
 from production.policies.alert_authority_policy import load_alert_authority_policy
 from production.correlation.observable_sightings import extract_session_observable_sightings
@@ -257,6 +258,7 @@ class ThreatHuntWorker:
             "observable_type": observable_type,
             "observable_value": observable_value,
             "relationship_confidence": confidence,
+            "confidence_semantics": CORRELATION_CONFIDENCE_SEMANTICS,
             "related_sighting_count": related.get("sighting_count") or 0,
             "related_first_seen": related.get("first_seen") or "",
             "related_last_seen": related.get("last_seen") or "",
@@ -302,6 +304,7 @@ class ThreatHuntWorker:
                 "observable_type": observable_type,
                 "observable_value": observable_value,
                 "confidence": confidence,
+                "confidence_semantics": CORRELATION_CONFIDENCE_SEMANTICS,
                 "job_id": job.get("job_id") or "",
                 "source_session_id": source_session_id,
                 "related_session_id": related_session_id,
@@ -340,6 +343,7 @@ class ThreatHuntWorker:
                 "alert_authority_policy_sha256": self.alert_authority_policy.sha256,
             },
             "confidence": confidence,
+            "confidence_semantics": CORRELATION_CONFIDENCE_SEMANTICS,
             "timestamp": utc_now(),
         }
 

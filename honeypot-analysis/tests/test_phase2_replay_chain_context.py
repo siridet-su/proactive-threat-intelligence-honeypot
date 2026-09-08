@@ -195,7 +195,9 @@ def test_retry_aware_selection_finds_later_complete_same_path_subsequence() -> N
         ],
     })
     selection = select_typed_semantic_chains(fact_set, [CHAIN_RULE])
-    assert selection["schema_version"] == "typed_semantic_chain_selection.v3"
+    # The current authoritative selector is v2; the former v3 assertion was
+    # a stale representation expectation (REPLAY-03), not a migration target.
+    assert selection["schema_version"] == "typed_semantic_chain_selection.v2"
     assert [match["status"] for match in selection["matches"]] == ["complete"]
     assert [finding["finding_type"] for finding in report["behavioral_findings"]] == [
         "connected_transfer_permission_execution"

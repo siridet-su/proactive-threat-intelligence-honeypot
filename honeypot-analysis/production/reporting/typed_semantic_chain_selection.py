@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 from copy import deepcopy
 from typing import Any
 
@@ -11,6 +12,15 @@ from production.utils.serialization import stable_json
 
 
 SCHEMA_VERSION = "typed_semantic_chain_selection.v2"
+PROJECT_LOCAL_HEURISTIC = "PROJECT_LOCAL_HEURISTIC"
+_CHRONOLOGY_QUALITIES = {
+    "timestamp_supported",
+    "fallback_input_order",
+    "mixed_timestamp",
+    "malformed_timestamp",
+    "contradictory_timestamp",
+    "insufficient_ordering",
+}
 
 
 def _clean(value: Any) -> str:
@@ -19,6 +29,175 @@ def _clean(value: Any) -> str:
 
 def _sha(value: Any) -> str:
     return hashlib.sha256(stable_json(value).encode("utf-8")).hexdigest()
+
+
+def _parsed_timestamp(value: Any) -> datetime | None:
+    text = _clean(value)
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _integer_or_none(value: Any) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def chronology_quality_for_records(records: Any) -> dict[str, Any]:
+    """Classify the evidence ordering without treating list order as time.
+
+    This is deliberately a small representation-level vocabulary.  It does
+    not assign a confidence score and never upgrades index/input order to
+    timestamp-proven chronology.
+    """
+
+    if not isinstance(records, (list, tuple)):
+        records = []
+    items = [item for item in records if isinstance(item, dict)]
+    indexed = []
+    for input_index, item in enumerate(items):
+        sequence_index = _integer_or_none(item.get("sequence_index"))
+        source_index = _integer_or_none(item.get("source_index"))
+        indexed.append((sequence_index, source_index, input_index, item))
+    indexed.sort(
+        key=lambda entry: (
+            entry[0] if entry[0] is not None else (
+                entry[1] if entry[1] is not None else entry[2]
+            ),
+            entry[1] if entry[1] is not None else entry[2],
+            entry[2],
+            _clean(entry[3].get("fact_id") or entry[3].get("evidence_id")),
+        )
+    )
+    items = [entry[3] for entry in indexed]
+    if not items:
+        return {
+            "quality": "insufficient_ordering",
+            "ordering_basis": "no_orderable_records",
+            "timestamp_count": 0,
+            "record_count": 0,
+        }
+    # ``timestamp`` is the event/fact timestamp.  Durable replay may expose
+    # only the receipt's canonical ``received_at``; that is still an
+    # authoritative timestamp, whereas sequence/source order alone is not.
+    raw_timestamps = [
+        _clean(item.get("timestamp") or item.get("received_at"))
+        for item in items
+    ]
+    present = [bool(value) for value in raw_timestamps]
+    if not any(present):
+        return {
+            "quality": "fallback_input_order",
+            "ordering_basis": "sequence_index_then_source_index",
+            "timestamp_count": 0,
+            "record_count": len(items),
+        }
+    parsed = [_parsed_timestamp(value) for value in raw_timestamps]
+    if any(value and parsed[index] is None for index, value in enumerate(raw_timestamps)):
+        quality = "malformed_timestamp"
+    elif not all(present):
+        quality = "mixed_timestamp"
+    elif any(
+        parsed[index] > parsed[index + 1]
+        for index in range(len(parsed) - 1)
+        if parsed[index] is not None and parsed[index + 1] is not None
+    ):
+        quality = "contradictory_timestamp"
+    else:
+        quality = "timestamp_supported"
+    return {
+        "quality": quality,
+        "ordering_basis": (
+            "timestamp_then_sequence_index"
+            if quality == "timestamp_supported"
+            else "sequence_index_then_source_index_with_timestamp_diagnostics"
+        ),
+        "timestamp_count": sum(present),
+        "record_count": len(items),
+    }
+
+
+def chronology_quality_for_fact_set(fact_set: dict[str, Any]) -> dict[str, Any]:
+    """Return the bounded chronology representation for a typed fact set."""
+
+    return chronology_quality_for_records(fact_set.get("facts") or [])
+
+
+def _selection_hash_basis(value: dict[str, Any]) -> dict[str, Any]:
+    basis = deepcopy(value)
+    basis.pop("selection_sha256", None)
+    return basis
+
+
+def validate_typed_chain_selection_provenance(
+    selection: Any,
+    match: Any,
+    *,
+    expected_status: str | None = None,
+) -> list[str]:
+    """Validate current selector provenance before it becomes a claim basis.
+
+    Historical selector-v1 records are readable by their existing adapters;
+    this validator is intentionally strict for the current v2 path.
+    """
+
+    errors: list[str] = []
+    if not isinstance(selection, dict):
+        return ["typed chain selection provenance is not an object"]
+    if selection.get("schema_version") != SCHEMA_VERSION:
+        errors.append("selector schema/version is not authoritative v2")
+    fact_hash = _clean(selection.get("fact_set_sha256")).lower()
+    if len(fact_hash) != 64 or any(char not in "0123456789abcdef" for char in fact_hash):
+        errors.append("selector fact_set_sha256 is invalid")
+    recorded = _clean(selection.get("selection_sha256")).lower()
+    if len(recorded) != 64 or recorded != _sha(_selection_hash_basis(selection)):
+        errors.append("selector selection_sha256 is invalid")
+    if not isinstance(match, dict):
+        errors.append("selector match provenance is not an object")
+        return errors
+    provenance = match.get("selector_provenance")
+    expected_keys = {
+        "schema_version", "claim_basis_type", "rule_id", "chain_id", "status"
+    }
+    if not isinstance(provenance, dict) or set(provenance) != expected_keys:
+        errors.append("selector match provenance shape is invalid")
+    else:
+        if provenance.get("schema_version") != SCHEMA_VERSION:
+            errors.append("selector match provenance schema/version is invalid")
+        if provenance.get("claim_basis_type") != SCHEMA_VERSION:
+            errors.append("selector claim-basis type is invalid")
+        for key in ("rule_id", "chain_id"):
+            if not _clean(provenance.get(key)):
+                errors.append(f"selector provenance {key} is required")
+        if provenance.get("status") not in {"complete", "incomplete"}:
+            errors.append("selector provenance status is invalid")
+    if not _clean(match.get("rule_id")) or not _clean(match.get("chain_id")):
+        errors.append("selector match rule_id and chain_id are required")
+    if expected_status and match.get("status") != expected_status:
+        errors.append("selector match status is incompatible")
+    if match.get("status") not in {"complete", "incomplete"}:
+        errors.append("selector match status is invalid")
+    if isinstance(provenance, dict):
+        if provenance.get("rule_id") != match.get("rule_id"):
+            errors.append("selector provenance rule_id mismatch")
+        if provenance.get("chain_id") != match.get("chain_id"):
+            errors.append("selector provenance chain_id mismatch")
+        if provenance.get("status") != match.get("status"):
+            errors.append("selector provenance status mismatch")
+    for key in ("fact_refs", "relationship_refs", "supporting_evidence_refs"):
+        if not isinstance(match.get(key), list) or any(
+            not isinstance(item, str) or not item.strip() for item in match.get(key) or []
+        ):
+            errors.append(f"selector match {key} is invalid")
+    return errors
 
 
 def _ordered_required_facts(
@@ -56,6 +235,7 @@ def _selection_for_rule(
         for item in fact_set.get("relationships") or []
         if isinstance(item, dict) and _clean(item.get("relationship_id"))
     }
+    chronology = chronology_quality_for_fact_set(fact_set)
     matches: list[dict[str, Any]] = []
     for chain in fact_set.get("chains") or []:
         if not isinstance(chain, dict) or chain.get("status") not in {
@@ -222,6 +402,18 @@ def _selection_for_rule(
             "rule_id": _clean(rule.get("rule_id")),
             "chain_id": _clean(chain.get("chain_id")),
             "status": "complete" if complete else "incomplete",
+            # These values are deliberately surfaced as local policy
+            # provenance.  They are not externally validated sufficiency
+            # thresholds and must not be read as calibrated evidence.
+            "numeric_provenance": PROJECT_LOCAL_HEURISTIC,
+            "heuristic_parameters": {
+                "minimum_incomplete_operation_count": (
+                    _integer_or_none(rule.get("minimum_incomplete_operation_count"))
+                ),
+                "same_entity_required": same_entity_rule,
+            },
+            "chronology_quality": chronology["quality"],
+            "chronology_basis": chronology["ordering_basis"],
             "matched_operation_types": selected_types,
             "missing_operation_types": required[len(selected_types):],
             "entity_ref": entity_refs[0] if entity_refs else "",
@@ -240,6 +432,13 @@ def _selection_for_rule(
                 "Cowrie-reported command success does not prove transfer completion, payload identity, execution effects, compromise, or persistence on a real host.",
             ],
         })
+        matches[-1]["selector_provenance"] = {
+            "schema_version": SCHEMA_VERSION,
+            "claim_basis_type": SCHEMA_VERSION,
+            "rule_id": matches[-1]["rule_id"],
+            "chain_id": matches[-1]["chain_id"],
+            "status": matches[-1]["status"],
+        }
     return matches
 
 
@@ -266,9 +465,19 @@ def select_typed_semantic_chains(
         "schema_version": SCHEMA_VERSION,
         "fact_set_sha256": _clean(fact_set.get("fact_set_sha256")),
         "matches": matches,
-            "authority": {
+        "numeric_provenance": PROJECT_LOCAL_HEURISTIC,
+        "selection_parameter_provenance": {
+            "minimum_incomplete_operation_count": PROJECT_LOCAL_HEURISTIC,
+            "same_entity_required": PROJECT_LOCAL_HEURISTIC,
+        },
+        "chronology": chronology_quality_for_fact_set(fact_set),
+        "authority": {
             "may_select_findings": True,
-            "may_select_hypotheses": True,
+            "may_derive_hypotheses": True,
+            "may_render_hypotheses": True,
+            "may_select_hypotheses": False,
+            "may_select_authoritative_hypothesis": False,
+            "may_authorize_response": False,
             "may_authorize_actions": False,
             "causality_claimed": False,
         },

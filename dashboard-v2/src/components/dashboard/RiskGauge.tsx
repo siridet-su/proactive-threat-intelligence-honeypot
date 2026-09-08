@@ -15,10 +15,9 @@ export function RiskGauge({ score, label }: RiskGaugeProps) {
   const strokeDasharray = `${(normalizedScore / 100) * (circumference / 2)} ${circumference}`;
 
   const getColor = () => {
-    if (normalizedScore < 40) return 'text-emerald-500';
-    if (normalizedScore < 70) return 'text-amber-500';
-    if (normalizedScore < 90) return 'text-orange-500';
-    return 'text-red-500';
+    if (normalizedScore < 40) return 'text-success';
+    if (normalizedScore < 70) return 'text-warning';
+    return 'text-danger';
   };
 
   return (
@@ -32,7 +31,7 @@ export function RiskGauge({ score, label }: RiskGaugeProps) {
             stroke="currentColor"
             strokeWidth="10"
             strokeLinecap="round"
-            className="text-slate-800"
+            className="text-border"
           />
           {/* Foreground Arc */}
           <path
@@ -42,21 +41,20 @@ export function RiskGauge({ score, label }: RiskGaugeProps) {
             strokeWidth="10"
             strokeLinecap="round"
             strokeDasharray={strokeDasharray}
-            className={cn('transition-all duration-1000 ease-out drop-shadow-[0_0_8px_currentColor]', getColor())}
+            className={cn('transition-colors duration-150', getColor())}
           />
         </svg>
         <div className="absolute bottom-0 left-0 right-0 text-center translate-y-2">
-          <span className="text-4xl font-black text-slate-100 drop-shadow-md">{score}</span>
-          <span className="text-sm font-medium text-slate-400 ml-1">/100</span>
+          <span className="text-3xl font-semibold text-text">{score}</span>
+          <span className="ml-1 text-sm font-medium text-text-muted">/100</span>
         </div>
       </div>
       
       <div className={cn(
-        'mt-6 px-4 py-1.5 rounded-full border text-sm font-bold tracking-widest uppercase shadow-[0_0_15px_rgba(0,0,0,0.2)]',
-        normalizedScore < 40 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-        normalizedScore < 70 ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-        normalizedScore < 90 ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' :
-        'bg-red-500/10 text-red-400 border-red-500/30 animate-pulse'
+        'ui-badge mt-6',
+        normalizedScore < 40 ? 'bg-success-subtle text-success border-success-border' :
+        normalizedScore < 70 ? 'bg-warning-subtle text-warning border-warning-border' :
+        'bg-danger-subtle text-danger border-danger-border'
       )}>
         {label} RISK
       </div>

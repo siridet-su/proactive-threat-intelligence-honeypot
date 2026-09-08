@@ -18,6 +18,12 @@ from typing import Any, Dict, Iterable, List, Tuple
 from production.classification.trust import is_trusted_classification_event
 from production.utils.serialization import stable_id, utc_now
 from production.correlation.session_evidence_graph import build_session_evidence_graph
+from production.correlation.semantics import (
+    CORRELATION_CONFIDENCE_SEMANTICS,
+    declared_confidence_semantics,
+    LEGACY_CORRELATION_CONFIDENCE_SEMANTICS,
+    is_valid_confidence_semantics,
+)
 from production.correlation.session_ttp_knowledge import (
     KNOWLEDGE_PACK_SCHEMA_VERSION,
     POLICY_SCHEMA_VERSION,
@@ -65,6 +71,16 @@ ALLOWED_CONDITION_TYPES = {
     "min_graph_count",
 }
 
+ALLOWED_RULE_TYPES = {
+    "DIRECT_COMMAND_RECONFIRMATION",
+    "DIRECT_EVENT_RECONFIRMATION",
+    "GENUINE_MULTI_EVENT_CORRELATION",
+    "MULTI_EVENT_CORRELATION",
+    "SINGLE_SESSION_THRESHOLD",
+    "THRESHOLD_CONTEXT_RULE",
+    "SESSION_CONTEXT_RULE",
+}
+
 EXTERNAL_REFERENCE_SOURCE_TYPES = {
     "mitre_attack_stix",
     "mitre_tie_generated_prior",
@@ -75,6 +91,20 @@ EXTERNAL_REFERENCE_SOURCE_TYPES = {
 }
 
 INFLUENCE_CONSUMERS = ("report", "prediction", "campaign", "threat_hunt", "alert")
+
+# These namespaces are intentionally separate.  The first is built only from
+# command/event mappings that passed the classification trust contract; the
+# second contains rule matches that are useful for report context but are not
+# ATT&CK authority.
+OBSERVED_TRUSTED_TTPS_KEY = "observed_trusted_ttps"
+CORRELATED_TTP_HYPOTHESES_KEY = "correlated_ttp_hypotheses"
+PROJECT_LOCAL_HEURISTIC = "PROJECT_LOCAL_HEURISTIC"
+TEMPORAL_SEMANTICS_ORDERED_SEQUENCE = "ordered_sequence"
+TEMPORAL_SEMANTICS_SESSION_SCOPED = "session_scoped_no_elapsed_window"
+TEMPORAL_SEMANTICS_TIME_BOUNDED = "time_bounded_correlation"
+TEMPORAL_RELATIONSHIP_ORDERED_SAME_SESSION = "ORDERED_SAME_SESSION_RELATIONSHIP"
+TEMPORAL_RELATIONSHIP_SESSION_SCOPED = "SAME_SESSION_SCOPE_NO_ELAPSED_WINDOW"
+TEMPORAL_RELATIONSHIP_TIME_BOUNDED = "TIME_BOUNDED_CORRELATION"
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -135,6 +165,250 @@ def load_knowledge(policy_path: str | Path = "", knowledge_pack_paths: Any = Non
 def _policy_body(policy_document: Dict[str, Any]) -> Dict[str, Any]:
     body = policy_document.get("policy", policy_document)
     return body if isinstance(body, dict) else {}
+
+
+def _correlation_confidence_semantics(policy_document: Dict[str, Any]) -> str:
+    """Return the declared score meaning, never an implied probability."""
+
+    return declared_confidence_semantics(
+        _policy_body(policy_document).get("confidence_semantics")
+    )
+
+
+def _classification_event_ref(
+    session_id: str,
+    index: int,
+    event: Dict[str, Any],
+) -> str:
+    """Return a stable reference without trusting a caller-supplied ID."""
+
+    explicit = _clean_text(
+        event.get("evidence_id")
+        or event.get("classification_event_id")
+        or event.get("event_id")
+    )
+    if explicit:
+        return explicit
+    return stable_id(
+        "classification-event",
+        {
+            "session_id": session_id or "unknown",
+            "index": index,
+            "ttp": _clean_text(event.get("ttp")),
+            "command": _clean_text(event.get("command") or event.get("input")),
+            "event_timestamp": _clean_text(event.get("event_timestamp")),
+        },
+    )
+
+
+def build_observed_trusted_ttps(
+    session_payload: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Aggregate trusted command/event mappings into a traceable session set.
+
+    Only events accepted by :func:`is_trusted_classification_event` are used.
+    Raw ``ttps``/``tactics`` aggregate fields are deliberately not treated as
+    trusted evidence because they do not carry the authority and provenance
+    needed to reconstruct the current contract.  The output order follows the
+    deterministic event order supplied by the session and is stable for a
+    given input.
+    """
+
+    session_id = _clean_text(session_payload.get("session_id")) or "unknown"
+    grouped: Dict[str, Dict[str, Any]] = {}
+    events = [
+        item
+        for item in _as_list(session_payload.get("classification_events"))
+        if isinstance(item, dict)
+    ]
+    for index, event in enumerate(events):
+        if not is_trusted_classification_event(event):
+            continue
+        raw_ttp = _clean_text(event.get("ttp")).upper()
+        if not raw_ttp or raw_ttp == "UNKNOWN":
+            continue
+        technique_id = main_ttp_id(raw_ttp)
+        if not technique_id:
+            continue
+        item = grouped.setdefault(
+            technique_id,
+            {
+                "observation_namespace": OBSERVED_TRUSTED_TTPS_KEY,
+                "technique_id": technique_id,
+                "source_ttp_values": [],
+                "source_subtechnique_values": [],
+                "tactics": [],
+                "classification_event_refs": [],
+                "command_evidence_refs": [],
+                "authority_decision_refs": [],
+                "evidence_refs": [],
+                "commands": [],
+                "sequence_indices": [],
+                "first_sequence_index": index,
+                "trust_tier": "trusted_observation",
+                "mapping_scope": "command_event_observation",
+                "mapping_semantics": "trusted_command_event_observation",
+                "authority": {
+                    "status": "trusted_observation",
+                    "correlation_may_override": False,
+                    "correlation_may_remove": False,
+                    "correlation_may_promote": False,
+                    "correlation_may_drive_prediction": False,
+                    "may_authorize_response": False,
+                    "canonical_write_allowed": False,
+                },
+                "_confidence_values": [],
+                "_confidence_semantics": [],
+            },
+        )
+        source_ttp = _clean_text(
+            event.get("source_ttp")
+            or event.get("source_subtechnique")
+            or event.get("ttp")
+        ).upper()
+        source_subtechnique = _clean_text(
+            event.get("source_subtechnique")
+            or (source_ttp if "." in source_ttp else "")
+        ).upper()
+        for key, value in (
+            ("source_ttp_values", source_ttp),
+            ("source_subtechnique_values", source_subtechnique),
+            ("tactics", _clean_text(event.get("tactic"))),
+        ):
+            if value and value not in item[key]:
+                item[key].append(value)
+        event_ref = _classification_event_ref(session_id, index, event)
+        for key in ("classification_event_refs", "evidence_refs"):
+            if event_ref not in item[key]:
+                item[key].append(event_ref)
+        command = _clean_text(event.get("command") or event.get("input"))
+        if command:
+            command_ref = stable_id(
+                "command-evidence",
+                {"session_id": session_id, "index": index, "command": command},
+            )
+            if command_ref not in item["command_evidence_refs"]:
+                item["command_evidence_refs"].append(command_ref)
+            if command not in item["commands"]:
+                item["commands"].append(command)
+        decision = event.get("authority_decision")
+        if isinstance(decision, dict):
+            decision_ref = _clean_text(
+                decision.get("decision_id") or decision.get("authority_decision_id")
+            )
+            if decision_ref and decision_ref not in item["authority_decision_refs"]:
+                item["authority_decision_refs"].append(decision_ref)
+        item["sequence_indices"].append(index)
+        try:
+            confidence = float(event.get("confidence"))
+        except (TypeError, ValueError):
+            confidence = None
+        if confidence is not None:
+            item["_confidence_values"].append(max(0.0, min(1.0, confidence)))
+        semantics = _clean_text(event.get("confidence_semantics"))
+        if semantics and semantics not in item["_confidence_semantics"]:
+            item["_confidence_semantics"].append(semantics)
+
+    output: List[Dict[str, Any]] = []
+    for item in sorted(
+        grouped.values(),
+        key=lambda value: (int(value.get("first_sequence_index", 0)), value["technique_id"]),
+    ):
+        confidence_values = item.pop("_confidence_values")
+        item["confidence"] = {
+            "min": round(min(confidence_values), 4) if confidence_values else None,
+            "average": round(sum(confidence_values) / len(confidence_values), 4)
+            if confidence_values
+            else None,
+            "count": len(confidence_values),
+        }
+        semantics_values = item.pop("_confidence_semantics")
+        item["confidence_semantics_values"] = semantics_values
+        item["confidence_semantics"] = (
+            semantics_values[0]
+            if len(semantics_values) == 1
+            else LEGACY_CORRELATION_CONFIDENCE_SEMANTICS
+            if not semantics_values
+            else "mixed_classification_event_score_semantics"
+        )
+        output.append(item)
+    return output
+
+
+def _rule_condition_types(rule: Dict[str, Any]) -> set[str]:
+    conditions = rule.get("conditions") or {}
+    if not isinstance(conditions, dict):
+        return set()
+    return {
+        _clean_text(condition.get("type"))
+        for group in ("all", "any", "none")
+        for condition in _as_list(conditions.get(group))
+        if isinstance(condition, dict) and _clean_text(condition.get("type"))
+    }
+
+
+def _rule_type(rule: Dict[str, Any]) -> str:
+    """Classify rule shape without changing matching behavior."""
+
+    declared = _clean_text(rule.get("rule_type"))
+    if declared in {
+        "DIRECT_COMMAND_RECONFIRMATION",
+        "DIRECT_EVENT_RECONFIRMATION",
+        "GENUINE_MULTI_EVENT_CORRELATION",
+        "MULTI_EVENT_CORRELATION",
+        "SINGLE_SESSION_THRESHOLD",
+        "THRESHOLD_CONTEXT_RULE",
+        "SESSION_CONTEXT_RULE",
+    }:
+        return declared
+    condition_types = _rule_condition_types(rule)
+    if condition_types & {"ordered_tactics", "ordered_ttps"}:
+        return "GENUINE_MULTI_EVENT_CORRELATION"
+    if condition_types & {"min_event_count", "min_login_failures", "min_graph_count"}:
+        return "SINGLE_SESSION_THRESHOLD"
+    if condition_types <= {"eventid", "eventid_prefix"}:
+        return "DIRECT_EVENT_RECONFIRMATION"
+    if condition_types & {"classification_ttp", "classification_tactic", "command_regex"}:
+        return "DIRECT_COMMAND_RECONFIRMATION"
+    return "SESSION_CONTEXT_RULE"
+
+
+def _temporal_semantics(rule: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose ordering separately from a measured elapsed-time window."""
+
+    window_keys = (
+        "time_window_seconds",
+        "elapsed_time_window_seconds",
+        "maxspan_seconds",
+        "timespan_seconds",
+        "maxspan",
+        "timespan",
+    )
+    window_value = next(
+        (rule.get(key) for key in window_keys if rule.get(key) is not None),
+        None,
+    )
+    condition_types = _rule_condition_types(rule)
+    if window_value is not None:
+        return {
+            "temporal_semantics": TEMPORAL_SEMANTICS_TIME_BOUNDED,
+            "temporal_relationship": TEMPORAL_RELATIONSHIP_TIME_BOUNDED,
+            "temporal_window_present": True,
+            "temporal_window": window_value,
+        }
+    if condition_types & {"ordered_tactics", "ordered_ttps"}:
+        return {
+            "temporal_semantics": TEMPORAL_SEMANTICS_ORDERED_SEQUENCE,
+            "temporal_relationship": TEMPORAL_RELATIONSHIP_ORDERED_SAME_SESSION,
+            "temporal_window_present": False,
+            "temporal_window": None,
+        }
+    return {
+        "temporal_semantics": TEMPORAL_SEMANTICS_SESSION_SCOPED,
+        "temporal_relationship": TEMPORAL_RELATIONSHIP_SESSION_SCOPED,
+        "temporal_window_present": False,
+        "temporal_window": None,
+    }
 
 
 class SessionEvidence:
@@ -449,6 +723,13 @@ def correlation_allows_influence(item: Dict[str, Any], consumer: str) -> bool:
     name = _clean_text(consumer).lower()
     if name not in INFLUENCE_CONSUMERS:
         return False
+    # A malformed explicit marker must never authorize a stronger consumer.
+    # Missing metadata is retained as an explicitly unresolved legacy value for
+    # historical records and compatibility fixtures.
+    if name != "report" and not is_valid_confidence_semantics(
+        item.get("confidence_semantics"), allow_absent=True
+    ):
+        return False
     if name == "report":
         return True
     scope = item.get("influence_scope") or {}
@@ -482,19 +763,32 @@ def correlate_session(
         policy_document = normalize_correlation_document(policy_document)
     body = _policy_body(policy_document)
     if not body.get("enabled", True):
+        semantics = _correlation_confidence_semantics(policy_document)
+        observed_trusted_ttps = build_observed_trusted_ttps(session_payload)
         return {
             "schema_version": SCHEMA_VERSION,
             "enabled": False,
+            "confidence_semantics": semantics,
+            OBSERVED_TRUSTED_TTPS_KEY: observed_trusted_ttps,
+            CORRELATED_TTP_HYPOTHESES_KEY: [],
             "correlations": [],
             "evidence_graph": build_session_evidence_graph(session_payload),
-            "summary": {"status": "disabled", "correlation_count": 0},
+            "summary": {
+                "status": "disabled",
+                "correlation_count": 0,
+                "observed_trusted_ttp_count": len(observed_trusted_ttps),
+                "confidence_semantics": semantics,
+                "correlation_output_namespace": CORRELATED_TTP_HYPOTHESES_KEY,
+            },
         }
 
     evidence_graph = build_session_evidence_graph(session_payload)
     evidence = SessionEvidence(session_payload, evidence_graph)
+    observed_trusted_ttps = build_observed_trusted_ttps(session_payload)
     correlations: List[Dict[str, Any]] = []
     policy_refs = policy_document.get("policy_id") or body.get("policy_id") or ""
     knowledge_summary = policy_document.get("knowledge_summary") or {}
+    confidence_semantics = _correlation_confidence_semantics(policy_document)
     for rule in body.get("rules") or []:
         if not isinstance(rule, dict) or not bool(rule.get("enabled", True)):
             continue
@@ -504,6 +798,36 @@ def correlate_session(
         rule_id = _clean_text(rule.get("rule_id"))
         confidence = _clamp_confidence(rule.get("confidence"), 0.5)
         prediction_eligibility = _prediction_eligibility(rule)
+        temporal = _temporal_semantics(rule)
+        rule_type = _rule_type(rule)
+        source_document_type = _clean_text(
+            rule.get("source_document_type") or "policy"
+        )
+        numeric_provenance = _clean_text(
+            rule.get("numeric_provenance")
+            or body.get("numeric_provenance")
+            or PROJECT_LOCAL_HEURISTIC
+        )
+        ontology_binding = rule.get("ontology_binding")
+        if not isinstance(ontology_binding, dict):
+            ontology_binding = {}
+        ontology_status = _clean_text(
+            rule.get("ontology_status") or ontology_binding.get("status")
+        )
+        claim_status = (
+            "ONTOLOGY_MISMATCH"
+            if ontology_status in {
+                "invalid_identifier",
+                "ontology_mismatch",
+                "ontology_version_mismatch",
+            }
+            else "UNRESOLVED_ONTOLOGY"
+            if ontology_status == "unresolved"
+            else "UNREVIEWED_RULE"
+            if source_document_type == "knowledge_pack"
+            else "CONTEXTUAL_ONLY"
+        )
+        optional_pack_status = _clean_text(rule.get("optional_pack_status"))
         influence_scope = {
             "report": {
                 "requested": True,
@@ -537,9 +861,45 @@ def correlate_session(
             "tactic": _clean_text(rule.get("tactic")),
             "technique_name": _clean_text(rule.get("technique_name")),
             "confidence": confidence,
+            # ``confidence`` remains a compatibility alias.  The canonical
+            # meaning is a bounded deterministic rule strength, never a
+            # calibrated probability.
+            "strength": confidence,
+            "strength_semantics": confidence_semantics,
+            "confidence_semantics": confidence_semantics,
+            "numeric_provenance": numeric_provenance,
             "evidence_type": _clean_text(rule.get("evidence_type") or "session_correlated_candidate"),
             "source_type": _clean_text(rule.get("source_type")),
-            "temporal_claim": bool(rule.get("temporal_claim", False)),
+            "output_namespace": CORRELATED_TTP_HYPOTHESES_KEY,
+            "correlation_kind": "contextual",
+            "rule_type": rule_type,
+            "claim_status": claim_status,
+            "ontology_status": ontology_status or "not_applicable",
+            "ontology_binding": ontology_binding,
+            "optional_pack_status": optional_pack_status,
+            "authority": {
+                "status": "non_authoritative",
+                "can_override_trusted": False,
+                "can_remove_trusted": False,
+                "can_promote_trusted": False,
+                "may_drive_prediction": False,
+                "may_authorize_response": False,
+                "canonical_write_allowed": False,
+            },
+            # ``temporal_claim`` is retained as a compatibility field, but it
+            # now reflects an actual elapsed-time predicate only.  Historical
+            # policy metadata used ``true`` for ordered subsequences; exposing
+            # that value would incorrectly imply bounded temporal proximity.
+            "temporal_claim": bool(temporal["temporal_window_present"]),
+            **temporal,
+            "chronology_quality": _clean_text(
+                (evidence_graph.get("summary") or {}).get("chronology_quality")
+                or evidence_graph.get("chronology_quality")
+            ) or "not_available",
+            "chronology_basis": _clean_text(
+                (evidence_graph.get("summary") or {}).get("chronology_basis")
+                or evidence_graph.get("chronology_basis")
+            ),
             "apply_to_prediction": prediction_eligibility["effective"],
             "apply_to_prediction_requested": prediction_eligibility["requested"],
             "prediction_eligibility": prediction_eligibility,
@@ -551,7 +911,7 @@ def correlate_session(
             "provenance": rule.get("provenance") or {},
             "policy_id": policy_refs,
             "policy_version": policy_document.get("version") or body.get("version") or "",
-            "source_document_type": _clean_text(rule.get("source_document_type") or "policy"),
+            "source_document_type": source_document_type,
             "source_document_id": _clean_text(rule.get("source_document_id") or rule.get("source_policy_id") or policy_refs),
             "source_document_version": _clean_text(rule.get("source_document_version")),
             "knowledge_pack_id": _clean_text(rule.get("knowledge_pack_id")),
@@ -573,9 +933,36 @@ def correlate_session(
     summary = {
         "status": "applied",
         "correlation_count": len(correlations),
+        "observed_trusted_ttp_count": len(observed_trusted_ttps),
+        "correlation_output_namespace": CORRELATED_TTP_HYPOTHESES_KEY,
+        "observed_output_namespace": OBSERVED_TRUSTED_TTPS_KEY,
+        "correlation_authority": {
+            "status": "non_authoritative",
+            "can_override_trusted": False,
+            "can_remove_trusted": False,
+            "can_promote_trusted": False,
+            "may_drive_prediction": False,
+            "may_authorize_response": False,
+            "canonical_write_allowed": False,
+        },
         "prediction_input_count": len(ttps_for_prediction),
         "policy_id": policy_refs,
         "policy_version": policy_document.get("version") or "",
+        "confidence_semantics": confidence_semantics,
+        "numeric_provenance": _clean_text(
+            body.get("numeric_provenance") or PROJECT_LOCAL_HEURISTIC
+        ),
+        "temporal_semantics": _clean_text(
+            body.get("temporal_semantics") or TEMPORAL_SEMANTICS_SESSION_SCOPED
+        ),
+        "temporal_window_present": bool(
+            body.get("time_window_seconds")
+            or body.get("elapsed_time_window_seconds")
+            or body.get("maxspan_seconds")
+            or body.get("timespan_seconds")
+            or body.get("maxspan")
+            or body.get("timespan")
+        ),
         "source_types": sorted({item.get("source_type") for item in correlations if item.get("source_type")}),
         "correlated_ttps_for_prediction": _unique(ttps_for_prediction),
         "correlated_tactics_for_prediction": _unique(tactics_for_prediction),
@@ -602,6 +989,9 @@ def correlate_session(
     return {
         "schema_version": SCHEMA_VERSION,
         "enabled": True,
+        "confidence_semantics": confidence_semantics,
+        OBSERVED_TRUSTED_TTPS_KEY: observed_trusted_ttps,
+        CORRELATED_TTP_HYPOTHESES_KEY: correlations,
         "evidence_graph": evidence_graph,
         "correlations": correlations,
         "summary": summary,
@@ -627,20 +1017,77 @@ def apply_session_ttp_correlations(
     payload = dict(session_payload)
     payload["session_evidence_graph"] = result.get("evidence_graph") or {}
     payload["session_evidence_graph_summary"] = (result.get("evidence_graph") or {}).get("summary") or {}
+    payload[OBSERVED_TRUSTED_TTPS_KEY] = result.get(OBSERVED_TRUSTED_TTPS_KEY) or []
+    payload[CORRELATED_TTP_HYPOTHESES_KEY] = result.get(
+        CORRELATED_TTP_HYPOTHESES_KEY
+    ) or []
     payload["session_ttp_correlations"] = result["correlations"]
     payload["session_ttp_correlation_summary"] = result["summary"]
     return payload
 
 
-def validate_policy_document(document: Dict[str, Any]) -> List[str]:
+def validate_policy_document(
+    document: Dict[str, Any],
+    *,
+    require_current_semantics: bool = False,
+) -> List[str]:
     errors: List[str] = []
     if document.get("schema_version") not in {POLICY_SCHEMA_VERSION, KNOWLEDGE_PACK_SCHEMA_VERSION}:
         errors.append(f"schema_version must be {POLICY_SCHEMA_VERSION} or {KNOWLEDGE_PACK_SCHEMA_VERSION}")
+    raw_body = _policy_body(document)
+    raw_semantics = raw_body.get("confidence_semantics")
+    raw_output_contract = raw_body.get("correlation_output_contract")
+    raw_numeric_provenance = raw_body.get("numeric_provenance")
+    raw_temporal_semantics = raw_body.get("temporal_semantics")
+    if raw_semantics is not None and not is_valid_confidence_semantics(
+        raw_semantics, allow_absent=False
+    ):
+        errors.append(
+            "policy.confidence_semantics must be a recognized non-probability marker"
+        )
+    if require_current_semantics and raw_semantics != CORRELATION_CONFIDENCE_SEMANTICS:
+        errors.append(
+            "policy.confidence_semantics must equal "
+            f"{CORRELATION_CONFIDENCE_SEMANTICS}"
+        )
+    if require_current_semantics and not isinstance(raw_output_contract, dict):
+        errors.append("policy.correlation_output_contract is required")
+    if require_current_semantics and not _clean_text(raw_numeric_provenance):
+        errors.append("policy.numeric_provenance is required")
+    if require_current_semantics and not _clean_text(raw_temporal_semantics):
+        errors.append("policy.temporal_semantics is required")
     document = normalize_correlation_document(document)
     body = _policy_body(document)
     if not isinstance(body, dict) or not body:
         errors.append("policy object is required")
         return errors
+    output_contract = body.get("correlation_output_contract")
+    required_contract = {
+        "observed_namespace": OBSERVED_TRUSTED_TTPS_KEY,
+        "context_namespace": CORRELATED_TTP_HYPOTHESES_KEY,
+        "authority": "non_authoritative",
+        "can_override_observed": False,
+        "can_remove_observed": False,
+        "can_promote_trusted": False,
+        "may_drive_prediction": False,
+        "may_authorize_response": False,
+        "canonical_write_allowed": False,
+    }
+    if not isinstance(output_contract, dict):
+        errors.append("policy.correlation_output_contract is required")
+    else:
+        for field, expected in required_contract.items():
+            if output_contract.get(field) != expected:
+                errors.append(
+                    "policy.correlation_output_contract."
+                    f"{field} must equal {expected!r}"
+                )
+    numeric_provenance = _clean_text(body.get("numeric_provenance"))
+    if not numeric_provenance:
+        errors.append("policy.numeric_provenance is required")
+    temporal_semantics = _clean_text(body.get("temporal_semantics"))
+    if not temporal_semantics:
+        errors.append("policy.temporal_semantics is required")
     if "enabled" in body and not isinstance(body.get("enabled"), bool):
         errors.append("policy.enabled must be boolean")
     rules = body.get("rules") or []
@@ -663,6 +1110,13 @@ def validate_policy_document(document: Dict[str, Any]) -> List[str]:
             errors.append(f"{path}.evidence_type must be one of {sorted(ALLOWED_EVIDENCE_TYPES)}")
         if not (0.0 <= _safe_float(rule.get("confidence"), -1.0) <= 1.0):
             errors.append(f"{path}.confidence must be between 0 and 1")
+        if not _clean_text(rule.get("numeric_provenance")):
+            errors.append(f"{path}.numeric_provenance is required")
+        declared_rule_type = _clean_text(rule.get("rule_type"))
+        if declared_rule_type and declared_rule_type not in ALLOWED_RULE_TYPES:
+            errors.append(
+                f"{path}.rule_type must be one of {sorted(ALLOWED_RULE_TYPES)}"
+            )
         if "temporal_claim" in rule and not isinstance(rule.get("temporal_claim"), bool):
             errors.append(f"{path}.temporal_claim must be boolean")
         for consumer in ("prediction", "campaign", "threat_hunt", "alert"):

@@ -493,7 +493,10 @@ class ProductionConfig:
     mitre_attack_path: str = ""
     runtime_feed_provenance_path: str = ""
     enable_feed_loading: bool = True
-    enable_securebert: bool = True
+    # Final runtime is deterministic-rule authoritative with optional FINAL_S1
+    # advisory output.  SecureBERT remains an explicit compatibility/research
+    # opt-in and is not loaded by the default final configuration.
+    enable_securebert: bool = False
     securebert_model_path: str = "models/securebert_ttp"
     securebert_checkpoint_path: str = ""
     securebert_device: str = "auto"
@@ -506,10 +509,17 @@ class ProductionConfig:
     enable_actor_attribution: bool = False
     classification_policy: Dict[str, Any] = field(default_factory=lambda: {
         "strategy": "notebook_merge",
+        # Historical SecureBERT candidate threshold; it is not an S1 margin
+        # threshold and has no effect when SecureBERT is disabled.
         "bert_min_confidence": 0.55,
         "keyword_fallback_on_low_confidence": True,
         "keyword_fallback_on_error": True,
         "rule_review_mode": "reviewed_only",
+        # Optional frozen FINAL_S1 LinearSVC metadata.  Disabled by default;
+        # when enabled this remains advisory-only and never changes rule
+        # authority.
+        "s1_advisory_enabled": False,
+        "s1_advisory_model_path": "",
     })
     classification_rules_path: str = "configs/classification_rules.trusted.json"
     classifier_environment_path: str = "configs/next_behavior_classifier_environment.v1.json"
@@ -589,6 +599,9 @@ class ProductionConfig:
         "command_pattern_command_limit": 6,
         "command_pattern_token_limit": 3,
         "emit_observational_signals": True,
+        "confidence_semantics": "developer_defined_heuristic_policy_strength_not_probability",
+        "strength_semantics": "developer_defined_heuristic_policy_strength_not_probability",
+        "numeric_provenance": "PROJECT_LOCAL_HEURISTIC",
         "field_weights": {
             "hassh_fingerprint": 0.45,
             "ja3_fingerprint": 0.35,
