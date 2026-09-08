@@ -1,18 +1,28 @@
 "use client";
 
-import { useThemePreference } from "./ThemeProvider";
-import { parseTheme, setThemePreference } from "@/lib/theme";
+import { Moon, Sun } from "lucide-react";
+
+import { useResolvedTheme } from "./ThemeProvider";
+import { requestThemePreference } from "@/lib/theme";
 
 export default function ThemeToggle() {
-  const preference = useThemePreference();
+  const theme = useResolvedTheme();
+  const targetTheme = theme === "dark" ? "light" : "dark";
+  const ToggleIcon = targetTheme === "dark" ? Moon : Sun;
+
   return (
-    <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-text-muted">
-      <span>Theme</span>
-      <select className="ui-field w-auto text-xs" value={preference} onChange={event => setThemePreference(parseTheme(event.target.value))}>
-        <option value="system">System</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
-    </label>
+    <button
+      type="button"
+      className="pti-theme-toggle ui-button h-9 min-h-9 w-10 shrink-0 p-0"
+      aria-label={`Switch to ${targetTheme} mode`}
+      title={`Switch to ${targetTheme} mode`}
+      onClick={() => requestThemePreference(targetTheme)}
+    >
+      <span className="pti-theme-toggle-spark pti-theme-toggle-spark-one" aria-hidden="true" />
+      <span className="pti-theme-toggle-spark pti-theme-toggle-spark-two" aria-hidden="true" />
+      <span className="pti-theme-toggle-spark pti-theme-toggle-spark-three" aria-hidden="true" />
+      <ToggleIcon className="pti-theme-toggle-glyph h-5 w-5 text-primary" aria-hidden="true" />
+      <span className="sr-only">Switch to {targetTheme} mode</span>
+    </button>
   );
 }

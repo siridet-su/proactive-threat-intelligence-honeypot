@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import clientPromise from "@/lib/mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 import { getSessionFromRequest, isAdmin, revokeOperatorSessions } from "@/lib/auth/session";
 
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   if (!session || session.mustChangePassword) return unauthorized();
   if (!isAdmin(session)) return forbidden();
   try {
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
     const users = await db.collection("users").find({}).toArray();
     return NextResponse.json(users.map((user) => ({
@@ -40,30 +40,60 @@ export async function POST(request: Request) {
   if (!session || session.mustChangePassword) return unauthorized();
   if (!isAdmin(session)) return forbidden();
   try {
-    const data = await request.json();
-    const client = await clientPromise;
+    const data: unknown = await request.json();
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return NextResponse.json({ error: "Invalid operator details" }, { status: 400 });
+    }
+
+    const candidate = data as Record<string, unknown>;
+    const fullName = typeof candidate.fullName === "string" ? candidate.fullName.trim() : "";
+    const email = typeof candidate.email === "string" ? candidate.email.trim() : "";
+    const position = typeof candidate.position === "string" ? candidate.position.trim() : "";
+    const role = candidate.role === "Admin" ? "Admin" : candidate.role === "Supporter" ? "Supporter" : "";
+    const initialPassword = typeof candidate.initialPassword === "string" ? candidate.initialPassword : "";
+
+    if (!fullName || !email || !position || !role || initialPassword.length < 8) {
+      return NextResponse.json({ error: "Enter complete operator details and an access key of at least 8 characters" }, { status: 400 });
+    }
+
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
-    // สุ่ม Operator ID เช่น OP_4402
-    const operatorId = `OP_${Math.floor(1000 + Math.random() * 9000)}`;
+    let operatorId = "";
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidateId = `OP_${Math.floor(1000 + Math.random() * 9000)}`;
+      const existing = await db.collection("users").findOne({ operatorId: candidateId }, { projection: { _id: 1 } });
+      if (!existing) {
+        operatorId = candidateId;
+        break;
+      }
+    }
+    if (!operatorId) return NextResponse.json({ error: "Unable to allocate an operator ID. Please try again." }, { status: 503 });
 
-    // ตั้งค่ารหัสผ่านเริ่มต้นเป็น default123 และแฮช
-    const defaultPassword = await bcrypt.hash("default123", 10);
+    const password = await bcrypt.hash(initialPassword, 10);
 
     const newUser = {
       operatorId,
-      fullName: data.fullName,
-      email: data.email,
-      position: data.position,
-      role: data.role,
-      password: defaultPassword,
-      isFirstLogin: true, // บังคับเปลี่ยนรหัสผ่าน
+      fullName,
+      email,
+      position,
+      role,
+      password,
+      isFirstLogin: true,
       status: "Active",
       createdAt: new Date(),
     };
 
     await db.collection("users").insertOne(newUser);
-    return NextResponse.json({ success: true, user: newUser });
+    return NextResponse.json({ success: true, user: {
+      operatorId: newUser.operatorId,
+      fullName: newUser.fullName,
+      email: newUser.email,
+      position: newUser.position,
+      role: newUser.role,
+      status: newUser.status,
+      createdAt: newUser.createdAt,
+    } });
   } catch {
     return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
   }
@@ -80,7 +110,7 @@ export async function PUT(request: Request) {
     }
     const administrator = isAdmin(session);
     if (!administrator && data.operatorId !== session.operatorId) return forbidden();
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
     const updateData: Record<string, unknown> = {
@@ -119,7 +149,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Invalid operator ID" }, { status: 400 });
     }
     if (operatorId === session.operatorId) return NextResponse.json({ error: "You cannot delete your own account" }, { status: 400 });
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
     await db.collection("users").deleteOne({ operatorId });

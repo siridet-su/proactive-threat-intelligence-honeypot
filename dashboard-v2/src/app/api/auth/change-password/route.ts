@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import clientPromise from "@/lib/mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 import { getSessionFromRequest, refreshSessionToken, sessionCookie } from "@/lib/auth/session";
 
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     if (typeof newPassword !== "string" || newPassword.length < 8) {
       return NextResponse.json({ success: false, error: "Access key must contain at least 8 characters." }, { status: 400 });
     }
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);

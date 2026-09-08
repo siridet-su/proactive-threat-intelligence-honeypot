@@ -1,9 +1,23 @@
 "use client";
-import { useState, useEffect } from "react";
-import { Settings, User, ShieldCheck, Key, Edit2, X, Info } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Settings, User, ShieldCheck, Key, Edit2, X, Info, LoaderCircle } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardProfile } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
+import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
+import { useModalFocusTrap } from "@/lib/useModalFocusTrap";
+
+type OperationNotice = {
+  kind: OperationToastKind;
+  title: string;
+  description: string;
+};
+
+async function getRequestError(response: Response, fallback: string) {
+  const payload: unknown = await response.json().catch(() => null);
+  if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") return payload.error;
+  return fallback;
+}
 
 export default function ProfilePage() {
   const [user, setUser] = useState<DashboardProfile | null>(null);
@@ -11,12 +25,93 @@ export default function ProfilePage() {
 
   // Modals state
   const [isEditInfoOpen, setIsEditInfoOpen] = useState(false);
+  const [isEditInfoPresent, setIsEditInfoPresent] = useState(false);
   const [isEditPasswordOpen, setIsEditPasswordOpen] = useState(false);
+  const [isEditPasswordPresent, setIsEditPasswordPresent] = useState(false);
 
   // Forms state
   const [infoForm, setInfoForm] = useState({ fullName: "", email: "" });
   const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
+  const [infoError, setInfoError] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [isSavingInfo, setIsSavingInfo] = useState(false);
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+  const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
+  const operationNoticeTimer = useRef<number | null>(null);
+  const editInfoCloseTimer = useRef<number | null>(null);
+  const editPasswordCloseTimer = useRef<number | null>(null);
+  const editInfoDialogRef = useRef<HTMLElement | null>(null);
+  const editPasswordDialogRef = useRef<HTMLElement | null>(null);
+
+  useModalFocusTrap(isEditInfoOpen, editInfoDialogRef);
+  useModalFocusTrap(isEditPasswordOpen, editPasswordDialogRef);
+
+  useEffect(() => () => {
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+    if (editInfoCloseTimer.current !== null) window.clearTimeout(editInfoCloseTimer.current);
+    if (editPasswordCloseTimer.current !== null) window.clearTimeout(editPasswordCloseTimer.current);
+  }, []);
+
+  const openEditInfo = () => {
+    if (editInfoCloseTimer.current !== null) window.clearTimeout(editInfoCloseTimer.current);
+    setInfoError("");
+    setIsEditInfoPresent(true);
+    window.requestAnimationFrame(() => setIsEditInfoOpen(true));
+  };
+
+  const closeEditInfo = useCallback(() => {
+    if (isSavingInfo) return;
+    setIsEditInfoOpen(false);
+    if (editInfoCloseTimer.current !== null) window.clearTimeout(editInfoCloseTimer.current);
+    editInfoCloseTimer.current = window.setTimeout(() => setIsEditInfoPresent(false), 180);
+  }, [isSavingInfo]);
+
+  const openEditPassword = () => {
+    if (editPasswordCloseTimer.current !== null) window.clearTimeout(editPasswordCloseTimer.current);
+    setPasswordError("");
+    setPasswordForm({ newPassword: "", confirmPassword: "" });
+    setIsEditPasswordPresent(true);
+    window.requestAnimationFrame(() => setIsEditPasswordOpen(true));
+  };
+
+  const closeEditPassword = useCallback(() => {
+    if (isSavingPassword) return;
+    setIsEditPasswordOpen(false);
+    if (editPasswordCloseTimer.current !== null) window.clearTimeout(editPasswordCloseTimer.current);
+    editPasswordCloseTimer.current = window.setTimeout(() => setIsEditPasswordPresent(false), 180);
+  }, [isSavingPassword]);
+
+  useEffect(() => {
+    if (!isEditInfoPresent && !isEditPasswordPresent) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (isEditInfoPresent && !isSavingInfo) closeEditInfo();
+        if (isEditPasswordPresent && !isSavingPassword) closeEditPassword();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = oldOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isEditInfoPresent, isEditPasswordPresent, isSavingInfo, isSavingPassword, closeEditInfo, closeEditPassword]);
+
+  const showOperationNotice = (notice: OperationNotice) => {
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+    setOperationNotice(notice);
+    operationNoticeTimer.current = window.setTimeout(() => {
+      setOperationNotice(null);
+      operationNoticeTimer.current = null;
+    }, 4800);
+  };
+
+  const dismissOperationNotice = () => {
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+    operationNoticeTimer.current = null;
+    setOperationNotice(null);
+  };
 
   const fetchProfile = async () => {
     try {
@@ -49,45 +144,57 @@ export default function ProfilePage() {
 
   const handleInfoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-    const res = await fetch("/api/users", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        operatorId: user.operatorId,
-        fullName: infoForm.fullName,
-        email: infoForm.email,
-        position: user.position, // ส่งค่าเดิมกลับไปเพื่อไม่ให้หาย
-        role: user.role
-      })
-    });
+    if (!user || isSavingInfo) return;
+    setInfoError("");
+    setIsSavingInfo(true);
 
-    if (res.ok) {
-      alert("Personal information updated.");
-      setIsEditInfoOpen(false);
-      fetchProfile();
+    try {
+      const res = await fetch("/api/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operatorId: user.operatorId,
+          fullName: infoForm.fullName,
+          email: infoForm.email,
+          position: user.position,
+          role: user.role,
+        }),
+      });
+      if (!res.ok) throw new Error(await getRequestError(res, "Personal information could not be updated."));
+      closeEditInfo();
+      void fetchProfile();
+      showOperationNotice({ kind: "success", title: "Profile updated", description: "Personal information was saved successfully." });
+    } catch (error) {
+      setInfoError(error instanceof Error ? error.message : "Personal information could not be updated. Please try again.");
+    } finally {
+      setIsSavingInfo(false);
     }
   };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || isSavingPassword) return;
+    setPasswordError("");
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordError("Passwords do not match.");
       return;
     }
+    setIsSavingPassword(true);
 
-    const res = await fetch("/api/auth/change-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operatorId: user.operatorId, newPassword: passwordForm.newPassword }),
-    });
-
-    if (res.ok) {
-      alert("Security credentials updated successfully.");
-      setIsEditPasswordOpen(false);
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operatorId: user.operatorId, newPassword: passwordForm.newPassword }),
+      });
+      if (!res.ok) throw new Error(await getRequestError(res, "Security credentials could not be updated."));
+      closeEditPassword();
       setPasswordForm({ newPassword: "", confirmPassword: "" });
-      setPasswordError("");
+      showOperationNotice({ kind: "success", title: "Credentials updated", description: "Your access key was updated successfully." });
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : "Security credentials could not be updated. Please try again.");
+    } finally {
+      setIsSavingPassword(false);
     }
   };
 
@@ -125,10 +232,12 @@ export default function ProfilePage() {
               </div>
               <div>
                 <p className="mb-1 text-xs text-text-subtle">Clearance level</p>
-                <p className="flex items-center gap-2 text-text">
-                  <span className={`h-2 w-2 rounded-full ${user.role === 'Admin' ? 'bg-primary' : 'bg-success'}`} aria-hidden="true"></span>
-                  {user.role === 'Admin' ? 'Tier 4 (Admin)' : 'Tier 2 (Supporter)'}
-                </p>
+                <div className="mt-1">
+                  <span className={`ui-badge ${user.role === 'Admin' ? 'border-primary-border bg-primary-subtle text-primary' : 'border-neutral-border bg-neutral-subtle text-text-muted'}`}>
+                    <span className={`h-2 w-2 rounded-full ${user.role === 'Admin' ? 'bg-primary' : 'bg-neutral'}`} aria-hidden="true" />
+                    {user.role === 'Admin' ? 'Level 4 (Admin)' : 'Level 2 (Supporter)'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -143,7 +252,7 @@ export default function ProfilePage() {
               <h3 className="flex items-center gap-2 text-base font-semibold text-text">
                 <User className="h-5 w-5 text-primary" aria-hidden="true" /> Personal information
               </h3>
-              <button onClick={() => setIsEditInfoOpen(true)} className="ui-button min-h-9 px-3 text-xs">
+              <button onClick={openEditInfo} className="ui-button min-h-9 px-3 text-xs">
                 <Edit2 className="h-3.5 w-3.5" aria-hidden="true" /> Edit information
               </button>
             </div>
@@ -177,7 +286,7 @@ export default function ProfilePage() {
                 <h4 className="mb-1 text-sm font-semibold text-text">Authentication credentials</h4>
                 <p className="text-sm text-text-muted">Update your access key regularly to maintain security.</p>
               </div>
-              <button onClick={() => setIsEditPasswordOpen(true)} className="ui-button shrink-0 px-3 text-xs">
+              <button onClick={openEditPassword} className="ui-button shrink-0 px-3 text-xs">
                 <Key className="h-3.5 w-3.5" aria-hidden="true" /> Change password
               </button>
             </div>
@@ -187,55 +296,59 @@ export default function ProfilePage() {
       </div>
 
       {/* Modal: Edit Personal Info */}
-      {isEditInfoOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-          <div className="ui-panel w-full max-w-md p-6 shadow-[var(--shadow-raised)]">
+      {isEditInfoPresent && (
+        <div data-open={isEditInfoOpen} onClick={(e) => { if (e.target === e.currentTarget && !isSavingInfo) closeEditInfo(); }} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <section ref={editInfoDialogRef} data-open={isEditInfoOpen} className="pti-modal-panel ui-panel w-full max-w-md p-6 shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="edit-personal-title" tabIndex={-1}>
             <div className="mb-6 flex items-center justify-between gap-4">
-              <h3 className="text-lg font-semibold text-text">Edit personal information</h3>
-              <button onClick={() => setIsEditInfoOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close edit personal information"><X className="h-5 w-5"/></button>
+              <h3 id="edit-personal-title" className="text-lg font-semibold text-text">Edit personal information</h3>
+              <button onClick={closeEditInfo} className="ui-button min-h-9 px-2" aria-label="Close edit personal information" disabled={isSavingInfo}><X className="h-5 w-5"/></button>
             </div>
-            <form onSubmit={handleInfoSubmit} className="space-y-4">
+            <form onSubmit={handleInfoSubmit} className="space-y-4" aria-busy={isSavingInfo}>
               <div>
                 <label htmlFor="profile-full-name" className="text-sm font-medium text-text-muted">Full name</label>
-                <input id="profile-full-name" type="text" value={infoForm.fullName} onChange={(e) => setInfoForm({...infoForm, fullName: e.target.value})} required className="ui-field mt-2" />
+                <input id="profile-full-name" type="text" value={infoForm.fullName} onChange={(e) => setInfoForm({...infoForm, fullName: e.target.value})} required className="ui-field mt-2" disabled={isSavingInfo} data-autofocus />
               </div>
               <div>
                 <label htmlFor="profile-email" className="text-sm font-medium text-text-muted">Email</label>
-                <input id="profile-email" type="email" value={infoForm.email} onChange={(e) => setInfoForm({...infoForm, email: e.target.value})} required className="ui-field mt-2" />
+                <input id="profile-email" type="email" value={infoForm.email} onChange={(e) => setInfoForm({...infoForm, email: e.target.value})} required className="ui-field mt-2" disabled={isSavingInfo} />
               </div>
-              <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
-                Save changes
+              {infoError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{infoError}</p>}
+              <button type="submit" className="ui-button ui-button-primary mt-4 w-full" disabled={isSavingInfo}>
+                {isSavingInfo && <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
+                {isSavingInfo ? "Saving changes…" : "Save changes"}
               </button>
             </form>
-          </div>
+          </section>
         </div>
       )}
 
       {/* Modal: Change Password */}
-      {isEditPasswordOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-          <div className="ui-panel w-full max-w-md p-6 shadow-[var(--shadow-raised)]">
+      {isEditPasswordPresent && (
+        <div data-open={isEditPasswordOpen} onClick={(e) => { if (e.target === e.currentTarget && !isSavingPassword) closeEditPassword(); }} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <section ref={editPasswordDialogRef} data-open={isEditPasswordOpen} className="pti-modal-panel ui-panel w-full max-w-md p-6 shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="change-password-title" tabIndex={-1}>
             <div className="mb-6 flex items-center justify-between gap-4">
-              <h3 className="text-lg font-semibold text-text">Change password</h3>
-              <button onClick={() => setIsEditPasswordOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close change password dialog"><X className="h-5 w-5"/></button>
+              <h3 id="change-password-title" className="text-lg font-semibold text-text">Change password</h3>
+              <button onClick={closeEditPassword} className="ui-button min-h-9 px-2" aria-label="Close change password dialog" disabled={isSavingPassword}><X className="h-5 w-5"/></button>
             </div>
-            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <form onSubmit={handlePasswordSubmit} className="space-y-4" aria-busy={isSavingPassword}>
               <div>
                 <label htmlFor="profile-new-password" className="text-sm font-medium text-text-muted">New password</label>
-                <input id="profile-new-password" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})} required className="ui-field mt-2" />
+                <input id="profile-new-password" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})} required className="ui-field mt-2" disabled={isSavingPassword} data-autofocus />
               </div>
               <div>
                 <label htmlFor="profile-confirm-password" className="text-sm font-medium text-text-muted">Confirm password</label>
-                <input id="profile-confirm-password" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})} required className="ui-field mt-2" />
+                <input id="profile-confirm-password" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})} required className="ui-field mt-2" disabled={isSavingPassword} />
               </div>
               {passwordError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{passwordError}</p>}
-              <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
-                Update credentials
+              <button type="submit" className="ui-button ui-button-primary mt-4 w-full" disabled={isSavingPassword}>
+                {isSavingPassword && <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
+                {isSavingPassword ? "Updating credentials…" : "Update credentials"}
               </button>
             </form>
-          </div>
+          </section>
         </div>
       )}
+      {operationNotice && <OperationToast {...operationNotice} onDismiss={dismissOperationNotice} />}
     </div>
   );
 }

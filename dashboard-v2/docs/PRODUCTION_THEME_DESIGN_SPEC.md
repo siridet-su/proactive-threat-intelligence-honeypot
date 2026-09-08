@@ -20,18 +20,18 @@ Permitted presentation changes include:
 
 The implementation must not add, remove, fabricate, reinterpret, or recalculate domain information. Existing fields, metrics, units, labels, status meanings, filters, actions, links, and data sources remain authoritative. Do not add a new KPI merely because space is available. Do not use mock values to make a layout look complete.
 
-## Direction: Operational Clarity
+## Direction: Semi-formal Cyber-Honeycomb
 
-The product should look like a dependable security operations application, not a fictional hacker terminal. The interface must prioritize scanability, stable hierarchy, and accurate status communication in both light and dark environments.
+The product should look like a dependable security operations application, but with a stylized "Honeypot" aesthetic. The interface balances scanability and stable hierarchy with dynamic, tech-forward visuals (hexagons, soft glows) primarily designed for dark environments.
 
 Core principles:
 
-1. Blue is the single brand and interaction color.
-2. Neutral surfaces carry the layout; semantic colors communicate state.
-3. Typography and spacing create hierarchy before decoration.
-4. Borders separate dense dashboard regions; shadows are restrained.
-5. Gradients, glows, blurred decoration, and animated status effects are not part of the normal UI.
-6. Light and dark modes have equal functional priority.
+1. Amber/Yellow is the primary brand and interaction color.
+2. Hexagon (Honeycomb) shapes are used for layout components and backgrounds.
+3. Tasteful gradients, soft glows (neon), and glassmorphism (translucency) are encouraged to enhance the tech aesthetic.
+4. Elegant animations (e.g., Framer Motion) are used for staggered entrances and interactive hover states.
+5. Typography and spacing create hierarchy before decoration.
+6. Dark mode is the primary focus, though light mode should remain functional.
 7. Machine data remains visually distinct without making the whole product monospace.
 
 ## Existing UI Audit
@@ -99,12 +99,11 @@ Each state also needs a low-emphasis background and border derived from the same
 
 ### Usage rules
 
-- Brand blue may identify navigation, links, focus, selected filters, and the main data series.
-- Red, amber, and green are reserved for semantic states. They must not decorate unrelated cards or navigation.
-- A page should normally have one solid primary action. Secondary actions use neutral surfaces and borders.
-- Do not use gradients for application surfaces, buttons, cards, headings, or decorative backgrounds.
-- Do not use neon glow or colored box shadows. Use a single neutral elevation shadow only where layering needs to be explicit.
-- Translucency and backdrop blur are not default surface treatments.
+- Brand Amber/Yellow may identify navigation, links, focus, selected filters, and glowing hover states.
+- Red, green, and cyan are reserved for semantic states (Danger, Success, Info).
+- A page should normally have one solid primary action.
+- Tasteful gradients and translucency (glassmorphism) are permitted to match the tech aesthetic.
+- Soft neon glows (colored box shadows) are permitted for hover states or critical emphasis, provided they do not overwhelm the UI.
 
 ## Typography
 

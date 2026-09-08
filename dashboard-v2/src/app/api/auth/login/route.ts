@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import clientPromise from "@/lib/mongodb";
+import { getMongoClient } from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 import { createSession, sessionCookie } from "@/lib/auth/session";
 
@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     if (typeof operatorId !== "string" || typeof password !== "string" || !operatorId.trim() || !password) {
       return NextResponse.json({ success: false, error: "Invalid credentials." }, { status: 400 });
     }
-    const client = await clientPromise;
+    const client = await getMongoClient();
     const db = client.db("honeypot_db");
     const normalizedOperatorId = operatorId.trim();
 

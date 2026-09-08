@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
+import { getMongoClient } from '@/lib/mongodb';
 import { isHardwareTelemetry } from '@/lib/dashboardTypes';
 import { getSessionFromRequest } from "@/lib/auth/session";
 
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const client = await clientPromise;
+    const client = await getMongoClient();
     // Assuming the database is "honeypot" and collection is "hardware_metrics" or "metrics"
     // Adjust db name and collection name based on what processor-agent inserts
     const db = client.db('honeypot_db');

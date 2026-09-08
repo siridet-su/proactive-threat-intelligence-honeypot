@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SessionAwareLink from "@/components/auth/SessionAwareLink";
 
 export default function Footer() {
   return (
@@ -9,7 +10,7 @@ export default function Footer() {
       </div>
       <nav aria-label="Footer navigation" className="mt-6 flex flex-wrap gap-x-6 gap-y-2">
         <Link href="#overview" className="hover:text-primary">Overview</Link>
-        <Link href="#documentation" className="hover:text-primary">Documentation</Link>
+        <SessionAwareLink href="#documentation" className="hover:text-primary">Documentation</SessionAwareLink>
         <Link href="/login" className="hover:text-primary">Operator sign in</Link>
       </nav>
     </footer>

@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Calendar, Download, Filter, Search, Shield } from "lucide-react";
+import { Calendar, Download, Filter, Search, Shield, X } from "lucide-react";
 
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { RegionState } from "@/components/ui/RegionState";
+import { SelectMenu } from "@/components/ui/SelectMenu";
 import { isDashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
+import { classificationBadgeClass, severityDotClass } from "@/lib/presentation";
+import { cn } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 10;
 const initialFilters = { dateRange: "Last 30 Days", attackerType: "All Types", criticality: "All Levels", region: "" };
@@ -94,7 +97,7 @@ export default function ArchivesPage() {
     <div className="mx-auto max-w-[1400px] space-y-7 pb-8">
       <header className="flex flex-col justify-between gap-4 border-b border-border pb-6 sm:flex-row sm:items-end">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Investigation / History</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-info">Investigation / History</p>
           <h1 className="mt-3 text-2xl font-semibold leading-8 tracking-tight">Security incursion archive</h1>
           <p className="mt-2 text-sm text-text-muted">{filteredSessions.length.toLocaleString()} sessions match the current view.</p>
         </div>
@@ -112,17 +115,17 @@ export default function ArchivesPage() {
             </button>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Date range
-              <span className="relative"><Calendar className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><select value={filters.dateRange} onChange={(event) => updateFilter("dateRange", event.target.value)} className="ui-field appearance-none pl-9"><option>Last 30 Days</option><option>Last 6 Months</option><option>All Time</option></select></span>
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Attacker type
-              <span className="relative"><Shield className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><select value={filters.attackerType} onChange={(event) => updateFilter("attackerType", event.target.value)} className="ui-field appearance-none pl-9"><option>All Types</option><option>APT</option><option>Botnet</option><option>Script Kiddie</option></select></span>
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Criticality
-              <select value={filters.criticality} onChange={(event) => updateFilter("criticality", event.target.value)} className="ui-field appearance-none"><option>All Levels</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
-            </label>
+            <div className="flex flex-col gap-2 text-sm font-medium text-text-muted"><span>Date range</span>
+              <SelectMenu value={filters.dateRange} onValueChange={(value) => updateFilter("dateRange", value)} options={["Last 30 Days", "Last 6 Months", "All Time"]} leadingIcon={<Calendar className="h-4 w-4" />} />
+            </div>
+            <div className="flex flex-col gap-2 text-sm font-medium text-text-muted"><span>Attacker type</span>
+              <SelectMenu value={filters.attackerType} onValueChange={(value) => updateFilter("attackerType", value)} options={["All Types", "APT", "Botnet", "Script Kiddie"]} leadingIcon={<Shield className="h-4 w-4" />} />
+            </div>
+            <div className="flex flex-col gap-2 text-sm font-medium text-text-muted"><span>Criticality</span>
+              <SelectMenu value={filters.criticality} onValueChange={(value) => updateFilter("criticality", value)} options={["All Levels", "Critical", "High", "Medium", "Low"]} />
+            </div>
             <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Region
-              <span className="relative"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><input value={filters.region} onChange={(event) => updateFilter("region", event.target.value)} type="search" placeholder="Search region..." className="ui-field pl-9" /></span>
+              <span className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-subtle" aria-hidden="true" /><input value={filters.region} onChange={(event) => updateFilter("region", event.target.value)} type="search" placeholder="Search region..." className="ui-field pl-9 pr-8" />{filters.region && <button type="button" onClick={() => updateFilter("region", "")} className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-text-subtle hover:text-text" aria-label="Clear region filter"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>}</span>
             </label>
           </div>
         </div>
@@ -136,10 +139,19 @@ export default function ArchivesPage() {
               {!loading && !fetchFailed && filteredSessions.length === 0 && <tr><td colSpan={6} className="p-4"><RegionState kind="empty" title="No matching sessions" description="Try a different date range or filter." /></td></tr>}
               {!loading && !fetchFailed && currentData.map((session) => (
                 <tr key={session.id}>
-                  <td className="font-mono text-sm text-primary">{session.id.substring(0, 12).toUpperCase()}{session.id.length > 12 ? "…" : ""}</td>
+                  <td className="font-mono text-sm">
+                    <span className="inline-flex items-center gap-2">
+                      <span className={cn("h-2 w-2 shrink-0 rounded-full", severityDotClass(session.severity))} aria-hidden="true" />
+                      <span className="font-medium text-text">{session.id.substring(0, 12).toUpperCase()}{session.id.length > 12 ? "…" : ""}</span>
+                    </span>
+                  </td>
                   <td className="font-mono text-xs"><div className="text-text">{session.date}</div><div className="mt-1 text-text-subtle">{session.time}</div></td>
                   <td className="font-mono text-sm text-text">{session.sourceIp}</td>
-                  <td className="text-text">{session.classification}</td>
+                  <td>
+                    <span className={cn("ui-badge", classificationBadgeClass(session.classification, session.typeColor))}>
+                      {session.classification}
+                    </span>
+                  </td>
                   <td><SeverityBadge severity={session.severity} /></td>
                   <td className="text-right"><Link href={`/threat-intel/${session.id}`} className="ui-button min-h-9 px-3 text-xs text-primary">View details</Link></td>
                 </tr>

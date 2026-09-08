@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Menu, X } from "lucide-react";
+import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Home, Menu, X } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
@@ -77,7 +77,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (pathname.includes('/malware-vault')) return 'Malware Vault';
     if (pathname.includes('/user-management')) return 'User Management';
     if (pathname.includes('/archives')) return 'Security Archive';
-    if (pathname.includes('/threat-intel/')) return 'Hacker Profile Analysis';
+    if (pathname.includes('/threat-intel/')) return 'Session Analysis';
     if (pathname.includes('/threat-intel')) return 'Threat Intelligence';
     return 'System Overview';
   };
@@ -85,6 +85,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navigation = (
     <>
       <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto px-4 py-6">
+        <div className="mb-5 border-b border-border pb-4">
+          <Link href="/" className="ui-nav-link" onClick={closeNavigation} aria-label="Open PTI-Honeypot landing page">
+            <Home className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+            <span>Landing page</span>
+          </Link>
+        </div>
         <p className="mb-4 px-3 text-xs font-medium text-text-subtle">Vigilance Protocol</p>
         {[
           { href: "/dashboard", title: "Dashboard", icon: LayoutDashboard, active: pathname === "/dashboard" },
@@ -100,13 +106,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ))}
       </nav>
       <div className="space-y-3 border-t border-border p-4">
-        <Link href="/profile" onClick={closeNavigation} aria-current={pathname.includes("/profile") ? "page" : undefined} className="ui-nav-link border border-border bg-surface-subtle">
+        <Link href="/profile" onClick={closeNavigation} aria-current={pathname.includes("/profile") ? "page" : undefined} className="ui-nav-link group border border-border bg-surface-subtle transition-transform duration-150 hover:-translate-y-px">
           <User className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="break-words font-semibold text-text">{userName || operatorId || "Operator"}</p>
             <p className="text-xs text-text-subtle">{userRole === "Admin" ? "LVL-4 ACCESS" : "LVL-2 ACCESS"}</p>
           </div>
-          <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <Settings className="h-4 w-4 shrink-0 text-text-subtle transition-colors duration-150 group-hover:text-primary" aria-hidden="true" />
         </Link>
         <button onClick={handleLogout} className="ui-button w-full"><LogOut className="h-4 w-4" aria-hidden="true" />Logout</button>
       </div>
@@ -117,14 +123,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <ThreatFeedProvider>
     <div className="min-h-dvh bg-canvas text-text">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[120] focus:rounded-lg focus:bg-surface focus:p-3">Skip to content</a>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-border bg-surface lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-border bg-surface print:hidden lg:flex">
         <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-6">
           <ShieldCheck className="h-6 w-6 text-primary" aria-hidden="true" />
           <span className="text-base font-semibold">PTI-Honeypot</span>
         </div>
         {navigation}
       </aside>
-      <dialog ref={drawer} className="ui-drawer" aria-label="Navigation" onClose={() => { setNavigationOpen(false); if (!window.matchMedia("(min-width: 1024px)").matches) navigationTrigger.current?.focus(); }} onClick={event => { if (event.target === event.currentTarget && event.clientX > event.currentTarget.getBoundingClientRect().right) closeNavigation(); }}>
+      <dialog ref={drawer} className="ui-drawer print:hidden" aria-label="Navigation" onClose={() => { setNavigationOpen(false); if (!window.matchMedia("(min-width: 1024px)").matches) navigationTrigger.current?.focus(); }} onClick={event => { if (event.target === event.currentTarget && event.clientX > event.currentTarget.getBoundingClientRect().right) closeNavigation(); }}>
         <div className="flex h-full flex-col">
           <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
             <span className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" />PTI-Honeypot</span>
@@ -133,8 +139,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {navigation}
         </div>
       </dialog>
-      <div className="min-w-0 lg:ml-60">
-        <header className="sticky top-0 z-20 border-b border-border bg-surface">
+      <div className="min-w-0 print:ml-0 lg:ml-60">
+        <header className="sticky top-0 z-20 border-b border-border bg-surface print:hidden">
           <div className="flex min-h-16 items-center justify-between gap-3 px-4 lg:px-8">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <button ref={navigationTrigger} className="ui-button px-2 lg:hidden" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={() => { drawer.current?.showModal(); setNavigationOpen(true); }}><Menu className="h-4 w-4" /></button>
@@ -147,7 +153,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
         </header>
-        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] p-4 md:p-6 lg:p-8">{children}</main>
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] p-4 print:max-w-none print:p-0 md:p-6 lg:p-8">{children}</main>
       </div>
       <ConfirmDialog open={logoutConfirmationOpen} onOpenChange={setLogoutConfirmationOpen} onConfirm={() => void confirmLogout()} title="Sign out of PTI-Honeypot?" description="Your current dashboard session will end and you will return to the sign-in screen." confirmLabel="Sign out" />
     </div>

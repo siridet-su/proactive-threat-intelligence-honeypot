@@ -1,25 +1,81 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { Briefcase, UserPlus, Edit2, ShieldX, X, Lock } from "lucide-react";
+import { Briefcase, CheckCircle2, Edit2, KeyRound, LoaderCircle, Lock, ShieldCheck, ShieldX, UserPlus, X } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardUser } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
+import { SelectMenu } from "@/components/ui/SelectMenu";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
+import { useModalFocusTrap } from "@/lib/useModalFocusTrap";
+
+type OperationNotice = {
+  kind: OperationToastKind;
+  title: string;
+  description: string;
+};
+
+async function getRequestError(response: Response, fallback: string) {
+  const payload: unknown = await response.json().catch(() => null);
+  if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") return payload.error;
+  return fallback;
+}
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<DashboardUser[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddModalPresent, setIsAddModalPresent] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditModalPresent, setIsEditModalPresent] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState("");
 
-  const [formData, setFormData] = useState({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter" });
+  const [formData, setFormData] = useState({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter", initialPassword: "" });
+  const [createError, setCreateError] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [createdOperatorId, setCreatedOperatorId] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
 
   // State สำหรับแก้ไขข้อมูล
   const [editFormData, setEditFormData] = useState({ operatorId: "", fullName: "", email: "", position: "", role: "", newPassword: "" });
+  const createDialogCloseTimer = useRef<number | null>(null);
+  const editDialogCloseTimer = useRef<number | null>(null);
+  const operationNoticeTimer = useRef<number | null>(null);
+  const createOperatorDialogRef = useRef<HTMLElement | null>(null);
+  const editOperatorDialogRef = useRef<HTMLDivElement | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<DashboardUser | null>(null);
+
+  useModalFocusTrap(isAddModalOpen, createOperatorDialogRef);
+  useModalFocusTrap(isEditModalOpen, editOperatorDialogRef);
+
+  useEffect(() => () => {
+    if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
+    if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+  }, []);
+
+  const showOperationNotice = (notice: OperationNotice) => {
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+    setOperationNotice(notice);
+    operationNoticeTimer.current = window.setTimeout(() => {
+      setOperationNotice(null);
+      operationNoticeTimer.current = null;
+    }, 4800);
+  };
+
+  const dismissOperationNotice = () => {
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+    operationNoticeTimer.current = null;
+    setOperationNotice(null);
+  };
 
   useEffect(() => {
     const loadSession = async () => {
@@ -59,68 +115,159 @@ export default function UserManagementPage() {
   // ฟังก์ชันเพิ่มผู้ใช้
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(formData)
-    });
-    if (res.ok) {
-      setIsAddModalOpen(false);
-      setFormData({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter" });
-      setRefreshKey(prev => prev + 1);
-      alert("New Operator Added. Default Password is: default123");
+    if (isCreating) return;
+    setCreateError("");
+    setIsCreating(true);
+
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+      const data: unknown = await res.json();
+      if (!res.ok || !data || typeof data !== "object") {
+        const message = data && typeof data === "object" && "error" in data && typeof data.error === "string"
+          ? data.error
+          : "The operator account could not be created.";
+        setCreateError(message);
+        return;
+      }
+
+      const candidate = data as { user?: { operatorId?: unknown } };
+      setCreatedOperatorId(typeof candidate.user?.operatorId === "string" ? candidate.user.operatorId : "New operator");
+      setRefreshKey((previous) => previous + 1);
+    } catch {
+      setCreateError("The operator account could not be created. Please try again.");
+    } finally {
+      setIsCreating(false);
     }
   };
 
+  const openCreateOperator = () => {
+    if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
+    setCreateError("");
+    setCreatedOperatorId("");
+    setFormData({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter", initialPassword: "" });
+    setIsAddModalPresent(true);
+    window.requestAnimationFrame(() => setIsAddModalOpen(true));
+  };
+
+  const closeCreateOperator = useCallback(() => {
+    if (isCreating) return;
+    setIsAddModalOpen(false);
+    if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
+    createDialogCloseTimer.current = window.setTimeout(() => setIsAddModalPresent(false), 180);
+    setCreateError("");
+    setCreatedOperatorId("");
+  }, [isCreating]);
+
   // ฟังก์ชันเปิดหน้าแก้ไข
   const openEditModal = (user: DashboardUser) => {
+    if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
+    setEditError("");
     setEditFormData({ ...user, newPassword: "" });
-    setIsEditModalOpen(true);
+    setIsEditModalPresent(true);
+    window.requestAnimationFrame(() => setIsEditModalOpen(true));
   };
+
+  const closeEditModal = useCallback((force = false) => {
+    if (isSavingEdit && !force) return;
+    setIsEditModalOpen(false);
+    if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
+    editDialogCloseTimer.current = window.setTimeout(() => setIsEditModalPresent(false), 180);
+  }, [isSavingEdit]);
+
+  useEffect(() => {
+    if (!isAddModalPresent && !isEditModalPresent) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (isAddModalPresent && !isCreating) closeCreateOperator();
+        if (isEditModalPresent && !isSavingEdit) closeEditModal();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = oldOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isAddModalPresent, isEditModalPresent, isCreating, isSavingEdit, closeCreateOperator, closeEditModal]);
 
   // ฟังก์ชันบันทึกการแก้ไข
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingEdit) return;
+    setEditError("");
+    setIsSavingEdit(true);
+    let profileSaved = false;
 
-    // 1. อัปเดตข้อมูลทั่วไป
-    const res = await fetch("/api/users", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editFormData)
-    });
+    try {
+      const profileResponse = await fetch("/api/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editFormData),
+      });
+      if (!profileResponse.ok) throw new Error(await getRequestError(profileResponse, "The operator profile could not be updated."));
+      profileSaved = true;
 
-    if (res.ok) {
-      // 2. ถ้ามีการกรอกรหัสผ่านใหม่ (และเป็นเจ้าของบัญชีตัวเอง) ให้เรียก API เปลี่ยนรหัสผ่านด้วย
-      if (editFormData.newPassword && editFormData.operatorId === currentUserId) {
-        await fetch("/api/auth/change-password", {
+      const passwordChanged = Boolean(editFormData.newPassword && editFormData.operatorId === currentUserId);
+      if (passwordChanged) {
+        const passwordResponse = await fetch("/api/auth/change-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ operatorId: editFormData.operatorId, newPassword: editFormData.newPassword }),
         });
-        alert("Profile and password updated successfully.");
-      } else {
-        alert("Profile updated successfully.");
+        if (!passwordResponse.ok) throw new Error(await getRequestError(passwordResponse, "The access key could not be updated."));
       }
 
-      setIsEditModalOpen(false);
-      setRefreshKey(prev => prev + 1);
+      closeEditModal(true);
+      setRefreshKey((previous) => previous + 1);
+      showOperationNotice({
+        kind: "success",
+        title: "Operator updated",
+        description: passwordChanged ? "Profile and access key were saved successfully." : "Profile changes were saved successfully.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The operator profile could not be updated. Please try again.";
+      if (profileSaved) {
+        setRefreshKey((previous) => previous + 1);
+        setEditError(`Profile changes were saved, but ${message.charAt(0).toLowerCase()}${message.slice(1)}`);
+      } else {
+        setEditError(message);
+      }
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
   // ฟังก์ชันลบผู้ใช้
-  const handleDelete = async (operatorId: string) => {
-    if (operatorId === currentUserId) {
-      alert("You cannot delete your own account.");
-      return;
-    }
+  const requestDelete = (user: DashboardUser) => {
+    if (user.operatorId === currentUserId) return;
+    setDeleteError("");
+    setDeleteCandidate(user);
+  };
 
-    if (confirm("Are you sure you want to terminate this operator's access?")) {
+  const confirmDelete = async () => {
+    if (!deleteCandidate || isDeleting) return;
+    const operatorId = deleteCandidate.operatorId;
+    setDeleteError("");
+    setIsDeleting(true);
+    try {
       const res = await fetch("/api/users", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operatorId })
       });
-      if (res.ok) setRefreshKey(prev => prev + 1);
+      if (!res.ok) throw new Error(await getRequestError(res, "The operator could not be removed."));
+      setRefreshKey((previous) => previous + 1);
+      setDeleteCandidate(null);
+      showOperationNotice({ kind: "success", title: "Operator removed", description: `${operatorId} no longer has workspace access.` });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "The operator could not be removed. Please try again.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -138,7 +285,7 @@ export default function UserManagementPage() {
               <Link href="/user-management/positions" className="ui-button">
                 <Briefcase className="w-4 h-4" /> Manage Positions
               </Link>
-              <button onClick={() => setIsAddModalOpen(true)} className="ui-button ui-button-primary">
+              <button onClick={openCreateOperator} className="ui-button ui-button-primary">
                 <UserPlus className="w-4 h-4" /> Add New Operator
               </button>
             </>
@@ -196,7 +343,7 @@ export default function UserManagementPage() {
                        <button onClick={() => openEditModal(user)} className="ui-button min-h-9 px-2" aria-label={`Edit ${user.operatorId}`}><Edit2 className="h-4 w-4" aria-hidden="true" /></button>
                     )}
                     {canDelete && (
-                       <button onClick={() => handleDelete(user.operatorId)} className="ui-button min-h-9 px-2 text-danger" aria-label={`Delete ${user.operatorId}`}><ShieldX className="h-4 w-4" aria-hidden="true" /></button>
+                       <button onClick={() => requestDelete(user)} className="ui-button min-h-9 px-2 text-danger" aria-label={`Delete ${user.operatorId}`}><ShieldX className="h-4 w-4" aria-hidden="true" /></button>
                     )}
                     </div>
                   </td>
@@ -208,74 +355,96 @@ export default function UserManagementPage() {
         </div>
       </div>
 
-      {/* Modal Add User (อันเดิม) */}
-      {isAddModalOpen && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]">
-             <div className="flex justify-between items-center mb-6">
-               <h3 className="text-lg font-semibold">Add new operator</h3><button onClick={() => setIsAddModalOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close add operator dialog"><X className="w-5 h-5"/></button>
-             </div>
-             <form onSubmit={handleAddUser} className="space-y-4">
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={formData.fullName} onChange={(e) => setFormData({...formData, fullName: e.target.value})} required className="ui-field mt-1" />
-               </div>
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required className="ui-field mt-1" />
-               </div>
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Position</label><select value={formData.position} onChange={(e) => setFormData({...formData, position: e.target.value})} className="ui-field mt-1">
-                   <option value="Lead Sentinel">Lead Sentinel</option>
-                   <option value="Data Guardian">Data Guardian</option>
-                   <option value="Network Shield">Network Shield</option>
-                   <option value="Threat Hunter">Threat Hunter</option>
-                 </select>
-               </div>
-               <div>
-                 <label className="text-xs font-medium text-text-muted">Role</label><select value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} className="ui-field mt-1">
-                   <option value="Admin">Admin</option>
-                   <option value="Supporter">Supporter</option>
-                 </select>
-               </div>
-               <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
-                 CREATE OPERATOR
-               </button>
-             </form>
-           </div>
-         </div>
+      {isAddModalPresent && (
+        <div data-open={isAddModalOpen} onClick={(e) => { if (e.target === e.currentTarget && !isCreating) closeCreateOperator(); }} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <section ref={createOperatorDialogRef} data-open={isAddModalOpen} className="pti-modal-panel w-full max-w-xl overflow-hidden rounded-2xl border border-primary-border bg-surface shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="create-operator-title" tabIndex={-1}>
+            <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle p-5 sm:p-6">
+              <div className="flex gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary-border bg-primary-subtle text-primary" aria-hidden="true"><ShieldCheck className="h-5 w-5" /></span>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Admin onboarding</p>
+                  <h2 id="create-operator-title" className="mt-1 text-lg font-semibold">Create operator</h2>
+                  <p className="mt-1 text-sm text-text-muted">Provision an account for the read-only intelligence workspace.</p>
+                </div>
+              </div>
+              <button onClick={closeCreateOperator} className="ui-button min-h-9 px-2" aria-label="Close create operator dialog" disabled={isCreating}><X className="h-5 w-5" /></button>
+            </header>
+
+            {createdOperatorId ? (
+              <div className="p-5 sm:p-6">
+                <div className="rounded-xl border border-success-border bg-success-subtle p-5 text-center">
+                  <CheckCircle2 className="mx-auto h-7 w-7 text-success" aria-hidden="true" />
+                  <h3 className="mt-3 text-base font-semibold text-text">Operator created</h3>
+                  <p className="mt-2 text-sm text-text-muted">Assigned operator ID</p>
+                  <p className="mt-1 font-mono text-lg font-semibold text-primary">{createdOperatorId}</p>
+                  <p className="mx-auto mt-4 max-w-sm text-sm leading-6 text-text-muted">Share the temporary access key through an approved secure channel. The operator will be required to change it at first sign-in.</p>
+                </div>
+                <button type="button" className="ui-button ui-button-primary mt-5 w-full" onClick={closeCreateOperator}>Done</button>
+              </div>
+            ) : (
+              <form onSubmit={handleAddUser} className="grid gap-5 p-5 sm:grid-cols-2 sm:p-6" aria-busy={isCreating}>
+                <div className="sm:col-span-2">
+                  <label htmlFor="create-full-name" className="text-xs font-medium text-text-muted">Full name</label>
+                  <input id="create-full-name" type="text" value={formData.fullName} onChange={(event) => setFormData({ ...formData, fullName: event.target.value })} required className="ui-field mt-1" disabled={isCreating} data-autofocus />
+                </div>
+                <div className="sm:col-span-2">
+                  <label htmlFor="create-email" className="text-xs font-medium text-text-muted">Email</label>
+                  <input id="create-email" type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} required className="ui-field mt-1" disabled={isCreating} />
+                </div>
+                <div>
+                  <label htmlFor="create-position" className="text-xs font-medium text-text-muted">Position</label>
+                  <SelectMenu id="create-position" value={formData.position} onValueChange={(position) => setFormData({ ...formData, position })} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={isCreating} />
+                </div>
+                <div>
+                  <label htmlFor="create-role" className="text-xs font-medium text-text-muted">Role</label>
+                  <SelectMenu id="create-role" value={formData.role} onValueChange={(role) => setFormData({ ...formData, role })} options={["Supporter", "Admin"]} className="mt-1" disabled={isCreating} />
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label htmlFor="create-access-key" className="text-xs font-medium text-text-muted">Temporary access key</label>
+                    <span className="text-xs text-text-subtle">At least 8 characters</span>
+                  </div>
+                  <div className="relative mt-1">
+                    <KeyRound className="pointer-events-none absolute inset-y-0 left-4 my-auto h-4 w-4 text-text-subtle" aria-hidden="true" />
+                    <input id="create-access-key" type="password" value={formData.initialPassword} onChange={(event) => setFormData({ ...formData, initialPassword: event.target.value })} minLength={8} required className="ui-field pl-11 font-mono" autoComplete="new-password" disabled={isCreating} />
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-text-subtle">The operator must change this key on their first sign-in.</p>
+                </div>
+                {createError && <p role="alert" className="sm:col-span-2 rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{createError}</p>}
+                <div className="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:col-span-2 sm:flex-row sm:justify-end">
+                  <button type="button" className="ui-button" onClick={closeCreateOperator} disabled={isCreating}>Cancel</button>
+                  <button type="submit" className="ui-button ui-button-primary" disabled={isCreating}><UserPlus className="h-4 w-4" aria-hidden="true" />{isCreating ? "Creating operator…" : "Create operator"}</button>
+                </div>
+              </form>
+            )}
+          </section>
+        </div>
       )}
 
       {/* Modal Edit User */}
-      {isEditModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]">
+      {isEditModalPresent && (
+        <div data-open={isEditModalOpen} onClick={(e) => { if (e.target === e.currentTarget && !isSavingEdit) closeEditModal(); }} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <div ref={editOperatorDialogRef} data-open={isEditModalOpen} className="pti-modal-panel max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="edit-operator-title" tabIndex={-1}>
             <div className="flex justify-between items-center mb-6">
-              <h3 className="flex items-center gap-2 text-lg font-semibold"><Edit2 className="w-5 h-5 text-primary"/> Edit operator [{editFormData.operatorId}]
+              <h3 id="edit-operator-title" className="flex items-center gap-2 text-lg font-semibold"><Edit2 className="w-5 h-5 text-primary"/> Edit operator [{editFormData.operatorId}]
               </h3>
-              <button onClick={() => setIsEditModalOpen(false)} className="ui-button min-h-9 px-2" aria-label="Close edit operator dialog"><X className="w-5 h-5"/></button>
+              <button onClick={() => closeEditModal()} className="ui-button min-h-9 px-2" aria-label="Close edit operator dialog" disabled={isSavingEdit}><X className="w-5 h-5"/></button>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="space-y-4">
+            <form onSubmit={handleEditSubmit} className="space-y-4" aria-busy={isSavingEdit}>
               <div>
-                <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="ui-field mt-1" />
+                <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="ui-field mt-1" disabled={isSavingEdit} data-autofocus />
               </div>
               <div>
-                <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={editFormData.email} onChange={(e) => setEditFormData({...editFormData, email: e.target.value})} required className="ui-field mt-1" />
+                <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={editFormData.email} onChange={(e) => setEditFormData({...editFormData, email: e.target.value})} required className="ui-field mt-1" disabled={isSavingEdit} />
               </div>
 
               {/* ให้ Admin เท่านั้นที่เปลี่ยนตำแหน่งและ Role ได้ */}
               <div>
-                <label className="text-xs font-medium text-text-muted">Position</label><select disabled={currentUserRole !== "Admin"} value={editFormData.position} onChange={(e) => setEditFormData({...editFormData, position: e.target.value})} className="ui-field mt-1">
-                  <option value="Lead Sentinel">Lead Sentinel</option>
-                  <option value="Data Guardian">Data Guardian</option>
-                  <option value="Network Shield">Network Shield</option>
-                  <option value="Threat Hunter">Threat Hunter</option>
-                </select>
+                <label className="text-xs font-medium text-text-muted">Position</label><SelectMenu value={editFormData.position} onValueChange={(position) => setEditFormData({...editFormData, position})} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={isSavingEdit || currentUserRole !== "Admin"} />
               </div>
               <div>
-                <label className="text-xs font-medium text-text-muted">Role</label><select disabled={currentUserRole !== "Admin"} value={editFormData.role} onChange={(e) => setEditFormData({...editFormData, role: e.target.value})} className="ui-field mt-1">
-                  <option value="Admin">Admin</option>
-                  <option value="Supporter">Supporter</option>
-                </select>
+                <label className="text-xs font-medium text-text-muted">Role</label><SelectMenu value={editFormData.role} onValueChange={(role) => setEditFormData({...editFormData, role})} options={["Admin", "Supporter"]} className="mt-1" disabled={isSavingEdit || currentUserRole !== "Admin"} />
               </div>
 
               {/* ส่วนเปลี่ยนรหัสผ่าน (แสดงเฉพาะตอนแก้ไขบัญชีตัวเอง) */}
@@ -283,17 +452,32 @@ export default function UserManagementPage() {
                 <div className="mt-4 border-t border-border pt-4"><label className="mb-2 flex items-center gap-1 text-xs font-medium text-warning">
                     <Lock className="w-3 h-3"/> CHANGE PASSWORD (OPTIONAL)
                   </label>
-                  <input type="password" placeholder="Leave blank to keep current password" value={editFormData.newPassword} onChange={(e) => setEditFormData({...editFormData, newPassword: e.target.value})} className="ui-field" />
+                  <input type="password" placeholder="Leave blank to keep current password" value={editFormData.newPassword} onChange={(e) => setEditFormData({...editFormData, newPassword: e.target.value})} className="ui-field" disabled={isSavingEdit} />
                 </div>
               )}
 
-              <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
-                SAVE CHANGES
+              {editError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{editError}</p>}
+              <button type="submit" className="ui-button ui-button-primary mt-4 w-full" disabled={isSavingEdit}>
+                {isSavingEdit && <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
+                {isSavingEdit ? "Saving changes…" : "Save changes"}
               </button>
             </form>
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={Boolean(deleteCandidate)}
+        onOpenChange={(open) => { if (!open) setDeleteCandidate(null); }}
+        onConfirm={() => void confirmDelete()}
+        title="Remove operator access?"
+        description={deleteCandidate ? `This will remove ${deleteCandidate.fullName || deleteCandidate.operatorId} from the operator roster. This action cannot be undone.` : ""}
+        confirmLabel="Remove operator"
+        confirmVariant="danger"
+        isProcessing={isDeleting}
+        processingLabel="Removing operator…"
+        errorMessage={deleteError}
+      />
+      {operationNotice && <OperationToast {...operationNotice} onDismiss={dismissOperationNotice} />}
     </div>
   );
 }

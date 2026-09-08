@@ -112,7 +112,7 @@ export default function ThreatIntelPage() {
                     </td>
                     <td className="font-mono text-xs text-text">{log.sourceIp}</td>
                     <td>
-                      <span className={`ui-badge ${classificationBadgeClass(log.typeColor)}`}>
+                      <span className={`ui-badge ${classificationBadgeClass(log.classification, log.typeColor)}`}>
                         {log.classification}
                       </span>
                     </td>
@@ -124,31 +124,38 @@ export default function ThreatIntelPage() {
                     </td>
                   </tr>
                 ))}
-                {/* สร้างช่องว่างให้เต็ม 5 แถวเสมอเมื่อข้อมูลหน้าสุดท้ายไม่ถึง 5 รายการ */}
-                {!isInitialLoad && Array.from({ length: Math.max(0, itemsPerPage - currentLogs.length) }).map((_, idx) => (
-                  <tr key={`empty-${idx}`}>
-                    <td colSpan={5}></td>
+                {!isInitialLoad && status === "error" && (
+                  <tr>
+                    <td colSpan={5} className="p-4">
+                      <RegionState kind="error" title="Threat intelligence unavailable" description="The latest session directory could not be loaded. The next automatic refresh will try again." />
+                    </td>
                   </tr>
-                ))}
+                )}
+                {!isInitialLoad && status !== "error" && logs.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-4">
+                      <RegionState kind="empty" title="NO THREAT INTELLIGENCE AVAILABLE" description="No sessions were returned in the last successful response." />
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
             </div>
-
-            <div className="pointer-events-none absolute inset-x-0 top-[52px] bottom-0 [&>div]:h-full">
-              {status === "error" && <RegionState kind="error" title="Threat intelligence unavailable" description="The latest session directory could not be loaded. The next automatic refresh will try again." />}
-              {status === "ready" && logs.length === 0 && <RegionState kind="empty" title="NO THREAT INTELLIGENCE AVAILABLE" description="No sessions were returned in the last successful response." />}
-            </div>
-
           </div>
           {!isInitialLoad && totalPages > 1 && (
-              <nav aria-label="Incursion log pages" className="flex flex-wrap justify-end gap-2 border-t border-border bg-surface-subtle p-4">
-                <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="ui-button min-h-9 px-3 text-xs">Prev</button>
-                {getPageNumbers().map(pageNum => (
-                  <button key={pageNum} onClick={() => setCurrentPage(pageNum)} aria-current={currentPage === pageNum ? "page" : undefined} aria-label={`Page ${pageNum}`} className="ui-button min-h-9 px-3 text-xs">
-                    {pageNum}
-                  </button>
-                ))}
-                <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="ui-button min-h-9 px-3 text-xs">Next</button>
+              <nav aria-label="Incursion log pages" className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-subtle p-4">
+                <p className="text-xs text-text-muted">
+                  Page {currentPage} of {totalPages} · {stats.total.toLocaleString()} sessions
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="ui-button min-h-9 px-3 text-xs">Prev</button>
+                  {getPageNumbers().map(pageNum => (
+                    <button key={pageNum} onClick={() => setCurrentPage(pageNum)} aria-current={currentPage === pageNum ? "page" : undefined} aria-label={`Page ${pageNum}`} className="ui-button min-h-9 px-3 text-xs">
+                      {pageNum}
+                    </button>
+                  ))}
+                  <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="ui-button min-h-9 px-3 text-xs">Next</button>
+                </div>
               </nav>
           )}
         </div>
