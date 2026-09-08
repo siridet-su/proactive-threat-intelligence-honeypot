@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Briefcase, CheckCircle2, Edit2, KeyRound, LoaderCircle, Lock, ShieldCheck, ShieldX, UserPlus, X } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
@@ -8,6 +8,7 @@ import { RegionState } from "@/components/ui/RegionState";
 import { SelectMenu } from "@/components/ui/SelectMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
+import { useModalFocusTrap } from "@/lib/useModalFocusTrap";
 
 type OperationNotice = {
   kind: OperationToastKind;
@@ -48,7 +49,12 @@ export default function UserManagementPage() {
   const createDialogCloseTimer = useRef<number | null>(null);
   const editDialogCloseTimer = useRef<number | null>(null);
   const operationNoticeTimer = useRef<number | null>(null);
+  const createOperatorDialogRef = useRef<HTMLElement | null>(null);
+  const editOperatorDialogRef = useRef<HTMLDivElement | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<DashboardUser | null>(null);
+
+  useModalFocusTrap(isAddModalOpen, createOperatorDialogRef);
+  useModalFocusTrap(isEditModalOpen, editOperatorDialogRef);
 
   useEffect(() => () => {
     if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
@@ -147,14 +153,14 @@ export default function UserManagementPage() {
     window.requestAnimationFrame(() => setIsAddModalOpen(true));
   };
 
-  const closeCreateOperator = () => {
+  const closeCreateOperator = useCallback(() => {
     if (isCreating) return;
     setIsAddModalOpen(false);
     if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
     createDialogCloseTimer.current = window.setTimeout(() => setIsAddModalPresent(false), 180);
     setCreateError("");
     setCreatedOperatorId("");
-  };
+  }, [isCreating]);
 
   // ฟังก์ชันเปิดหน้าแก้ไข
   const openEditModal = (user: DashboardUser) => {
@@ -165,12 +171,29 @@ export default function UserManagementPage() {
     window.requestAnimationFrame(() => setIsEditModalOpen(true));
   };
 
-  const closeEditModal = (force = false) => {
+  const closeEditModal = useCallback((force = false) => {
     if (isSavingEdit && !force) return;
     setIsEditModalOpen(false);
     if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
     editDialogCloseTimer.current = window.setTimeout(() => setIsEditModalPresent(false), 180);
-  };
+  }, [isSavingEdit]);
+
+  useEffect(() => {
+    if (!isAddModalPresent && !isEditModalPresent) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (isAddModalPresent && !isCreating) closeCreateOperator();
+        if (isEditModalPresent && !isSavingEdit) closeEditModal();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = oldOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isAddModalPresent, isEditModalPresent, isCreating, isSavingEdit, closeCreateOperator, closeEditModal]);
 
   // ฟังก์ชันบันทึกการแก้ไข
   const handleEditSubmit = async (e: React.FormEvent) => {
@@ -333,8 +356,8 @@ export default function UserManagementPage() {
       </div>
 
       {isAddModalPresent && (
-        <div data-open={isAddModalOpen} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
-          <section data-open={isAddModalOpen} className="pti-modal-panel w-full max-w-xl overflow-hidden rounded-2xl border border-primary-border bg-surface shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="create-operator-title">
+        <div data-open={isAddModalOpen} onClick={(e) => { if (e.target === e.currentTarget && !isCreating) closeCreateOperator(); }} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <section ref={createOperatorDialogRef} data-open={isAddModalOpen} className="pti-modal-panel w-full max-w-xl overflow-hidden rounded-2xl border border-primary-border bg-surface shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="create-operator-title" tabIndex={-1}>
             <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle p-5 sm:p-6">
               <div className="flex gap-3">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary-border bg-primary-subtle text-primary" aria-hidden="true"><ShieldCheck className="h-5 w-5" /></span>
@@ -362,7 +385,7 @@ export default function UserManagementPage() {
               <form onSubmit={handleAddUser} className="grid gap-5 p-5 sm:grid-cols-2 sm:p-6" aria-busy={isCreating}>
                 <div className="sm:col-span-2">
                   <label htmlFor="create-full-name" className="text-xs font-medium text-text-muted">Full name</label>
-                  <input id="create-full-name" type="text" value={formData.fullName} onChange={(event) => setFormData({ ...formData, fullName: event.target.value })} required className="ui-field mt-1" disabled={isCreating} />
+                  <input id="create-full-name" type="text" value={formData.fullName} onChange={(event) => setFormData({ ...formData, fullName: event.target.value })} required className="ui-field mt-1" disabled={isCreating} data-autofocus />
                 </div>
                 <div className="sm:col-span-2">
                   <label htmlFor="create-email" className="text-xs font-medium text-text-muted">Email</label>
@@ -400,8 +423,8 @@ export default function UserManagementPage() {
 
       {/* Modal Edit User */}
       {isEditModalPresent && (
-        <div data-open={isEditModalOpen} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4">
-          <div data-open={isEditModalOpen} className="pti-modal-panel max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="edit-operator-title">
+        <div data-open={isEditModalOpen} onClick={(e) => { if (e.target === e.currentTarget && !isSavingEdit) closeEditModal(); }} className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4" role="presentation">
+          <div ref={editOperatorDialogRef} data-open={isEditModalOpen} className="pti-modal-panel max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-raised)]" role="dialog" aria-modal="true" aria-labelledby="edit-operator-title" tabIndex={-1}>
             <div className="flex justify-between items-center mb-6">
               <h3 id="edit-operator-title" className="flex items-center gap-2 text-lg font-semibold"><Edit2 className="w-5 h-5 text-primary"/> Edit operator [{editFormData.operatorId}]
               </h3>
@@ -410,7 +433,7 @@ export default function UserManagementPage() {
 
             <form onSubmit={handleEditSubmit} className="space-y-4" aria-busy={isSavingEdit}>
               <div>
-                <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="ui-field mt-1" disabled={isSavingEdit} />
+                <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="ui-field mt-1" disabled={isSavingEdit} data-autofocus />
               </div>
               <div>
                 <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={editFormData.email} onChange={(e) => setEditFormData({...editFormData, email: e.target.value})} required className="ui-field mt-1" disabled={isSavingEdit} />

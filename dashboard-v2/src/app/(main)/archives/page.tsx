@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Calendar, Download, Filter, Search, Shield } from "lucide-react";
+import { Calendar, Download, Filter, Search, Shield, X } from "lucide-react";
 
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { RegionState } from "@/components/ui/RegionState";
@@ -125,7 +125,7 @@ export default function ArchivesPage() {
               <SelectMenu value={filters.criticality} onValueChange={(value) => updateFilter("criticality", value)} options={["All Levels", "Critical", "High", "Medium", "Low"]} />
             </div>
             <label className="flex flex-col gap-2 text-sm font-medium text-text-muted">Region
-              <span className="relative"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-text-subtle" aria-hidden="true" /><input value={filters.region} onChange={(event) => updateFilter("region", event.target.value)} type="search" placeholder="Search region..." className="ui-field pl-9" /></span>
+              <span className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-subtle" aria-hidden="true" /><input value={filters.region} onChange={(event) => updateFilter("region", event.target.value)} type="search" placeholder="Search region..." className="ui-field pl-9 pr-8" />{filters.region && <button type="button" onClick={() => updateFilter("region", "")} className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-text-subtle hover:text-text" aria-label="Clear region filter"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>}</span>
             </label>
           </div>
         </div>

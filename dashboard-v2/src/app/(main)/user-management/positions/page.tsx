@@ -1,5 +1,5 @@
 "use client";
-import { Shield, Database, Network, Target, Plus, Edit2, Trash2, Users, Briefcase } from "lucide-react";
+import { Shield, Database, Network, Target, Plus, Edit2, Trash2, Users, Briefcase, Info } from "lucide-react";
 
 export default function PositionsPage() {
   const positions = [
@@ -22,6 +22,15 @@ export default function PositionsPage() {
           <Plus className="h-4 w-4" aria-hidden="true" /> Add position
         </button>
       </header>
+
+      {/* Information Banner */}
+      <div className="flex items-start gap-3 rounded-xl border border-border bg-surface-subtle p-4 text-xs leading-relaxed text-text-muted">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <div>
+          <span className="font-semibold text-text">System Preset Designations:</span>{" "}
+          Positions and operational access tiers are defined by the core vigilance policy. Creation, modification, and revocation of operational designations must be approved through system governance.
+        </div>
+      </div>
 
       {/* Stats Cards */}
       <div className="grid max-w-2xl grid-cols-1 gap-4 sm:grid-cols-2">

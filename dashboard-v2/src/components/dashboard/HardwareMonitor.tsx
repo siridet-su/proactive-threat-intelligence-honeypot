@@ -197,7 +197,7 @@ export function HardwareMonitor() {
                 <XAxis dataKey="time" stroke="var(--chart-axis)" fontSize={12} tickMargin={10} minTickGap={30} />
                 <YAxis stroke="var(--chart-axis)" fontSize={12} domain={[0, 100]} />
                 <Tooltip contentStyle={{ backgroundColor: 'var(--surface-raised)', borderColor: 'var(--border)', color: 'var(--text)', fontSize: '12px' }} />
-                <Area type="monotone" dataKey="cpu_percent" stroke="var(--chart-1)" strokeWidth={2} fillOpacity={1} fill="var(--primary-subtle)" isAnimationActive={false} />
+                <Area type="monotone" dataKey="cpu_percent" stroke="var(--chart-1)" strokeWidth={2} fillOpacity={1} fill="var(--chart-1-subtle)" isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
