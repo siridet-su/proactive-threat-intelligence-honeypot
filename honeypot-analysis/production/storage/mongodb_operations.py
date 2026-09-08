@@ -51,6 +51,12 @@ from production.utils.serialization import stable_id, stable_json, utc_now
 
 QUEUE_COLLECTIONS = dict(JOB_QUEUE_TABLES)
 QUEUE_COLLECTIONS["prediction"] = "prediction_outbox"
+PREDICTION_OUTBOX_TERMINAL_SCHEMA_VERSION = "prediction_outbox_terminal.v1"
+# The installed MongoDB validator requires prediction_outbox.payload_json to
+# exist.  Completed work no longer needs its input task, so retain a valid
+# empty JSON object as a bounded sentinel while preserving payload_sha256 as
+# the digest of the original task.
+PREDICTION_OUTBOX_COMPACTED_PAYLOAD = "{}"
 _PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
 _SESSION_TABLES = {
     "sessions",
@@ -1293,9 +1299,127 @@ class MongoDBRuntimeOperations:
             output.append({"outbox_id": row["outbox_id"], "task": task, "attempts": int(row.get("attempts", 0)), "claim_owner": row["claim_owner"], "claim_token": token, "claim_expires_at": row["claim_expires_at"]})
         return output
 
+    def _prediction_snapshot_link_exists(self, snapshot_id: str) -> bool:
+        """Return whether a durable snapshot exists for an outbox completion.
+
+        Completion is allowed only after the result has been durably written.
+        Both ``_id`` and ``snapshot_id`` are checked for compatibility with
+        the Mongo adapter's versioned snapshot records, and the returned
+        identity must agree with the outbox link.
+        """
+
+        identity = _required(snapshot_id, "snapshot_id")
+        document = self.database.prediction_snapshots.find_one(
+            {"$or": [{"_id": identity}, {"snapshot_id": identity}]},
+            {"_id": 1, "snapshot_id": 1},
+        )
+        if not document:
+            return False
+        return str(document.get("snapshot_id") or document.get("_id") or "") == identity
+
+    @staticmethod
+    def _prediction_outbox_has_active_lease(document: Mapping[str, Any]) -> bool:
+        """Conservatively reject any residual claim metadata on a terminal row."""
+
+        return any(
+            document.get(field) not in (None, "")
+            for field in ("claim_owner", "claim_token", "claim_expires_at")
+        )
+
+    def compact_completed_prediction_outbox(
+        self,
+        outbox_id: str,
+        *,
+        now: Any = None,
+    ) -> bool:
+        """Compact one eligible completed outbox row without changing identity.
+
+        The operation is deliberately idempotent.  A completed row is
+        eligible only when its snapshot link is durable, no claim metadata
+        remains, and the original task payload is still present.  The
+        installed collection validator requires ``payload_json``; therefore
+        compaction stores the empty-object sentinel and marks the terminal
+        form, while retaining the original payload digest for provenance.
+        """
+
+        current = _utc(now)
+        identity = _required(outbox_id, "outbox_id")
+        collection = self.database.prediction_outbox
+        document = collection.find_one({"_id": identity})
+        if not document:
+            return False
+        if str(document.get("status") or "") != "completed":
+            return False
+        snapshot_id = str(document.get("snapshot_id") or "").strip()
+        if not snapshot_id:
+            return False
+        if not self._prediction_snapshot_link_exists(snapshot_id):
+            return False
+        if self._prediction_outbox_has_active_lease(document):
+            return False
+        if document.get("payload_compacted") is True or document.get("payload_json") == PREDICTION_OUTBOX_COMPACTED_PAYLOAD:
+            return True
+        if "payload_json" not in document:
+            return False
+        result = collection.update_one(
+            {
+                "_id": identity,
+                "status": "completed",
+                "snapshot_id": snapshot_id,
+                "payload_json": {"$exists": True},
+                "$and": [
+                    {"$or": [{"claim_owner": {"$exists": False}}, {"claim_owner": None}]},
+                    {"$or": [{"claim_token": {"$exists": False}}, {"claim_token": None}]},
+                    {"$or": [{"claim_expires_at": {"$exists": False}}, {"claim_expires_at": None}]},
+                ],
+            },
+            {
+                "$set": {
+                    "payload_json": PREDICTION_OUTBOX_COMPACTED_PAYLOAD,
+                    "payload_compacted": True,
+                    "payload_compacted_at": current,
+                    "terminal_schema_version": PREDICTION_OUTBOX_TERMINAL_SCHEMA_VERSION,
+                    "updated_at": current,
+                }
+            },
+        )
+        return result.modified_count == 1
+
     def complete_prediction_outbox(self, outbox_id: str, owner: str, token: str, snapshot_id: str, *, now: Any = None) -> bool:
         current = _utc(now)
-        result = self.database.prediction_outbox.update_one({"_id": _required(outbox_id, "outbox_id"), "status": "in_progress", "claim_owner": _required(owner, "owner"), "claim_token": _token(token), "claim_expires_at": {"$gt": current}}, {"$set": {"status": "completed", "snapshot_id": _required(snapshot_id, "snapshot_id"), "completed_at": current, "updated_at": current}, "$unset": {"next_retry_at": "", "claim_owner": "", "claim_token": "", "claim_expires_at": "", "last_error_code": "", "last_error_type": "", "last_error_at": ""}})
+        identity = _required(snapshot_id, "snapshot_id")
+        if not self._prediction_snapshot_link_exists(identity):
+            return False
+        result = self.database.prediction_outbox.update_one(
+            {
+                "_id": _required(outbox_id, "outbox_id"),
+                "status": "in_progress",
+                "claim_owner": _required(owner, "owner"),
+                "claim_token": _token(token),
+                "claim_expires_at": {"$gt": current},
+            },
+            {
+                "$set": {
+                    "status": "completed",
+                    "snapshot_id": identity,
+                    "completed_at": current,
+                    "payload_json": PREDICTION_OUTBOX_COMPACTED_PAYLOAD,
+                    "payload_compacted": True,
+                    "payload_compacted_at": current,
+                    "terminal_schema_version": PREDICTION_OUTBOX_TERMINAL_SCHEMA_VERSION,
+                    "updated_at": current,
+                },
+                "$unset": {
+                    "next_retry_at": "",
+                    "claim_owner": "",
+                    "claim_token": "",
+                    "claim_expires_at": "",
+                    "last_error_code": "",
+                    "last_error_type": "",
+                    "last_error_at": "",
+                },
+            },
+        )
         return result.modified_count == 1
 
     def fail_prediction_outbox(self, outbox_id: str, owner: str, token: str, error_code: str, error_type: str, retryable: bool, max_attempts: int, retry_delay_seconds: float, *, now: Any = None) -> str:

@@ -53,7 +53,8 @@ export async function POST(request: Request) {
     });
     response.cookies.set(sessionCookie(token, expiresAt));
     return response;
-  } catch {
+  } catch (error) {
+    console.error("[LOGIN ERROR]", error);
     return NextResponse.json({ success: false, error: "Server Error" }, { status: 500 });
   }
 }
