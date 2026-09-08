@@ -34,6 +34,23 @@ export interface DashboardThreatEvent extends JsonRecord {
   } | null;
 }
 
+export type ThreatSeverityFilter = "All" | "Critical" | "High" | "Medium" | "Low";
+
+export interface ThreatDirectoryPage {
+  items: DashboardThreatEvent[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface ThreatDashboardSummary {
+  windowHours: number;
+  sessions: number;
+  uniqueSources: number;
+  prioritySessions: number;
+}
+
 export interface AttackerSummary {
   ip: string;
   country: string;

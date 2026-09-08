@@ -42,7 +42,7 @@ export default function HeroSection() {
             Proactive threat intelligence powered by next-generation honeypots. Observe attacker behavior before it reaches production.
           </p>
           <div className="pti-hero-reveal pti-hero-reveal-delay-3 mt-9 flex flex-wrap gap-3">
-            <MagneticLink href="/login" className="ui-button ui-button-primary pti-magnetic-link pti-hive-primary-cta group px-6">
+            <MagneticLink href="/login" authenticatedHref="/dashboard" className="ui-button ui-button-primary pti-magnetic-link pti-hive-primary-cta group px-6">
               View live dashboard
               <svg className="pti-button-arrow h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M4 12h15" /></svg>
             </MagneticLink>

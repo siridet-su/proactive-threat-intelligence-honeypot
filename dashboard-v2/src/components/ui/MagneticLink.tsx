@@ -1,16 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEventHandler, type ReactNode } from "react";
 
 interface MagneticLinkProps {
   href: string;
   className?: string;
   children: ReactNode;
+  authenticatedHref?: string;
+  loginHref?: string;
+  onClick?: MouseEventHandler<HTMLAnchorElement>;
 }
 
-export default function MagneticLink({ href, className, children }: MagneticLinkProps) {
+function navigate(destination: string) {
+  window.location.assign(destination);
+}
+
+function loginDestination(destination: string) {
+  return `/login?next=${encodeURIComponent(destination)}`;
+}
+
+export default function MagneticLink({ href, className, children, authenticatedHref, loginHref, onClick }: MagneticLinkProps) {
   const element = useRef<HTMLAnchorElement>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     const link = element.current;
@@ -57,5 +69,28 @@ export default function MagneticLink({ href, className, children }: MagneticLink
     };
   }, []);
 
-  return <Link ref={element} href={href} className={className}>{children}</Link>;
+  const handleClick: MouseEventHandler<HTMLAnchorElement> = async (event) => {
+    onClick?.(event);
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      checking ||
+      !authenticatedHref
+    ) return;
+
+    event.preventDefault();
+    setChecking(true);
+    try {
+      const response = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
+      navigate(response.ok ? authenticatedHref : (loginHref ?? loginDestination(authenticatedHref)));
+    } catch {
+      navigate(loginHref ?? loginDestination(authenticatedHref));
+    }
+  };
+
+  return <Link ref={element} href={href} className={className} onClick={handleClick} aria-busy={checking || undefined}>{children}{checking && <span className="sr-only">Checking session…</span>}</Link>;
 }

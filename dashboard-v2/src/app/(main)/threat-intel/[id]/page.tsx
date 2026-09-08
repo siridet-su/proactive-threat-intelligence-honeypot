@@ -8,6 +8,7 @@ import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RegionState } from "@/components/ui/RegionState";
+import { severityColor } from "@/lib/presentation";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
@@ -38,7 +39,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const lon = threatData.geo.lon || 0;
   const severity = threatData.severity || "Unknown";
   const classification = threatData.classification || "Unknown";
-  const markerColor = severity === "Critical" ? "var(--danger)" : severity === "High" || severity === "Medium" ? "var(--warning)" : "var(--info)";
+  const markerColor = severityColor(severity);
 
   return (
     <div className="space-y-7 pb-10">

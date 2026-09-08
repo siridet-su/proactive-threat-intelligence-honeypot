@@ -1,12 +1,25 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Briefcase, CheckCircle2, Edit2, KeyRound, Lock, ShieldCheck, ShieldX, UserPlus, X } from "lucide-react";
+import { Briefcase, CheckCircle2, Edit2, KeyRound, LoaderCircle, Lock, ShieldCheck, ShieldX, UserPlus, X } from "lucide-react";
 import { isDashboardUser } from "@/lib/dashboardTypes";
 import type { DashboardUser } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
 import { SelectMenu } from "@/components/ui/SelectMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
+
+type OperationNotice = {
+  kind: OperationToastKind;
+  title: string;
+  description: string;
+};
+
+async function getRequestError(response: Response, fallback: string) {
+  const payload: unknown = await response.json().catch(() => null);
+  if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") return payload.error;
+  return fallback;
+}
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<DashboardUser[]>([]);
@@ -24,17 +37,39 @@ export default function UserManagementPage() {
   const [createError, setCreateError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createdOperatorId, setCreatedOperatorId] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
 
   // State สำหรับแก้ไขข้อมูล
   const [editFormData, setEditFormData] = useState({ operatorId: "", fullName: "", email: "", position: "", role: "", newPassword: "" });
   const createDialogCloseTimer = useRef<number | null>(null);
   const editDialogCloseTimer = useRef<number | null>(null);
+  const operationNoticeTimer = useRef<number | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<DashboardUser | null>(null);
 
   useEffect(() => () => {
     if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
     if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
   }, []);
+
+  const showOperationNotice = (notice: OperationNotice) => {
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+    setOperationNotice(notice);
+    operationNoticeTimer.current = window.setTimeout(() => {
+      setOperationNotice(null);
+      operationNoticeTimer.current = null;
+    }, 4800);
+  };
+
+  const dismissOperationNotice = () => {
+    if (operationNoticeTimer.current !== null) window.clearTimeout(operationNoticeTimer.current);
+    operationNoticeTimer.current = null;
+    setOperationNotice(null);
+  };
 
   useEffect(() => {
     const loadSession = async () => {
@@ -124,12 +159,14 @@ export default function UserManagementPage() {
   // ฟังก์ชันเปิดหน้าแก้ไข
   const openEditModal = (user: DashboardUser) => {
     if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
+    setEditError("");
     setEditFormData({ ...user, newPassword: "" });
     setIsEditModalPresent(true);
     window.requestAnimationFrame(() => setIsEditModalOpen(true));
   };
 
-  const closeEditModal = () => {
+  const closeEditModal = (force = false) => {
+    if (isSavingEdit && !force) return;
     setIsEditModalOpen(false);
     if (editDialogCloseTimer.current !== null) window.clearTimeout(editDialogCloseTimer.current);
     editDialogCloseTimer.current = window.setTimeout(() => setIsEditModalPresent(false), 180);
@@ -138,50 +175,76 @@ export default function UserManagementPage() {
   // ฟังก์ชันบันทึกการแก้ไข
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingEdit) return;
+    setEditError("");
+    setIsSavingEdit(true);
+    let profileSaved = false;
 
-    // 1. อัปเดตข้อมูลทั่วไป
-    const res = await fetch("/api/users", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editFormData)
-    });
+    try {
+      const profileResponse = await fetch("/api/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editFormData),
+      });
+      if (!profileResponse.ok) throw new Error(await getRequestError(profileResponse, "The operator profile could not be updated."));
+      profileSaved = true;
 
-    if (res.ok) {
-      // 2. ถ้ามีการกรอกรหัสผ่านใหม่ (และเป็นเจ้าของบัญชีตัวเอง) ให้เรียก API เปลี่ยนรหัสผ่านด้วย
-      if (editFormData.newPassword && editFormData.operatorId === currentUserId) {
-        await fetch("/api/auth/change-password", {
+      const passwordChanged = Boolean(editFormData.newPassword && editFormData.operatorId === currentUserId);
+      if (passwordChanged) {
+        const passwordResponse = await fetch("/api/auth/change-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ operatorId: editFormData.operatorId, newPassword: editFormData.newPassword }),
         });
-        alert("Profile and password updated successfully.");
-      } else {
-        alert("Profile updated successfully.");
+        if (!passwordResponse.ok) throw new Error(await getRequestError(passwordResponse, "The access key could not be updated."));
       }
 
-      closeEditModal();
-      setRefreshKey(prev => prev + 1);
+      closeEditModal(true);
+      setRefreshKey((previous) => previous + 1);
+      showOperationNotice({
+        kind: "success",
+        title: "Operator updated",
+        description: passwordChanged ? "Profile and access key were saved successfully." : "Profile changes were saved successfully.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The operator profile could not be updated. Please try again.";
+      if (profileSaved) {
+        setRefreshKey((previous) => previous + 1);
+        setEditError(`Profile changes were saved, but ${message.charAt(0).toLowerCase()}${message.slice(1)}`);
+      } else {
+        setEditError(message);
+      }
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
   // ฟังก์ชันลบผู้ใช้
   const requestDelete = (user: DashboardUser) => {
     if (user.operatorId === currentUserId) return;
+    setDeleteError("");
     setDeleteCandidate(user);
   };
 
   const confirmDelete = async () => {
-    if (!deleteCandidate) return;
+    if (!deleteCandidate || isDeleting) return;
     const operatorId = deleteCandidate.operatorId;
+    setDeleteError("");
+    setIsDeleting(true);
     try {
       const res = await fetch("/api/users", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operatorId })
       });
-      if (res.ok) setRefreshKey(prev => prev + 1);
-    } finally {
+      if (!res.ok) throw new Error(await getRequestError(res, "The operator could not be removed."));
+      setRefreshKey((previous) => previous + 1);
       setDeleteCandidate(null);
+      showOperationNotice({ kind: "success", title: "Operator removed", description: `${operatorId} no longer has workspace access.` });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "The operator could not be removed. Please try again.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -342,23 +405,23 @@ export default function UserManagementPage() {
             <div className="flex justify-between items-center mb-6">
               <h3 id="edit-operator-title" className="flex items-center gap-2 text-lg font-semibold"><Edit2 className="w-5 h-5 text-primary"/> Edit operator [{editFormData.operatorId}]
               </h3>
-              <button onClick={closeEditModal} className="ui-button min-h-9 px-2" aria-label="Close edit operator dialog"><X className="w-5 h-5"/></button>
+              <button onClick={() => closeEditModal()} className="ui-button min-h-9 px-2" aria-label="Close edit operator dialog" disabled={isSavingEdit}><X className="w-5 h-5"/></button>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="space-y-4">
+            <form onSubmit={handleEditSubmit} className="space-y-4" aria-busy={isSavingEdit}>
               <div>
-                <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="ui-field mt-1" />
+                <label className="text-xs font-medium text-text-muted">Full name</label><input type="text" value={editFormData.fullName} onChange={(e) => setEditFormData({...editFormData, fullName: e.target.value})} required className="ui-field mt-1" disabled={isSavingEdit} />
               </div>
               <div>
-                <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={editFormData.email} onChange={(e) => setEditFormData({...editFormData, email: e.target.value})} required className="ui-field mt-1" />
+                <label className="text-xs font-medium text-text-muted">Email</label><input type="email" value={editFormData.email} onChange={(e) => setEditFormData({...editFormData, email: e.target.value})} required className="ui-field mt-1" disabled={isSavingEdit} />
               </div>
 
               {/* ให้ Admin เท่านั้นที่เปลี่ยนตำแหน่งและ Role ได้ */}
               <div>
-                <label className="text-xs font-medium text-text-muted">Position</label><SelectMenu value={editFormData.position} onValueChange={(position) => setEditFormData({...editFormData, position})} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={currentUserRole !== "Admin"} />
+                <label className="text-xs font-medium text-text-muted">Position</label><SelectMenu value={editFormData.position} onValueChange={(position) => setEditFormData({...editFormData, position})} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={isSavingEdit || currentUserRole !== "Admin"} />
               </div>
               <div>
-                <label className="text-xs font-medium text-text-muted">Role</label><SelectMenu value={editFormData.role} onValueChange={(role) => setEditFormData({...editFormData, role})} options={["Admin", "Supporter"]} className="mt-1" disabled={currentUserRole !== "Admin"} />
+                <label className="text-xs font-medium text-text-muted">Role</label><SelectMenu value={editFormData.role} onValueChange={(role) => setEditFormData({...editFormData, role})} options={["Admin", "Supporter"]} className="mt-1" disabled={isSavingEdit || currentUserRole !== "Admin"} />
               </div>
 
               {/* ส่วนเปลี่ยนรหัสผ่าน (แสดงเฉพาะตอนแก้ไขบัญชีตัวเอง) */}
@@ -366,12 +429,14 @@ export default function UserManagementPage() {
                 <div className="mt-4 border-t border-border pt-4"><label className="mb-2 flex items-center gap-1 text-xs font-medium text-warning">
                     <Lock className="w-3 h-3"/> CHANGE PASSWORD (OPTIONAL)
                   </label>
-                  <input type="password" placeholder="Leave blank to keep current password" value={editFormData.newPassword} onChange={(e) => setEditFormData({...editFormData, newPassword: e.target.value})} className="ui-field" />
+                  <input type="password" placeholder="Leave blank to keep current password" value={editFormData.newPassword} onChange={(e) => setEditFormData({...editFormData, newPassword: e.target.value})} className="ui-field" disabled={isSavingEdit} />
                 </div>
               )}
 
-              <button type="submit" className="ui-button ui-button-primary mt-4 w-full">
-                SAVE CHANGES
+              {editError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle p-3 text-sm text-danger">{editError}</p>}
+              <button type="submit" className="ui-button ui-button-primary mt-4 w-full" disabled={isSavingEdit}>
+                {isSavingEdit && <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
+                {isSavingEdit ? "Saving changes…" : "Save changes"}
               </button>
             </form>
           </div>
@@ -385,7 +450,11 @@ export default function UserManagementPage() {
         description={deleteCandidate ? `This will remove ${deleteCandidate.fullName || deleteCandidate.operatorId} from the operator roster. This action cannot be undone.` : ""}
         confirmLabel="Remove operator"
         confirmVariant="danger"
+        isProcessing={isDeleting}
+        processingLabel="Removing operator…"
+        errorMessage={deleteError}
       />
+      {operationNotice && <OperationToast {...operationNotice} onDismiss={dismissOperationNotice} />}
     </div>
   );
 }

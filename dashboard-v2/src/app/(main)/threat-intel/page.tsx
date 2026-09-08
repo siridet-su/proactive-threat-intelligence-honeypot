@@ -112,7 +112,7 @@ export default function ThreatIntelPage() {
                     </td>
                     <td className="font-mono text-xs text-text">{log.sourceIp}</td>
                     <td>
-                      <span className={`ui-badge ${classificationBadgeClass(log.typeColor)}`}>
+                      <span className={`ui-badge ${classificationBadgeClass(log.classification, log.typeColor)}`}>
                         {log.classification}
                       </span>
                     </td>

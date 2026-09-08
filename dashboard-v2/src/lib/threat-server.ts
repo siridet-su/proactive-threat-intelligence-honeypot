@@ -3,12 +3,21 @@ import "server-only";
 import geoip from "geoip-lite";
 import type { ChangeStream, Document, Filter } from "mongodb";
 
-import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
+import type {
+  DashboardThreatEvent,
+  ThreatDashboardSummary,
+  ThreatDirectoryPage,
+  ThreatSeverityFilter,
+} from "@/lib/dashboardTypes";
 import { getMongoClient } from "@/lib/mongodb";
 
 const DATABASE_NAME = "honeypot_canonical_v1";
 const COLLECTION_NAME = "sessions";
 const DEFAULT_LIMIT = 100;
+const DEFAULT_DIRECTORY_PAGE_SIZE = 20;
+const MAX_DIRECTORY_PAGE_SIZE = 100;
+export const MAX_DIRECTORY_EXPORT = 10_000;
+const SUMMARY_WINDOW_HOURS = 24;
 const SNAPSHOT_TTL_MS = 5_000;
 const STREAM_RETRY_MS = 5_000;
 
@@ -51,6 +60,64 @@ function queryForRange(range: string | null): Filter<Document> {
 
 function limitForRange(range: string | null): number {
   return range === "all" ? 2_000 : DEFAULT_LIMIT;
+}
+
+export interface ThreatDirectoryFilters {
+  query?: string;
+  severity?: ThreatSeverityFilter;
+  page?: number;
+  pageSize?: number;
+}
+
+function normalizeDirectoryFilters(filters: ThreatDirectoryFilters) {
+  const query = filters.query?.trim().slice(0, 120) ?? "";
+  const severity: ThreatSeverityFilter = ["Critical", "High", "Medium", "Low"].includes(filters.severity ?? "")
+    ? filters.severity as ThreatSeverityFilter
+    : "All";
+  const page = Number.isFinite(filters.page) ? Math.max(1, Math.floor(filters.page ?? 1)) : 1;
+  const pageSize = Number.isFinite(filters.pageSize)
+    ? Math.min(MAX_DIRECTORY_PAGE_SIZE, Math.max(1, Math.floor(filters.pageSize ?? DEFAULT_DIRECTORY_PAGE_SIZE)))
+    : DEFAULT_DIRECTORY_PAGE_SIZE;
+
+  return { query, severity, page, pageSize };
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function filterForDirectory({ query, severity }: Pick<ReturnType<typeof normalizeDirectoryFilters>, "query" | "severity">): Filter<Document> {
+  const conditions: Filter<Document>[] = [];
+
+  if (severity !== "All") {
+    if (severity === "Medium") {
+      conditions.push({
+        $or: [
+          { max_confirmed_severity: "Medium" },
+          { max_confirmed_severity: { $exists: false } },
+          { max_confirmed_severity: "" },
+        ],
+      });
+    } else {
+      conditions.push({ max_confirmed_severity: severity });
+    }
+  }
+
+  if (query) {
+    const matcher = new RegExp(escapeRegex(query), "i");
+    conditions.push({
+      $or: [
+        { session_id: matcher },
+        { src_ip: matcher },
+        { session_source: matcher },
+        { max_confirmed_severity: matcher },
+      ],
+    });
+  }
+
+  if (!conditions.length) return {};
+  if (conditions.length === 1) return conditions[0];
+  return { $and: conditions };
 }
 
 function normalizeThreats(sessionDocs: Document[]): DashboardThreatEvent[] {
@@ -155,6 +222,84 @@ export async function getThreatSnapshot(range: string | null = null): Promise<Da
   } finally {
     runtime.inflightSnapshots.delete(cacheKey);
   }
+}
+
+export async function getThreatDirectory(filters: ThreatDirectoryFilters = {}): Promise<ThreatDirectoryPage> {
+  const normalized = normalizeDirectoryFilters(filters);
+  const query = filterForDirectory(normalized);
+  const client = await getMongoClient();
+  const collection = client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME);
+  const total = await collection.countDocuments(query);
+  const totalPages = Math.max(1, Math.ceil(total / normalized.pageSize));
+  const page = Math.min(normalized.page, totalPages);
+  const sessionDocs = await collection
+    .find(query)
+    .sort({ start_time: -1 })
+    .skip((page - 1) * normalized.pageSize)
+    .limit(normalized.pageSize)
+    .allowDiskUse(true)
+    .toArray();
+
+  return {
+    items: normalizeThreats(sessionDocs),
+    page,
+    pageSize: normalized.pageSize,
+    total,
+    totalPages,
+  };
+}
+
+export async function getThreatDirectoryExport(filters: Omit<ThreatDirectoryFilters, "page" | "pageSize"> = {}) {
+  const normalized = normalizeDirectoryFilters(filters);
+  const query = filterForDirectory(normalized);
+  const client = await getMongoClient();
+  const collection = client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME);
+  const total = await collection.countDocuments(query);
+  const sessionDocs = await collection
+    .find(query)
+    .sort({ start_time: -1 })
+    .limit(MAX_DIRECTORY_EXPORT)
+    .allowDiskUse(true)
+    .toArray();
+
+  return {
+    items: normalizeThreats(sessionDocs),
+    total,
+    truncated: total > MAX_DIRECTORY_EXPORT,
+  };
+}
+
+export async function getThreatDashboardSummary(): Promise<ThreatDashboardSummary> {
+  const windowStart = new Date(Date.now() - SUMMARY_WINDOW_HOURS * 60 * 60 * 1_000).toISOString();
+  const client = await getMongoClient();
+  const [summary] = await client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME).aggregate<{
+    sessions: Array<{ count: number }>;
+    uniqueSources: Array<{ count: number }>;
+    prioritySessions: Array<{ count: number }>;
+  }>([
+    { $match: { start_time: { $gte: windowStart } } },
+    {
+      $facet: {
+        sessions: [{ $count: "count" }],
+        uniqueSources: [
+          { $match: { src_ip: { $type: "string", $ne: "" } } },
+          { $group: { _id: "$src_ip" } },
+          { $count: "count" },
+        ],
+        prioritySessions: [
+          { $match: { max_confirmed_severity: { $in: ["Critical", "High"] } } },
+          { $count: "count" },
+        ],
+      },
+    },
+  ], { allowDiskUse: true }).toArray();
+
+  return {
+    windowHours: SUMMARY_WINDOW_HOURS,
+    sessions: summary?.sessions[0]?.count ?? 0,
+    uniqueSources: summary?.uniqueSources[0]?.count ?? 0,
+    prioritySessions: summary?.prioritySessions[0]?.count ?? 0,
+  };
 }
 
 function invalidateThreatSnapshots() {

@@ -18,10 +18,14 @@
   --on-primary: #FFFFFF;
   --focus-ring: #F59E0B;
   --success: #15803D;
-  --warning: #B45309;
+  --warning: #D97706;
   --danger: #B91C1C;
   --info: #0369A1;
   --neutral: #475569;
+  --severity-critical: #B91C1C;
+  --severity-high: #EA580C;
+  --severity-medium: #D97706;
+  --severity-low: #15803D;
   --chart-1: #2563EB;
   --chart-2: #0F766E;
   --chart-3: #B45309;
@@ -55,10 +59,14 @@
   --on-primary: #FFFFFF;
   --focus-ring: #FDE68A;
   --success: #4ADE80;
-  --warning: #FBBF24;
+  --warning: #F59E0B;
   --danger: #F87171;
   --info: #38BDF8;
   --neutral: #94A3B8;
+  --severity-critical: #F87171;
+  --severity-high: #FB923C;
+  --severity-medium: #FBBF24;
+  --severity-low: #4ADE80;
   --chart-1: #60A5FA;
   --chart-2: #2DD4BF;
   --chart-3: #FBBF24;
@@ -84,6 +92,26 @@
   --danger-border: color-mix(in srgb, var(--danger) 28%, var(--border));
   --info-subtle: color-mix(in srgb, var(--info) 6%, var(--surface));
   --info-border: color-mix(in srgb, var(--info) 28%, var(--border));
+  --severity-critical-subtle: color-mix(in srgb, var(--severity-critical) 8%, var(--surface));
+  --severity-critical-border: color-mix(in srgb, var(--severity-critical) 30%, var(--border));
+  --severity-high-subtle: color-mix(in srgb, var(--severity-high) 8%, var(--surface));
+  --severity-high-border: color-mix(in srgb, var(--severity-high) 30%, var(--border));
+  --severity-medium-subtle: color-mix(in srgb, var(--severity-medium) 8%, var(--surface));
+  --severity-medium-border: color-mix(in srgb, var(--severity-medium) 30%, var(--border));
+  --severity-low-subtle: color-mix(in srgb, var(--severity-low) 8%, var(--surface));
+  --severity-low-border: color-mix(in srgb, var(--severity-low) 30%, var(--border));
+  --chart-1-subtle: color-mix(in srgb, var(--chart-1) 10%, var(--surface));
+  --chart-1-border: color-mix(in srgb, var(--chart-1) 32%, var(--border));
+  --chart-2-subtle: color-mix(in srgb, var(--chart-2) 10%, var(--surface));
+  --chart-2-border: color-mix(in srgb, var(--chart-2) 32%, var(--border));
+  --chart-3-subtle: color-mix(in srgb, var(--chart-3) 10%, var(--surface));
+  --chart-3-border: color-mix(in srgb, var(--chart-3) 32%, var(--border));
+  --chart-4-subtle: color-mix(in srgb, var(--chart-4) 10%, var(--surface));
+  --chart-4-border: color-mix(in srgb, var(--chart-4) 32%, var(--border));
+  --chart-5-subtle: color-mix(in srgb, var(--chart-5) 10%, var(--surface));
+  --chart-5-border: color-mix(in srgb, var(--chart-5) 32%, var(--border));
+  --chart-6-subtle: color-mix(in srgb, var(--chart-6) 10%, var(--surface));
+  --chart-6-border: color-mix(in srgb, var(--chart-6) 32%, var(--border));
   --neutral-subtle: var(--surface-subtle);
   --neutral-border: var(--border);
   --control-border: var(--text-subtle);
@@ -126,6 +154,38 @@
   --color-neutral: var(--neutral);
   --color-neutral-subtle: var(--neutral-subtle);
   --color-neutral-border: var(--neutral-border);
+
+  --color-severity-critical: var(--severity-critical);
+  --color-severity-critical-subtle: var(--severity-critical-subtle);
+  --color-severity-critical-border: var(--severity-critical-border);
+  --color-severity-high: var(--severity-high);
+  --color-severity-high-subtle: var(--severity-high-subtle);
+  --color-severity-high-border: var(--severity-high-border);
+  --color-severity-medium: var(--severity-medium);
+  --color-severity-medium-subtle: var(--severity-medium-subtle);
+  --color-severity-medium-border: var(--severity-medium-border);
+  --color-severity-low: var(--severity-low);
+  --color-severity-low-subtle: var(--severity-low-subtle);
+  --color-severity-low-border: var(--severity-low-border);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-1-subtle: var(--chart-1-subtle);
+  --color-chart-1-border: var(--chart-1-border);
+  --color-chart-2: var(--chart-2);
+  --color-chart-2-subtle: var(--chart-2-subtle);
+  --color-chart-2-border: var(--chart-2-border);
+  --color-chart-3: var(--chart-3);
+  --color-chart-3-subtle: var(--chart-3-subtle);
+  --color-chart-3-border: var(--chart-3-border);
+  --color-chart-4: var(--chart-4);
+  --color-chart-4-subtle: var(--chart-4-subtle);
+  --color-chart-4-border: var(--chart-4-border);
+  --color-chart-5: var(--chart-5);
+  --color-chart-5-subtle: var(--chart-5-subtle);
+  --color-chart-5-border: var(--chart-5-border);
+  --color-chart-6: var(--chart-6);
+  --color-chart-6-subtle: var(--chart-6-subtle);
+  --color-chart-6-border: var(--chart-6-border);
 
   --color-background: var(--canvas);
   --color-foreground: var(--text);
@@ -184,7 +244,7 @@
   .ui-table th { background: var(--surface-subtle); color: var(--text-muted); font-size: 13px; font-weight: 600; padding: 16px 24px; white-space: nowrap; }
   .ui-table td { height: 56px; padding: 16px 24px; border-top: 1px solid var(--border); }
   .ui-table tbody tr { transition: background-color 150ms, transform 150ms; }
-  .ui-table tbody tr:hover { background: var(--surface-hover); box-shadow: inset 3px 0 0 var(--primary); transform: translateY(-1px); }
+  .ui-table tbody tr:hover { background: var(--surface-hover); box-shadow: inset 3px 0 0 var(--info); transform: translateY(-1px); }
   .ui-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--neutral-border); border-radius: 999px; padding: 3px 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--neutral); background: var(--neutral-subtle); }
   summary { cursor: pointer; }
   summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
