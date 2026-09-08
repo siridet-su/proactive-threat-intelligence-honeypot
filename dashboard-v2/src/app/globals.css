@@ -397,8 +397,10 @@
 .pti-hive-primary-cta { border-color: var(--primary-action); }
 .pti-hive-secondary-cta { border-color: color-mix(in srgb, var(--info) 58%, var(--border)); color: var(--info); }
 .pti-hive-secondary-cta:hover:not(:disabled) { border-color: var(--info); color: var(--info); }
-.pti-cyber-landing .pti-honeypot-scene > .ui-panel { border-color: var(--primary-border); background: var(--surface); box-shadow: var(--shadow-card); }
-.pti-honeypot-asset-stage { position: relative; min-height: clamp(19rem, 34vw, 25rem); overflow: hidden; isolation: isolate; border: 1px solid var(--border); border-radius: 0.75rem; background: radial-gradient(circle at 50% 54%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 42%), linear-gradient(145deg, color-mix(in srgb, var(--surface-subtle) 94%, var(--canvas)), var(--surface)); }
+.pti-honeypot-scene { isolation: isolate; }
+.pti-honeypot-scene::before { content: ""; position: absolute; z-index: -1; inset: 8% -12% 14%; background: radial-gradient(ellipse at 50% 52%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 66%); pointer-events: none; }
+.pti-honeypot-workspace-row { border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent); }
+.pti-honeypot-asset-stage { position: relative; min-height: clamp(19rem, 34vw, 25rem); overflow: hidden; isolation: isolate; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--border)); border-radius: 0.75rem; background: radial-gradient(circle at 50% 54%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 42%), color-mix(in srgb, var(--surface) 72%, var(--canvas)); }
 .pti-honeypot-asset-stage::before { content: ""; position: absolute; inset: 1rem; z-index: -1; border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border)); border-radius: 50%; opacity: 0.72; transform: scaleX(0.86); }
 .pti-honeypot-device-frame { position: absolute; z-index: 2; bottom: -14%; left: 50%; width: min(82%, 29rem); transform: translateX(-50%); }
 .pti-honeypot-device { transform-origin: center bottom; }
@@ -422,6 +424,7 @@
 .pti-honeypot-stage-label { position: absolute; z-index: 4; font-family: var(--font-mono); font-size: 0.58rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-subtle); }
 .pti-honeypot-stage-label-top { top: 1.1rem; left: 1.15rem; }
 .pti-honeypot-stage-label-bottom { right: 1.15rem; bottom: 1rem; }
+.pti-honeypot-evidence-card { background: color-mix(in srgb, var(--surface) 74%, transparent); }
 
 .pti-hive-section { background: color-mix(in srgb, var(--surface-subtle) 82%, var(--canvas)); }
 .pti-hive-section-mark { position: absolute; width: 16rem; height: 18rem; border: 1px solid var(--primary-border); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); opacity: 0.33; }
