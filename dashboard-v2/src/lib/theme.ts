@@ -1,6 +1,6 @@
 export type ThemePreference = "system" | "light" | "dark";
 export type ResolvedTheme = Exclude<ThemePreference, "system">;
-export type ThemeTransitionRequest = { preference: ThemePreference };
+export type ThemeTransitionRequest = { theme: ResolvedTheme };
 export const THEME_STORAGE_KEY = "pti-theme";
 export const THEME_CHANGE_EVENT = "pti-theme-change";
 export const THEME_TRANSITION_REQUEST_EVENT = "pti-theme-transition-request";
@@ -28,9 +28,9 @@ export function setThemePreference(preference: ThemePreference) {
   window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
 }
 
-export function requestThemePreference(preference: ThemePreference) {
+export function requestThemePreference(theme: ResolvedTheme) {
   window.dispatchEvent(new CustomEvent<ThemeTransitionRequest>(THEME_TRANSITION_REQUEST_EVENT, {
-    detail: { preference },
+    detail: { theme },
   }));
 }
 

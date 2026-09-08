@@ -18,7 +18,7 @@ const topics = [
 ] as const;
 
 type TopicId = (typeof topics)[number]["id"];
-type OpenMenu = "theme" | "account" | "mobile" | null;
+type OpenMenu = "account" | "mobile" | null;
 
 type PublicSession = {
   operatorId: string;
@@ -201,7 +201,7 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <ThemeToggle open={openMenu === "theme"} onOpenChange={(open) => setOpenMenu(open ? "theme" : null)} />
+          <ThemeToggle />
           {session ? (
             <div className="relative hidden lg:block">
               <button

@@ -4,18 +4,16 @@ import { createContext, useContext, useEffect, useRef, useState, useSyncExternal
 import {
   applyTheme,
   parseTheme,
-  resolveTheme,
   setThemePreference,
   THEME_CHANGE_EVENT,
   THEME_STORAGE_KEY,
   THEME_TRANSITION_REQUEST_EVENT,
   type ResolvedTheme,
-  type ThemePreference,
   type ThemeTransitionRequest,
 } from "@/lib/theme";
 import ThemeTransition from "./ThemeTransition";
 
-const ThemeContext = createContext<ThemePreference>("system");
+const ThemeContext = createContext<ResolvedTheme>("light");
 type ThemeSwitch = { previous: ResolvedTheme; resolved: ResolvedTheme };
 const THEME_HANDOFF_DELAY_MS = 760;
 const THEME_TRANSITION_DURATION_MS = 1360;
@@ -33,25 +31,28 @@ function subscribe(onChange: () => void) {
     window.removeEventListener("storage", onStorage);
   };
 }
-const getSnapshot = () => parseTheme(document.documentElement.dataset.themePreference);
-const getServerSnapshot = (): ThemePreference => "system";
+const getSnapshot = (): ResolvedTheme => document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+const getServerSnapshot = (): ResolvedTheme => "light";
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const preference = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const resolvedTheme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const themeApplyTimer = useRef<number | null>(null);
   const transitionDismissTimer = useRef<number | null>(null);
   const [themeSwitch, setThemeSwitch] = useState<ThemeSwitch | null>(null);
 
   useEffect(() => {
     // Read the bootstrapped preference too: hydration initially uses the server snapshot.
-    const current = getSnapshot();
-    applyTheme(current);
-    if (current !== "system") return;
+    const preference = parseTheme(document.documentElement.dataset.themePreference);
+    applyTheme(preference);
+    if (preference !== "system") return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => applyTheme("system");
+    const onChange = () => {
+      applyTheme("system");
+      window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
+    };
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
-  }, [preference]);
+  }, [resolvedTheme]);
 
   useEffect(() => {
     const clearTimers = () => {
@@ -63,17 +64,16 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
       if (!request) return;
 
       const previous = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-      const resolved = resolveTheme(request.preference);
-      if (previous === resolved) {
-        setThemePreference(request.preference);
+      if (previous === request.theme) {
+        setThemePreference(request.theme);
         return;
       }
 
       clearTimers();
-      setThemeSwitch({ previous, resolved });
+      setThemeSwitch({ previous, resolved: request.theme });
       // Keep the current theme visible through the outgoing icon. The actual
       // token swap happens while the overlay covers the hand-off in the rail.
-      themeApplyTimer.current = window.setTimeout(() => setThemePreference(request.preference), THEME_HANDOFF_DELAY_MS);
+      themeApplyTimer.current = window.setTimeout(() => setThemePreference(request.theme), THEME_HANDOFF_DELAY_MS);
       transitionDismissTimer.current = window.setTimeout(() => setThemeSwitch(null), THEME_TRANSITION_DURATION_MS);
     };
 
@@ -85,11 +85,11 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
   }, []);
 
   return (
-    <ThemeContext value={preference}>
+    <ThemeContext value={resolvedTheme}>
       {children}
       {themeSwitch && <ThemeTransition {...themeSwitch} />}
     </ThemeContext>
   );
 }
 
-export const useThemePreference = () => useContext(ThemeContext);
+export const useResolvedTheme = () => useContext(ThemeContext);
