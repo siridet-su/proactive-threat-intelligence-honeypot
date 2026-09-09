@@ -127,9 +127,19 @@ export interface FilesystemTopologySession {
   cwdState: SessionCwdState;
 }
 
+/** A session that is no longer live but remains available for CWD audit retention. */
+export interface FilesystemClosedSession extends FilesystemTopologySession {
+  lifecycle: {
+    startedAt: string | null;
+    closedAt: string | null;
+  };
+}
+
 export interface FilesystemTopologySnapshot {
   nodes: FilesystemTopologyNode[];
   sessions: FilesystemTopologySession[];
+  /** Most recently closed, audit-ready sessions. They never appear in the live graph. */
+  recentClosedSessions: FilesystemClosedSession[];
   /** True when a bounded live snapshot contains only the most recently observed sessions. */
   truncated: boolean;
   generatedAt: string;

@@ -916,7 +916,8 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 	}
 
 	cwdStateIndexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "updatedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
+		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "updatedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
+		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
 		{Keys: bson.D{{Key: "cwdState.path", Value: 1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}

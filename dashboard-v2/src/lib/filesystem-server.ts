@@ -6,6 +6,7 @@ import type {
   FilesystemTopologyNode,
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
+  FilesystemClosedSession,
   SessionCwdHistoryEvent,
   SessionCwdHistoryPage,
   SessionCwdState,
@@ -26,6 +27,7 @@ const DATABASE_NAME = "honeypot_db";
 const SESSIONS_COLLECTION = "cwd_session_state";
 const HISTORY_COLLECTION = "cwd_events";
 const TOPOLOGY_LIMIT = 500;
+const RECENT_CLOSED_LIMIT = 12;
 const HISTORY_PAGE_SIZE = 80;
 const TOPOLOGY_BROADCAST_DEBOUNCE_MS = 250;
 interface TopologySubscriber {
@@ -98,13 +100,29 @@ function toTopologySession(document: Document): FilesystemTopologySession | null
   };
 }
 
+function toClosedSession(document: Document): FilesystemClosedSession | null {
+  const session = toTopologySession(document);
+  const lifecycle = document.lifecycle;
+  if (!session || !lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) return null;
+  const lifecycleRecord = lifecycle as Record<string, unknown>;
+  return {
+    ...session,
+    lifecycle: {
+      startedAt: asDateString(lifecycleRecord.startedAt),
+      closedAt: asDateString(lifecycleRecord.closedAt),
+    },
+  };
+}
+
 /**
  * Materializes only observed paths and their ancestors. It deliberately does not
  * invent a Linux filesystem or infer a path where Cowrie has not emitted one.
  */
 async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
   const client = await getMongoClient();
-  const documents = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION)
+  const states = client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION);
+  const [documents, closedDocuments] = await Promise.all([
+    states
     // A missing lifecycle field is legacy state, not evidence that a session is
     // still live. Only the processor's explicit active projection belongs in
     // the real-time map.
@@ -114,10 +132,20 @@ async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
     // to represent every active session.
     .limit(TOPOLOGY_LIMIT + 1)
     .allowDiskUse(true)
-    .toArray();
+    .toArray(),
+    // Closed sessions are intentionally outside the live topology, but the
+    // most recent verified state remains directly reachable for audit.
+    states
+      .find({ "lifecycle.status": "closed", "cwdState.path": { $type: "string", $ne: "" } })
+      .sort({ "lifecycle.closedAt": -1, sessionId: -1 })
+      .limit(RECENT_CLOSED_LIMIT)
+      .allowDiskUse(true)
+      .toArray(),
+  ]);
 
   const truncated = documents.length > TOPOLOGY_LIMIT;
   const sessions = documents.slice(0, TOPOLOGY_LIMIT).map(toTopologySession).filter((item): item is FilesystemTopologySession => item !== null);
+  const recentClosedSessions = closedDocuments.map(toClosedSession).filter((item): item is FilesystemClosedSession => item !== null);
   const nodes = new Map<string, FilesystemTopologyNode>();
 
   for (const session of sessions) {
@@ -142,6 +170,7 @@ async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
   return {
     nodes: [...nodes.values()].sort((left, right) => left.path.localeCompare(right.path)),
     sessions,
+    recentClosedSessions,
     truncated,
     generatedAt: new Date().toISOString(),
   };
