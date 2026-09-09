@@ -399,7 +399,7 @@ export function TopologyCanvas({
 
   return (
     <div
-      className={`ui-panel overflow-hidden ${
+      className={`ui-panel self-start overflow-hidden ${
         isTopologyExpanded ? "fixed inset-3 z-50 flex flex-col bg-surface" : ""
       }`}
       aria-busy={regionStatus === "loading"}
@@ -554,8 +554,8 @@ export function TopologyCanvas({
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-30 h-full w-full overflow-visible" aria-hidden="true">
                     {graphCallouts.map((callout, index) => {
                       const position = positionForCallout(callout, index);
-                      const selected = callout.sessionIds.includes(selectedSessionId ?? "");
-                      const targetPaths = selected
+                      const selectedSource = callout.sessionIds.includes(selectedSessionId ?? "");
+                      const targetPaths = selectedSource
                         ? [...new Set(callout.sessionIds.map((sessionId) => liveSessionById.get(sessionId)?.cwdState.path).filter((path): path is string => Boolean(path)))]
                         : [callout.path];
                       return (
@@ -563,6 +563,7 @@ export function TopologyCanvas({
                           {targetPaths.map((path) => {
                             const node = graphNodeByPath.get(path);
                             if (!node) return null;
+                            const focused = selectedSource || path === selectedPath;
                             const endpoint = leaderEndpoints(node, position);
                             const controlX = (endpoint.startX + endpoint.endX) / 2;
                             return (
@@ -570,17 +571,20 @@ export function TopologyCanvas({
                                 <path
                                   d={`M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`}
                                   fill="none"
-                                  stroke="var(--primary)"
-                                  strokeWidth={selected ? "0.42" : "0.32"}
-                                  strokeDasharray={selected ? "none" : "1.1 1.4"}
+                                  stroke={focused ? "var(--primary)" : "var(--border-strong)"}
+                                  strokeOpacity={focused ? 1 : 0.52}
+                                  strokeWidth={focused ? "0.42" : "0.24"}
+                                  strokeDasharray={focused ? "none" : "0.75 1.6"}
                                 />
                                 <circle
                                   cx={endpoint.startX}
                                   cy={endpoint.startY}
-                                  r="1.15"
-                                  fill="var(--surface)"
-                                  stroke="var(--primary)"
-                                  strokeWidth="0.48"
+                                  r={focused ? "1.05" : "0.5"}
+                                  fill={focused ? "var(--surface)" : "var(--border-strong)"}
+                                  fillOpacity={focused ? 1 : 0.68}
+                                  stroke={focused ? "var(--primary)" : "var(--border-strong)"}
+                                  strokeOpacity={focused ? 1 : 0.55}
+                                  strokeWidth={focused ? "0.48" : "0.18"}
                                 />
                               </g>
                             );
@@ -602,9 +606,14 @@ export function TopologyCanvas({
                           : "border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
                       }`}
                     >
-                      <Crosshair className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                      <Crosshair
+                        className={`h-3.5 w-3.5 shrink-0 ${
+                          node.path === selectedPath ? "text-primary" : "text-text-subtle"
+                        }`}
+                        aria-hidden="true"
+                      />
                       <span className="truncate font-mono text-xs">{node.path}</span>
-                      <span className="rounded-full bg-info-subtle px-1.5 text-xs font-semibold text-info">
+                      <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-xs font-semibold text-text-subtle">
                         {node.sessionIds.length}
                       </span>
                     </button>
@@ -673,7 +682,7 @@ export function TopologyCanvas({
                 />
               </div>
 
-              <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
                 <span>
                   <strong className="text-text">{snapshot.nodes.length}</strong> observed paths
                 </span>
@@ -681,6 +690,16 @@ export function TopologyCanvas({
                   <strong className="text-text">{snapshot.sessions.length}</strong> sessions with a known CWD
                 </span>
                 <span>Snapshot {formatTimestamp(snapshot.generatedAt)}</span>
+                <span className="flex items-center gap-3 sm:ml-auto" aria-label="Topology map legend">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
+                    Filesystem route
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
+                    Focused connection
+                  </span>
+                </span>
               </div>
               {snapshot.truncated && (
                 <div className="flex gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
