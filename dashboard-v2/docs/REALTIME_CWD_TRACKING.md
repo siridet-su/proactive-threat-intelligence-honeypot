@@ -87,6 +87,12 @@ connection ที่ไม่อาจยืนยันสถานะได้
 - UI แสดง topology graph ขนาดใหญ่และ source-IP callout ของ session ที่ยัง active;
   กราฟ prioritise เส้นทางล่าสุดเพื่อให้อ่านง่าย ขณะที่ Path inspector ค้นหาและแบ่งหน้า
   session ที่จุดนั้นได้
+- snapshot เดียวกันมี `recentClosedSessions` ไม่เกิน 12 รายการ เรียงตาม `closedAt`
+  เพื่อให้ short-lived SSH probe เปิด audit trail ได้หลังหายจาก live graph โดยไม่
+  ทำให้ live callout ถูกปะปนกับ connection ที่สิ้นสุดแล้ว
+- Session route navigator เรียง `cwd_events` จากเริ่มต้นไปเหตุการณ์ล่าสุด และให้
+  operator ย้อน/เดินหน้าได้ทีละ verified transition หรือข้ามไป checkpoint ล่าสุด;
+  ปุ่มจะไม่สร้าง route จาก command ที่ไม่มี CWD event
 - เมื่อ MongoDB Change Stream ปิดหรือ error ฝั่ง server จะปิด SSE เพื่อให้ browser
   reconnect และรับ snapshot ใหม่ แทนการส่ง heartbeat จาก stream ที่ตายแล้ว
 - เมื่อผู้ใช้เปลี่ยน session UI จะ abort history request เดิมและปฏิเสธ response ที่
