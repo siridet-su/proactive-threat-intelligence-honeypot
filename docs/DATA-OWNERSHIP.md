@@ -1,7 +1,7 @@
 ---
 title: Data ownership and event-flow contract
-status: target
-last_verified: 2026-08-25
+status: current
+last_verified: 2026-09-10
 ---
 
 # Data ownership and event-flow contract
@@ -13,7 +13,8 @@ last_verified: 2026-08-25
 | Raw Cowrie/Zeek/service logs | origin service | collector/adapter | local, bounded and rotated |
 | Redis streams | Go telemetry plane | processor and workers | transient, bounded queue |
 | Canonical security events | MongoDB Atlas `events` | dashboard, cloud analysis, report jobs | durable project record |
-| Hardware samples | MongoDB Atlas `hardware_metrics` | operational dashboard | durable but retention-managed |
+| Live hardware samples | MongoDB Atlas `hardware_live` | dashboard snapshot and SSE | fixed ring of 30 documents per sensor |
+| Hardware history | MongoDB Atlas `hardware_metrics_1m` | dashboard fallback and reporting | one upserted row per sensor/minute, 30-day TTL |
 | Threat-intelligence results | Atlas enrichment records/projections | dashboard, cloud analysis | cache-aware with expiry |
 | Session analysis and report output | Atlas analysis/report records | dashboard and report export | evidence-linked, versioned |
 | Raw malware artifact | none by default | no runtime consumer | delete after hash/metadata capture unless explicitly quarantined |
@@ -55,8 +56,9 @@ from reaching Atlas.
 - Provider API keys, deployment secrets, and raw malware artifacts never enter
   event documents or LLM prompts.
 
-## Current temporary exception
+## Hardware telemetry exception
 
-The Go pipeline is intentionally stopped while the Pi is allocated to adaptive
-POC testing. This is an operational pause, not a change in ownership or the
-target data architecture.
+Each valid raw hardware entry replaces one of 30 `hardware_live` slots before
+its consumer-group acknowledgement. An independent minute worker reads the
+bounded Redis stream and upserts completed rollup buckets. Hardware samples are
+not canonical security events.

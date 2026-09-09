@@ -1,34 +1,56 @@
-import { NextResponse } from 'next/server';
-import { getMongoClient } from '@/lib/mongodb';
-import { isHardwareTelemetry } from '@/lib/dashboardTypes';
+import { NextResponse } from "next/server";
+import type { Db } from "mongodb";
+import { getMongoClient } from "@/lib/mongodb";
+import { getRecentHardwareMetrics } from "@/lib/hardware-mongo";
+import { isHardwareTelemetry } from "@/lib/dashboardTypes";
+import type { HardwareTelemetry } from "@/lib/dashboardTypes";
 import { getSessionFromRequest } from "@/lib/auth/session";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+async function readRecentMongoMetrics(
+  db: Db,
+  collectionName: string,
+): Promise<HardwareTelemetry[]> {
+  const documents = await db
+    .collection(collectionName)
+    .find({})
+    .sort({ timestamp: -1 })
+    .limit(30)
+    .toArray();
+  return documents.filter(isHardwareTelemetry).reverse();
+}
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session || session.mustChangePassword) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  try {
+    const liveMetrics = await getRecentHardwareMetrics(30);
+    if (liveMetrics.length > 0) {
+      return NextResponse.json(liveMetrics);
+    }
+  } catch (error) {
+    console.warn("Hardware live snapshot unavailable; using MongoDB rollup:", error);
+  }
+
   try {
     const client = await getMongoClient();
-    // Assuming the database is "honeypot" and collection is "hardware_metrics" or "metrics"
-    // Adjust db name and collection name based on what processor-agent inserts
-    const db = client.db('honeypot_db');
+    const db = client.db("honeypot_db");
+    const rollups = await readRecentMongoMetrics(db, "hardware_metrics_1m");
+    if (rollups.length > 0) {
+      return NextResponse.json(rollups);
+    }
 
-    // Fetch the latest 30 hardware metrics (e.g. for a sparkline or live chart)
-    const rawMetrics = await db
-      .collection('hardware_metrics')
-      .find({})
-      .sort({ timestamp: -1 })
-      .limit(30)
-      .toArray();
-
-    const metrics = rawMetrics.filter(isHardwareTelemetry);
-    return NextResponse.json(metrics.reverse()); // Reverse so the oldest of the 30 is first
+    // Transitional fallback while the first minute rollup is being created.
+    const legacyMetrics = await readRecentMongoMetrics(db, "hardware_metrics");
+    return NextResponse.json(legacyMetrics);
   } catch (error: unknown) {
-    console.error('Failed to fetch hardware metrics:', error);
-    const message = error instanceof Error ? error.message : 'Failed to fetch metrics';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("Failed to fetch hardware metrics:", error);
+    const message = error instanceof Error ? error.message : "Failed to fetch metrics";
+    return NextResponse.json({ error: message }, { status: 503 });
   }
 }

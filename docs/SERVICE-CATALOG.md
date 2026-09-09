@@ -1,7 +1,7 @@
 ---
 title: Honeypot service catalog
 status: current
-last_verified: 2026-08-25
+last_verified: 2026-09-10
 ---
 
 # Honeypot service catalog
@@ -12,17 +12,20 @@ an operational change.
 
 | Service or component | Exposure | Lifecycle | Owner/status | Telemetry path | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Cowrie SSH | attacker-facing | Current | inherited foundation + current adaptive work | Cowrie JSON → Go pipeline when enabled; legacy forwarder in parallel | Primary focus for adaptive shell work. |
+| Cowrie SSH | attacker-facing | Current | active, systemd-isolated | Sanitized Cowrie JSON → Go pipeline; legacy forwarder in parallel | Primary focus for adaptive shell work. Artifact bytes are reduced to a local SHA-256 ledger. |
 | Cowrie Telnet | attacker-facing | Current | inherited foundation | Cowrie JSON → same as SSH | Keep only while its deception value justifies scope. |
 | Cowrie management listener | private overlay | Current | operations | operational logs | Not an attacker-facing decoy. |
-| Admin SSH | restricted management port | Current | operations | host audit logs | Never use for honeypot or LLM test instructions. |
+| Admin SSH | Tailscale/ZeroTier only, port 2222 | Current | operations | host audit logs + fail2ban | Key-only, root-disabled; X11 and TCP/agent forwarding disabled. |
 | Web middleware/Odoo facade | HTTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | Corporate web decoy | HTTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | FTP decoy | FTP + passive range | Current | current project | service-event adapter required | Docker decoy stack. |
 | SMTP sink | SMTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | PostgreSQL/Odoo/deception-core | loopback/internal | Current | current project | internal application logs | Supporting decoy infrastructure, not public database services. |
-| Zeek | sensor | Target, currently paused | current project | Go collector | Start only for staged telemetry work. |
-| Go collector/processor | telemetry | Target, currently paused | current project | Redis → Atlas | Principal ingestion path when enabled. |
+| Zeek | sensor | Current, active | current project | Go collector | Interface workers feed Redis with zero observed pending lag at verification. |
+| Go collector/processor | telemetry | Current, active | current project | Redis → Atlas/canonical stream | Principal ingestion path. Processor TI enqueueing is disabled. |
+| Hardware agent | local telemetry | Current, active | current project | Redis `raw:hardware` → MongoDB `hardware_live` + `hardware_metrics_1m` | One-second samples replace 30 fixed live slots; history receives one rollup per sensor/minute. |
+| TI worker | outbound enrichment | Current, intentionally disabled | current project | Redis `ti:jobs` | Must remain disabled until explicitly approved; new jobs are not enqueued and no TI queue currently remains. |
+| Artifact hash retention | local maintenance | Current, active timer | operations | SHA-256 ledger only | Removes artifact bytes after a stability window; legacy artifacts were swept on 2026-09-09. |
 | Legacy sensor forwarder | cloud forwarding | Legacy, currently active | previous team | separate legacy path | Maintain only until an approved migration/parity check. |
 | Post-session/cloud analysis | cloud/internal | Target | current project | reads Atlas canonical events | Production workstream under development. |
 | Hailo/Ollama | local inference | Experiment | inherited/candidate | no approved Cowrie data path | Re-adopt only through an ADR and safe staging tests. |

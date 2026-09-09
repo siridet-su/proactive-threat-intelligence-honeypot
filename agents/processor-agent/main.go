@@ -42,10 +42,13 @@ type Config struct {
 
 	LookupDir string
 
-	MongoURI                 string
-	MongoDB                  string
-	EventRetention           time.Duration
-	HardwareMetricsRetention time.Duration
+	MongoURI                      string
+	MongoDB                       string
+	EventRetention                time.Duration
+	HardwareMetricsRetention      time.Duration
+	HardwareLiveSlots             int
+	HardwareRollupRetention       time.Duration
+	HardwareRollupBackfillMinutes int
 
 	TIEnabled         bool
 	TIJobsStream      string
@@ -99,6 +102,7 @@ func main() {
 	for _, stream := range rawStreams {
 		ensureConsumerGroup(ctx, rdb, stream, cfg.GroupName)
 	}
+	go hardwareRollupLoop(ctx, rdb, mw, cfg)
 
 	log.Printf(
 		"processor started redis=%s group=%s consumer=%s lookup_dir=%s mongo_enabled=%v",
@@ -118,6 +122,9 @@ func loadConfig() Config {
 	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "5000"), 10, 64)
 	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
 	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
+	hardwareLiveSlots := getenvPositiveInt("HARDWARE_LIVE_SLOTS", defaultHardwareLiveSlots)
+	hardwareRollupRetention := getenvPositiveDuration("HARDWARE_ROLLUP_RETENTION", defaultHardwareRollupRetention)
+	hardwareRollupBackfillMinutes := getenvPositiveInt("HARDWARE_ROLLUP_BACKFILL_MINUTES", defaultHardwareRollupBackfillMinutes)
 	tiEnqueueDedupTTL := getenvPositiveDuration("TI_ENQUEUE_DEDUP_TTL", time.Minute)
 
 	return Config{
@@ -130,10 +137,13 @@ func loadConfig() Config {
 
 		LookupDir: getenv("LOOKUP_DIR", "/home/cpe27/honeypot-pipeline/lookups"),
 
-		MongoURI:                 getenv("MONGO_URI", ""),
-		MongoDB:                  getenv("MONGO_DATABASE", "honeypot_db"),
-		EventRetention:           eventRetention,
-		HardwareMetricsRetention: hardwareMetricsRetention,
+		MongoURI:                      getenv("MONGO_URI", ""),
+		MongoDB:                       getenv("MONGO_DATABASE", "honeypot_db"),
+		EventRetention:                eventRetention,
+		HardwareMetricsRetention:      hardwareMetricsRetention,
+		HardwareLiveSlots:             hardwareLiveSlots,
+		HardwareRollupRetention:       hardwareRollupRetention,
+		HardwareRollupBackfillMinutes: hardwareRollupBackfillMinutes,
 
 		TIEnabled:         strings.EqualFold(getenv("THREAT_INTEL_ENABLED", "false"), "true"),
 		TIJobsStream:      getenv("TI_JOBS_STREAM", "ti:jobs"),
@@ -221,26 +231,11 @@ func processMessage(
 	streamName string,
 	msg redis.XMessage,
 ) error {
-	if streamName == "raw:hardware" {
-		doc := map[string]interface{}{}
-		for k, v := range msg.Values {
-			strVal := valueToString(v)
-			if f, err := strconv.ParseFloat(strVal, 64); err == nil {
-				doc[k] = f
-			} else {
-				doc[k] = strVal
-			}
-		}
-		observedAt := time.Now().UTC()
-		if ts, ok := doc["timestamp"].(float64); ok {
-			observedAt = time.Unix(int64(ts), 0).UTC()
-		}
-		setHardwareMetricExpiry(doc, observedAt, cfg.HardwareMetricsRetention)
+	if streamName == hardwareRawStream {
 		if !mw.enabled {
-			return fmt.Errorf("MongoDB is disabled; refusing to acknowledge hardware metric")
+			return fmt.Errorf("MongoDB is disabled; refusing to acknowledge hardware live sample")
 		}
-		_, err := mw.db.Collection("hardware_metrics").InsertOne(ctx, doc)
-		return err
+		return writeHardwareLiveSample(ctx, mw, msg, cfg.HardwareLiveSlots)
 	}
 
 	source := valueToString(msg.Values["source"])
@@ -904,6 +899,21 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
 	if err := ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes); err != nil {
+		return err
+	}
+
+	hardwareLiveIndexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "sensor_id", Value: 1}, {Key: "timestamp", Value: -1}}},
+	}
+	if err := ensureIndexModels(ctx, mw.db.Collection(hardwareLiveCollection), hardwareLiveIndexes); err != nil {
+		return err
+	}
+
+	hardwareRollupIndexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "sensor_id", Value: 1}, {Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+	if err := ensureIndexModels(ctx, mw.db.Collection(hardwareRollupCollection), hardwareRollupIndexes); err != nil {
 		return err
 	}
 

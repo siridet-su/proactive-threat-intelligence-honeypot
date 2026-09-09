@@ -1,8 +1,11 @@
 # Hardware Metrics Agent
 
 The hardware agent samples Raspberry Pi system metrics and writes them to the
-Redis stream `raw:hardware`. The processor agent converts numeric values and
-stores each sample in the MongoDB Atlas `hardware_metrics` collection.
+local Redis stream `raw:hardware`. The processor replaces one of 30 fixed
+`hardware_live` MongoDB slots per sensor every second, so the cloud dashboard
+can read MongoDB without an ever-growing live collection. It also upserts one
+compact min/avg/max document per sensor and minute into
+`hardware_metrics_1m`. Redis remains internal to the Pi.
 
 ## Network metrics
 
@@ -26,11 +29,17 @@ The agent reads these optional environment variables:
 ```ini
 NETWORK_INTERFACES=wlan0,tailscale0
 NETWORK_PRIMARY_INTERFACE=wlan0
-NETWORK_SAMPLE_SECONDS=30
+NETWORK_SAMPLE_SECONDS=1
+HARDWARE_SENSOR_ID=ubuntu-pi-server
+HARDWARE_STREAM_MAXLEN=900
 ```
 
 `NETWORK_INTERFACES` is a comma-separated allowlist. Interface names are
 sanitized before being used in metric field names.
+
+`HARDWARE_STREAM_MAXLEN` defaults to 900 and uses approximate Redis stream
+trimming. At one sample per second this retains about 15 minutes of live data
+without unbounded growth. `HARDWARE_SENSOR_ID` defaults to the host name.
 
 ### Fields
 

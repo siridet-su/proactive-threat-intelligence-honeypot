@@ -25,6 +25,17 @@ The BFF forwards only `GET`, sends `Accept: application/json`, disables caching,
 
 Every public backend JSON response passes through a redaction projection. Raw command detail is deliberately excluded from the public session view; `/api/internal/session-commands` is a separate loopback/admin monitor route and is not allowlisted by this BFF.
 
+## Dedicated hardware endpoints
+
+Both routes require a valid dashboard session and run in the Next.js Node
+runtime:
+
+- `GET /api/hardware/stream`: SSE from one process-shared MongoDB change
+  stream watching `hardware_live` insert/replace events. It sends the latest
+  30 slots first and a heartbeat every 15 seconds.
+- `GET /api/hardware`: latest 30 `hardware_live` slots, falling back to
+  `hardware_metrics_1m` and then legacy `hardware_metrics`.
+
 ## Error contract
 
 The BFF returns `401` for a missing/invalid dashboard session, `404` for an unknown allowlist key, `503` for an unsafe origin or unavailable upstream, and `502` for a non-JSON or oversized upstream response. An upstream `401`/`403` is normalized to `dashboard backend authorization failed`; an upstream `404` is normalized to `dashboard data was not found`; other upstream status codes are preserved with `dashboard backend request failed`. Backend route-specific errors below are therefore visible only after the BFF has admitted the request.
