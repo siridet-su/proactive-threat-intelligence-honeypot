@@ -42,8 +42,8 @@ func cwdObservationFromEvent(event map[string]any, payload map[string]any) (cwdO
 		return cwdObservation{}, false
 	}
 
-	observedAt, ok := event["timestamp"].(time.Time)
-	if !ok || observedAt.IsZero() {
+	observedAt, ok := cwdObservationTimestamp(event)
+	if !ok {
 		return cwdObservation{}, false
 	}
 	base := cwdObservation{
@@ -97,6 +97,27 @@ func cwdObservationFromEvent(event map[string]any, payload map[string]any) (cwdO
 		return base, true
 	default:
 		return cwdObservation{}, false
+	}
+}
+
+// cwdObservationTimestamp accepts the native timestamp produced by
+// normalizeEvent and the RFC3339 string produced when enrichEvent deep-copies
+// that event through JSON. Both forms represent the same source timestamp.
+func cwdObservationTimestamp(event map[string]any) (time.Time, bool) {
+	switch timestamp := event["timestamp"].(type) {
+	case time.Time:
+		if timestamp.IsZero() {
+			return time.Time{}, false
+		}
+		return timestamp.UTC(), true
+	case string:
+		parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(timestamp))
+		if err != nil || parsed.IsZero() {
+			return time.Time{}, false
+		}
+		return parsed.UTC(), true
+	default:
+		return time.Time{}, false
 	}
 }
 

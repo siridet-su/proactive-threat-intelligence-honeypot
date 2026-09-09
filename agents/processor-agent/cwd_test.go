@@ -45,6 +45,22 @@ func TestCwdObservationFromCommandUsesAuthoritativeCowrieCwd(t *testing.T) {
 	}
 }
 
+func TestCwdObservationAcceptsTimestampSerializedByEnrichment(t *testing.T) {
+	// enrichEvent starts by JSON-deep-copying normalized events, so timestamp is
+	// an RFC3339 string by the time processMessage records the CWD projection.
+	event := deepCopy(cwdEventForTest("raw-command-serialized"))
+	observation, ok := cwdObservationFromEvent(event, map[string]any{
+		"eventid": "cowrie.command.input", "session": "session-1",
+		"cwd": "/home/operator", "cwd_status": "confirmed",
+	})
+	if !ok {
+		t.Fatal("expected CWD observation after timestamp JSON serialization")
+	}
+	if observation.At.Format(time.RFC3339Nano) != "2026-09-08T12:00:00Z" {
+		t.Fatalf("unexpected parsed timestamp: %s", observation.At.Format(time.RFC3339Nano))
+	}
+}
+
 func TestCwdObservationPreservesExplicitUnknownStatus(t *testing.T) {
 	observation, ok := cwdObservationFromEvent(cwdEventForTest("raw-command-unknown"), map[string]any{
 		"eventid": "cowrie.command.input", "session": "session-1",
