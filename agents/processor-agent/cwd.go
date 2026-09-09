@@ -29,6 +29,24 @@ type cwdObservation struct {
 	Status        string
 }
 
+// cwdSessionClosedFromEvent accepts only Cowrie's session lifecycle event. It
+// is intentionally separate from CWD observations: closing a session must not
+// invent a directory transition or add an audit-history entry.
+func cwdSessionClosedFromEvent(event map[string]any, payload map[string]any) (string, time.Time, bool) {
+	if getNestedString(event, "source") != "cowrie" || getPayloadString(payload, "eventid") != "cowrie.session.closed" {
+		return "", time.Time{}, false
+	}
+	sessionID := cleanText(getPayloadString(payload, "session"))
+	if sessionID == "" {
+		return "", time.Time{}, false
+	}
+	at, ok := cwdObservationTimestamp(event)
+	if !ok {
+		return "", time.Time{}, false
+	}
+	return sessionID, at, true
+}
+
 // cwdObservationFromEvent accepts only fields produced by Cowrie itself. It
 // deliberately does not parse an attacker's command text to simulate a shell.
 func cwdObservationFromEvent(event map[string]any, payload map[string]any) (cwdObservation, bool) {
@@ -42,8 +60,8 @@ func cwdObservationFromEvent(event map[string]any, payload map[string]any) (cwdO
 		return cwdObservation{}, false
 	}
 
-	observedAt, ok := event["timestamp"].(time.Time)
-	if !ok || observedAt.IsZero() {
+	observedAt, ok := cwdObservationTimestamp(event)
+	if !ok {
 		return cwdObservation{}, false
 	}
 	base := cwdObservation{
@@ -100,6 +118,27 @@ func cwdObservationFromEvent(event map[string]any, payload map[string]any) (cwdO
 	}
 }
 
+// cwdObservationTimestamp accepts the native timestamp produced by
+// normalizeEvent and the RFC3339 string produced when enrichEvent deep-copies
+// that event through JSON. Both forms represent the same source timestamp.
+func cwdObservationTimestamp(event map[string]any) (time.Time, bool) {
+	switch timestamp := event["timestamp"].(type) {
+	case time.Time:
+		if timestamp.IsZero() {
+			return time.Time{}, false
+		}
+		return timestamp.UTC(), true
+	case string:
+		parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(timestamp))
+		if err != nil || parsed.IsZero() {
+			return time.Time{}, false
+		}
+		return parsed.UTC(), true
+	default:
+		return time.Time{}, false
+	}
+}
+
 func canonicalCwd(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 4096 || strings.ContainsRune(value, '\x00') || !strings.HasPrefix(value, "/") {
@@ -137,6 +176,10 @@ func cwdStateOrderFilter(observation cwdObservation) bson.M {
 	sequence := observation.At.UnixNano()
 	return bson.M{
 		"_id": observation.SessionID,
+		// A late/retried CWD event must never revive a session that Cowrie has
+		// already closed. Older v2 documents without lifecycle metadata remain
+		// eligible for their first lifecycle-aware update.
+		"lifecycle.status": bson.M{"$ne": "closed"},
 		"$or": bson.A{
 			bson.M{"stateSequence": bson.M{"$lt": sequence}},
 			bson.M{
@@ -164,6 +207,10 @@ func cwdStateDocument(observation cwdObservation, retention time.Duration) bson.
 			"observedAt":    observation.At,
 			"sourceEventId": observation.SourceEventID,
 		},
+		"lifecycle": bson.M{
+			"status":    "active",
+			"startedAt": observation.At,
+		},
 		"updatedAt":  observation.At,
 		"expires_at": expiryAt(observation.At, retention),
 	}
@@ -180,10 +227,51 @@ func cwdStateUpdate(observation cwdObservation, retention time.Duration) bson.M 
 			"stateSequence":      document["stateSequence"],
 			"stateSourceEventId": document["stateSourceEventId"],
 			"cwdState":           document["cwdState"],
-			"updatedAt":          document["updatedAt"],
-			"expires_at":         document["expires_at"],
+			// cwdStateOrderFilter rejects a closed state, so an authoritative CWD
+			// observation can safely activate a legacy projection that predates
+			// lifecycle metadata without reviving a closed session.
+			"lifecycle.status": "active",
+			"updatedAt":        document["updatedAt"],
+			"expires_at":       document["expires_at"],
+		},
+		// Preserve the actual first CWD observation, while giving legacy
+		// documents lifecycle metadata the first time they receive v2 telemetry.
+		"$min": bson.M{"lifecycle.startedAt": observation.At},
+	}
+}
+
+func cwdSessionCloseUpdate(sessionID string, closedAt time.Time, retention time.Duration) bson.M {
+	return bson.M{
+		"$set": bson.M{
+			"lifecycle.status":   "closed",
+			"lifecycle.closedAt": closedAt,
+			"updatedAt":          closedAt,
+			"expires_at":         expiryAt(closedAt, retention),
+		},
+		// A close can be observed before an initial CWD event reaches this
+		// consumer. The tombstone makes that ordering safe: a later CWD insert
+		// hits the duplicate key path and is rejected by cwdStateOrderFilter.
+		"$setOnInsert": bson.M{
+			"schemaVersion": cwdStateSchemaVersion,
+			"sessionId":     sessionID,
 		},
 	}
+}
+
+func (mw *MongoWriter) closeCwdSession(ctx context.Context, sessionID string, closedAt time.Time, retention time.Duration) error {
+	if !mw.enabled {
+		return fmt.Errorf("MongoDB is disabled; refusing to close CWD session")
+	}
+	_, err := mw.db.Collection("cwd_session_state").UpdateOne(
+		ctx,
+		// Do not filter out an already closed document here: the raw Redis
+		// stream is at-least-once, so a retried close must be a harmless update
+		// rather than an upsert attempt that collides with the existing _id.
+		bson.M{"_id": sessionID},
+		cwdSessionCloseUpdate(sessionID, closedAt, retention),
+		options.Update().SetUpsert(true),
+	)
+	return err
 }
 
 // updateLatestCwdState performs a compare-and-set without a read/write race.

@@ -45,6 +45,22 @@ func TestCwdObservationFromCommandUsesAuthoritativeCowrieCwd(t *testing.T) {
 	}
 }
 
+func TestCwdObservationAcceptsTimestampSerializedByEnrichment(t *testing.T) {
+	// enrichEvent starts by JSON-deep-copying normalized events, so timestamp is
+	// an RFC3339 string by the time processMessage records the CWD projection.
+	event := deepCopy(cwdEventForTest("raw-command-serialized"))
+	observation, ok := cwdObservationFromEvent(event, map[string]any{
+		"eventid": "cowrie.command.input", "session": "session-1",
+		"cwd": "/home/operator", "cwd_status": "confirmed",
+	})
+	if !ok {
+		t.Fatal("expected CWD observation after timestamp JSON serialization")
+	}
+	if observation.At.Format(time.RFC3339Nano) != "2026-09-08T12:00:00Z" {
+		t.Fatalf("unexpected parsed timestamp: %s", observation.At.Format(time.RFC3339Nano))
+	}
+}
+
 func TestCwdObservationPreservesExplicitUnknownStatus(t *testing.T) {
 	observation, ok := cwdObservationFromEvent(cwdEventForTest("raw-command-unknown"), map[string]any{
 		"eventid": "cowrie.command.input", "session": "session-1",
@@ -94,6 +110,19 @@ func TestCwdFailureDoesNotPersistAttackerTargetAsCurrentPath(t *testing.T) {
 	}
 }
 
+func TestCwdSessionClosedRequiresCowrieLifecycleEvent(t *testing.T) {
+	event := cwdEventForTest("session-closed")
+	sessionID, closedAt, ok := cwdSessionClosedFromEvent(event, map[string]any{
+		"eventid": "cowrie.session.closed", "session": "session-1",
+	})
+	if !ok || sessionID != "session-1" || closedAt.IsZero() {
+		t.Fatalf("expected authoritative session close: id=%q at=%v ok=%v", sessionID, closedAt, ok)
+	}
+	if _, _, ok := cwdSessionClosedFromEvent(event, map[string]any{"eventid": "cowrie.session.closed"}); ok {
+		t.Fatal("session close without a Cowrie session ID must be ignored")
+	}
+}
+
 func TestCwdStateOrderFilterRejectsOlderAndBreaksTimestampTies(t *testing.T) {
 	at := time.Date(2026, 9, 8, 12, 0, 0, 123, time.UTC)
 	filter := cwdStateOrderFilter(cwdObservation{
@@ -101,6 +130,10 @@ func TestCwdStateOrderFilterRejectsOlderAndBreaksTimestampTies(t *testing.T) {
 	})
 	if filter["_id"] != "session-1" {
 		t.Fatalf("filter is not scoped to the session: %#v", filter)
+	}
+	lifecycle, ok := filter["lifecycle.status"].(bson.M)
+	if !ok || lifecycle["$ne"] != "closed" {
+		t.Fatalf("closed sessions must reject late CWD updates: %#v", filter)
 	}
 	conditions, ok := filter["$or"].(bson.A)
 	if !ok || len(conditions) != 3 {
@@ -129,6 +162,26 @@ func TestCwdStateDocumentStoresDateAndOrderMetadata(t *testing.T) {
 	if document["stateSequence"] != at.UnixNano() || document["stateSourceEventId"] != "event-b" {
 		t.Fatalf("state order metadata missing: %#v", document)
 	}
+	lifecycle, ok := document["lifecycle"].(bson.M)
+	if !ok || lifecycle["status"] != "active" || lifecycle["startedAt"] != at {
+		t.Fatalf("active lifecycle metadata missing: %#v", document)
+	}
+}
+
+func TestCwdSessionCloseUpdateCreatesRetentionBoundedTombstone(t *testing.T) {
+	closedAt := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	update := cwdSessionCloseUpdate("session-1", closedAt, 24*time.Hour)
+	set, ok := update["$set"].(bson.M)
+	if !ok || set["lifecycle.status"] != "closed" || set["lifecycle.closedAt"] != closedAt {
+		t.Fatalf("closed lifecycle state missing: %#v", update)
+	}
+	if set["expires_at"] != closedAt.Add(24*time.Hour) {
+		t.Fatalf("close tombstone must retain only for the configured duration: %#v", update)
+	}
+	insert, ok := update["$setOnInsert"].(bson.M)
+	if !ok || insert["sessionId"] != "session-1" || insert["schemaVersion"] != cwdStateSchemaVersion {
+		t.Fatalf("close tombstone insert metadata missing: %#v", update)
+	}
 }
 
 func TestCowrieCwdContractFixtures(t *testing.T) {
@@ -137,8 +190,8 @@ func TestCowrieCwdContractFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(contents)), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected three producer contract fixtures, got %d", len(lines))
+	if len(lines) != 4 {
+		t.Fatalf("expected four producer contract fixtures, got %d", len(lines))
 	}
 	for index, line := range lines {
 		var payload map[string]any

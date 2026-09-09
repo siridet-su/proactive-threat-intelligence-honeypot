@@ -282,6 +282,11 @@ func processMessage(
 			return fmt.Errorf("record CWD observation: %w", err)
 		}
 	}
+	if sessionID, closedAt, ok := cwdSessionClosedFromEvent(enriched, payload); ok {
+		if err := mw.closeCwdSession(ctx, sessionID, closedAt, cfg.EventRetention); err != nil {
+			return fmt.Errorf("close CWD session: %w", err)
+		}
+	}
 
 	// Threat-intelligence calls must not delay or block ingestion. The worker
 	// receives one idempotent job per supported observable after MongoDB has the

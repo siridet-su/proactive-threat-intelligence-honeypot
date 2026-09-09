@@ -48,10 +48,25 @@ index d615b29..4622e2d 100644
 
  commands["cd"] = Command_cd
 diff --git a/src/cowrie/shell/honeypot.py b/src/cowrie/shell/honeypot.py
-index 1c71b5b..cd7b88e 100644
+index 1c71b5b..8b8eb44 100644
 --- a/src/cowrie/shell/honeypot.py
 +++ b/src/cowrie/shell/honeypot.py
-@@ -37,7 +37,13 @@ class HoneyPotShell:
+@@ -31,6 +31,13 @@ class HoneyPotShell:
+     def __init__(self, protocol: HoneyPotTransport) -> None:
+         self.protocol = protocol
+         self.cmdpending: list[str] = []
++        if getattr(self, "interactive", True):
++            log.msg(
++                eventid="cowrie.session.cwd",
++                cwd_before="",
++                cwd_after=self.protocol.cwd,
++                cwd_action="entered",
++                cwd_status="confirmed",
++                format="CWD %(cwd_action)s: %(cwd_after)s",
++            )
+         self.showPrompt()
+
+@@ -37,7 +44,13 @@ class HoneyPotShell:
          self.showPrompt()
 
      def lineReceived(self, line: str) -> None:
