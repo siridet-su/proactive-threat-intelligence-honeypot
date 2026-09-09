@@ -100,6 +100,8 @@ export function FilesystemActivity() {
   const [zoom, setZoom] = useState(1);
   const [pathSessionQuery, setPathSessionQuery] = useState("");
   const [pathSessionPage, setPathSessionPage] = useState(0);
+  // The initial live connection enables manual refresh after hydration.
+  const [isHydrated, setIsHydrated] = useState(false);
   const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
   const historyRequest = useRef<{ generation: number; sessionId: string; controller: AbortController } | null>(null);
   const latestSnapshotAt = useRef(0);
@@ -156,9 +158,14 @@ export function FilesystemActivity() {
       source = new EventSource("/api/filesystem-topology/stream");
       source.addEventListener("snapshot", onMessage as EventListener);
       source.addEventListener("topology.update", onMessage as EventListener);
-      source.onopen = () => { if (!disposed) setStreamState("live"); };
+      source.onopen = () => {
+        if (disposed) return;
+        setIsHydrated(true);
+        setStreamState("live");
+      };
       source.onerror = () => {
         if (disposed || source === null) return;
+        setIsHydrated(true);
         setStreamState("stale");
         source.close();
         source = null;
@@ -292,7 +299,10 @@ export function FilesystemActivity() {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <span className={`ui-badge ${streamState === "live" ? "border-success-border bg-success-subtle text-success" : "border-warning-border bg-warning-subtle text-warning"}`}><Radio className="h-3.5 w-3.5" aria-hidden="true" />{streamState === "live" ? "Live updates" : streamState === "connecting" ? "Connecting" : "Reconnecting"}</span>
-        <button type="button" className="ui-button" onClick={() => void refresh()} disabled={regionStatus === "loading" || regionStatus === "refreshing"}><RefreshCw className={`h-4 w-4 ${regionStatus === "refreshing" ? "animate-spin" : ""}`} aria-hidden="true" />Refresh</button>
+        <button type="button" className="ui-button" onClick={() => {
+          if (!isHydrated || regionStatus === "loading" || regionStatus === "refreshing") return;
+          void refresh();
+        }}><RefreshCw className="h-4 w-4" aria-hidden="true" />Refresh</button>
       </div>
     </section>
 
