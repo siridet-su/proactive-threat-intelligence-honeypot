@@ -2,24 +2,61 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Archive, Home, Menu, X, FolderTree } from "lucide-react";
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef, type KeyboardEvent } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { ThreatFeedProvider } from "@/components/threat/ThreatFeedProvider";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const drawer = useRef<HTMLDialogElement>(null);
+  const drawerPanel = useRef<HTMLElement>(null);
   const navigationTrigger = useRef<HTMLButtonElement>(null);
+  const drawerCloseTimer = useRef<number | null>(null);
+  const drawerOpeningFrame = useRef<number | null>(null);
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [drawerMounted, setDrawerMounted] = useState(false);
   const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
-  const closeNavigation = () => { drawer.current?.close(); setNavigationOpen(false); };
+  const clearDrawerTimers = useCallback(() => {
+    if (drawerCloseTimer.current !== null) window.clearTimeout(drawerCloseTimer.current);
+    if (drawerOpeningFrame.current !== null) window.cancelAnimationFrame(drawerOpeningFrame.current);
+    drawerCloseTimer.current = null;
+    drawerOpeningFrame.current = null;
+  }, []);
+  const closeNavigation = useCallback((immediate = false) => {
+    if (!drawerMounted) {
+      setNavigationOpen(false);
+      return;
+    }
+    clearDrawerTimers();
+    const finishClose = () => {
+      drawerCloseTimer.current = null;
+      setDrawerMounted(false);
+      if (!window.matchMedia("(min-width: 1024px)").matches) navigationTrigger.current?.focus();
+    };
+    setNavigationOpen(false);
+    if (immediate || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      finishClose();
+      return;
+    }
+    drawerCloseTimer.current = window.setTimeout(finishClose, 180);
+  }, [clearDrawerTimers, drawerMounted]);
+  const openNavigation = useCallback(() => {
+    clearDrawerTimers();
+    setDrawerMounted(true);
+    setNavigationOpen(false);
+    drawerOpeningFrame.current = window.requestAnimationFrame(() => {
+      drawerOpeningFrame.current = null;
+      setNavigationOpen(true);
+      drawerPanel.current?.focus();
+    });
+  }, [clearDrawerTimers]);
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 1024px)");
-    const onResize = () => { if (desktop.matches) closeNavigation(); };
+    const onResize = () => { if (desktop.matches) closeNavigation(true); };
     desktop.addEventListener("change", onResize);
     return () => desktop.removeEventListener("change", onResize);
-  }, []);
+  }, [clearDrawerTimers, closeNavigation]);
+  useEffect(() => () => clearDrawerTimers(), [clearDrawerTimers]);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -71,6 +108,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.back();
   };
 
+  const onDrawerKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeNavigation();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const panel = drawerPanel.current;
+    if (!panel) return;
+    const focusable = [...panel.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+    if (!focusable.length) {
+      event.preventDefault();
+      panel.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1)!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   const getPageTitle = () => {
     if (pathname.includes('/profile')) return 'User Profile';
     if (pathname.includes('/system-health')) return 'System Health';
@@ -87,7 +150,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <>
       <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto px-4 py-6">
         <div className="mb-5 border-b border-border pb-4">
-          <Link href="/" className="ui-nav-link" onClick={closeNavigation} aria-label="Open PTI-Honeypot landing page">
+          <Link href="/" className="ui-nav-link" onClick={() => closeNavigation()} aria-label="Open PTI-Honeypot landing page">
             <Home className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
             <span>Landing page</span>
           </Link>
@@ -102,13 +165,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           { href: "/system-health", title: "System Health", icon: Activity, active: pathname.includes("/system-health") },
           ...((userRole === "Admin" || userRole === "admin") ? [{ href: "/user-management", title: "User Management", icon: Users, active: pathname.includes("/user-management") }] : []),
         ].map(({ href, title, icon: Icon, active }) => (
-          <Link key={href} href={href} className="ui-nav-link" aria-current={active ? "page" : undefined} onClick={closeNavigation}>
+          <Link key={href} href={href} className="ui-nav-link" aria-current={active ? "page" : undefined} onClick={() => closeNavigation()}>
             <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span>{title}</span>
           </Link>
         ))}
       </nav>
       <div className="space-y-3 border-t border-border p-4">
-        <Link href="/profile" onClick={closeNavigation} aria-current={pathname.includes("/profile") ? "page" : undefined} className="ui-nav-link group border border-border bg-surface-subtle transition-transform duration-150 hover:-translate-y-px">
+        <Link href="/profile" onClick={() => closeNavigation()} aria-current={pathname.includes("/profile") ? "page" : undefined} className="ui-nav-link group border border-border bg-surface-subtle transition-transform duration-150 hover:-translate-y-px">
           <User className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="break-words font-semibold text-text">{userName || operatorId || "Operator"}</p>
@@ -132,20 +195,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         {navigation}
       </aside>
-      <dialog ref={drawer} className="ui-drawer print:hidden" aria-label="Navigation" onClose={() => { setNavigationOpen(false); if (!window.matchMedia("(min-width: 1024px)").matches) navigationTrigger.current?.focus(); }} onClick={event => { if (event.target === event.currentTarget && event.clientX > event.currentTarget.getBoundingClientRect().right) closeNavigation(); }}>
-        <div className="flex h-full flex-col">
+      {drawerMounted && <div className={`ui-drawer-layer print:hidden ${navigationOpen ? "is-open" : ""}`}>
+        <button type="button" className="ui-drawer-scrim" aria-label="Close navigation" tabIndex={-1} onClick={() => closeNavigation()} />
+        <aside ref={drawerPanel} id="dashboard-navigation-drawer" role="dialog" aria-modal="true" aria-label="Navigation" tabIndex={-1} className="ui-drawer-panel flex h-full flex-col" onKeyDown={onDrawerKeyDown}>
           <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
             <span className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" />PTI-Honeypot</span>
-            <button className="ui-button" onClick={closeNavigation} aria-label="Close navigation"><X className="h-4 w-4" /></button>
+            <button className="ui-button" onClick={() => closeNavigation()} aria-label="Close navigation"><X className="h-4 w-4" /></button>
           </div>
           {navigation}
-        </div>
-      </dialog>
+        </aside>
+      </div>}
       <div className="min-w-0 print:ml-0 lg:ml-60">
         <header className="sticky top-0 z-20 border-b border-border bg-surface print:hidden">
           <div className="flex min-h-16 items-center justify-between gap-3 px-4 lg:px-8">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-              <button ref={navigationTrigger} className="ui-button px-2 lg:hidden" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={() => { drawer.current?.showModal(); setNavigationOpen(true); }}><Menu className="h-4 w-4" /></button>
+              <button ref={navigationTrigger} className="ui-button px-2 lg:hidden" aria-label="Open navigation" aria-haspopup="dialog" aria-controls="dashboard-navigation-drawer" aria-expanded={navigationOpen} onClick={openNavigation}><Menu className="h-4 w-4" /></button>
               {pathname !== "/dashboard" && <button onClick={handleBack} className="ui-button px-2" title="Go back" aria-label="Go back"><ArrowLeft className="h-4 w-4" /></button>}
               <span className="text-xs font-medium sm:text-sm">{getPageTitle()}</span>
             </div>
