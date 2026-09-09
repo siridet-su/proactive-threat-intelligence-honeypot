@@ -35,6 +35,10 @@ Cowrie authoritative CWD event
 {"eventid":"cowrie.session.cwd","session":"...","cwd_before":"/home/operator","cwd_after":"/var/tmp","cwd_action":"changed","cwd_status":"confirmed"}
 ```
 
+เมื่อ interactive shell พร้อมใช้งาน Cowrie จะส่ง `cwd_action: "entered"` หนึ่งครั้ง
+เพื่อประกาศ CWD เริ่มต้นของ session ทันที จึงไม่ต้องรอให้ผู้โจมตีสั่ง `cd` ก่อน
+dashboard จะระบุตำแหน่งได้
+
 ถ้า `cd` ล้มเหลว ใช้ `cwd_action: "failed_change"` และ `cwd_after` เท่ากับ
 directory เดิม Processor จะไม่เก็บ attacker-supplied target เป็น current state
 หรือ `toPath`
@@ -46,11 +50,22 @@ directory เดิม Processor จะไม่เก็บ attacker-supplied t
 - `_id` และ `sessionId`: Cowrie session ID
 - `cwdState.path`, `status`, `observedAt`, `sourceEventId`: ค่าล่าสุดที่ยืนยันได้
 - `stateSequence`, `stateSourceEventId`: compare-and-set ordering keys
+- `lifecycle.status`, `startedAt`, `closedAt`: สถานะ live ของ Cowrie session
 - `updatedAt`, `expires_at`: topology ordering และ TTL
 
 Processor update state แบบ ordered compare-and-set ด้วย timestamp nanoseconds และ
 source event ID เป็น tie-breaker ดังนั้น retry หรือ event เก่าที่มาถึงช้าจะไม่เขียนทับ
 state ใหม่กว่า
+
+เมื่อ Processor รับ `cowrie.session.closed` จะ mark state เป็น `closed` โดยไม่ลบ
+history หรือ state ทิ้งทันที เพื่อให้ audit ย้อนหลังได้จนกว่า TTL จะหมดอายุ แต่ live
+topology จะ query เฉพาะ state ที่ยัง active ดังนั้น callout ของ connection ที่ปิดแล้วจะ
+หายจาก dashboard ผ่าน Change Stream/SSE โดยอัตโนมัติ และ late/retried CWD event จะไม่
+revive session ที่ปิดไปแล้ว
+
+state เก่าที่ไม่มี `lifecycle.status` จะไม่ถูกนับเป็น live โดยปริยาย เพื่อไม่แสดง
+connection ที่ไม่อาจยืนยันสถานะได้เป็นศัตรูที่ยังเชื่อมต่ออยู่; authoritative CWD event
+ถัดไปจะ enrich state เก่านั้นกลับเป็น `active` อย่างปลอดภัย
 
 `cwd_events` เก็บเฉพาะ Cowrie-emitted transitions (`changed`, `entered`,
 `failed_change`) เพื่อ audit history ไม่สร้าง transition จากการเดา command:
@@ -62,10 +77,16 @@ state ใหม่กว่า
 
 ## Dashboard behavior
 
-- `GET /api/filesystem-topology` อ่าน snapshot ล่าสุดจาก `cwd_session_state`
+- `GET /api/filesystem-topology` อ่าน snapshot ล่าสุดจาก `cwd_session_state` โดยจำกัด
+  live payload ที่ 500 sessions และส่ง `truncated: true` แทนการตัดข้อมูลแบบเงียบ ๆ
 - `GET /api/sessions/[sessionId]/cwd-history` ใช้ keyset pagination ที่ sort ด้วย
   `(at DESC, eventId DESC)` จึงไม่ข้าม event ที่ timestamp เท่ากัน
-- `GET /api/filesystem-topology/stream` ส่ง snapshot และ update ผ่าน SSE
+- `GET /api/filesystem-topology/stream` ส่ง snapshot และ update ผ่าน SSE; เมื่อมี
+  CWD mutation หลายรายการในช่วงสั้น ๆ server จะ coalesce เป็น snapshot เดียวก่อน
+  broadcast ให้ subscribers ใน Node process เดียวกัน
+- UI แสดง topology graph ขนาดใหญ่และ source-IP callout ของ session ที่ยัง active;
+  กราฟ prioritise เส้นทางล่าสุดเพื่อให้อ่านง่าย ขณะที่ Path inspector ค้นหาและแบ่งหน้า
+  session ที่จุดนั้นได้
 - เมื่อ MongoDB Change Stream ปิดหรือ error ฝั่ง server จะปิด SSE เพื่อให้ browser
   reconnect และรับ snapshot ใหม่ แทนการส่ง heartbeat จาก stream ที่ตายแล้ว
 - เมื่อผู้ใช้เปลี่ยน session UI จะ abort history request เดิมและปฏิเสธ response ที่

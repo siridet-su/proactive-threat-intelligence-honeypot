@@ -39,12 +39,10 @@ export async function GET(request: Request) {
 
   try {
     unsubscribe = await subscribeFilesystemUpdates({
-      changed: () => {
-        void getFilesystemTopology().then((snapshot) => {
-          const payload = formatEvent("topology.update", { type: "topology.update", data: snapshot });
-          if (controllerRef && !closed) controllerRef.enqueue(payload);
-          else if (!closed) pending.push(payload);
-        }).catch(() => close());
+      changed: (snapshot) => {
+        const payload = formatEvent("topology.update", { type: "topology.update", data: snapshot });
+        if (controllerRef && !closed) controllerRef.enqueue(payload);
+        else if (!closed) pending.push(payload);
       },
       unavailable: close,
     });

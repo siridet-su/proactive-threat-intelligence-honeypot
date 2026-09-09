@@ -130,6 +130,8 @@ export interface FilesystemTopologySession {
 export interface FilesystemTopologySnapshot {
   nodes: FilesystemTopologyNode[];
   sessions: FilesystemTopologySession[];
+  /** True when a bounded live snapshot contains only the most recently observed sessions. */
+  truncated: boolean;
   generatedAt: string;
 }
 
