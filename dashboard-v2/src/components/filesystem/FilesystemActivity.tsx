@@ -11,6 +11,7 @@ import type {
 } from "@/lib/dashboardTypes";
 import { CwdRouteHistory } from "./CwdRouteHistory";
 import { isHistoryPage, isSnapshot, type StreamState } from "./filesystemUtils";
+import { LiveSources } from "./LiveSources";
 import { PathInspector } from "./PathInspector";
 import { RecentClosedSessions } from "./RecentClosedSessions";
 import { SessionContextCard } from "./SessionContextCard";
@@ -37,6 +38,7 @@ export function FilesystemActivity() {
     if (Number.isFinite(timestamp) && timestamp < latestSnapshotAt.current) return;
     if (Number.isFinite(timestamp)) latestSnapshotAt.current = timestamp;
     const selectingInitialSession = !initializedSelection.current && Boolean(data.sessions[0]);
+    const initialSessionPath = data.sessions[0]?.cwdState.path ?? null;
     if (selectingInitialSession) initializedSelection.current = true;
     setSnapshot(data);
     setRegionStatus("ready");
@@ -51,7 +53,9 @@ export function FilesystemActivity() {
     });
     setSelectedPath((current) => {
       if (current) return data.nodes.some((node) => node.path === current) ? current : null;
-      return selectingInitialSession ? data.nodes[0]?.path ?? null : null;
+      return selectingInitialSession && initialSessionPath && data.nodes.some((node) => node.path === initialSessionPath)
+        ? initialSessionPath
+        : null;
     });
   }, []);
 
@@ -173,6 +177,10 @@ export function FilesystemActivity() {
     () => snapshot?.nodes.find((n) => n.path === selectedPath) ?? null,
     [selectedPath, snapshot],
   );
+  const selectedNodeLiveSessionCount = useMemo(
+    () => (selectedPath ? (snapshot?.sessions.filter((session) => session.cwdState.path === selectedPath).length ?? 0) : 0),
+    [selectedPath, snapshot],
+  );
 
   // Reload CWD route when a new source event arrives for the selected session
   useEffect(() => {
@@ -199,6 +207,30 @@ export function FilesystemActivity() {
     if (session?.cwdState.path) {
       setSelectedPath(snapshot?.nodes.some((n) => n.path === session.cwdState.path) ? session.cwdState.path : null);
     }
+  };
+
+  const selectPath = (path: string | null) => {
+    const sessionId = path
+      ? [...(snapshot?.sessions ?? [])]
+          .filter((session) => session.cwdState.path === path)
+          .sort((left, right) => {
+            const leftObservedAt = Date.parse(left.cwdState.observedAt ?? "") || 0;
+            const rightObservedAt = Date.parse(right.cwdState.observedAt ?? "") || 0;
+            return rightObservedAt - leftObservedAt;
+          })[0]?.sessionId
+      : undefined;
+
+    if (sessionId) {
+      selectSession(sessionId);
+      return;
+    }
+
+    historyRequest.current?.controller.abort();
+    setHistory([]);
+    setHistoryCursor(null);
+    setSelectedHistoryEventId(null);
+    setSelectedSessionId(null);
+    setSelectedPath(path);
   };
 
   return (
@@ -245,14 +277,18 @@ export function FilesystemActivity() {
           selectedSessionId={selectedSessionId}
           selectedPath={selectedPath}
           onSelectSession={selectSession}
-          onSelectPath={(path) => setSelectedPath(path)}
+          onSelectPath={selectPath}
         />
 
         <aside className="space-y-4" aria-live="polite">
           <PathInspector
             key={selectedNode?.path ?? "no-selected-path"}
             selectedNode={selectedNode}
-            sessionById={sessionById}
+            sessions={snapshot?.sessions ?? []}
+            liveSessionCount={selectedNodeLiveSessionCount}
+          />
+          <LiveSources
+            sessions={snapshot?.sessions ?? []}
             selectedSessionId={selectedSessionId}
             onSelectSession={selectSession}
           />
