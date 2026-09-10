@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatTimestamp, statusLabel } from "./filesystemUtils";
+import { actionLabel, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
 
 interface CwdRouteHistoryProps {
   selectedSession: FilesystemTopologySession | null;
@@ -169,7 +169,9 @@ export function CwdRouteHistory({
                     {selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "Loading hop"}
                   </p>
                   <p className="mt-0.5 truncate font-mono text-xs text-text-muted">
-                    <span>{selectedHistoryEvent?.fromPath ?? "Unknown"}</span>
+                    <span className={isInitialSshEntry(selectedHistoryEvent) ? "text-text-subtle font-medium" : ""}>
+                      {formatFromPath(selectedHistoryEvent)}
+                    </span>
                     <span className={`px-1.5 font-bold ${isFailedHop ? "text-warning" : "text-primary"}`}>
                       {isFailedHop ? "⇏" : "→"}
                     </span>
@@ -323,7 +325,9 @@ export function CwdRouteHistory({
                           </time>
                         </div>
                         <p className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs text-text-muted break-all">
-                          <span>{event.fromPath ?? "Unknown"}</span>
+                          <span className={isInitialSshEntry(event) ? "text-text-subtle font-medium" : ""}>
+                            {formatFromPath(event)}
+                          </span>
                           <span className={`font-bold ${isFailed ? "text-warning" : "text-primary"}`}>
                             {isFailed ? "⇏" : "→"}
                           </span>

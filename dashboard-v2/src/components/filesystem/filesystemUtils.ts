@@ -112,11 +112,25 @@ export function statusBadgeClass(status: FilesystemTopologySession["cwdState"]["
   return "border-border bg-surface-subtle text-text-subtle";
 }
 
+export function isInitialSshEntry(event: SessionCwdHistoryEvent | null | undefined): boolean {
+  if (!event) return false;
+  return event.action === "entered" && (!event.fromPath || event.fromPath.toLowerCase() === "unknown");
+}
+
+export function formatFromPath(event: SessionCwdHistoryEvent | null | undefined): string {
+  if (!event) return "Unknown";
+  if (isInitialSshEntry(event)) {
+    return "[SSH Login]";
+  }
+  return event.fromPath ?? "Unknown";
+}
+
 export function actionLabel(event: SessionCwdHistoryEvent): string {
   if (event.action === "entered") return "Entered directory";
   if (event.action === "failed_change") return "Directory change failed";
   return "Changed directory";
 }
+
 
 export type GraphNode = FilesystemTopologyNode & { x: number; y: number };
 export type GraphElementSize = { width: number; height: number };
@@ -220,9 +234,15 @@ export function pointForGraph(nodes: FilesystemTopologyNode[], sessions: Filesys
 export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNodeByPath: Map<string, GraphNode>): GraphCallout[] {
   const groups = new Map<string, FilesystemTopologySession[]>();
   for (const session of sessions) {
-    if (!session.cwdState.path || !graphNodeByPath.has(session.cwdState.path)) continue;
+    if (!session.cwdState.path) continue;
+    let effectivePath: string | null = session.cwdState.path;
+    while (effectivePath && !graphNodeByPath.has(effectivePath)) {
+      const slashIndex = effectivePath.lastIndexOf("/");
+      effectivePath = slashIndex <= 0 ? (slashIndex === 0 ? "/" : null) : effectivePath.slice(0, slashIndex);
+    }
+    if (!effectivePath || !graphNodeByPath.has(effectivePath)) continue;
     const group = groups.get(session.sourceIp) ?? [];
-    group.push(session);
+    group.push({ ...session, cwdState: { ...session.cwdState, path: effectivePath } });
     groups.set(session.sourceIp, group);
   }
   return [...groups.entries()]

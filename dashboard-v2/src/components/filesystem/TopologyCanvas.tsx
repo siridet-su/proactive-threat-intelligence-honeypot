@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
 import {
   ChevronRight,
   Folder,
@@ -56,6 +56,8 @@ import {
 const LABEL_LAYOUT_STORAGE_KEY = "pti-filesystem-label-layout-v1";
 const NODE_LAYOUT_STORAGE_KEY = "pti-filesystem-node-layout-v1";
 const NODE_WORKSPACE_LIMIT = 400;
+const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
+
 
 interface WorkspaceLayoutSnapshot {
   labelPositions: Record<string, LabelPosition>;
@@ -222,26 +224,60 @@ export function TopologyCanvas({
     () => Math.max(440, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
     [graphNodes],
   );
+  const effectiveSessions = useMemo(() => {
+    if (!activeHop?.toPath || !selectedSessionId) return snapshot?.sessions ?? [];
+    return (snapshot?.sessions ?? []).map((session) => {
+      if (session.sessionId === selectedSessionId) {
+        return {
+          ...session,
+          cwdState: {
+            ...session.cwdState,
+            path: activeHop.toPath,
+          },
+        };
+      }
+      return session;
+    });
+  }, [activeHop, selectedSessionId, snapshot?.sessions]);
+
   const graphCallouts = useMemo(
-    () => calloutsForGraph(snapshot?.sessions ?? [], graphNodeByPath),
-    [graphNodeByPath, snapshot?.sessions],
+    () => calloutsForGraph(effectiveSessions, graphNodeByPath),
+    [effectiveSessions, graphNodeByPath],
   );
   const automaticCalloutPositions = useMemo(
     () => sourceRailPositions(graphCallouts, graphNodeByPath),
     [graphCallouts, graphNodeByPath],
   );
   const liveSessionById = useMemo(
-    () => new Map((snapshot?.sessions ?? []).map((session) => [session.sessionId, session])),
-    [snapshot?.sessions],
+    () => new Map(effectiveSessions.map((session) => [session.sessionId, session])),
+    [effectiveSessions],
   );
   const selectedGraphCallout = useMemo(
     () => graphCallouts.find((callout) => callout.sessionIds.includes(selectedSessionId ?? "")) ?? null,
     [graphCallouts, selectedSessionId],
   );
   const liveSourceCount = useMemo(
-    () => new Set((snapshot?.sessions ?? []).map((session) => session.sourceIp)).size,
-    [snapshot?.sessions],
+    () => new Set(effectiveSessions.map((session) => session.sourceIp)).size,
+    [effectiveSessions],
   );
+
+  // When a source's verified path changes, clear any manual drag override so it smoothly moves to the new directory
+  const lastSourcePathByIp = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    for (const callout of graphCallouts) {
+      const previousPath = lastSourcePathByIp.current.get(callout.sourceIp);
+      if (previousPath && previousPath !== callout.path) {
+        setLabelPositions((current) => {
+          if (!current[callout.sourceIp]) return current;
+          const next = { ...current };
+          delete next[callout.sourceIp];
+          return next;
+        });
+      }
+      lastSourcePathByIp.current.set(callout.sourceIp, callout.path);
+    }
+  }, [graphCallouts]);
+
 
   const measureElementBounds = useCallback(() => {
     const plane = graphPlaneRef.current;
@@ -900,7 +936,7 @@ export function TopologyCanvas({
                               transition={
                                 reducedMotion || Boolean(draggedNodePath)
                                   ? { duration: 0 }
-                                  : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                                  : TOPOLOGY_TRANSITION
                               }
                               fill="none"
                               stroke={
@@ -939,7 +975,7 @@ export function TopologyCanvas({
                                 transition={
                                   reducedMotion || Boolean(draggedNodePath)
                                     ? { duration: 0 }
-                                    : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                                    : TOPOLOGY_TRANSITION
                                 }
                                 fill="none"
                                 stroke="var(--primary)"
@@ -989,7 +1025,7 @@ export function TopologyCanvas({
                                     transition={
                                       reducedMotion || Boolean(draggedNodePath || draggedCalloutIp)
                                         ? { duration: 0 }
-                                        : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                                        : TOPOLOGY_TRANSITION
                                     }
                                     fill="none"
                                     stroke={focused ? "var(--primary)" : "var(--border-strong)"}
@@ -1003,7 +1039,7 @@ export function TopologyCanvas({
                                     transition={
                                       reducedMotion || Boolean(draggedNodePath || draggedCalloutIp)
                                         ? { duration: 0 }
-                                        : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                                        : TOPOLOGY_TRANSITION
                                     }
                                     r={focused ? "1.05" : "0.5"}
                                     fill={focused ? "var(--surface)" : "var(--border-strong)"}
@@ -1043,8 +1079,8 @@ export function TopologyCanvas({
                           reducedMotion || draggedNodePath === node.path
                             ? { duration: 0 }
                             : {
-                                left: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
-                                top: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+                                left: TOPOLOGY_TRANSITION,
+                                top: TOPOLOGY_TRANSITION,
                                 opacity: { duration: 0.3, ease: "easeOut" },
                                 scale: { duration: 0.3, ease: "easeOut" },
                               }
@@ -1156,8 +1192,8 @@ export function TopologyCanvas({
                           reducedMotion || draggedCalloutIp === callout.sourceIp
                             ? { duration: 0 }
                             : {
-                                left: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
-                                top: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+                                left: TOPOLOGY_TRANSITION,
+                                top: TOPOLOGY_TRANSITION,
                                 opacity: { duration: 0.3, ease: "easeOut" },
                                 scale: { duration: 0.3, ease: "easeOut" },
                               }
