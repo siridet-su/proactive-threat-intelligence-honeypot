@@ -42,6 +42,7 @@ import {
   MAP_MIN_ZOOM,
   pointForGraph,
   sourceRailPositions,
+  type ActiveHopRoute,
   type GraphCallout,
   type GraphElementBounds,
   type LabelDrag,
@@ -90,6 +91,9 @@ interface TopologyCanvasProps {
   streamState: StreamState;
   selectedSessionId: string | null;
   selectedPath: string | null;
+  activeHop?: ActiveHopRoute | null;
+  title?: string;
+  subtitle?: string;
   onSelectSession: (sessionId: string) => void;
   onSelectPath: (path: string | null) => void;
 }
@@ -100,6 +104,9 @@ export function TopologyCanvas({
   streamState,
   selectedSessionId,
   selectedPath,
+  activeHop,
+  title,
+  subtitle,
   onSelectSession,
   onSelectPath,
 }: TopologyCanvasProps) {
@@ -377,7 +384,7 @@ export function TopologyCanvas({
     [automaticCalloutPositions, labelPositions],
   );
 
-  const centerMapOn = (position: LabelPosition) => {
+  const centerMapOn = useCallback((position: LabelPosition) => {
     const surface = mapSurfaceRef.current;
     const plane = graphPlaneRef.current;
     if (!surface || !plane) return;
@@ -387,7 +394,7 @@ export function TopologyCanvas({
     };
     panRef.current = nextPan;
     setPan(nextPan);
-  };
+  }, []);
 
   const centerSelectedSource = () => {
     if (!selectedGraphCallout) return;
@@ -395,6 +402,14 @@ export function TopologyCanvas({
     if (index < 0) return;
     centerMapOn(positionForCallout(selectedGraphCallout, index));
   };
+
+  // Smoothly center the camera on the target node when analyst steps through active hops in route player
+  useEffect(() => {
+    if (!activeHop?.toPath) return;
+    const targetNode = graphNodeByPath.get(activeHop.toPath);
+    if (!targetNode) return;
+    centerMapOn(targetNode);
+  }, [activeHop?.eventId, activeHop?.toPath, graphNodeByPath, centerMapOn]);
 
   // Label dragging handlers
   const onCalloutPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, sourceIp: string, origin: LabelPosition) => {
@@ -655,28 +670,30 @@ export function TopologyCanvas({
       }`}
       aria-busy={regionStatus === "loading"}
     >
-      <div className="flex flex-col gap-3 border-b border-border p-5 lg:flex-row lg:items-center lg:justify-between">
-        <div>
+      <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1 pr-3">
           <div className="flex items-center gap-2">
-            <Route className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="font-semibold text-text">Live filesystem topology</h2>
+            <Route className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <h2 className="truncate font-semibold text-text text-sm sm:text-base">{title ?? "Live filesystem topology"}</h2>
           </div>
-          <p className="mt-1 text-xs text-text-subtle">
-            Observed paths form the topology; compact source-IP clusters point to their most recently verified location.
+          <p className="mt-0.5 truncate text-xs text-text-subtle">
+            {subtitle ?? "Observed paths form the topology; compact source-IP clusters point to their most recently verified location."}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
+
+        {/* Toolbar Buttons: ALWAYS single row with flex-nowrap */}
+        <div className="flex shrink-0 items-center gap-1 flex-nowrap">
           <button
             type="button"
-            className="ui-button h-9 min-h-9 w-9 p-0"
+            className="ui-button h-8 min-h-8 w-8 p-0"
             title="Zoom out"
             aria-label="Zoom out"
             onClick={() => setMapZoom(zoomRef.current - 0.1)}
           >
-            <ZoomOut className="h-4 w-4" />
+            <ZoomOut className="h-3.5 w-3.5" />
           </button>
           <span
-            className="ui-badge h-9 min-w-12 justify-center font-mono tabular-nums"
+            className="ui-badge h-8 min-w-11 justify-center px-1 font-mono text-xs tabular-nums"
             aria-live="polite"
             aria-label={`Zoom ${Math.round(zoom * 100)} percent`}
           >
@@ -684,70 +701,76 @@ export function TopologyCanvas({
           </span>
           <button
             type="button"
-            className="ui-button h-9 min-h-9 w-9 p-0"
+            className="ui-button h-8 min-h-8 w-8 p-0"
             title="Zoom in"
             aria-label="Zoom in"
             onClick={() => setMapZoom(zoomRef.current + 0.1)}
           >
-            <ZoomIn className="h-4 w-4" />
+            <ZoomIn className="h-3.5 w-3.5" />
           </button>
+
+          <div className="mx-0.5 h-4 w-px bg-border" />
+
           <button
             type="button"
-            className="ui-button h-9 min-h-9 w-9 p-0"
+            className="ui-button h-8 min-h-8 w-8 p-0"
             title="Reset view"
             aria-label="Reset map view"
             onClick={fitTopology}
           >
-            <ScanLine className="h-4 w-4" />
+            <ScanLine className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
-            className="ui-button h-9 min-h-9 w-9 p-0"
+            className="ui-button h-8 min-h-8 w-8 p-0"
             title="Center selected IP"
             aria-label="Center selected IP"
             disabled={!selectedGraphCallout}
             onClick={centerSelectedSource}
           >
-            <LocateFixed className="h-4 w-4" />
+            <LocateFixed className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
-            className="ui-button h-9 min-h-9 w-9 p-0"
+            className="ui-button h-8 min-h-8 w-8 p-0"
             title="Auto arrange topology"
             aria-label="Auto arrange directory and IP labels"
             onClick={autoArrangeTopology}
           >
-            <MousePointer2 className="h-4 w-4" />
+            <MousePointer2 className="h-3.5 w-3.5" />
           </button>
           {canUndoAutoArrange && (
             <button
               type="button"
-              className="ui-button h-9 min-h-9 w-9 p-0"
+              className="ui-button h-8 min-h-8 w-8 p-0"
               title="Undo auto arrange"
               aria-label="Undo auto arrange"
               onClick={undoAutoArrangeTopology}
             >
-              <Undo2 className="h-4 w-4" />
+              <Undo2 className="h-3.5 w-3.5" />
             </button>
           )}
           <button
             type="button"
-            className="ui-button h-9 min-h-9 w-9 p-0"
+            className="ui-button h-8 min-h-8 w-8 p-0"
             title="Restore default workspace"
             aria-label="Restore default map view and layout"
             onClick={resetMapWorkspace}
           >
-            <RotateCcw className="h-4 w-4" />
+            <RotateCcw className="h-3.5 w-3.5" />
           </button>
+
+          <div className="mx-0.5 h-4 w-px bg-border" />
+
           <button
             type="button"
-            className="ui-button h-9 min-h-9 w-9 p-0"
+            className="ui-button h-8 min-h-8 w-8 p-0"
             title={isTopologyExpanded ? "Exit expanded map" : "Expand map workspace"}
             aria-label={isTopologyExpanded ? "Exit expanded map" : "Expand map workspace"}
             aria-pressed={isTopologyExpanded}
             onClick={() => setIsTopologyExpanded((expanded) => !expanded)}
           >
-            {isTopologyExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>
         </div>
       </div>
@@ -817,79 +840,150 @@ export function TopologyCanvas({
                   }
                 >
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
-                    {graphNodes.map((node) => {
-                      const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
-                      if (!parent) return null;
-                      const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${(parent.y + node.y) / 2}, ${node.x} ${(parent.y + node.y) / 2}, ${node.x} ${node.y}`;
-                      return (
-                        <motion.path
-                          key={`${parent.path}-${node.path}`}
-                          initial={false}
-                          animate={{ d: filesystemRoute }}
-                          transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
-                          fill="none"
-                          stroke="var(--border-strong)"
-                          strokeWidth="0.35"
-                        />
-                      );
-                    })}
+                    <AnimatePresence initial={false}>
+                      {graphNodes.map((node) => {
+                        const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
+                        if (!parent) return null;
+                        const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${(parent.y + node.y) / 2}, ${node.x} ${(parent.y + node.y) / 2}, ${node.x} ${node.y}`;
+
+                        const isActiveHopEdge = Boolean(
+                          activeHop && (
+                            (activeHop.fromPath === parent.path && activeHop.toPath === node.path) ||
+                            (activeHop.fromPath === node.path && activeHop.toPath === parent.path)
+                          )
+                        );
+
+                        const isTrailEdge = Boolean(
+                          activeHop &&
+                          activeHop.visitedPaths.includes(node.path) &&
+                          activeHop.visitedPaths.includes(parent.path)
+                        );
+
+                        return (
+                          <motion.g
+                            key={`${parent.path}-${node.path}`}
+                            initial={reducedMotion ? false : { opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={reducedMotion ? undefined : { opacity: 0 }}
+                            transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
+                          >
+                            <motion.path
+                              initial={false}
+                              animate={{ d: filesystemRoute }}
+                              transition={reducedMotion ? { duration: 0 } : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                              fill="none"
+                              stroke={
+                                isActiveHopEdge
+                                  ? "var(--primary)"
+                                  : isTrailEdge
+                                    ? "var(--primary)"
+                                    : "var(--border-strong)"
+                              }
+                              strokeWidth={
+                                isActiveHopEdge
+                                  ? "0.65"
+                                  : isTrailEdge
+                                    ? "0.45"
+                                    : "0.35"
+                              }
+                              strokeOpacity={
+                                isActiveHopEdge
+                                  ? 1
+                                  : isTrailEdge
+                                    ? 0.75
+                                    : 0.4
+                              }
+                              strokeDasharray={
+                                isActiveHopEdge
+                                  ? "none"
+                                  : isTrailEdge
+                                    ? "1.2 0.8"
+                                    : "none"
+                              }
+                            />
+                            {isActiveHopEdge && (
+                              <motion.path
+                                initial={false}
+                                animate={{ d: filesystemRoute }}
+                                fill="none"
+                                stroke="var(--primary)"
+                                strokeWidth="1.2"
+                                strokeOpacity={0.3}
+                                className="animate-pulse"
+                              />
+                            )}
+                          </motion.g>
+                        );
+                      })}
+                    </AnimatePresence>
                   </svg>
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible" aria-hidden="true">
-                    {graphCallouts.map((callout, index) => {
-                      const position = positionForCallout(callout, index);
-                      const selectedSource = callout.sessionIds.includes(selectedSessionId ?? "");
-                      const targetPaths = selectedSource
-                        ? [...new Set(callout.sessionIds.map((sessionId) => liveSessionById.get(sessionId)?.cwdState.path).filter((path): path is string => Boolean(path)))]
-                        : [callout.path];
-                      return (
-                        <g key={`leader-${callout.sourceIp}`}>
-                          {targetPaths.map((path, routeIndex) => {
-                            const node = graphNodeByPath.get(path);
-                            if (!node) return null;
-                            const focused = selectedSource;
-                            const endpoint = leaderEndpoints(
-                              node,
-                              position,
-                              nodeElementBounds[node.path],
-                              calloutElementBounds[callout.sourceIp],
-                            );
-                            const controlX = (endpoint.startX + endpoint.endX) / 2;
-                            const routePath = `M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`;
-                            return (
-                              <g key={`${callout.sourceIp}-route-${routeIndex}`}>
-                                <motion.path
-                                  initial={false}
-                                  animate={{ d: routePath }}
-                                  transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
-                                  fill="none"
-                                  stroke={focused ? "var(--primary)" : "var(--border-strong)"}
-                                  strokeOpacity={focused ? 1 : 0.52}
-                                  strokeWidth={focused ? "0.42" : "0.24"}
-                                  strokeDasharray={focused ? "none" : "0.75 1.6"}
-                                />
-                                <motion.circle
-                                  initial={false}
-                                  animate={{ cx: endpoint.startX, cy: endpoint.startY }}
-                                  transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
-                                  r={focused ? "1.05" : "0.5"}
-                                  fill={focused ? "var(--surface)" : "var(--border-strong)"}
-                                  fillOpacity={focused ? 1 : 0.68}
-                                  stroke={focused ? "var(--primary)" : "var(--border-strong)"}
-                                  strokeOpacity={focused ? 1 : 0.55}
-                                  strokeWidth={focused ? "0.48" : "0.18"}
-                                />
-                              </g>
-                            );
-                          })}
-                        </g>
-                      );
-                    })}
+                    <AnimatePresence initial={false}>
+                      {graphCallouts.map((callout, index) => {
+                        const position = positionForCallout(callout, index);
+                        const selectedSource = callout.sessionIds.includes(selectedSessionId ?? "");
+                        const targetPaths = selectedSource
+                          ? [...new Set(callout.sessionIds.map((sessionId) => liveSessionById.get(sessionId)?.cwdState.path).filter((path): path is string => Boolean(path)))]
+                          : [callout.path];
+                        return (
+                          <motion.g
+                            key={`leader-${callout.sourceIp}`}
+                            initial={reducedMotion ? false : { opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={reducedMotion ? undefined : { opacity: 0 }}
+                            transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
+                          >
+                            {targetPaths.map((path, routeIndex) => {
+                              const node = graphNodeByPath.get(path);
+                              if (!node) return null;
+                              const focused = selectedSource;
+                              const endpoint = leaderEndpoints(
+                                node,
+                                position,
+                                nodeElementBounds[node.path],
+                                calloutElementBounds[callout.sourceIp],
+                              );
+                              const controlX = (endpoint.startX + endpoint.endX) / 2;
+                              const routePath = `M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`;
+                              return (
+                                <g key={`${callout.sourceIp}-route-${routeIndex}`}>
+                                  <motion.path
+                                    initial={false}
+                                    animate={{ d: routePath }}
+                                    transition={reducedMotion ? { duration: 0 } : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                                    fill="none"
+                                    stroke={focused ? "var(--primary)" : "var(--border-strong)"}
+                                    strokeOpacity={focused ? 1 : 0.52}
+                                    strokeWidth={focused ? "0.42" : "0.24"}
+                                    strokeDasharray={focused ? "none" : "0.75 1.6"}
+                                  />
+                                  <motion.circle
+                                    initial={false}
+                                    animate={{ cx: endpoint.startX, cy: endpoint.startY }}
+                                    transition={reducedMotion ? { duration: 0 } : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                                    r={focused ? "1.05" : "0.5"}
+                                    fill={focused ? "var(--surface)" : "var(--border-strong)"}
+                                    fillOpacity={focused ? 1 : 0.68}
+                                    stroke={focused ? "var(--primary)" : "var(--border-strong)"}
+                                    strokeOpacity={focused ? 1 : 0.55}
+                                    strokeWidth={focused ? "0.48" : "0.18"}
+                                  />
+                                </g>
+                              );
+                            })}
+                          </motion.g>
+                        );
+                      })}
+                    </AnimatePresence>
                   </svg>
                   <AnimatePresence initial={false}>
                     {graphNodes.map((node) => {
                     const isSelected = node.path === selectedPath;
                     const isRoot = node.path === "/";
                     const isSensitive = isSensitiveDirectory(node.path);
+                    const isHopTarget = activeHop?.toPath === node.path;
+                    const isHopVisited = Boolean(activeHop?.visitedPaths.includes(node.path));
+                    const visitedStep = activeHop?.visitedStepMap[node.path];
 
                     return (
                       <motion.button
@@ -898,17 +992,24 @@ export function TopologyCanvas({
                           if (element) nodeElementRefs.current.set(node.path, element);
                           else nodeElementRefs.current.delete(node.path);
                         }}
-                        initial={false}
-                        animate={{ left: `${node.x}%`, top: `${node.y}%`, opacity: 1 }}
-                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.96 }}
+                        initial={reducedMotion ? false : { opacity: 0, scale: 0.92 }}
+                        animate={{ left: `${node.x}%`, top: `${node.y}%`, opacity: 1, scale: 1 }}
+                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
                         transition={
                           reducedMotion || draggedNodePath === node.path
                             ? { duration: 0 }
-                            : { left: { duration: 0.18, ease: "easeOut" }, top: { duration: 0.18, ease: "easeOut" }, opacity: { duration: 0.14 }, scale: { duration: 0.14 } }
+                            : {
+                                left: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+                                top: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+                                opacity: { duration: 0.3, ease: "easeOut" },
+                                scale: { duration: 0.3, ease: "easeOut" },
+                              }
                         }
                         type="button"
                         aria-pressed={isSelected}
-                        aria-label={`Inspect directory ${node.path}${isSensitive ? " (sensitive target)" : ""}`}
+                        aria-label={`Inspect directory ${node.path}${isSensitive ? " (sensitive target)" : ""}${
+                          isHopTarget && activeHop ? ` (active hop target ${activeHop.stepIndex + 1} of ${activeHop.totalSteps})` : ""
+                        }`}
                         title={node.path}
                         onPointerDown={(event) => onNodePointerDown(event, node.path, node)}
                         onPointerMove={onNodePointerMove}
@@ -921,24 +1022,38 @@ export function TopologyCanvas({
                           }
                           onSelectPath(node.path);
                         }}
-                        className={`absolute z-10 flex max-w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-150 ${
-                          isSelected
-                            ? "border-primary-border bg-primary-subtle text-text"
-                            : isSensitive
-                              ? "border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
-                              : "border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
+                        className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-200 ${
+                          isHopTarget && activeHop?.isFailedAttempt
+                            ? "z-20 border-warning bg-warning-subtle text-text ring-2 ring-warning ring-offset-2 ring-offset-surface shadow-md shadow-warning/20"
+                            : isHopTarget
+                              ? "z-20 border-primary bg-primary-subtle text-text ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-md shadow-primary/20"
+                              : isSelected
+                                ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
+                                : isHopVisited
+                                  ? "z-10 border-primary/40 bg-surface text-text hover:border-primary/70 hover:bg-surface-hover"
+                                  : isSensitive
+                                    ? "z-10 border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
+                                    : "z-10 border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
                         }`}
                       >
-                        {isRoot ? (
-                          <HardDrive
-                            className={`h-3.5 w-3.5 shrink-0 ${isSelected ? "text-primary" : "text-text-subtle"}`}
+                        {isHopTarget && !reducedMotion && (
+                          <span
+                            className={`pointer-events-none absolute -inset-1 animate-ping rounded-lg border-2 opacity-40 ${
+                              activeHop?.isFailedAttempt ? "border-warning/70" : "border-primary/50"
+                            }`}
                             aria-hidden="true"
                           />
-                        ) : isSelected ? (
+                        )}
+                        {isRoot ? (
+                          <HardDrive
+                            className={`h-3.5 w-3.5 shrink-0 ${isSelected || isHopTarget ? "text-primary" : "text-text-subtle"}`}
+                            aria-hidden="true"
+                          />
+                        ) : isSelected || isHopTarget ? (
                           <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                         ) : (
                           <Folder
-                            className={`h-3.5 w-3.5 shrink-0 ${isSensitive ? "text-warning" : "text-text-subtle"}`}
+                            className={`h-3.5 w-3.5 shrink-0 ${isSensitive ? "text-warning" : isHopVisited ? "text-primary/80" : "text-text-subtle"}`}
                             aria-hidden="true"
                           />
                         )}
@@ -950,6 +1065,28 @@ export function TopologyCanvas({
                             aria-hidden="true"
                           />
                         )}
+                        {isHopTarget && activeHop ? (
+                          <span
+                            className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-[10px] font-bold shadow-xs ${
+                              activeHop.isFailedAttempt ? "bg-warning text-surface" : "bg-primary text-surface"
+                            }`}
+                            title={
+                              activeHop.isFailedAttempt
+                                ? `Attempted move failed (stayed at ${node.path})`
+                                : `Current hop target (${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
+                            }
+                          >
+                            <Route className="h-2.5 w-2.5" aria-hidden="true" />
+                            {activeHop.isFailedAttempt ? `Failed #${activeHop.stepIndex + 1}` : `Hop ${activeHop.stepIndex + 1}`}
+                          </span>
+                        ) : isHopVisited && visitedStep !== undefined ? (
+                          <span
+                            className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-[10px] font-semibold text-primary"
+                            title={`Route step ${visitedStep}`}
+                          >
+                            #{visitedStep}
+                          </span>
+                        ) : null}
                         <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-[11px] font-semibold text-text-subtle">
                           {node.sessionIds.length}
                         </span>
@@ -968,13 +1105,18 @@ export function TopologyCanvas({
                           if (element) calloutElementRefs.current.set(callout.sourceIp, element);
                           else calloutElementRefs.current.delete(callout.sourceIp);
                         }}
-                        initial={reducedMotion ? false : { opacity: 0, scale: 0.96 }}
+                        initial={reducedMotion ? false : { opacity: 0, scale: 0.94 }}
                         animate={{ left: `${position.x}%`, top: `${position.y}%`, opacity: 1, scale: 1 }}
-                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.96 }}
+                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
                         transition={
                           reducedMotion || draggedCalloutIp === callout.sourceIp
                             ? { duration: 0 }
-                            : { left: { duration: 0.18, ease: "easeOut" }, top: { duration: 0.18, ease: "easeOut" }, opacity: { duration: 0.14 }, scale: { duration: 0.14 } }
+                            : {
+                                left: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+                                top: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+                                opacity: { duration: 0.3, ease: "easeOut" },
+                                scale: { duration: 0.3, ease: "easeOut" },
+                              }
                         }
                         type="button"
                         aria-pressed={selected}
@@ -992,7 +1134,7 @@ export function TopologyCanvas({
                           }
                           onSelectSession(callout.sessionIds[0]);
                         }}
-                        className={`absolute z-40 flex w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-2 rounded-lg border px-2.5 py-2 text-left shadow-sm transition-colors duration-150 ${
+                        className={`absolute z-40 flex w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-2 rounded-lg border px-2.5 py-2 text-left shadow-sm transition-colors duration-200 ${
                           selected
                             ? "border-primary-border bg-primary-subtle"
                             : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"

@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   FolderOpen,
+  Route,
   ShieldAlert,
   Terminal,
 } from "lucide-react";
@@ -32,6 +33,7 @@ interface FilesystemInspectorProps {
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onSelectPath: (path: string) => void;
+  onOpenAudit?: (sessionId: string) => void;
 }
 
 type InspectorTab = "session" | "directory";
@@ -85,6 +87,7 @@ export function FilesystemInspector({
   selectedSessionId,
   onSelectSession,
   onSelectPath,
+  onOpenAudit,
 }: FilesystemInspectorProps) {
   const [activeTab, setActiveTab] = useState<InspectorTab>("session");
   const [directoryView, setDirectoryView] = useState<DirectoryView>("recent");
@@ -95,15 +98,26 @@ export function FilesystemInspector({
   // Auto-switch to directory tab when a directory node is clicked
   useEffect(() => {
     if (selectedNode?.path && selectedNode.path !== lastSelectedPath.current) {
-      setActiveTab("directory");
+      lastSelectedPath.current = selectedNode.path;
+      if (selectedSession && selectedNode.path === selectedSession.cwdState.path) {
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        setActiveTab("directory");
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
     lastSelectedPath.current = selectedNode?.path ?? null;
-  }, [selectedNode?.path]);
+  }, [selectedNode?.path, selectedSession]);
 
   // Auto-switch to session tab when a session is selected
   useEffect(() => {
     if (selectedSessionId && selectedSessionId !== lastSelectedSession.current) {
-      setActiveTab("session");
+      lastSelectedSession.current = selectedSessionId;
+      const timer = window.setTimeout(() => {
+        setActiveTab("session");
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
     lastSelectedSession.current = selectedSessionId;
   }, [selectedSessionId]);
@@ -243,6 +257,17 @@ export function FilesystemInspector({
                   Unknown paths remain unknown. This view never fills a missing directory with a guessed Linux path.
                 </p>
               </div>
+
+              {onOpenAudit && (
+                <button
+                  type="button"
+                  onClick={() => onOpenAudit(selectedSession.sessionId)}
+                  className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-lg border border-primary-border bg-primary px-3 py-2 text-xs font-semibold text-surface transition-all hover:bg-primary/90 shadow-sm"
+                >
+                  <Route className="h-3.5 w-3.5" aria-hidden="true" />
+                  Open Session Forensics & Replay ➜
+                </button>
+              )}
             </dl>
           ) : (
             <p className="py-4 text-center text-sm text-text-muted">

@@ -1,4 +1,5 @@
 import type {
+  FilesystemClosedSession,
   FilesystemTopologyNode,
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
@@ -12,6 +13,20 @@ export type LabelPosition = { x: number; y: number };
 export type LabelDrag = { sourceIp: string; startX: number; startY: number; origin: LabelPosition };
 export type NodeDrag = { path: string; startX: number; startY: number; origin: LabelPosition };
 export type MapMetrics = { surfaceWidth: number; surfaceHeight: number; planeWidth: number; planeHeight: number; planeLeft: number; planeTop: number };
+
+export interface ActiveHopRoute {
+  eventId: string;
+  fromPath: string | null;
+  toPath: string | null;
+  action: string;
+  status: string;
+  at: string | null;
+  stepIndex: number;
+  totalSteps: number;
+  visitedPaths: string[];
+  visitedStepMap: Record<string, number>;
+  isFailedAttempt?: boolean;
+}
 
 export const INSPECTOR_PAGE_SIZE = 12;
 export const GRAPH_CALLOUT_LIMIT = 8;
@@ -309,3 +324,98 @@ export function leaderEndpoints(
     endY: sourceCenterY - deltaY * Math.min(1, labelScale),
   };
 }
+
+/**
+ * Materializes the complete historical directory tree touched by a specific session.
+ * This ensures that even paths that the attacker exited via 'cd ..' or lateral jumps
+ * remain fully visible and interconnected on the audit canvas.
+ */
+export function buildAuditSnapshot(
+  baseSnapshot: FilesystemTopologySnapshot | null,
+  session: FilesystemTopologySession | FilesystemClosedSession | null,
+  history: SessionCwdHistoryEvent[],
+): FilesystemTopologySnapshot {
+  if (!session) {
+    return (
+      baseSnapshot ?? {
+        nodes: [],
+        sessions: [],
+        recentClosedSessions: [],
+        truncated: false,
+        generatedAt: new Date().toISOString(),
+      }
+    );
+  }
+
+  const nodesMap = new Map<string, FilesystemTopologyNode>();
+
+  const registerPath = (rawPath: string | null, observedAt: string | null) => {
+    if (!rawPath || !rawPath.startsWith("/")) return;
+    const segments = rawPath.split("/").filter(Boolean);
+    const paths = ["/"];
+    let current = "";
+    for (const segment of segments) {
+      current += `/${segment}`;
+      paths.push(current);
+    }
+
+    for (const p of paths) {
+      const existing = nodesMap.get(p);
+      if (existing) {
+        if (!existing.sessionIds.includes(session.sessionId)) {
+          existing.sessionIds.push(session.sessionId);
+        }
+        if (observedAt && (!existing.observedAt || observedAt > existing.observedAt)) {
+          existing.observedAt = observedAt;
+        }
+      } else {
+        const segs = p.split("/").filter(Boolean);
+        const parentPath = p === "/" ? null : segs.length > 1 ? `/${segs.slice(0, -1).join("/")}` : "/";
+        nodesMap.set(p, {
+          path: p,
+          parentPath,
+          depth: p === "/" ? 0 : segs.length,
+          sessionIds: [session.sessionId],
+          observedAt,
+        });
+      }
+    }
+  };
+
+  // 1. Register session's cwdState path
+  registerPath(session.cwdState.path, session.cwdState.observedAt);
+
+  // 2. Register all paths from history events (only toPath for non-failed moves to avoid typo nodes)
+  for (const event of history) {
+    registerPath(event.fromPath, event.at);
+    if (event.action !== "failed_change") {
+      registerPath(event.toPath, event.at);
+    }
+  }
+
+  // 3. Guarantee root node exists
+  if (!nodesMap.has("/")) {
+    nodesMap.set("/", {
+      path: "/",
+      parentPath: null,
+      depth: 0,
+      sessionIds: [session.sessionId],
+      observedAt: session.cwdState.observedAt,
+    });
+  }
+
+  return {
+    nodes: [...nodesMap.values()].sort((a, b) => a.path.localeCompare(b.path)),
+    sessions: [
+      {
+        sessionId: session.sessionId,
+        sourceIp: session.sourceIp,
+        cwdState: session.cwdState,
+      },
+    ],
+    recentClosedSessions: [],
+    truncated: false,
+    generatedAt: new Date().toISOString(),
+  };
+}
+

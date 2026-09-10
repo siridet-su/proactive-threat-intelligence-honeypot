@@ -224,12 +224,29 @@ async function flushTopologyBroadcast() {
   }
 }
 
+let broadcastScheduledAt: number | null = null;
+
 function scheduleTopologyBroadcast() {
   if (!runtime.subscribers.size) return;
   runtime.topologyDirty = true;
-  if (runtime.pendingBroadcast || runtime.broadcastInFlight) return;
+  const now = Date.now();
+  if (broadcastScheduledAt === null) {
+    broadcastScheduledAt = now;
+  }
+  const elapsed = now - broadcastScheduledAt;
+
+  // If already scheduled and within the max latency ceiling (500ms), debounce trailing events.
+  // This coalesces rapid two-phase command execution events (e.g. command.input -> session.cwd)
+  // into a single smooth snapshot broadcast.
+  if (runtime.pendingBroadcast && elapsed < 500) {
+    clearTimeout(runtime.pendingBroadcast);
+    runtime.pendingBroadcast = null;
+  }
+
+  if (runtime.broadcastInFlight) return;
   runtime.pendingBroadcast = setTimeout(() => {
     runtime.pendingBroadcast = null;
+    broadcastScheduledAt = null;
     void flushTopologyBroadcast().catch(() => {
       for (const subscriber of [...runtime.subscribers]) subscriber.unavailable();
     });

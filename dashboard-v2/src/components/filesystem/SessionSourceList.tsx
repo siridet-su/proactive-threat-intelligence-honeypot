@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, History, Radio } from "lucide-react";
+import { ChevronRight, History, Radio, Route } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { FilesystemClosedSession, FilesystemTopologySession } from "@/lib/dashboardTypes";
@@ -11,6 +11,7 @@ interface SessionSourceListProps {
   recentClosedSessions: FilesystemClosedSession[];
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
+  onAuditSession?: (sessionId: string) => void;
 }
 
 type TabKey = "live" | "closed";
@@ -20,6 +21,7 @@ export function SessionSourceList({
   recentClosedSessions,
   selectedSessionId,
   onSelectSession,
+  onAuditSession,
 }: SessionSourceListProps) {
   const isSelectedClosed = useMemo(
     () => recentClosedSessions.some((s) => s.sessionId === selectedSessionId),
@@ -159,11 +161,33 @@ export function SessionSourceList({
                         {latestPath ? compactDirectoryPath(latestPath) : "Unknown path"}
                       </span>
                     </span>
-                    {selected ? (
-                      <span className="shrink-0 text-xs font-semibold text-primary">Auditing</span>
-                    ) : (
-                      <ChevronRight className="h-4 w-4 shrink-0 text-text-subtle" aria-hidden="true" />
-                    )}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {onAuditSession && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          title="Open in Session Forensics & Replay"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAuditSession(source.latest.sessionId);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.stopPropagation();
+                              onAuditSession(source.latest.sessionId);
+                            }
+                          }}
+                          className="rounded p-1 text-primary hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
+                        >
+                          <Route className="h-4 w-4" />
+                        </span>
+                      )}
+                      {selected ? (
+                        <span className="text-xs font-semibold text-primary">Auditing</span>
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-text-subtle" aria-hidden="true" />
+                      )}
+                    </span>
                   </button>
                 );
               })}
@@ -199,10 +223,32 @@ export function SessionSourceList({
                       {session.cwdState.path ? compactDirectoryPath(session.cwdState.path) : "Unknown path"}
                     </span>
                   </span>
-                  <span className="shrink-0 text-right">
-                    <span className="block text-xs font-medium text-warning">Closed</span>
-                    <span className="mt-0.5 block text-[11px] text-text-subtle">
-                      {formatTimestamp(session.lifecycle.closedAt)}
+                  <span className="flex shrink-0 items-center gap-2">
+                    {onAuditSession && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        title="Open in Session Forensics & Replay"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAuditSession(session.sessionId);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.stopPropagation();
+                            onAuditSession(session.sessionId);
+                          }
+                        }}
+                        className="rounded p-1 text-primary hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
+                      >
+                        <Route className="h-4 w-4" />
+                      </span>
+                    )}
+                    <span className="text-right">
+                      <span className="block text-xs font-medium text-warning">Closed</span>
+                      <span className="mt-0.5 block text-[11px] text-text-subtle">
+                        {formatTimestamp(session.lifecycle.closedAt)}
+                      </span>
                     </span>
                   </span>
                 </button>
