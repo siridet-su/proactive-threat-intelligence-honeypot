@@ -2,10 +2,11 @@
 
 ## Status
 
-Target architecture. The processor now assigns expiry timestamps and creates
-TTL indexes for newly written canonical events and hardware metrics. Existing
-documents without `expires_at` require a deliberate backfill before TTL can
-remove them.
+Implemented for new hardware telemetry on 2026-09-10. One-second samples remain
+in a bounded local Redis stream, while the processor replaces 30 fixed
+`hardware_live` MongoDB slots and upserts completed one-minute rollups.
+Existing legacy `hardware_metrics` documents without `expires_at` still
+require a deliberate migration before TTL can remove them.
 
 ## Context
 
@@ -22,10 +23,12 @@ first retention priority.
 Cowrie / Zeek / hardware sample
   → local raw log or Redis stream (bounded, transient)
   → processor-agent
-      → canonical events or hardware metrics with expires_at
+      → canonical security events with expires_at
+      → hardware_live fixed 30-slot ring
+      → hardware_metrics_1m min/avg/max rollup
       → ti:jobs for validated IP/SHA-256 observables
-  → ti-worker → threat_intel shared cache + event summary
-  → dashboard reads events, summaries, and future rollups
+  → ti-worker (intentionally disabled until approved)
+  → cloud dashboard reads live hardware and history from MongoDB
 ```
 
 Raw Cowrie JSON, Zeek logs/PCAP, unbounded shell transcripts, malware binaries,
@@ -46,8 +49,9 @@ splits.
 | `sessions` | one redacted, bounded summary per SSH session | 90 days |
 | `attacker_profiles` | upserted IP-level counts and risk summary | 180 days or 10K profiles |
 | `threat_intel` | provider-shared lookup cache | per-record provider expiry |
-| `hardware_metrics` | native hardware samples for immediate health view | 48 hours via TTL |
-| `hardware_metrics_5m` | future 5-minute min/avg/max rollup | 180 days |
+| `hardware_metrics` | legacy native hardware samples; no new writes | existing TTL where present; migration required |
+| `hardware_live` | last 30 one-second samples per sensor | fixed ring; documents are replaced |
+| `hardware_metrics_1m` | one deterministic min/avg/max rollup per sensor/minute | 30 days via TTL |
 | `daily_rollups` | future dashboard/report aggregates | long-lived and compact |
 | debug normalised/enriched events | temporary troubleshooting only | disabled by default or 24 hours |
 
@@ -58,11 +62,13 @@ The Processor reads these duration variables:
 | Variable | Default | Applies to |
 |---|---:|---|
 | `EVENT_RETENTION` | `720h` | canonical `events` |
-| `HARDWARE_METRICS_RETENTION` | `48h` | `hardware_metrics` |
+| `HARDWARE_LIVE_SLOTS` | `30` | fixed live documents per sensor |
+| `HARDWARE_ROLLUP_RETENTION` | `720h` | `hardware_metrics_1m` |
+| `HARDWARE_ROLLUP_BACKFILL_MINUTES` | `10` | completed Redis minute buckets recomputed at startup |
 
 Each new document receives an `expires_at` timestamp derived from the observed
-event/sample time, not from dashboard read time. The Processor creates TTL
-indexes on `events.expires_at` and `hardware_metrics.expires_at` when it starts.
+event/bucket time, not from dashboard read time. The Processor creates TTL
+indexes on `events.expires_at` and `hardware_metrics_1m.expires_at` when it starts.
 MongoDB TTL cleanup is asynchronous, so expiry is not an exact deletion timer.
 
 ## Index budget
@@ -75,8 +81,9 @@ events.timestamp desc
 events.network.src_ip + timestamp
 events.session.id + timestamp
 events.expires_at (TTL)
-hardware_metrics.timestamp desc
-hardware_metrics.expires_at (TTL)
+hardware_live.sensor_id + timestamp desc
+hardware_metrics_1m.sensor_id + timestamp desc
+hardware_metrics_1m.expires_at (TTL)
 ```
 
 Review and drop superseded legacy indexes separately after confirming the live
@@ -96,9 +103,12 @@ pipeline for a demonstration:
 
 Backfill must be dry-run by default and must not run automatically on the Pi.
 
-## Next implementation phase
+## Live hardware storage budget
 
-Implement a 5-minute `hardware_metrics_5m` rollup before increasing hardware
-retention. The dashboard should query the latest native samples for the live
-sparkline and rollups for long-range charts. This removes the need to retain
-every 30-second sample in Atlas.
+The hardware agent publishes every second and uses local Redis `MAXLEN ~ 900`.
+The processor performs one MongoDB replacement per sample, cycling through 30
+deterministic `hardware_live` slots per sensor. The stored live document count
+therefore remains constant. The cloud dashboard opens one change stream per
+Node.js process and fans updates out to its SSE clients. One-minute history
+creates about 43,200 documents over 30 days instead of about 2.59 million raw
+one-second documents.

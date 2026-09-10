@@ -22,6 +22,13 @@ dashboard page --GET /api/... + cookie--> Next catch-all BFF
                          storage adapter / canonical backend
 ```
 
+Hardware telemetry uses two dedicated authenticated Next routes outside the
+generic BFF. One process-shared MongoDB change stream watches insert/replace
+events in the fixed-size `hardware_live` ring and fans them out to SSE clients.
+`GET /api/hardware` reads the same 30 slots for a snapshot, falling back to
+`hardware_metrics_1m` and then legacy `hardware_metrics`. The cloud
+dashboard does not connect to Pi Redis.
+
 The BFF is implemented by `src/app/api/[...path]/route.ts`. Its `ROUTES` object is the source of truth for the 34 browser-visible GET mappings. The route is a dispatch boundary, not a datastore adapter: it forwards JSON and does not interpret Mongo documents.
 
 The auth handler is `src/app/api/auth/route.ts`, with cookie derivation and timing-safe comparison in `src/lib/dashboardAuth.ts`. The browser client in `src/lib/api.ts` is GET-only, uses `cache: "no-store"`, parses JSON, and converts non-2xx responses to `DashboardApiError`.

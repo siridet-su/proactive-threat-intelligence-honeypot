@@ -1,10 +1,20 @@
-import { NextResponse } from 'next/server';
-import type { ChangeStreamDocument, Document } from 'mongodb';
-import { getMongoClient } from '@/lib/mongodb';
-import { isHardwareTelemetry } from '@/lib/dashboardTypes';
+import { NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
+import {
+  getRecentHardwareMetrics,
+  subscribeToHardwareMetrics,
+} from "@/lib/hardware-mongo";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const encoder = new TextEncoder();
+const HEARTBEAT_MS = 15_000;
+const SESSION_RECHECK_MS = 60_000;
+
+function ssePayload(value: unknown): Uint8Array {
+  return encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
+}
 
 const DATABASE_NAME = 'honeypot_db';
 const HARDWARE_LIVE_COLLECTION = 'hardware_live';
@@ -29,9 +39,12 @@ export async function GET(req: Request) {
           .limit(HARDWARE_SAMPLE_LIMIT)
           .toArray()).filter(isHardwareTelemetry);
 
-        // Reverse so the oldest of the 30 is first
-        const reversed = initialData.reverse();
-        controller.enqueue(`data: ${JSON.stringify({ type: 'initial', data: reversed })}\n\n`);
+    let cancelStream: (() => void) | undefined;
+    let unsubscribe: (() => void) | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        let closed = false;
+        const timers: Record<string, ReturnType<typeof setInterval>> = {};
 
         // 2. The live buffer updates fixed slots, so inserts alone would miss most samples.
         const changeStream = collection.watch(
@@ -46,44 +59,50 @@ export async function GET(req: Request) {
           ) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'update', data: change.fullDocument })}\n\n`);
           }
+        };
+        cancelStream = () => shutdown(false);
+
+        enqueue({
+          type: "initial",
+          data: initialMetrics,
         });
 
-        changeStream.on('error', (err) => {
-          console.error("Change stream error:", err);
-          controller.close();
-        });
-
-        const sessionCheck = setInterval(() => {
+        timers.sessionCheck = setInterval(() => {
           void getSessionFromRequest(req).then((currentSession) => {
             if (!currentSession || currentSession.mustChangePassword) {
-              void changeStream.close();
-              controller.close();
+              shutdown(true);
             }
-          }).catch(() => {
-            void changeStream.close();
-            controller.close();
-          });
-        }, 60_000);
+          }).catch(() => shutdown(true));
+        }, SESSION_RECHECK_MS);
 
-        // 3. Clean up when the client disconnects (e.g., user closes browser tab)
-        req.signal.addEventListener('abort', () => {
-          clearInterval(sessionCheck);
-          changeStream.close();
-          controller.close();
+        req.signal.addEventListener("abort", () => shutdown(false), { once: true });
+
+        timers.heartbeat = setInterval(() => {
+          if (!closed) {
+            controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`));
+          }
+        }, HEARTBEAT_MS);
+        unsubscribe = subscribeToHardwareMetrics((metric) => {
+          enqueue({ type: "update", data: metric });
         });
-      }
+      },
+      cancel() {
+        cancelStream?.();
+      },
     });
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (error: unknown) {
-    console.error('Failed to initialize SSE stream:', error);
-    const message = error instanceof Error ? error.message : 'Failed to start stream';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("Failed to initialize hardware MongoDB stream:", error);
+    const message = error instanceof Error ? error.message : "Failed to start stream";
+    return NextResponse.json({ error: message }, { status: 503 });
   }
 }

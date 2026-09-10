@@ -42,6 +42,29 @@ func requirePositiveIntEnv(key string) int {
 	return value
 }
 
+func positiveIntEnv(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		log.Fatalf("%s must be a positive integer", key)
+	}
+	return parsed
+}
+
+func hardwareSensorID() string {
+	if configured := strings.TrimSpace(os.Getenv("HARDWARE_SENSOR_ID")); configured != "" {
+		return configured
+	}
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		return "hardware-sensor"
+	}
+	return strings.TrimSpace(hostname)
+}
+
 func csvValues(value string) []string {
 	seen := make(map[string]struct{})
 	result := make([]string, 0)
@@ -132,10 +155,14 @@ func main() {
 	interfaces := csvValues(requireEnv("NETWORK_INTERFACES"))
 	primaryInterface := requireEnv("NETWORK_PRIMARY_INTERFACE")
 	sampleSeconds := requirePositiveIntEnv("NETWORK_SAMPLE_SECONDS")
+	streamMaxLen := int64(positiveIntEnv("HARDWARE_STREAM_MAXLEN", 900))
+	sensorID := hardwareSensorID()
 
 	log.Printf(
-		"Hardware Agent started, stream=raw:hardware interval=%ds primary_interface=%s interfaces=%s",
+		"Hardware Agent started, stream=raw:hardware interval=%ds maxlen=%d sensor_id=%s primary_interface=%s interfaces=%s",
 		sampleSeconds,
+		streamMaxLen,
+		sensorID,
 		primaryInterface,
 		strings.Join(interfaces, ","),
 	)
@@ -143,11 +170,11 @@ func main() {
 	ticker := time.NewTicker(time.Duration(sampleSeconds) * time.Second)
 	defer ticker.Stop()
 
-	previousNetwork := pushMetrics(ctx, rdb, nil, interfaces, primaryInterface)
+	previousNetwork := pushMetrics(ctx, rdb, nil, interfaces, primaryInterface, sensorID, streamMaxLen)
 
 	for {
 		<-ticker.C
-		previousNetwork = pushMetrics(ctx, rdb, previousNetwork, interfaces, primaryInterface)
+		previousNetwork = pushMetrics(ctx, rdb, previousNetwork, interfaces, primaryInterface, sensorID, streamMaxLen)
 	}
 }
 
@@ -157,6 +184,8 @@ func pushMetrics(
 	previousNetwork *networkSample,
 	interfaces []string,
 	primaryInterface string,
+	sensorID string,
+	streamMaxLen int64,
 ) *networkSample {
 	values, currentNetwork := collectHardwareMetrics(
 		previousNetwork,
@@ -164,10 +193,11 @@ func pushMetrics(
 		primaryInterface,
 		time.Now(),
 	)
+	values["sensor_id"] = sensorID
 
 	_, err := rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: "raw:hardware",
-		MaxLen: 5000,
+		MaxLen: streamMaxLen,
 		Approx: true,
 		Values: values,
 	}).Result()

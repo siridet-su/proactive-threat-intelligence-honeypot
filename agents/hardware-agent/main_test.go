@@ -20,6 +20,24 @@ func TestCSVValuesTrimsDeduplicatesAndPreservesOrder(t *testing.T) {
 	}
 }
 
+func TestPositiveIntEnvUsesFallbackAndConfiguredValue(t *testing.T) {
+	t.Setenv("HARDWARE_TEST_POSITIVE_INT", "")
+	if got := positiveIntEnv("HARDWARE_TEST_POSITIVE_INT", 900); got != 900 {
+		t.Fatalf("fallback = %d, want 900", got)
+	}
+	t.Setenv("HARDWARE_TEST_POSITIVE_INT", "1200")
+	if got := positiveIntEnv("HARDWARE_TEST_POSITIVE_INT", 900); got != 1200 {
+		t.Fatalf("configured value = %d, want 1200", got)
+	}
+}
+
+func TestHardwareSensorIDPrefersConfiguredValue(t *testing.T) {
+	t.Setenv("HARDWARE_SENSOR_ID", " pi-dev-01 ")
+	if got := hardwareSensorID(); got != "pi-dev-01" {
+		t.Fatalf("sensor id = %q, want pi-dev-01", got)
+	}
+}
+
 func TestAddMemoryMetricsPreservesLegacyAndDefinesPressureSemantics(t *testing.T) {
 	values := map[string]interface{}{}
 	memory := &mem.VirtualMemoryStat{
