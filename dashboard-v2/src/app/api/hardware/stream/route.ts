@@ -6,6 +6,10 @@ import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = 'force-dynamic';
 
+const DATABASE_NAME = 'honeypot_db';
+const HARDWARE_LIVE_COLLECTION = 'hardware_live';
+const HARDWARE_SAMPLE_LIMIT = 30;
+
 export async function GET(req: Request) {
   const session = await getSessionFromRequest(req);
   if (!session || session.mustChangePassword) {
@@ -13,27 +17,33 @@ export async function GET(req: Request) {
   }
   try {
     const client = await getMongoClient();
-    const db = client.db('honeypot_db');
-    const collection = db.collection('hardware_metrics');
+    const db = client.db(DATABASE_NAME);
+    const collection = db.collection(HARDWARE_LIVE_COLLECTION);
 
     const stream = new ReadableStream<string>({
       async start(controller) {
-        // 1. Send the initial payload (latest 30 items) so the chart isn't empty
+        // 1. Send the rolling live window so the chart isn't empty.
         const initialData = (await collection
           .find({})
           .sort({ timestamp: -1 })
-          .limit(30)
+          .limit(HARDWARE_SAMPLE_LIMIT)
           .toArray()).filter(isHardwareTelemetry);
 
         // Reverse so the oldest of the 30 is first
         const reversed = initialData.reverse();
         controller.enqueue(`data: ${JSON.stringify({ type: 'initial', data: reversed })}\n\n`);
 
-        // 2. Open a Change Stream to listen for new inserts in real-time
-        const changeStream = collection.watch([{ $match: { operationType: 'insert' } }]);
+        // 2. The live buffer updates fixed slots, so inserts alone would miss most samples.
+        const changeStream = collection.watch(
+          [{ $match: { operationType: { $in: ['insert', 'replace', 'update'] } } }],
+          { fullDocument: 'updateLookup' },
+        );
 
         changeStream.on('change', (change: ChangeStreamDocument<Document>) => {
-          if (change.operationType === 'insert' && isHardwareTelemetry(change.fullDocument)) {
+          if (
+            (change.operationType === 'insert' || change.operationType === 'replace' || change.operationType === 'update')
+            && isHardwareTelemetry(change.fullDocument)
+          ) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'update', data: change.fullDocument })}\n\n`);
           }
         });

@@ -10,14 +10,15 @@ export type StreamState = "connecting" | "live" | "stale";
 export type Pan = { x: number; y: number };
 export type LabelPosition = { x: number; y: number };
 export type LabelDrag = { sourceIp: string; startX: number; startY: number; origin: LabelPosition };
+export type NodeDrag = { path: string; startX: number; startY: number; origin: LabelPosition };
 export type MapMetrics = { surfaceWidth: number; surfaceHeight: number; planeWidth: number; planeHeight: number; planeLeft: number; planeTop: number };
 
 export const INSPECTOR_PAGE_SIZE = 12;
 export const GRAPH_CALLOUT_LIMIT = 8;
 export const GRAPH_NODE_LIMIT = 42;
 export const LABEL_LAYOUT_STORAGE_KEY = "pti-filesystem-label-layout-v1";
-export const MAP_MIN_ZOOM = 0.6;
-export const MAP_MAX_ZOOM = 1.6;
+export const MAP_MIN_ZOOM = 0.35;
+export const MAP_MAX_ZOOM = 2.75;
 
 export function isSnapshot(value: unknown): value is FilesystemTopologySnapshot {
   if (!value || typeof value !== "object") return false;
@@ -49,6 +50,39 @@ export function compactDirectoryPath(path: string): string {
   return path === "/" ? path : `…/${directorySegment(path)}`;
 }
 
+export function isSensitiveDirectory(path: string): boolean {
+  const p = path.toLowerCase();
+  return (
+    p === "/root" ||
+    p.startsWith("/root/") ||
+    p === "/tmp" ||
+    p.startsWith("/tmp/") ||
+    p === "/var/tmp" ||
+    p.startsWith("/var/tmp/") ||
+    p === "/dev/shm" ||
+    p.startsWith("/dev/shm/") ||
+    p === "/etc" ||
+    p.startsWith("/etc/")
+  );
+}
+
+export interface BreadcrumbSegment {
+  name: string;
+  path: string;
+}
+
+export function pathBreadcrumbs(path: string): BreadcrumbSegment[] {
+  if (path === "/") return [{ name: "/", path: "/" }];
+  const parts = path.split("/").filter(Boolean);
+  const breadcrumbs: BreadcrumbSegment[] = [{ name: "/", path: "/" }];
+  let current = "";
+  for (const part of parts) {
+    current += `/${part}`;
+    breadcrumbs.push({ name: part, path: current });
+  }
+  return breadcrumbs;
+}
+
 export function statusLabel(status: FilesystemTopologySession["cwdState"]["status"]): string {
   if (status === "confirmed") return "Confirmed";
   if (status === "observed") return "Observed";
@@ -67,13 +101,6 @@ export function actionLabel(event: SessionCwdHistoryEvent): string {
   if (event.action === "entered") return "Entered directory";
   if (event.action === "failed_change") return "Directory change failed";
   return "Changed directory";
-}
-
-export function snapLabelPosition(position: LabelPosition): LabelPosition {
-  return {
-    x: Math.min(94, Math.max(6, Math.round(position.x / 2) * 2)),
-    y: Math.min(94, Math.max(6, Math.round(position.y / 2) * 2)),
-  };
 }
 
 export type GraphNode = FilesystemTopologyNode & { x: number; y: number };

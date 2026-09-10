@@ -5,6 +5,10 @@ import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = 'force-dynamic';
 
+const DATABASE_NAME = 'honeypot_db';
+const HARDWARE_LIVE_COLLECTION = 'hardware_live';
+const HARDWARE_SAMPLE_LIMIT = 30;
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session || session.mustChangePassword) {
@@ -12,16 +16,14 @@ export async function GET(request: Request) {
   }
   try {
     const client = await getMongoClient();
-    // Assuming the database is "honeypot" and collection is "hardware_metrics" or "metrics"
-    // Adjust db name and collection name based on what processor-agent inserts
-    const db = client.db('honeypot_db');
+    const db = client.db(DATABASE_NAME);
 
-    // Fetch the latest 30 hardware metrics (e.g. for a sparkline or live chart)
+    // hardware_live is the agent-maintained rolling window for the live monitor.
     const rawMetrics = await db
-      .collection('hardware_metrics')
+      .collection(HARDWARE_LIVE_COLLECTION)
       .find({})
       .sort({ timestamp: -1 })
-      .limit(30)
+      .limit(HARDWARE_SAMPLE_LIMIT)
       .toArray();
 
     const metrics = rawMetrics.filter(isHardwareTelemetry);

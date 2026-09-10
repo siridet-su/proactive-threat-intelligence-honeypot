@@ -3,8 +3,10 @@
 import { motion, useReducedMotion } from "framer-motion";
 import {
   ChevronRight,
-  Crosshair,
+  Folder,
+  FolderOpen,
   Grip,
+  HardDrive,
   LocateFixed,
   Maximize2,
   Minimize2,
@@ -32,20 +34,27 @@ import {
   calloutSlot,
   directorySegment,
   formatTimestamp,
+  isSensitiveDirectory,
   leaderEndpoints,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
   pointForGraph,
-  snapLabelPosition,
   type GraphCallout,
   type LabelDrag,
   type LabelPosition,
   type MapMetrics,
+  type NodeDrag,
   type Pan,
   type StreamState,
 } from "./filesystemUtils";
 
 const LABEL_LAYOUT_STORAGE_KEY = "pti-filesystem-label-layout-v1";
+const NODE_LAYOUT_STORAGE_KEY = "pti-filesystem-node-layout-v1";
+const NODE_WORKSPACE_LIMIT = 400;
+
+function unrestrictedNodeCoordinate(value: number) {
+  return Math.min(NODE_WORKSPACE_LIMIT, Math.max(-NODE_WORKSPACE_LIMIT, value));
+}
 
 interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
@@ -72,6 +81,7 @@ export function TopologyCanvas({
   const [isDraggingSurface, setIsDraggingSurface] = useState(false);
   const [isTopologyExpanded, setIsTopologyExpanded] = useState(false);
   const [labelPositions, setLabelPositions] = useState<Record<string, LabelPosition>>({});
+  const [nodePositions, setNodePositions] = useState<Record<string, LabelPosition>>({});
   const [mapMetrics, setMapMetrics] = useState<MapMetrics | null>(null);
 
   const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
@@ -80,8 +90,11 @@ export function TopologyCanvas({
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
   const graphPlaneRef = useRef<HTMLDivElement>(null);
   const labelDrag = useRef<LabelDrag | null>(null);
+  const nodeDrag = useRef<NodeDrag | null>(null);
   const suppressCalloutClick = useRef(false);
+  const suppressNodeClick = useRef(false);
   const labelLayoutReady = useRef(false);
+  const nodeLayoutReady = useRef(false);
 
   // Restore label layout from localStorage
   useEffect(() => {
@@ -95,7 +108,7 @@ export function TopologyCanvas({
               if (!position || typeof position !== "object" || Array.isArray(position)) return [];
               const candidate = position as Partial<LabelPosition>;
               return typeof candidate.x === "number" && typeof candidate.y === "number"
-                ? [[sourceIp, snapLabelPosition({ x: candidate.x, y: candidate.y })]]
+                ? [[sourceIp, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
                 : [];
             }),
           );
@@ -116,14 +129,50 @@ export function TopologyCanvas({
     window.localStorage.setItem(LABEL_LAYOUT_STORAGE_KEY, JSON.stringify(labelPositions));
   }, [labelPositions]);
 
+  // Directory layout is a workspace preference, independent from source-IP labels.
+  useEffect(() => {
+    const restore = window.setTimeout(() => {
+      try {
+        const raw = window.localStorage.getItem(NODE_LAYOUT_STORAGE_KEY);
+        const parsed: unknown = raw ? JSON.parse(raw) : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const restored = Object.fromEntries(
+            Object.entries(parsed).flatMap(([path, position]) => {
+              if (!position || typeof position !== "object" || Array.isArray(position)) return [];
+              const candidate = position as Partial<LabelPosition>;
+              return typeof candidate.x === "number" && typeof candidate.y === "number"
+                ? [[path, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
+                : [];
+            }),
+          );
+          setNodePositions(restored);
+        }
+      } catch {
+        window.localStorage.removeItem(NODE_LAYOUT_STORAGE_KEY);
+      } finally {
+        nodeLayoutReady.current = true;
+      }
+    }, 0);
+    return () => window.clearTimeout(restore);
+  }, []);
+
+  useEffect(() => {
+    if (!nodeLayoutReady.current) return;
+    window.localStorage.setItem(NODE_LAYOUT_STORAGE_KEY, JSON.stringify(nodePositions));
+  }, [nodePositions]);
+
   // Derived graph layout
-  const graphNodes = useMemo(
+  const automaticGraphNodes = useMemo(
     () => pointForGraph(snapshot?.nodes ?? [], snapshot?.sessions ?? [], selectedPath),
     [selectedPath, snapshot?.nodes, snapshot?.sessions],
   );
+  const graphNodes = useMemo(
+    () => automaticGraphNodes.map((node) => ({ ...node, ...(nodePositions[node.path] ?? {}) })),
+    [automaticGraphNodes, nodePositions],
+  );
   const graphNodeByPath = useMemo(() => new Map(graphNodes.map((node) => [node.path, node])), [graphNodes]);
   const graphPlaneHeight = useMemo(
-    () => Math.max(500, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
+    () => Math.max(440, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
     [graphNodes],
   );
   const graphCallouts = useMemo(
@@ -171,9 +220,15 @@ export function TopologyCanvas({
     window.localStorage.removeItem(LABEL_LAYOUT_STORAGE_KEY);
   };
 
+  const resetNodeLayout = () => {
+    setNodePositions({});
+    window.localStorage.removeItem(NODE_LAYOUT_STORAGE_KEY);
+  };
+
   const resetMapWorkspace = () => {
     resetViewport();
     resetLabelLayout();
+    resetNodeLayout();
   };
 
   const fitTopology = () => resetViewport();
@@ -224,8 +279,8 @@ export function TopologyCanvas({
     setLabelPositions((current) => ({
       ...current,
       [dragging.sourceIp]: {
-        x: Math.min(94, Math.max(6, dragging.origin.x + deltaX)),
-        y: Math.min(94, Math.max(6, dragging.origin.y + deltaY)),
+        x: unrestrictedNodeCoordinate(dragging.origin.x + deltaX),
+        y: unrestrictedNodeCoordinate(dragging.origin.y + deltaY),
       },
     }));
   };
@@ -235,10 +290,44 @@ export function TopologyCanvas({
     if (dragging) {
       setLabelPositions((current) => ({
         ...current,
-        [dragging.sourceIp]: snapLabelPosition(current[dragging.sourceIp] ?? dragging.origin),
+        [dragging.sourceIp]: current[dragging.sourceIp] ?? dragging.origin,
       }));
     }
     labelDrag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  // Manual node placement is unconstrained by the automatic tree layout.
+  const onNodePointerDown = (event: ReactPointerEvent<HTMLButtonElement>, path: string, origin: LabelPosition) => {
+    event.stopPropagation();
+    event.currentTarget.focus();
+    suppressNodeClick.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    nodeDrag.current = { path, startX: event.clientX, startY: event.clientY, origin };
+  };
+
+  const onNodePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const dragging = nodeDrag.current;
+    const plane = graphPlaneRef.current;
+    if (!dragging || !plane) return;
+    const rect = plane.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const deltaX = ((event.clientX - dragging.startX) / rect.width) * 100;
+    const deltaY = ((event.clientY - dragging.startY) / rect.height) * 100;
+    if (Math.abs(deltaX) > 0.2 || Math.abs(deltaY) > 0.2) suppressNodeClick.current = true;
+    setNodePositions((current) => ({
+      ...current,
+      [dragging.path]: {
+        x: unrestrictedNodeCoordinate(dragging.origin.x + deltaX),
+        y: unrestrictedNodeCoordinate(dragging.origin.y + deltaY),
+      },
+    }));
+  };
+
+  const onNodePointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    nodeDrag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -375,15 +464,11 @@ export function TopologyCanvas({
     const rawTop = ((-mapMetrics.planeTop - pan.y) / (zoom * mapMetrics.planeHeight)) * 100;
     const rawRight = rawLeft + (mapMetrics.surfaceWidth / (zoom * mapMetrics.planeWidth)) * 100;
     const rawBottom = rawTop + (mapMetrics.surfaceHeight / (zoom * mapMetrics.planeHeight)) * 100;
-    const left = Math.min(100, Math.max(0, rawLeft));
-    const top = Math.min(100, Math.max(0, rawTop));
-    const right = Math.min(100, Math.max(0, rawRight));
-    const bottom = Math.min(100, Math.max(0, rawBottom));
     return {
-      x: left === right ? Math.min(98, left) : left,
-      y: top === bottom ? Math.min(98, top) : top,
-      width: Math.max(2, right - left),
-      height: Math.max(2, bottom - top),
+      x: rawLeft,
+      y: rawTop,
+      width: Math.max(2, rawRight - rawLeft),
+      height: Math.max(2, rawBottom - rawTop),
     };
   }, [mapMetrics, pan, zoom]);
 
@@ -404,7 +489,7 @@ export function TopologyCanvas({
 
   return (
     <div
-      className={`ui-panel self-start overflow-hidden ${
+      className={`ui-panel overflow-hidden ${
         isTopologyExpanded ? "fixed inset-3 z-50 flex flex-col bg-surface" : ""
       }`}
       aria-busy={regionStatus === "loading"}
@@ -467,8 +552,8 @@ export function TopologyCanvas({
           <button
             type="button"
             className="ui-button h-9 min-h-9 w-9 p-0"
-            title="Reset map and label layout"
-            aria-label="Reset map view and label layout"
+            title="Reset map, directory, and label layout"
+            aria-label="Reset map view, directory positions, and label layout"
             onClick={resetMapWorkspace}
           >
             <MousePointer2 className="h-4 w-4" />
@@ -517,7 +602,7 @@ export function TopologyCanvas({
                 aria-label="Filesystem topology map workspace. Use arrow keys to pan, scroll or pinch to zoom."
                 onKeyDown={onSurfaceKeyDown}
                 className={`relative overflow-hidden bg-surface-subtle p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                  isTopologyExpanded ? "min-h-[540px] flex-1" : "min-h-[540px]"
+                  isTopologyExpanded ? "min-h-[540px] flex-1" : "min-h-[440px]"
                 }`}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
@@ -530,11 +615,11 @@ export function TopologyCanvas({
                 />
                 <div className="pointer-events-none absolute left-5 top-5 flex items-center gap-2 text-xs text-text-subtle">
                   <Grip className="h-3.5 w-3.5" aria-hidden="true" />
-                  Drag surface to pan · Scroll or pinch to zoom · Drag IP labels freely
+                  Drag surface to pan · Scroll or pinch to zoom · Drag directory or IP nodes beyond the tree frame · Use reset to recover
                 </div>
                 <motion.div
                   ref={graphPlaneRef}
-                  className="relative min-h-[500px] origin-top-left"
+                  className="relative min-h-[500px] origin-top-left overflow-visible"
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion
@@ -549,7 +634,7 @@ export function TopologyCanvas({
                     reducedMotion || isDraggingSurface ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 28 }
                   }
                 >
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
                     {graphNodes.map((node) => {
                       const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
                       if (!parent) return null;
@@ -606,33 +691,65 @@ export function TopologyCanvas({
                       );
                     })}
                   </svg>
-                  {graphNodes.map((node) => (
-                    <button
-                      key={node.path}
-                      type="button"
-                      aria-pressed={node.path === selectedPath}
-                      aria-label={`Inspect directory ${node.path}`}
-                      title={node.path}
-                      onClick={() => onSelectPath(node.path)}
-                      style={{ left: `${node.x}%`, top: `${node.y}%` }}
-                      className={`absolute z-10 flex max-w-40 -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-150 ${
-                        node.path === selectedPath
-                          ? "border-primary-border bg-primary-subtle text-text"
-                          : "border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
-                      }`}
-                    >
-                      <Crosshair
-                        className={`h-3.5 w-3.5 shrink-0 ${
-                          node.path === selectedPath ? "text-primary" : "text-text-subtle"
+                  {graphNodes.map((node) => {
+                    const isSelected = node.path === selectedPath;
+                    const isRoot = node.path === "/";
+                    const isSensitive = isSensitiveDirectory(node.path);
+
+                    return (
+                      <button
+                        key={node.path}
+                        type="button"
+                        aria-pressed={isSelected}
+                        aria-label={`Inspect directory ${node.path}${isSensitive ? " (sensitive target)" : ""}`}
+                        title={node.path}
+                        onPointerDown={(event) => onNodePointerDown(event, node.path, node)}
+                        onPointerMove={onNodePointerMove}
+                        onPointerUp={onNodePointerEnd}
+                        onPointerCancel={onNodePointerEnd}
+                        onClick={() => {
+                          if (suppressNodeClick.current) {
+                            suppressNodeClick.current = false;
+                            return;
+                          }
+                          onSelectPath(node.path);
+                        }}
+                        style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                        className={`absolute z-10 flex max-w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-150 ${
+                          isSelected
+                            ? "border-primary-border bg-primary-subtle text-text"
+                            : isSensitive
+                              ? "border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
+                              : "border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
                         }`}
-                        aria-hidden="true"
-                      />
-                      <span className="truncate font-mono text-xs">{directorySegment(node.path)}</span>
-                      <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-xs font-semibold text-text-subtle">
-                        {node.sessionIds.length}
-                      </span>
-                    </button>
-                  ))}
+                      >
+                        {isRoot ? (
+                          <HardDrive
+                            className={`h-3.5 w-3.5 shrink-0 ${isSelected ? "text-primary" : "text-text-subtle"}`}
+                            aria-hidden="true"
+                          />
+                        ) : isSelected ? (
+                          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                        ) : (
+                          <Folder
+                            className={`h-3.5 w-3.5 shrink-0 ${isSensitive ? "text-warning" : "text-text-subtle"}`}
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span className="truncate font-mono text-xs">{directorySegment(node.path)}</span>
+                        {isSensitive && (
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+                            title="Sensitive target / Drop directory"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-[11px] font-semibold text-text-subtle">
+                          {node.sessionIds.length}
+                        </span>
+                      </button>
+                    );
+                  })}
                   {graphCallouts.map((callout, index) => {
                     const position = positionForCallout(callout, index);
                     const selected = callout.sessionIds.includes(selectedSessionId ?? "");
@@ -681,11 +798,6 @@ export function TopologyCanvas({
                   })}
                 </motion.div>
 
-                <div className="pointer-events-none absolute bottom-3 left-5 z-20 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted shadow-sm">
-                  <span className="font-semibold text-text">{graphNodes.length}</span> paths mapped ·{" "}
-                  <span className="font-semibold text-text">{graphCallouts.length}</span> of {liveSourceCount} IP labels
-                </div>
-
                 <TopologyMinimap
                   graphNodes={graphNodes}
                   graphNodeByPath={graphNodeByPath}
@@ -704,6 +816,9 @@ export function TopologyCanvas({
                 </span>
                 <span>
                   <strong className="text-text">{snapshot.sessions.length}</strong> sessions with a known CWD
+                </span>
+                <span>
+                  <strong className="text-text">{liveSourceCount}</strong> live {liveSourceCount === 1 ? "source" : "sources"}
                 </span>
                 <span>Snapshot {formatTimestamp(snapshot.generatedAt)}</span>
                 <span className="flex items-center gap-3 sm:ml-auto" aria-label="Topology map legend">
@@ -749,12 +864,16 @@ export function TopologyCanvas({
                   </span>
                 </div>
                 <p className="mt-3 text-xs text-text-subtle">
-                  Choose an IP to fan its leader line out to every current verified path. Drag labels on the map to
-                  arrange them. Press Escape to exit this workspace.
+                  Choose an IP to fan its leader line out to every current verified path. Drag directories and IP labels
+                  on the map to arrange them. Press Escape to exit this workspace.
                 </p>
-                <button type="button" className="ui-button mt-4 w-full" onClick={resetLabelLayout}>
+                <button type="button" className="ui-button mt-4 w-full" onClick={resetNodeLayout}>
                   <MousePointer2 className="h-4 w-4" />
-                  Auto arrange labels
+                  Auto arrange directories
+                </button>
+                <button type="button" className="ui-button mt-2 w-full" onClick={resetLabelLayout}>
+                  <MousePointer2 className="h-4 w-4" />
+                  Auto arrange IP labels
                 </button>
                 <div className="mt-5 space-y-2">
                   {graphCallouts.map((callout) => {
