@@ -78,15 +78,17 @@ async function runHardwareWatcher(state: HardwareWatchState): Promise<void> {
       stream = client
         .db(DATABASE_NAME)
         .collection(LIVE_COLLECTION)
-        .watch([
-          { $match: { operationType: { $in: ["insert", "replace"] } } },
-        ]);
+        .watch(
+          [{ $match: { operationType: { $in: ["insert", "replace", "update"] } } }],
+          { fullDocument: "updateLookup" },
+        );
       state.stream = stream;
 
       for await (const change of stream) {
         if (
           change.operationType === "insert"
           || change.operationType === "replace"
+          || change.operationType === "update"
         ) {
           publish(state, change.fullDocument);
         }
