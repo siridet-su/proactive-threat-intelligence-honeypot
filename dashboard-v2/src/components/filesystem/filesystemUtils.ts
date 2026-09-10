@@ -39,6 +39,16 @@ export function formatTimestamp(value: string | null): string {
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" }).format(date);
 }
 
+export function directorySegment(path: string): string {
+  if (path === "/") return "/";
+  const normalized = path.replace(/\/+$/, "");
+  return normalized.slice(normalized.lastIndexOf("/") + 1) || path;
+}
+
+export function compactDirectoryPath(path: string): string {
+  return path === "/" ? path : `…/${directorySegment(path)}`;
+}
+
 export function statusLabel(status: FilesystemTopologySession["cwdState"]["status"]): string {
   if (status === "confirmed") return "Confirmed";
   if (status === "observed") return "Observed";

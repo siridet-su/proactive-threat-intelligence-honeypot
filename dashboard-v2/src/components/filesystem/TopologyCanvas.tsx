@@ -30,6 +30,7 @@ import { TopologyMinimap } from "./TopologyMinimap";
 import {
   calloutsForGraph,
   calloutSlot,
+  directorySegment,
   formatTimestamp,
   leaderEndpoints,
   MAP_MAX_ZOOM,
@@ -121,6 +122,10 @@ export function TopologyCanvas({
     [selectedPath, snapshot?.nodes, snapshot?.sessions],
   );
   const graphNodeByPath = useMemo(() => new Map(graphNodes.map((node) => [node.path, node])), [graphNodes]);
+  const graphPlaneHeight = useMemo(
+    () => Math.max(500, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
+    [graphNodes],
+  );
   const graphCallouts = useMemo(
     () => calloutsForGraph(snapshot?.sessions ?? [], graphNodeByPath, selectedSessionId),
     [graphNodeByPath, selectedSessionId, snapshot?.sessions],
@@ -529,9 +534,17 @@ export function TopologyCanvas({
                 </div>
                 <motion.div
                   ref={graphPlaneRef}
-                  className={`relative origin-top-left ${isTopologyExpanded ? "h-full min-h-[500px]" : "h-[500px]"}`}
+                  className="relative min-h-[500px] origin-top-left"
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
-                  style={reducedMotion ? { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` } : undefined}
+                  style={
+                    reducedMotion
+                      ? {
+                          minHeight: graphPlaneHeight,
+                          height: isTopologyExpanded ? "100%" : undefined,
+                          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                        }
+                      : { minHeight: graphPlaneHeight, height: isTopologyExpanded ? "100%" : undefined }
+                  }
                   transition={
                     reducedMotion || isDraggingSurface ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 28 }
                   }
@@ -551,7 +564,7 @@ export function TopologyCanvas({
                       );
                     })}
                   </svg>
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-30 h-full w-full overflow-visible" aria-hidden="true">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible" aria-hidden="true">
                     {graphCallouts.map((callout, index) => {
                       const position = positionForCallout(callout, index);
                       const selectedSource = callout.sessionIds.includes(selectedSessionId ?? "");
@@ -563,7 +576,7 @@ export function TopologyCanvas({
                           {targetPaths.map((path) => {
                             const node = graphNodeByPath.get(path);
                             if (!node) return null;
-                            const focused = selectedSource || path === selectedPath;
+                            const focused = selectedSource;
                             const endpoint = leaderEndpoints(node, position);
                             const controlX = (endpoint.startX + endpoint.endX) / 2;
                             return (
@@ -598,6 +611,8 @@ export function TopologyCanvas({
                       key={node.path}
                       type="button"
                       aria-pressed={node.path === selectedPath}
+                      aria-label={`Inspect directory ${node.path}`}
+                      title={node.path}
                       onClick={() => onSelectPath(node.path)}
                       style={{ left: `${node.x}%`, top: `${node.y}%` }}
                       className={`absolute z-10 flex max-w-40 -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-150 ${
@@ -612,7 +627,7 @@ export function TopologyCanvas({
                         }`}
                         aria-hidden="true"
                       />
-                      <span className="truncate font-mono text-xs">{node.path}</span>
+                      <span className="truncate font-mono text-xs">{directorySegment(node.path)}</span>
                       <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-xs font-semibold text-text-subtle">
                         {node.sessionIds.length}
                       </span>
@@ -626,6 +641,9 @@ export function TopologyCanvas({
                         key={`callout-${callout.sourceIp}`}
                         type="button"
                         aria-pressed={selected}
+                        aria-label={`Inspect source ${callout.sourceIp}; ${callout.sessionIds.length} ${
+                          callout.sessionIds.length === 1 ? "session" : "sessions"
+                        }`}
                         onPointerDown={(event) => onCalloutPointerDown(event, callout.sourceIp, position)}
                         onPointerMove={onCalloutPointerMove}
                         onPointerUp={onCalloutPointerEnd}
@@ -656,8 +674,6 @@ export function TopologyCanvas({
                             <span>
                               {callout.sessionIds.length} {callout.sessionIds.length === 1 ? "session" : "sessions"}
                             </span>
-                            <span aria-hidden="true">·</span>
-                            <span className="truncate font-mono">{callout.path}</span>
                           </span>
                         </span>
                       </button>
@@ -697,7 +713,7 @@ export function TopologyCanvas({
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
-                    Focused connection
+                    Selected source route
                   </span>
                 </span>
               </div>
