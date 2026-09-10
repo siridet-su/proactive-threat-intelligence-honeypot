@@ -16,93 +16,76 @@ function ssePayload(value: unknown): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
 }
 
-const DATABASE_NAME = 'honeypot_db';
-const HARDWARE_LIVE_COLLECTION = 'hardware_live';
-const HARDWARE_SAMPLE_LIMIT = 30;
-
-export async function GET(req: Request) {
-  const session = await getSessionFromRequest(req);
+export async function GET(request: Request) {
+  const session = await getSessionFromRequest(request);
   if (!session || session.mustChangePassword) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  try {
-    const client = await getMongoClient();
-    const db = client.db(DATABASE_NAME);
-    const collection = db.collection(HARDWARE_LIVE_COLLECTION);
 
-    const stream = new ReadableStream<string>({
-      async start(controller) {
-        // 1. Send the rolling live window so the chart isn't empty.
-        const initialData = (await collection
-          .find({})
-          .sort({ timestamp: -1 })
-          .limit(HARDWARE_SAMPLE_LIMIT)
-          .toArray()).filter(isHardwareTelemetry);
+  let shutdown: (() => void) | undefined;
 
-    let cancelStream: (() => void) | undefined;
-    let unsubscribe: (() => void) | undefined;
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        let closed = false;
-        const timers: Record<string, ReturnType<typeof setInterval>> = {};
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
+      const resources: {
+        unsubscribe?: () => void;
+        heartbeat?: ReturnType<typeof setInterval>;
+        sessionCheck?: ReturnType<typeof setInterval>;
+      } = {};
 
-        // 2. The live buffer updates fixed slots, so inserts alone would miss most samples.
-        const changeStream = collection.watch(
-          [{ $match: { operationType: { $in: ['insert', 'replace', 'update'] } } }],
-          { fullDocument: 'updateLookup' },
-        );
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        if (resources.heartbeat) clearInterval(resources.heartbeat);
+        if (resources.sessionCheck) clearInterval(resources.sessionCheck);
+        resources.unsubscribe?.();
+        controller.close();
+      };
 
-        changeStream.on('change', (change: ChangeStreamDocument<Document>) => {
-          if (
-            (change.operationType === 'insert' || change.operationType === 'replace' || change.operationType === 'update')
-            && isHardwareTelemetry(change.fullDocument)
-          ) {
-            controller.enqueue(`data: ${JSON.stringify({ type: 'update', data: change.fullDocument })}\n\n`);
-          }
-        };
-        cancelStream = () => shutdown(false);
+      const enqueue = (value: unknown) => {
+        if (!closed) controller.enqueue(ssePayload(value));
+      };
 
-        enqueue({
-          type: "initial",
-          data: initialMetrics,
-        });
+      shutdown = close;
 
-        timers.sessionCheck = setInterval(() => {
-          void getSessionFromRequest(req).then((currentSession) => {
-            if (!currentSession || currentSession.mustChangePassword) {
-              shutdown(true);
-            }
-          }).catch(() => shutdown(true));
-        }, SESSION_RECHECK_MS);
+      try {
+        enqueue({ type: "initial", data: await getRecentHardwareMetrics() });
+      } catch (error) {
+        console.error("Failed to read initial hardware metrics:", error);
+        close();
+        return;
+      }
 
-        req.signal.addEventListener("abort", () => shutdown(false), { once: true });
+      resources.unsubscribe = subscribeToHardwareMetrics((metric) => {
+        enqueue({ type: "update", data: metric });
+      });
 
-        timers.heartbeat = setInterval(() => {
-          if (!closed) {
-            controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`));
-          }
-        }, HEARTBEAT_MS);
-        unsubscribe = subscribeToHardwareMetrics((metric) => {
-          enqueue({ type: "update", data: metric });
-        });
-      },
-      cancel() {
-        cancelStream?.();
-      },
-    });
+      resources.heartbeat = setInterval(() => {
+        if (!closed) controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`));
+      }, HEARTBEAT_MS);
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
-  } catch (error: unknown) {
-    console.error("Failed to initialize hardware MongoDB stream:", error);
-    const message = error instanceof Error ? error.message : "Failed to start stream";
-    return NextResponse.json({ error: message }, { status: 503 });
-  }
+      resources.sessionCheck = setInterval(() => {
+        void getSessionFromRequest(request)
+          .then((currentSession) => {
+            if (!currentSession || currentSession.mustChangePassword) close();
+          })
+          .catch(close);
+      }, SESSION_RECHECK_MS);
+
+      request.signal.addEventListener("abort", close, { once: true });
+    },
+    cancel() {
+      shutdown?.();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 }
