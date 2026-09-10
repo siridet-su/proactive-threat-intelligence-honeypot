@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   ChevronRight,
   Folder,
@@ -11,15 +11,18 @@ import {
   Maximize2,
   Minimize2,
   MousePointer2,
+  RotateCcw,
   Route,
   ScanLine,
   ShieldAlert,
+  Undo2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,7 +34,6 @@ import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
 import { TopologyMinimap } from "./TopologyMinimap";
 import {
   calloutsForGraph,
-  calloutSlot,
   directorySegment,
   formatTimestamp,
   isSensitiveDirectory,
@@ -39,7 +41,9 @@ import {
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
   pointForGraph,
+  sourceRailPositions,
   type GraphCallout,
+  type GraphElementBounds,
   type LabelDrag,
   type LabelPosition,
   type MapMetrics,
@@ -51,6 +55,30 @@ import {
 const LABEL_LAYOUT_STORAGE_KEY = "pti-filesystem-label-layout-v1";
 const NODE_LAYOUT_STORAGE_KEY = "pti-filesystem-node-layout-v1";
 const NODE_WORKSPACE_LIMIT = 400;
+
+interface WorkspaceLayoutSnapshot {
+  labelPositions: Record<string, LabelPosition>;
+  nodePositions: Record<string, LabelPosition>;
+  pan: Pan;
+  zoom: number;
+}
+
+function sameElementBounds(
+  left: Record<string, GraphElementBounds>,
+  right: Record<string, GraphElementBounds>,
+) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => {
+    const next = right[key];
+    const current = left[key];
+    return next && current &&
+      Math.abs(next.x - current.x) < 0.01 &&
+      Math.abs(next.y - current.y) < 0.01 &&
+      Math.abs(next.width - current.width) < 0.01 &&
+      Math.abs(next.height - current.height) < 0.01;
+  });
+}
 
 function unrestrictedNodeCoordinate(value: number) {
   return Math.min(NODE_WORKSPACE_LIMIT, Math.max(-NODE_WORKSPACE_LIMIT, value));
@@ -83,23 +111,34 @@ export function TopologyCanvas({
   const [labelPositions, setLabelPositions] = useState<Record<string, LabelPosition>>({});
   const [nodePositions, setNodePositions] = useState<Record<string, LabelPosition>>({});
   const [mapMetrics, setMapMetrics] = useState<MapMetrics | null>(null);
+  const [draggedCalloutIp, setDraggedCalloutIp] = useState<string | null>(null);
+  const [draggedNodePath, setDraggedNodePath] = useState<string | null>(null);
+  const [nodeElementBounds, setNodeElementBounds] = useState<Record<string, GraphElementBounds>>({});
+  const [calloutElementBounds, setCalloutElementBounds] = useState<Record<string, GraphElementBounds>>({});
 
   const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
   const panRef = useRef<Pan>({ x: 0, y: 0 });
   const zoomRef = useRef(1);
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
   const graphPlaneRef = useRef<HTMLDivElement>(null);
+  const nodeElementRefs = useRef(new Map<string, HTMLButtonElement>());
+  const calloutElementRefs = useRef(new Map<string, HTMLButtonElement>());
   const labelDrag = useRef<LabelDrag | null>(null);
   const nodeDrag = useRef<NodeDrag | null>(null);
   const suppressCalloutClick = useRef(false);
   const suppressNodeClick = useRef(false);
   const labelLayoutReady = useRef(false);
   const nodeLayoutReady = useRef(false);
+  const skipLabelLayoutRestore = useRef(false);
+  const skipNodeLayoutRestore = useRef(false);
+  const autoArrangeUndo = useRef<WorkspaceLayoutSnapshot | null>(null);
+  const [canUndoAutoArrange, setCanUndoAutoArrange] = useState(false);
 
   // Restore label layout from localStorage
   useEffect(() => {
     const restore = window.setTimeout(() => {
       try {
+        if (skipLabelLayoutRestore.current) return;
         const raw = window.localStorage.getItem(LABEL_LAYOUT_STORAGE_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : {};
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -133,6 +172,7 @@ export function TopologyCanvas({
   useEffect(() => {
     const restore = window.setTimeout(() => {
       try {
+        if (skipNodeLayoutRestore.current) return;
         const raw = window.localStorage.getItem(NODE_LAYOUT_STORAGE_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : {};
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -176,8 +216,12 @@ export function TopologyCanvas({
     [graphNodes],
   );
   const graphCallouts = useMemo(
-    () => calloutsForGraph(snapshot?.sessions ?? [], graphNodeByPath, selectedSessionId),
-    [graphNodeByPath, selectedSessionId, snapshot?.sessions],
+    () => calloutsForGraph(snapshot?.sessions ?? [], graphNodeByPath),
+    [graphNodeByPath, snapshot?.sessions],
+  );
+  const automaticCalloutPositions = useMemo(
+    () => sourceRailPositions(graphCallouts, graphNodeByPath),
+    [graphCallouts, graphNodeByPath],
   );
   const liveSessionById = useMemo(
     () => new Map((snapshot?.sessions ?? []).map((session) => [session.sessionId, session])),
@@ -191,6 +235,41 @@ export function TopologyCanvas({
     () => new Set((snapshot?.sessions ?? []).map((session) => session.sourceIp)).size,
     [snapshot?.sessions],
   );
+
+  const measureElementBounds = useCallback(() => {
+    const plane = graphPlaneRef.current;
+    if (!plane?.offsetWidth || !plane.offsetHeight) return;
+    const planeBounds = plane.getBoundingClientRect();
+    if (!planeBounds.width || !planeBounds.height) return;
+    const toRelativeBounds = (element: HTMLButtonElement): GraphElementBounds => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        x: ((bounds.left + bounds.width / 2 - planeBounds.left) / planeBounds.width) * 100,
+        y: ((bounds.top + bounds.height / 2 - planeBounds.top) / planeBounds.height) * 100,
+        width: (bounds.width / planeBounds.width) * 100,
+        height: (bounds.height / planeBounds.height) * 100,
+      };
+    };
+    const measuredNodes = Object.fromEntries(
+      [...nodeElementRefs.current.entries()].map(([path, element]) => [path, toRelativeBounds(element)]),
+    );
+    const measuredCallouts = Object.fromEntries(
+      [...calloutElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
+    );
+    setNodeElementBounds((current) => sameElementBounds(current, measuredNodes) ? current : measuredNodes);
+    setCalloutElementBounds((current) => sameElementBounds(current, measuredCallouts) ? current : measuredCallouts);
+  }, []);
+
+  // Connector endpoints use rendered bounds, including their actual centers. This keeps a line
+  // attached to the same visual edge in compact, expanded, zoomed, and manually arranged views.
+  useLayoutEffect(() => {
+    measureElementBounds();
+    const plane = graphPlaneRef.current;
+    if (!plane) return;
+    const observer = new ResizeObserver(measureElementBounds);
+    observer.observe(plane);
+    return () => observer.disconnect();
+  }, [graphCallouts, graphNodes, isTopologyExpanded, labelPositions, measureElementBounds, nodePositions]);
 
   const setMapZoom = useCallback((value: number, focalPoint?: Pan) => {
     const nextZoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, Number(value.toFixed(3))));
@@ -208,20 +287,43 @@ export function TopologyCanvas({
     setPan(nextPan);
   }, []);
 
-  const resetViewport = () => {
+  const resetViewport = useCallback(() => {
+    const surface = mapSurfaceRef.current;
+    const plane = graphPlaneRef.current;
+    if (surface && plane) {
+      const availableWidth = surface.clientWidth - 40;
+      const baseWidth = plane.offsetWidth || 860;
+      if (availableWidth < baseWidth) {
+        const fitZoom = Math.min(1, Math.max(MAP_MIN_ZOOM, Number((availableWidth / baseWidth).toFixed(2))));
+        const panX = Math.max(0, (surface.clientWidth - baseWidth * fitZoom) / 2);
+        panRef.current = { x: panX, y: 0 };
+        zoomRef.current = fitZoom;
+        setPan(panRef.current);
+        setZoom(zoomRef.current);
+        return;
+      }
+    }
     panRef.current = { x: 0, y: 0 };
     zoomRef.current = 1;
     setPan(panRef.current);
     setZoom(zoomRef.current);
-  };
+  }, []);
 
   const resetLabelLayout = () => {
+    skipLabelLayoutRestore.current = true;
+    labelDrag.current = null;
+    setDraggedCalloutIp(null);
     setLabelPositions({});
+    setCalloutElementBounds({});
     window.localStorage.removeItem(LABEL_LAYOUT_STORAGE_KEY);
   };
 
   const resetNodeLayout = () => {
+    skipNodeLayoutRestore.current = true;
+    nodeDrag.current = null;
+    setDraggedNodePath(null);
     setNodePositions({});
+    setNodeElementBounds({});
     window.localStorage.removeItem(NODE_LAYOUT_STORAGE_KEY);
   };
 
@@ -229,14 +331,50 @@ export function TopologyCanvas({
     resetViewport();
     resetLabelLayout();
     resetNodeLayout();
+    autoArrangeUndo.current = null;
+    setCanUndoAutoArrange(false);
   };
 
   const fitTopology = () => resetViewport();
 
+  const autoArrangeTopology = () => {
+    autoArrangeUndo.current = {
+      labelPositions: { ...labelPositions },
+      nodePositions: { ...nodePositions },
+      pan: { ...panRef.current },
+      zoom: zoomRef.current,
+    };
+    setCanUndoAutoArrange(true);
+    resetViewport();
+    resetLabelLayout();
+    resetNodeLayout();
+  };
+
+  const undoAutoArrangeTopology = () => {
+    const previous = autoArrangeUndo.current;
+    if (!previous) return;
+    setLabelPositions(previous.labelPositions);
+    setNodePositions(previous.nodePositions);
+    panRef.current = previous.pan;
+    zoomRef.current = previous.zoom;
+    setPan(previous.pan);
+    setZoom(previous.zoom);
+    autoArrangeUndo.current = null;
+    setCanUndoAutoArrange(false);
+  };
+
+  const clearAutoArrangeUndo = () => {
+    if (!autoArrangeUndo.current) return;
+    autoArrangeUndo.current = null;
+    setCanUndoAutoArrange(false);
+  };
+
   const positionForCallout = useCallback(
-    (callout: GraphCallout, index: number): LabelPosition =>
-      labelPositions[callout.sourceIp] ?? calloutSlot(index, graphCallouts.length),
-    [graphCallouts.length, labelPositions],
+    (callout: GraphCallout, _index: number): LabelPosition =>
+      labelPositions[callout.sourceIp] ??
+      automaticCalloutPositions.get(callout.sourceIp) ??
+      { x: _index % 2 === 0 ? 10 : 90, y: 50 },
+    [automaticCalloutPositions, labelPositions],
   );
 
   const centerMapOn = (position: LabelPosition) => {
@@ -265,6 +403,7 @@ export function TopologyCanvas({
     suppressCalloutClick.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
     labelDrag.current = { sourceIp, startX: event.clientX, startY: event.clientY, origin };
+    setDraggedCalloutIp(sourceIp);
   };
 
   const onCalloutPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -275,7 +414,10 @@ export function TopologyCanvas({
     if (!rect.width || !rect.height) return;
     const deltaX = ((event.clientX - dragging.startX) / rect.width) * 100;
     const deltaY = ((event.clientY - dragging.startY) / rect.height) * 100;
-    if (Math.abs(deltaX) > 0.25 || Math.abs(deltaY) > 0.25) suppressCalloutClick.current = true;
+    if (Math.abs(deltaX) > 0.25 || Math.abs(deltaY) > 0.25) {
+      suppressCalloutClick.current = true;
+      clearAutoArrangeUndo();
+    }
     setLabelPositions((current) => ({
       ...current,
       [dragging.sourceIp]: {
@@ -294,6 +436,7 @@ export function TopologyCanvas({
       }));
     }
     labelDrag.current = null;
+    setDraggedCalloutIp(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -306,6 +449,7 @@ export function TopologyCanvas({
     suppressNodeClick.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
     nodeDrag.current = { path, startX: event.clientX, startY: event.clientY, origin };
+    setDraggedNodePath(path);
   };
 
   const onNodePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -316,7 +460,10 @@ export function TopologyCanvas({
     if (!rect.width || !rect.height) return;
     const deltaX = ((event.clientX - dragging.startX) / rect.width) * 100;
     const deltaY = ((event.clientY - dragging.startY) / rect.height) * 100;
-    if (Math.abs(deltaX) > 0.2 || Math.abs(deltaY) > 0.2) suppressNodeClick.current = true;
+    if (Math.abs(deltaX) > 0.2 || Math.abs(deltaY) > 0.2) {
+      suppressNodeClick.current = true;
+      clearAutoArrangeUndo();
+    }
     setNodePositions((current) => ({
       ...current,
       [dragging.path]: {
@@ -328,6 +475,7 @@ export function TopologyCanvas({
 
   const onNodePointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
     nodeDrag.current = null;
+    setDraggedNodePath(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -457,6 +605,19 @@ export function TopologyCanvas({
     return () => observer.disconnect();
   }, [isTopologyExpanded, snapshot?.nodes.length]);
 
+  // Auto-fit viewport on mount if container is on a narrow screen
+  const hasInitializedView = useRef(false);
+  useEffect(() => {
+    if (hasInitializedView.current) return;
+    const surface = mapSurfaceRef.current;
+    if (!surface?.clientWidth) return;
+    hasInitializedView.current = true;
+    if (surface.clientWidth < 900) {
+      resetViewport();
+    }
+  }, [resetViewport]);
+
+
   // Minimap viewport box calculation
   const minimapViewport = useMemo(() => {
     if (!mapMetrics || !mapMetrics.planeWidth || !mapMetrics.planeHeight) return null;
@@ -533,8 +694,8 @@ export function TopologyCanvas({
           <button
             type="button"
             className="ui-button h-9 min-h-9 w-9 p-0"
-            title="Fit topology"
-            aria-label="Fit topology in view"
+            title="Reset view"
+            aria-label="Reset map view"
             onClick={fitTopology}
           >
             <ScanLine className="h-4 w-4" />
@@ -552,11 +713,31 @@ export function TopologyCanvas({
           <button
             type="button"
             className="ui-button h-9 min-h-9 w-9 p-0"
-            title="Reset map, directory, and label layout"
-            aria-label="Reset map view, directory positions, and label layout"
-            onClick={resetMapWorkspace}
+            title="Auto arrange topology"
+            aria-label="Auto arrange directory and IP labels"
+            onClick={autoArrangeTopology}
           >
             <MousePointer2 className="h-4 w-4" />
+          </button>
+          {canUndoAutoArrange && (
+            <button
+              type="button"
+              className="ui-button h-9 min-h-9 w-9 p-0"
+              title="Undo auto arrange"
+              aria-label="Undo auto arrange"
+              onClick={undoAutoArrangeTopology}
+            >
+              <Undo2 className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="ui-button h-9 min-h-9 w-9 p-0"
+            title="Restore default workspace"
+            aria-label="Restore default map view and layout"
+            onClick={resetMapWorkspace}
+          >
+            <RotateCcw className="h-4 w-4" />
           </button>
           <button
             type="button"
@@ -619,16 +800,17 @@ export function TopologyCanvas({
                 </div>
                 <motion.div
                   ref={graphPlaneRef}
-                  className="relative min-h-[500px] origin-top-left overflow-visible"
+                  className="relative min-h-[500px] min-w-[860px] origin-top-left overflow-visible"
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion
                       ? {
                           minHeight: graphPlaneHeight,
+                          minWidth: 860,
                           height: isTopologyExpanded ? "100%" : undefined,
                           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                         }
-                      : { minHeight: graphPlaneHeight, height: isTopologyExpanded ? "100%" : undefined }
+                      : { minHeight: graphPlaneHeight, minWidth: 860, height: isTopologyExpanded ? "100%" : undefined }
                   }
                   transition={
                     reducedMotion || isDraggingSurface ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 28 }
@@ -638,10 +820,13 @@ export function TopologyCanvas({
                     {graphNodes.map((node) => {
                       const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
                       if (!parent) return null;
+                      const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${(parent.y + node.y) / 2}, ${node.x} ${(parent.y + node.y) / 2}, ${node.x} ${node.y}`;
                       return (
-                        <path
+                        <motion.path
                           key={`${parent.path}-${node.path}`}
-                          d={`M ${parent.x} ${parent.y} C ${parent.x} ${(parent.y + node.y) / 2}, ${node.x} ${(parent.y + node.y) / 2}, ${node.x} ${node.y}`}
+                          initial={false}
+                          animate={{ d: filesystemRoute }}
+                          transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
                           fill="none"
                           stroke="var(--border-strong)"
                           strokeWidth="0.35"
@@ -658,25 +843,34 @@ export function TopologyCanvas({
                         : [callout.path];
                       return (
                         <g key={`leader-${callout.sourceIp}`}>
-                          {targetPaths.map((path) => {
+                          {targetPaths.map((path, routeIndex) => {
                             const node = graphNodeByPath.get(path);
                             if (!node) return null;
                             const focused = selectedSource;
-                            const endpoint = leaderEndpoints(node, position);
+                            const endpoint = leaderEndpoints(
+                              node,
+                              position,
+                              nodeElementBounds[node.path],
+                              calloutElementBounds[callout.sourceIp],
+                            );
                             const controlX = (endpoint.startX + endpoint.endX) / 2;
+                            const routePath = `M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`;
                             return (
-                              <g key={path}>
-                                <path
-                                  d={`M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`}
+                              <g key={`${callout.sourceIp}-route-${routeIndex}`}>
+                                <motion.path
+                                  initial={false}
+                                  animate={{ d: routePath }}
+                                  transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
                                   fill="none"
                                   stroke={focused ? "var(--primary)" : "var(--border-strong)"}
                                   strokeOpacity={focused ? 1 : 0.52}
                                   strokeWidth={focused ? "0.42" : "0.24"}
                                   strokeDasharray={focused ? "none" : "0.75 1.6"}
                                 />
-                                <circle
-                                  cx={endpoint.startX}
-                                  cy={endpoint.startY}
+                                <motion.circle
+                                  initial={false}
+                                  animate={{ cx: endpoint.startX, cy: endpoint.startY }}
+                                  transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
                                   r={focused ? "1.05" : "0.5"}
                                   fill={focused ? "var(--surface)" : "var(--border-strong)"}
                                   fillOpacity={focused ? 1 : 0.68}
@@ -691,14 +885,27 @@ export function TopologyCanvas({
                       );
                     })}
                   </svg>
-                  {graphNodes.map((node) => {
+                  <AnimatePresence initial={false}>
+                    {graphNodes.map((node) => {
                     const isSelected = node.path === selectedPath;
                     const isRoot = node.path === "/";
                     const isSensitive = isSensitiveDirectory(node.path);
 
                     return (
-                      <button
+                      <motion.button
                         key={node.path}
+                        ref={(element) => {
+                          if (element) nodeElementRefs.current.set(node.path, element);
+                          else nodeElementRefs.current.delete(node.path);
+                        }}
+                        initial={false}
+                        animate={{ left: `${node.x}%`, top: `${node.y}%`, opacity: 1 }}
+                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.96 }}
+                        transition={
+                          reducedMotion || draggedNodePath === node.path
+                            ? { duration: 0 }
+                            : { left: { duration: 0.18, ease: "easeOut" }, top: { duration: 0.18, ease: "easeOut" }, opacity: { duration: 0.14 }, scale: { duration: 0.14 } }
+                        }
                         type="button"
                         aria-pressed={isSelected}
                         aria-label={`Inspect directory ${node.path}${isSensitive ? " (sensitive target)" : ""}`}
@@ -714,7 +921,6 @@ export function TopologyCanvas({
                           }
                           onSelectPath(node.path);
                         }}
-                        style={{ left: `${node.x}%`, top: `${node.y}%` }}
                         className={`absolute z-10 flex max-w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-150 ${
                           isSelected
                             ? "border-primary-border bg-primary-subtle text-text"
@@ -747,15 +953,29 @@ export function TopologyCanvas({
                         <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-[11px] font-semibold text-text-subtle">
                           {node.sessionIds.length}
                         </span>
-                      </button>
+                      </motion.button>
                     );
-                  })}
-                  {graphCallouts.map((callout, index) => {
+                    })}
+                  </AnimatePresence>
+                  <AnimatePresence initial={false}>
+                    {graphCallouts.map((callout, index) => {
                     const position = positionForCallout(callout, index);
                     const selected = callout.sessionIds.includes(selectedSessionId ?? "");
                     return (
-                      <button
+                      <motion.button
                         key={`callout-${callout.sourceIp}`}
+                        ref={(element) => {
+                          if (element) calloutElementRefs.current.set(callout.sourceIp, element);
+                          else calloutElementRefs.current.delete(callout.sourceIp);
+                        }}
+                        initial={reducedMotion ? false : { opacity: 0, scale: 0.96 }}
+                        animate={{ left: `${position.x}%`, top: `${position.y}%`, opacity: 1, scale: 1 }}
+                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.96 }}
+                        transition={
+                          reducedMotion || draggedCalloutIp === callout.sourceIp
+                            ? { duration: 0 }
+                            : { left: { duration: 0.18, ease: "easeOut" }, top: { duration: 0.18, ease: "easeOut" }, opacity: { duration: 0.14 }, scale: { duration: 0.14 } }
+                        }
                         type="button"
                         aria-pressed={selected}
                         aria-label={`Inspect source ${callout.sourceIp}; ${callout.sessionIds.length} ${
@@ -772,7 +992,6 @@ export function TopologyCanvas({
                           }
                           onSelectSession(callout.sessionIds[0]);
                         }}
-                        style={{ left: `${position.x}%`, top: `${position.y}%` }}
                         className={`absolute z-40 flex w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-2 rounded-lg border px-2.5 py-2 text-left shadow-sm transition-colors duration-150 ${
                           selected
                             ? "border-primary-border bg-primary-subtle"
@@ -793,9 +1012,10 @@ export function TopologyCanvas({
                             </span>
                           </span>
                         </span>
-                      </button>
+                      </motion.button>
                     );
-                  })}
+                    })}
+                  </AnimatePresence>
                 </motion.div>
 
                 <TopologyMinimap
@@ -865,15 +1085,22 @@ export function TopologyCanvas({
                 </div>
                 <p className="mt-3 text-xs text-text-subtle">
                   Choose an IP to fan its leader line out to every current verified path. Drag directories and IP labels
-                  on the map to arrange them. Press Escape to exit this workspace.
+                  on the map to arrange them. Auto arrange rebuilds the subtree layout, returns sources to their rails,
+                  and recenters the camera; undo restores this workspace. Press Escape to exit this workspace.
                 </p>
-                <button type="button" className="ui-button mt-4 w-full" onClick={resetNodeLayout}>
-                  <MousePointer2 className="h-4 w-4" />
-                  Auto arrange directories
+                <button type="button" className="ui-button mt-4 w-full" onClick={autoArrangeTopology}>
+                  <ScanLine className="h-4 w-4" />
+                  Auto arrange topology
                 </button>
-                <button type="button" className="ui-button mt-2 w-full" onClick={resetLabelLayout}>
-                  <MousePointer2 className="h-4 w-4" />
-                  Auto arrange IP labels
+                {canUndoAutoArrange && (
+                  <button type="button" className="ui-button mt-2 w-full" onClick={undoAutoArrangeTopology}>
+                    <Undo2 className="h-4 w-4" />
+                    Undo auto arrange
+                  </button>
+                )}
+                <button type="button" className="ui-button mt-2 w-full" onClick={resetMapWorkspace}>
+                  <RotateCcw className="h-4 w-4" />
+                  Restore default workspace
                 </button>
                 <div className="mt-5 space-y-2">
                   {graphCallouts.map((callout) => {

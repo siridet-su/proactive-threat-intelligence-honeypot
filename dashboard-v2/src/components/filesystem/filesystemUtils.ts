@@ -104,6 +104,8 @@ export function actionLabel(event: SessionCwdHistoryEvent): string {
 }
 
 export type GraphNode = FilesystemTopologyNode & { x: number; y: number };
+export type GraphElementSize = { width: number; height: number };
+export type GraphElementBounds = GraphElementSize & { x: number; y: number };
 export type GraphCallout = {
   sourceIp: string;
   sessionIds: string[];
@@ -131,23 +133,69 @@ export function pointForGraph(nodes: FilesystemTopologyNode[], sessions: Filesys
   }
 
   const selected = nodes.filter((node) => included.has(node.path));
-  const maxDepth = Math.max(1, ...selected.map((node) => node.depth));
-  const levels = new Map<number, FilesystemTopologyNode[]>();
+  const selectedByPath = new Map(selected.map((node) => [node.path, node]));
+  const childrenByPath = new Map<string, FilesystemTopologyNode[]>();
   for (const node of selected) {
-    const group = levels.get(node.depth) ?? [];
-    group.push(node);
-    levels.set(node.depth, group);
+    if (!node.parentPath || !selectedByPath.has(node.parentPath)) continue;
+    const children = childrenByPath.get(node.parentPath) ?? [];
+    children.push(node);
+    childrenByPath.set(node.parentPath, children);
   }
+  for (const children of childrenByPath.values()) {
+    children.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  // Tidy tree assignment:
+  // Each leaf receives an ordered horizontal index.
+  // Each parent is centered over the midpoint of its first and last children.
+  const horizontalByPath = new Map<string, number>();
+  let leafIndex = 0;
+  const assignHorizontalPosition = (path: string): number => {
+    const children = childrenByPath.get(path) ?? [];
+    if (!children.length) {
+      const position = leafIndex;
+      leafIndex += 1;
+      horizontalByPath.set(path, position);
+      return position;
+    }
+    const childPositions = children.map((child) => assignHorizontalPosition(child.path));
+    const position = (childPositions[0] + childPositions[childPositions.length - 1]) / 2;
+    horizontalByPath.set(path, position);
+    return position;
+  };
+
+  if (selectedByPath.has("/")) assignHorizontalPosition("/");
+  for (const node of [...selected].sort((left, right) => left.path.localeCompare(right.path))) {
+    if (!horizontalByPath.has(node.path)) assignHorizontalPosition(node.path);
+  }
+
+  const maxDepth = Math.max(1, ...selected.map((node) => node.depth));
+  const leafCount = Math.max(1, leafIndex);
+
+  // Dynamic tree width:
+  // Keep tree envelope bounded between 27% and 73% so dedicated rail margin lanes have at least 18-25% clearance.
+  const minSlotGap = 10;
+  const maxSlotGap = 16;
+  const naturalWidth = (leafCount - 1) * maxSlotGap;
+  const totalTreeWidth = leafCount === 1 ? 0 : Math.min(46, Math.max((leafCount - 1) * minSlotGap, naturalWidth));
+  const treeLeft = 50 - totalTreeWidth / 2;
+
+  // Consistent vertical step per depth level so nodes are never too far from parent
+  const idealDepthStep = 14;
+  const maxVerticalSpan = 72;
+  const verticalSpan = Math.min(maxVerticalSpan, Math.max(idealDepthStep, maxDepth * idealDepthStep));
+  const depthStep = verticalSpan / maxDepth;
+  const startY = 10;
+
   return selected.map((node) => {
-    const level = [...(levels.get(node.depth) ?? [])].sort((left, right) => left.path.localeCompare(right.path));
-    const index = level.findIndex((item) => item.path === node.path);
-    const x = level.length === 1 ? 50 : 9 + (82 * index) / (level.length - 1);
-    const y = 13 + (72 * node.depth) / maxDepth;
+    const leafPosition = horizontalByPath.get(node.path) ?? 0;
+    const x = leafCount === 1 ? 50 : treeLeft + (totalTreeWidth * leafPosition) / (leafCount - 1);
+    const y = startY + node.depth * depthStep;
     return { ...node, x, y };
   });
 }
 
-export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNodeByPath: Map<string, GraphNode>, selectedSessionId: string | null): GraphCallout[] {
+export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNodeByPath: Map<string, GraphNode>): GraphCallout[] {
   const groups = new Map<string, FilesystemTopologySession[]>();
   for (const session of sessions) {
     if (!session.cwdState.path || !graphNodeByPath.has(session.cwdState.path)) continue;
@@ -160,38 +208,104 @@ export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNod
       const ordered = [...group].sort((left, right) => Date.parse(right.cwdState.observedAt ?? "") - Date.parse(left.cwdState.observedAt ?? ""));
       return { sourceIp, sessionIds: ordered.map((session) => session.sessionId), path: ordered[0].cwdState.path! };
     })
-    .sort((left, right) => {
-      const leftSelected = left.sessionIds.includes(selectedSessionId ?? "");
-      const rightSelected = right.sessionIds.includes(selectedSessionId ?? "");
-      if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
-      const leftObservedAt = sessions.find((session) => session.sessionId === left.sessionIds[0])?.cwdState.observedAt ?? "";
-      const rightObservedAt = sessions.find((session) => session.sessionId === right.sessionIds[0])?.cwdState.observedAt ?? "";
-      return Date.parse(rightObservedAt) - Date.parse(leftObservedAt);
-    })
+    .sort((left, right) => left.sourceIp.localeCompare(right.sourceIp, undefined, { numeric: true }))
     .slice(0, GRAPH_CALLOUT_LIMIT);
 }
 
-export function calloutSlot(index: number, count: number): { left: boolean; x: number; y: number } {
-  const left = index % 2 === 0;
-  const slotsPerSide = Math.max(1, Math.ceil(count / 2));
-  const slot = Math.floor(index / 2);
-  return {
-    left,
-    x: left ? 10 : 90,
-    y: slotsPerSide === 1 ? 50 : 16 + (68 * slot) / (slotsPerSide - 1),
+export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: Map<string, GraphNode>): Map<string, LabelPosition> {
+  const leftRail: GraphCallout[] = [];
+  const rightRail: GraphCallout[] = [];
+
+  for (const [index, callout] of callouts.entries()) {
+    const target = graphNodeByPath.get(callout.path);
+    // A source whose target is centered alternates rails.
+    const useLeftRail = !target || Math.abs(target.x - 50) < 0.1 ? index % 2 === 0 : target.x < 50;
+    (useLeftRail ? leftRail : rightRail).push(callout);
+  }
+
+  // Dedicated outer margin lanes: 9% on the left, 91% on the right.
+  // With the tree envelope constrained within 27%-73%, this guarantees >= 18% horizontal clearance on all screens.
+  const leftRailX = 9;
+  const rightRailX = 91;
+
+  const positions = new Map<string, LabelPosition>();
+
+  const placeOnRail = (rail: GraphCallout[], x: number) => {
+    if (!rail.length) return;
+
+    rail.sort((left, right) => {
+      const leftY = graphNodeByPath.get(left.path)?.y ?? 50;
+      const rightY = graphNodeByPath.get(right.path)?.y ?? 50;
+      return leftY - rightY || left.sourceIp.localeCompare(right.sourceIp, undefined, { numeric: true });
+    });
+
+    if (rail.length === 1) {
+      const targetY = graphNodeByPath.get(rail[0].path)?.y ?? 50;
+      positions.set(rail[0].sourceIp, { x, y: Math.min(80, Math.max(18, targetY)) });
+      return;
+    }
+
+    // Multiple callouts: enforce minimum vertical separation of at least 13%
+    const minGap = 13;
+    const count = rail.length;
+    const targetYs = rail.map((c) => Math.min(82, Math.max(18, graphNodeByPath.get(c.path)?.y ?? 50)));
+
+    const ys = [...targetYs];
+    for (let i = 1; i < count; i++) {
+      if (ys[i] < ys[i - 1] + minGap) {
+        ys[i] = ys[i - 1] + minGap;
+      }
+    }
+
+    if (ys[count - 1] > 84) {
+      ys[count - 1] = 84;
+      for (let i = count - 2; i >= 0; i--) {
+        if (ys[i] > ys[i + 1] - minGap) {
+          ys[i] = ys[i + 1] - minGap;
+        }
+      }
+    }
+
+    rail.forEach((callout, index) => {
+      positions.set(callout.sourceIp, { x, y: Math.max(16, ys[index]) });
+    });
   };
+
+  placeOnRail(leftRail, leftRailX);
+  placeOnRail(rightRail, rightRailX);
+  return positions;
 }
 
-export function leaderEndpoints(node: GraphNode, label: LabelPosition): { startX: number; startY: number; endX: number; endY: number } {
-  const deltaX = label.x - node.x;
-  const deltaY = label.y - node.y;
-  if (deltaX === 0 && deltaY === 0) return { startX: node.x, startY: node.y, endX: label.x, endY: label.y };
-  const nodeScale = 1 / Math.max(Math.abs(deltaX) / 8, Math.abs(deltaY) / 3.5);
-  const labelScale = 1 / Math.max(Math.abs(deltaX) / 9, Math.abs(deltaY) / 4);
+export function leaderEndpoints(
+  node: GraphNode,
+  label: LabelPosition,
+  nodeBounds?: GraphElementBounds,
+  sourceBounds?: GraphElementBounds,
+): { startX: number; startY: number; endX: number; endY: number } {
+  // Always anchor to the exact mathematical center of node and label
+  const nodeCenterX = node.x;
+  const nodeCenterY = node.y;
+  const sourceCenterX = label.x;
+  const sourceCenterY = label.y;
+  const deltaX = sourceCenterX - nodeCenterX;
+  const deltaY = sourceCenterY - nodeCenterY;
+  if (deltaX === 0 && deltaY === 0) {
+    return { startX: nodeCenterX, startY: nodeCenterY, endX: sourceCenterX, endY: sourceCenterY };
+  }
+
+  // Directory labels are content-sized, while source labels have a fixed 11rem width.
+  const segLen = directorySegment(node.path).length;
+  const nodeHalfWidth = nodeBounds?.width ? nodeBounds.width / 2 : Math.min(6.2, Math.max(2.8, 2.2 + segLen * 0.32));
+  const nodeHalfHeight = nodeBounds?.height ? nodeBounds.height / 2 : 2.5;
+  const sourceHalfWidth = sourceBounds?.width ? sourceBounds.width / 2 : 6.0;
+  const sourceHalfHeight = sourceBounds?.height ? sourceBounds.height / 2 : 2.8;
+
+  const nodeScale = 1 / Math.max(Math.abs(deltaX) / nodeHalfWidth, Math.abs(deltaY) / nodeHalfHeight);
+  const labelScale = 1 / Math.max(Math.abs(deltaX) / sourceHalfWidth, Math.abs(deltaY) / sourceHalfHeight);
   return {
-    startX: node.x + deltaX * nodeScale,
-    startY: node.y + deltaY * nodeScale,
-    endX: label.x - deltaX * labelScale,
-    endY: label.y - deltaY * labelScale,
+    startX: nodeCenterX + deltaX * Math.min(1, nodeScale),
+    startY: nodeCenterY + deltaY * Math.min(1, nodeScale),
+    endX: sourceCenterX - deltaX * Math.min(1, labelScale),
+    endY: sourceCenterY - deltaY * Math.min(1, labelScale),
   };
 }

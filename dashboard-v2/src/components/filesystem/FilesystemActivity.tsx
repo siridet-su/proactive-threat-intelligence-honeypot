@@ -10,11 +10,9 @@ import type {
   SessionCwdHistoryEvent,
 } from "@/lib/dashboardTypes";
 import { CwdRouteHistory } from "./CwdRouteHistory";
+import { FilesystemInspector } from "./FilesystemInspector";
 import { isHistoryPage, isSnapshot, type StreamState } from "./filesystemUtils";
-import { LiveSources } from "./LiveSources";
-import { PathInspector } from "./PathInspector";
-import { RecentClosedSessions } from "./RecentClosedSessions";
-import { SessionContextCard } from "./SessionContextCard";
+import { SessionSourceList } from "./SessionSourceList";
 import { TopologyCanvas } from "./TopologyCanvas";
 
 export function FilesystemActivity() {
@@ -31,31 +29,45 @@ export function FilesystemActivity() {
 
   const historyRequest = useRef<{ generation: number; sessionId: string; controller: AbortController } | null>(null);
   const latestSnapshotAt = useRef(0);
-  const initializedSelection = useRef(false);
+  const selectedSessionIdRef = useRef<string | null>(null);
+  const selectedLiveCwdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
 
   const applySnapshot = useCallback((data: FilesystemTopologySnapshot) => {
     const timestamp = Date.parse(data.generatedAt);
     if (Number.isFinite(timestamp) && timestamp < latestSnapshotAt.current) return;
     if (Number.isFinite(timestamp)) latestSnapshotAt.current = timestamp;
-    const selectingInitialSession = !initializedSelection.current && Boolean(data.sessions[0]);
-    const initialSessionPath = data.sessions[0]?.cwdState.path ?? null;
-    if (selectingInitialSession) initializedSelection.current = true;
+
     setSnapshot(data);
     setRegionStatus("ready");
-    setSelectedSessionId((current) => {
-      if (current) {
-        return [...data.sessions, ...data.recentClosedSessions].some((session) => session.sessionId === current)
-          ? current
-          : null;
-      }
-      if (selectingInitialSession) return data.sessions[0].sessionId;
-      return null;
-    });
+
+    const knownSessions = [...data.sessions, ...data.recentClosedSessions];
+    const currentSessionId = selectedSessionIdRef.current;
+    const nextSessionId = knownSessions.some((session) => session.sessionId === currentSessionId)
+      ? currentSessionId
+      : data.sessions[0]?.sessionId ?? data.recentClosedSessions[0]?.sessionId ?? null;
+    const selectedLiveSession = data.sessions.find((session) => session.sessionId === nextSessionId) ?? null;
+
+    selectedSessionIdRef.current = nextSessionId;
+    setSelectedSessionId(nextSessionId);
+
+    const liveCwdChanged =
+      Boolean(selectedLiveSession?.cwdState.path) &&
+      selectedLiveSession?.cwdState.path !== selectedLiveCwdRef.current;
+    selectedLiveCwdRef.current = selectedLiveSession?.cwdState.path ?? null;
+
     setSelectedPath((current) => {
-      if (current) return data.nodes.some((node) => node.path === current) ? current : null;
-      return selectingInitialSession && initialSessionPath && data.nodes.some((node) => node.path === initialSessionPath)
-        ? initialSessionPath
-        : null;
+      // If the active session actually changed its working directory, follow the new CWD.
+      if (liveCwdChanged && selectedLiveSession?.cwdState.path && data.nodes.some((node) => node.path === selectedLiveSession.cwdState.path)) {
+        return selectedLiveSession.cwdState.path;
+      }
+      // Otherwise, preserve the user's manual inspection target if it still exists in the graph.
+      const valid = current && data.nodes.some((node) => node.path === current);
+      if (valid) return current;
+      return selectedLiveSession?.cwdState.path ?? data.sessions[0]?.cwdState.path ?? data.nodes[0]?.path ?? null;
     });
   }, []);
 
@@ -203,8 +215,10 @@ export function FilesystemActivity() {
     setHistory([]);
     setHistoryCursor(null);
     setSelectedHistoryEventId(null);
+    selectedSessionIdRef.current = sessionId;
     setSelectedSessionId(sessionId);
     if (session?.cwdState.path) {
+      selectedLiveCwdRef.current = session.cwdState.path;
       setSelectedPath(snapshot?.nodes.some((n) => n.path === session.cwdState.path) ? session.cwdState.path : null);
     }
   };
@@ -229,22 +243,22 @@ export function FilesystemActivity() {
     setHistory([]);
     setHistoryCursor(null);
     setSelectedHistoryEventId(null);
+    selectedSessionIdRef.current = null;
     setSelectedSessionId(null);
+    selectedLiveCwdRef.current = null;
     setSelectedPath(path);
   };
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-col gap-4 border-b border-border pb-6 md:flex-row md:items-end md:justify-between">
+      <section className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary">Runtime filesystem</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-text">Filesystem activity</h1>
-          <p className="mt-2 max-w-2xl text-sm text-text-muted">
-            Inspect the observed Cowrie working-directory topology, then audit a selected session&apos;s recorded path
-            changes.
+          <h1 className="text-xl font-semibold tracking-tight text-text">Filesystem activity</h1>
+          <p className="mt-0.5 max-w-2xl text-xs text-text-muted">
+            Inspect observed Cowrie working-directory topology and audit recorded path changes.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span
             className={`ui-badge ${
               streamState === "live"
@@ -269,54 +283,50 @@ export function FilesystemActivity() {
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <TopologyCanvas
-          snapshot={snapshot}
-          regionStatus={regionStatus}
-          streamState={streamState}
-          selectedSessionId={selectedSessionId}
-          selectedPath={selectedPath}
-          onSelectSession={selectSession}
-          onSelectPath={selectPath}
-        />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
+        <div className="min-w-0 space-y-6">
+          <TopologyCanvas
+            snapshot={snapshot}
+            regionStatus={regionStatus}
+            streamState={streamState}
+            selectedSessionId={selectedSessionId}
+            selectedPath={selectedPath}
+            onSelectSession={selectSession}
+            onSelectPath={selectPath}
+          />
 
-        <aside className="space-y-4" aria-live="polite">
-          <PathInspector
-            key={selectedNode?.path ?? "no-selected-path"}
+          <CwdRouteHistory
+            selectedSession={selectedSession}
+            history={history}
+            historyStatus={historyStatus}
+            historyCursor={historyCursor}
+            selectedHistoryEventId={selectedHistoryEventId}
+            onSelectHistoryEventId={setSelectedHistoryEventId}
+            onLoadEarlier={() => {
+              if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
+            }}
+          />
+        </div>
+
+        <aside className="min-w-0 space-y-4" aria-live="polite">
+          <FilesystemInspector
+            selectedSession={selectedSession}
+            selectedClosedSession={selectedClosedSession}
             selectedNode={selectedNode}
             sessions={snapshot?.sessions ?? []}
             liveSessionCount={selectedNodeLiveSessionCount}
-          />
-          <LiveSources
-            sessions={snapshot?.sessions ?? []}
             selectedSessionId={selectedSessionId}
             onSelectSession={selectSession}
+            onSelectPath={selectPath}
           />
-          <RecentClosedSessions
+          <SessionSourceList
+            sessions={snapshot?.sessions ?? []}
             recentClosedSessions={snapshot?.recentClosedSessions ?? []}
             selectedSessionId={selectedSessionId}
             onSelectSession={selectSession}
           />
         </aside>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <CwdRouteHistory
-          selectedSession={selectedSession}
-          history={history}
-          historyStatus={historyStatus}
-          historyCursor={historyCursor}
-          selectedHistoryEventId={selectedHistoryEventId}
-          onSelectHistoryEventId={setSelectedHistoryEventId}
-          onLoadEarlier={() => {
-            if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
-          }}
-        />
-        <SessionContextCard
-          selectedSession={selectedSession}
-          selectedClosedSession={selectedClosedSession}
-        />
-      </section>
+      </div>
     </div>
   );
 }

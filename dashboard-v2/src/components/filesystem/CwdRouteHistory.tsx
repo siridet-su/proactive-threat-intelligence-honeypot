@@ -89,10 +89,10 @@ export function CwdRouteHistory({
                 </button>
                 <div className="min-w-0 rounded-lg border border-primary-border bg-primary-subtle px-3 py-2.5 text-center sm:px-5">
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-                    Checkpoint {selectedHistoryIndex + 1} of {chronologicalHistory.length}
+                    Hop {selectedHistoryIndex + 1} of {chronologicalHistory.length}
                   </p>
                   <p className="mt-1 font-medium text-text">
-                    {selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "Loading checkpoint"}
+                    {selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "Loading hop"}
                   </p>
                   <p className="mt-1 truncate font-mono text-xs text-text-muted">
                     {selectedHistoryEvent?.fromPath ?? "Unknown"}
