@@ -188,19 +188,26 @@ export function pointForGraph(nodes: FilesystemTopologyNode[], sessions: Filesys
   const leafCount = Math.max(1, leafIndex);
 
   // Dynamic tree width:
-  // Keep tree envelope bounded between 27% and 73% so dedicated rail margin lanes have at least 18-25% clearance.
-  const minSlotGap = 10;
-  const maxSlotGap = 16;
-  const naturalWidth = (leafCount - 1) * maxSlotGap;
-  const totalTreeWidth = leafCount === 1 ? 0 : Math.min(46, Math.max((leafCount - 1) * minSlotGap, naturalWidth));
+  // Allocate generous horizontal separation between branches so nodes never crowd or overlap.
+  // For small leaf counts (2-4 leaves), guarantee wide badges and labels have ample clearance (28% gap for 2 leaves).
+  // Tree envelope stays bounded between 26% and 74% to preserve clear margins for outer IP rails.
+  let totalTreeWidth = 0;
+  if (leafCount === 2) {
+    totalTreeWidth = 28;
+  } else if (leafCount === 3) {
+    totalTreeWidth = 40;
+  } else if (leafCount === 4) {
+    totalTreeWidth = 46;
+  } else if (leafCount > 4) {
+    totalTreeWidth = Math.min(48, Math.max(46, (leafCount - 1) * 11));
+  }
   const treeLeft = 50 - totalTreeWidth / 2;
 
-  // Consistent vertical step per depth level so nodes are never too far from parent
-  const idealDepthStep = 14;
-  const maxVerticalSpan = 72;
-  const verticalSpan = Math.min(maxVerticalSpan, Math.max(idealDepthStep, maxDepth * idealDepthStep));
-  const depthStep = verticalSpan / maxDepth;
-  const startY = 10;
+  // Consistent vertical step per depth level so nodes are never too close to parents
+  // Shallow trees (depth 1-2) use a generous step (20%) so nodes and active rings have ample breathing room.
+  // Deeper trees scale down gracefully (down to 12%) so all nodes remain comfortably within viewport.
+  const depthStep = Math.min(20, Math.max(12, 54 / maxDepth));
+  const startY = 12;
 
   return selected.map((node) => {
     const leafPosition = horizontalByPath.get(node.path) ?? 0;

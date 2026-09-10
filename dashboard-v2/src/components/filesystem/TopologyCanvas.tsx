@@ -403,13 +403,37 @@ export function TopologyCanvas({
     centerMapOn(positionForCallout(selectedGraphCallout, index));
   };
 
-  // Smoothly center the camera on the target node when analyst steps through active hops in route player
+  // Keep camera steady; only bring target node into view when hop changes AND it is outside the viewport
+  const lastCenteredHopEventId = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeHop?.toPath) return;
+    if (!activeHop?.eventId || !activeHop?.toPath) return;
+    if (activeHop.eventId === lastCenteredHopEventId.current) return;
+    lastCenteredHopEventId.current = activeHop.eventId;
+
+    // Never auto-center while user is actively dragging or interacting with the canvas
+    if (nodeDrag.current || labelDrag.current || isDraggingSurface) return;
+
     const targetNode = graphNodeByPath.get(activeHop.toPath);
     if (!targetNode) return;
-    centerMapOn(targetNode);
-  }, [activeHop?.eventId, activeHop?.toPath, graphNodeByPath, centerMapOn]);
+
+    const surface = mapSurfaceRef.current;
+    const plane = graphPlaneRef.current;
+    if (!surface || !plane) return;
+
+    const screenX = (plane.offsetWidth * targetNode.x / 100) * zoomRef.current + panRef.current.x;
+    const screenY = (plane.offsetHeight * targetNode.y / 100) * zoomRef.current + panRef.current.y;
+
+    const margin = 60;
+    const isVisible =
+      screenX >= margin &&
+      screenX <= surface.clientWidth - margin &&
+      screenY >= margin &&
+      screenY <= surface.clientHeight - margin;
+
+    if (!isVisible) {
+      centerMapOn(targetNode);
+    }
+  }, [activeHop?.eventId, activeHop?.toPath, centerMapOn, graphNodeByPath, isDraggingSurface]);
 
   // Label dragging handlers
   const onCalloutPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, sourceIp: string, origin: LabelPosition) => {
@@ -844,7 +868,10 @@ export function TopologyCanvas({
                       {graphNodes.map((node) => {
                         const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
                         if (!parent) return null;
-                        const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${(parent.y + node.y) / 2}, ${node.x} ${(parent.y + node.y) / 2}, ${node.x} ${node.y}`;
+                        const cpOffset = Math.min(25, Math.max(8, Math.abs(node.y - parent.y) * 0.5));
+                        const cp1Y = parent.y <= node.y ? parent.y + cpOffset : parent.y - cpOffset;
+                        const cp2Y = parent.y <= node.y ? node.y - cpOffset : node.y + cpOffset;
+                        const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${cp1Y}, ${node.x} ${cp2Y}, ${node.x} ${node.y}`;
 
                         const isActiveHopEdge = Boolean(
                           activeHop && (
@@ -870,7 +897,11 @@ export function TopologyCanvas({
                             <motion.path
                               initial={false}
                               animate={{ d: filesystemRoute }}
-                              transition={reducedMotion ? { duration: 0 } : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                              transition={
+                                reducedMotion || Boolean(draggedNodePath)
+                                  ? { duration: 0 }
+                                  : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                              }
                               fill="none"
                               stroke={
                                 isActiveHopEdge
@@ -905,6 +936,11 @@ export function TopologyCanvas({
                               <motion.path
                                 initial={false}
                                 animate={{ d: filesystemRoute }}
+                                transition={
+                                  reducedMotion || Boolean(draggedNodePath)
+                                    ? { duration: 0 }
+                                    : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                                }
                                 fill="none"
                                 stroke="var(--primary)"
                                 strokeWidth="1.2"
@@ -950,7 +986,11 @@ export function TopologyCanvas({
                                   <motion.path
                                     initial={false}
                                     animate={{ d: routePath }}
-                                    transition={reducedMotion ? { duration: 0 } : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                                    transition={
+                                      reducedMotion || Boolean(draggedNodePath || draggedCalloutIp)
+                                        ? { duration: 0 }
+                                        : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                                    }
                                     fill="none"
                                     stroke={focused ? "var(--primary)" : "var(--border-strong)"}
                                     strokeOpacity={focused ? 1 : 0.52}
@@ -960,7 +1000,11 @@ export function TopologyCanvas({
                                   <motion.circle
                                     initial={false}
                                     animate={{ cx: endpoint.startX, cy: endpoint.startY }}
-                                    transition={reducedMotion ? { duration: 0 } : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                                    transition={
+                                      reducedMotion || Boolean(draggedNodePath || draggedCalloutIp)
+                                        ? { duration: 0 }
+                                        : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+                                    }
                                     r={focused ? "1.05" : "0.5"}
                                     fill={focused ? "var(--surface)" : "var(--border-strong)"}
                                     fillOpacity={focused ? 1 : 0.68}
