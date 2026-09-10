@@ -22,6 +22,10 @@ async function readRecentMongoMetrics(
   return documents.filter(isHardwareTelemetry).reverse();
 }
 
+const DATABASE_NAME = 'honeypot_db';
+const HARDWARE_LIVE_COLLECTION = 'hardware_live';
+const HARDWARE_SAMPLE_LIMIT = 30;
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session || session.mustChangePassword) {
@@ -29,21 +33,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const liveMetrics = await getRecentHardwareMetrics(30);
-    if (liveMetrics.length > 0) {
-      return NextResponse.json(liveMetrics);
-    }
-  } catch (error) {
-    console.warn("Hardware live snapshot unavailable; using MongoDB rollup:", error);
-  }
-
-  try {
     const client = await getMongoClient();
-    const db = client.db("honeypot_db");
-    const rollups = await readRecentMongoMetrics(db, "hardware_metrics_1m");
-    if (rollups.length > 0) {
-      return NextResponse.json(rollups);
-    }
+    const db = client.db(DATABASE_NAME);
+
+    // hardware_live is the agent-maintained rolling window for the live monitor.
+    const rawMetrics = await db
+      .collection(HARDWARE_LIVE_COLLECTION)
+      .find({})
+      .sort({ timestamp: -1 })
+      .limit(HARDWARE_SAMPLE_LIMIT)
+      .toArray();
 
     // Transitional fallback while the first minute rollup is being created.
     const legacyMetrics = await readRecentMongoMetrics(db, "hardware_metrics");

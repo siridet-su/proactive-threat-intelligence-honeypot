@@ -16,14 +16,28 @@ function ssePayload(value: unknown): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
 }
 
+const DATABASE_NAME = 'honeypot_db';
+const HARDWARE_LIVE_COLLECTION = 'hardware_live';
+const HARDWARE_SAMPLE_LIMIT = 30;
+
 export async function GET(req: Request) {
   const session = await getSessionFromRequest(req);
   if (!session || session.mustChangePassword) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
   try {
-    const initialMetrics = await getRecentHardwareMetrics(30);
+    const client = await getMongoClient();
+    const db = client.db(DATABASE_NAME);
+    const collection = db.collection(HARDWARE_LIVE_COLLECTION);
+
+    const stream = new ReadableStream<string>({
+      async start(controller) {
+        // 1. Send the rolling live window so the chart isn't empty.
+        const initialData = (await collection
+          .find({})
+          .sort({ timestamp: -1 })
+          .limit(HARDWARE_SAMPLE_LIMIT)
+          .toArray()).filter(isHardwareTelemetry);
 
     let cancelStream: (() => void) | undefined;
     let unsubscribe: (() => void) | undefined;
@@ -32,27 +46,18 @@ export async function GET(req: Request) {
         let closed = false;
         const timers: Record<string, ReturnType<typeof setInterval>> = {};
 
-        const enqueue = (value: unknown) => {
-          if (closed) return;
-          try {
-            controller.enqueue(ssePayload(value));
-          } catch {
-            closed = true;
-          }
-        };
+        // 2. The live buffer updates fixed slots, so inserts alone would miss most samples.
+        const changeStream = collection.watch(
+          [{ $match: { operationType: { $in: ['insert', 'replace', 'update'] } } }],
+          { fullDocument: 'updateLookup' },
+        );
 
-        const shutdown = (closeController: boolean) => {
-          if (closed) return;
-          closed = true;
-          if (timers.sessionCheck) clearInterval(timers.sessionCheck);
-          if (timers.heartbeat) clearInterval(timers.heartbeat);
-          unsubscribe?.();
-          if (closeController) {
-            try {
-              controller.close();
-            } catch {
-              // The browser may already have canceled the stream.
-            }
+        changeStream.on('change', (change: ChangeStreamDocument<Document>) => {
+          if (
+            (change.operationType === 'insert' || change.operationType === 'replace' || change.operationType === 'update')
+            && isHardwareTelemetry(change.fullDocument)
+          ) {
+            controller.enqueue(`data: ${JSON.stringify({ type: 'update', data: change.fullDocument })}\n\n`);
           }
         };
         cancelStream = () => shutdown(false);

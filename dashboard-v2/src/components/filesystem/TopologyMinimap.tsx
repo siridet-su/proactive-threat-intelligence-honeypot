@@ -23,6 +23,31 @@ export function TopologyMinimap({
   positionForCallout,
   onFit,
 }: TopologyMinimapProps) {
+  const calloutPositions = graphCallouts.map((callout, index) => ({
+    callout,
+    position: positionForCallout(callout, index),
+  }));
+  const horizontalCoordinates = [
+    0,
+    100,
+    ...graphNodes.map((node) => node.x),
+    ...calloutPositions.map(({ position }) => position.x),
+    ...(minimapViewport ? [minimapViewport.x, minimapViewport.x + minimapViewport.width] : []),
+  ];
+  const verticalCoordinates = [
+    0,
+    100,
+    ...graphNodes.map((node) => node.y),
+    ...calloutPositions.map(({ position }) => position.y),
+    ...(minimapViewport ? [minimapViewport.y, minimapViewport.y + minimapViewport.height] : []),
+  ];
+  const minX = Math.min(...horizontalCoordinates);
+  const maxX = Math.max(...horizontalCoordinates);
+  const minY = Math.min(...verticalCoordinates);
+  const maxY = Math.max(...verticalCoordinates);
+  const normalizeX = (value: number) => ((value - minX) / Math.max(1, maxX - minX)) * 100;
+  const normalizeY = (value: number) => ((value - minY) / Math.max(1, maxY - minY)) * 100;
+
   return (
     <button
       type="button"
@@ -38,7 +63,7 @@ export function TopologyMinimap({
           return parent ? (
             <path
               key={`minimap-${parent.path}-${node.path}`}
-              d={`M ${parent.x} ${parent.y} C ${parent.x} ${(parent.y + node.y) / 2}, ${node.x} ${(parent.y + node.y) / 2}, ${node.x} ${node.y}`}
+              d={`M ${normalizeX(parent.x)} ${normalizeY(parent.y)} C ${normalizeX(parent.x)} ${normalizeY((parent.y + node.y) / 2)}, ${normalizeX(node.x)} ${normalizeY((parent.y + node.y) / 2)}, ${normalizeX(node.x)} ${normalizeY(node.y)}`}
               fill="none"
               stroke="var(--border-strong)"
               strokeWidth="0.8"
@@ -48,20 +73,19 @@ export function TopologyMinimap({
         {graphNodes.map((node) => (
           <circle
             key={`minimap-node-${node.path}`}
-            cx={node.x}
-            cy={node.y}
+            cx={normalizeX(node.x)}
+            cy={normalizeY(node.y)}
             r="1.6"
             fill={node.path === selectedPath ? "var(--primary)" : "var(--text-subtle)"}
           />
         ))}
-        {graphCallouts.map((callout, index) => {
-          const position = positionForCallout(callout, index);
+        {calloutPositions.map(({ callout, position }) => {
           const selected = callout.sessionIds.includes(selectedSessionId ?? "");
           return (
             <circle
               key={`minimap-callout-${callout.sourceIp}`}
-              cx={Math.min(98, Math.max(2, position.x))}
-              cy={Math.min(98, Math.max(2, position.y))}
+              cx={normalizeX(position.x)}
+              cy={normalizeY(position.y)}
               r="2"
               fill={selected ? "var(--primary)" : "var(--success)"}
             />
@@ -69,10 +93,10 @@ export function TopologyMinimap({
         })}
         {minimapViewport && (
           <rect
-            x={minimapViewport.x}
-            y={minimapViewport.y}
-            width={minimapViewport.width}
-            height={minimapViewport.height}
+            x={normalizeX(minimapViewport.x)}
+            y={normalizeY(minimapViewport.y)}
+            width={Math.max(2, normalizeX(minimapViewport.x + minimapViewport.width) - normalizeX(minimapViewport.x))}
+            height={Math.max(2, normalizeY(minimapViewport.y + minimapViewport.height) - normalizeY(minimapViewport.y))}
             rx="1.5"
             fill="none"
             stroke="var(--primary)"
