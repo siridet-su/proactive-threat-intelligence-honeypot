@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getMongoClient } from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 import { createSession, sessionCookie } from "@/lib/auth/session";
+import { emailLookup, normalizeEmail } from "@/lib/auth/operator-identity";
 
 export async function POST(request: Request) {
   try {
@@ -9,24 +10,34 @@ export async function POST(request: Request) {
     if (!body || typeof body !== "object") {
       return NextResponse.json({ success: false, error: "Invalid credentials." }, { status: 400 });
     }
-    const { operatorId, password } = body as { operatorId?: unknown; password?: unknown };
-    if (typeof operatorId !== "string" || typeof password !== "string" || !operatorId.trim() || !password) {
+    const { identifier, operatorId, password } = body as {
+      identifier?: unknown;
+      operatorId?: unknown;
+      password?: unknown;
+    };
+    const suppliedIdentifier = typeof identifier === "string" ? identifier : operatorId;
+    if (typeof suppliedIdentifier !== "string" || typeof password !== "string" || !suppliedIdentifier.trim() || !password) {
       return NextResponse.json({ success: false, error: "Invalid credentials." }, { status: 400 });
     }
     const client = await getMongoClient();
     const db = client.db("honeypot_db");
-    const normalizedOperatorId = operatorId.trim();
+    const normalizedIdentifier = suppliedIdentifier.trim();
+    const normalizedEmail = normalizeEmail(normalizedIdentifier);
 
     let authenticatedUser: { operatorId: string; role: "Admin" | "Supporter"; isFirstLogin: boolean } | null = null;
 
-    if (normalizedOperatorId === "admin") {
+    if (normalizedIdentifier.toLowerCase() === "admin") {
       const configuredPassword = process.env.PTI_ADMIN_PASSWORD;
       const developmentPassword = process.env.NODE_ENV !== "production" ? "admin" : undefined;
       if (password === configuredPassword || password === developmentPassword) {
         authenticatedUser = { operatorId: "admin", role: "Admin", isFirstLogin: false };
       }
     } else {
-      const user = await db.collection("users").findOne({ operatorId: normalizedOperatorId });
+      const user = await db.collection("users").findOne(
+        normalizedEmail
+          ? { email: emailLookup(normalizedEmail) }
+          : { operatorId: normalizedIdentifier },
+      );
       if (user && user.status === "Active" && typeof user.password === "string" && await bcrypt.compare(password, user.password)) {
         authenticatedUser = {
           operatorId: user.operatorId,
@@ -37,7 +48,7 @@ export async function POST(request: Request) {
     }
 
     if (!authenticatedUser) {
-      return NextResponse.json({ success: false, error: "Invalid Operator ID" }, { status: 401 });
+      return NextResponse.json({ success: false, error: "Invalid credentials." }, { status: 401 });
     }
 
     const { token, expiresAt } = await createSession({

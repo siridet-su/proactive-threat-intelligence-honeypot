@@ -11,7 +11,7 @@ function getSafeNextDestination() {
 }
 
 export default function LoginForm() {
-  const [operatorId, setOperatorId] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [accessKey, setAccessKey] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,7 +30,7 @@ export default function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operatorId, password: accessKey }),
+        body: JSON.stringify({ identifier, password: accessKey }),
       });
       const data = await res.json();
 
@@ -60,7 +60,7 @@ export default function LoginForm() {
         <form onSubmit={(event) => void handleAuthenticate(event)} className="mt-8 flex w-full flex-col gap-5" aria-busy={isSubmitting}>
           <div>
             <div className="mb-2 flex justify-between">
-              <label htmlFor="operator-id" className="text-xs font-medium text-text-muted">OPERATOR ID</label>
+              <label htmlFor="operator-id" className="text-xs font-medium text-text-muted">OPERATOR ID OR EMAIL</label>
               <span className="text-xs text-text-subtle">REQUIRED</span>
             </div>
             <div className="relative">
@@ -70,11 +70,13 @@ export default function LoginForm() {
                 aria-invalid={Boolean(error)}
                 aria-describedby={error ? "login-error" : undefined}
                 type="text"
-                placeholder="admin"
-                value={operatorId}
-                onChange={(event) => setOperatorId(event.target.value)}
-                name="operatorId"
+                placeholder="admin or operator@example.com"
+                value={identifier}
+                onChange={(event) => setIdentifier(event.target.value)}
+                name="identifier"
                 autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
                 className="ui-field pl-11 font-mono"
                 disabled={isSubmitting}
                 required
