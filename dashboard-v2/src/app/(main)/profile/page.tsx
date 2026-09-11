@@ -198,8 +198,7 @@ export default function ProfilePage() {
     }
   };
 
-  if (loading) return <div className="min-h-[360px] py-16"><RegionState kind="loading" title="Loading profile" description="Retrieving operator account details." /></div>;
-  if (!user) return <div className="min-h-[360px] py-16"><RegionState kind="error" title="Profile unavailable" description="The operator profile could not be loaded." /></div>;
+  if (!loading && !user) return <div className="min-h-[360px] py-16"><RegionState kind="error" title="Profile unavailable" description="The operator profile could not be loaded." /></div>;
 
   return (
     <div className="max-w-6xl space-y-7 pb-10">
@@ -209,16 +208,16 @@ export default function ProfilePage() {
         <h1 className="text-2xl font-semibold leading-8">User profile</h1>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3" aria-busy={loading}>
         {/* Left Column (Metadata) */}
         <div className="space-y-6 lg:col-span-1">
           <div className="ui-panel p-6">
-            <h2 className="text-2xl font-semibold text-text">{user.fullName}</h2>
-            <p className="mt-1 text-sm text-primary">{user.position}</p>
+            {loading ? <ProfileSkeleton className="h-8 w-52" /> : <h2 className="text-2xl font-semibold text-text">{user!.fullName}</h2>}
+            <div className="mt-1">{loading ? <ProfileSkeleton className="h-4 w-28" /> : <p className="text-sm text-primary">{user!.position}</p>}</div>
 
             <div className="mt-6 flex items-center gap-2 rounded-lg border border-border bg-surface-subtle p-3 font-mono text-xs text-text">
               <User className="h-4 w-4 text-text-subtle" aria-hidden="true" />
-              OP-ID: {user.operatorId}
+              OP-ID: {loading ? <ProfileSkeleton className="ml-1 h-3 w-20" /> : user!.operatorId}
             </div>
 
             <div className="mt-8 flex items-center gap-2 border-b border-border pb-3 font-semibold text-text">
@@ -228,15 +227,15 @@ export default function ProfilePage() {
             <div className="mt-5 space-y-4 text-sm">
               <div>
                 <p className="mb-1 text-xs text-text-subtle">Account created</p>
-                <p className="text-text">{user.createdAt ? new Date(user.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' UTC' : 'N/A'}</p>
+                {loading ? <ProfileSkeleton className="h-4 w-36" /> : <p className="text-text">{user!.createdAt ? new Date(user!.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' UTC' : 'N/A'}</p>}
               </div>
               <div>
                 <p className="mb-1 text-xs text-text-subtle">Clearance level</p>
                 <div className="mt-1">
-                  <span className={`ui-badge ${user.role === 'Admin' ? 'border-primary-border bg-primary-subtle text-primary' : 'border-neutral-border bg-neutral-subtle text-text-muted'}`}>
-                    <span className={`h-2 w-2 rounded-full ${user.role === 'Admin' ? 'bg-primary' : 'bg-neutral'}`} aria-hidden="true" />
-                    {user.role === 'Admin' ? 'Level 4 (Admin)' : 'Level 2 (Supporter)'}
-                  </span>
+                  {loading ? <ProfileSkeleton className="h-6 w-28" /> : <span className={`ui-badge ${user!.role === 'Admin' ? 'border-primary-border bg-primary-subtle text-primary' : 'border-neutral-border bg-neutral-subtle text-text-muted'}`}>
+                    <span className={`h-2 w-2 rounded-full ${user!.role === 'Admin' ? 'bg-primary' : 'bg-neutral'}`} aria-hidden="true" />
+                    {user!.role === 'Admin' ? 'Level 4 (Admin)' : 'Level 2 (Supporter)'}
+                  </span>}
                 </div>
               </div>
             </div>
@@ -252,7 +251,7 @@ export default function ProfilePage() {
               <h3 className="flex items-center gap-2 text-base font-semibold text-text">
                 <User className="h-5 w-5 text-primary" aria-hidden="true" /> Personal information
               </h3>
-              <button onClick={openEditInfo} className="ui-button min-h-9 px-3 text-xs">
+              <button type="button" onClick={openEditInfo} disabled={!user} className="ui-button min-h-9 px-3 text-xs">
                 <Edit2 className="h-3.5 w-3.5" aria-hidden="true" /> Edit information
               </button>
             </div>
@@ -260,15 +259,15 @@ export default function ProfilePage() {
             <div className="grid grid-cols-1 gap-6 text-sm sm:grid-cols-2">
               <div>
                 <p className="mb-1 text-xs text-text-subtle">Full name</p>
-                <p className="text-text">{user.fullName}</p>
+                {loading ? <ProfileSkeleton className="h-4 w-36" /> : <p className="text-text">{user!.fullName}</p>}
               </div>
               <div>
                 <p className="mb-1 text-xs text-text-subtle">Email address</p>
-                <p className="break-all text-text">{user.email}</p>
+                {loading ? <ProfileSkeleton className="h-4 w-48" /> : <p className="break-all text-text">{user!.email}</p>}
               </div>
               <div>
                 <p className="mb-1 text-xs text-text-subtle">Position</p>
-                <p className="text-text">{user.position}</p>
+                {loading ? <ProfileSkeleton className="h-4 w-32" /> : <p className="text-text">{user!.position}</p>}
               </div>
             </div>
           </div>
@@ -286,7 +285,7 @@ export default function ProfilePage() {
                 <h4 className="mb-1 text-sm font-semibold text-text">Authentication credentials</h4>
                 <p className="text-sm text-text-muted">Update your access key regularly to maintain security.</p>
               </div>
-              <button onClick={openEditPassword} className="ui-button shrink-0 px-3 text-xs">
+              <button type="button" onClick={openEditPassword} disabled={!user} className="ui-button shrink-0 px-3 text-xs">
                 <Key className="h-3.5 w-3.5" aria-hidden="true" /> Change password
               </button>
             </div>
@@ -351,4 +350,8 @@ export default function ProfilePage() {
       {operationNotice && <OperationToast {...operationNotice} onDismiss={dismissOperationNotice} />}
     </div>
   );
+}
+
+function ProfileSkeleton({ className }: { className: string }) {
+  return <span className={`ui-skeleton block rounded ${className}`} aria-hidden="true" />;
 }
