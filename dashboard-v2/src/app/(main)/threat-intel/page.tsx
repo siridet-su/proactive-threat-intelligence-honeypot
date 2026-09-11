@@ -7,6 +7,7 @@ import type { DashboardChartDatum } from "@/lib/dashboardTypes";
 import { RefreshStatus, RegionState } from "@/components/ui/RegionState";
 import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { classificationBadgeClass } from "@/lib/presentation";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 export default function ThreatIntelPage() {
   const { threats: logs, status } = useThreatFeed();
@@ -105,7 +106,7 @@ export default function ThreatIntelPage() {
                   </tr>
                 ))}
                 {!isInitialLoad && currentLogs.map((log) => (
-                  <tr key={log.id} className="text-text-muted">
+                  <tr key={log.id} className="text-text-muted transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
                     <td className="font-mono text-xs">
                       <div>{log.date}</div>
                       <div className="mt-1 text-text-subtle">{log.time}</div>
@@ -118,7 +119,7 @@ export default function ThreatIntelPage() {
                     </td>
                     <td><SeverityBadge severity={log.severity} /></td>
                     <td className="text-right">
-                      <Link href={`/threat-intel/${log.id}`} className="ui-button min-h-9 px-3 text-xs">
+                      <Link href={`/threat-intel/${log.id}`} className="ui-button min-h-9 px-3 text-xs transition-colors duration-150 hover:border-border-strong">
                         View Details
                       </Link>
                     </td>
@@ -148,13 +149,49 @@ export default function ThreatIntelPage() {
                   Page {currentPage} of {totalPages} · {stats.total.toLocaleString()} sessions
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="ui-button min-h-9 px-3 text-xs">Prev</button>
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(1)}
+                    className="ui-button min-h-9 px-2.5 text-xs"
+                    aria-label="First page"
+                  >
+                    <ChevronsLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                    First
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(p => p - 1)}
+                    className="ui-button min-h-9 px-2.5 text-xs"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                    Prev
+                  </button>
                   {getPageNumbers().map(pageNum => (
-                    <button key={pageNum} onClick={() => setCurrentPage(pageNum)} aria-current={currentPage === pageNum ? "page" : undefined} aria-label={`Page ${pageNum}`} className="ui-button min-h-9 px-3 text-xs">
+                    <button type="button" key={pageNum} onClick={() => setCurrentPage(pageNum)} aria-current={currentPage === pageNum ? "page" : undefined} aria-label={`Page ${pageNum}`} className="ui-button min-h-9 px-3 text-xs">
                       {pageNum}
                     </button>
                   ))}
-                  <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="ui-button min-h-9 px-3 text-xs">Next</button>
+                  <button
+                    type="button"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(p => p + 1)}
+                    className="ui-button min-h-9 px-2.5 text-xs"
+                  >
+                    Next
+                    <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(totalPages)}
+                    className="ui-button min-h-9 px-2.5 text-xs"
+                    aria-label="Last page"
+                  >
+                    Last
+                    <ChevronsRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
                 </div>
               </nav>
           )}
@@ -165,7 +202,7 @@ export default function ThreatIntelPage() {
 }
 
 function MetricSummary({ label, value, loading, unavailable, reported = true, annotation, annotationClass = "text-text-subtle", valueClass = "text-text" }: { label: string; value: string; loading: boolean; unavailable: boolean; reported?: boolean; annotation?: string; annotationClass?: string; valueClass?: string }) {
-  return <div className="ui-panel flex min-h-[116px] flex-col justify-between p-5">
+  return <div className="ui-panel ui-panel-interactive flex min-h-[116px] flex-col justify-between p-5">
     <h2 className="text-sm font-medium text-text-muted">{label}</h2>
     {loading ? <div className="ui-skeleton h-8 w-20" aria-label={`Loading ${label}`} /> : unavailable || !reported ? <p className="text-sm text-text-muted">{reported ? "Unavailable" : "Not reported"}</p> : <div className="flex flex-wrap items-baseline gap-2"><span className={`text-[28px] font-semibold leading-9 tabular-nums ${valueClass}`}>{value}</span>{annotation && <span className={`text-xs font-medium ${annotationClass}`}>{annotation}</span>}</div>}
   </div>;
