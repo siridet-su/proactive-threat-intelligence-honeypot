@@ -24,7 +24,12 @@ import type {
 import { AuditSessionSelect } from "./AuditSessionSelect";
 import { CwdRouteHistory } from "./CwdRouteHistory";
 import { FilesystemInspector } from "./FilesystemInspector";
+import { TimelineSplitter } from "./TimelineSplitter";
 import {
+  DEFAULT_TIMELINE_SIDEBAR_WIDTH,
+  MAX_TIMELINE_SIDEBAR_WIDTH,
+  MIN_TIMELINE_SIDEBAR_WIDTH,
+  TIMELINE_SIDEBAR_STORAGE_KEY,
   buildAuditSnapshot,
   isHistoryPage,
   isSnapshot,
@@ -50,6 +55,8 @@ export function FilesystemActivity() {
   // Fullscreen & Hybrid Replay Studio State
   const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
+  const [timelineWidth, setTimelineWidth] = useState<number>(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
+  const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1400);
   const [showFailedAttempts, setShowFailedAttempts] = useState(true);
@@ -77,9 +84,88 @@ export function FilesystemActivity() {
           selectedSessionIdRef.current = urlSessionId;
           setSelectedSessionId(urlSessionId);
         }
+
+        try {
+          const saved = localStorage.getItem(TIMELINE_SIDEBAR_STORAGE_KEY);
+          if (saved) {
+            const parsed = parseInt(saved, 10);
+            if (!Number.isNaN(parsed)) {
+              setTimelineWidth(Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, Math.min(MAX_TIMELINE_SIDEBAR_WIDTH, parsed)));
+            }
+          }
+        } catch {
+          // ignore
+        }
       }
     }, 0);
     return () => clearTimeout(timer);
+  }, []);
+
+  // Persist timeline width preference
+  useEffect(() => {
+    if (isHydrated && typeof window !== "undefined") {
+      try {
+        localStorage.setItem(TIMELINE_SIDEBAR_STORAGE_KEY, String(timelineWidth));
+      } catch {
+        // ignore
+      }
+    }
+  }, [timelineWidth, isHydrated]);
+
+  // Prevent text selection and preserve resize cursor during drag
+  useEffect(() => {
+    if (isDraggingTimeline) {
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "col-resize";
+    } else {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    }
+    return () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+  }, [isDraggingTimeline]);
+
+  // Draggable splitter mouse handler (relative delta formula)
+  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingTimeline(true);
+    const startX = e.clientX;
+    const startWidth = timelineWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = startX - moveEvent.clientX;
+      const maxAllowed = Math.min(MAX_TIMELINE_SIDEBAR_WIDTH, Math.floor(window.innerWidth * 0.65));
+      const clamped = Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, Math.min(maxAllowed, startWidth + deltaX));
+      setTimelineWidth(clamped);
+    };
+
+    const onMouseUp = () => {
+      setIsDraggingTimeline(false);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [timelineWidth]);
+
+  const handleResetTimelineWidth = useCallback(() => {
+    setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
+  }, []);
+
+  const handleSplitterKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setTimelineWidth((curr) => Math.min(MAX_TIMELINE_SIDEBAR_WIDTH, curr + 24));
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setTimelineWidth((curr) => Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, curr - 24));
+    } else if (e.key === "Enter" || e.key === " " || e.key === "Home") {
+      e.preventDefault();
+      setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
+    }
   }, []);
 
   const applySnapshot = useCallback((data: FilesystemTopologySnapshot) => {
@@ -663,7 +749,7 @@ export function FilesystemActivity() {
                 type="button"
                 onClick={() => setIsTimelineCollapsed((c) => !c)}
                 className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
-                title={isTimelineCollapsed ? "Show timeline sidebar (70/30 split)" : "Collapse timeline sidebar (100% canvas)"}
+                title={isTimelineCollapsed ? "Show timeline sidebar" : "Collapse timeline sidebar"}
                 aria-pressed={isTimelineCollapsed}
               >
                 {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5" /> : <PanelRightClose className="h-3.5 w-3.5" />}
@@ -702,21 +788,42 @@ export function FilesystemActivity() {
                 isExpanded={isAuditFullscreen}
                 onToggleExpand={() => setIsAuditFullscreen(false)}
                 isAuditMode={true}
+                isResizingContainer={isDraggingTimeline}
                 className="h-full flex-1 min-h-0"
               />
             </div>
 
-            {/* Right Timeline: Smoothly collapsible sidebar */}
+            {/* Draggable Splitter Handle */}
+            {!isTimelineCollapsed && (
+              <TimelineSplitter
+                isDragging={isDraggingTimeline}
+                width={timelineWidth}
+                onMouseDown={handleSplitterMouseDown}
+                onDoubleClick={handleResetTimelineWidth}
+                onKeyDown={handleSplitterKeyDown}
+                className="hidden sm:flex"
+              />
+            )}
+
+            {/* Right Timeline: Smoothly collapsible & resizable sidebar */}
             <div
               inert={isTimelineCollapsed ? true : undefined}
               aria-hidden={isTimelineCollapsed}
-              className={`h-full flex flex-col shrink-0 overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none ${
+              style={{ width: isTimelineCollapsed ? 0 : timelineWidth }}
+              className={`h-full flex flex-col shrink-0 overflow-hidden ${
+                isDraggingTimeline
+                  ? "transition-none"
+                  : "transition-[width,opacity,margin] duration-300 ease-in-out motion-reduce:transition-none"
+              } ${
                 isTimelineCollapsed
-                  ? "w-0 opacity-0 pointer-events-none ml-0"
-                  : "w-80 lg:w-96 xl:w-[28rem] opacity-100 ml-2.5 sm:ml-3"
+                  ? "opacity-0 pointer-events-none ml-0"
+                  : "opacity-100 ml-2 sm:ml-2.5"
               }`}
             >
-              <div className="w-80 lg:w-96 xl:w-[28rem] h-full flex flex-col min-h-0">
+              <div
+                style={{ width: timelineWidth }}
+                className="h-full flex flex-col min-h-0"
+              >
                 <CwdRouteHistory
                   selectedSession={selectedSession}
                   history={history}
@@ -823,7 +930,7 @@ export function FilesystemActivity() {
                 type="button"
                 onClick={() => setIsTimelineCollapsed((c) => !c)}
                 className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
-                title={isTimelineCollapsed ? "Show timeline panel (70/30 split)" : "Collapse timeline panel (100% canvas)"}
+                title={isTimelineCollapsed ? "Show timeline panel" : "Collapse timeline panel"}
                 aria-pressed={isTimelineCollapsed}
               >
                 {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5 text-primary" /> : <PanelRightClose className="h-3.5 w-3.5" />}
@@ -861,21 +968,45 @@ export function FilesystemActivity() {
                 isExpanded={false}
                 onToggleExpand={() => setIsAuditFullscreen(true)}
                 isAuditMode={true}
+                isResizingContainer={isDraggingTimeline}
                 className="h-full flex-1 min-h-0"
               />
             </div>
 
-            {/* Smooth Collapsible Sidebar */}
+            {/* Draggable Splitter Handle (desktop only) */}
+            {!isTimelineCollapsed && (
+              <TimelineSplitter
+                isDragging={isDraggingTimeline}
+                width={timelineWidth}
+                onMouseDown={handleSplitterMouseDown}
+                onDoubleClick={handleResetTimelineWidth}
+                onKeyDown={handleSplitterKeyDown}
+                className="hidden lg:flex"
+              />
+            )}
+
+            {/* Smooth Collapsible & Resizable Sidebar */}
             <div
               inert={isTimelineCollapsed ? true : undefined}
               aria-hidden={isTimelineCollapsed}
-              className={`flex flex-col shrink-0 overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none ${
+              style={{
+                ['--timeline-width' as string]: `${timelineWidth}px`,
+                width: isTimelineCollapsed ? 0 : undefined,
+              }}
+              className={`flex flex-col shrink-0 overflow-hidden ${
+                isDraggingTimeline
+                  ? "transition-none"
+                  : "transition-all duration-300 ease-in-out motion-reduce:transition-none"
+              } ${
                 isTimelineCollapsed
                   ? "max-h-0 lg:max-h-none lg:w-0 opacity-0 pointer-events-none mt-0 lg:mt-0 lg:ml-0"
-                  : "max-h-[800px] lg:max-h-none w-full lg:w-96 xl:w-[28rem] opacity-100 mt-4 lg:mt-0 lg:ml-4"
+                  : "max-h-[800px] lg:max-h-none w-full lg:w-[var(--timeline-width)] opacity-100 mt-4 lg:mt-0 lg:ml-2.5"
               }`}
             >
-              <div className="w-full lg:w-96 xl:w-[28rem] h-full flex flex-col min-h-0">
+              <div
+                style={{ ['--timeline-width' as string]: `${timelineWidth}px` }}
+                className="w-full lg:w-[var(--timeline-width)] h-full flex flex-col min-h-0"
+              >
                 <CwdRouteHistory
                   selectedSession={selectedSession}
                   history={history}

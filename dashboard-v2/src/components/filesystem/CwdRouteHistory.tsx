@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  CornerDownRight,
   FastForward,
   History,
   Pause,
@@ -151,10 +152,10 @@ export function CwdRouteHistory({
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
       {/* Panel Header */}
       <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-sm font-semibold sm:text-base">
+            <History className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
+            <h2 className="text-sm font-semibold sm:text-base truncate">
               {isSidebar ? "Session Route & Replay" : "Verified CWD route"}
             </h2>
           </div>
@@ -165,7 +166,7 @@ export function CwdRouteHistory({
           </p>
         </div>
         {selectedSession && (
-          <span className="ui-badge shrink-0 font-mono text-xs">
+          <span className="ui-badge shrink-0 font-mono text-xs whitespace-nowrap">
             {selectedSession.sessionId.slice(0, 12)}
           </span>
         )}
@@ -199,7 +200,7 @@ export function CwdRouteHistory({
               <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-stretch gap-2">
                 <button
                   type="button"
-                  className="ui-button h-auto min-h-0 w-9 shrink-0 p-0 sm:w-auto sm:px-3"
+                  className="ui-button h-auto min-h-0 shrink-0 px-2 sm:px-2.5 flex items-center justify-center gap-1 text-xs"
                   aria-label="Show previous directory move"
                   disabled={selectedHistoryIndex <= 0}
                   onClick={() => {
@@ -212,38 +213,70 @@ export function CwdRouteHistory({
                 </button>
 
                 <div
-                  className={`min-w-0 rounded-lg border px-3 py-2 text-center transition-colors ${
+                  className={`min-w-0 rounded-lg border px-3 py-2 text-left transition-colors ${
                     isFailedHop
                       ? "border-warning-border bg-warning-subtle text-text"
                       : "border-primary-border bg-primary-subtle text-text"
                   }`}
+                  title={selectedHistoryEvent?.sequence !== null ? `Event Sequence: ${selectedHistoryEvent?.sequence}` : undefined}
                 >
-                  <div className="flex items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em]">
-                    {isFailedHop && <AlertTriangle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />}
-                    <span className={isFailedHop ? "text-warning" : "text-primary"}>
-                      Hop {selectedHistoryIndex + 1} of {displayedHistory.length}
-                    </span>
-                    {isFailedHop && <span className="text-[10px] text-warning font-normal lowercase">(failed)</span>}
+                  <div className="flex items-center justify-between gap-2 text-xs min-w-0">
+                    <div className="flex items-center gap-1.5 font-semibold uppercase tracking-[0.1em] shrink-0 whitespace-nowrap">
+                      {isFailedHop && <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" aria-hidden="true" />}
+                      <span className={isFailedHop ? "text-warning" : "text-primary"}>
+                        Hop {selectedHistoryIndex + 1} of {displayedHistory.length}
+                      </span>
+                    </div>
+                    {isFailedHop ? (
+                      <span className="rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-[10px] font-semibold text-warning shrink-0 whitespace-nowrap">
+                        Failed Attempt
+                      </span>
+                    ) : (
+                      <span
+                        className="font-sans text-[11px] font-medium text-text-subtle truncate text-right min-w-0"
+                        title={selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : undefined}
+                      >
+                        {selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "Loading hop"}
+                      </span>
+                    )}
                   </div>
-                  <p className="mt-0.5 truncate font-medium text-xs sm:text-sm text-text">
-                    {selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "Loading hop"}
-                  </p>
-                  <p className="mt-0.5 truncate font-mono text-xs text-text-muted">
-                    <span className={isInitialSshEntry(selectedHistoryEvent) ? "text-text-subtle font-medium" : ""}>
-                      {formatFromPath(selectedHistoryEvent)}
-                    </span>
-                    <span className={`px-1.5 font-bold ${isFailedHop ? "text-warning" : "text-primary"}`}>
-                      {isFailedHop ? "⇏" : "→"}
-                    </span>
-                    <span className={isFailedHop ? "line-through text-text-muted/70" : ""}>
-                      {selectedHistoryEvent?.toPath ?? "Unknown"}
-                    </span>
-                  </p>
+
+                  {/* Two-Line Journey Display */}
+                  <div className="mt-1.5 space-y-0.5 font-mono text-xs">
+                    <div className="flex items-center gap-1.5 text-text-subtle text-[11px] min-w-0">
+                      <span className="shrink-0 font-sans text-[10px] uppercase tracking-wider text-text-subtle/70">
+                        from
+                      </span>
+                      {isInitialSshEntry(selectedHistoryEvent) ? (
+                        <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-[10px] font-medium text-text-subtle">
+                          [SSH Login]
+                        </span>
+                      ) : (
+                        <span className="truncate text-text-muted" title={selectedHistoryEvent?.fromPath ?? undefined}>
+                          {formatFromPath(selectedHistoryEvent)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs min-w-0">
+                      <CornerDownRight
+                        className={`h-3.5 w-3.5 shrink-0 ${isFailedHop ? "text-warning" : "text-primary"}`}
+                        aria-hidden="true"
+                      />
+                      <span
+                        className={`truncate font-semibold ${
+                          isFailedHop ? "line-through text-text-muted/70" : "text-text"
+                        }`}
+                        title={selectedHistoryEvent?.toPath ?? undefined}
+                      >
+                        {selectedHistoryEvent?.toPath ?? "Unknown"}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <button
                   type="button"
-                  className="ui-button h-auto min-h-0 w-9 shrink-0 p-0 sm:w-auto sm:px-3"
+                  className="ui-button h-auto min-h-0 shrink-0 px-2 sm:px-2.5 flex items-center justify-center gap-1 text-xs"
                   aria-label="Show next directory move"
                   disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
                   onClick={() => {
@@ -257,12 +290,12 @@ export function CwdRouteHistory({
               </div>
 
               {/* Playback Controls & Filters */}
-              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs">
-                <div className="flex items-center gap-1.5">
+              <div className="mt-2.5 flex items-center justify-between gap-1.5 border-t border-border/60 pt-2 text-xs">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
                     onClick={handleTogglePlay}
-                    className={`ui-button h-7 min-h-7 px-2 text-xs flex items-center gap-1 ${
+                    className={`ui-button h-7 min-h-7 px-2 text-xs flex items-center gap-1 shrink-0 ${
                       isPlaying ? "border-primary bg-primary text-surface" : ""
                     }`}
                     title={isPlaying ? "Pause auto-playback" : "Play route trajectory automatically"}
@@ -287,16 +320,16 @@ export function CwdRouteHistory({
                         setInternalPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
                       }
                     }}
-                    className="ui-button h-7 min-h-7 px-1.5 font-mono text-[11px]"
+                    className="ui-button h-7 min-h-7 px-1.5 font-mono text-[11px] shrink-0"
                     title="Toggle playback speed (1x / 2x)"
                   >
                     {playbackSpeed === 1400 ? "1x" : "2x"}
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {failedCount > 0 && (
-                    <label className="flex items-center gap-1 text-[11px] text-text-subtle cursor-pointer select-none">
+                    <label className="flex items-center gap-1 text-[11px] text-text-subtle cursor-pointer select-none whitespace-nowrap shrink-0">
                       <input
                         type="checkbox"
                         checked={showFailedAttempts}
@@ -315,7 +348,7 @@ export function CwdRouteHistory({
 
                   <button
                     type="button"
-                    className="ui-button h-7 min-h-7 px-2 text-[11px]"
+                    className="ui-button h-7 min-h-7 px-2 text-[11px] shrink-0 whitespace-nowrap"
                     disabled={selectedHistoryIndex === displayedHistory.length - 1}
                     onClick={() => {
                       handlePause();
@@ -384,34 +417,59 @@ export function CwdRouteHistory({
                             : "border-transparent hover:border-border hover:bg-surface-hover"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-1">
-                          <p className="truncate font-medium text-xs text-text">
+                        <div className="flex items-center justify-between gap-1.5 min-w-0">
+                          <p className="truncate font-medium text-xs text-text min-w-0">
                             <span className="mr-1.5 font-mono text-[11px] text-text-subtle">
                               {String(index + 1).padStart(2, "0")}
                             </span>
                             {actionLabel(event)}
                           </p>
-                          <time className="shrink-0 font-mono text-[11px] text-text-subtle">
+                          <time className="shrink-0 font-mono text-[11px] text-text-subtle whitespace-nowrap ml-1">
                             {formatTimestamp(event.at)}
                           </time>
                         </div>
-                        <p className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs text-text-muted break-all">
-                          <span className={isInitialSshEntry(event) ? "text-text-subtle font-medium" : ""}>
-                            {formatFromPath(event)}
-                          </span>
-                          <span className={`font-bold ${isFailed ? "text-warning" : "text-primary"}`}>
-                            {isFailed ? "⇏" : "→"}
-                          </span>
-                          <span className={isFailed ? "line-through text-text-muted/60" : ""}>
-                            {event.toPath ?? "Unknown"}
-                          </span>
-                          {isFailed && (
-                            <span className="ml-1 rounded border border-warning-border bg-warning-subtle px-1 py-0.1 text-[10px] font-semibold text-warning">
-                              Failed Attempt
+                        <div className="mt-1.5 space-y-0.5 font-mono text-xs">
+                          {/* Line 1: Origin */}
+                          <div className="flex items-center gap-1.5 text-text-subtle text-[11px] min-w-0">
+                            <span className="shrink-0 font-sans text-[10px] uppercase tracking-wider text-text-subtle/70">
+                              from
                             </span>
-                          )}
-                        </p>
-                        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-text-subtle">
+                            {isInitialSshEntry(event) ? (
+                              <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-[10px] font-medium text-text-subtle">
+                                [SSH Login]
+                              </span>
+                            ) : (
+                              <span className="truncate text-text-muted" title={event.fromPath ?? undefined}>
+                                {formatFromPath(event)}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Line 2: Destination */}
+                          <div className="flex items-center gap-1.5 text-xs min-w-0">
+                            <CornerDownRight
+                              className={`h-3.5 w-3.5 shrink-0 ${isFailed ? "text-warning" : "text-primary"}`}
+                              aria-hidden="true"
+                            />
+                            <span
+                              className={`truncate font-semibold ${
+                                isFailed ? "line-through text-text-muted/60" : "text-text"
+                              }`}
+                              title={event.toPath ?? undefined}
+                            >
+                              {event.toPath ?? "Unknown"}
+                            </span>
+                            {isFailed && (
+                              <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-[10px] font-semibold text-warning">
+                                Failed
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div
+                          className="mt-1.5 flex items-center gap-1.5 text-[11px] text-text-subtle"
+                          title={event.sequence !== null ? `Event Sequence: ${event.sequence}` : undefined}
+                        >
                           <span
                             className={`h-1.5 w-1.5 rounded-full ${
                               event.status === "confirmed"
@@ -425,7 +483,6 @@ export function CwdRouteHistory({
                             aria-hidden="true"
                           />
                           <span>{statusLabel(event.status)}</span>
-                          {event.sequence !== null ? <span>· event {event.sequence}</span> : null}
                         </div>
                       </button>
                     </li>
