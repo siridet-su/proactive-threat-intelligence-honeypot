@@ -240,13 +240,18 @@ export function TopologyCanvas({
     });
   }, [activeHop, selectedSessionId, snapshot?.sessions]);
 
+  const automaticGraphNodeByPath = useMemo(
+    () => new Map(automaticGraphNodes.map((node) => [node.path, node])),
+    [automaticGraphNodes],
+  );
+
   const graphCallouts = useMemo(
-    () => calloutsForGraph(effectiveSessions, graphNodeByPath),
-    [effectiveSessions, graphNodeByPath],
+    () => calloutsForGraph(effectiveSessions, automaticGraphNodeByPath),
+    [effectiveSessions, automaticGraphNodeByPath],
   );
   const automaticCalloutPositions = useMemo(
-    () => sourceRailPositions(graphCallouts, graphNodeByPath),
-    [graphCallouts, graphNodeByPath],
+    () => sourceRailPositions(graphCallouts, automaticGraphNodeByPath),
+    [graphCallouts, automaticGraphNodeByPath],
   );
   const liveSessionById = useMemo(
     () => new Map(effectiveSessions.map((session) => [session.sessionId, session])),
