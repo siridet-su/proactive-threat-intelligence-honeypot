@@ -11,7 +11,7 @@ import {
   Plus,
   RefreshCw,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
@@ -26,6 +26,13 @@ interface CwdRouteHistoryProps {
   layout?: "card" | "sidebar";
   onSelectHistoryEventId: (eventId: string | null) => void;
   onLoadEarlier: () => void;
+  isPlaying?: boolean;
+  onTogglePlay?: () => void;
+  onPause?: () => void;
+  playbackSpeed?: number;
+  onToggleSpeed?: () => void;
+  showFailedAttempts?: boolean;
+  onToggleShowFailedAttempts?: (show: boolean) => void;
 }
 
 export function CwdRouteHistory({
@@ -37,11 +44,22 @@ export function CwdRouteHistory({
   layout = "card",
   onSelectHistoryEventId,
   onLoadEarlier,
+  isPlaying: controlledIsPlaying,
+  onTogglePlay,
+  onPause,
+  playbackSpeed: controlledPlaybackSpeed,
+  onToggleSpeed,
+  showFailedAttempts: controlledShowFailedAttempts,
+  onToggleShowFailedAttempts,
 }: CwdRouteHistoryProps) {
   const chronologicalHistory = useMemo(() => [...history].reverse(), [history]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1400);
-  const [showFailedAttempts, setShowFailedAttempts] = useState(true);
+  const [internalIsPlaying, setInternalIsPlaying] = useState(false);
+  const [internalPlaybackSpeed, setInternalPlaybackSpeed] = useState<number>(1400);
+  const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
+
+  const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
+  const playbackSpeed = controlledPlaybackSpeed !== undefined ? controlledPlaybackSpeed : internalPlaybackSpeed;
+  const showFailedAttempts = controlledShowFailedAttempts !== undefined ? controlledShowFailedAttempts : internalShowFailedAttempts;
 
   const failedCount = useMemo(
     () => chronologicalHistory.filter((e) => e.action === "failed_change").length,
@@ -63,13 +81,55 @@ export function CwdRouteHistory({
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
 
-  // Auto-play timer
+  const timelineContainerRef = useRef<HTMLDivElement | null>(null);
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => {
+    if (!activeHistoryEventId) return;
+    const container = timelineContainerRef.current;
+    const item = activeItemRef.current;
+    if (container && item) {
+      const containerRect = container.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      const relativeItemTop = itemRect.top - containerRect.top + container.scrollTop;
+      const targetScrollTop = relativeItemTop - (container.clientHeight / 2) + (itemRect.height / 2);
+
+      container.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: "smooth",
+      });
+    }
+  }, [activeHistoryEventId]);
+
+  const handlePause = useCallback(() => {
+    if (onPause) {
+      onPause();
+    } else if (onTogglePlay) {
+      if (isPlaying) onTogglePlay();
+    } else {
+      setInternalIsPlaying(false);
+    }
+  }, [isPlaying, onPause, onTogglePlay]);
+
+  const handleTogglePlay = useCallback(() => {
+    if (onTogglePlay) {
+      onTogglePlay();
+    } else {
+      if (selectedHistoryIndex >= displayedHistory.length - 1) {
+        onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
+      }
+      setInternalIsPlaying((prev) => !prev);
+    }
+  }, [displayedHistory, onSelectHistoryEventId, onTogglePlay, selectedHistoryIndex]);
+
+  // Auto-play timer (only active if not controlled externally by parent)
+  useEffect(() => {
+    if (controlledIsPlaying !== undefined) return;
     if (!isPlaying) return;
 
     const timer = setTimeout(() => {
       if (selectedHistoryIndex >= displayedHistory.length - 1) {
-        setIsPlaying(false);
+        setInternalIsPlaying(false);
         return;
       }
 
@@ -78,17 +138,17 @@ export function CwdRouteHistory({
       if (nextEvent) {
         onSelectHistoryEventId(nextEvent.id);
       } else {
-        setIsPlaying(false);
+        setInternalIsPlaying(false);
       }
     }, playbackSpeed);
 
     return () => clearTimeout(timer);
-  }, [isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed, onSelectHistoryEventId]);
+  }, [controlledIsPlaying, isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed, onSelectHistoryEventId]);
 
   const isSidebar = layout === "sidebar";
 
   return (
-    <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-[500px]" : ""}`}>
+    <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
       {/* Panel Header */}
       <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -143,7 +203,7 @@ export function CwdRouteHistory({
                   aria-label="Show previous directory move"
                   disabled={selectedHistoryIndex <= 0}
                   onClick={() => {
-                    setIsPlaying(false);
+                    handlePause();
                     onSelectHistoryEventId(displayedHistory[selectedHistoryIndex - 1]?.id ?? null);
                   }}
                 >
@@ -187,7 +247,7 @@ export function CwdRouteHistory({
                   aria-label="Show next directory move"
                   disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
                   onClick={() => {
-                    setIsPlaying(false);
+                    handlePause();
                     onSelectHistoryEventId(displayedHistory[selectedHistoryIndex + 1]?.id ?? null);
                   }}
                 >
@@ -201,12 +261,7 @@ export function CwdRouteHistory({
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      if (selectedHistoryIndex >= displayedHistory.length - 1) {
-                        onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
-                      }
-                      setIsPlaying(!isPlaying);
-                    }}
+                    onClick={handleTogglePlay}
                     className={`ui-button h-7 min-h-7 px-2 text-xs flex items-center gap-1 ${
                       isPlaying ? "border-primary bg-primary text-surface" : ""
                     }`}
@@ -225,7 +280,13 @@ export function CwdRouteHistory({
 
                   <button
                     type="button"
-                    onClick={() => setPlaybackSpeed(playbackSpeed === 1400 ? 700 : 1400)}
+                    onClick={() => {
+                      if (onToggleSpeed) {
+                        onToggleSpeed();
+                      } else {
+                        setInternalPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
+                      }
+                    }}
                     className="ui-button h-7 min-h-7 px-1.5 font-mono text-[11px]"
                     title="Toggle playback speed (1x / 2x)"
                   >
@@ -239,7 +300,13 @@ export function CwdRouteHistory({
                       <input
                         type="checkbox"
                         checked={showFailedAttempts}
-                        onChange={(e) => setShowFailedAttempts(e.target.checked)}
+                        onChange={(e) => {
+                          if (onToggleShowFailedAttempts) {
+                            onToggleShowFailedAttempts(e.target.checked);
+                          } else {
+                            setInternalShowFailedAttempts(e.target.checked);
+                          }
+                        }}
                         className="rounded border-border text-primary focus:ring-primary h-3 w-3"
                       />
                       <span>Failures ({failedCount})</span>
@@ -251,7 +318,7 @@ export function CwdRouteHistory({
                     className="ui-button h-7 min-h-7 px-2 text-[11px]"
                     disabled={selectedHistoryIndex === displayedHistory.length - 1}
                     onClick={() => {
-                      setIsPlaying(false);
+                      handlePause();
                       onSelectHistoryEventId(displayedHistory.at(-1)?.id ?? null);
                     }}
                     title="Jump to latest recorded move"
@@ -280,7 +347,10 @@ export function CwdRouteHistory({
             )}
 
             {/* Scrollable Timeline List */}
-            <div className={`mt-4 ${isSidebar ? "flex-1 min-h-0 overflow-y-auto pr-1" : ""}`}>
+            <div
+              ref={timelineContainerRef}
+              className={`mt-4 ${isSidebar ? "flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 pb-4" : ""}`}
+            >
               <ol className="relative space-y-0 border-l border-border pl-5" aria-label="Verified directory route">
                 {displayedHistory.map((event, index) => {
                   const isCurrent = event.id === activeHistoryEventId;
@@ -300,9 +370,10 @@ export function CwdRouteHistory({
                       />
                       <button
                         type="button"
+                        ref={isCurrent ? activeItemRef : undefined}
                         aria-current={isCurrent ? "step" : undefined}
                         onClick={() => {
-                          setIsPlaying(false);
+                          handlePause();
                           onSelectHistoryEventId(event.id);
                         }}
                         className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 ${

@@ -98,6 +98,10 @@ interface TopologyCanvasProps {
   subtitle?: string;
   onSelectSession: (sessionId: string) => void;
   onSelectPath: (path: string | null) => void;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  isAuditMode?: boolean;
+  className?: string;
 }
 
 export function TopologyCanvas({
@@ -111,12 +115,28 @@ export function TopologyCanvas({
   subtitle,
   onSelectSession,
   onSelectPath,
+  isExpanded: controlledIsExpanded,
+  onToggleExpand,
+  isAuditMode = false,
+  className,
 }: TopologyCanvasProps) {
   const reducedMotion = useReducedMotion();
   const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isDraggingSurface, setIsDraggingSurface] = useState(false);
-  const [isTopologyExpanded, setIsTopologyExpanded] = useState(false);
+  const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
+  const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
+  const isControlledExpansion = onToggleExpand !== undefined;
+  const isStandaloneExpanded = isTopologyExpanded && !isControlledExpansion;
+
+  const handleToggleExpand = useCallback(() => {
+    if (onToggleExpand) {
+      onToggleExpand();
+    } else {
+      setInternalIsTopologyExpanded((prev) => !prev);
+    }
+  }, [onToggleExpand]);
+
   const [labelPositions, setLabelPositions] = useState<Record<string, LabelPosition>>({});
   const [nodePositions, setNodePositions] = useState<Record<string, LabelPosition>>({});
   const [mapMetrics, setMapMetrics] = useState<MapMetrics | null>(null);
@@ -713,11 +733,11 @@ export function TopologyCanvas({
     };
   }, [mapMetrics, pan, zoom]);
 
-  // Escape key exits expanded workspace
+  // Escape key exits expanded workspace (when running standalone)
   useEffect(() => {
-    if (!isTopologyExpanded) return;
+    if (!isStandaloneExpanded) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsTopologyExpanded(false);
+      if (event.key === "Escape") setInternalIsTopologyExpanded(false);
     };
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -726,16 +746,16 @@ export function TopologyCanvas({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isTopologyExpanded]);
+  }, [isStandaloneExpanded]);
 
   return (
     <div
-      className={`ui-panel overflow-hidden ${
-        isTopologyExpanded ? "fixed inset-3 z-50 flex flex-col bg-surface" : ""
-      }`}
+      className={`ui-panel overflow-hidden flex flex-col ${
+        isStandaloneExpanded ? "fixed inset-3 z-50 bg-surface" : ""
+      } ${className ?? ""}`}
       aria-busy={regionStatus === "loading"}
     >
-      <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1 pr-3">
           <div className="flex items-center gap-2">
             <Route className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -830,10 +850,26 @@ export function TopologyCanvas({
           <button
             type="button"
             className="ui-button h-8 min-h-8 w-8 p-0"
-            title={isTopologyExpanded ? "Exit expanded map" : "Expand map workspace"}
-            aria-label={isTopologyExpanded ? "Exit expanded map" : "Expand map workspace"}
+            title={
+              isTopologyExpanded
+                ? isAuditMode
+                  ? "Exit fullscreen audit studio"
+                  : "Exit expanded map"
+                : isAuditMode
+                  ? "Open fullscreen audit studio"
+                  : "Expand map workspace"
+            }
+            aria-label={
+              isTopologyExpanded
+                ? isAuditMode
+                  ? "Exit fullscreen audit studio"
+                  : "Exit expanded map"
+                : isAuditMode
+                  ? "Open fullscreen audit studio"
+                  : "Expand map workspace"
+            }
             aria-pressed={isTopologyExpanded}
-            onClick={() => setIsTopologyExpanded((expanded) => !expanded)}
+            onClick={handleToggleExpand}
           >
             {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>
@@ -862,17 +898,21 @@ export function TopologyCanvas({
         </div>
       ) : (
         <>
-          <div className={isTopologyExpanded ? "grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]" : ""}>
-            <div className={isTopologyExpanded ? "flex min-h-0 min-w-0 flex-col" : ""}>
+          <div
+            className={
+              isStandaloneExpanded
+                ? "grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]"
+                : "flex min-h-0 flex-1 flex-col"
+            }
+          >
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <div
                 ref={mapSurfaceRef}
                 tabIndex={0}
                 role="region"
                 aria-label="Filesystem topology map workspace. Use arrow keys to pan, scroll or pinch to zoom."
                 onKeyDown={onSurfaceKeyDown}
-                className={`relative overflow-hidden bg-surface-subtle p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                  isTopologyExpanded ? "min-h-[540px] flex-1" : "min-h-[440px]"
-                }`}
+                className="relative min-h-[380px] flex-1 overflow-hidden bg-surface-subtle p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerEnd}
@@ -1257,7 +1297,7 @@ export function TopologyCanvas({
                 />
               </div>
 
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
+              <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
                 <span>
                   <strong className="text-text">{snapshot.nodes.length}</strong> observed paths
                 </span>
@@ -1280,7 +1320,7 @@ export function TopologyCanvas({
                 </span>
               </div>
               {snapshot.truncated && (
-                <div className="flex gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
+                <div className="flex shrink-0 gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
                   <ShieldAlert className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
                   <p>
                     Showing the latest {snapshot.sessions.length} observed sessions. Older sessions are not included in
@@ -1290,7 +1330,7 @@ export function TopologyCanvas({
               )}
             </div>
 
-            {isTopologyExpanded && (
+            {isStandaloneExpanded && (
               <aside
                 className="min-h-0 overflow-y-auto border-t border-border bg-surface p-5 lg:border-l lg:border-t-0"
                 aria-label="Expanded map controls"

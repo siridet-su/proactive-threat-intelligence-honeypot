@@ -1,7 +1,19 @@
 // @refresh reset
 "use client";
 
-import { ChevronLeft, Radio, RefreshCw, Route } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  PanelRightClose,
+  PanelRightOpen,
+  Pause,
+  Play,
+  Radio,
+  RefreshCw,
+  Route,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RegionStatus } from "@/components/ui/RegionState";
@@ -9,6 +21,7 @@ import type {
   FilesystemTopologySnapshot,
   SessionCwdHistoryEvent,
 } from "@/lib/dashboardTypes";
+import { AuditSessionSelect } from "./AuditSessionSelect";
 import { CwdRouteHistory } from "./CwdRouteHistory";
 import { FilesystemInspector } from "./FilesystemInspector";
 import {
@@ -33,6 +46,13 @@ export function FilesystemActivity() {
   const [historyStatus, setHistoryStatus] = useState<RegionStatus>("loading");
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState<string | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
+
+  // Fullscreen & Hybrid Replay Studio State
+  const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
+  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1400);
+  const [showFailedAttempts, setShowFailedAttempts] = useState(true);
 
   const historyRequest = useRef<{ generation: number; sessionId: string; controller: AbortController } | null>(null);
   const latestSnapshotAt = useRef(0);
@@ -240,19 +260,24 @@ export function FilesystemActivity() {
 
   const selectSession = useCallback(
     (sessionId: string) => {
+      const isDifferentSession = sessionId !== selectedSessionIdRef.current;
       const session = sessionById.get(sessionId);
       historyRequest.current?.controller.abort();
-      setHistory([]);
-      setHistoryCursor(null);
-      setSelectedHistoryEventId(null);
+      if (isDifferentSession) {
+        setHistory([]);
+        setHistoryCursor(null);
+        setSelectedHistoryEventId(null);
+      }
+      setIsPlaying(false);
       selectedSessionIdRef.current = sessionId;
       setSelectedSessionId(sessionId);
       if (session?.cwdState.path) {
         selectedLiveCwdRef.current = session.cwdState.path;
         setSelectedPath(snapshot?.nodes.some((n) => n.path === session.cwdState.path) ? session.cwdState.path : null);
       }
+      void loadHistory(sessionId, null);
     },
-    [sessionById, snapshot?.nodes],
+    [sessionById, snapshot?.nodes, loadHistory],
   );
 
   // Decoupled directory selection: inspects directory metadata without destroying the currently audited session
@@ -262,10 +287,19 @@ export function FilesystemActivity() {
 
   const switchViewMode = useCallback(
     (mode: "live" | "audit", targetSessionId?: string) => {
+      if (mode === "live") {
+        setIsAuditFullscreen(false);
+        setIsPlaying(false);
+      }
       setViewMode(mode);
-      const sid = targetSessionId ?? selectedSessionIdRef.current;
-      if (targetSessionId) {
-        selectSession(targetSessionId);
+      const sid =
+        targetSessionId ??
+        selectedSessionIdRef.current ??
+        snapshot?.sessions[0]?.sessionId ??
+        snapshot?.recentClosedSessions[0]?.sessionId ??
+        null;
+      if (sid) {
+        selectSession(sid);
       }
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
@@ -279,7 +313,7 @@ export function FilesystemActivity() {
         window.history.replaceState(null, "", url.toString());
       }
     },
-    [selectSession],
+    [selectSession, snapshot?.sessions, snapshot?.recentClosedSessions],
   );
 
   const auditSnapshot = useMemo(() => {
@@ -289,19 +323,24 @@ export function FilesystemActivity() {
 
   const chronologicalHistory = useMemo(() => [...history].reverse(), [history]);
 
+  const displayedHistory = useMemo(() => {
+    if (showFailedAttempts) return chronologicalHistory;
+    return chronologicalHistory.filter((e) => e.action !== "failed_change");
+  }, [chronologicalHistory, showFailedAttempts]);
+
   const selectedHistoryIndex = useMemo(() => {
-    if (!chronologicalHistory.length) return -1;
-    const index = chronologicalHistory.findIndex((event) => event.id === selectedHistoryEventId);
-    return index >= 0 ? index : chronologicalHistory.length - 1;
-  }, [chronologicalHistory, selectedHistoryEventId]);
+    if (!displayedHistory.length) return -1;
+    const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
+    return index >= 0 ? index : displayedHistory.length - 1;
+  }, [displayedHistory, selectedHistoryEventId]);
 
   const activeHop: ActiveHopRoute | null = useMemo(() => {
-    if (selectedHistoryIndex < 0 || !chronologicalHistory[selectedHistoryIndex]) return null;
-    const currentEvent = chronologicalHistory[selectedHistoryIndex];
+    if (selectedHistoryIndex < 0 || !displayedHistory[selectedHistoryIndex]) return null;
+    const currentEvent = displayedHistory[selectedHistoryIndex];
     const isFailed = currentEvent.action === "failed_change";
     const visitedStepMap: Record<string, number> = {};
     for (let i = 0; i <= selectedHistoryIndex; i++) {
-      const ev = chronologicalHistory[i];
+      const ev = displayedHistory[i];
       if (ev.action !== "failed_change" && ev.toPath && visitedStepMap[ev.toPath] === undefined) {
         visitedStepMap[ev.toPath] = i + 1;
       }
@@ -314,15 +353,105 @@ export function FilesystemActivity() {
       status: currentEvent.status,
       at: currentEvent.at,
       stepIndex: selectedHistoryIndex,
-      totalSteps: chronologicalHistory.length,
+      totalSteps: displayedHistory.length,
       visitedPaths: Object.keys(visitedStepMap),
       visitedStepMap,
       isFailedAttempt: isFailed,
     };
-  }, [chronologicalHistory, selectedHistoryIndex]);
+  }, [displayedHistory, selectedHistoryIndex]);
+
+  const handlePrevHop = useCallback(() => {
+    setIsPlaying(false);
+    if (selectedHistoryIndex > 0) {
+      setSelectedHistoryEventId(displayedHistory[selectedHistoryIndex - 1]?.id ?? null);
+    }
+  }, [displayedHistory, selectedHistoryIndex]);
+
+  const handleNextHop = useCallback(() => {
+    setIsPlaying(false);
+    if (selectedHistoryIndex >= 0 && selectedHistoryIndex < displayedHistory.length - 1) {
+      setSelectedHistoryEventId(displayedHistory[selectedHistoryIndex + 1]?.id ?? null);
+    }
+  }, [displayedHistory, selectedHistoryIndex]);
+
+  const handleTogglePlay = useCallback(() => {
+    if (selectedHistoryIndex >= displayedHistory.length - 1) {
+      setSelectedHistoryEventId(displayedHistory[0]?.id ?? null);
+    }
+    setIsPlaying((prev) => !prev);
+  }, [displayedHistory, selectedHistoryIndex]);
+
+  const handlePause = useCallback(() => {
+    setIsPlaying(false);
+  }, []);
+
+  const handleToggleSpeed = useCallback(() => {
+    setPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
+  }, []);
+
+  // Synchronized auto-play timer for audit mode
+  useEffect(() => {
+    if (viewMode !== "audit" || !isPlaying) return;
+
+    const timer = setTimeout(() => {
+      if (selectedHistoryIndex >= displayedHistory.length - 1) {
+        setIsPlaying(false);
+        return;
+      }
+
+      const nextIndex = selectedHistoryIndex + 1;
+      const nextEvent = displayedHistory[nextIndex];
+      if (nextEvent) {
+        setSelectedHistoryEventId(nextEvent.id);
+      } else {
+        setIsPlaying(false);
+      }
+    }, playbackSpeed);
+
+    return () => clearTimeout(timer);
+  }, [viewMode, isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed]);
+
+  // Global audit keyboard shortcuts (Space: play/pause, Left/Right: step, Esc: exit fullscreen)
+  useEffect(() => {
+    if (viewMode !== "audit") return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const tag = (event.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
+      if (event.key === "Escape") {
+        if (isAuditFullscreen) {
+          event.preventDefault();
+          setIsAuditFullscreen(false);
+        }
+      } else if (event.key === " " || event.code === "Space") {
+        event.preventDefault();
+        handleTogglePlay();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        handlePrevHop();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        handleNextHop();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [viewMode, isAuditFullscreen, handleTogglePlay, handlePrevHop, handleNextHop]);
+
+  // Lock body scroll when audit fullscreen is active
+  useEffect(() => {
+    if (!isAuditFullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isAuditFullscreen]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-10 sm:pb-14">
       {/* Header Section */}
       <section className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -444,10 +573,177 @@ export function FilesystemActivity() {
             />
           </aside>
         </div>
+      ) : isAuditFullscreen ? (
+        /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Audit Replay Studio Fullscreen"
+          className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
+        >
+          {/* Studio Top Navigation Bar */}
+          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-2">
+                <Route className="h-4 w-4 text-primary" />
+                <span className="text-sm font-semibold text-text">Audit Replay Studio</span>
+              </div>
+              <div className="h-4 w-px bg-border hidden sm:block" />
+              <span className="text-xs text-text-subtle font-medium hidden md:inline">Audited Session:</span>
+              <AuditSessionSelect
+                sessions={snapshot?.sessions ?? []}
+                recentClosedSessions={snapshot?.recentClosedSessions ?? []}
+                selectedSessionId={selectedSessionId}
+                onSelectSession={selectSession}
+              />
+              {selectedSession && (
+                <span className="font-mono text-xs text-text-subtle hidden lg:inline">
+                  IP: <strong className="text-text">{selectedSession.sourceIp}</strong>
+                </span>
+              )}
+            </div>
+
+            {/* Center: Active Hop / Quick Replay Scrubber */}
+            <div className="flex items-center gap-2">
+              {displayedHistory.length > 0 && (
+                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-subtle px-2.5 py-1">
+                  <button
+                    type="button"
+                    onClick={handlePrevHop}
+                    disabled={selectedHistoryIndex <= 0}
+                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    title="Previous hop (←)"
+                    aria-label="Previous hop"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTogglePlay}
+                    className={`ui-button h-6 min-h-6 px-2 text-[11px] flex items-center gap-1 ${
+                      isPlaying ? "border-primary bg-primary text-surface" : ""
+                    }`}
+                    title={isPlaying ? "Pause auto-playback (Space)" : "Play route trajectory automatically (Space)"}
+                    aria-label={isPlaying ? "Pause auto-playback" : "Play route trajectory automatically"}
+                  >
+                    {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    <span>{isPlaying ? "Pause" : "Play"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextHop}
+                    disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
+                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    title="Next hop (→)"
+                    aria-label="Next hop"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="text-[11px] font-mono text-text-muted px-1.5 border-l border-border/60">
+                    Hop <strong className="text-primary">{selectedHistoryIndex + 1}</strong> of {displayedHistory.length}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Tools & Controls */}
+            <div className="flex items-center gap-2">
+              {/* Keyboard shortcuts hints */}
+              <div className="hidden xl:flex items-center gap-1.5 text-[11px] text-text-subtle font-mono mr-2">
+                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Space</kbd> Play
+                <span className="text-border">·</span>
+                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">←</kbd>
+                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">→</kbd> Step
+                <span className="text-border">·</span>
+                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Esc</kbd> Exit
+              </div>
+
+              {/* Toggle Timeline Collapse (70/30 vs 100%) */}
+              <button
+                type="button"
+                onClick={() => setIsTimelineCollapsed((c) => !c)}
+                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
+                title={isTimelineCollapsed ? "Show timeline sidebar (70/30 split)" : "Collapse timeline sidebar (100% canvas)"}
+                aria-pressed={isTimelineCollapsed}
+              >
+                {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5" /> : <PanelRightClose className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">{isTimelineCollapsed ? "Show Timeline" : "Hide Timeline"}</span>
+              </button>
+
+              {/* Exit Fullscreen Button */}
+              <button
+                type="button"
+                onClick={() => setIsAuditFullscreen(false)}
+                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5 bg-surface-subtle hover:bg-surface-hover"
+                title="Exit Fullscreen Studio (Esc)"
+                aria-label="Exit Fullscreen Studio"
+              >
+                <Minimize2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Exit Fullscreen</span>
+              </button>
+            </div>
+          </header>
+
+          {/* Main Studio Workspace */}
+          <div className="min-h-0 flex-1 flex overflow-hidden">
+            {/* Left Canvas: Flex-1 fills available width smoothly */}
+            <div className="min-w-0 flex-1 h-full flex flex-col">
+              <TopologyCanvas
+                snapshot={auditSnapshot ?? snapshot}
+                regionStatus={regionStatus}
+                streamState={streamState}
+                selectedSessionId={selectedSessionId}
+                selectedPath={selectedPath}
+                activeHop={activeHop}
+                title={`Attack Trajectory: ${selectedSession?.sourceIp ?? "Session"}`}
+                subtitle="All historical directories touched by this session are preserved on the canvas."
+                onSelectSession={selectSession}
+                onSelectPath={selectPath}
+                isExpanded={isAuditFullscreen}
+                onToggleExpand={() => setIsAuditFullscreen(false)}
+                isAuditMode={true}
+                className="h-full flex-1 min-h-0"
+              />
+            </div>
+
+            {/* Right Timeline: Smoothly collapsible sidebar */}
+            <div
+              inert={isTimelineCollapsed ? true : undefined}
+              aria-hidden={isTimelineCollapsed}
+              className={`h-full flex flex-col shrink-0 overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none ${
+                isTimelineCollapsed
+                  ? "w-0 opacity-0 pointer-events-none ml-0"
+                  : "w-80 lg:w-96 xl:w-[28rem] opacity-100 ml-2.5 sm:ml-3"
+              }`}
+            >
+              <div className="w-80 lg:w-96 xl:w-[28rem] h-full flex flex-col min-h-0">
+                <CwdRouteHistory
+                  selectedSession={selectedSession}
+                  history={history}
+                  historyStatus={historyStatus}
+                  historyCursor={historyCursor}
+                  selectedHistoryEventId={selectedHistoryEventId}
+                  layout="sidebar"
+                  onSelectHistoryEventId={setSelectedHistoryEventId}
+                  onLoadEarlier={() => {
+                    if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
+                  }}
+                  isPlaying={isPlaying}
+                  onTogglePlay={handleTogglePlay}
+                  onPause={handlePause}
+                  playbackSpeed={playbackSpeed}
+                  onToggleSpeed={handleToggleSpeed}
+                  showFailedAttempts={showFailedAttempts}
+                  onToggleShowFailedAttempts={setShowFailedAttempts}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
-        /* Mode 2: Session Forensics & Replay Mode (Side-by-Side 100% Viewport) */
+        /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
         <div className="space-y-4">
-          {/* Target Session Selector Bar */}
+          {/* Target Session Selector & Action Bar */}
           <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between shadow-xs">
             <div className="flex flex-wrap items-center gap-2.5">
               <button
@@ -460,50 +756,97 @@ export function FilesystemActivity() {
               </button>
               <div className="h-4 w-px bg-border hidden sm:block" />
               <span className="text-xs text-text-subtle font-medium">Audited Session:</span>
-              <select
-                value={selectedSessionId ?? ""}
-                onChange={(e) => {
-                  const nextId = e.target.value;
-                  if (nextId) selectSession(nextId);
-                }}
-                className="rounded-lg border border-border bg-surface-subtle px-2.5 py-1 font-mono text-xs text-text focus:border-primary focus:outline-none"
-              >
-                {snapshot?.sessions.length ? (
-                  <optgroup label="Active Sessions">
-                    {snapshot.sessions.map((s) => (
-                      <option key={s.sessionId} value={s.sessionId}>
-                        {s.sourceIp} · {s.sessionId.slice(0, 8)}… ({s.cwdState.path})
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-                {snapshot?.recentClosedSessions.length ? (
-                  <optgroup label="Closed Sessions">
-                    {snapshot.recentClosedSessions.map((s) => (
-                      <option key={s.sessionId} value={s.sessionId}>
-                        {s.sourceIp} · {s.sessionId.slice(0, 8)}… (Closed)
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-              </select>
+              <AuditSessionSelect
+                sessions={snapshot?.sessions ?? []}
+                recentClosedSessions={snapshot?.recentClosedSessions ?? []}
+                selectedSessionId={selectedSessionId}
+                onSelectSession={selectSession}
+              />
             </div>
 
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
               {selectedSession && (
                 <span className="font-mono text-xs text-text-subtle hidden md:inline">
                   IP: <strong className="text-text">{selectedSession.sourceIp}</strong>
                 </span>
               )}
-              <span className="ui-badge border-primary-border bg-primary-subtle text-primary text-xs font-semibold">
-                Forensic Playback Synchronized
-              </span>
+
+              {/* Compact Scrubber when Timeline is collapsed */}
+              <div
+                className={`overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none flex items-center ${
+                  isTimelineCollapsed && displayedHistory.length > 0
+                    ? "max-w-xs opacity-100"
+                    : "max-w-0 opacity-0 pointer-events-none"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-subtle px-2 py-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handlePrevHop}
+                    disabled={selectedHistoryIndex <= 0}
+                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    title="Previous hop (←)"
+                    aria-label="Previous hop"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTogglePlay}
+                    className={`ui-button h-6 min-h-6 px-2 text-[11px] flex items-center gap-1 ${
+                      isPlaying ? "border-primary bg-primary text-surface" : ""
+                    }`}
+                    title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+                    aria-label={isPlaying ? "Pause" : "Play"}
+                  >
+                    {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    <span>{isPlaying ? "Pause" : "Play"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextHop}
+                    disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
+                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    title="Next hop (→)"
+                    aria-label="Next hop"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="text-[11px] font-mono text-text-muted px-1">
+                    Hop {selectedHistoryIndex + 1}/{displayedHistory.length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Toggle Timeline Collapse */}
+              <button
+                type="button"
+                onClick={() => setIsTimelineCollapsed((c) => !c)}
+                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
+                title={isTimelineCollapsed ? "Show timeline panel (70/30 split)" : "Collapse timeline panel (100% canvas)"}
+                aria-pressed={isTimelineCollapsed}
+              >
+                {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5 text-primary" /> : <PanelRightClose className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">{isTimelineCollapsed ? "Show Timeline" : "Hide Timeline"}</span>
+              </button>
+
+              {/* Fullscreen Button */}
+              <button
+                type="button"
+                onClick={() => setIsAuditFullscreen(true)}
+                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
+                title="Enter Fullscreen Audit Studio"
+                aria-label="Enter Fullscreen Audit Studio"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Fullscreen</span>
+              </button>
             </div>
           </div>
 
           {/* Side-by-Side Audit Layout */}
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-stretch">
-            <div className="min-w-0">
+          <div className="flex flex-col lg:flex-row items-stretch lg:h-[600px] xl:h-[660px]">
+            <div className="min-w-0 flex-1 h-full flex flex-col min-h-[480px] lg:min-h-0">
               <TopologyCanvas
                 snapshot={auditSnapshot ?? snapshot}
                 regionStatus={regionStatus}
@@ -515,22 +858,44 @@ export function FilesystemActivity() {
                 subtitle="All historical directories touched by this session are preserved on the canvas."
                 onSelectSession={selectSession}
                 onSelectPath={selectPath}
+                isExpanded={false}
+                onToggleExpand={() => setIsAuditFullscreen(true)}
+                isAuditMode={true}
+                className="h-full flex-1 min-h-0"
               />
             </div>
 
-            <div className="min-w-0">
-              <CwdRouteHistory
-                selectedSession={selectedSession}
-                history={history}
-                historyStatus={historyStatus}
-                historyCursor={historyCursor}
-                selectedHistoryEventId={selectedHistoryEventId}
-                layout="sidebar"
-                onSelectHistoryEventId={setSelectedHistoryEventId}
-                onLoadEarlier={() => {
-                  if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
-                }}
-              />
+            {/* Smooth Collapsible Sidebar */}
+            <div
+              inert={isTimelineCollapsed ? true : undefined}
+              aria-hidden={isTimelineCollapsed}
+              className={`flex flex-col shrink-0 overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none ${
+                isTimelineCollapsed
+                  ? "max-h-0 lg:max-h-none lg:w-0 opacity-0 pointer-events-none mt-0 lg:mt-0 lg:ml-0"
+                  : "max-h-[800px] lg:max-h-none w-full lg:w-96 xl:w-[28rem] opacity-100 mt-4 lg:mt-0 lg:ml-4"
+              }`}
+            >
+              <div className="w-full lg:w-96 xl:w-[28rem] h-full flex flex-col min-h-0">
+                <CwdRouteHistory
+                  selectedSession={selectedSession}
+                  history={history}
+                  historyStatus={historyStatus}
+                  historyCursor={historyCursor}
+                  selectedHistoryEventId={selectedHistoryEventId}
+                  layout="sidebar"
+                  onSelectHistoryEventId={setSelectedHistoryEventId}
+                  onLoadEarlier={() => {
+                    if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
+                  }}
+                  isPlaying={isPlaying}
+                  onTogglePlay={handleTogglePlay}
+                  onPause={handlePause}
+                  playbackSpeed={playbackSpeed}
+                  onToggleSpeed={handleToggleSpeed}
+                  showFailedAttempts={showFailedAttempts}
+                  onToggleShowFailedAttempts={setShowFailedAttempts}
+                />
+              </div>
             </div>
           </div>
         </div>
