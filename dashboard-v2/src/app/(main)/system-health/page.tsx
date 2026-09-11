@@ -12,16 +12,12 @@ export default function SystemHealthPage() {
             <h1 className="mt-3 text-2xl font-semibold leading-8 tracking-tight">System health</h1>
             <p className="mt-2 text-sm text-text-muted">Review the telemetry and live event surface supporting the honeypot.</p>
           </div>
-          <span className="ui-badge border-info-border bg-info-subtle text-info">Telemetry refresh · 10s</span>
        </header>
 
        {/* ---------------- Hardware Task Manager ---------------- */}
-       <section className="ui-panel flex min-h-[430px] flex-col p-5 sm:p-6 lg:h-[450px]">
-          <div className="mb-4 flex items-center gap-2"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-success"></span>
-            <h2 className="text-base font-semibold">Hardware telemetry</h2><span className="text-xs text-text-muted">Real-time</span>
-          </div>
+       <section className="ui-panel flex min-h-[500px] flex-col p-5 sm:p-6 lg:h-[510px]">
           <div className="flex-1">
-             <HardwareMonitor />
+            <HardwareMonitor />
           </div>
        </section>
 
@@ -33,7 +29,7 @@ export default function SystemHealthPage() {
           </div>
           {/* Top Attackers */}
           <div className="ui-panel flex min-h-[420px] flex-col overflow-hidden p-5 sm:p-6 xl:h-full">
-            <h2 className="mb-4 text-base font-semibold">Top threat actors</h2>
+            <div className="mb-4"><h2 className="text-base font-semibold">Top source IPs</h2><p className="mt-1 text-xs text-text-muted">Ranked by observed events in the current live feed.</p></div>
             <AttackerTable />
           </div>
        </div>

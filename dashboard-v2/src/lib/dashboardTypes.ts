@@ -79,6 +79,7 @@ export interface HardwareTelemetry extends JsonRecord {
 
 export interface HardwareChartRecord extends HardwareTelemetry {
   time: string;
+  timestampEpoch: number;
 }
 
 export type HardwareStreamMessage =
@@ -207,16 +208,28 @@ export function isDashboardThreatEvent(value: unknown): value is DashboardThreat
     isAbuseIpdb(value.abuseipdb) && isVirusTotal(value.virustotal);
 }
 
-function isMetric(value: unknown): boolean {
-  return value === undefined || value === null || value instanceof Date || isStringOrNumber(value);
+function hardwareTimestampEpoch(value: unknown): number | null {
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+  if (typeof value === "number") return Number.isFinite(value) ? new Date(value).getTime() : null;
+  if (typeof value === "string" && value.trim()) {
+    const timestamp = new Date(value).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  return null;
+}
+
+function isHardwareMetric(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  return typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value));
 }
 
 export function isHardwareTelemetry(value: unknown): value is HardwareTelemetry {
   if (!isRecord(value)) return false;
-  return isMetric(value.timestamp) && isMetric(value.cpu_percent) &&
-    isMetric(value.mem_percent) && isMetric(value.disk_percent) &&
-    isMetric(value.temperature) && isMetric(value.net_wlan0_rx_mbps) &&
-    isMetric(value.net_wlan0_tx_mbps);
+  return hardwareTimestampEpoch(value.timestamp) !== null && isHardwareMetric(value.cpu_percent) &&
+    isHardwareMetric(value.mem_percent) && isHardwareMetric(value.disk_percent) &&
+    isHardwareMetric(value.temperature) && isHardwareMetric(value.net_wlan0_rx_mbps) &&
+    isHardwareMetric(value.net_wlan0_tx_mbps);
 }
 
 export function parseHardwareStreamMessage(value: unknown): HardwareStreamMessage | null {
@@ -248,11 +261,25 @@ export function parseThreatStreamMessage(value: unknown): ThreatStreamMessage | 
 }
 
 export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRecord {
-  const date = metric.timestamp instanceof Date ? metric.timestamp : new Date(metric.timestamp ?? "");
+  const timestampEpoch = hardwareTimestampEpoch(metric.timestamp) ?? 0;
+  const date = new Date(timestampEpoch);
   return {
     ...metric,
+    cpu_percent: numericHardwareMetric(metric.cpu_percent),
+    mem_percent: numericHardwareMetric(metric.mem_percent),
+    disk_percent: numericHardwareMetric(metric.disk_percent),
+    temperature: numericHardwareMetric(metric.temperature),
+    net_wlan0_rx_mbps: numericHardwareMetric(metric.net_wlan0_rx_mbps),
+    net_wlan0_tx_mbps: numericHardwareMetric(metric.net_wlan0_tx_mbps),
+    timestampEpoch,
     time: `${date.getHours()}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`,
   };
+}
+
+export function numericHardwareMetric(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  const numberValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
 }
 
 export function isDashboardUser(value: unknown): value is DashboardUser {
