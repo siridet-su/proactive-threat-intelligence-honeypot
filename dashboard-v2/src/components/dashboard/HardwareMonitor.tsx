@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CloudOff, Cpu, HardDrive, MemoryStick, Radio, RefreshCw, Thermometer, Wifi } from "lucide-react";
+import { CloudOff, Cpu, FlipHorizontal2, HardDrive, MemoryStick, Radio, RefreshCw, Thermometer, Wifi } from "lucide-react";
 
 import { formatHardwareMetric, isHardwareTelemetry, parseHardwareStreamMessage } from "@/lib/dashboardTypes";
 import type { HardwareChartRecord, HardwareTelemetry } from "@/lib/dashboardTypes";
@@ -22,6 +22,14 @@ function reconcileMetrics(incoming: HardwareTelemetry[], current: HardwareChartR
 function formatPercent(value: number | string | null | undefined) { return typeof value === "number" ? `${value.toFixed(1)}%` : "—"; }
 function formatTemperature(value: number | string | null | undefined) { return typeof value === "number" ? `${value.toFixed(1)}°C` : "—"; }
 function formatThroughput(value: number | string | null | undefined) { return typeof value === "number" ? value.toFixed(2) : "—"; }
+function formatBytes(value: number | string | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let amount = Math.abs(value);
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index += 1; }
+  return `${value < 0 ? "-" : ""}${amount.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
 function formatAge(milliseconds: number) { if (milliseconds < 5_000) return "just now"; if (milliseconds < 60_000) return `${Math.floor(milliseconds / 1_000)}s ago`; return `${Math.floor(milliseconds / 60_000)}m ago`; }
 
 export function HardwareMonitor() {
@@ -142,14 +150,38 @@ export function HardwareMonitor() {
       <div className="flex items-center gap-2"><span className={`ui-badge ${statePresentation.className}`} aria-live="polite">{statePresentation.label}</span><button type="button" onClick={() => void refreshTelemetry()} disabled={manualRefreshing} className="ui-button min-h-9 px-3 text-xs"><RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />Refresh</button></div>
     </div>
     {loading && metrics.length === 0 ? <HardwareSkeleton /> : metrics.length === 0 ? <RegionState kind={fetchFailed ? "error" : "empty"} title={fetchFailed ? "Hardware telemetry unavailable" : "No hardware telemetry"} description={fetchFailed ? "The hardware service could not be reached. You can retry now or wait for the next automatic refresh." : "No verified telemetry samples were returned from hardware_live."} /> : <div className="flex min-h-0 flex-1 flex-col gap-5">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5"><MetricCard icon={Cpu} label="CPU usage" value={formatPercent(latest?.cpu_percent)} /><MetricCard icon={MemoryStick} label="Memory" value={formatPercent(latest?.mem_percent)} /><MetricCard icon={HardDrive} label="Storage" value={formatPercent(latest?.disk_percent)} /><MetricCard icon={Thermometer} label="Temperature" value={formatTemperature(latest?.temperature)} iconClassName="bg-warning-subtle text-warning" /><MetricCard icon={Wifi} label="wlan0 · RX / TX" value={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)}`} suffix="Mbps" /></div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <MetricCard icon={Cpu} label="CPU usage" value={formatPercent(latest?.cpu_percent)} details={latest?.cpu_core_percent?.map((percentage, index) => ({ label: `Core ${index + 1}`, value: formatPercent(percentage) })) ?? []} />
+        <MetricCard icon={MemoryStick} label="Memory" value={formatPercent(latest?.mem_percent)} details={[{ label: "Used", value: formatBytes(latest?.mem_used_bytes) }, { label: "Available", value: formatBytes(latest?.mem_available_bytes) }, { label: "Total", value: formatBytes(latest?.mem_total_bytes) }]} />
+        <MetricCard icon={HardDrive} label="Storage" value={formatPercent(latest?.disk_percent)} details={[{ label: "Used", value: formatBytes(latest?.disk_used_bytes) }, { label: "Free", value: formatBytes(latest?.disk_free_bytes) }, { label: "Total", value: formatBytes(latest?.disk_total_bytes) }]} />
+        <MetricCard icon={Thermometer} label="Temperature" value={formatTemperature(latest?.temperature)} details={[{ label: "Latest sample", value: latest?.time ?? "—" }, { label: "Reading", value: formatTemperature(latest?.temperature) }]} />
+        <MetricCard icon={Wifi} label="wlan0 · RX / TX" value={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)}`} suffix="Mbps" details={[{ label: "RX", value: `${formatThroughput(latest?.net_wlan0_rx_mbps)} Mbps` }, { label: "TX", value: `${formatThroughput(latest?.net_wlan0_tx_mbps)} Mbps` }]} />
+      </div>
       <div className="grid min-h-[220px] flex-1 grid-cols-1 gap-4 lg:grid-cols-3"><HardwareChart title="CPU history" description={`${metrics.length} most recent verified samples`} data={metrics} dataKey="cpu_percent" domain={[0, 100]} stroke="var(--chart-1)" fill="var(--chart-1-subtle)" /><HardwareChart title="Thermal history" description="Temperature in °C" data={metrics} dataKey="temperature" stroke="var(--warning)" fill="var(--warning-subtle)" /><ThroughputChart data={metrics} /></div>
     </div>}
   </div>;
 }
 
-function MetricCard({ icon: Icon, label, value, suffix, iconClassName = "bg-primary-subtle text-primary" }: { icon: typeof Cpu; label: string; value: string; suffix?: string; iconClassName?: string }) {
-  return <div className="ui-panel-interactive rounded-lg border border-border bg-surface-subtle p-3"><div className="flex items-center gap-3"><div className={`rounded-md p-2 ${iconClassName}`}><Icon className="h-4 w-4" aria-hidden="true" /></div><div className="min-w-0"><div className="text-xs font-medium text-text-muted">{label}</div><div className="truncate font-mono text-lg text-text">{value}{suffix && <span className="ml-1 text-xs text-text-subtle">{suffix}</span>}</div></div></div></div>;
+type MetricDetail = { label: string; value: string };
+
+function MetricCard({ icon: Icon, label, value, suffix, details, iconClassName = "bg-primary-subtle text-primary" }: { icon: typeof Cpu; label: string; value: string; suffix?: string; details: MetricDetail[]; iconClassName?: string }) {
+  const [flipped, setFlipped] = useState(false);
+  const accessibleDetails = details.filter((detail) => detail.value !== "—");
+  const detailDescription = accessibleDetails.length > 0 ? accessibleDetails.map((detail) => `${detail.label}: ${detail.value}`).join(", ") : "No detailed value in the latest sample";
+
+  return <button type="button" onClick={() => setFlipped((current) => !current)} aria-pressed={flipped} aria-label={`${label}. ${flipped ? "Show summary" : "Show details"}. ${flipped ? "" : detailDescription}`} className="group relative min-h-[104px] w-full text-left [perspective:1000px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
+    <span className={`relative block min-h-[104px] transition-transform duration-150 [transform-style:preserve-3d] motion-reduce:transition-none ${flipped ? "[transform:rotateY(180deg)] motion-reduce:[transform:none]" : ""}`}>
+      <span className={`absolute inset-0 flex flex-col justify-between rounded-lg border border-border bg-surface-subtle p-3 shadow-[var(--shadow-card)] transition-colors duration-150 [backface-visibility:hidden] group-hover:border-border-strong group-hover:bg-surface-hover motion-reduce:[backface-visibility:visible] motion-reduce:transition-none ${flipped ? "motion-reduce:opacity-0" : "motion-reduce:opacity-100"}`}>
+        <span className="flex min-w-0 items-center gap-3"><span className={`rounded-md p-2 ${iconClassName}`}><Icon className="h-4 w-4" aria-hidden="true" /></span><span className="min-w-0"><span className="block text-xs font-medium text-text-muted">{label}</span><span className="block truncate font-mono text-lg text-text">{value}{suffix && <span className="ml-1 text-xs text-text-subtle">{suffix}</span>}</span></span></span>
+        <span className="inline-flex items-center gap-1 self-end text-xs text-text-subtle"><FlipHorizontal2 className="h-3.5 w-3.5" aria-hidden="true" />Details</span>
+      </span>
+      <span className={`absolute inset-0 flex flex-col justify-between rounded-lg border border-primary-border bg-primary-subtle p-3 [backface-visibility:hidden] [transform:rotateY(180deg)] motion-reduce:[backface-visibility:visible] motion-reduce:[transform:none] motion-reduce:transition-none ${flipped ? "motion-reduce:opacity-100" : "motion-reduce:opacity-0"}`}>
+        <span className="flex min-w-0 items-center justify-between gap-2"><span className="text-xs font-medium text-text">{label} details</span><FlipHorizontal2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /></span>
+        {accessibleDetails.length > 0 ? <span className={`grid gap-x-2 gap-y-2 ${accessibleDetails.length > 3 ? "grid-cols-2" : "grid-cols-3"}`}>{accessibleDetails.map((detail) => <span key={detail.label} className="min-w-0"><span className="block truncate text-xs text-text-muted">{detail.label}</span><span className="block truncate font-mono text-xs font-medium text-text" title={detail.value}>{detail.value}</span></span>)}</span> : <span className="text-xs text-text-muted">No detailed value in the latest sample.</span>}
+        <span className="self-end text-xs text-primary">Summary</span>
+      </span>
+    </span>
+  </button>;
 }
 
 function HardwareSkeleton() {
