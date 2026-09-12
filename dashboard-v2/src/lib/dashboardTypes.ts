@@ -70,8 +70,16 @@ export interface DashboardChartDatum {
 export interface HardwareTelemetry extends JsonRecord {
   timestamp?: string | number | Date;
   cpu_percent?: number | string | null;
+  /** Current percentage per logical CPU, ordered by core index. */
+  cpu_core_percent?: number[] | null;
   mem_percent?: number | string | null;
+  mem_total_bytes?: number | string | null;
+  mem_available_bytes?: number | string | null;
+  mem_used_bytes?: number | string | null;
   disk_percent?: number | string | null;
+  disk_total_bytes?: number | string | null;
+  disk_free_bytes?: number | string | null;
+  disk_used_bytes?: number | string | null;
   temperature?: number | string | null;
   net_wlan0_rx_mbps?: number | string | null;
   net_wlan0_tx_mbps?: number | string | null;
@@ -224,10 +232,17 @@ function isHardwareMetric(value: unknown): boolean {
   return typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value));
 }
 
+function isHardwareMetricList(value: unknown): boolean {
+  return value === undefined || value === null || (Array.isArray(value) && value.length > 0 && value.every(isHardwareMetric));
+}
+
 export function isHardwareTelemetry(value: unknown): value is HardwareTelemetry {
   if (!isRecord(value)) return false;
   return hardwareTimestampEpoch(value.timestamp) !== null && isHardwareMetric(value.cpu_percent) &&
+    isHardwareMetricList(value.cpu_core_percent) &&
     isHardwareMetric(value.mem_percent) && isHardwareMetric(value.disk_percent) &&
+    isHardwareMetric(value.mem_total_bytes) && isHardwareMetric(value.mem_available_bytes) && isHardwareMetric(value.mem_used_bytes) &&
+    isHardwareMetric(value.disk_total_bytes) && isHardwareMetric(value.disk_free_bytes) && isHardwareMetric(value.disk_used_bytes) &&
     isHardwareMetric(value.temperature) && isHardwareMetric(value.net_wlan0_rx_mbps) &&
     isHardwareMetric(value.net_wlan0_tx_mbps);
 }
@@ -266,8 +281,15 @@ export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRe
   return {
     ...metric,
     cpu_percent: numericHardwareMetric(metric.cpu_percent),
+    cpu_core_percent: numericHardwareMetricList(metric.cpu_core_percent),
     mem_percent: numericHardwareMetric(metric.mem_percent),
+    mem_total_bytes: numericHardwareMetric(metric.mem_total_bytes),
+    mem_available_bytes: numericHardwareMetric(metric.mem_available_bytes),
+    mem_used_bytes: numericHardwareMetric(metric.mem_used_bytes),
     disk_percent: numericHardwareMetric(metric.disk_percent),
+    disk_total_bytes: numericHardwareMetric(metric.disk_total_bytes),
+    disk_free_bytes: numericHardwareMetric(metric.disk_free_bytes),
+    disk_used_bytes: numericHardwareMetric(metric.disk_used_bytes),
     temperature: numericHardwareMetric(metric.temperature),
     net_wlan0_rx_mbps: numericHardwareMetric(metric.net_wlan0_rx_mbps),
     net_wlan0_tx_mbps: numericHardwareMetric(metric.net_wlan0_tx_mbps),
@@ -280,6 +302,12 @@ export function numericHardwareMetric(value: unknown): number | null {
   if (value === undefined || value === null) return null;
   const numberValue = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+export function numericHardwareMetricList(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const metrics = value.map(numericHardwareMetric);
+  return metrics.every((metric): metric is number => metric !== null) ? metrics : null;
 }
 
 export function isDashboardUser(value: unknown): value is DashboardUser {

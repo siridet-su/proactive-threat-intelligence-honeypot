@@ -112,6 +112,33 @@ the same Linux semantics. The pressure fields deliberately calculate
 `total - available`, matching the experimental Python collector. Do not mix the
 legacy and pressure fields in one feature definition.
 
+## Bounded live dashboard projection
+
+The processor projects only the fields required by the real-time System Health
+screen into the 30-slot `hardware_live` ring. It is not a raw audit store. The
+current projection includes:
+
+```text
+cpu_percent
+cpu_core_percent
+mem_percent
+mem_total_bytes
+mem_available_bytes
+mem_used_bytes
+disk_percent
+disk_total_bytes
+disk_free_bytes
+disk_used_bytes
+temperature
+net_wlan0_rx_mbps
+net_wlan0_tx_mbps
+```
+
+`cpu_core_percent` is one current percentage per logical CPU. Capacity fields
+are retained so the dashboard can reveal exact current values behind compact
+percentage cards. Raw counters and audit-oriented collector fields are not
+copied into `hardware_live`.
+
 ## Read-only parity snapshot
 
 The binary can emit one warmed JSON snapshot without requiring Redis configuration

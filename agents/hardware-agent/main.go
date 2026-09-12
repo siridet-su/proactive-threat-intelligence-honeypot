@@ -227,16 +227,16 @@ func collectHardwareMetrics(
 	}
 
 	// 2. CPU Metrics
-	if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
-		values["cpu_percent"] = fmt.Sprintf("%.2f", c[0])
+	if total, err := cpu.Percent(0, false); err == nil {
+		addCPUMetrics(values, total, nil)
 	}
-
-	// Per-core CPU % removed to save database space
+	if cores, err := cpu.Percent(0, true); err == nil {
+		addCPUMetrics(values, nil, cores)
+	}
 
 	// 3. Disk Metrics (root /)
 	if d, err := disk.Usage("/"); err == nil && d != nil {
-		values["disk_used_bytes"] = d.Used
-		values["disk_percent"] = fmt.Sprintf("%.2f", d.UsedPercent)
+		addDiskMetrics(values, d)
 	}
 
 	// 4. Keep physical and overlay metrics separate. Tailscale traffic is also
@@ -276,6 +276,31 @@ func addMemoryMetrics(values map[string]interface{}, memory *mem.VirtualMemorySt
 	values["mem_pressure_used_bytes"] = pressureUsed
 	values["mem_pressure_percent"] = fmt.Sprintf("%.2f", pressurePercent)
 	values["mem_pressure_semantics"] = "total_minus_available"
+}
+
+func addCPUMetrics(values map[string]interface{}, total []float64, cores []float64) {
+	if len(total) > 0 {
+		values["cpu_percent"] = fmt.Sprintf("%.2f", total[0])
+	}
+	if len(cores) == 0 {
+		return
+	}
+	encoded, err := json.Marshal(cores)
+	if err != nil {
+		log.Printf("Unable to encode per-core CPU metrics: %v", err)
+		return
+	}
+	// The processor decodes this JSON array before creating the bounded
+	// hardware_live projection. It is retained because the system-health
+	// card exposes a current per-core breakdown, not an audit trail.
+	values["cpu_core_percent"] = string(encoded)
+}
+
+func addDiskMetrics(values map[string]interface{}, usage *disk.UsageStat) {
+	values["disk_total_bytes"] = usage.Total
+	values["disk_free_bytes"] = usage.Free
+	values["disk_used_bytes"] = usage.Used
+	values["disk_percent"] = fmt.Sprintf("%.2f", usage.UsedPercent)
 }
 
 func emitSnapshot(

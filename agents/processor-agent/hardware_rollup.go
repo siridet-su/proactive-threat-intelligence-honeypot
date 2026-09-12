@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -14,6 +15,25 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// hardwareLiveFields is the bounded real-time projection consumed by System
+// Health. Raw interface counters, collector semantics, and audit-only fields
+// remain outside hardware_live.
+var hardwareLiveFields = map[string]struct{}{
+	"cpu_percent":         {},
+	"cpu_core_percent":    {},
+	"mem_percent":         {},
+	"mem_total_bytes":     {},
+	"mem_available_bytes": {},
+	"mem_used_bytes":      {},
+	"disk_percent":        {},
+	"disk_total_bytes":    {},
+	"disk_free_bytes":     {},
+	"disk_used_bytes":     {},
+	"temperature":         {},
+	"net_wlan0_rx_mbps":   {},
+	"net_wlan0_tx_mbps":   {},
+}
 
 const (
 	hardwareRawStream        = "raw:hardware"
@@ -56,6 +76,18 @@ func parseHardwareSample(message redis.XMessage) (hardwareSample, bool) {
 	for key, value := range message.Values {
 		values[key] = normalizeHardwareValue(value)
 	}
+	if encoded, ok := values["cpu_core_percent"].(string); ok {
+		var cores []float64
+		if err := json.Unmarshal([]byte(encoded), &cores); err != nil || len(cores) == 0 {
+			return hardwareSample{}, false
+		}
+		for _, percentage := range cores {
+			if math.IsNaN(percentage) || math.IsInf(percentage, 0) {
+				return hardwareSample{}, false
+			}
+		}
+		values["cpu_core_percent"] = cores
+	}
 
 	unixSeconds, ok := values["timestamp"].(float64)
 	if !ok || math.IsNaN(unixSeconds) || math.IsInf(unixSeconds, 0) {
@@ -83,10 +115,12 @@ func buildHardwareLiveDocument(message redis.XMessage, slotCount int) (bson.M, b
 	}
 	document := bson.M{}
 	for key, value := range sample.values {
-		document[key] = value
+		if _, keep := hardwareLiveFields[key]; keep {
+			document[key] = value
+		}
 	}
 	document["_id"] = fmt.Sprintf("%s:%d", sample.sensorID, slot)
-	document["schema_version"] = "hardware_live.v1"
+	document["schema_version"] = "hardware_live.v2"
 	document["sensor_id"] = sample.sensorID
 	document["slot"] = slot
 	document["timestamp"] = sample.at
