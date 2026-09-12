@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getMongoClient } from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 import { getSessionFromRequest, isAdmin, revokeOperatorSessions } from "@/lib/auth/session";
+import { emailLookup, normalizeEmail } from "@/lib/auth/operator-identity";
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
 
     const candidate = data as Record<string, unknown>;
     const fullName = typeof candidate.fullName === "string" ? candidate.fullName.trim() : "";
-    const email = typeof candidate.email === "string" ? candidate.email.trim() : "";
+    const email = typeof candidate.email === "string" ? normalizeEmail(candidate.email) : null;
     const position = typeof candidate.position === "string" ? candidate.position.trim() : "";
     const role = candidate.role === "Admin" ? "Admin" : candidate.role === "Supporter" ? "Supporter" : "";
     const initialPassword = typeof candidate.initialPassword === "string" ? candidate.initialPassword : "";
@@ -58,11 +59,20 @@ export async function POST(request: Request) {
 
     const client = await getMongoClient();
     const db = client.db("honeypot_db");
+    const users = db.collection("users");
+
+    const emailInUse = await users.findOne(
+      { email: emailLookup(email) },
+      { projection: { _id: 1 } },
+    );
+    if (emailInUse) {
+      return NextResponse.json({ error: "An operator already uses this email address" }, { status: 409 });
+    }
 
     let operatorId = "";
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const candidateId = `OP_${Math.floor(1000 + Math.random() * 9000)}`;
-      const existing = await db.collection("users").findOne({ operatorId: candidateId }, { projection: { _id: 1 } });
+      const existing = await users.findOne({ operatorId: candidateId }, { projection: { _id: 1 } });
       if (!existing) {
         operatorId = candidateId;
         break;
@@ -84,7 +94,7 @@ export async function POST(request: Request) {
       createdAt: new Date(),
     };
 
-    await db.collection("users").insertOne(newUser);
+    await users.insertOne(newUser);
     return NextResponse.json({ success: true, user: {
       operatorId: newUser.operatorId,
       fullName: newUser.fullName,
@@ -113,9 +123,21 @@ export async function PUT(request: Request) {
     const client = await getMongoClient();
     const db = client.db("honeypot_db");
 
+    const email = typeof data.email === "string" ? normalizeEmail(data.email) : null;
+    if (!email) return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+
+    const users = db.collection("users");
+    const emailInUse = await users.findOne(
+      { operatorId: { $ne: data.operatorId }, email: emailLookup(email) },
+      { projection: { _id: 1 } },
+    );
+    if (emailInUse) {
+      return NextResponse.json({ error: "An operator already uses this email address" }, { status: 409 });
+    }
+
     const updateData: Record<string, unknown> = {
       fullName: data.fullName,
-      email: data.email,
+      email,
     };
     if (administrator) {
       updateData.position = data.position;
@@ -123,7 +145,7 @@ export async function PUT(request: Request) {
     }
 
     // อัปเดตข้อมูลลงฐานข้อมูล
-    await db.collection("users").updateOne(
+    await users.updateOne(
       { operatorId: data.operatorId },
       { $set: updateData }
     );

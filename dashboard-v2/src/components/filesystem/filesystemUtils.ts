@@ -32,6 +32,10 @@ export const INSPECTOR_PAGE_SIZE = 12;
 export const GRAPH_CALLOUT_LIMIT = 8;
 export const GRAPH_NODE_LIMIT = 42;
 export const LABEL_LAYOUT_STORAGE_KEY = "pti-filesystem-label-layout-v1";
+export const TIMELINE_SIDEBAR_STORAGE_KEY = "pti-timeline-sidebar-width-v1";
+export const MIN_TIMELINE_SIDEBAR_WIDTH = 360;
+export const MAX_TIMELINE_SIDEBAR_WIDTH = 760;
+export const DEFAULT_TIMELINE_SIDEBAR_WIDTH = 420;
 export const MAP_MIN_ZOOM = 0.35;
 export const MAP_MAX_ZOOM = 2.75;
 
@@ -260,20 +264,43 @@ export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: M
 
   for (const [index, callout] of callouts.entries()) {
     const target = graphNodeByPath.get(callout.path);
-    // A source whose target is centered alternates rails.
-    const useLeftRail = !target || Math.abs(target.x - 50) < 0.1 ? index % 2 === 0 : target.x < 50;
+    // When target is centered:
+    // - If only 1 callout, always place on the RIGHT rail for consistent left-to-right reading (directory -> source IP).
+    // - If multiple callouts, alternate between right and left rails (index 0 -> right, index 1 -> left...).
+    const isCentered = !target || Math.abs(target.x - 50) < 0.1;
+    const useLeftRail = isCentered
+      ? callouts.length === 1
+        ? false
+        : index % 2 !== 0
+      : target.x < 50;
     (useLeftRail ? leftRail : rightRail).push(callout);
   }
 
-  // Dedicated outer margin lanes: 9% on the left, 91% on the right.
-  // With the tree envelope constrained within 27%-73%, this guarantees >= 18% horizontal clearance on all screens.
-  const leftRailX = 9;
-  const rightRailX = 91;
+  // Adaptive rail positions:
+  // When both rails are occupied, use generous outer lanes (9% on left, 91% on right).
+  // When only one rail is occupied (e.g. single-session audit mode), adaptively position the rail
+  // closer to the tree envelope so that callouts feel connected to the cluster without giant voids.
+  const nodeXs = [...graphNodeByPath.values()].map((n) => n.x);
+  const minTreeX = nodeXs.length ? Math.min(...nodeXs) : 50;
+  const maxTreeX = nodeXs.length ? Math.max(...nodeXs) : 50;
+
+  let leftRailX = 9;
+  let rightRailX = 91;
+
+  if (leftRail.length === 0 && rightRail.length <= 2) {
+    rightRailX = Math.min(91, Math.max(89, maxTreeX + 26));
+  } else if (rightRail.length === 0 && leftRail.length <= 2) {
+    leftRailX = Math.max(9, Math.min(11, minTreeX - 26));
+  }
 
   const positions = new Map<string, LabelPosition>();
 
   const placeOnRail = (rail: GraphCallout[], x: number) => {
     if (!rail.length) return;
+    const isRightRail = x > 50;
+    // The bottom-right corner houses the minimap (approx y >= 70% in the right corner).
+    // To avoid overlapping the minimap upon auto-arrange or reset, right-rail callouts are capped at y <= 66%.
+    const maxRailY = isRightRail ? 66 : 82;
 
     rail.sort((left, right) => {
       const leftY = graphNodeByPath.get(left.path)?.y ?? 50;
@@ -283,14 +310,14 @@ export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: M
 
     if (rail.length === 1) {
       const targetY = graphNodeByPath.get(rail[0].path)?.y ?? 50;
-      positions.set(rail[0].sourceIp, { x, y: Math.min(80, Math.max(18, targetY)) });
+      positions.set(rail[0].sourceIp, { x, y: Math.min(maxRailY, Math.max(18, targetY)) });
       return;
     }
 
     // Multiple callouts: enforce minimum vertical separation of at least 13%
     const minGap = 13;
     const count = rail.length;
-    const targetYs = rail.map((c) => Math.min(82, Math.max(18, graphNodeByPath.get(c.path)?.y ?? 50)));
+    const targetYs = rail.map((c) => Math.min(maxRailY, Math.max(18, graphNodeByPath.get(c.path)?.y ?? 50)));
 
     const ys = [...targetYs];
     for (let i = 1; i < count; i++) {
@@ -299,8 +326,8 @@ export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: M
       }
     }
 
-    if (ys[count - 1] > 84) {
-      ys[count - 1] = 84;
+    if (ys[count - 1] > maxRailY) {
+      ys[count - 1] = maxRailY;
       for (let i = count - 2; i >= 0; i--) {
         if (ys[i] > ys[i + 1] - minGap) {
           ys[i] = ys[i + 1] - minGap;

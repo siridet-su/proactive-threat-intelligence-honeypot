@@ -53,8 +53,6 @@ import {
   type StreamState,
 } from "./filesystemUtils";
 
-const LABEL_LAYOUT_STORAGE_KEY = "pti-filesystem-label-layout-v1";
-const NODE_LAYOUT_STORAGE_KEY = "pti-filesystem-node-layout-v1";
 const NODE_WORKSPACE_LIMIT = 400;
 const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
 
@@ -87,6 +85,50 @@ function unrestrictedNodeCoordinate(value: number) {
   return Math.min(NODE_WORKSPACE_LIMIT, Math.max(-NODE_WORKSPACE_LIMIT, value));
 }
 
+function readStoredLabelLayout(storageKey: string): Record<string, LabelPosition> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed).flatMap(([sourceIp, position]) => {
+          if (!position || typeof position !== "object" || Array.isArray(position)) return [];
+          const candidate = position as Partial<LabelPosition>;
+          return typeof candidate.x === "number" && typeof candidate.y === "number"
+            ? [[sourceIp, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
+            : [];
+        }),
+      );
+    }
+  } catch {
+    // Ignore corrupt or blocked localStorage
+  }
+  return {};
+}
+
+function readStoredNodeLayout(storageKey: string): Record<string, LabelPosition> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed).flatMap(([path, position]) => {
+          if (!position || typeof position !== "object" || Array.isArray(position)) return [];
+          const candidate = position as Partial<LabelPosition>;
+          return typeof candidate.x === "number" && typeof candidate.y === "number"
+            ? [[path, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
+            : [];
+        }),
+      );
+    }
+  } catch {
+    // Ignore corrupt or blocked localStorage
+  }
+  return {};
+}
+
 interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
   regionStatus: RegionStatus;
@@ -98,6 +140,11 @@ interface TopologyCanvasProps {
   subtitle?: string;
   onSelectSession: (sessionId: string) => void;
   onSelectPath: (path: string | null) => void;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  isAuditMode?: boolean;
+  isResizingContainer?: boolean;
+  className?: string;
 }
 
 export function TopologyCanvas({
@@ -111,14 +158,61 @@ export function TopologyCanvas({
   subtitle,
   onSelectSession,
   onSelectPath,
+  isExpanded: controlledIsExpanded,
+  onToggleExpand,
+  isAuditMode = false,
+  isResizingContainer = false,
+  className,
 }: TopologyCanvasProps) {
   const reducedMotion = useReducedMotion();
+  const hasUserManuallyAdjustedView = useRef(false);
   const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isDraggingSurface, setIsDraggingSurface] = useState(false);
-  const [isTopologyExpanded, setIsTopologyExpanded] = useState(false);
-  const [labelPositions, setLabelPositions] = useState<Record<string, LabelPosition>>({});
-  const [nodePositions, setNodePositions] = useState<Record<string, LabelPosition>>({});
+  const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
+  const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
+  const isControlledExpansion = onToggleExpand !== undefined;
+  const isStandaloneExpanded = isTopologyExpanded && !isControlledExpansion;
+
+  const handleToggleExpand = useCallback(() => {
+    hasUserManuallyAdjustedView.current = false;
+    if (onToggleExpand) {
+      onToggleExpand();
+    } else {
+      setInternalIsTopologyExpanded((prev) => !prev);
+    }
+  }, [onToggleExpand]);
+
+  // Scope layout persistence so audit session inspection never overrides live global topology
+  const labelStorageKey = useMemo(
+    () => (isAuditMode ? `pti-label-layout-audit-${selectedSessionId ?? "default"}` : "pti-label-layout-live"),
+    [isAuditMode, selectedSessionId],
+  );
+  const nodeStorageKey = useMemo(
+    () => (isAuditMode ? `pti-node-layout-audit-${selectedSessionId ?? "default"}` : "pti-node-layout-live"),
+    [isAuditMode, selectedSessionId],
+  );
+
+  const [labelPositions, setLabelPositions] = useState<Record<string, LabelPosition>>(() =>
+    readStoredLabelLayout(labelStorageKey),
+  );
+  const [nodePositions, setNodePositions] = useState<Record<string, LabelPosition>>(() =>
+    readStoredNodeLayout(nodeStorageKey),
+  );
+
+  // Sync state if storage key changes (e.g. switching between live and audit mode or changing session)
+  const [prevLabelStorageKey, setPrevLabelStorageKey] = useState(labelStorageKey);
+  if (prevLabelStorageKey !== labelStorageKey) {
+    setPrevLabelStorageKey(labelStorageKey);
+    setLabelPositions(readStoredLabelLayout(labelStorageKey));
+  }
+
+  const [prevNodeStorageKey, setPrevNodeStorageKey] = useState(nodeStorageKey);
+  if (prevNodeStorageKey !== nodeStorageKey) {
+    setPrevNodeStorageKey(nodeStorageKey);
+    setNodePositions(readStoredNodeLayout(nodeStorageKey));
+  }
+
   const [mapMetrics, setMapMetrics] = useState<MapMetrics | null>(null);
   const [draggedCalloutIp, setDraggedCalloutIp] = useState<string | null>(null);
   const [draggedNodePath, setDraggedNodePath] = useState<string | null>(null);
@@ -136,79 +230,26 @@ export function TopologyCanvas({
   const nodeDrag = useRef<NodeDrag | null>(null);
   const suppressCalloutClick = useRef(false);
   const suppressNodeClick = useRef(false);
-  const labelLayoutReady = useRef(false);
-  const nodeLayoutReady = useRef(false);
-  const skipLabelLayoutRestore = useRef(false);
-  const skipNodeLayoutRestore = useRef(false);
   const autoArrangeUndo = useRef<WorkspaceLayoutSnapshot | null>(null);
   const [canUndoAutoArrange, setCanUndoAutoArrange] = useState(false);
 
-  // Restore label layout from localStorage
-  useEffect(() => {
-    const restore = window.setTimeout(() => {
-      try {
-        if (skipLabelLayoutRestore.current) return;
-        const raw = window.localStorage.getItem(LABEL_LAYOUT_STORAGE_KEY);
-        const parsed: unknown = raw ? JSON.parse(raw) : {};
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const restored = Object.fromEntries(
-            Object.entries(parsed).flatMap(([sourceIp, position]) => {
-              if (!position || typeof position !== "object" || Array.isArray(position)) return [];
-              const candidate = position as Partial<LabelPosition>;
-              return typeof candidate.x === "number" && typeof candidate.y === "number"
-                ? [[sourceIp, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
-                : [];
-            }),
-          );
-          setLabelPositions(restored);
-        }
-      } catch {
-        window.localStorage.removeItem(LABEL_LAYOUT_STORAGE_KEY);
-      } finally {
-        labelLayoutReady.current = true;
-      }
-    }, 0);
-    return () => window.clearTimeout(restore);
-  }, []);
-
   // Save label layout to localStorage
   useEffect(() => {
-    if (!labelLayoutReady.current) return;
-    window.localStorage.setItem(LABEL_LAYOUT_STORAGE_KEY, JSON.stringify(labelPositions));
-  }, [labelPositions]);
+    if (Object.keys(labelPositions).length === 0) {
+      window.localStorage.removeItem(labelStorageKey);
+    } else {
+      window.localStorage.setItem(labelStorageKey, JSON.stringify(labelPositions));
+    }
+  }, [labelPositions, labelStorageKey]);
 
   // Directory layout is a workspace preference, independent from source-IP labels.
   useEffect(() => {
-    const restore = window.setTimeout(() => {
-      try {
-        if (skipNodeLayoutRestore.current) return;
-        const raw = window.localStorage.getItem(NODE_LAYOUT_STORAGE_KEY);
-        const parsed: unknown = raw ? JSON.parse(raw) : {};
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const restored = Object.fromEntries(
-            Object.entries(parsed).flatMap(([path, position]) => {
-              if (!position || typeof position !== "object" || Array.isArray(position)) return [];
-              const candidate = position as Partial<LabelPosition>;
-              return typeof candidate.x === "number" && typeof candidate.y === "number"
-                ? [[path, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
-                : [];
-            }),
-          );
-          setNodePositions(restored);
-        }
-      } catch {
-        window.localStorage.removeItem(NODE_LAYOUT_STORAGE_KEY);
-      } finally {
-        nodeLayoutReady.current = true;
-      }
-    }, 0);
-    return () => window.clearTimeout(restore);
-  }, []);
-
-  useEffect(() => {
-    if (!nodeLayoutReady.current) return;
-    window.localStorage.setItem(NODE_LAYOUT_STORAGE_KEY, JSON.stringify(nodePositions));
-  }, [nodePositions]);
+    if (Object.keys(nodePositions).length === 0) {
+      window.localStorage.removeItem(nodeStorageKey);
+    } else {
+      window.localStorage.setItem(nodeStorageKey, JSON.stringify(nodePositions));
+    }
+  }, [nodePositions, nodeStorageKey]);
 
   // Derived graph layout
   const automaticGraphNodes = useMemo(
@@ -240,13 +281,25 @@ export function TopologyCanvas({
     });
   }, [activeHop, selectedSessionId, snapshot?.sessions]);
 
+  const automaticGraphNodeByPath = useMemo(
+    () => new Map(automaticGraphNodes.map((node) => [node.path, node])),
+    [automaticGraphNodes],
+  );
+
   const graphCallouts = useMemo(
-    () => calloutsForGraph(effectiveSessions, graphNodeByPath),
-    [effectiveSessions, graphNodeByPath],
+    () => calloutsForGraph(effectiveSessions, automaticGraphNodeByPath),
+    [effectiveSessions, automaticGraphNodeByPath],
   );
   const automaticCalloutPositions = useMemo(
-    () => sourceRailPositions(graphCallouts, graphNodeByPath),
-    [graphCallouts, graphNodeByPath],
+    () => sourceRailPositions(graphCallouts, automaticGraphNodeByPath),
+    [graphCallouts, automaticGraphNodeByPath],
+  );
+  const positionForCallout = useCallback(
+    (callout: GraphCallout, _index: number): LabelPosition =>
+      labelPositions[callout.sourceIp] ??
+      automaticCalloutPositions.get(callout.sourceIp) ??
+      { x: _index % 2 === 0 ? 10 : 90, y: 50 },
+    [automaticCalloutPositions, labelPositions],
   );
   const liveSessionById = useMemo(
     () => new Map(effectiveSessions.map((session) => [session.sessionId, session])),
@@ -330,57 +383,155 @@ export function TopologyCanvas({
     setPan(nextPan);
   }, []);
 
-  const resetViewport = useCallback(() => {
-    const surface = mapSurfaceRef.current;
-    const plane = graphPlaneRef.current;
-    if (surface && plane) {
-      const availableWidth = surface.clientWidth - 40;
+  const calculateFitViewport = useCallback(
+    (
+      surface: HTMLDivElement,
+      plane: HTMLDivElement,
+      overrideLabels?: Record<string, LabelPosition>,
+      overrideNodes?: Record<string, LabelPosition>,
+    ) => {
+      const surfaceWidth = surface.clientWidth;
+      if (!surfaceWidth) return null;
+
       const baseWidth = plane.offsetWidth || 860;
-      if (availableWidth < baseWidth) {
-        const fitZoom = Math.min(1, Math.max(MAP_MIN_ZOOM, Number((availableWidth / baseWidth).toFixed(2))));
-        const panX = Math.max(0, (surface.clientWidth - baseWidth * fitZoom) / 2);
-        panRef.current = { x: panX, y: 0 };
-        zoomRef.current = fitZoom;
-        setPan(panRef.current);
-        setZoom(zoomRef.current);
-        return;
+      const effectiveNodes = overrideNodes ?? nodePositions;
+      const effectiveLabels = overrideLabels ?? labelPositions;
+
+      // 1. Calculate actual content horizontal bounding box in plane percentage (0 - 100)
+      let minContentX = 100;
+      let maxContentX = 0;
+
+      // Folders
+      for (const node of automaticGraphNodes) {
+        const bounds = nodeElementBounds[node.path];
+        // If rendered element bounds are measured, use actual rendered width in %
+        // Otherwise fallback to safe default folder width (~16% of plane, half = 8%)
+        const halfWidth = bounds?.width ? bounds.width / 2 : 8;
+        const posX = effectiveNodes[node.path]?.x ?? node.x;
+        const left = posX - halfWidth;
+        const right = posX + halfWidth;
+        if (left < minContentX) minContentX = left;
+        if (right > maxContentX) maxContentX = right;
       }
-    }
-    panRef.current = { x: 0, y: 0 };
-    zoomRef.current = 1;
-    setPan(panRef.current);
-    setZoom(zoomRef.current);
-  }, []);
+
+      // IP Callouts
+      for (const callout of graphCallouts) {
+        const bounds = calloutElementBounds[callout.sourceIp];
+        const pos =
+          effectiveLabels[callout.sourceIp] ??
+          automaticCalloutPositions.get(callout.sourceIp) ??
+          { x: 90, y: 50 };
+        // Callout is w-44 (176px). On an 860px plane, 176px is ~20.4%, half = 10.2%
+        const halfWidth = bounds?.width ? bounds.width / 2 : 10.5;
+        const posX = pos.x;
+        const left = posX - halfWidth;
+        const right = posX + halfWidth;
+        if (left < minContentX) minContentX = left;
+        if (right > maxContentX) maxContentX = right;
+      }
+
+      // If no nodes found or bounds invalid, fallback to balanced 20%-80%
+      if (minContentX >= maxContentX) {
+        minContentX = 20;
+        maxContentX = 80;
+      }
+
+      // Add a small 2% padding around content bounds for visual breathing room
+      const safeMinX = Math.max(0, minContentX - 2);
+      const safeMaxX = Math.min(100, maxContentX + 2);
+
+      const contentWidthPercent = safeMaxX - safeMinX;
+      const contentCenterPercent = (safeMinX + safeMaxX) / 2;
+
+      // Actual unscaled content width in pixels
+      const unscaledContentWidthPx = (contentWidthPercent / 100) * baseWidth;
+      const horizontalPadding = 48; // 24px clearance on each side of the screen
+      const availableWidth = surfaceWidth - horizontalPadding;
+
+      let fitZoom = 1;
+      if (availableWidth < unscaledContentWidthPx) {
+        fitZoom = Math.min(1, Math.max(MAP_MIN_ZOOM, Number((availableWidth / unscaledContentWidthPx).toFixed(2))));
+      } else {
+        fitZoom = 1;
+      }
+
+      // Calculate panX to place contentCenterPercent exactly at the center of surfaceWidth
+      const contentCenterPx = (contentCenterPercent / 100) * baseWidth * fitZoom;
+      let panX = Math.round(surfaceWidth / 2 - plane.offsetLeft - contentCenterPx);
+
+      // Defensive safety clamp: Ensure the bounds never cross screen edges (minimum 24px clearance)
+      const minPadding = 24;
+      const screenLeft = plane.offsetLeft + panX + (safeMinX / 100) * baseWidth * fitZoom;
+      const screenRight = plane.offsetLeft + panX + (safeMaxX / 100) * baseWidth * fitZoom;
+      if (screenLeft < minPadding) {
+        panX += Math.round(minPadding - screenLeft);
+      } else if (screenRight > surfaceWidth - minPadding) {
+        panX -= Math.round(screenRight - (surfaceWidth - minPadding));
+      }
+
+      return {
+        zoom: fitZoom,
+        pan: { x: panX, y: 0 },
+      };
+    },
+    [automaticCalloutPositions, automaticGraphNodes, calloutElementBounds, graphCallouts, labelPositions, nodeElementBounds, nodePositions],
+  );
+
+  const resetViewport = useCallback(
+    (overrideLabels?: Record<string, LabelPosition>, overrideNodes?: Record<string, LabelPosition>) => {
+      hasUserManuallyAdjustedView.current = false;
+      const surface = mapSurfaceRef.current;
+      const plane = graphPlaneRef.current;
+      if (surface && plane) {
+        const fit = calculateFitViewport(surface, plane, overrideLabels, overrideNodes);
+        if (fit) {
+          panRef.current = fit.pan;
+          zoomRef.current = fit.zoom;
+          setPan(fit.pan);
+          setZoom(fit.zoom);
+          return;
+        }
+      }
+      panRef.current = { x: 0, y: 0 };
+      zoomRef.current = 1;
+      setPan(panRef.current);
+      setZoom(zoomRef.current);
+    },
+    [calculateFitViewport],
+  );
 
   const resetLabelLayout = () => {
-    skipLabelLayoutRestore.current = true;
     labelDrag.current = null;
     setDraggedCalloutIp(null);
     setLabelPositions({});
     setCalloutElementBounds({});
-    window.localStorage.removeItem(LABEL_LAYOUT_STORAGE_KEY);
+    window.localStorage.removeItem(labelStorageKey);
   };
 
   const resetNodeLayout = () => {
-    skipNodeLayoutRestore.current = true;
     nodeDrag.current = null;
     setDraggedNodePath(null);
     setNodePositions({});
     setNodeElementBounds({});
-    window.localStorage.removeItem(NODE_LAYOUT_STORAGE_KEY);
+    window.localStorage.removeItem(nodeStorageKey);
   };
 
   const resetMapWorkspace = () => {
-    resetViewport();
+    hasUserManuallyAdjustedView.current = false;
     resetLabelLayout();
     resetNodeLayout();
+    resetViewport({}, {});
     autoArrangeUndo.current = null;
     setCanUndoAutoArrange(false);
   };
 
-  const fitTopology = () => resetViewport();
+  const fitTopology = () => {
+    hasUserManuallyAdjustedView.current = false;
+    resetViewport();
+  };
 
   const autoArrangeTopology = () => {
+    hasUserManuallyAdjustedView.current = false;
     autoArrangeUndo.current = {
       labelPositions: { ...labelPositions },
       nodePositions: { ...nodePositions },
@@ -388,14 +539,15 @@ export function TopologyCanvas({
       zoom: zoomRef.current,
     };
     setCanUndoAutoArrange(true);
-    resetViewport();
     resetLabelLayout();
     resetNodeLayout();
+    resetViewport({}, {});
   };
 
   const undoAutoArrangeTopology = () => {
     const previous = autoArrangeUndo.current;
     if (!previous) return;
+    hasUserManuallyAdjustedView.current = true;
     setLabelPositions(previous.labelPositions);
     setNodePositions(previous.nodePositions);
     panRef.current = previous.pan;
@@ -411,14 +563,6 @@ export function TopologyCanvas({
     autoArrangeUndo.current = null;
     setCanUndoAutoArrange(false);
   };
-
-  const positionForCallout = useCallback(
-    (callout: GraphCallout, _index: number): LabelPosition =>
-      labelPositions[callout.sourceIp] ??
-      automaticCalloutPositions.get(callout.sourceIp) ??
-      { x: _index % 2 === 0 ? 10 : 90, y: 50 },
-    [automaticCalloutPositions, labelPositions],
-  );
 
   const centerMapOn = useCallback((position: LabelPosition) => {
     const surface = mapSurfaceRef.current;
@@ -566,9 +710,14 @@ export function TopologyCanvas({
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragStart.current) return;
+    const deltaX = event.clientX - dragStart.current.x;
+    const deltaY = event.clientY - dragStart.current.y;
+    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+      hasUserManuallyAdjustedView.current = true;
+    }
     const nextPan = {
-      x: dragStart.current.pan.x + event.clientX - dragStart.current.x,
-      y: dragStart.current.pan.y + event.clientY - dragStart.current.y,
+      x: dragStart.current.pan.x + deltaX,
+      y: dragStart.current.pan.y + deltaY,
     };
     panRef.current = nextPan;
     setPan(nextPan);
@@ -586,6 +735,7 @@ export function TopologyCanvas({
   const onSurfaceKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
       event.preventDefault();
+      hasUserManuallyAdjustedView.current = true;
       const step = 40;
       setPan((current) => {
         const next = {
@@ -606,6 +756,7 @@ export function TopologyCanvas({
       const plane = graphPlaneRef.current;
       if (!plane) return;
       event.preventDefault();
+      hasUserManuallyAdjustedView.current = true;
       const bounds = surface.getBoundingClientRect();
       setMapZoom(zoomRef.current * Math.exp(-event.deltaY * 0.0015), {
         x: event.clientX - bounds.left - plane.offsetLeft,
@@ -635,6 +786,7 @@ export function TopologyCanvas({
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length === 2 && initialDistance) {
         e.preventDefault();
+        hasUserManuallyAdjustedView.current = true;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const currentDistance = Math.hypot(dx, dy);
@@ -658,12 +810,12 @@ export function TopologyCanvas({
     };
   }, [setMapZoom]);
 
-  // ResizeObserver for metrics
+  // ResizeObserver for metrics and responsive auto-fit viewport
   useEffect(() => {
     const surface = mapSurfaceRef.current;
     const plane = graphPlaneRef.current;
     if (!surface || !plane) return;
-    const measure = () => {
+    const handleResize = () => {
       setMapMetrics({
         surfaceWidth: surface.clientWidth,
         surfaceHeight: surface.clientHeight,
@@ -672,26 +824,30 @@ export function TopologyCanvas({
         planeLeft: plane.offsetLeft,
         planeTop: plane.offsetTop,
       });
+
+      // Automatically fit camera if the user hasn't manually panned or zoomed
+      if (!hasUserManuallyAdjustedView.current) {
+        const fit = calculateFitViewport(surface, plane);
+        if (fit) {
+          if (
+            Math.abs(panRef.current.x - fit.pan.x) > 1 ||
+            Math.abs(panRef.current.y - fit.pan.y) > 1 ||
+            Math.abs(zoomRef.current - fit.zoom) > 0.005
+          ) {
+            panRef.current = fit.pan;
+            zoomRef.current = fit.zoom;
+            setPan(fit.pan);
+            setZoom(fit.zoom);
+          }
+        }
+      }
     };
-    measure();
-    const observer = new ResizeObserver(measure);
+    handleResize();
+    const observer = new ResizeObserver(handleResize);
     observer.observe(surface);
     observer.observe(plane);
     return () => observer.disconnect();
-  }, [isTopologyExpanded, snapshot?.nodes.length]);
-
-  // Auto-fit viewport on mount if container is on a narrow screen
-  const hasInitializedView = useRef(false);
-  useEffect(() => {
-    if (hasInitializedView.current) return;
-    const surface = mapSurfaceRef.current;
-    if (!surface?.clientWidth) return;
-    hasInitializedView.current = true;
-    if (surface.clientWidth < 900) {
-      resetViewport();
-    }
-  }, [resetViewport]);
-
+  }, [calculateFitViewport, isTopologyExpanded, snapshot?.nodes.length]);
 
   // Minimap viewport box calculation
   const minimapViewport = useMemo(() => {
@@ -708,11 +864,11 @@ export function TopologyCanvas({
     };
   }, [mapMetrics, pan, zoom]);
 
-  // Escape key exits expanded workspace
+  // Escape key exits expanded workspace (when running standalone)
   useEffect(() => {
-    if (!isTopologyExpanded) return;
+    if (!isStandaloneExpanded) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsTopologyExpanded(false);
+      if (event.key === "Escape") setInternalIsTopologyExpanded(false);
     };
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -721,16 +877,16 @@ export function TopologyCanvas({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isTopologyExpanded]);
+  }, [isStandaloneExpanded]);
 
   return (
     <div
-      className={`ui-panel overflow-hidden ${
-        isTopologyExpanded ? "fixed inset-3 z-50 flex flex-col bg-surface" : ""
-      }`}
+      className={`ui-panel overflow-hidden flex flex-col ${
+        isStandaloneExpanded ? "fixed inset-3 z-50 bg-surface" : ""
+      } ${className ?? ""}`}
       aria-busy={regionStatus === "loading"}
     >
-      <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1 pr-3">
           <div className="flex items-center gap-2">
             <Route className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -748,7 +904,10 @@ export function TopologyCanvas({
             className="ui-button h-8 min-h-8 w-8 p-0"
             title="Zoom out"
             aria-label="Zoom out"
-            onClick={() => setMapZoom(zoomRef.current - 0.1)}
+            onClick={() => {
+              hasUserManuallyAdjustedView.current = true;
+              setMapZoom(zoomRef.current - 0.1);
+            }}
           >
             <ZoomOut className="h-3.5 w-3.5" />
           </button>
@@ -764,7 +923,10 @@ export function TopologyCanvas({
             className="ui-button h-8 min-h-8 w-8 p-0"
             title="Zoom in"
             aria-label="Zoom in"
-            onClick={() => setMapZoom(zoomRef.current + 0.1)}
+            onClick={() => {
+              hasUserManuallyAdjustedView.current = true;
+              setMapZoom(zoomRef.current + 0.1);
+            }}
           >
             <ZoomIn className="h-3.5 w-3.5" />
           </button>
@@ -786,7 +948,10 @@ export function TopologyCanvas({
             title="Center selected IP"
             aria-label="Center selected IP"
             disabled={!selectedGraphCallout}
-            onClick={centerSelectedSource}
+            onClick={() => {
+              hasUserManuallyAdjustedView.current = true;
+              centerSelectedSource();
+            }}
           >
             <LocateFixed className="h-3.5 w-3.5" />
           </button>
@@ -825,10 +990,26 @@ export function TopologyCanvas({
           <button
             type="button"
             className="ui-button h-8 min-h-8 w-8 p-0"
-            title={isTopologyExpanded ? "Exit expanded map" : "Expand map workspace"}
-            aria-label={isTopologyExpanded ? "Exit expanded map" : "Expand map workspace"}
+            title={
+              isTopologyExpanded
+                ? isAuditMode
+                  ? "Exit fullscreen audit studio"
+                  : "Exit expanded map"
+                : isAuditMode
+                  ? "Open fullscreen audit studio"
+                  : "Expand map workspace"
+            }
+            aria-label={
+              isTopologyExpanded
+                ? isAuditMode
+                  ? "Exit fullscreen audit studio"
+                  : "Exit expanded map"
+                : isAuditMode
+                  ? "Open fullscreen audit studio"
+                  : "Expand map workspace"
+            }
             aria-pressed={isTopologyExpanded}
-            onClick={() => setIsTopologyExpanded((expanded) => !expanded)}
+            onClick={handleToggleExpand}
           >
             {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>
@@ -857,17 +1038,21 @@ export function TopologyCanvas({
         </div>
       ) : (
         <>
-          <div className={isTopologyExpanded ? "grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]" : ""}>
-            <div className={isTopologyExpanded ? "flex min-h-0 min-w-0 flex-col" : ""}>
+          <div
+            className={
+              isStandaloneExpanded
+                ? "grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]"
+                : "flex min-h-0 flex-1 flex-col"
+            }
+          >
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <div
                 ref={mapSurfaceRef}
                 tabIndex={0}
                 role="region"
                 aria-label="Filesystem topology map workspace. Use arrow keys to pan, scroll or pinch to zoom."
                 onKeyDown={onSurfaceKeyDown}
-                className={`relative overflow-hidden bg-surface-subtle p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                  isTopologyExpanded ? "min-h-[540px] flex-1" : "min-h-[440px]"
-                }`}
+                className="relative min-h-[380px] flex-1 overflow-hidden bg-surface-subtle p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerEnd}
@@ -896,7 +1081,9 @@ export function TopologyCanvas({
                       : { minHeight: graphPlaneHeight, minWidth: 860, height: isTopologyExpanded ? "100%" : undefined }
                   }
                   transition={
-                    reducedMotion || isDraggingSurface ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 28 }
+                    reducedMotion || isDraggingSurface || isResizingContainer
+                      ? { duration: 0 }
+                      : { type: "spring", stiffness: 260, damping: 28 }
                   }
                 >
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
@@ -1252,7 +1439,7 @@ export function TopologyCanvas({
                 />
               </div>
 
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
+              <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
                 <span>
                   <strong className="text-text">{snapshot.nodes.length}</strong> observed paths
                 </span>
@@ -1275,7 +1462,7 @@ export function TopologyCanvas({
                 </span>
               </div>
               {snapshot.truncated && (
-                <div className="flex gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
+                <div className="flex shrink-0 gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
                   <ShieldAlert className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
                   <p>
                     Showing the latest {snapshot.sessions.length} observed sessions. Older sessions are not included in
@@ -1285,7 +1472,7 @@ export function TopologyCanvas({
               )}
             </div>
 
-            {isTopologyExpanded && (
+            {isStandaloneExpanded && (
               <aside
                 className="min-h-0 overflow-y-auto border-t border-border bg-surface p-5 lg:border-l lg:border-t-0"
                 aria-label="Expanded map controls"
