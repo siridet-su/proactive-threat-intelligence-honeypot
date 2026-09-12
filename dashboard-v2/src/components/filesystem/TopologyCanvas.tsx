@@ -320,22 +320,6 @@ export function TopologyCanvas({
     [effectiveSessions],
   );
 
-  // When a source's verified path changes, clear any manual drag override so it smoothly moves to the new directory
-  const lastSourcePathByIp = useRef<Map<string, string>>(new Map());
-  useEffect(() => {
-    for (const callout of graphCallouts) {
-      const previousPath = lastSourcePathByIp.current.get(callout.sourceIp);
-      if (previousPath && previousPath !== callout.path) {
-        setLabelPositions((current) => {
-          if (!current[callout.sourceIp]) return current;
-          const next = { ...current };
-          delete next[callout.sourceIp];
-          return next;
-        });
-      }
-      lastSourcePathByIp.current.set(callout.sourceIp, callout.path);
-    }
-  }, [graphCallouts]);
 
 
   const measureElementBounds = useCallback(() => {
@@ -404,9 +388,9 @@ export function TopologyCanvas({
         const a = boxes[i];
         const b = boxes[j];
 
-        // An overlap occurs when both X and Y center distances are smaller than the sum of their half-sizes
-        const overlapX = Math.abs(a.x - b.x) < a.hw + b.hw;
-        const overlapY = Math.abs(a.y - b.y) < a.hh + b.hh;
+        // An overlap occurs when both X and Y center distances are smaller than the sum of their half-sizes (with small tolerance)
+        const overlapX = Math.abs(a.x - b.x) < a.hw + b.hw - 0.4;
+        const overlapY = Math.abs(a.y - b.y) < a.hh + b.hh - 0.4;
 
         if (overlapX && overlapY) {
           if (a.type === "node") overlappingNodes.add(a.id);
@@ -1379,10 +1363,8 @@ export function TopologyCanvas({
                         )}
                         {isHopTarget && !reducedMotion && (
                           <span
-                            className={`pointer-events-none absolute -inset-0.5 animate-hearthwave rounded-lg border-2 ${
-                              activeHop?.isFailedAttempt
-                                ? "border-warning/80 shadow-[0_0_12px_rgba(217,119,6,0.28)]"
-                                : "border-primary/80 shadow-[0_0_12px_rgba(245,158,11,0.28)]"
+                            className={`pointer-events-none absolute -inset-1 rounded-xl border ${
+                              activeHop?.isFailedAttempt ? "animate-hop-aura-warning" : "animate-hop-aura"
                             }`}
                             aria-hidden="true"
                           />
