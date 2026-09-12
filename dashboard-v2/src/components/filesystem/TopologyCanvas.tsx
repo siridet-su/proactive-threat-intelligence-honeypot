@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
 import {
+  AlertTriangle,
   ChevronRight,
   Folder,
   FolderOpen,
@@ -41,6 +42,7 @@ import {
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
   pointForGraph,
+  resolveCalloutPositions,
   sourceRailPositions,
   type ActiveHopRoute,
   type GraphCallout,
@@ -253,8 +255,8 @@ export function TopologyCanvas({
 
   // Derived graph layout
   const automaticGraphNodes = useMemo(
-    () => pointForGraph(snapshot?.nodes ?? [], snapshot?.sessions ?? [], selectedPath),
-    [selectedPath, snapshot?.nodes, snapshot?.sessions],
+    () => pointForGraph(snapshot?.nodes ?? [], snapshot?.sessions ?? [], selectedPath, isAuditMode),
+    [isAuditMode, selectedPath, snapshot?.nodes, snapshot?.sessions],
   );
   const graphNodes = useMemo(
     () => automaticGraphNodes.map((node) => ({ ...node, ...(nodePositions[node.path] ?? {}) })),
@@ -291,15 +293,19 @@ export function TopologyCanvas({
     [effectiveSessions, automaticGraphNodeByPath],
   );
   const automaticCalloutPositions = useMemo(
-    () => sourceRailPositions(graphCallouts, automaticGraphNodeByPath),
-    [graphCallouts, automaticGraphNodeByPath],
+    () => sourceRailPositions(graphCallouts, automaticGraphNodeByPath, isAuditMode),
+    [graphCallouts, automaticGraphNodeByPath, isAuditMode],
+  );
+  const effectiveCalloutPositions = useMemo(
+    () => resolveCalloutPositions(graphCallouts, automaticCalloutPositions, labelPositions),
+    [graphCallouts, automaticCalloutPositions, labelPositions],
   );
   const positionForCallout = useCallback(
     (callout: GraphCallout, _index: number): LabelPosition =>
-      labelPositions[callout.sourceIp] ??
+      effectiveCalloutPositions.get(callout.sourceIp) ??
       automaticCalloutPositions.get(callout.sourceIp) ??
       { x: _index % 2 === 0 ? 10 : 90, y: 50 },
-    [automaticCalloutPositions, labelPositions],
+    [automaticCalloutPositions, effectiveCalloutPositions],
   );
   const liveSessionById = useMemo(
     () => new Map(effectiveSessions.map((session) => [session.sessionId, session])),
@@ -367,6 +373,56 @@ export function TopologyCanvas({
     return () => observer.disconnect();
   }, [graphCallouts, graphNodes, isTopologyExpanded, labelPositions, measureElementBounds, nodePositions]);
 
+  // Overlap detection: Identify any directory nodes or IP callouts that overlap each other
+  const { overlappingNodePaths, overlappingCalloutIps } = useMemo(() => {
+    const overlappingNodes = new Set<string>();
+    const overlappingCallouts = new Set<string>();
+
+    type BoundingBox = { id: string; type: "node" | "callout"; x: number; y: number; hw: number; hh: number };
+    const boxes: BoundingBox[] = [];
+
+    // Collect directory nodes
+    for (const node of graphNodes) {
+      const bounds = nodeElementBounds[node.path];
+      const hw = bounds?.width ? bounds.width / 2 : 7.5;
+      const hh = bounds?.height ? bounds.height / 2 : 4.0;
+      boxes.push({ id: node.path, type: "node", x: node.x, y: node.y, hw, hh });
+    }
+
+    // Collect callouts
+    for (const [index, callout] of graphCallouts.entries()) {
+      const pos = positionForCallout(callout, index);
+      const bounds = calloutElementBounds[callout.sourceIp];
+      const hw = bounds?.width ? bounds.width / 2 : 8.35;
+      const hh = bounds?.height ? bounds.height / 2 : 5.2;
+      boxes.push({ id: callout.sourceIp, type: "callout", x: pos.x, y: pos.y, hw, hh });
+    }
+
+    // Compare all pairs for AABB intersection
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+
+        // An overlap occurs when both X and Y center distances are smaller than the sum of their half-sizes
+        const overlapX = Math.abs(a.x - b.x) < a.hw + b.hw;
+        const overlapY = Math.abs(a.y - b.y) < a.hh + b.hh;
+
+        if (overlapX && overlapY) {
+          if (a.type === "node") overlappingNodes.add(a.id);
+          else overlappingCallouts.add(a.id);
+
+          if (b.type === "node") overlappingNodes.add(b.id);
+          else overlappingCallouts.add(b.id);
+        }
+      }
+    }
+
+    return { overlappingNodePaths: overlappingNodes, overlappingCalloutIps: overlappingCallouts };
+  }, [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, positionForCallout]);
+
+  const totalOverlaps = overlappingNodePaths.size + overlappingCalloutIps.size;
+
   const setMapZoom = useCallback((value: number, focalPoint?: Pan) => {
     const nextZoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, Number(value.toFixed(3))));
     const currentZoom = zoomRef.current;
@@ -418,11 +474,12 @@ export function TopologyCanvas({
       for (const callout of graphCallouts) {
         const bounds = calloutElementBounds[callout.sourceIp];
         const pos =
+          effectiveCalloutPositions.get(callout.sourceIp) ??
           effectiveLabels[callout.sourceIp] ??
           automaticCalloutPositions.get(callout.sourceIp) ??
           { x: 90, y: 50 };
-        // Callout is w-44 (176px). On an 860px plane, 176px is ~20.4%, half = 10.2%
-        const halfWidth = bounds?.width ? bounds.width / 2 : 10.5;
+        // Callout is w-36 (144px). On an 860px plane, 144px is ~16.7%, half = 8.35%
+        const halfWidth = bounds?.width ? bounds.width / 2 : 8.5;
         const posX = pos.x;
         const left = posX - halfWidth;
         const right = posX + halfWidth;
@@ -474,7 +531,7 @@ export function TopologyCanvas({
         pan: { x: panX, y: 0 },
       };
     },
-    [automaticCalloutPositions, automaticGraphNodes, calloutElementBounds, graphCallouts, labelPositions, nodeElementBounds, nodePositions],
+    [automaticCalloutPositions, automaticGraphNodes, calloutElementBounds, effectiveCalloutPositions, graphCallouts, labelPositions, nodeElementBounds, nodePositions],
   );
 
   const resetViewport = useCallback(
@@ -600,8 +657,8 @@ export function TopologyCanvas({
     const plane = graphPlaneRef.current;
     if (!surface || !plane) return;
 
-    const screenX = (plane.offsetWidth * targetNode.x / 100) * zoomRef.current + panRef.current.x;
-    const screenY = (plane.offsetHeight * targetNode.y / 100) * zoomRef.current + panRef.current.y;
+    const screenX = plane.offsetLeft + panRef.current.x + ((plane.offsetWidth * targetNode.x) / 100) * zoomRef.current;
+    const screenY = plane.offsetTop + panRef.current.y + ((plane.offsetHeight * targetNode.y) / 100) * zoomRef.current;
 
     const margin = 60;
     const isVisible =
@@ -957,12 +1014,17 @@ export function TopologyCanvas({
           </button>
           <button
             type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Auto arrange topology"
-            aria-label="Auto arrange directory and IP labels"
+            className={`ui-button relative h-8 min-h-8 w-8 p-0 ${
+              totalOverlaps > 0 ? "border-warning/70 text-warning" : ""
+            }`}
+            title={totalOverlaps > 0 ? `Auto arrange topology (${totalOverlaps} overlapping)` : "Auto arrange topology"}
+            aria-label={totalOverlaps > 0 ? `Auto arrange topology, ${totalOverlaps} overlapping elements` : "Auto arrange directory and IP labels"}
             onClick={autoArrangeTopology}
           >
             <MousePointer2 className="h-3.5 w-3.5" />
+            {totalOverlaps > 0 && (
+              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
+            )}
           </button>
           {canUndoAutoArrange && (
             <button
@@ -1251,6 +1313,7 @@ export function TopologyCanvas({
                     const isHopTarget = activeHop?.toPath === node.path;
                     const isHopVisited = Boolean(activeHop?.visitedPaths.includes(node.path));
                     const visitedStep = activeHop?.visitedStepMap[node.path];
+                    const isOverlapping = overlappingNodePaths.has(node.path);
 
                     return (
                       <motion.button
@@ -1289,24 +1352,37 @@ export function TopologyCanvas({
                           }
                           onSelectPath(node.path);
                         }}
-                        className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-200 ${
-                          isHopTarget && activeHop?.isFailedAttempt
-                            ? "z-20 border-warning bg-warning-subtle text-text ring-2 ring-warning ring-offset-2 ring-offset-surface shadow-md shadow-warning/20"
-                            : isHopTarget
-                              ? "z-20 border-primary bg-primary-subtle text-text ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-md shadow-primary/20"
-                              : isSelected
-                                ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
-                                : isHopVisited
-                                  ? "z-10 border-primary/40 bg-surface text-text hover:border-primary/70 hover:bg-surface-hover"
-                                  : isSensitive
-                                    ? "z-10 border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
-                                    : "z-10 border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
+                        className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${
+                          isOverlapping
+                            ? "z-30 border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
+                            : isHopTarget && activeHop?.isFailedAttempt
+                              ? "z-20 border-warning bg-warning-subtle text-text ring-2 ring-warning ring-offset-2 ring-offset-surface shadow-md shadow-warning/20"
+                              : isHopTarget
+                                ? "z-20 border-primary bg-primary-subtle text-text ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-md shadow-primary/20"
+                                : isSelected
+                                  ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
+                                  : isHopVisited
+                                    ? "z-10 border-primary/40 bg-surface text-text hover:border-primary/70 hover:bg-surface-hover"
+                                    : isSensitive
+                                      ? "z-10 border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
+                                      : "z-10 border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
                         }`}
                       >
+                        {isOverlapping && (
+                          <span
+                            className="pointer-events-none absolute -top-1.5 -right-1.5 z-40 flex h-4 w-4 items-center justify-center rounded-full bg-warning text-surface shadow ring-1 ring-surface"
+                            title="Overlapping position with another node"
+                            aria-label="Overlapping position with another node"
+                          >
+                            <AlertTriangle className="h-2.5 w-2.5 stroke-[2.5]" aria-hidden="true" />
+                          </span>
+                        )}
                         {isHopTarget && !reducedMotion && (
                           <span
-                            className={`pointer-events-none absolute -inset-1 animate-ping rounded-lg border-2 opacity-40 ${
-                              activeHop?.isFailedAttempt ? "border-warning/70" : "border-primary/50"
+                            className={`pointer-events-none absolute -inset-0.5 animate-hearthwave rounded-lg border-2 ${
+                              activeHop?.isFailedAttempt
+                                ? "border-warning/80 shadow-[0_0_12px_rgba(217,119,6,0.28)]"
+                                : "border-primary/80 shadow-[0_0_12px_rgba(245,158,11,0.28)]"
                             }`}
                             aria-hidden="true"
                           />
@@ -1334,7 +1410,7 @@ export function TopologyCanvas({
                         )}
                         {isHopTarget && activeHop ? (
                           <span
-                            className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-[10px] font-bold shadow-xs ${
+                            className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-[9px] font-bold shadow-xs ${
                               activeHop.isFailedAttempt ? "bg-warning text-surface" : "bg-primary text-surface"
                             }`}
                             title={
@@ -1344,19 +1420,21 @@ export function TopologyCanvas({
                             }
                           >
                             <Route className="h-2.5 w-2.5" aria-hidden="true" />
-                            {activeHop.isFailedAttempt ? `Failed #${activeHop.stepIndex + 1}` : `Hop ${activeHop.stepIndex + 1}`}
+                            <span>{activeHop.isFailedAttempt ? `Failed #${activeHop.stepIndex + 1}` : `Hop ${activeHop.stepIndex + 1}`}</span>
                           </span>
                         ) : isHopVisited && visitedStep !== undefined ? (
                           <span
-                            className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-[10px] font-semibold text-primary"
+                            className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-primary"
                             title={`Route step ${visitedStep}`}
                           >
                             #{visitedStep}
                           </span>
                         ) : null}
-                        <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-[11px] font-semibold text-text-subtle">
-                          {node.sessionIds.length}
-                        </span>
+                        {!isAuditMode && (
+                          <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-[11px] font-semibold text-text-subtle">
+                            {node.sessionIds.length}
+                          </span>
+                        )}
                       </motion.button>
                     );
                     })}
@@ -1365,6 +1443,8 @@ export function TopologyCanvas({
                     {graphCallouts.map((callout, index) => {
                     const position = positionForCallout(callout, index);
                     const selected = callout.sessionIds.includes(selectedSessionId ?? "");
+                    const isOverlapping = overlappingCalloutIps.has(callout.sourceIp);
+
                     return (
                       <motion.button
                         key={`callout-${callout.sourceIp}`}
@@ -1401,12 +1481,23 @@ export function TopologyCanvas({
                           }
                           onSelectSession(callout.sessionIds[0]);
                         }}
-                        className={`absolute z-40 flex w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-2 rounded-lg border px-2.5 py-2 text-left shadow-sm transition-colors duration-200 ${
-                          selected
-                            ? "border-primary-border bg-primary-subtle"
-                            : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"
+                        className={`absolute z-40 flex w-36 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-200 ${
+                          isOverlapping
+                            ? "border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
+                            : selected
+                              ? "border-primary-border bg-primary-subtle"
+                              : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"
                         }`}
                       >
+                        {isOverlapping && (
+                          <span
+                            className="pointer-events-none absolute -top-1.5 -right-1.5 z-50 flex h-4 w-4 items-center justify-center rounded-full bg-warning text-surface shadow ring-1 ring-surface"
+                            title="Overlapping position with another node"
+                            aria-label="Overlapping position with another node"
+                          >
+                            <AlertTriangle className="h-2.5 w-2.5 stroke-[2.5]" aria-hidden="true" />
+                          </span>
+                        )}
                         <span
                           className={`h-2 w-2 shrink-0 rounded-full ${
                             streamState === "live" ? "bg-success" : "bg-warning"
@@ -1414,8 +1505,10 @@ export function TopologyCanvas({
                           aria-hidden="true"
                         />
                         <span className="min-w-0">
-                          <span className="block truncate font-mono text-xs text-text">{callout.sourceIp}</span>
-                          <span className="mt-0.5 flex items-center gap-1 text-[11px] text-text-subtle">
+                          <span className="block truncate font-mono text-xs text-text" title={callout.sourceIp}>
+                            {callout.sourceIp}
+                          </span>
+                          <span className="mt-0.5 flex items-center gap-1 text-[10px] text-text-subtle">
                             <span>
                               {callout.sessionIds.length} {callout.sessionIds.length === 1 ? "session" : "sessions"}
                             </span>
@@ -1450,6 +1543,18 @@ export function TopologyCanvas({
                   <strong className="text-text">{liveSourceCount}</strong> live {liveSourceCount === 1 ? "source" : "sources"}
                 </span>
                 <span>Snapshot {formatTimestamp(snapshot.generatedAt)}</span>
+                {totalOverlaps > 0 && (
+                  <button
+                    type="button"
+                    onClick={autoArrangeTopology}
+                    className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning transition-colors hover:bg-warning-subtle/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning"
+                    title="Click to automatically arrange overlapping elements"
+                    aria-label={`${totalOverlaps} elements overlapping. Click to auto arrange.`}
+                  >
+                    <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span>{totalOverlaps} overlapping · Auto arrange</span>
+                  </button>
+                )}
                 <span className="flex items-center gap-3 sm:ml-auto" aria-label="Topology map legend">
                   <span className="flex items-center gap-1.5">
                     <span className="h-px w-3 bg-border-strong" aria-hidden="true" />

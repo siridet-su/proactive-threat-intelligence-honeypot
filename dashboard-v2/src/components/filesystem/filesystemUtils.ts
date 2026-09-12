@@ -145,7 +145,12 @@ export type GraphCallout = {
   path: string;
 };
 
-export function pointForGraph(nodes: FilesystemTopologyNode[], sessions: FilesystemTopologySession[], selectedPath: string | null): GraphNode[] {
+export function pointForGraph(
+  nodes: FilesystemTopologyNode[],
+  sessions: FilesystemTopologySession[],
+  selectedPath: string | null,
+  isAuditMode = false,
+): GraphNode[] {
   const byPath = new Map(nodes.map((node) => [node.path, node]));
   const included = new Set<string>(["/"]);
   const recentSessions = [...sessions].sort((left, right) => {
@@ -207,32 +212,81 @@ export function pointForGraph(nodes: FilesystemTopologyNode[], sessions: Filesys
 
   // Dynamic tree width:
   // Allocate generous horizontal separation between branches so nodes never crowd or overlap.
-  // For small leaf counts (2-4 leaves), guarantee wide badges and labels have ample clearance (28% gap for 2 leaves).
-  // Tree envelope stays bounded between 26% and 74% to preserve clear margins for outer IP rails.
   let totalTreeWidth = 0;
-  if (leafCount === 2) {
-    totalTreeWidth = 28;
-  } else if (leafCount === 3) {
-    totalTreeWidth = 40;
-  } else if (leafCount === 4) {
-    totalTreeWidth = 46;
-  } else if (leafCount > 4) {
-    totalTreeWidth = Math.min(48, Math.max(46, (leafCount - 1) * 11));
+  if (isAuditMode) {
+    if (leafCount === 1) {
+      totalTreeWidth = 0;
+    } else if (leafCount === 2) {
+      totalTreeWidth = 32;
+    } else if (leafCount === 3) {
+      totalTreeWidth = 46;
+    } else if (leafCount === 4) {
+      totalTreeWidth = 63;
+    } else {
+      totalTreeWidth = Math.min(72, (leafCount - 1) * 19);
+    }
+  } else {
+    // Live mode: preserve outer lanes for IP callouts on both rails
+    if (leafCount === 2) {
+      totalTreeWidth = 28;
+    } else if (leafCount === 3) {
+      totalTreeWidth = 40;
+    } else if (leafCount === 4) {
+      totalTreeWidth = 48;
+    } else if (leafCount > 4) {
+      totalTreeWidth = Math.min(50, Math.max(46, (leafCount - 1) * 11));
+    }
   }
   const treeLeft = 50 - totalTreeWidth / 2;
 
   // Consistent vertical step per depth level so nodes are never too close to parents
-  // Shallow trees (depth 1-2) use a generous step (20%) so nodes and active rings have ample breathing room.
-  // Deeper trees scale down gracefully (down to 12%) so all nodes remain comfortably within viewport.
-  const depthStep = Math.min(20, Math.max(12, 54 / maxDepth));
-  const startY = 12;
+  // In Audit mode: allocate generous vertical spacing (18% - 26%) so folders, hop badges,
+  // and active beacons have ample clear air.
+  // In Live mode: allocate 14% - 20%.
+  const depthStep = isAuditMode
+    ? Math.min(26, Math.max(18, 64 / maxDepth))
+    : Math.min(20, Math.max(14, 54 / maxDepth));
+  const startY = isAuditMode ? 10 : 12;
 
-  return selected.map((node) => {
+  const positioned = selected.map((node) => {
     const leafPosition = horizontalByPath.get(node.path) ?? 0;
     const x = leafCount === 1 ? 50 : treeLeft + (totalTreeWidth * leafPosition) / (leafCount - 1);
     const y = startY + node.depth * depthStep;
     return { ...node, x, y };
   });
+
+  // Intelligent horizontal clearance enforcement:
+  // Ensure no two sibling or adjacent nodes at the same depth level are positioned closer
+  // than the required button clearance width (minimum 21% in audit mode, 16% in live mode).
+  const minClearance = isAuditMode ? 21 : 16;
+  const byDepth = new Map<number, GraphNode[]>();
+  for (const node of positioned) {
+    const list = byDepth.get(node.depth) ?? [];
+    list.push(node);
+    byDepth.set(node.depth, list);
+  }
+
+  for (const list of byDepth.values()) {
+    if (list.length <= 1) continue;
+    list.sort((a, b) => a.x - b.x);
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (let i = 0; i < list.length - 1; i++) {
+        const a = list[i];
+        const b = list[i + 1];
+        const gap = b.x - a.x;
+        if (gap < minClearance) {
+          const needed = minClearance - gap;
+          a.x = Math.max(12, a.x - needed / 2);
+          b.x = Math.min(88, b.x + needed / 2);
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
+  return positioned;
 }
 
 export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNodeByPath: Map<string, GraphNode>): GraphCallout[] {
@@ -258,22 +312,66 @@ export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNod
     .slice(0, GRAPH_CALLOUT_LIMIT);
 }
 
-export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: Map<string, GraphNode>): Map<string, LabelPosition> {
+export function sourceRailPositions(
+  callouts: GraphCallout[],
+  graphNodeByPath: Map<string, GraphNode>,
+  isAuditMode = false,
+): Map<string, LabelPosition> {
   const leftRail: GraphCallout[] = [];
   const rightRail: GraphCallout[] = [];
 
   for (const [index, callout] of callouts.entries()) {
     const target = graphNodeByPath.get(callout.path);
-    // When target is centered:
-    // - If only 1 callout, always place on the RIGHT rail for consistent left-to-right reading (directory -> source IP).
-    // - If multiple callouts, alternate between right and left rails (index 0 -> right, index 1 -> left...).
+    // In Audit Replay or when there is only 1 callout, always anchor on the RIGHT rail.
+    // This keeps the IP callout steady and prevents it from jumping across the tree
+    // between left and right rails when the attacker hops between directories.
+    // When there are multiple callouts in Live mode:
+    // - If target is centered, alternate between right and left rails.
+    // - Otherwise, place on left rail if target is on the left (target.x < 50), else right rail.
     const isCentered = !target || Math.abs(target.x - 50) < 0.1;
-    const useLeftRail = isCentered
-      ? callouts.length === 1
+    const useLeftRail =
+      isAuditMode || callouts.length === 1
         ? false
-        : index % 2 !== 0
-      : target.x < 50;
+        : isCentered
+          ? index % 2 !== 0
+          : target.x < 50;
     (useLeftRail ? leftRail : rightRail).push(callout);
+  }
+
+  // Rail rebalancing: if one rail is heavily loaded and the other is sparse,
+  // balance callouts whose target directory is closest to center so lines don't cross.
+  if (!isAuditMode) {
+    while (rightRail.length - leftRail.length > 2) {
+      let bestIdx = -1;
+      let minX = Infinity;
+      for (let i = 0; i < rightRail.length; i++) {
+        const tx = graphNodeByPath.get(rightRail[i].path)?.x ?? 50;
+        if (tx < minX) {
+          minX = tx;
+          bestIdx = i;
+        }
+      }
+      if (bestIdx >= 0) {
+        const [moved] = rightRail.splice(bestIdx, 1);
+        leftRail.push(moved);
+      } else break;
+    }
+
+    while (leftRail.length - rightRail.length > 2) {
+      let bestIdx = -1;
+      let maxX = -Infinity;
+      for (let i = 0; i < leftRail.length; i++) {
+        const tx = graphNodeByPath.get(leftRail[i].path)?.x ?? 50;
+        if (tx > maxX) {
+          maxX = tx;
+          bestIdx = i;
+        }
+      }
+      if (bestIdx >= 0) {
+        const [moved] = leftRail.splice(bestIdx, 1);
+        rightRail.push(moved);
+      } else break;
+    }
   }
 
   // Adaptive rail positions:
@@ -288,9 +386,9 @@ export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: M
   let rightRailX = 91;
 
   if (leftRail.length === 0 && rightRail.length <= 2) {
-    rightRailX = Math.min(91, Math.max(89, maxTreeX + 26));
+    rightRailX = Math.min(88, Math.max(82, maxTreeX + 22));
   } else if (rightRail.length === 0 && leftRail.length <= 2) {
-    leftRailX = Math.max(9, Math.min(11, minTreeX - 26));
+    leftRailX = Math.max(12, Math.min(18, minTreeX - 22));
   }
 
   const positions = new Map<string, LabelPosition>();
@@ -309,13 +407,36 @@ export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: M
     });
 
     if (rail.length === 1) {
-      const targetY = graphNodeByPath.get(rail[0].path)?.y ?? 50;
+      // In Audit mode: keep callout vertically steady at the vertical center of the tree
+      // so the card stays calm and stationary while stepping through hops during replay.
+      // In Live mode: gently level with the active directory row.
+      const nodeYs = [...graphNodeByPath.values()].map((n) => n.y);
+      const avgTreeY = nodeYs.length ? (Math.min(...nodeYs) + Math.max(...nodeYs)) / 2 : 50;
+      let targetY = isAuditMode
+        ? Math.min(maxRailY, Math.max(22, avgTreeY))
+        : graphNodeByPath.get(rail[0].path)?.y ?? 50;
+
+      // In Audit mode: if any directory node on this rail's side is at a similar Y (within 11%),
+      // offset targetY so the card doesn't level horizontally right next to that folder!
+      if (isAuditMode) {
+        const hasNearbyNodeOnSide = [...graphNodeByPath.values()].some(
+          (n) => (isRightRail ? n.x > 66 : n.x < 34) && Math.abs(n.y - targetY) < 11,
+        );
+        if (hasNearbyNodeOnSide) {
+          targetY = targetY + 14 <= maxRailY ? targetY + 14 : targetY - 14;
+        }
+      }
+
       positions.set(rail[0].sourceIp, { x, y: Math.min(maxRailY, Math.max(18, targetY)) });
       return;
     }
 
-    // Multiple callouts: enforce minimum vertical separation of at least 13%
-    const minGap = 13;
+    // When a rail has 4 or more callouts, use staggered double columns (outer lane & inner lane)
+    // to guarantee generous clearance and eliminate crowding
+    const useDoubleColumn = rail.length >= 4;
+    const innerX = isRightRail ? Math.max(73, x - 16) : Math.min(27, x + 16);
+
+    const minGap = useDoubleColumn ? 11.5 : 14.0;
     const count = rail.length;
     const targetYs = rail.map((c) => Math.min(maxRailY, Math.max(18, graphNodeByPath.get(c.path)?.y ?? 50)));
 
@@ -335,14 +456,47 @@ export function sourceRailPositions(callouts: GraphCallout[], graphNodeByPath: M
       }
     }
 
+    // Defensive forward relaxation: if upward adjustment pushed ys[0] below min boundary (16%),
+    // clamp ys[0] = 16 and re-propagate minGap downwards so no cards are squeezed
+    if (ys[0] < 16) {
+      ys[0] = 16;
+      for (let i = 1; i < count; i++) {
+        if (ys[i] < ys[i - 1] + minGap) {
+          ys[i] = ys[i - 1] + minGap;
+        }
+      }
+    }
+
     rail.forEach((callout, index) => {
-      positions.set(callout.sourceIp, { x, y: Math.max(16, ys[index]) });
+      const calloutX = useDoubleColumn && index % 2 !== 0 ? innerX : x;
+      positions.set(callout.sourceIp, { x: calloutX, y: ys[index] });
     });
   };
 
   placeOnRail(leftRail, leftRailX);
   placeOnRail(rightRail, rightRailX);
   return positions;
+}
+
+/**
+ * Callout position resolver:
+ * Gives users complete freedom to position nodes without unexpected system interference or pushing.
+ * Seeds callouts with manual coordinates if dragged, or automatic rail coordinates if unplaced.
+ */
+export function resolveCalloutPositions(
+  callouts: GraphCallout[],
+  automaticPositions: Map<string, LabelPosition>,
+  manualPositions: Record<string, LabelPosition>,
+): Map<string, LabelPosition> {
+  const resolved = new Map<string, LabelPosition>();
+
+  for (const [index, callout] of callouts.entries()) {
+    const autoPos = automaticPositions.get(callout.sourceIp) ?? { x: index % 2 === 0 ? 10 : 90, y: 50 };
+    const manualPos = manualPositions[callout.sourceIp];
+    resolved.set(callout.sourceIp, manualPos ? { ...manualPos } : { ...autoPos });
+  }
+
+  return resolved;
 }
 
 export function leaderEndpoints(
