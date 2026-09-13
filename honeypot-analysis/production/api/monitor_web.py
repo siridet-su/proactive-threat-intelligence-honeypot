@@ -2719,6 +2719,16 @@ def _dashboard_next_distinct_projection(
         "NO_DATA",
         "INSUFFICIENT_EVIDENCE",
     } or freshness_state in {"NO_DATA", "INSUFFICIENT_EVIDENCE"}
+    historical_prediction = (
+        top1
+        if session_ended
+        and has_data
+        and prediction_status == "PREDICTED"
+        and freshness_state == "FRESH"
+        and isinstance(freshness, dict)
+        and freshness.get("history_manifest_match") is True
+        else None
+    )
     state = (
         "SESSION_ENDED"
         if session_ended
@@ -2736,8 +2746,23 @@ def _dashboard_next_distinct_projection(
     result["status"] = state
     result["availability"] = "AVAILABLE" if state == "DATA" else state
     result["next_distinct_tactic"] = top1 if state == "DATA" else None
+    result["stored_next_distinct_tactic"] = historical_prediction
     if state == "SESSION_ENDED":
-        result["prediction_status_reason"] = "session ended; no session-end prediction is emitted"
+        if historical_prediction is not None:
+            result["prediction_status_reason"] = (
+                "session ended; no session-end prediction is emitted; "
+                "the last fresh, manifest-matched sidecar result is shown as a historical advisory"
+            )
+        elif stale:
+            result["prediction_status_reason"] = (
+                "session ended; the stored sidecar result is stale or history-mismatched; "
+                "no session-end prediction is emitted"
+            )
+        else:
+            result["prediction_status_reason"] = (
+                "session ended; no valid stored prediction is available; "
+                "no session-end prediction is emitted"
+            )
     return result
 
 
