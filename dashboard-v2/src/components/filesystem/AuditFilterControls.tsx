@@ -339,8 +339,8 @@ export function AuditFilterControls({
 
       {/* 3. Filter Result Summary & Quick Reset */}
       {hasActiveFilters && (
-        <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1 text-xs">
-          <span className="font-mono text-xs text-text-muted">
+        <div className="flex h-9 min-h-9 items-stretch overflow-hidden rounded-lg border border-border bg-surface text-xs">
+          <span className="flex items-center px-2 font-mono text-xs text-text-muted">
             Filtered:{" "}
             <strong
               className={
@@ -358,9 +358,9 @@ export function AuditFilterControls({
             onClick={onResetFilters}
             title="Reset all audit filters"
             aria-label="Reset all audit filters"
-            className="ml-0.5 h-9 px-2 flex items-center gap-1 rounded-md border border-border bg-surface text-xs font-sans text-text-muted hover:text-text hover:bg-surface-hover hover:border-border-strong transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="flex min-w-14 items-center justify-center gap-1 border-l border-border px-2 font-sans text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring"
           >
-            <RotateCcw className="h-2.5 w-2.5" />
+            <RotateCcw className="h-3 w-3" />
             <span>Reset</span>
           </button>
         </div>
