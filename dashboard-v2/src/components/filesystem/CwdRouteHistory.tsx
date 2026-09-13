@@ -15,12 +15,26 @@ import {
   Shield,
   Terminal,
 } from "lucide-react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import { actionLabel, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
+
+type SidebarTab = "replay" | "commands" | "actions";
+
+const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
+  replay: 1,
+  commands: 2,
+  actions: 3,
+};
+
+const SIDEBAR_CONTENT_VARIANTS = {
+  enter: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * 10 }),
+  center: { opacity: 1, x: 0 },
+  exit: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * -6 }),
+};
 
 interface CwdRouteHistoryProps {
   selectedSession: FilesystemTopologySession | null;
@@ -61,7 +75,8 @@ export function CwdRouteHistory({
   const [internalIsPlaying, setInternalIsPlaying] = useState(false);
   const [internalPlaybackSpeed, setInternalPlaybackSpeed] = useState<number>(1400);
   const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<"replay" | "commands" | "actions">("replay");
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("replay");
+  const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
   const shouldReduceMotion = useReducedMotion();
 
   const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
@@ -153,7 +168,14 @@ export function CwdRouteHistory({
   }, [controlledIsPlaying, isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed, onSelectHistoryEventId]);
 
   const isSidebar = layout === "sidebar";
-  const sidebarTabColumn = sidebarTab === "replay" ? 1 : sidebarTab === "commands" ? 2 : 3;
+  const sidebarTabColumn = SIDEBAR_TAB_COLUMN[sidebarTab];
+  const sidebarContentDirection = shouldReduceMotion ? 0 : sidebarTabDirection;
+
+  const handleSidebarTabChange = (nextTab: SidebarTab) => {
+    if (nextTab === sidebarTab) return;
+    setSidebarTabDirection(SIDEBAR_TAB_COLUMN[nextTab] > sidebarTabColumn ? 1 : -1);
+    setSidebarTab(nextTab);
+  };
 
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
@@ -200,7 +222,7 @@ export function CwdRouteHistory({
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => setSidebarTab(tab.id)}
+                    onClick={() => handleSidebarTabChange(tab.id)}
                     aria-pressed={isActive}
                     className={`relative z-10 flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium transition-colors duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                       isActive ? "text-primary" : "text-text-muted hover:text-text"
@@ -242,9 +264,26 @@ export function CwdRouteHistory({
             title="No verified directory transitions"
             description="This session has a known observed path, but Cowrie has not recorded a directory move. It may have ended after a non-interactive probe."
           />
-        ) : sidebarTab === "commands" ? (
-          /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
-          <div className="flex flex-1 flex-col min-h-0 space-y-3">
+        ) : (
+          <AnimatePresence initial={false} mode="popLayout" custom={sidebarContentDirection}>
+            <motion.div
+              key={isSidebar ? sidebarTab : "route-history"}
+              data-forensic-tab-panel={sidebarTab}
+              custom={sidebarContentDirection}
+              variants={SIDEBAR_CONTENT_VARIANTS}
+              initial={isSidebar ? "enter" : false}
+              animate="center"
+              exit={isSidebar ? "exit" : undefined}
+              transition={
+                shouldReduceMotion
+                  ? { duration: 0 }
+                  : { duration: 0.18, ease: [0.4, 0, 0.2, 1] }
+              }
+              className={isSidebar ? "flex min-h-0 flex-1 flex-col" : undefined}
+            >
+              {sidebarTab === "commands" ? (
+                /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
+                <div className="flex flex-1 flex-col min-h-0 space-y-3">
             <div className="rounded-xl border border-border bg-surface-subtle p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <span className="text-text-muted">Selected CWD context</span>
@@ -262,10 +301,10 @@ export function CwdRouteHistory({
               title="Command and file telemetry unavailable"
               description="No authoritative command, payload, or file event is linked to this CWD hop. Only verified directory transitions are shown."
             />
-          </div>
-        ) : sidebarTab === "actions" ? (
-          /* Response controls remain unavailable until an authoritative action API exists. */
-          <div className="flex flex-1 flex-col min-h-0 space-y-3">
+                </div>
+              ) : sidebarTab === "actions" ? (
+                /* Response controls remain unavailable until an authoritative action API exists. */
+                <div className="flex flex-1 flex-col min-h-0 space-y-3">
             <div className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2.5">
               <div className="text-xs font-semibold text-text">Selected session</div>
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
@@ -284,10 +323,10 @@ export function CwdRouteHistory({
               title="Response controls unavailable"
               description="This dashboard has no verified terminate-session or firewall-block action API. No command has been sent to the honeypot."
             />
-          </div>
-        ) : (
-          /* Tab 1: Sleek Compact Route Replay */
-          <>
+                </div>
+              ) : (
+                /* Tab 1: Sleek Compact Route Replay */
+                <>
             {/* Sleek Compact Hop Deck */}
             <div className="rounded-xl border border-border bg-surface-subtle p-2.5 shadow-2xs" aria-live="polite">
               {/* Controls & Scrubber Row */}
@@ -578,7 +617,10 @@ export function CwdRouteHistory({
                 })}
               </ol>
             </div>
-          </>
+                </>
+              )}
+            </motion.div>
+          </AnimatePresence>
         )}
       </div>
     </div>
