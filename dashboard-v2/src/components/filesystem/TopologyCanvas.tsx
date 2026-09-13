@@ -12,6 +12,7 @@ import {
   Maximize2,
   Minimize2,
   MousePointer2,
+  Move,
   RotateCcw,
   Route,
   ScanLine,
@@ -236,9 +237,10 @@ export function TopologyCanvas({
   const nodeDrag = useRef<NodeDrag | null>(null);
   const suppressCalloutClick = useRef(false);
   const suppressNodeClick = useRef(false);
-  const autoArrangeUndo = useRef<WorkspaceLayoutSnapshot | null>(null);
+  const layoutUndo = useRef<WorkspaceLayoutSnapshot | null>(null);
+  const pendingDragUndo = useRef<WorkspaceLayoutSnapshot | null>(null);
   const layoutMenuRef = useRef<HTMLDivElement>(null);
-  const [canUndoAutoArrange, setCanUndoAutoArrange] = useState(false);
+  const [canUndoLayout, setCanUndoLayout] = useState(false);
   const [isArrangeMode, setIsArrangeMode] = useState(false);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
 
@@ -262,6 +264,18 @@ export function TopologyCanvas({
       document.removeEventListener("keydown", closeLayoutMenuOnEscape);
     };
   }, [layoutMenuOpen]);
+
+  useEffect(() => {
+    if (!isArrangeMode) return;
+    const exitArrangeMode = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || layoutMenuOpen) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setIsArrangeMode(false);
+    };
+    document.addEventListener("keydown", exitArrangeMode);
+    return () => document.removeEventListener("keydown", exitArrangeMode);
+  }, [isArrangeMode, layoutMenuOpen]);
 
   // Save label layout to localStorage
   useEffect(() => {
@@ -590,8 +604,9 @@ export function TopologyCanvas({
     resetLabelLayout();
     resetNodeLayout();
     resetViewport({}, {});
-    autoArrangeUndo.current = null;
-    setCanUndoAutoArrange(false);
+    layoutUndo.current = null;
+    pendingDragUndo.current = null;
+    setCanUndoLayout(false);
   };
 
   const fitTopology = () => {
@@ -601,20 +616,20 @@ export function TopologyCanvas({
 
   const autoArrangeTopology = () => {
     hasUserManuallyAdjustedView.current = false;
-    autoArrangeUndo.current = {
+    layoutUndo.current = {
       labelPositions: { ...labelPositions },
       nodePositions: { ...nodePositions },
       pan: { ...panRef.current },
       zoom: zoomRef.current,
     };
-    setCanUndoAutoArrange(true);
+    setCanUndoLayout(true);
     resetLabelLayout();
     resetNodeLayout();
     resetViewport({}, {});
   };
 
-  const undoAutoArrangeTopology = () => {
-    const previous = autoArrangeUndo.current;
+  const undoLayoutChange = () => {
+    const previous = layoutUndo.current;
     if (!previous) return;
     hasUserManuallyAdjustedView.current = true;
     setLabelPositions(previous.labelPositions);
@@ -623,14 +638,24 @@ export function TopologyCanvas({
     zoomRef.current = previous.zoom;
     setPan(previous.pan);
     setZoom(previous.zoom);
-    autoArrangeUndo.current = null;
-    setCanUndoAutoArrange(false);
+    layoutUndo.current = null;
+    pendingDragUndo.current = null;
+    setCanUndoLayout(false);
   };
 
-  const clearAutoArrangeUndo = () => {
-    if (!autoArrangeUndo.current) return;
-    autoArrangeUndo.current = null;
-    setCanUndoAutoArrange(false);
+  const captureDragUndo = () => {
+    pendingDragUndo.current = {
+      labelPositions: { ...labelPositions },
+      nodePositions: { ...nodePositions },
+      pan: { ...panRef.current },
+      zoom: zoomRef.current,
+    };
+  };
+
+  const commitDragUndo = () => {
+    if (!pendingDragUndo.current) return;
+    layoutUndo.current = pendingDragUndo.current;
+    pendingDragUndo.current = null;
   };
 
   const centerMapOn = useCallback((position: LabelPosition) => {
@@ -692,6 +717,7 @@ export function TopologyCanvas({
     suppressCalloutClick.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
     labelDrag.current = { sourceIp, startX: event.clientX, startY: event.clientY, origin };
+    captureDragUndo();
     setDraggedCalloutIp(sourceIp);
   };
 
@@ -704,8 +730,8 @@ export function TopologyCanvas({
     const deltaX = ((event.clientX - dragging.startX) / rect.width) * 100;
     const deltaY = ((event.clientY - dragging.startY) / rect.height) * 100;
     if (Math.abs(deltaX) > 0.25 || Math.abs(deltaY) > 0.25) {
+      if (!suppressCalloutClick.current) commitDragUndo();
       suppressCalloutClick.current = true;
-      clearAutoArrangeUndo();
     }
     setLabelPositions((current) => ({
       ...current,
@@ -725,7 +751,9 @@ export function TopologyCanvas({
       }));
     }
     labelDrag.current = null;
+    pendingDragUndo.current = null;
     setDraggedCalloutIp(null);
+    if (suppressCalloutClick.current) setCanUndoLayout(true);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -739,6 +767,7 @@ export function TopologyCanvas({
     suppressNodeClick.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
     nodeDrag.current = { path, startX: event.clientX, startY: event.clientY, origin };
+    captureDragUndo();
     setDraggedNodePath(path);
   };
 
@@ -751,8 +780,8 @@ export function TopologyCanvas({
     const deltaX = ((event.clientX - dragging.startX) / rect.width) * 100;
     const deltaY = ((event.clientY - dragging.startY) / rect.height) * 100;
     if (Math.abs(deltaX) > 0.2 || Math.abs(deltaY) > 0.2) {
+      if (!suppressNodeClick.current) commitDragUndo();
       suppressNodeClick.current = true;
-      clearAutoArrangeUndo();
     }
     setNodePositions((current) => ({
       ...current,
@@ -765,7 +794,9 @@ export function TopologyCanvas({
 
   const onNodePointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
     nodeDrag.current = null;
+    pendingDragUndo.current = null;
     setDraggedNodePath(null);
+    if (suppressNodeClick.current) setCanUndoLayout(true);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -968,8 +999,8 @@ export function TopologyCanvas({
           </p>
         </div>
 
-        {/* Primary navigation remains visible; lower-frequency layout actions live in one named menu. */}
-        <div className="flex shrink-0 items-center gap-1 flex-nowrap">
+        {/* Primary navigation and interaction mode remain visible; lower-frequency layout actions live in the menu. */}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
           <button
             type="button"
             className="ui-button h-9 min-h-9 w-9 p-0"
@@ -1002,7 +1033,7 @@ export function TopologyCanvas({
             <ZoomIn className="h-3.5 w-3.5" />
           </button>
 
-          <div className="mx-0.5 h-4 w-px bg-border" />
+          <div className="mx-0.5 hidden h-4 w-px bg-border lg:block" />
 
           <button
             type="button"
@@ -1026,11 +1057,60 @@ export function TopologyCanvas({
           >
             <LocateFixed className="h-3.5 w-3.5" />
           </button>
+
+          <div className="mx-0.5 hidden h-4 w-px bg-border lg:block" />
+
+          <div
+            className="flex h-9 items-center rounded-lg bg-surface-subtle ring-1 ring-inset ring-border"
+            role="group"
+            aria-label="Topology interaction mode"
+          >
+            <button
+              type="button"
+              aria-pressed={!isArrangeMode}
+              onClick={() => setIsArrangeMode(false)}
+              className={`flex h-9 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                !isArrangeMode
+                  ? "border border-border bg-surface text-text shadow-xs"
+                  : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
+              }`}
+            >
+              <MousePointer2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Explore
+            </button>
+            <button
+              type="button"
+              aria-pressed={isArrangeMode}
+              onClick={() => setIsArrangeMode(true)}
+              className={`flex h-9 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                isArrangeMode
+                  ? "border border-primary-border bg-primary-subtle font-semibold text-primary shadow-xs"
+                  : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
+              }`}
+            >
+              <Move className="h-3.5 w-3.5" aria-hidden="true" />
+              Arrange
+            </button>
+          </div>
+
+          {canUndoLayout && (
+            <button
+              type="button"
+              className="ui-button h-9 min-h-9 px-2.5 text-xs"
+              title="Undo last layout change"
+              aria-label="Undo last layout change"
+              onClick={undoLayoutChange}
+            >
+              <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden 2xl:inline">Undo</span>
+            </button>
+          )}
+
           <div ref={layoutMenuRef} className="relative">
             <button
               type="button"
               className={`ui-button relative h-9 min-h-9 w-9 p-0 ${
-                totalOverlaps > 0 ? "border-warning/70 text-warning" : isArrangeMode ? "border-primary-border bg-primary-subtle text-primary" : ""
+                totalOverlaps > 0 ? "border-warning/70 text-warning" : ""
               }`}
               title="Layout options"
               aria-label="Open topology layout options"
@@ -1061,32 +1141,7 @@ export function TopologyCanvas({
                   <span className="flex-1">Auto arrange</span>
                   {totalOverlaps > 0 && <span className="text-warning">{totalOverlaps} overlapping</span>}
                 </button>
-                <button
-                  type="button"
-                  aria-pressed={isArrangeMode}
-                  onClick={() => {
-                    setIsArrangeMode((current) => !current);
-                    setLayoutMenuOpen(false);
-                  }}
-                  className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                >
-                  <MousePointer2 className="h-4 w-4 text-primary" aria-hidden="true" />
-                  <span className="flex-1">Arrange nodes</span>
-                  <span className="text-text-subtle">{isArrangeMode ? "On" : "Off"}</span>
-                </button>
                 <div className="my-1 h-px bg-border" aria-hidden="true" />
-                <button
-                  type="button"
-                  disabled={!canUndoAutoArrange}
-                  onClick={() => {
-                    undoAutoArrangeTopology();
-                    setLayoutMenuOpen(false);
-                  }}
-                  className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:text-text-subtle"
-                >
-                  <Undo2 className="h-4 w-4" aria-hidden="true" />
-                  Undo auto arrange
-                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -1103,7 +1158,7 @@ export function TopologyCanvas({
             )}
           </div>
 
-          <div className="mx-0.5 h-4 w-px bg-border" />
+          <div className="mx-0.5 hidden h-4 w-px bg-border lg:block" />
 
           <button
             type="button"
@@ -1180,6 +1235,26 @@ export function TopologyCanvas({
                   className="pointer-events-none absolute inset-0 opacity-50 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]"
                   aria-hidden="true"
                 />
+
+                <AnimatePresence initial={false}>
+                  {isArrangeMode && (
+                    <motion.div
+                      role="status"
+                      initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.15, ease: "easeOut" }}
+                      className="pointer-events-none absolute left-4 top-4 z-50 flex min-h-9 items-center gap-2 rounded-lg border border-primary-border bg-surface-raised px-3 text-xs text-text shadow-sm sm:left-5 sm:top-5"
+                    >
+                      <Move className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                      <strong className="font-semibold text-primary">Arrange mode</strong>
+                      <span className="text-text-muted">Drag nodes</span>
+                      <span className="text-border" aria-hidden="true">·</span>
+                      <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 font-mono text-xs">Esc</kbd>
+                      <span className="text-text-muted">to finish</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <motion.div
                   ref={graphPlaneRef}
@@ -1669,18 +1744,18 @@ export function TopologyCanvas({
                   </span>
                 </div>
                 <p className="mt-3 text-xs text-text-subtle">
-                  Choose an IP to fan its leader line out to every current verified path. Drag directories and IP labels
-                  on the map to arrange them. Auto arrange rebuilds the subtree layout, returns sources to their rails,
+                  Choose an IP to fan its leader line out to every current verified path. Switch to Arrange to drag
+                  directories and IP labels. Auto arrange rebuilds the subtree layout, returns sources to their rails,
                   and recenters the camera; undo restores this workspace. Press Escape to exit this workspace.
                 </p>
                 <button type="button" className="ui-button mt-4 w-full" onClick={autoArrangeTopology}>
                   <ScanLine className="h-4 w-4" />
                   Auto arrange topology
                 </button>
-                {canUndoAutoArrange && (
-                  <button type="button" className="ui-button mt-2 w-full" onClick={undoAutoArrangeTopology}>
+                {canUndoLayout && (
+                  <button type="button" className="ui-button mt-2 w-full" onClick={undoLayoutChange}>
                     <Undo2 className="h-4 w-4" />
-                    Undo auto arrange
+                    Undo layout change
                   </button>
                 )}
                 <button type="button" className="ui-button mt-2 w-full" onClick={resetMapWorkspace}>
