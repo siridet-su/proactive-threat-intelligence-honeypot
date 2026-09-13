@@ -18,9 +18,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RegionStatus } from "@/components/ui/RegionState";
 import type {
+  FilesystemClosedSession,
+  FilesystemTopologySession,
   FilesystemTopologySnapshot,
   SessionCwdHistoryEvent,
 } from "@/lib/dashboardTypes";
+import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
 import { CwdRouteHistory } from "./CwdRouteHistory";
 import { FilesystemInspector } from "./FilesystemInspector";
@@ -31,9 +34,13 @@ import {
   MIN_TIMELINE_SIDEBAR_WIDTH,
   TIMELINE_SIDEBAR_STORAGE_KEY,
   buildAuditSnapshot,
+  getDistinctSessionPaths,
   isHistoryPage,
+  isHomeOnlySession,
   isSnapshot,
+  sessionTouchesPath,
   type ActiveHopRoute,
+  type DistinctPathOption,
   type StreamState,
 } from "./filesystemUtils";
 import { SessionSourceList } from "./SessionSourceList";
@@ -51,6 +58,10 @@ export function FilesystemActivity() {
   const [historyStatus, setHistoryStatus] = useState<RegionStatus>("loading");
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState<string | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
+
+  // Audit Mode Filter State
+  const [hideHomeOnly, setHideHomeOnly] = useState(false);
+  const [targetPathFilter, setTargetPathFilter] = useState<string | null>(null);
 
   // Fullscreen & Hybrid Replay Studio State
   const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
@@ -83,6 +94,14 @@ export function FilesystemActivity() {
         if (urlSessionId) {
           selectedSessionIdRef.current = urlSessionId;
           setSelectedSessionId(urlSessionId);
+        }
+        const urlHideHome = params.get("hideHome");
+        if (urlHideHome === "1" || urlHideHome === "true") {
+          setHideHomeOnly(true);
+        }
+        const urlTargetPath = params.get("targetPath");
+        if (urlTargetPath) {
+          setTargetPathFilter(urlTargetPath);
         }
 
         try {
@@ -329,6 +348,79 @@ export function FilesystemActivity() {
     [selectedPath, snapshot],
   );
 
+  const distinctPaths: DistinctPathOption[] = useMemo(() => {
+    return getDistinctSessionPaths(
+      snapshot?.nodes ?? [],
+      snapshot?.sessions ?? [],
+      snapshot?.recentClosedSessions ?? [],
+    );
+  }, [snapshot]);
+
+  const {
+    filteredActiveSessions,
+    filteredClosedSessions,
+    homeOnlyCount,
+    totalSessionsCount,
+    filteredSessionsCount,
+  } = useMemo(() => {
+    const allActive = snapshot?.sessions ?? [];
+    const allClosed = snapshot?.recentClosedSessions ?? [];
+    const allNodes = snapshot?.nodes ?? [];
+
+    let homeCount = 0;
+    for (const s of allActive) {
+      if (isHomeOnlySession(s, allNodes)) homeCount++;
+    }
+    for (const s of allClosed) {
+      if (isHomeOnlySession(s, allNodes)) homeCount++;
+    }
+
+    const filterFn = (s: FilesystemTopologySession | FilesystemClosedSession) => {
+      if (hideHomeOnly && isHomeOnlySession(s, allNodes)) {
+        return false;
+      }
+      if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter, allNodes)) {
+        return false;
+      }
+      return true;
+    };
+
+    const filteredActive = allActive.filter(filterFn);
+    const filteredClosed = allClosed.filter(filterFn);
+    const total = allActive.length + allClosed.length;
+    const filtered = filteredActive.length + filteredClosed.length;
+
+    return {
+      filteredActiveSessions: filteredActive,
+      filteredClosedSessions: filteredClosed,
+      homeOnlyCount: homeCount,
+      totalSessionsCount: total,
+      filteredSessionsCount: filtered,
+    };
+  }, [snapshot, hideHomeOnly, targetPathFilter]);
+
+  const handleResetAuditFilters = useCallback(() => {
+    setHideHomeOnly(false);
+    setTargetPathFilter(null);
+  }, []);
+
+  // Sync URL query params with audit filters
+  useEffect(() => {
+    if (viewMode !== "audit" || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (hideHomeOnly) {
+      url.searchParams.set("hideHome", "1");
+    } else {
+      url.searchParams.delete("hideHome");
+    }
+    if (targetPathFilter) {
+      url.searchParams.set("targetPath", targetPathFilter);
+    } else {
+      url.searchParams.delete("targetPath");
+    }
+    window.history.replaceState(null, "", url.toString());
+  }, [viewMode, hideHomeOnly, targetPathFilter]);
+
   // Reload CWD route when a new source event arrives for the selected session
   useEffect(() => {
     if (!selectedSessionId) {
@@ -366,6 +458,48 @@ export function FilesystemActivity() {
     [sessionById, snapshot?.nodes, loadHistory],
   );
 
+  const handleToggleHideHomeOnly = useCallback(() => {
+    setHideHomeOnly((prev) => {
+      const next = !prev;
+      if (next && selectedSessionId) {
+        const allNodes = snapshot?.nodes ?? [];
+        const currentSession = sessionById.get(selectedSessionId);
+        if (currentSession && isHomeOnlySession(currentSession, allNodes)) {
+          const firstNonHome = allSessions.find((s) => {
+            if (isHomeOnlySession(s, allNodes)) return false;
+            if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter, allNodes)) return false;
+            return true;
+          });
+          if (firstNonHome) {
+            selectSession(firstNonHome.sessionId);
+          }
+        }
+      }
+      return next;
+    });
+  }, [selectedSessionId, snapshot?.nodes, sessionById, allSessions, targetPathFilter, selectSession]);
+
+  const handleSelectTargetPath = useCallback(
+    (path: string | null) => {
+      setTargetPathFilter(path);
+      if (path && selectedSessionId) {
+        const allNodes = snapshot?.nodes ?? [];
+        const currentSession = sessionById.get(selectedSessionId);
+        if (currentSession && !sessionTouchesPath(currentSession, path, allNodes)) {
+          const firstMatching = allSessions.find((s) => {
+            if (hideHomeOnly && isHomeOnlySession(s, allNodes)) return false;
+            if (!sessionTouchesPath(s, path, allNodes)) return false;
+            return true;
+          });
+          if (firstMatching) {
+            selectSession(firstMatching.sessionId);
+          }
+        }
+      }
+    },
+    [selectedSessionId, snapshot?.nodes, sessionById, allSessions, hideHomeOnly, selectSession],
+  );
+
   // Decoupled directory selection: inspects directory metadata without destroying the currently audited session
   const selectPath = (path: string | null) => {
     setSelectedPath(path);
@@ -392,14 +526,20 @@ export function FilesystemActivity() {
         if (mode === "audit") {
           url.searchParams.set("view", "audit");
           if (sid) url.searchParams.set("sessionId", sid);
+          if (hideHomeOnly) url.searchParams.set("hideHome", "1");
+          else url.searchParams.delete("hideHome");
+          if (targetPathFilter) url.searchParams.set("targetPath", targetPathFilter);
+          else url.searchParams.delete("targetPath");
         } else {
           url.searchParams.delete("view");
           url.searchParams.delete("sessionId");
+          url.searchParams.delete("hideHome");
+          url.searchParams.delete("targetPath");
         }
         window.history.replaceState(null, "", url.toString());
       }
     },
-    [selectSession, snapshot?.sessions, snapshot?.recentClosedSessions],
+    [selectSession, snapshot?.sessions, snapshot?.recentClosedSessions, hideHomeOnly, targetPathFilter],
   );
 
   const auditSnapshot = useMemo(() => {
@@ -677,13 +817,29 @@ export function FilesystemActivity() {
               <div className="h-4 w-px bg-border hidden sm:block" />
               <span className="text-xs text-text-subtle font-medium hidden md:inline">Audited Session:</span>
               <AuditSessionSelect
-                sessions={snapshot?.sessions ?? []}
-                recentClosedSessions={snapshot?.recentClosedSessions ?? []}
+                sessions={filteredActiveSessions}
+                recentClosedSessions={filteredClosedSessions}
                 selectedSessionId={selectedSessionId}
                 onSelectSession={selectSession}
+                totalCount={totalSessionsCount}
+                hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                onResetFilters={handleResetAuditFilters}
+                allSessionsList={allSessions}
+              />
+              <AuditFilterControls
+                hideHomeOnly={hideHomeOnly}
+                onToggleHideHomeOnly={handleToggleHideHomeOnly}
+                targetPath={targetPathFilter}
+                onSelectTargetPath={handleSelectTargetPath}
+                distinctPaths={distinctPaths}
+                homeOnlyCount={homeOnlyCount}
+                filteredCount={filteredSessionsCount}
+                totalCount={totalSessionsCount}
+                onResetFilters={handleResetAuditFilters}
+                selectedCanvasPath={selectedPath}
               />
               {selectedSession && (
-                <span className="font-mono text-xs text-text-subtle hidden lg:inline">
+                <span className="font-mono text-xs text-text-subtle hidden xl:inline">
                   IP: <strong className="text-text">{selectedSession.sourceIp}</strong>
                 </span>
               )}
@@ -851,34 +1007,35 @@ export function FilesystemActivity() {
       ) : (
         /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
         <div className="space-y-4">
-          {/* Target Session Selector & Action Bar */}
-          <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between shadow-xs">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <button
-                type="button"
-                onClick={() => switchViewMode("live")}
-                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Back to Live Topology
-              </button>
-              <div className="h-4 w-px bg-border hidden sm:block" />
-              <span className="text-xs text-text-subtle font-medium">Audited Session:</span>
+          {/* Target Session Selector & Action Bar (Compact Single-Row Toolbar) */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2">
               <AuditSessionSelect
-                sessions={snapshot?.sessions ?? []}
-                recentClosedSessions={snapshot?.recentClosedSessions ?? []}
+                sessions={filteredActiveSessions}
+                recentClosedSessions={filteredClosedSessions}
                 selectedSessionId={selectedSessionId}
                 onSelectSession={selectSession}
+                totalCount={totalSessionsCount}
+                hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                onResetFilters={handleResetAuditFilters}
+                allSessionsList={allSessions}
+              />
+              <div className="h-4 w-px bg-border hidden sm:block" />
+              <AuditFilterControls
+                hideHomeOnly={hideHomeOnly}
+                onToggleHideHomeOnly={handleToggleHideHomeOnly}
+                targetPath={targetPathFilter}
+                onSelectTargetPath={handleSelectTargetPath}
+                distinctPaths={distinctPaths}
+                homeOnlyCount={homeOnlyCount}
+                filteredCount={filteredSessionsCount}
+                totalCount={totalSessionsCount}
+                onResetFilters={handleResetAuditFilters}
+                selectedCanvasPath={selectedPath}
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {selectedSession && (
-                <span className="font-mono text-xs text-text-subtle hidden md:inline">
-                  IP: <strong className="text-text">{selectedSession.sourceIp}</strong>
-                </span>
-              )}
-
+            <div className="flex items-center gap-1.5 text-xs">
               {/* Compact Scrubber when Timeline is collapsed */}
               <div
                 className={`overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none flex items-center ${
@@ -887,7 +1044,7 @@ export function FilesystemActivity() {
                     : "max-w-0 opacity-0 pointer-events-none"
                 }`}
               >
-                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-subtle px-2 py-1 shrink-0">
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-subtle px-1.5 py-0.5 shrink-0">
                   <button
                     type="button"
                     onClick={handlePrevHop}
@@ -901,13 +1058,13 @@ export function FilesystemActivity() {
                   <button
                     type="button"
                     onClick={handleTogglePlay}
-                    className={`ui-button h-6 min-h-6 px-2 text-[11px] flex items-center gap-1 ${
+                    className={`ui-button h-6 min-h-6 px-1.5 text-[10px] flex items-center gap-1 ${
                       isPlaying ? "border-primary bg-primary text-surface" : ""
                     }`}
                     title={isPlaying ? "Pause (Space)" : "Play (Space)"}
                     aria-label={isPlaying ? "Pause" : "Play"}
                   >
-                    {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    {isPlaying ? <Pause className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
                     <span>{isPlaying ? "Pause" : "Play"}</span>
                   </button>
                   <button
@@ -920,8 +1077,8 @@ export function FilesystemActivity() {
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>
-                  <span className="text-[11px] font-mono text-text-muted px-1">
-                    Hop {selectedHistoryIndex + 1}/{displayedHistory.length}
+                  <span className="text-[10px] font-mono text-text-muted px-1">
+                    {selectedHistoryIndex + 1}/{displayedHistory.length}
                   </span>
                 </div>
               </div>

@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
-  Grip,
   HardDrive,
   LocateFixed,
   Maximize2,
@@ -461,7 +460,6 @@ export function TopologyCanvas({
       for (const callout of graphCallouts) {
         const bounds = calloutElementBounds[callout.sourceIp];
         const pos =
-          effectiveCalloutPositions.get(callout.sourceIp) ??
           effectiveLabels[callout.sourceIp] ??
           automaticCalloutPositions.get(callout.sourceIp) ??
           { x: 90, y: 50 };
@@ -518,7 +516,7 @@ export function TopologyCanvas({
         pan: { x: panX, y: 0 },
       };
     },
-    [automaticCalloutPositions, automaticGraphNodes, calloutElementBounds, effectiveCalloutPositions, graphCallouts, labelPositions, nodeElementBounds, nodePositions],
+    [automaticCalloutPositions, automaticGraphNodes, calloutElementBounds, graphCallouts, labelPositions, nodeElementBounds, nodePositions],
   );
 
   const resetViewport = useCallback(
@@ -1111,10 +1109,7 @@ export function TopologyCanvas({
                   className="pointer-events-none absolute inset-0 opacity-50 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]"
                   aria-hidden="true"
                 />
-                <div className="pointer-events-none absolute left-5 top-5 flex items-center gap-2 text-xs text-text-subtle">
-                  <Grip className="h-3.5 w-3.5" aria-hidden="true" />
-                  Drag surface to pan · Scroll or pinch to zoom · Drag directory or IP nodes beyond the tree frame · Use reset to recover
-                </div>
+
                 <motion.div
                   ref={graphPlaneRef}
                   className="relative min-h-[500px] min-w-[860px] origin-top-left overflow-visible"
@@ -1508,8 +1503,8 @@ export function TopologyCanvas({
                 />
               </div>
 
-              <div className="flex h-11 shrink-0 items-center justify-between gap-4 border-t border-border px-5 text-xs text-text-muted select-none">
-                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 text-xs">
+              <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:flex-nowrap sm:gap-3">
                   <span className="shrink-0">
                     <strong className="font-medium text-text">{snapshot.nodes.length}</strong> observed paths
                   </span>
@@ -1531,7 +1526,7 @@ export function TopologyCanvas({
                   </span>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-3.5">
+                <div className="flex max-w-full shrink-0 flex-wrap items-center gap-3.5">
                   <AnimatePresence>
                     {totalOverlaps > 0 && (
                       <motion.div
@@ -1557,7 +1552,7 @@ export function TopologyCanvas({
                     )}
                   </AnimatePresence>
 
-                  <div className="flex items-center gap-3" aria-label="Topology map legend">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Topology map legend">
                     <span className="flex items-center gap-1.5">
                       <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
                       <span>Filesystem route</span>

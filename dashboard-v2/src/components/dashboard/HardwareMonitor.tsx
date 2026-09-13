@@ -176,9 +176,8 @@ function MetricCard({ icon: Icon, label, value, suffix, details, iconClassName =
         <span className="inline-flex items-center gap-1 self-end text-xs text-text-subtle"><FlipHorizontal2 className="h-3.5 w-3.5" aria-hidden="true" />Details</span>
       </span>
       <span className={`absolute inset-0 flex flex-col justify-between rounded-lg border border-primary-border bg-primary-subtle p-3 [backface-visibility:hidden] [transform:rotateY(180deg)] motion-reduce:[backface-visibility:visible] motion-reduce:[transform:none] motion-reduce:transition-none ${flipped ? "motion-reduce:opacity-100" : "motion-reduce:opacity-0"}`}>
-        <span className="flex min-w-0 items-center justify-between gap-2"><span className="text-xs font-medium text-text">{label} details</span><FlipHorizontal2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /></span>
+        <span className="flex min-w-0 items-center justify-between gap-2"><span className="text-xs font-medium text-text">{label} details</span><span className="inline-flex shrink-0 items-center gap-1 text-xs text-primary"><FlipHorizontal2 className="h-3.5 w-3.5" aria-hidden="true" />Summary</span></span>
         {accessibleDetails.length > 0 ? <span className={`grid gap-x-2 gap-y-2 ${accessibleDetails.length > 3 ? "grid-cols-2" : "grid-cols-3"}`}>{accessibleDetails.map((detail) => <span key={detail.label} className="min-w-0"><span className="block truncate text-xs text-text-muted">{detail.label}</span><span className="block truncate font-mono text-xs font-medium text-text" title={detail.value}>{detail.value}</span></span>)}</span> : <span className="text-xs text-text-muted">No detailed value in the latest sample.</span>}
-        <span className="self-end text-xs text-primary">Summary</span>
       </span>
     </span>
   </button>;

@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, RotateCcw, Search, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -23,6 +23,10 @@ export interface AuditSessionSelectProps {
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   className?: string;
+  totalCount?: number;
+  hasActiveFilters?: boolean;
+  onResetFilters?: () => void;
+  allSessionsList?: readonly (FilesystemTopologySession | FilesystemClosedSession)[];
 }
 
 export function AuditSessionSelect({
@@ -31,46 +35,100 @@ export function AuditSessionSelect({
   selectedSessionId,
   onSelectSession,
   className,
+  totalCount,
+  hasActiveFilters,
+  onResetFilters,
+  allSessionsList,
 }: AuditSessionSelectProps) {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const generatedId = useId();
   const triggerId = `audit-session-select-${generatedId}`;
   const menuId = `${triggerId}-menu`;
 
-  const allSessions = useMemo(
-    () => [...sessions, ...recentClosedSessions],
-    [sessions, recentClosedSessions],
+  const effectiveAllSessions = useMemo(
+    () => allSessionsList ?? [...sessions, ...recentClosedSessions],
+    [allSessionsList, sessions, recentClosedSessions],
   );
 
   const selectedSession = useMemo(
-    () => allSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
-    [allSessions, selectedSessionId],
+    () =>
+      effectiveAllSessions.find((s) => s.sessionId === selectedSessionId) ??
+      [...sessions, ...recentClosedSessions].find((s) => s.sessionId === selectedSessionId) ??
+      null,
+    [effectiveAllSessions, sessions, recentClosedSessions, selectedSessionId],
   );
 
   const isSelectedClosed = useMemo(
-    () => recentClosedSessions.some((s) => s.sessionId === selectedSessionId),
-    [recentClosedSessions, selectedSessionId],
+    () =>
+      selectedSession
+        ? "lifecycle" in selectedSession && Boolean(selectedSession.lifecycle)
+        : recentClosedSessions.some((s) => s.sessionId === selectedSessionId),
+    [selectedSession, recentClosedSessions, selectedSessionId],
+  );
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const filteredActiveSessions = useMemo(() => {
+    if (!normalizedQuery) return sessions;
+    return sessions.filter(
+      (s) =>
+        s.sourceIp.toLowerCase().includes(normalizedQuery) ||
+        s.sessionId.toLowerCase().includes(normalizedQuery) ||
+        (s.cwdState?.path && s.cwdState.path.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [sessions, normalizedQuery]);
+
+  const filteredClosedSessions = useMemo(() => {
+    if (!normalizedQuery) return recentClosedSessions;
+    return recentClosedSessions.filter(
+      (s) =>
+        s.sourceIp.toLowerCase().includes(normalizedQuery) ||
+        s.sessionId.toLowerCase().includes(normalizedQuery) ||
+        (s.cwdState?.path && s.cwdState.path.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [recentClosedSessions, normalizedQuery]);
+
+  const allDisplaySessions = useMemo(
+    () => [...filteredActiveSessions, ...filteredClosedSessions],
+    [filteredActiveSessions, filteredClosedSessions],
   );
 
   const selectedIndex = useMemo(
-    () => allSessions.findIndex((s) => s.sessionId === selectedSessionId),
-    [allSessions, selectedSessionId],
+    () => allDisplaySessions.findIndex((s) => s.sessionId === selectedSessionId),
+    [allDisplaySessions, selectedSessionId],
   );
+
+  const isSelectedFilteredOut = useMemo(
+    () =>
+      Boolean(
+        selectedSession &&
+          hasActiveFilters &&
+          !allDisplaySessions.some((s) => s.sessionId === selectedSessionId),
+      ),
+    [selectedSession, hasActiveFilters, allDisplaySessions, selectedSessionId],
+  );
+
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+    setSearchQuery("");
+  }, []);
 
   // Close on click outside or Escape
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false);
+        closeMenu();
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        closeMenu();
         triggerRef.current?.focus();
       }
     };
@@ -80,6 +138,13 @@ export function AuditSessionSelect({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
+  }, [open, closeMenu]);
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => searchInputRef.current?.focus(), 50);
+    return () => clearTimeout(timer);
   }, [open]);
 
   // Scroll active option into view when opened
@@ -93,15 +158,15 @@ export function AuditSessionSelect({
   const handleSelect = useCallback(
     (sessionId: string) => {
       onSelectSession(sessionId);
-      setOpen(false);
+      closeMenu();
       triggerRef.current?.focus();
     },
-    [onSelectSession],
+    [onSelectSession, closeMenu],
   );
 
   const focusOption = (index: number) => {
-    if (!allSessions.length) return;
-    const nextIndex = (index + allSessions.length) % allSessions.length;
+    if (!allDisplaySessions.length) return;
+    const nextIndex = (index + allDisplaySessions.length) % allDisplaySessions.length;
     optionRefs.current[nextIndex]?.focus();
   };
 
@@ -122,7 +187,7 @@ export function AuditSessionSelect({
       focusOption(0);
     } else if (event.key === "End") {
       event.preventDefault();
-      focusOption(allSessions.length - 1);
+      focusOption(allDisplaySessions.length - 1);
     }
   };
 
@@ -139,7 +204,7 @@ export function AuditSessionSelect({
         aria-controls={menuId}
         onClick={() => setOpen((prev) => !prev)}
         onKeyDown={handleTriggerKeyDown}
-        className={`h-8 min-h-8 max-w-[280px] sm:max-w-md flex items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle px-2.5 py-1 font-mono text-xs text-text transition-all cursor-pointer select-none ${
+        className={`h-8 min-h-8 max-w-[280px] sm:max-w-md flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text transition-all cursor-pointer select-none ${
           open
             ? "border-primary ring-2 ring-primary/30 bg-surface"
             : "hover:bg-surface-hover hover:border-border-strong"
@@ -171,6 +236,11 @@ export function AuditSessionSelect({
               <span className="truncate text-text-muted hidden sm:inline">
                 ({isSelectedClosed ? "Closed" : selectedSession.cwdState.path ?? "/"})
               </span>
+              {isSelectedFilteredOut && (
+                <span className="rounded bg-primary-subtle border border-primary-border px-1.5 py-0.2 text-[10px] text-primary font-sans font-medium hidden md:inline">
+                  Filtered
+                </span>
+              )}
             </>
           ) : (
             <span className="text-text-muted">Select Session…</span>
@@ -195,19 +265,73 @@ export function AuditSessionSelect({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[300px] sm:min-w-[420px] max-w-[90vw] sm:max-w-[480px] max-h-80 overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1.5 shadow-2xl backdrop-blur-md"
+            className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[320px] sm:min-w-[440px] max-w-[90vw] sm:max-w-[500px] max-h-96 overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1.5 shadow-2xl backdrop-blur-md"
           >
+            {/* Search Input inside Session Dropdown */}
+            <div className="relative mb-1.5 px-1 pt-1">
+              <Search className="absolute left-3 top-3 h-3.5 w-3.5 text-text-subtle" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search IP, session ID, or path..."
+                className="w-full rounded-lg border border-border bg-surface-subtle pl-8 pr-7 py-1.5 text-xs font-mono text-text placeholder:text-text-subtle focus:border-primary focus:outline-hidden focus:ring-1 focus:ring-primary/40"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-3 text-text-subtle hover:text-text"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Callout if currently audited session is hidden by active filter */}
+            {isSelectedFilteredOut && selectedSession && (
+              <div className="mx-1 mb-2 rounded-lg border border-primary-border bg-primary-subtle p-2 text-xs">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-primary">
+                  Currently Auditing (Hidden by active filter):
+                </div>
+                <div className="mt-1 flex items-center justify-between font-mono text-[11px]">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/60 shrink-0" />
+                    <strong className="text-text">{selectedSession.sourceIp}</strong>
+                    <span className="text-text-subtle">{selectedSession.sessionId.slice(0, 8)}…</span>
+                  </div>
+                  <span className="px-1.5 py-0.2 rounded bg-surface border border-border/60 text-text-muted text-[10px] shrink-0">
+                    {selectedSession.cwdState?.path ?? "/"}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Active Sessions */}
-            {sessions.length > 0 && (
+            {filteredActiveSessions.length > 0 && (
               <div>
-                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-subtle uppercase tracking-wider flex items-center gap-1.5 select-none">
-                  <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                  Active Sessions ({sessions.length})
+                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                    Active Sessions ({filteredActiveSessions.length})
+                  </div>
+                  {totalCount !== undefined && totalCount > allDisplaySessions.length && (
+                    <span className="text-[10px] font-mono text-primary/80 lowercase">
+                      filtered
+                    </span>
+                  )}
                 </div>
                 <div className="space-y-0.5">
-                  {sessions.map((s, idx) => {
+                  {filteredActiveSessions.map((s, idx) => {
                     const isSelected = s.sessionId === selectedSessionId;
                     const globalIndex = idx;
+                    const isOutsideHome =
+                      s.cwdState?.path &&
+                      s.cwdState.path !== "/" &&
+                      s.cwdState.path !== "/home" &&
+                      !s.cwdState.path.startsWith("/home/");
+
                     return (
                       <button
                         key={s.sessionId}
@@ -233,8 +357,14 @@ export function AuditSessionSelect({
                           <span className="text-text-subtle">·</span>
                           <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
                           {s.cwdState?.path && (
-                            <span className="truncate text-text-subtle">
-                              ({s.cwdState.path})
+                            <span
+                              className={`truncate px-1.5 py-0.2 rounded text-[10px] border ${
+                                isOutsideHome
+                                  ? "bg-primary/10 text-primary border-primary/30 font-semibold"
+                                  : "bg-surface-subtle text-text-subtle border-border/50"
+                              }`}
+                            >
+                              {s.cwdState.path}
                             </span>
                           )}
                         </div>
@@ -249,16 +379,22 @@ export function AuditSessionSelect({
             )}
 
             {/* Closed Sessions */}
-            {recentClosedSessions.length > 0 && (
-              <div className={sessions.length > 0 ? "mt-2 pt-2 border-t border-border/60" : ""}>
+            {filteredClosedSessions.length > 0 && (
+              <div className={filteredActiveSessions.length > 0 ? "mt-2 pt-2 border-t border-border/60" : ""}>
                 <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-subtle uppercase tracking-wider flex items-center gap-1.5 select-none">
                   <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/50" />
-                  Closed Sessions ({recentClosedSessions.length})
+                  Closed Sessions ({filteredClosedSessions.length})
                 </div>
                 <div className="space-y-0.5">
-                  {recentClosedSessions.map((s, idx) => {
+                  {filteredClosedSessions.map((s, idx) => {
                     const isSelected = s.sessionId === selectedSessionId;
-                    const globalIndex = sessions.length + idx;
+                    const globalIndex = filteredActiveSessions.length + idx;
+                    const isOutsideHome =
+                      s.cwdState?.path &&
+                      s.cwdState.path !== "/" &&
+                      s.cwdState.path !== "/home" &&
+                      !s.cwdState.path.startsWith("/home/");
+
                     return (
                       <button
                         key={s.sessionId}
@@ -283,6 +419,17 @@ export function AuditSessionSelect({
                           </strong>
                           <span className="text-text-subtle">·</span>
                           <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
+                          {s.cwdState?.path && (
+                            <span
+                              className={`truncate px-1.5 py-0.2 rounded text-[10px] border ${
+                                isOutsideHome
+                                  ? "bg-primary/10 text-primary border-primary/30 font-semibold"
+                                  : "bg-surface-subtle text-text-subtle border-border/50"
+                              }`}
+                            >
+                              {s.cwdState.path}
+                            </span>
+                          )}
                           <span className="text-[10px] text-text-subtle font-sans px-1 rounded bg-surface-subtle border border-border shrink-0">
                             Closed
                           </span>
@@ -298,9 +445,30 @@ export function AuditSessionSelect({
             )}
 
             {/* Empty State */}
-            {sessions.length === 0 && recentClosedSessions.length === 0 && (
+            {allDisplaySessions.length === 0 && (
               <div className="px-3 py-4 text-center text-xs text-text-subtle font-mono">
-                No sessions available for audit
+                {searchQuery ? (
+                  <div>No sessions match &ldquo;{searchQuery}&rdquo;</div>
+                ) : hasActiveFilters ? (
+                  <div className="space-y-2">
+                    <div>No sessions match current audit filters.</div>
+                    {onResetFilters && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onResetFilters();
+                          setSearchQuery("");
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-subtle px-2 py-1 text-xs text-primary hover:bg-surface-hover hover:border-primary/40 transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        Reset audit filters
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div>No sessions available for audit</div>
+                )}
               </div>
             )}
           </motion.div>

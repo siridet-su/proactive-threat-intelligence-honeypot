@@ -27,7 +27,7 @@ const DATABASE_NAME = "honeypot_db";
 const SESSIONS_COLLECTION = "cwd_session_state";
 const HISTORY_COLLECTION = "cwd_events";
 const TOPOLOGY_LIMIT = 500;
-const RECENT_CLOSED_LIMIT = 12;
+const RECENT_CLOSED_LIMIT = 100;
 const HISTORY_PAGE_SIZE = 80;
 const TOPOLOGY_BROADCAST_DEBOUNCE_MS = 250;
 interface TopologySubscriber {

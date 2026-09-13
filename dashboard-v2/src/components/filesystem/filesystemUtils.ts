@@ -311,20 +311,31 @@ export function sourceRailPositions(
   const leftRail: GraphCallout[] = [];
   const rightRail: GraphCallout[] = [];
 
-  for (const [index, callout] of callouts.entries()) {
+  for (const callout of callouts) {
     let useLeftRail: boolean;
-    if (isAuditMode || callouts.length === 1) {
-      // In Audit mode or single-session view:
+    if (isAuditMode) {
+      // In Audit mode:
       // The session callout MUST remain completely stationary on ONE stable rail throughout
       // the entire replay. It should NEVER jump back and forth when stepping through hops.
-      // Choose the rail where the majority of the session's directories reside:
+      // Choose the quieter side of the complete tree rather than following the active hop.
       const leftNodeCount = [...graphNodeByPath.values()].filter((n) => n.x < 50).length;
       const rightNodeCount = [...graphNodeByPath.values()].filter((n) => n.x > 50).length;
-      useLeftRail = leftNodeCount >= rightNodeCount;
+      useLeftRail = leftNodeCount <= rightNodeCount;
+    } else if (callouts.length === 1) {
+      // A lone live source belongs beside its target branch. Centered targets use the
+      // quieter half of the tree so the connector remains short without adding clutter.
+      const target = graphNodeByPath.get(callout.path);
+      if (target && Math.abs(target.x - 50) >= 0.1) {
+        useLeftRail = target.x < 50;
+      } else {
+        const leftNodeCount = [...graphNodeByPath.values()].filter((n) => n.x < 50).length;
+        const rightNodeCount = [...graphNodeByPath.values()].filter((n) => n.x > 50).length;
+        useLeftRail = leftNodeCount <= rightNodeCount;
+      }
     } else {
       const target = graphNodeByPath.get(callout.path);
       const isCentered = !target || Math.abs(target.x - 50) < 0.1;
-      useLeftRail = isCentered ? index % 2 !== 0 : target.x < 50;
+      useLeftRail = isCentered ? leftRail.length <= rightRail.length : target.x < 50;
     }
     (useLeftRail ? leftRail : rightRail).push(callout);
   }
@@ -365,14 +376,15 @@ export function sourceRailPositions(
     }
   }
 
-  // Adaptive rail positions:
-  // Guarantee clear outer lanes with safe clearance from the nearest tree node.
+  // Target-aware adaptive rails:
+  // Sparse topologies keep sources close to their related directory. As density grows,
+  // the rails progressively move outward to preserve a clean directory-tree silhouette.
   const nodeXs = [...graphNodeByPath.values()].map((n) => n.x);
   const minTreeX = nodeXs.length ? Math.min(...nodeXs) : 50;
   const maxTreeX = nodeXs.length ? Math.max(...nodeXs) : 50;
-
-  const leftRailX = Math.max(9, Math.min(11, minTreeX - 15));
-  const rightRailX = Math.min(91, Math.max(89, maxTreeX + 15));
+  const railGap = callouts.length <= 2 ? 18 : callouts.length <= 4 ? 20 : 22;
+  const leftRailX = Math.max(10, minTreeX - railGap);
+  const rightRailX = Math.min(90, maxTreeX + railGap);
 
   const positions = new Map<string, LabelPosition>();
 
@@ -391,24 +403,16 @@ export function sourceRailPositions(
 
     if (rail.length === 1) {
       const callout = rail[0];
-      // In Audit mode or single-session view:
-      // Place the callout at a clean, stable elevated position (y ≈ 25%)
-      // so it stays calm and stationary while stepping through hops.
-      const targetY = isAuditMode ? 25 : (() => {
-        const target = graphNodeByPath.get(callout.path);
-        if (target && target.y <= 38) return Math.max(20, target.y);
-        return 26;
-      })();
+      // Audit sources stay fixed while replay hops change. Live sources align with their
+      // target so the relationship is readable without scanning two distant focal points.
+      const targetY = isAuditMode ? 25 : (graphNodeByPath.get(callout.path)?.y ?? 50);
       positions.set(callout.sourceIp, { x, y: Math.min(maxRailY, Math.max(18, targetY)) });
       return;
     }
 
-    // When a rail has 4 or more callouts, use staggered double columns (outer lane & inner lane)
-    // to guarantee generous clearance and eliminate crowding
-    const useDoubleColumn = rail.length >= 4;
-    const innerX = isRightRail ? Math.max(73, x - 16) : Math.min(27, x + 16);
-
-    const minGap = useDoubleColumn ? 11.5 : 14.0;
+    // At most eight source clusters are rendered. A single relaxed column per side keeps
+    // labels aligned and prevents connectors from weaving between staggered columns.
+    const minGap = rail.length >= 4 ? 11.5 : 14;
     const count = rail.length;
     const targetYs = rail.map((c) => Math.min(maxRailY, Math.max(18, graphNodeByPath.get(c.path)?.y ?? 50)));
 
@@ -428,10 +432,10 @@ export function sourceRailPositions(
       }
     }
 
-    // Defensive forward relaxation: if upward adjustment pushed ys[0] below min boundary (16%),
-    // clamp ys[0] = 16 and re-propagate minGap downwards so no cards are squeezed
-    if (ys[0] < 16) {
-      ys[0] = 16;
+    // Defensive forward relaxation: keep every callout inside the usable canvas and
+    // re-propagate the minimum separation after clamping.
+    if (ys[0] < 18) {
+      ys[0] = 18;
       for (let i = 1; i < count; i++) {
         if (ys[i] < ys[i - 1] + minGap) {
           ys[i] = ys[i - 1] + minGap;
@@ -440,8 +444,7 @@ export function sourceRailPositions(
     }
 
     rail.forEach((callout, index) => {
-      const calloutX = useDoubleColumn && index % 2 !== 0 ? innerX : x;
-      positions.set(callout.sourceIp, { x: calloutX, y: ys[index] });
+      positions.set(callout.sourceIp, { x, y: ys[index] });
     });
   };
 
@@ -599,3 +602,155 @@ export function buildAuditSnapshot(
   };
 }
 
+/**
+ * Checks whether a session strictly stayed within `/home` (and its subdirectories)
+ * without traversing into any sensitive or system directories (e.g. /etc, /var, /tmp, /root).
+ */
+export function isHomeOnlySession(
+  session: FilesystemTopologySession | FilesystemClosedSession,
+  allNodes: readonly FilesystemTopologyNode[] = [],
+  sessionHistoryEvents: readonly SessionCwdHistoryEvent[] = [],
+): boolean {
+  const cwd = session.cwdState.path;
+  if (!cwd) return false;
+
+  const isHomePath = (p: string | null | undefined): boolean => {
+    if (!p || p === "/") return false;
+    return p === "/home" || p.startsWith("/home/");
+  };
+
+  // If the session's current cwd is outside /home and not root, it left /home
+  if (!isHomePath(cwd) && cwd !== "/") {
+    return false;
+  }
+
+  // Check all topology nodes where this session is registered
+  for (const node of allNodes) {
+    if (node.path === "/") continue;
+    if (node.sessionIds.includes(session.sessionId)) {
+      if (!isHomePath(node.path)) {
+        return false;
+      }
+    }
+  }
+
+  // Check history events if loaded
+  for (const event of sessionHistoryEvents) {
+    if (event.fromPath && event.fromPath !== "/" && !isHomePath(event.fromPath)) {
+      return false;
+    }
+    if (event.action !== "failed_change" && event.toPath && event.toPath !== "/" && !isHomePath(event.toPath)) {
+      return false;
+    }
+  }
+
+  // If cwd is "/" and no nodes are under /home, then it's a root session, not home
+  if (cwd === "/") {
+    const hasHomeNode = allNodes.some(
+      (n) => n.sessionIds.includes(session.sessionId) && isHomePath(n.path),
+    );
+    if (!hasHomeNode) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Checks whether a session touched or traversed into a specific target path of interest.
+ * Matches exact path or descendant subpaths (e.g. target "/etc" matches "/etc" and "/etc/shadow").
+ */
+export function sessionTouchesPath(
+  session: FilesystemTopologySession | FilesystemClosedSession,
+  targetPath: string,
+  allNodes: readonly FilesystemTopologyNode[] = [],
+  sessionHistoryEvents: readonly SessionCwdHistoryEvent[] = [],
+): boolean {
+  if (!targetPath || targetPath === "" || targetPath === "all") return true;
+
+  const normalize = (p: string | null | undefined): string | null => {
+    if (!p) return null;
+    let s = p.trim();
+    if (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
+    return s;
+  };
+
+  const normTarget = normalize(targetPath);
+  if (!normTarget || normTarget === "/") return true;
+
+  const matches = (p: string | null | undefined): boolean => {
+    const norm = normalize(p);
+    if (!norm) return false;
+    return norm === normTarget || norm.startsWith(`${normTarget}/`);
+  };
+
+  // 1. Current cwd
+  if (matches(session.cwdState.path)) return true;
+
+  // 2. Topology nodes
+  for (const node of allNodes) {
+    if (node.sessionIds.includes(session.sessionId) && matches(node.path)) {
+      return true;
+    }
+  }
+
+  // 3. History events
+  for (const event of sessionHistoryEvents) {
+    if (matches(event.fromPath)) return true;
+    if (event.action !== "failed_change" && matches(event.toPath)) return true;
+  }
+
+  return false;
+}
+
+export interface DistinctPathOption {
+  path: string;
+  sessionCount: number;
+}
+
+/**
+ * Extracts distinct paths observed across all sessions with session counts,
+ * sorted by session count descending, then path ascending.
+ */
+export function getDistinctSessionPaths(
+  allNodes: readonly FilesystemTopologyNode[] = [],
+  sessions: readonly FilesystemTopologySession[] = [],
+  recentClosedSessions: readonly FilesystemClosedSession[] = [],
+): DistinctPathOption[] {
+  const pathSessionMap = new Map<string, Set<string>>();
+
+  const addPathSession = (path: string | null | undefined, sessionId: string) => {
+    if (!path || path === "/") return;
+    const norm = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+    if (!pathSessionMap.has(norm)) {
+      pathSessionMap.set(norm, new Set());
+    }
+    pathSessionMap.get(norm)?.add(sessionId);
+  };
+
+  for (const node of allNodes) {
+    if (node.path === "/") continue;
+    for (const sid of node.sessionIds) {
+      addPathSession(node.path, sid);
+    }
+  }
+
+  for (const s of sessions) {
+    addPathSession(s.cwdState.path, s.sessionId);
+  }
+
+  for (const s of recentClosedSessions) {
+    addPathSession(s.cwdState.path, s.sessionId);
+  }
+
+  return [...pathSessionMap.entries()]
+    .map(([path, sessionSet]) => ({
+      path,
+      sessionCount: sessionSet.size,
+    }))
+    .sort((a, b) => {
+      if (b.sessionCount !== a.sessionCount) {
+        return b.sessionCount - a.sessionCount;
+      }
+      return a.path.localeCompare(b.path);
+    });
+}
