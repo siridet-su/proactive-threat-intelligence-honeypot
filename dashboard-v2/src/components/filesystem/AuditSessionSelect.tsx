@@ -240,7 +240,7 @@ export function AuditSessionSelect({
                 ({isSelectedClosed ? "Closed" : selectedSession.cwdState.path ?? "/"})
               </span>
               {isSelectedFilteredOut && (
-                <span className="rounded bg-primary-subtle border border-primary-border px-1.5 py-0.2 text-xs text-primary font-sans font-medium hidden md:inline">
+                <span className="hidden h-[18px] rounded-full border border-primary-border bg-surface px-1.5 font-sans text-xs font-semibold leading-4 text-primary shadow-2xs md:inline">
                   Filtered
                 </span>
               )}
