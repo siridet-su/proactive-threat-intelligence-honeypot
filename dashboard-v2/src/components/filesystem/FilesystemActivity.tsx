@@ -26,7 +26,7 @@ import type {
 import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
 import { CwdRouteHistory } from "./CwdRouteHistory";
-import { FilesystemInspector } from "./FilesystemInspector";
+import { FilesystemContextPanel } from "./FilesystemContextPanel";
 import { TimelineSplitter } from "./TimelineSplitter";
 import {
   DEFAULT_TIMELINE_SIDEBAR_WIDTH,
@@ -43,7 +43,6 @@ import {
   type DistinctPathOption,
   type StreamState,
 } from "./filesystemUtils";
-import { SessionSourceList } from "./SessionSourceList";
 import { TopologyCanvas } from "./TopologyCanvas";
 
 export function FilesystemActivity() {
@@ -76,6 +75,8 @@ export function FilesystemActivity() {
   const latestSnapshotAt = useRef(0);
   const selectedSessionIdRef = useRef<string | null>(null);
   const selectedLiveCwdRef = useRef<string | null>(null);
+  const auditDialogRef = useRef<HTMLDivElement | null>(null);
+  const focusBeforeFullscreenRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     selectedSessionIdRef.current = selectedSessionId;
@@ -615,6 +616,11 @@ export function FilesystemActivity() {
     setPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
   }, []);
 
+  const enterAuditFullscreen = useCallback(() => {
+    focusBeforeFullscreenRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setIsAuditFullscreen(true);
+  }, []);
+
   // Synchronized auto-play timer for audit mode
   useEffect(() => {
     if (viewMode !== "audit" || !isPlaying) return;
@@ -642,15 +648,20 @@ export function FilesystemActivity() {
     if (viewMode !== "audit") return;
 
     const onKeyDown = (event: KeyboardEvent) => {
-      const tag = (event.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (event.key === "Escape" && isAuditFullscreen) {
+        event.preventDefault();
+        setIsAuditFullscreen(false);
+        return;
+      }
 
-      if (event.key === "Escape") {
-        if (isAuditFullscreen) {
-          event.preventDefault();
-          setIsAuditFullscreen(false);
-        }
-      } else if (event.key === " " || event.code === "Space") {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (
+        target?.closest(
+          'a, button, input, select, textarea, summary, [role="combobox"], [role="listbox"], [role="region"], [contenteditable="true"]',
+        )
+      ) return;
+
+      if (event.key === " " || event.code === "Space") {
         event.preventDefault();
         handleTogglePlay();
       } else if (event.key === "ArrowLeft") {
@@ -665,6 +676,58 @@ export function FilesystemActivity() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [viewMode, isAuditFullscreen, handleTogglePlay, handlePrevHop, handleNextHop]);
+
+  // Keep keyboard focus inside the modal workspace and restore it to the invoking control.
+  useEffect(() => {
+    if (!isAuditFullscreen) return;
+    const dialog = auditDialogRef.current;
+    if (!dialog) return;
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(",");
+    const focusInitial = window.requestAnimationFrame(() => {
+      (dialog.querySelector<HTMLElement>(focusableSelector) ?? dialog).focus();
+    });
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(focusableSelector)].filter(
+        (element) => !element.hasAttribute("inert") && element.getClientRects().length > 0,
+      );
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", trapFocus);
+    return () => {
+      const previousFocus = focusBeforeFullscreenRef.current;
+      window.cancelAnimationFrame(focusInitial);
+      document.removeEventListener("keydown", trapFocus);
+      focusBeforeFullscreenRef.current = null;
+      window.requestAnimationFrame(() => {
+        if (previousFocus?.isConnected) {
+          previousFocus.focus();
+          return;
+        }
+        document.querySelector<HTMLElement>('[data-audit-fullscreen-trigger="true"]')?.focus();
+      });
+    };
+  }, [isAuditFullscreen]);
 
   // Lock body scroll when audit fullscreen is active
   useEffect(() => {
@@ -693,15 +756,13 @@ export function FilesystemActivity() {
           {/* Mode Switcher Tabs */}
           <div
             className="flex items-center rounded-lg border border-border bg-surface-subtle p-0.5"
-            role="tablist"
             aria-label="Filesystem views"
           >
             <button
               type="button"
-              role="tab"
-              aria-selected={viewMode === "live"}
+              aria-pressed={viewMode === "live"}
               onClick={() => switchViewMode("live")}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
                 viewMode === "live"
                   ? "bg-surface text-primary shadow-xs border border-border"
                   : "text-text-muted hover:text-text"
@@ -710,7 +771,7 @@ export function FilesystemActivity() {
               <Radio className="h-3.5 w-3.5" aria-hidden="true" />
               Live Topology
               {snapshot?.sessions.length ? (
-                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-[10px] font-mono text-text-subtle border border-border">
+                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
                   {snapshot.sessions.length}
                 </span>
               ) : null}
@@ -718,10 +779,9 @@ export function FilesystemActivity() {
 
             <button
               type="button"
-              role="tab"
-              aria-selected={viewMode === "audit"}
+              aria-pressed={viewMode === "audit"}
               onClick={() => switchViewMode("audit")}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
                 viewMode === "audit"
                   ? "bg-surface text-primary shadow-xs border border-border"
                   : "text-text-muted hover:text-text"
@@ -730,7 +790,7 @@ export function FilesystemActivity() {
               <Route className="h-3.5 w-3.5" aria-hidden="true" />
               Session Audit & Replay
               {selectedSession && (
-                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-[10px] font-mono text-text-subtle border border-border">
+                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
                   .{selectedSession.sourceIp.split(".").pop()}
                 </span>
               )}
@@ -778,33 +838,27 @@ export function FilesystemActivity() {
             />
           </div>
 
-          <aside className="min-w-0 space-y-4" aria-live="polite">
-            <FilesystemInspector
-              selectedSession={selectedSession}
-              selectedClosedSession={selectedClosedSession}
-              selectedNode={selectedNode}
-              sessions={snapshot?.sessions ?? []}
-              liveSessionCount={selectedNodeLiveSessionCount}
-              selectedSessionId={selectedSessionId}
-              onSelectSession={selectSession}
-              onSelectPath={selectPath}
-              onOpenAudit={(sessionId) => switchViewMode("audit", sessionId)}
-            />
-            <SessionSourceList
-              sessions={snapshot?.sessions ?? []}
-              recentClosedSessions={snapshot?.recentClosedSessions ?? []}
-              selectedSessionId={selectedSessionId}
-              onSelectSession={selectSession}
-              onAuditSession={(sessionId) => switchViewMode("audit", sessionId)}
-            />
-          </aside>
+          <FilesystemContextPanel
+            selectedSession={selectedSession}
+            selectedClosedSession={selectedClosedSession}
+            selectedNode={selectedNode}
+            sessions={snapshot?.sessions ?? []}
+            recentClosedSessions={snapshot?.recentClosedSessions ?? []}
+            liveSessionCount={selectedNodeLiveSessionCount}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={selectSession}
+            onSelectPath={selectPath}
+            onOpenAudit={(sessionId) => switchViewMode("audit", sessionId)}
+          />
         </div>
       ) : isAuditFullscreen ? (
         /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
         <div
+          ref={auditDialogRef}
           role="dialog"
           aria-modal="true"
           aria-label="Audit Replay Studio Fullscreen"
+          tabIndex={-1}
           className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
         >
           {/* Studio Top Navigation Bar */}
@@ -847,13 +901,13 @@ export function FilesystemActivity() {
 
             {/* Center: Active Hop / Quick Replay Scrubber */}
             <div className="flex items-center gap-2">
-              {displayedHistory.length > 0 && (
+              {displayedHistory.length > 0 && isTimelineCollapsed && (
                 <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-subtle px-2.5 py-1">
                   <button
                     type="button"
                     onClick={handlePrevHop}
                     disabled={selectedHistoryIndex <= 0}
-                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    className="ui-button h-9 min-h-9 w-9 p-0"
                     title="Previous hop (←)"
                     aria-label="Previous hop"
                   >
@@ -862,7 +916,7 @@ export function FilesystemActivity() {
                   <button
                     type="button"
                     onClick={handleTogglePlay}
-                    className={`ui-button h-6 min-h-6 px-2 text-[11px] flex items-center gap-1 ${
+                    className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 ${
                       isPlaying ? "border-primary bg-primary text-surface" : ""
                     }`}
                     title={isPlaying ? "Pause auto-playback (Space)" : "Play route trajectory automatically (Space)"}
@@ -875,13 +929,13 @@ export function FilesystemActivity() {
                     type="button"
                     onClick={handleNextHop}
                     disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
-                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    className="ui-button h-9 min-h-9 w-9 p-0"
                     title="Next hop (→)"
                     aria-label="Next hop"
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>
-                  <span className="text-[11px] font-mono text-text-muted px-1.5 border-l border-border/60">
+                  <span className="text-xs font-mono text-text-muted px-1.5 border-l border-border/60">
                     Hop <strong className="text-primary">{selectedHistoryIndex + 1}</strong> of {displayedHistory.length}
                   </span>
                 </div>
@@ -891,7 +945,7 @@ export function FilesystemActivity() {
             {/* Right: Tools & Controls */}
             <div className="flex items-center gap-2">
               {/* Keyboard shortcuts hints */}
-              <div className="hidden xl:flex items-center gap-1.5 text-[11px] text-text-subtle font-mono mr-2">
+              <div className="hidden xl:flex items-center gap-1.5 text-xs text-text-subtle font-mono mr-2">
                 <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Space</kbd> Play
                 <span className="text-border">·</span>
                 <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">←</kbd>
@@ -904,7 +958,7 @@ export function FilesystemActivity() {
               <button
                 type="button"
                 onClick={() => setIsTimelineCollapsed((c) => !c)}
-                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
+                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
                 title={isTimelineCollapsed ? "Show timeline sidebar" : "Collapse timeline sidebar"}
                 aria-pressed={isTimelineCollapsed}
               >
@@ -916,7 +970,7 @@ export function FilesystemActivity() {
               <button
                 type="button"
                 onClick={() => setIsAuditFullscreen(false)}
-                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5 bg-surface-subtle hover:bg-surface-hover"
+                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5 bg-surface-subtle hover:bg-surface-hover"
                 title="Exit Fullscreen Studio (Esc)"
                 aria-label="Exit Fullscreen Studio"
               >
@@ -1049,7 +1103,7 @@ export function FilesystemActivity() {
                     type="button"
                     onClick={handlePrevHop}
                     disabled={selectedHistoryIndex <= 0}
-                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    className="ui-button h-9 min-h-9 w-9 p-0"
                     title="Previous hop (←)"
                     aria-label="Previous hop"
                   >
@@ -1058,26 +1112,26 @@ export function FilesystemActivity() {
                   <button
                     type="button"
                     onClick={handleTogglePlay}
-                    className={`ui-button h-6 min-h-6 px-1.5 text-[10px] flex items-center gap-1 ${
+                    className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 ${
                       isPlaying ? "border-primary bg-primary text-surface" : ""
                     }`}
                     title={isPlaying ? "Pause (Space)" : "Play (Space)"}
                     aria-label={isPlaying ? "Pause" : "Play"}
                   >
-                    {isPlaying ? <Pause className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
+                    {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                     <span>{isPlaying ? "Pause" : "Play"}</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleNextHop}
                     disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
-                    className="ui-button h-6 min-h-6 w-6 p-0"
+                    className="ui-button h-9 min-h-9 w-9 p-0"
                     title="Next hop (→)"
                     aria-label="Next hop"
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>
-                  <span className="text-[10px] font-mono text-text-muted px-1">
+                  <span className="text-xs font-mono text-text-muted px-1">
                     {selectedHistoryIndex + 1}/{displayedHistory.length}
                   </span>
                 </div>
@@ -1087,7 +1141,7 @@ export function FilesystemActivity() {
               <button
                 type="button"
                 onClick={() => setIsTimelineCollapsed((c) => !c)}
-                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
+                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
                 title={isTimelineCollapsed ? "Show timeline panel" : "Collapse timeline panel"}
                 aria-pressed={isTimelineCollapsed}
               >
@@ -1098,8 +1152,9 @@ export function FilesystemActivity() {
               {/* Fullscreen Button */}
               <button
                 type="button"
-                onClick={() => setIsAuditFullscreen(true)}
-                className="ui-button h-8 px-2.5 text-xs flex items-center gap-1.5"
+                onClick={enterAuditFullscreen}
+                data-audit-fullscreen-trigger="true"
+                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
                 title="Enter Fullscreen Audit Studio"
                 aria-label="Enter Fullscreen Audit Studio"
               >
@@ -1125,7 +1180,7 @@ export function FilesystemActivity() {
                 onSelectSession={selectSession}
                 onSelectPath={selectPath}
                 isExpanded={false}
-                onToggleExpand={() => setIsAuditFullscreen(true)}
+                onToggleExpand={enterAuditFullscreen}
                 isAuditMode={true}
                 isResizingContainer={isDraggingTimeline}
                 className="h-full flex-1 min-h-0"

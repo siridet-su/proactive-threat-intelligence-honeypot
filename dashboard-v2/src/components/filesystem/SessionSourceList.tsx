@@ -7,6 +7,7 @@ import type { FilesystemClosedSession, FilesystemTopologySession } from "@/lib/d
 import { compactDirectoryPath, formatTimestamp } from "./filesystemUtils";
 
 interface SessionSourceListProps {
+  embedded?: boolean;
   sessions: FilesystemTopologySession[];
   recentClosedSessions: FilesystemClosedSession[];
   selectedSessionId: string | null;
@@ -17,6 +18,7 @@ interface SessionSourceListProps {
 type TabKey = "live" | "closed";
 
 export function SessionSourceList({
+  embedded = false,
   sessions,
   recentClosedSessions,
   selectedSessionId,
@@ -66,7 +68,7 @@ export function SessionSourceList({
   }, [sessions]);
 
   return (
-    <div className="ui-panel h-fit p-5">
+    <div className={embedded ? "" : "ui-panel h-fit p-5"}>
       {/* Tab Switcher Header */}
       <div className="flex items-center justify-between gap-2 border-b border-border pb-3" role="tablist" aria-label="Session telemetry views">
         <div className="flex items-center gap-1.5">
@@ -76,8 +78,15 @@ export function SessionSourceList({
             role="tab"
             aria-selected={activeTab === "live"}
             aria-controls="panel-source-live"
+            tabIndex={activeTab === "live" ? 0 : -1}
             onClick={() => selectTab("live")}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              selectTab("closed");
+              document.getElementById("tab-source-closed")?.focus();
+            }}
+            className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "live"
                 ? "bg-success-subtle text-success shadow-xs"
                 : "text-text-muted hover:bg-surface-hover hover:text-text"
@@ -86,7 +95,7 @@ export function SessionSourceList({
             <Radio className="h-3.5 w-3.5" aria-hidden="true" />
             Live sources
             <span
-              className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+              className={`rounded-full px-1.5 py-0.2 text-xs font-bold ${
                 activeTab === "live" ? "bg-surface text-success" : "bg-surface-subtle text-text-subtle"
               }`}
             >
@@ -100,8 +109,15 @@ export function SessionSourceList({
             role="tab"
             aria-selected={activeTab === "closed"}
             aria-controls="panel-source-closed"
+            tabIndex={activeTab === "closed" ? 0 : -1}
             onClick={() => selectTab("closed")}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              selectTab("live");
+              document.getElementById("tab-source-live")?.focus();
+            }}
+            className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "closed"
                 ? "bg-warning-subtle text-warning shadow-xs"
                 : "text-text-muted hover:bg-surface-hover hover:text-text"
@@ -110,7 +126,7 @@ export function SessionSourceList({
             <History className="h-3.5 w-3.5" aria-hidden="true" />
             Closed
             <span
-              className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+              className={`rounded-full px-1.5 py-0.2 text-xs font-bold ${
                 activeTab === "closed" ? "bg-surface text-warning" : "bg-surface-subtle text-text-subtle"
               }`}
             >
@@ -135,60 +151,55 @@ export function SessionSourceList({
                 const selected = source.sessions.some((session) => session.sessionId === selectedSessionId);
                 const latestPath = source.latest.cwdState.path;
                 return (
-                  <button
+                  <div
                     key={source.sourceIp}
-                    type="button"
-                    aria-pressed={selected}
-                    aria-label={`Inspect source ${source.sourceIp}; ${source.sessions.length} ${
-                      source.sessions.length === 1 ? "session" : "sessions"
-                    }; latest verified path ${latestPath ?? "unknown"}`}
-                    onClick={() => onSelectSession(source.latest.sessionId)}
                     className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150 ${
                       selected
                         ? "border-primary-border bg-primary-subtle"
                         : "border-border hover:border-border-strong hover:bg-surface-hover"
                     }`}
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate font-mono text-xs text-text">{source.sourceIp}</span>
-                      <span className="mt-0.5 block text-xs text-text-subtle">
-                        {source.sessions.length} {source.sessions.length === 1 ? "session" : "sessions"} · latest
-                      </span>
-                      <span
-                        className="mt-1 block truncate font-mono text-xs text-text-muted"
-                        title={latestPath ?? "Unknown path"}
-                      >
-                        {latestPath ? compactDirectoryPath(latestPath) : "Unknown path"}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      {onAuditSession && (
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          title="Open in Session Forensics & Replay"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onAuditSession(source.latest.sessionId);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.stopPropagation();
-                              onAuditSession(source.latest.sessionId);
-                            }
-                          }}
-                          className="rounded p-1 text-primary hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
-                        >
-                          <Route className="h-4 w-4" />
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      aria-label={`Inspect source ${source.sourceIp}; ${source.sessions.length} ${
+                        source.sessions.length === 1 ? "session" : "sessions"
+                      }; latest verified path ${latestPath ?? "unknown"}`}
+                      onClick={() => onSelectSession(source.latest.sessionId)}
+                      className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-mono text-xs text-text">{source.sourceIp}</span>
+                        <span className="mt-0.5 block text-xs text-text-subtle">
+                          {source.sessions.length} {source.sessions.length === 1 ? "session" : "sessions"} · latest
                         </span>
-                      )}
-                      {selected ? (
-                        <span className="text-xs font-semibold text-primary">Auditing</span>
-                      ) : (
-                        <ChevronRight className="h-4 w-4 text-text-subtle" aria-hidden="true" />
-                      )}
-                    </span>
-                  </button>
+                        <span
+                          className="mt-1 block truncate font-mono text-xs text-text-muted"
+                          title={latestPath ?? "Unknown path"}
+                        >
+                          {latestPath ? compactDirectoryPath(latestPath) : "Unknown path"}
+                        </span>
+                      </span>
+                      <span className="shrink-0">
+                        {selected ? (
+                          <span className="text-xs font-semibold text-primary">Selected</span>
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-text-subtle" aria-hidden="true" />
+                        )}
+                      </span>
+                    </button>
+                    {onAuditSession && (
+                      <button
+                        type="button"
+                        title="Open in Session Forensics & Replay"
+                        aria-label={`Open ${source.sourceIp} in Session Forensics and Replay`}
+                        onClick={() => onAuditSession(source.latest.sessionId)}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-primary transition-colors hover:border-primary-border hover:bg-primary-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      >
+                        <Route className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -201,57 +212,51 @@ export function SessionSourceList({
           {recentClosedSessions.length ? (
             <div className="max-h-[22rem] space-y-2 overflow-y-auto overscroll-contain pr-1">
               {recentClosedSessions.map((session) => (
-                <button
+                <div
                   key={session.sessionId}
-                  type="button"
-                  onClick={() => onSelectSession(session.sessionId)}
                   className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150 ${
                     session.sessionId === selectedSessionId
                       ? "border-warning-border bg-warning-subtle"
                       : "border-border hover:border-border-strong hover:bg-surface-hover"
                   }`}
                 >
-                  <span className="min-w-0">
-                    <span className="block truncate font-mono text-xs text-text">{session.sourceIp}</span>
-                    <span className="mt-0.5 block truncate font-mono text-[11px] text-text-subtle">
-                      {session.sessionId}
-                    </span>
-                    <span
-                      className="mt-1 block truncate font-mono text-[11px] text-text-muted"
-                      title={session.cwdState.path ?? "Unknown path"}
-                    >
-                      {session.cwdState.path ? compactDirectoryPath(session.cwdState.path) : "Unknown path"}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    {onAuditSession && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        title="Open in Session Forensics & Replay"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAuditSession(session.sessionId);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.stopPropagation();
-                            onAuditSession(session.sessionId);
-                          }
-                        }}
-                        className="rounded p-1 text-primary hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
-                      >
-                        <Route className="h-4 w-4" />
+                  <button
+                    type="button"
+                    aria-pressed={session.sessionId === selectedSessionId}
+                    onClick={() => onSelectSession(session.sessionId)}
+                    className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-mono text-xs text-text">{session.sourceIp}</span>
+                      <span className="mt-0.5 block truncate font-mono text-xs text-text-subtle">
+                        {session.sessionId}
                       </span>
-                    )}
-                    <span className="text-right">
+                      <span
+                        className="mt-1 block truncate font-mono text-xs text-text-muted"
+                        title={session.cwdState.path ?? "Unknown path"}
+                      >
+                        {session.cwdState.path ? compactDirectoryPath(session.cwdState.path) : "Unknown path"}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
                       <span className="block text-xs font-medium text-warning">Closed</span>
-                      <span className="mt-0.5 block text-[11px] text-text-subtle">
+                      <span className="mt-0.5 block text-xs text-text-subtle">
                         {formatTimestamp(session.lifecycle.closedAt)}
                       </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
+                  {onAuditSession && (
+                    <button
+                      type="button"
+                      title="Open in Session Forensics & Replay"
+                      aria-label={`Open ${session.sourceIp} in Session Forensics and Replay`}
+                      onClick={() => onAuditSession(session.sessionId)}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-primary transition-colors hover:border-primary-border hover:bg-primary-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    >
+                      <Route className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           ) : (

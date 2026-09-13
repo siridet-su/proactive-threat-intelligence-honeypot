@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Check,
   ChevronDown,
@@ -50,6 +50,7 @@ export function AuditFilterControls({
   className,
 }: AuditFilterControlsProps) {
   const [pathDropdownOpen, setPathDropdownOpen] = useState(false);
+  const reducedMotion = useReducedMotion();
   const [pathSearchQuery, setPathSearchQuery] = useState("");
   const pathMenuRef = useRef<HTMLDivElement>(null);
   const pathTriggerRef = useRef<HTMLButtonElement>(null);
@@ -83,6 +84,8 @@ export function AuditFilterControls({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
         closeDropdown();
         pathTriggerRef.current?.focus();
       }
@@ -120,10 +123,10 @@ export function AuditFilterControls({
         onClick={onToggleHideHomeOnly}
         title={
           hideHomeOnly
-            ? `Hiding ${homeOnlyCount} home-only session${homeOnlyCount === 1 ? "" : "s"}. Click to show all.`
-            : "Hide sessions that strictly stayed in /home and never traversed into system directories"
+            ? `Excluding ${homeOnlyCount} home-only session${homeOnlyCount === 1 ? "" : "s"}. Click to include them.`
+            : "Exclude sessions that stayed in /home and never traversed into system directories"
         }
-        className={`h-8 min-h-8 flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-all cursor-pointer select-none ${
+        className={`h-9 min-h-9 flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer select-none ${
           hideHomeOnly
             ? "border-primary-border bg-primary-subtle text-primary shadow-xs hover:bg-primary-subtle/80"
             : "border-border bg-surface text-text-muted hover:border-border-strong hover:bg-surface-hover hover:text-text"
@@ -134,12 +137,12 @@ export function AuditFilterControls({
             hideHomeOnly ? "text-primary" : "text-text-subtle"
           }`}
         />
-        <span className="font-sans font-medium text-[11px] sm:text-xs">
-          Hide <span className="font-mono">/home</span> only
+        <span className="font-sans font-medium text-xs">
+          Exclude home-only
         </span>
         {homeOnlyCount > 0 && (
           <span
-            className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono font-semibold transition-colors ${
+            className={`rounded-full px-1.5 py-0.2 text-xs font-mono font-semibold transition-colors ${
               hideHomeOnly
                 ? "bg-surface text-primary border border-primary-border shadow-2xs"
                 : "bg-surface-subtle text-text-subtle border border-border"
@@ -162,7 +165,7 @@ export function AuditFilterControls({
             aria-expanded={pathDropdownOpen}
             aria-controls={pathMenuId}
             onClick={() => setPathDropdownOpen((prev) => !prev)}
-            className={`h-8 min-h-8 max-w-[220px] sm:max-w-xs flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-all cursor-pointer select-none ${
+            className={`h-9 min-h-9 max-w-[220px] sm:max-w-xs flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer select-none ${
               targetPath
                 ? "border-primary-border bg-primary-subtle text-primary shadow-xs"
                 : pathDropdownOpen
@@ -175,7 +178,7 @@ export function AuditFilterControls({
               <FolderSearch
                 className={`h-3.5 w-3.5 shrink-0 ${targetPath ? "text-primary" : "text-text-subtle"}`}
               />
-              <span className="font-sans font-medium text-[11px] sm:text-xs text-text-subtle hidden sm:inline">
+              <span className="hidden font-sans text-xs font-medium text-text-subtle sm:inline">
                 Path:
               </span>
               <span className={`truncate ${targetPath ? "font-bold text-primary" : "text-text"}`}>
@@ -199,7 +202,7 @@ export function AuditFilterControls({
               }}
               title="Clear path filter"
               aria-label="Clear path filter"
-              className="ml-1 h-7 w-7 flex items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-text hover:bg-surface-hover transition-colors"
+              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-text hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -213,11 +216,11 @@ export function AuditFilterControls({
               id={pathMenuId}
               role="listbox"
               aria-labelledby={pathTriggerId}
-              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -6, scale: 0.98 }}
-              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-              className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[260px] sm:min-w-[320px] max-w-[90vw] sm:max-w-sm max-h-80 overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1.5 shadow-2xl backdrop-blur-md"
+              exit={reducedMotion ? undefined : { opacity: 0, y: -6, scale: 0.98 }}
+              transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[260px] sm:min-w-[320px] max-w-[90vw] sm:max-w-sm max-h-80 overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
             >
               {/* Search Box */}
               <div className="relative mb-1.5 px-1 pt-1">
@@ -232,9 +235,10 @@ export function AuditFilterControls({
                 />
                 {pathSearchQuery && (
                   <button
-                    type="button"
-                    onClick={() => setPathSearchQuery("")}
-                    className="absolute right-3 top-3 text-text-subtle hover:text-text"
+                  type="button"
+                  onClick={() => setPathSearchQuery("")}
+                  aria-label="Clear directory search"
+                  className="absolute right-3 top-3 text-text-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -258,7 +262,7 @@ export function AuditFilterControls({
                   <span className="font-sans font-medium">All paths</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-text-subtle">({totalCount} sessions)</span>
+                  <span className="text-xs text-text-subtle">({totalCount} sessions)</span>
                   {targetPath === null && <Check className="h-3.5 w-3.5 text-primary" />}
                 </div>
               </button>
@@ -274,19 +278,19 @@ export function AuditFilterControls({
                       className="w-full flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2 py-1.5 text-left text-xs font-mono text-primary hover:bg-primary/20 transition-colors"
                     >
                       <div className="flex items-center gap-1.5 truncate">
-                        <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-primary/80">
+                        <span className="text-xs font-sans font-semibold uppercase tracking-wider text-primary/80">
                           Canvas Selection:
                         </span>
                         <strong className="truncate">{selectedCanvasPath}</strong>
                       </div>
-                      <span className="text-[10px] underline font-sans shrink-0">Filter</span>
+                      <span className="text-xs underline font-sans shrink-0">Filter</span>
                     </button>
                   </div>
                 )}
 
               {/* Distinct Paths List */}
               <div className="mt-1 pt-1 border-t border-border/60">
-                <div className="px-2 py-1 text-[10px] font-semibold text-text-subtle uppercase tracking-wider">
+                <div className="px-2 py-1 text-xs font-semibold text-text-subtle uppercase tracking-wider">
                   Observed Directories ({filteredPaths.length})
                 </div>
                 <div className="space-y-0.5">
@@ -312,7 +316,7 @@ export function AuditFilterControls({
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="rounded bg-surface-subtle border border-border/60 px-1 py-0.2 text-[10px] text-text-subtle">
+                          <span className="rounded bg-surface-subtle border border-border/60 px-1 py-0.2 text-xs text-text-subtle">
                             {item.sessionCount} {item.sessionCount === 1 ? "session" : "sessions"}
                           </span>
                           {isSelected && <Check className="h-3.5 w-3.5 text-primary" />}
@@ -336,7 +340,7 @@ export function AuditFilterControls({
       {/* 3. Filter Result Summary & Quick Reset */}
       {hasActiveFilters && (
         <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1 text-xs">
-          <span className="font-mono text-[11px] text-text-muted">
+          <span className="font-mono text-xs text-text-muted">
             Filtered:{" "}
             <strong
               className={
@@ -354,7 +358,7 @@ export function AuditFilterControls({
             onClick={onResetFilters}
             title="Reset all audit filters"
             aria-label="Reset all audit filters"
-            className="ml-0.5 h-5 px-1.5 flex items-center gap-1 rounded border border-border/80 bg-surface text-[10px] font-sans text-text-muted hover:text-text hover:bg-surface-hover hover:border-border-strong transition-colors cursor-pointer"
+            className="ml-0.5 h-9 px-2 flex items-center gap-1 rounded-md border border-border bg-surface text-xs font-sans text-text-muted hover:text-text hover:bg-surface-hover hover:border-border-strong transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <RotateCcw className="h-2.5 w-2.5" />
             <span>Reset</span>

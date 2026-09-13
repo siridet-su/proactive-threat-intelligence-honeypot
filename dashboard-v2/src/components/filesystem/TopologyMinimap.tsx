@@ -114,7 +114,7 @@ export function TopologyMinimap({
 
   return (
     <div
-      className="absolute bottom-3 right-5 z-20 hidden w-28 overflow-hidden rounded-xl border border-border/80 bg-surface/85 backdrop-blur-md p-1.5 text-left shadow-md transition-all duration-200 hover:border-border hover:bg-surface/95 sm:block select-none"
+      className="absolute bottom-3 right-5 z-20 hidden w-28 overflow-hidden rounded-xl border border-border bg-surface p-1.5 text-left shadow-sm transition-colors duration-150 hover:border-border-strong sm:block select-none"
     >
       <div>
         <button
@@ -127,7 +127,7 @@ export function TopologyMinimap({
         >
           <div className="flex items-center gap-1.5">
             <Map className="h-3 w-3 text-primary" aria-hidden="true" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em]">Overview</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.12em]">Overview</span>
           </div>
           <motion.span
             animate={{ rotate: isCollapsed ? 0 : 180 }}

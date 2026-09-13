@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Check, ChevronDown, RotateCcw, Search, X } from "lucide-react";
 import {
   useCallback,
@@ -41,6 +41,7 @@ export function AuditSessionSelect({
   allSessionsList,
 }: AuditSessionSelectProps) {
   const [open, setOpen] = useState(false);
+  const reducedMotion = useReducedMotion();
   const [searchQuery, setSearchQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -128,6 +129,8 @@ export function AuditSessionSelect({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
         closeMenu();
         triggerRef.current?.focus();
       }
@@ -204,7 +207,7 @@ export function AuditSessionSelect({
         aria-controls={menuId}
         onClick={() => setOpen((prev) => !prev)}
         onKeyDown={handleTriggerKeyDown}
-        className={`h-8 min-h-8 max-w-[280px] sm:max-w-md flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text transition-all cursor-pointer select-none ${
+        className={`h-9 min-h-9 max-w-[280px] sm:max-w-md flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text transition-colors cursor-pointer select-none ${
           open
             ? "border-primary ring-2 ring-primary/30 bg-surface"
             : "hover:bg-surface-hover hover:border-border-strong"
@@ -237,7 +240,7 @@ export function AuditSessionSelect({
                 ({isSelectedClosed ? "Closed" : selectedSession.cwdState.path ?? "/"})
               </span>
               {isSelectedFilteredOut && (
-                <span className="rounded bg-primary-subtle border border-primary-border px-1.5 py-0.2 text-[10px] text-primary font-sans font-medium hidden md:inline">
+                <span className="rounded bg-primary-subtle border border-primary-border px-1.5 py-0.2 text-xs text-primary font-sans font-medium hidden md:inline">
                   Filtered
                 </span>
               )}
@@ -261,11 +264,11 @@ export function AuditSessionSelect({
             id={menuId}
             role="listbox"
             aria-labelledby={triggerId}
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[320px] sm:min-w-[440px] max-w-[90vw] sm:max-w-[500px] max-h-96 overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1.5 shadow-2xl backdrop-blur-md"
+            exit={reducedMotion ? undefined : { opacity: 0, y: -6, scale: 0.98 }}
+            transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[320px] sm:min-w-[440px] max-w-[90vw] sm:max-w-[500px] max-h-96 overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
           >
             {/* Search Input inside Session Dropdown */}
             <div className="relative mb-1.5 px-1 pt-1">
@@ -280,9 +283,10 @@ export function AuditSessionSelect({
               />
               {searchQuery && (
                 <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-3 text-text-subtle hover:text-text"
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear session search"
+                className="absolute right-3 top-3 text-text-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -292,16 +296,16 @@ export function AuditSessionSelect({
             {/* Callout if currently audited session is hidden by active filter */}
             {isSelectedFilteredOut && selectedSession && (
               <div className="mx-1 mb-2 rounded-lg border border-primary-border bg-primary-subtle p-2 text-xs">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-primary">
-                  Currently Auditing (Hidden by active filter):
+                <div className="text-xs font-semibold uppercase tracking-wider text-primary">
+                  Selected session (hidden by active filter):
                 </div>
-                <div className="mt-1 flex items-center justify-between font-mono text-[11px]">
+                <div className="mt-1 flex items-center justify-between font-mono text-xs">
                   <div className="flex items-center gap-1.5 truncate">
                     <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/60 shrink-0" />
                     <strong className="text-text">{selectedSession.sourceIp}</strong>
                     <span className="text-text-subtle">{selectedSession.sessionId.slice(0, 8)}…</span>
                   </div>
-                  <span className="px-1.5 py-0.2 rounded bg-surface border border-border/60 text-text-muted text-[10px] shrink-0">
+                  <span className="px-1.5 py-0.2 rounded bg-surface border border-border/60 text-text-muted text-xs shrink-0">
                     {selectedSession.cwdState?.path ?? "/"}
                   </span>
                 </div>
@@ -311,13 +315,13 @@ export function AuditSessionSelect({
             {/* Active Sessions */}
             {filteredActiveSessions.length > 0 && (
               <div>
-                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none">
+                <div className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none">
                   <div className="flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-success" />
                     Active Sessions ({filteredActiveSessions.length})
                   </div>
                   {totalCount !== undefined && totalCount > allDisplaySessions.length && (
-                    <span className="text-[10px] font-mono text-primary/80 lowercase">
+                    <span className="text-xs font-mono text-primary/80 lowercase">
                       filtered
                     </span>
                   )}
@@ -358,7 +362,7 @@ export function AuditSessionSelect({
                           <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
                           {s.cwdState?.path && (
                             <span
-                              className={`truncate px-1.5 py-0.2 rounded text-[10px] border ${
+                              className={`truncate px-1.5 py-0.2 rounded text-xs border ${
                                 isOutsideHome
                                   ? "bg-primary/10 text-primary border-primary/30 font-semibold"
                                   : "bg-surface-subtle text-text-subtle border-border/50"
@@ -381,7 +385,7 @@ export function AuditSessionSelect({
             {/* Closed Sessions */}
             {filteredClosedSessions.length > 0 && (
               <div className={filteredActiveSessions.length > 0 ? "mt-2 pt-2 border-t border-border/60" : ""}>
-                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-subtle uppercase tracking-wider flex items-center gap-1.5 select-none">
+                <div className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center gap-1.5 select-none">
                   <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/50" />
                   Closed Sessions ({filteredClosedSessions.length})
                 </div>
@@ -421,7 +425,7 @@ export function AuditSessionSelect({
                           <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
                           {s.cwdState?.path && (
                             <span
-                              className={`truncate px-1.5 py-0.2 rounded text-[10px] border ${
+                              className={`truncate px-1.5 py-0.2 rounded text-xs border ${
                                 isOutsideHome
                                   ? "bg-primary/10 text-primary border-primary/30 font-semibold"
                                   : "bg-surface-subtle text-text-subtle border-border/50"
@@ -430,7 +434,7 @@ export function AuditSessionSelect({
                               {s.cwdState.path}
                             </span>
                           )}
-                          <span className="text-[10px] text-text-subtle font-sans px-1 rounded bg-surface-subtle border border-border shrink-0">
+                          <span className="text-xs text-text-subtle font-sans px-1 rounded bg-surface-subtle border border-border shrink-0">
                             Closed
                           </span>
                         </div>

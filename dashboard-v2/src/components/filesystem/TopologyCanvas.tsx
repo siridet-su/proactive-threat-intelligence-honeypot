@@ -7,6 +7,7 @@ import {
   Folder,
   FolderOpen,
   HardDrive,
+  LayoutGrid,
   LocateFixed,
   Maximize2,
   Minimize2,
@@ -14,6 +15,7 @@ import {
   RotateCcw,
   Route,
   ScanLine,
+  Settings2,
   ShieldAlert,
   Undo2,
   ZoomIn,
@@ -235,7 +237,31 @@ export function TopologyCanvas({
   const suppressCalloutClick = useRef(false);
   const suppressNodeClick = useRef(false);
   const autoArrangeUndo = useRef<WorkspaceLayoutSnapshot | null>(null);
+  const layoutMenuRef = useRef<HTMLDivElement>(null);
   const [canUndoAutoArrange, setCanUndoAutoArrange] = useState(false);
+  const [isArrangeMode, setIsArrangeMode] = useState(false);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!layoutMenuOpen) return;
+    const closeLayoutMenu = (event: PointerEvent) => {
+      if (!layoutMenuRef.current?.contains(event.target as Node)) setLayoutMenuOpen(false);
+    };
+    const closeLayoutMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setLayoutMenuOpen(false);
+        layoutMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeLayoutMenu);
+    document.addEventListener("keydown", closeLayoutMenuOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeLayoutMenu);
+      document.removeEventListener("keydown", closeLayoutMenuOnEscape);
+    };
+  }, [layoutMenuOpen]);
 
   // Save label layout to localStorage
   useEffect(() => {
@@ -408,6 +434,7 @@ export function TopologyCanvas({
   }, [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, positionForCallout]);
 
   const totalOverlaps = overlappingNodePaths.size + overlappingCalloutIps.size;
+  const showMinimap = isTopologyExpanded || graphNodes.length > 8 || graphCallouts.length > 2;
 
   const setMapZoom = useCallback((value: number, focalPoint?: Pan) => {
     const nextZoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, Number(value.toFixed(3))));
@@ -661,6 +688,7 @@ export function TopologyCanvas({
   const onCalloutPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, sourceIp: string, origin: LabelPosition) => {
     event.stopPropagation();
     event.currentTarget.focus();
+    if (!isArrangeMode) return;
     suppressCalloutClick.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
     labelDrag.current = { sourceIp, startX: event.clientX, startY: event.clientY, origin };
@@ -707,6 +735,7 @@ export function TopologyCanvas({
   const onNodePointerDown = (event: ReactPointerEvent<HTMLButtonElement>, path: string, origin: LabelPosition) => {
     event.stopPropagation();
     event.currentTarget.focus();
+    if (!isArrangeMode) return;
     suppressNodeClick.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
     nodeDrag.current = { path, startX: event.clientX, startY: event.clientY, origin };
@@ -939,11 +968,11 @@ export function TopologyCanvas({
           </p>
         </div>
 
-        {/* Toolbar Buttons: ALWAYS single row with flex-nowrap */}
+        {/* Primary navigation remains visible; lower-frequency layout actions live in one named menu. */}
         <div className="flex shrink-0 items-center gap-1 flex-nowrap">
           <button
             type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
+            className="ui-button h-9 min-h-9 w-9 p-0"
             title="Zoom out"
             aria-label="Zoom out"
             onClick={() => {
@@ -954,7 +983,7 @@ export function TopologyCanvas({
             <ZoomOut className="h-3.5 w-3.5" />
           </button>
           <span
-            className="ui-badge h-8 min-w-11 justify-center px-1 font-mono text-xs tabular-nums"
+            className="ui-badge h-9 min-w-12 justify-center px-1 font-mono text-xs tabular-nums"
             aria-live="polite"
             aria-label={`Zoom ${Math.round(zoom * 100)} percent`}
           >
@@ -962,7 +991,7 @@ export function TopologyCanvas({
           </span>
           <button
             type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
+            className="ui-button h-9 min-h-9 w-9 p-0"
             title="Zoom in"
             aria-label="Zoom in"
             onClick={() => {
@@ -977,16 +1006,16 @@ export function TopologyCanvas({
 
           <button
             type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Reset view"
-            aria-label="Reset map view"
+            className="ui-button h-9 min-h-9 w-9 p-0"
+            title="Fit topology in view"
+            aria-label="Fit topology in view"
             onClick={fitTopology}
           >
             <ScanLine className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
+            className="ui-button h-9 min-h-9 w-9 p-0"
             title="Center selected IP"
             aria-label="Center selected IP"
             disabled={!selectedGraphCallout}
@@ -997,46 +1026,88 @@ export function TopologyCanvas({
           >
             <LocateFixed className="h-3.5 w-3.5" />
           </button>
-          <button
-            type="button"
-            className={`ui-button relative h-8 min-h-8 w-8 p-0 ${
-              totalOverlaps > 0 ? "border-warning/70 text-warning" : ""
-            }`}
-            title={totalOverlaps > 0 ? `Auto arrange topology (${totalOverlaps} overlapping)` : "Auto arrange topology"}
-            aria-label={totalOverlaps > 0 ? `Auto arrange topology, ${totalOverlaps} overlapping elements` : "Auto arrange directory and IP labels"}
-            onClick={autoArrangeTopology}
-          >
-            <MousePointer2 className="h-3.5 w-3.5" />
-            {totalOverlaps > 0 && (
-              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
-            )}
-          </button>
-          {canUndoAutoArrange && (
+          <div ref={layoutMenuRef} className="relative">
             <button
               type="button"
-              className="ui-button h-8 min-h-8 w-8 p-0"
-              title="Undo auto arrange"
-              aria-label="Undo auto arrange"
-              onClick={undoAutoArrangeTopology}
+              className={`ui-button relative h-9 min-h-9 w-9 p-0 ${
+                totalOverlaps > 0 ? "border-warning/70 text-warning" : isArrangeMode ? "border-primary-border bg-primary-subtle text-primary" : ""
+              }`}
+              title="Layout options"
+              aria-label="Open topology layout options"
+              aria-expanded={layoutMenuOpen}
+              aria-controls="topology-layout-options"
+              onClick={() => setLayoutMenuOpen((current) => !current)}
             >
-              <Undo2 className="h-3.5 w-3.5" />
+              <Settings2 className="h-3.5 w-3.5" />
+              {totalOverlaps > 0 && (
+                <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
+              )}
             </button>
-          )}
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Restore default workspace"
-            aria-label="Restore default map view and layout"
-            onClick={resetMapWorkspace}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
+            {layoutMenuOpen && (
+              <div
+                id="topology-layout-options"
+                aria-label="Topology layout options"
+                className="absolute right-0 top-[calc(100%+6px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    autoArrangeTopology();
+                    setLayoutMenuOpen(false);
+                  }}
+                  className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  <LayoutGrid className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <span className="flex-1">Auto arrange</span>
+                  {totalOverlaps > 0 && <span className="text-warning">{totalOverlaps} overlapping</span>}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={isArrangeMode}
+                  onClick={() => {
+                    setIsArrangeMode((current) => !current);
+                    setLayoutMenuOpen(false);
+                  }}
+                  className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  <MousePointer2 className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <span className="flex-1">Arrange nodes</span>
+                  <span className="text-text-subtle">{isArrangeMode ? "On" : "Off"}</span>
+                </button>
+                <div className="my-1 h-px bg-border" aria-hidden="true" />
+                <button
+                  type="button"
+                  disabled={!canUndoAutoArrange}
+                  onClick={() => {
+                    undoAutoArrangeTopology();
+                    setLayoutMenuOpen(false);
+                  }}
+                  className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:text-text-subtle"
+                >
+                  <Undo2 className="h-4 w-4" aria-hidden="true" />
+                  Undo auto arrange
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetMapWorkspace();
+                    setIsArrangeMode(false);
+                    setLayoutMenuOpen(false);
+                  }}
+                  className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  Restore default layout
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="mx-0.5 h-4 w-px bg-border" />
 
           <button
             type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
+            className="ui-button h-9 min-h-9 w-9 p-0"
             title={
               isTopologyExpanded
                 ? isAuditMode
@@ -1333,7 +1404,7 @@ export function TopologyCanvas({
                           }
                           onSelectPath(node.path);
                         }}
-                        className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${
+                        className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${
                           isOverlapping
                             ? "z-30 border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
                             : isHopTarget && activeHop?.isFailedAttempt
@@ -1381,7 +1452,7 @@ export function TopologyCanvas({
                         )}
                         {isHopTarget && activeHop ? (
                           <span
-                            className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-[9px] font-bold shadow-xs ${
+                            className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-xs font-bold shadow-xs ${
                               activeHop.isFailedAttempt ? "bg-warning text-surface" : "bg-primary text-surface"
                             }`}
                             title={
@@ -1395,14 +1466,14 @@ export function TopologyCanvas({
                           </span>
                         ) : isHopVisited && visitedStep !== undefined ? (
                           <span
-                            className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-primary"
+                            className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-xs font-semibold text-primary"
                             title={`Route step ${visitedStep}`}
                           >
                             #{visitedStep}
                           </span>
                         ) : null}
                         {!isAuditMode && (
-                          <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-[11px] font-semibold text-text-subtle">
+                          <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-xs font-semibold text-text-subtle">
                             {node.sessionIds.length}
                           </span>
                         )}
@@ -1452,7 +1523,7 @@ export function TopologyCanvas({
                           }
                           onSelectSession(callout.sessionIds[0]);
                         }}
-                        className={`absolute z-40 flex w-36 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-200 ${
+                        className={`absolute z-40 flex w-36 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-200 ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${
                           isOverlapping
                             ? "border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
                             : selected
@@ -1479,7 +1550,7 @@ export function TopologyCanvas({
                           <span className="block truncate font-mono text-xs text-text" title={callout.sourceIp}>
                             {callout.sourceIp}
                           </span>
-                          <span className="mt-0.5 flex items-center gap-1 text-[10px] text-text-subtle">
+                          <span className="mt-0.5 flex items-center gap-1 text-xs text-text-subtle">
                             <span>
                               {callout.sessionIds.length} {callout.sessionIds.length === 1 ? "session" : "sessions"}
                             </span>
@@ -1491,16 +1562,18 @@ export function TopologyCanvas({
                   </AnimatePresence>
                 </motion.div>
 
-                <TopologyMinimap
-                  graphNodes={graphNodes}
-                  graphNodeByPath={graphNodeByPath}
-                  graphCallouts={graphCallouts}
-                  selectedPath={selectedPath}
-                  selectedSessionId={selectedSessionId}
-                  minimapViewport={minimapViewport}
-                  positionForCallout={positionForCallout}
-                  onFit={fitTopology}
-                />
+                {showMinimap && (
+                  <TopologyMinimap
+                    graphNodes={graphNodes}
+                    graphNodeByPath={graphNodeByPath}
+                    graphCallouts={graphCallouts}
+                    selectedPath={selectedPath}
+                    selectedSessionId={selectedSessionId}
+                    minimapViewport={minimapViewport}
+                    positionForCallout={positionForCallout}
+                    onFit={fitTopology}
+                  />
+                )}
               </div>
 
               <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-0">
@@ -1661,7 +1734,7 @@ export function TopologyCanvas({
                               <span className="block truncate font-mono text-xs text-text">
                                 {session?.cwdState.path ?? "Unknown"}
                               </span>
-                              <span className="mt-0.5 block truncate font-mono text-[11px] text-text-subtle">
+                              <span className="mt-0.5 block truncate font-mono text-xs text-text-subtle">
                                 {sessionId}
                               </span>
                             </span>

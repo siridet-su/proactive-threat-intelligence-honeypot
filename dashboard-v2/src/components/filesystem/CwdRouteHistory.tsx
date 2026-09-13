@@ -6,7 +6,6 @@ import {
   ChevronRight,
   CornerDownRight,
   FastForward,
-  FileCode2,
   History,
   Pause,
   Play,
@@ -14,7 +13,6 @@ import {
   RefreshCw,
   Rewind,
   Shield,
-  ShieldAlert,
   Terminal,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -157,18 +155,28 @@ export function CwdRouteHistory({
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
       {/* Panel Header with Compact Tabs */}
-      <div className="flex flex-col gap-2 border-b border-border px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <History className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
-          <h2 className="text-xs font-semibold sm:text-sm truncate">
-            {isSidebar ? "Forensic Studio" : "Verified CWD route"}
-          </h2>
+      <div
+        className={`flex shrink-0 gap-2 border-b border-border px-3.5 py-2.5 ${
+          isSidebar ? "flex-col" : "flex-col sm:flex-row sm:items-center sm:justify-between"
+        }`}
+      >
+        <div className={`min-w-0 ${isSidebar ? "flex flex-col gap-2" : "flex items-center gap-2"}`}>
+          <div className="flex min-w-0 items-center gap-2">
+            <History className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <h2 className="truncate text-xs font-semibold sm:text-sm">
+              {isSidebar ? "Forensic Studio" : "Verified CWD route"}
+            </h2>
+          </div>
           {isSidebar && (
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 ml-1 text-xs">
+            <div
+              className="grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
+              aria-label="Forensic studio views"
+            >
               <button
                 type="button"
                 onClick={() => setSidebarTab("replay")}
-                className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                aria-pressed={sidebarTab === "replay"}
+                className={`min-h-9 rounded-md px-2 text-xs font-medium transition-colors cursor-pointer ${
                   sidebarTab === "replay"
                     ? "bg-surface text-primary font-semibold shadow-2xs border border-border"
                     : "text-text-muted hover:text-text"
@@ -179,32 +187,34 @@ export function CwdRouteHistory({
               <button
                 type="button"
                 onClick={() => setSidebarTab("commands")}
-                className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                aria-pressed={sidebarTab === "commands"}
+                className={`flex min-h-9 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium transition-colors cursor-pointer ${
                   sidebarTab === "commands"
                     ? "bg-surface text-primary font-semibold shadow-2xs border border-border"
                     : "text-text-muted hover:text-text"
                 }`}
               >
                 <Terminal className="h-3 w-3" />
-                <span>Commands & Files</span>
+                <span>Command data</span>
               </button>
               <button
                 type="button"
                 onClick={() => setSidebarTab("actions")}
-                className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                aria-pressed={sidebarTab === "actions"}
+                className={`flex min-h-9 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium transition-colors cursor-pointer ${
                   sidebarTab === "actions"
                     ? "bg-surface text-primary font-semibold shadow-2xs border border-border"
                     : "text-text-muted hover:text-text"
                 }`}
               >
                 <Shield className="h-3 w-3" />
-                <span>Pi Portal</span>
+                <span>Response</span>
               </button>
             </div>
           )}
         </div>
-        {selectedSession && (
-          <span className="ui-badge shrink-0 font-mono text-[11px] whitespace-nowrap hidden sm:inline-flex py-0.5 px-2">
+        {selectedSession && !isSidebar && (
+          <span className="ui-badge shrink-0 font-mono text-xs whitespace-nowrap hidden sm:inline-flex py-0.5 px-2">
             {selectedSession.sessionId.slice(0, 8)}…
           </span>
         )}
@@ -232,123 +242,47 @@ export function CwdRouteHistory({
             description="This session has a known observed path, but Cowrie has not recorded a directory move. It may have ended after a non-interactive probe."
           />
         ) : sidebarTab === "commands" ? (
-          /* Tab 2: Commands & Files Inspection */
+          /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
           <div className="flex flex-1 flex-col min-h-0 space-y-3">
-            <div className="rounded-xl border border-border bg-surface p-3 shadow-2xs">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Terminal className="h-4 w-4 text-primary" />
-                  <span className="text-xs font-semibold text-text">Command & Shell Telemetry</span>
-                </div>
-                <span className="ui-badge text-[10px] font-mono">Stream Hook Ready</span>
-              </div>
-              <p className="mt-1 text-[11px] text-text-subtle">
-                Attacker command execution log synchronized with the directory hop replay.
-              </p>
-            </div>
-
-            <div className="flex-1 min-h-[200px] rounded-xl border border-border bg-surface-subtle p-3 font-mono text-xs overflow-y-auto space-y-2">
-              <div className="text-[11px] text-text-subtle pb-1 border-b border-border/60 flex items-center justify-between">
-                <span>
-                  Current Path:{" "}
-                  <strong className="text-text font-bold">
-                    {selectedHistoryEvent?.toPath ?? selectedSession.cwdState.path ?? "/"}
-                  </strong>
+            <div className="rounded-xl border border-border bg-surface-subtle p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-text-muted">Selected CWD context</span>
+                <span className="font-mono text-text">
+                  {selectedHistoryEvent?.toPath ?? selectedSession.cwdState.path ?? "Unknown"}
                 </span>
-                <span>Hop {selectedHistoryIndex + 1}/{displayedHistory.length}</span>
               </div>
-              <div className="space-y-1.5 pt-1 text-[11px]">
-                <div className="flex items-start gap-2">
-                  <span className="text-primary select-none font-bold">$</span>
-                  <span className="text-text font-semibold">cd {selectedHistoryEvent?.toPath ?? ""}</span>
-                </div>
-                <div className="flex items-start gap-2 text-text-muted">
-                  <span className="text-primary select-none font-bold">$</span>
-                  <span>ls -la</span>
-                </div>
-                <div className="rounded bg-surface p-2 border border-border/50 text-[10px] text-text-subtle">
-                  Directory accessed at {formatTimestamp(selectedHistoryEvent?.at ?? null)} (Session: {selectedSession.sessionId.slice(0, 8)}…)
-                </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-text-subtle">
+                <span>Hop {selectedHistoryIndex + 1} of {displayedHistory.length}</span>
+                <span>{formatTimestamp(selectedHistoryEvent?.at ?? null)}</span>
               </div>
             </div>
-
-            <div className="rounded-xl border border-border bg-surface p-3 shadow-2xs">
-              <div className="flex items-center gap-2">
-                <FileCode2 className="h-4 w-4 text-primary" />
-                <span className="text-xs font-semibold text-text">Payload & File Activity</span>
-              </div>
-              <p className="mt-1 text-[11px] text-text-subtle">
-                Captured scripts, dropped artifacts, and file modifications in this path.
-              </p>
-            </div>
+            <RegionState
+              kind="empty"
+              title="Command and file telemetry unavailable"
+              description="No authoritative command, payload, or file event is linked to this CWD hop. Only verified directory transitions are shown."
+            />
           </div>
         ) : sidebarTab === "actions" ? (
-          /* Tab 3: Active Defense & Pi Command Portal */
+          /* Response controls remain unavailable until an authoritative action API exists. */
           <div className="flex flex-1 flex-col min-h-0 space-y-3">
-            <div className="rounded-xl border border-border bg-surface p-3 shadow-2xs">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-danger" />
-                  <span className="text-xs font-semibold text-text">Pi Active Defense Portal</span>
-                </div>
-                <span className="ui-badge text-[10px] font-mono border-danger-border bg-danger-subtle text-danger">
-                  Honeypot Live
-                </span>
-              </div>
-              <p className="mt-1 text-[11px] text-text-subtle">
-                Direct remote management portal to Raspberry Pi Cowrie honeypot node.
-              </p>
-            </div>
-
             <div className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2.5">
-              <div className="text-xs font-semibold text-text">Attacker Target: {selectedSession.sourceIp}</div>
+              <div className="text-xs font-semibold text-text">Selected session</div>
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                 <div className="rounded bg-surface p-2 border border-border">
-                  <div className="text-[10px] text-text-subtle">Session ID</div>
-                  <div className="font-bold text-text mt-0.5 truncate">{selectedSession.sessionId.slice(0, 10)}…</div>
+                  <div className="text-xs text-text-subtle">Source IP</div>
+                  <div className="font-semibold text-text mt-0.5 truncate">{selectedSession.sourceIp}</div>
                 </div>
                 <div className="rounded bg-surface p-2 border border-border">
-                  <div className="text-[10px] text-text-subtle">Node Status</div>
-                  <div className="font-bold text-text mt-0.5">
-                    {"lifecycle" in selectedSession && Boolean((selectedSession as { lifecycle?: { closedAt?: string | null } }).lifecycle?.closedAt) ? (
-                      <span className="text-text-subtle">Closed</span>
-                    ) : (
-                      <span className="text-success flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" /> Live
-                      </span>
-                    )}
-                  </div>
+                  <div className="text-xs text-text-subtle">Session ID</div>
+                  <div className="font-bold text-text mt-0.5 truncate">{selectedSession.sessionId.slice(0, 10)}…</div>
                 </div>
               </div>
-
-              <div className="pt-2 space-y-2">
-                <button
-                  type="button"
-                  disabled={"lifecycle" in selectedSession && Boolean((selectedSession as { lifecycle?: { closedAt?: string | null } }).lifecycle?.closedAt)}
-                  className="w-full ui-button-danger py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() => alert(`Kill signal sent to Pi for session: ${selectedSession.sessionId}`)}
-                >
-                  <ShieldAlert className="h-4 w-4" />
-                  <span>Terminate Session (Kill Now)</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="w-full ui-button py-2 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-2"
-                  onClick={() => alert(`IP ${selectedSession.sourceIp} firewall block requested`)}
-                >
-                  <Shield className="h-4 w-4 text-warning" />
-                  <span>Block Attacker IP at Pi Firewall</span>
-                </button>
-              </div>
             </div>
-
-            <div className="rounded-xl border border-border bg-surface p-3 text-xs text-text-subtle">
-              <div className="font-semibold text-text mb-1">Pi Daemon Connectivity</div>
-              <p className="text-[11px]">
-                Active remote actions execute through the PTI Honeypot Agent on your Raspberry Pi.
-              </p>
-            </div>
+            <RegionState
+              kind="empty"
+              title="Response controls unavailable"
+              description="This dashboard has no verified terminate-session or firewall-block action API. No command has been sent to the honeypot."
+            />
           </div>
         ) : (
           /* Tab 1: Sleek Compact Route Replay */
@@ -360,7 +294,7 @@ export function CwdRouteHistory({
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    className="ui-button h-7 w-7 p-0 shrink-0"
+                    className="ui-button h-9 w-9 p-0 shrink-0"
                     title="Jump to first hop"
                     aria-label="First hop"
                     disabled={selectedHistoryIndex <= 0}
@@ -374,7 +308,7 @@ export function CwdRouteHistory({
 
                   <button
                     type="button"
-                    className="ui-button h-7 w-7 p-0 shrink-0"
+                    className="ui-button h-9 w-9 p-0 shrink-0"
                     title="Previous hop"
                     aria-label="Previous hop"
                     disabled={selectedHistoryIndex <= 0}
@@ -389,7 +323,7 @@ export function CwdRouteHistory({
                   <button
                     type="button"
                     onClick={handleTogglePlay}
-                    className={`ui-button h-7 min-h-7 px-2 text-xs flex items-center gap-1 shrink-0 ${
+                    className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 shrink-0 ${
                       isPlaying ? "border-primary bg-primary text-surface" : ""
                     }`}
                     title={isPlaying ? "Pause playback" : "Play route trajectory"}
@@ -401,7 +335,7 @@ export function CwdRouteHistory({
 
                   <button
                     type="button"
-                    className="ui-button h-7 w-7 p-0 shrink-0"
+                    className="ui-button h-9 w-9 p-0 shrink-0"
                     title="Next hop"
                     aria-label="Next hop"
                     disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
@@ -415,7 +349,7 @@ export function CwdRouteHistory({
 
                   <button
                     type="button"
-                    className="ui-button h-7 w-7 p-0 shrink-0"
+                    className="ui-button h-9 w-9 p-0 shrink-0"
                     title="Jump to latest hop"
                     aria-label="Latest hop"
                     disabled={selectedHistoryIndex === displayedHistory.length - 1}
@@ -436,7 +370,7 @@ export function CwdRouteHistory({
                         setInternalPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
                       }
                     }}
-                    className="ui-button h-7 min-h-7 px-1.5 font-mono text-[10px] shrink-0"
+                    className="ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0"
                     title="Toggle playback speed (1x / 2x)"
                   >
                     {playbackSpeed === 1400 ? "1x" : "2x"}
@@ -446,7 +380,7 @@ export function CwdRouteHistory({
                 {/* Right side: Failures + Hop indicator */}
                 <div className="flex items-center gap-2">
                   {failedCount > 0 && (
-                    <label className="flex items-center gap-1 text-[10px] text-text-subtle cursor-pointer select-none whitespace-nowrap shrink-0">
+                    <label className="flex items-center gap-1 text-xs text-text-subtle cursor-pointer select-none whitespace-nowrap shrink-0">
                       <input
                         type="checkbox"
                         checked={showFailedAttempts}
@@ -457,13 +391,13 @@ export function CwdRouteHistory({
                             setInternalShowFailedAttempts(e.target.checked);
                           }
                         }}
-                        className="rounded border-border text-primary focus:ring-primary h-3 w-3"
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                       />
                       <span>Failures ({failedCount})</span>
                     </label>
                   )}
 
-                  <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-[10px] font-semibold text-primary border border-primary-border shrink-0">
+                  <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-xs font-semibold text-primary border border-primary-border shrink-0">
                     Hop {selectedHistoryIndex + 1}/{displayedHistory.length}
                   </span>
                 </div>
@@ -484,7 +418,7 @@ export function CwdRouteHistory({
                     ) : (
                       <CornerDownRight className="h-3.5 w-3.5 text-primary shrink-0" />
                     )}
-                    <span className="text-[11px] text-text-subtle truncate max-w-[120px]" title={selectedHistoryEvent?.fromPath ?? undefined}>
+                    <span className="text-xs text-text-subtle truncate max-w-[120px]" title={selectedHistoryEvent?.fromPath ?? undefined}>
                       {isInitialSshEntry(selectedHistoryEvent) ? "[SSH Login]" : formatFromPath(selectedHistoryEvent)}
                     </span>
                     <span className="text-text-subtle">→</span>
@@ -493,7 +427,7 @@ export function CwdRouteHistory({
                     </strong>
                   </div>
 
-                  <span className="text-[10px] font-sans text-text-subtle shrink-0">
+                  <span className="text-xs font-sans text-text-subtle shrink-0">
                     {isFailedHop ? "Failed" : (selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "")}
                   </span>
                 </div>
@@ -572,23 +506,23 @@ export function CwdRouteHistory({
                       >
                         <div className="flex items-center justify-between gap-1.5 min-w-0">
                           <p className="truncate font-medium text-xs text-text min-w-0">
-                            <span className="mr-1.5 font-mono text-[11px] text-text-subtle">
+                            <span className="mr-1.5 font-mono text-xs text-text-subtle">
                               {String(index + 1).padStart(2, "0")}
                             </span>
                             {actionLabel(event)}
                           </p>
-                          <time className="shrink-0 font-mono text-[11px] text-text-subtle whitespace-nowrap ml-1">
+                          <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1">
                             {formatTimestamp(event.at)}
                           </time>
                         </div>
                         <div className="mt-1.5 space-y-0.5 font-mono text-xs">
                           {/* Line 1: Origin */}
-                          <div className="flex items-center gap-1.5 text-text-subtle text-[11px] min-w-0">
-                            <span className="shrink-0 font-sans text-[10px] uppercase tracking-wider text-text-subtle/70">
+                          <div className="flex items-center gap-1.5 text-text-subtle text-xs min-w-0">
+                            <span className="shrink-0 font-sans text-xs uppercase tracking-wider text-text-subtle/70">
                               from
                             </span>
                             {isInitialSshEntry(event) ? (
-                              <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-[10px] font-medium text-text-subtle">
+                              <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-xs font-medium text-text-subtle">
                                 [SSH Login]
                               </span>
                             ) : (
@@ -613,14 +547,14 @@ export function CwdRouteHistory({
                               {event.toPath ?? "Unknown"}
                             </span>
                             {isFailed && (
-                              <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-[10px] font-semibold text-warning">
+                              <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning">
                                 Failed
                               </span>
                             )}
                           </div>
                         </div>
                         <div
-                          className="mt-1.5 flex items-center gap-1.5 text-[11px] text-text-subtle"
+                          className="mt-1.5 flex items-center gap-1.5 text-xs text-text-subtle"
                           title={event.sequence !== null ? `Event Sequence: ${event.sequence}` : undefined}
                         >
                           <span

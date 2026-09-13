@@ -25,6 +25,7 @@ import {
 } from "./filesystemUtils";
 
 interface FilesystemInspectorProps {
+  embedded?: boolean;
   selectedSession: FilesystemTopologySession | null;
   selectedClosedSession: FilesystemClosedSession | null;
   selectedNode: FilesystemTopologyNode | null;
@@ -67,8 +68,8 @@ function DirectorySessionRow({ session, selected, onSelect }: DirectorySessionRo
       <span className="flex shrink-0 items-center gap-2">
         <time className="text-right text-xs text-text-subtle">{formatTimestamp(session.cwdState.observedAt)}</time>
         {selected ? (
-          <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-primary shadow-xs">
-            Auditing
+          <span className="rounded bg-surface px-1.5 py-0.5 text-xs font-semibold text-primary shadow-xs">
+            Selected
           </span>
         ) : (
           <ChevronRight className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
@@ -79,6 +80,7 @@ function DirectorySessionRow({ session, selected, onSelect }: DirectorySessionRo
 }
 
 export function FilesystemInspector({
+  embedded = false,
   selectedSession,
   selectedClosedSession,
   selectedNode,
@@ -149,7 +151,7 @@ export function FilesystemInspector({
   }, [branchSessions]);
 
   return (
-    <div className="ui-panel h-fit p-5">
+    <div className={embedded ? "" : "ui-panel h-fit p-5"}>
       {/* Inspector Tabs */}
       <div className="flex items-center justify-between border-b border-border pb-3" role="tablist" aria-label="Inspector mode">
         <div className="flex items-center gap-1.5">
@@ -159,8 +161,15 @@ export function FilesystemInspector({
             role="tab"
             aria-selected={activeTab === "session"}
             aria-controls="panel-inspector-session"
+            tabIndex={activeTab === "session" ? 0 : -1}
             onClick={() => setActiveTab("session")}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              setActiveTab("directory");
+              document.getElementById("tab-inspector-directory")?.focus();
+            }}
+            className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "session"
                 ? "bg-primary-subtle text-primary shadow-xs"
                 : "text-text-muted hover:bg-surface-hover hover:text-text"
@@ -169,7 +178,7 @@ export function FilesystemInspector({
             <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
             Session
             {selectedSession && (
-              <span className="rounded-full bg-surface px-1.5 py-0.2 text-[10px] font-mono font-bold text-primary">
+              <span className="rounded-full bg-surface px-1.5 py-0.2 text-xs font-mono font-bold text-primary">
                 .{selectedSession.sourceIp.split(".").pop()}
               </span>
             )}
@@ -181,8 +190,15 @@ export function FilesystemInspector({
             role="tab"
             aria-selected={activeTab === "directory"}
             aria-controls="panel-inspector-directory"
+            tabIndex={activeTab === "directory" ? 0 : -1}
             onClick={() => setActiveTab("directory")}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              setActiveTab("session");
+              document.getElementById("tab-inspector-session")?.focus();
+            }}
+            className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "directory"
                 ? "bg-primary-subtle text-primary shadow-xs"
                 : "text-text-muted hover:bg-surface-hover hover:text-text"
@@ -191,7 +207,7 @@ export function FilesystemInspector({
             <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
             Directory
             {selectedNode && (
-              <span className="rounded-full bg-surface px-1.5 py-0.2 text-[10px] font-mono font-bold text-primary">
+              <span className="rounded-full bg-surface px-1.5 py-0.2 text-xs font-mono font-bold text-primary">
                 {liveSessionCount}
               </span>
             )}
@@ -221,7 +237,7 @@ export function FilesystemInspector({
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-xs text-text-subtle">Confidence</dt>
                 <dd>
-                  <span className={`ui-badge ${statusBadgeClass(selectedSession.cwdState.status)} text-[11px]`}>
+                  <span className={`ui-badge ${statusBadgeClass(selectedSession.cwdState.status)} text-xs`}>
                     {statusLabel(selectedSession.cwdState.status)}
                   </span>
                 </dd>
@@ -237,7 +253,7 @@ export function FilesystemInspector({
                   <div className="flex items-center justify-between gap-2 border-t border-border pt-2.5">
                     <dt className="text-xs text-text-subtle">Connection state</dt>
                     <dd>
-                      <span className="ui-badge border-warning-border bg-warning-subtle text-warning text-[11px]">
+                      <span className="ui-badge border-warning-border bg-warning-subtle text-warning text-xs">
                         Closed
                       </span>
                     </dd>
@@ -253,7 +269,7 @@ export function FilesystemInspector({
 
               <div className="mt-4 flex gap-2 rounded-lg border border-warning-border bg-warning-subtle p-2.5 text-xs text-text-muted">
                 <ShieldAlert className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                <p className="text-[11px] leading-relaxed">
+                <p className="text-xs leading-relaxed">
                   Unknown paths remain unknown. This view never fills a missing directory with a guessed Linux path.
                 </p>
               </div>
@@ -306,7 +322,7 @@ export function FilesystemInspector({
                   })}
                 </div>
                 {isSensitiveDirectory(selectedNode.path) && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-0.5 text-[11px] font-semibold text-warning">
+                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-0.5 text-xs font-semibold text-warning">
                     <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
                     Sensitive target / Drop directory
                   </div>
@@ -316,13 +332,12 @@ export function FilesystemInspector({
               <div className="mt-4">
                 <div className="flex items-center justify-between gap-2 border-b border-border pb-2 text-xs">
                   <span className="font-semibold text-text">Live sessions</span>
-                  <div className="flex items-center gap-1" role="tablist" aria-label="Directory session grouping">
+                  <div className="flex items-center gap-1" aria-label="Directory session grouping">
                     <button
                       type="button"
-                      role="tab"
-                      aria-selected={directoryView === "recent"}
+                      aria-pressed={directoryView === "recent"}
                       onClick={() => setDirectoryView("recent")}
-                      className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                      className={`min-h-9 rounded px-2 text-xs font-medium transition-colors ${
                         directoryView === "recent"
                           ? "bg-surface-hover font-semibold text-text"
                           : "text-text-subtle hover:text-text"
@@ -332,10 +347,9 @@ export function FilesystemInspector({
                     </button>
                     <button
                       type="button"
-                      role="tab"
-                      aria-selected={directoryView === "all"}
+                      aria-pressed={directoryView === "all"}
                       onClick={() => setDirectoryView("all")}
-                      className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                      className={`min-h-9 rounded px-2 text-xs font-medium transition-colors ${
                         directoryView === "all"
                           ? "bg-surface-hover font-semibold text-text"
                           : "text-text-subtle hover:text-text"
@@ -366,12 +380,12 @@ export function FilesystemInspector({
                             <span className="flex items-center justify-between gap-3">
                               <span className="min-w-0">
                                 <span className="block truncate font-mono text-xs text-text">{source.sourceIp}</span>
-                                <span className="mt-0.5 block text-[11px] text-text-subtle">
+                                <span className="mt-0.5 block text-xs text-text-subtle">
                                   {source.sessions.length} {source.sessions.length === 1 ? "session" : "sessions"}
                                 </span>
                               </span>
                               <span className="flex items-center gap-1.5">
-                                <time className="shrink-0 text-right text-[11px] text-text-subtle">
+                                <time className="shrink-0 text-right text-xs text-text-subtle">
                                   {formatTimestamp(source.sessions[0]?.cwdState.observedAt ?? null)}
                                 </time>
                                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-subtle transition-transform duration-200 group-open:rotate-180" aria-hidden="true" />
