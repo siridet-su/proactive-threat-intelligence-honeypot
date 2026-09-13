@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Route,
 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RegionStatus } from "@/components/ui/RegionState";
@@ -46,6 +47,7 @@ import {
 import { TopologyCanvas } from "./TopologyCanvas";
 
 export function FilesystemActivity() {
+  const shouldReduceMotion = useReducedMotion();
   const [viewMode, setViewMode] = useState<"live" | "audit">("live");
   const [snapshot, setSnapshot] = useState<FilesystemTopologySnapshot | null>(null);
   const [regionStatus, setRegionStatus] = useState<RegionStatus>("loading");
@@ -903,56 +905,75 @@ export function FilesystemActivity() {
             </div>
 
             {/* Stable right-side control cluster */}
-            <div className="flex flex-wrap items-center justify-end gap-2 justify-self-end xl:flex-nowrap">
-              {displayedHistory.length > 0 && isTimelineCollapsed && (
-                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-subtle px-2.5 py-1">
-                  <button
-                    type="button"
-                    onClick={handlePrevHop}
-                    disabled={selectedHistoryIndex <= 0}
-                    className="ui-button h-9 min-h-9 w-9 p-0"
-                    title="Previous hop (←)"
-                    aria-label="Previous hop"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleTogglePlay}
-                    className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 ${
-                      isPlaying ? "border-primary bg-primary text-surface" : ""
-                    }`}
-                    title={isPlaying ? "Pause auto-playback (Space)" : "Play route trajectory automatically (Space)"}
-                    aria-label={isPlaying ? "Pause auto-playback" : "Play route trajectory automatically"}
-                  >
-                    {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    <span>{isPlaying ? "Pause" : "Play"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleNextHop}
-                    disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
-                    className="ui-button h-9 min-h-9 w-9 p-0"
-                    title="Next hop (→)"
-                    aria-label="Next hop"
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                  <span className="text-xs font-mono text-text-muted px-1.5 border-l border-border/60">
-                    Hop <strong className="text-primary">{selectedHistoryIndex + 1}</strong> of {displayedHistory.length}
-                  </span>
-                </div>
-              )}
-
-              {/* Keyboard shortcuts hints */}
-              {!isTimelineCollapsed && (
-                <div className="mr-2 hidden items-center gap-1.5 font-mono text-xs text-text-subtle 2xl:flex">
-                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Space</kbd> Play
-                  <span className="text-border">·</span>
-                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">←</kbd>
-                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">→</kbd> Step
-                  <span className="text-border">·</span>
-                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Esc</kbd> Exit
+            <div className="flex min-h-10 flex-wrap items-center justify-end gap-2 justify-self-end xl:flex-nowrap">
+              {displayedHistory.length > 0 && (
+                <div className="relative h-10 w-72 shrink-0 overflow-hidden">
+                  <AnimatePresence initial={false} mode="wait">
+                    {isTimelineCollapsed ? (
+                      <motion.div
+                        key="quick-replay"
+                        initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, x: 32, scale: 0.96 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 32, scale: 0.96 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.16, ease: "easeOut" }}
+                        className="absolute inset-0 flex items-center justify-end"
+                      >
+                        <div className="flex h-10 items-center gap-1 rounded-lg border border-border bg-surface-subtle p-0.5">
+                          <button
+                            type="button"
+                            onClick={handlePrevHop}
+                            disabled={selectedHistoryIndex <= 0}
+                            className="ui-button h-9 min-h-9 w-9 p-0"
+                            title="Previous hop (←)"
+                            aria-label="Previous hop"
+                          >
+                            <ChevronLeft className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleTogglePlay}
+                            className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 ${
+                              isPlaying ? "border-primary bg-primary text-surface" : ""
+                            }`}
+                            title={isPlaying ? "Pause auto-playback (Space)" : "Play route trajectory automatically (Space)"}
+                            aria-label={isPlaying ? "Pause auto-playback" : "Play route trajectory automatically"}
+                          >
+                            {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                            <span>{isPlaying ? "Pause" : "Play"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleNextHop}
+                            disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
+                            className="ui-button h-9 min-h-9 w-9 p-0"
+                            title="Next hop (→)"
+                            aria-label="Next hop"
+                          >
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                          <span className="border-l border-border/60 px-1.5 font-mono text-xs text-text-muted">
+                            Hop <strong className="text-primary">{selectedHistoryIndex + 1}</strong> of {displayedHistory.length}
+                          </span>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="keyboard-hints"
+                        initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, x: 32, scale: 0.96 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 32, scale: 0.96 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.16, ease: "easeOut" }}
+                        className="absolute inset-0 flex h-10 items-center justify-end gap-1.5 font-mono text-xs text-text-subtle"
+                      >
+                        <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Space</kbd> Play
+                        <span className="text-border">·</span>
+                        <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">←</kbd>
+                        <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">→</kbd> Step
+                        <span className="text-border">·</span>
+                        <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Esc</kbd> Exit
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )}
 
