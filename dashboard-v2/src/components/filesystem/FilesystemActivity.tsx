@@ -781,6 +781,7 @@ export function FilesystemActivity() {
                 selectedSessionId={selectedSessionId}
                 selectedPath={selectedPath}
                 activeHop={activeHop}
+                hopDurationMs={playbackSpeed}
                 title={`Attack Trajectory: ${selectedSession?.sourceIp ?? "Session"}`}
                 subtitle="All historical directories touched by this session are preserved on the canvas."
                 onSelectSession={selectSession}
@@ -961,6 +962,7 @@ export function FilesystemActivity() {
                 selectedSessionId={selectedSessionId}
                 selectedPath={selectedPath}
                 activeHop={activeHop}
+                hopDurationMs={playbackSpeed}
                 title={`Attack Trajectory: ${selectedSession?.sourceIp ?? "Session"}`}
                 subtitle="All historical directories touched by this session are preserved on the canvas."
                 onSelectSession={selectSession}

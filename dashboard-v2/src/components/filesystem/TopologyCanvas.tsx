@@ -33,6 +33,7 @@ import {
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
 import { TopologyMinimap } from "./TopologyMinimap";
+import { HopEnergy } from "./HopEnergy";
 import {
   calloutsForGraph,
   directorySegment,
@@ -138,6 +139,7 @@ interface TopologyCanvasProps {
   selectedSessionId: string | null;
   selectedPath: string | null;
   activeHop?: ActiveHopRoute | null;
+  hopDurationMs?: number;
   title?: string;
   subtitle?: string;
   onSelectSession: (sessionId: string) => void;
@@ -156,6 +158,7 @@ export function TopologyCanvas({
   selectedSessionId,
   selectedPath,
   activeHop,
+  hopDurationMs = 1400,
   title,
   subtitle,
   onSelectSession,
@@ -1155,6 +1158,8 @@ export function TopologyCanvas({
                           activeHop.visitedPaths.includes(parent.path)
                         );
 
+                        const hopColor = activeHop?.isFailedAttempt ? "var(--warning)" : "var(--primary)";
+
                         return (
                           <motion.g
                             key={`${parent.path}-${node.path}`}
@@ -1163,6 +1168,7 @@ export function TopologyCanvas({
                             exit={reducedMotion ? undefined : { opacity: 0 }}
                             transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
                           >
+                            {/* The active connector is drawn with its packet in HopEnergy. */}
                             <motion.path
                               initial={false}
                               animate={{ d: filesystemRoute }}
@@ -1174,23 +1180,23 @@ export function TopologyCanvas({
                               fill="none"
                               stroke={
                                 isActiveHopEdge
-                                  ? "var(--primary)"
+                                  ? hopColor
                                   : isTrailEdge
                                     ? "var(--primary)"
                                     : "var(--border-strong)"
                               }
                               strokeWidth={
                                 isActiveHopEdge
-                                  ? "0.65"
+                                  ? "0.55"
                                   : isTrailEdge
-                                    ? "0.45"
+                                    ? "0.24"
                                     : "0.35"
                               }
                               strokeOpacity={
                                 isActiveHopEdge
-                                  ? 1
+                                  ? 0
                                   : isTrailEdge
-                                    ? 0.75
+                                    ? 0.42
                                     : 0.4
                               }
                               strokeDasharray={
@@ -1201,22 +1207,6 @@ export function TopologyCanvas({
                                     : "none"
                               }
                             />
-                            {isActiveHopEdge && (
-                              <motion.path
-                                initial={false}
-                                animate={{ d: filesystemRoute }}
-                                transition={
-                                  reducedMotion || Boolean(draggedNodePath)
-                                    ? { duration: 0 }
-                                    : TOPOLOGY_TRANSITION
-                                }
-                                fill="none"
-                                stroke="var(--primary)"
-                                strokeWidth="1.2"
-                                strokeOpacity={0.3}
-                                className="animate-pulse"
-                              />
-                            )}
                           </motion.g>
                         );
                       })}
@@ -1289,6 +1279,18 @@ export function TopologyCanvas({
                       })}
                     </AnimatePresence>
                   </svg>
+                  {activeHop?.toPath && !activeHop.isFailedAttempt && graphNodeByPath.has(activeHop.toPath) && (
+                    <HopEnergy
+                      key={`${selectedSessionId}:${activeHop.eventId}`}
+                      from={activeHop.fromPath ? graphNodeByPath.get(activeHop.fromPath) : undefined}
+                      to={graphNodeByPath.get(activeHop.toPath)!}
+                      fromBounds={activeHop.fromPath ? nodeElementBounds[activeHop.fromPath] : undefined}
+                      toBounds={nodeElementBounds[activeHop.toPath]}
+                      durationMs={hopDurationMs}
+                      reducedMotion={Boolean(reducedMotion)}
+                      transition={reducedMotion || Boolean(draggedNodePath) ? { duration: 0 } : TOPOLOGY_TRANSITION}
+                    />
+                  )}
                   <AnimatePresence initial={false}>
                     {graphNodes.map((node) => {
                     const isSelected = node.path === selectedPath;
@@ -1340,9 +1342,9 @@ export function TopologyCanvas({
                           isOverlapping
                             ? "z-30 border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
                             : isHopTarget && activeHop?.isFailedAttempt
-                              ? "z-20 border-warning bg-warning-subtle text-text ring-2 ring-warning ring-offset-2 ring-offset-surface shadow-md shadow-warning/20"
+                              ? "z-20 border-warning bg-warning-subtle text-text"
                               : isHopTarget
-                                ? "z-20 border-primary bg-primary-subtle text-text ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-md shadow-primary/20"
+                                ? "z-20 border-primary bg-primary-subtle text-text"
                                 : isSelected
                                   ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
                                   : isHopVisited
@@ -1360,14 +1362,6 @@ export function TopologyCanvas({
                           >
                             <AlertTriangle className="h-2.5 w-2.5 stroke-[2.5]" aria-hidden="true" />
                           </span>
-                        )}
-                        {isHopTarget && !reducedMotion && (
-                          <span
-                            className={`pointer-events-none absolute -inset-1 rounded-xl border ${
-                              activeHop?.isFailedAttempt ? "animate-hop-aura-warning" : "animate-hop-aura"
-                            }`}
-                            aria-hidden="true"
-                          />
                         )}
                         {isRoot ? (
                           <HardDrive
@@ -1514,39 +1508,66 @@ export function TopologyCanvas({
                 />
               </div>
 
-              <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
-                <span>
-                  <strong className="text-text">{snapshot.nodes.length}</strong> observed paths
-                </span>
-                <span>
-                  <strong className="text-text">{snapshot.sessions.length}</strong> sessions with a known CWD
-                </span>
-                <span>
-                  <strong className="text-text">{liveSourceCount}</strong> live {liveSourceCount === 1 ? "source" : "sources"}
-                </span>
-                <span>Snapshot {formatTimestamp(snapshot.generatedAt)}</span>
-                {totalOverlaps > 0 && (
-                  <button
-                    type="button"
-                    onClick={autoArrangeTopology}
-                    className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning transition-colors hover:bg-warning-subtle/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning"
-                    title="Click to automatically arrange overlapping elements"
-                    aria-label={`${totalOverlaps} elements overlapping. Click to auto arrange.`}
+              <div className="flex h-11 shrink-0 items-center justify-between gap-4 border-t border-border px-5 text-xs text-text-muted select-none">
+                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 text-xs">
+                  <span className="shrink-0">
+                    <strong className="font-medium text-text">{snapshot.nodes.length}</strong> observed paths
+                  </span>
+                  <span className="shrink-0 text-border" aria-hidden="true">·</span>
+                  <span className="shrink-0">
+                    <strong className="font-medium text-text">{snapshot.sessions.length}</strong> sessions
+                    <span className="hidden xl:inline"> with a known CWD</span>
+                  </span>
+                  <span className="shrink-0 text-border" aria-hidden="true">·</span>
+                  <span className="shrink-0">
+                    <strong className="font-medium text-text">{liveSourceCount}</strong> live {liveSourceCount === 1 ? "source" : "sources"}
+                  </span>
+                  <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
+                  <span
+                    className="hidden 2xl:inline truncate text-text-subtle"
+                    title={`Snapshot generated at ${formatTimestamp(snapshot.generatedAt)}`}
                   >
-                    <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
-                    <span>{totalOverlaps} overlapping · Auto arrange</span>
-                  </button>
-                )}
-                <span className="flex items-center gap-3 sm:ml-auto" aria-label="Topology map legend">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
-                    Filesystem route
+                    Snapshot {formatTimestamp(snapshot.generatedAt)}
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
-                    Selected source route
-                  </span>
-                </span>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-3.5">
+                  <AnimatePresence>
+                    {totalOverlaps > 0 && (
+                      <motion.div
+                        key="overlap-badge-group"
+                        initial={reducedMotion ? false : { opacity: 0, scale: 0.92, x: 8 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.92, x: 8 }}
+                        transition={{ duration: 0.18, ease: "easeOut" }}
+                        className="flex items-center gap-3"
+                      >
+                        <button
+                          type="button"
+                          onClick={autoArrangeTopology}
+                          className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2.5 py-1 text-xs font-medium text-warning transition-all hover:border-warning/60 hover:bg-warning/20 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning"
+                          title="Click to automatically arrange overlapping elements"
+                          aria-label={`${totalOverlaps} elements overlapping. Click to auto arrange.`}
+                        >
+                          <AlertTriangle className="h-3 w-3 shrink-0 text-warning" aria-hidden="true" />
+                          <span>{totalOverlaps} overlapping · Auto arrange</span>
+                        </button>
+                        <div className="hidden h-3.5 w-px bg-border sm:block" aria-hidden="true" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="flex items-center gap-3" aria-label="Topology map legend">
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
+                      <span>Filesystem route</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
+                      <span>Selected source route</span>
+                    </span>
+                  </div>
+                </div>
               </div>
               {snapshot.truncated && (
                 <div className="flex shrink-0 gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
