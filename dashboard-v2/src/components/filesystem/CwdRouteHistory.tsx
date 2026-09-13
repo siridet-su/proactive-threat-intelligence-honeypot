@@ -15,8 +15,8 @@ import {
   Shield,
   Terminal,
 } from "lucide-react";
-import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
@@ -62,7 +62,6 @@ export function CwdRouteHistory({
   const [internalPlaybackSpeed, setInternalPlaybackSpeed] = useState<number>(1400);
   const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<"replay" | "commands" | "actions">("replay");
-  const sidebarTabsId = useId();
   const shouldReduceMotion = useReducedMotion();
 
   const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
@@ -154,6 +153,7 @@ export function CwdRouteHistory({
   }, [controlledIsPlaying, isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed, onSelectHistoryEventId]);
 
   const isSidebar = layout === "sidebar";
+  const sidebarTabColumn = sidebarTab === "replay" ? 1 : sidebarTab === "commands" ? 2 : 3;
 
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
@@ -171,51 +171,47 @@ export function CwdRouteHistory({
             </h2>
           </div>
           {isSidebar && (
-            <LayoutGroup id={sidebarTabsId}>
-              <div
-                className="grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
-                aria-label="Forensic studio views"
-              >
-                {([
-                  { id: "replay", label: "Route Replay", icon: null },
-                  { id: "commands", label: "Command data", icon: Terminal },
-                  { id: "actions", label: "Response", icon: Shield },
-                ] as const).map((tab) => {
-                  const isActive = sidebarTab === tab.id;
-                  const Icon = tab.icon;
-
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setSidebarTab(tab.id)}
-                      aria-pressed={isActive}
-                      className={`relative isolate flex min-h-9 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-md border border-transparent px-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
-                        isActive ? "font-semibold text-primary" : "font-medium text-text-muted hover:text-text"
-                      }`}
-                    >
-                      {isActive && (
-                        <motion.span
-                          layoutId="forensic-studio-active-tab"
-                          data-forensic-tab-highlight
-                          aria-hidden="true"
-                          className="absolute inset-0 z-0 rounded-md border border-border bg-surface shadow-2xs"
-                          transition={
-                            shouldReduceMotion
-                              ? { duration: 0 }
-                              : { duration: 0.28, ease: [0.4, 0, 0.2, 1] }
-                          }
-                        />
-                      )}
-                      <span className="relative z-10 flex items-center justify-center gap-1">
-                        {Icon && <Icon className="h-3 w-3" aria-hidden="true" />}
-                        <span>{tab.label}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+            <div
+              className="relative isolate grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
+              aria-label="Forensic studio views"
+            >
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0.5 grid grid-cols-3 gap-1">
+                <motion.span
+                  layout="position"
+                  data-forensic-tab-highlight
+                  className="rounded-md border border-border bg-surface shadow-2xs"
+                  style={{ gridColumnStart: sidebarTabColumn }}
+                  transition={
+                    shouldReduceMotion
+                      ? { duration: 0 }
+                      : { duration: 0.28, ease: [0.4, 0, 0.2, 1] }
+                  }
+                />
               </div>
-            </LayoutGroup>
+              {([
+                { id: "replay", label: "Route Replay", icon: null },
+                { id: "commands", label: "Command data", icon: Terminal },
+                { id: "actions", label: "Response", icon: Shield },
+              ] as const).map((tab) => {
+                const isActive = sidebarTab === tab.id;
+                const Icon = tab.icon;
+
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSidebarTab(tab.id)}
+                    aria-pressed={isActive}
+                    className={`relative z-10 flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium transition-colors duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
+                      isActive ? "text-primary" : "text-text-muted hover:text-text"
+                    }`}
+                  >
+                    {Icon && <Icon className="h-3 w-3" aria-hidden="true" />}
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
         {selectedSession && !isSidebar && (
