@@ -15,7 +15,8 @@ import {
   Shield,
   Terminal,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
@@ -61,6 +62,8 @@ export function CwdRouteHistory({
   const [internalPlaybackSpeed, setInternalPlaybackSpeed] = useState<number>(1400);
   const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<"replay" | "commands" | "actions">("replay");
+  const sidebarTabsId = useId();
+  const shouldReduceMotion = useReducedMotion();
 
   const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
   const playbackSpeed = controlledPlaybackSpeed !== undefined ? controlledPlaybackSpeed : internalPlaybackSpeed;
@@ -168,49 +171,51 @@ export function CwdRouteHistory({
             </h2>
           </div>
           {isSidebar && (
-            <div
-              className="grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
-              aria-label="Forensic studio views"
-            >
-              <button
-                type="button"
-                onClick={() => setSidebarTab("replay")}
-                aria-pressed={sidebarTab === "replay"}
-                className={`min-h-9 rounded-md px-2 text-xs font-medium transition-colors cursor-pointer ${
-                  sidebarTab === "replay"
-                    ? "bg-surface text-primary font-semibold shadow-2xs border border-border"
-                    : "text-text-muted hover:text-text"
-                }`}
+            <LayoutGroup id={sidebarTabsId}>
+              <div
+                className="grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
+                aria-label="Forensic studio views"
               >
-                Route Replay
-              </button>
-              <button
-                type="button"
-                onClick={() => setSidebarTab("commands")}
-                aria-pressed={sidebarTab === "commands"}
-                className={`flex min-h-9 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium transition-colors cursor-pointer ${
-                  sidebarTab === "commands"
-                    ? "bg-surface text-primary font-semibold shadow-2xs border border-border"
-                    : "text-text-muted hover:text-text"
-                }`}
-              >
-                <Terminal className="h-3 w-3" />
-                <span>Command data</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSidebarTab("actions")}
-                aria-pressed={sidebarTab === "actions"}
-                className={`flex min-h-9 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium transition-colors cursor-pointer ${
-                  sidebarTab === "actions"
-                    ? "bg-surface text-primary font-semibold shadow-2xs border border-border"
-                    : "text-text-muted hover:text-text"
-                }`}
-              >
-                <Shield className="h-3 w-3" />
-                <span>Response</span>
-              </button>
-            </div>
+                {([
+                  { id: "replay", label: "Route Replay", icon: null },
+                  { id: "commands", label: "Command data", icon: Terminal },
+                  { id: "actions", label: "Response", icon: Shield },
+                ] as const).map((tab) => {
+                  const isActive = sidebarTab === tab.id;
+                  const Icon = tab.icon;
+
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setSidebarTab(tab.id)}
+                      aria-pressed={isActive}
+                      className={`relative isolate flex min-h-9 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-md border border-transparent px-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
+                        isActive ? "font-semibold text-primary" : "font-medium text-text-muted hover:text-text"
+                      }`}
+                    >
+                      {isActive && (
+                        <motion.span
+                          layoutId="forensic-studio-active-tab"
+                          data-forensic-tab-highlight
+                          aria-hidden="true"
+                          className="absolute inset-0 z-0 rounded-md border border-border bg-surface shadow-2xs"
+                          transition={
+                            shouldReduceMotion
+                              ? { duration: 0 }
+                              : { duration: 0.18, ease: [0.22, 1, 0.36, 1] }
+                          }
+                        />
+                      )}
+                      <span className="relative z-10 flex items-center justify-center gap-1">
+                        {Icon && <Icon className="h-3 w-3" aria-hidden="true" />}
+                        <span>{tab.label}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </LayoutGroup>
           )}
         </div>
         {selectedSession && !isSidebar && (
