@@ -696,7 +696,10 @@ export function FilesystemActivity() {
     const trapFocus = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
       const focusable = [...dialog.querySelectorAll<HTMLElement>(focusableSelector)].filter(
-        (element) => !element.hasAttribute("inert") && element.getClientRects().length > 0,
+        (element) =>
+          !element.closest("[inert]") &&
+          !element.closest('[aria-hidden="true"]') &&
+          element.getClientRects().length > 0,
       );
       if (!focusable.length) {
         event.preventDefault();
@@ -862,8 +865,8 @@ export function FilesystemActivity() {
           className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
         >
           {/* Studio Top Navigation Bar */}
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs">
-            <div className="flex flex-wrap items-center gap-2.5">
+          <header className="grid shrink-0 grid-cols-1 items-start gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="flex min-w-0 flex-wrap items-center gap-2.5">
               <div className="flex items-center gap-2">
                 <Route className="h-4 w-4 text-primary" />
                 <span className="text-sm font-semibold text-text">Audit Replay Studio</span>
@@ -899,8 +902,8 @@ export function FilesystemActivity() {
               )}
             </div>
 
-            {/* Center: Active Hop / Quick Replay Scrubber */}
-            <div className="flex items-center gap-2">
+            {/* Stable right-side control cluster */}
+            <div className="flex flex-wrap items-center justify-end gap-2 justify-self-end xl:flex-nowrap">
               {displayedHistory.length > 0 && isTimelineCollapsed && (
                 <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-subtle px-2.5 py-1">
                   <button
@@ -940,19 +943,18 @@ export function FilesystemActivity() {
                   </span>
                 </div>
               )}
-            </div>
 
-            {/* Right: Tools & Controls */}
-            <div className="flex items-center gap-2">
               {/* Keyboard shortcuts hints */}
-              <div className="hidden xl:flex items-center gap-1.5 text-xs text-text-subtle font-mono mr-2">
-                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Space</kbd> Play
-                <span className="text-border">·</span>
-                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">←</kbd>
-                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">→</kbd> Step
-                <span className="text-border">·</span>
-                <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Esc</kbd> Exit
-              </div>
+              {!isTimelineCollapsed && (
+                <div className="mr-2 hidden items-center gap-1.5 font-mono text-xs text-text-subtle 2xl:flex">
+                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Space</kbd> Play
+                  <span className="text-border">·</span>
+                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">←</kbd>
+                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">→</kbd> Step
+                  <span className="text-border">·</span>
+                  <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 shadow-2xs">Esc</kbd> Exit
+                </div>
+              )}
 
               {/* Toggle Timeline Collapse (70/30 vs 100%) */}
               <button
