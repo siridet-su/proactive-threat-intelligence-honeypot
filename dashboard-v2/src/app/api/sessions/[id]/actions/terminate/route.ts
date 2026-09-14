@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
-import { requestSessionTermination, responseControlConfigured } from "@/lib/response-control";
+import { requestSessionTermination, responseControlConfigured, responseControlHealthy } from "@/lib/response-control";
 import {
   createTerminateAction,
   getTerminateAction,
@@ -33,13 +33,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const administrator = isAdmin(dashboardSession);
   const actionId = new URL(request.url).searchParams.get("actionId") ?? undefined;
   if (actionId && !ACTION_ID_PATTERN.test(actionId)) return NextResponse.json({ error: "Invalid action ID" }, { status: 400 });
-  const action = administrator ? await getTerminateAction(id, actionId) : null;
   const configured = responseControlConfigured();
+  const [action, active, healthy] = await Promise.all([
+    administrator ? getTerminateAction(id, actionId) : null,
+    sessionIsActive(id),
+    administrator && configured ? responseControlHealthy() : false,
+  ]);
   return NextResponse.json({
-    available: administrator && configured,
+    available: administrator && healthy,
     authorized: administrator,
     configured,
-    active: await sessionIsActive(id),
+    active,
     action,
   }, { headers: { "Cache-Control": "no-store" } });
 }

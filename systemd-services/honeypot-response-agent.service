@@ -2,6 +2,8 @@
 Description=Honeypot allow-listed response agent
 After=network-online.target tailscaled.service cowrie.service
 Wants=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 
 [Service]
 Type=simple

@@ -54,6 +54,10 @@ function isPrivateManagementHost(hostname: string): boolean {
 
 function responseAgentEndpoint(sessionId: string): URL {
   if (!SESSION_ID_PATTERN.test(sessionId)) throw new Error("invalid Cowrie session id");
+  return new URL(`/v1/sessions/${sessionId}/terminate`, responseAgentBase());
+}
+
+function responseAgentBase(): URL {
   const configured = process.env.COWRIE_RESPONSE_AGENT_URL?.trim();
   if (!configured) throw new Error("response agent is not configured");
   const base = new URL(configured);
@@ -63,7 +67,36 @@ function responseAgentEndpoint(sessionId: string): URL {
   if (base.protocol === "http:" && !isPrivateManagementHost(base.hostname)) {
     throw new Error("unencrypted response agent URL must use a private management host");
   }
-  return new URL(`/v1/sessions/${sessionId}/terminate`, base);
+  return base;
+}
+
+export async function responseControlHealthy(): Promise<boolean> {
+  const token = responseAgentToken();
+  if (!token) return false;
+  let endpoint: URL;
+  try {
+    endpoint = new URL("/v1/health", responseAgentBase());
+  } catch {
+    return false;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    if (!response.ok) return false;
+    const document: unknown = await response.json();
+    return Boolean(document && typeof document === "object" && (document as { ok?: unknown }).ok === true && (document as { status?: unknown }).status === "ready");
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function requestSessionTermination(sessionId: string, actionId: string): Promise<ResponseAgentResult> {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 vi.mock("server-only", () => ({}));
 
-import { requestSessionTermination, responseControlConfigured } from "../src/lib/response-control";
+import { requestSessionTermination, responseControlConfigured, responseControlHealthy } from "../src/lib/response-control";
 
 const originalURL = process.env.COWRIE_RESPONSE_AGENT_URL;
 const originalToken = process.env.COWRIE_RESPONSE_AGENT_TOKEN;
@@ -51,6 +51,28 @@ describe("response control client", () => {
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
     expect((init?.headers as Record<string, string>)["X-Action-ID"]).toBe(validActionID);
+  });
+
+  it("reports healthy only when the authenticated agent and Cowrie socket are ready", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ ok: true, status: "ready" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+
+    expect(await responseControlHealthy()).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("http://100.118.43.30:8788/v1/health");
+    expect(init?.method).toBe("GET");
+    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer 01234567890123456789012345678901");
+  });
+
+  it("reports unhealthy for an invalid health response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ ok: true, status: "starting" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+
+    expect(await responseControlHealthy()).toBe(false);
   });
 
   it("prefers a private absolute token file for deployed runtimes", async () => {

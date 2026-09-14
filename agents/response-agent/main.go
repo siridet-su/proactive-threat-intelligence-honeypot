@@ -36,12 +36,22 @@ type controlResponse struct {
 }
 
 type unixController interface {
+	Ready(context.Context) error
 	Terminate(context.Context, string, string) (controlResponse, error)
 }
 
 type socketController struct {
 	path    string
 	timeout time.Duration
+}
+
+func (controller socketController) Ready(ctx context.Context) error {
+	dialer := net.Dialer{Timeout: controller.timeout}
+	connection, err := dialer.DialContext(ctx, "unix", controller.path)
+	if err != nil {
+		return fmt.Errorf("connect to Cowrie control socket: %w", err)
+	}
+	return connection.Close()
 }
 
 func (controller socketController) Terminate(ctx context.Context, actionID, sessionID string) (controlResponse, error) {
@@ -74,6 +84,7 @@ type server struct {
 
 func (service *server) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/health", service.health)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/terminate", service.terminateSession)
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Cache-Control", "no-store")
@@ -81,6 +92,18 @@ func (service *server) routes() http.Handler {
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		mux.ServeHTTP(response, request)
 	})
+}
+
+func (service *server) health(response http.ResponseWriter, request *http.Request) {
+	if !service.authorized(request) {
+		writeJSON(response, http.StatusUnauthorized, controlResponse{Status: "unauthorized"})
+		return
+	}
+	if err := service.controller.Ready(request.Context()); err != nil {
+		writeJSON(response, http.StatusServiceUnavailable, controlResponse{Status: "control_unavailable"})
+		return
+	}
+	writeJSON(response, http.StatusOK, controlResponse{OK: true, Status: "ready"})
 }
 
 func (service *server) authorized(request *http.Request) bool {

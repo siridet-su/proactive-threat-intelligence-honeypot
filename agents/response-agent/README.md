@@ -1,8 +1,10 @@
 # Honeypot response agent
 
-This agent exposes exactly one operation to the private management plane:
-terminate one live Cowrie connection by its 12-character transport ID. It has
-no shell or generic command endpoint.
+This agent exposes one mutating operation to the private management plane:
+terminate one live Cowrie connection by its 12-character transport ID. An
+authenticated `GET /v1/health` readiness endpoint verifies that the local
+Cowrie control socket accepts connections without sending a control action.
+The agent has no shell or generic command endpoint.
 
 The HTTP listener must bind to the Pi's Tailscale address. A bearer credential
 is read from a private file, and the action is forwarded to Cowrie over its

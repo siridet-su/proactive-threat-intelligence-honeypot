@@ -18,9 +18,14 @@ type fakeController struct {
 	sessionID string
 	response  controlResponse
 	err       error
+	readyErr  error
 }
 
 const validActionID = "123e4567-e89b-12d3-a456-426614174000"
+
+func (controller *fakeController) Ready(_ context.Context) error {
+	return controller.readyErr
+}
 
 func (controller *fakeController) Terminate(_ context.Context, actionID, sessionID string) (controlResponse, error) {
 	controller.called = true
@@ -71,6 +76,35 @@ func TestTerminateSessionRequiresAuthentication(t *testing.T) {
 	testServer(controller).terminateSession(recorder, request)
 	if recorder.status != http.StatusUnauthorized || controller.called {
 		t.Fatalf("status=%d called=%v", recorder.status, controller.called)
+	}
+}
+
+func TestHealthRequiresAuthentication(t *testing.T) {
+	controller := &fakeController{}
+	recorder := newResponseRecorder()
+	testServer(controller).health(recorder, newRequest("/v1/health"))
+	if recorder.status != http.StatusUnauthorized {
+		t.Fatalf("status=%d response=%+v", recorder.status, decodeResponse(t, recorder))
+	}
+}
+
+func TestHealthReportsCowrieControlReadiness(t *testing.T) {
+	request := newRequest("/v1/health")
+	request.Header.Set("Authorization", "Bearer 01234567890123456789012345678901")
+	recorder := newResponseRecorder()
+	testServer(&fakeController{}).health(recorder, request)
+	if recorder.status != http.StatusOK || decodeResponse(t, recorder) != (controlResponse{OK: true, Status: "ready"}) {
+		t.Fatalf("status=%d response=%+v", recorder.status, decodeResponse(t, recorder))
+	}
+}
+
+func TestHealthFailsClosedWhenCowrieControlIsUnavailable(t *testing.T) {
+	request := newRequest("/v1/health")
+	request.Header.Set("Authorization", "Bearer 01234567890123456789012345678901")
+	recorder := newResponseRecorder()
+	testServer(&fakeController{readyErr: io.EOF}).health(recorder, request)
+	if recorder.status != http.StatusServiceUnavailable || decodeResponse(t, recorder).Status != "control_unavailable" {
+		t.Fatalf("status=%d response=%+v", recorder.status, decodeResponse(t, recorder))
 	}
 }
 

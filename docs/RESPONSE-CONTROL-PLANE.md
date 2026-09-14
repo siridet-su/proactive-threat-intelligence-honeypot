@@ -92,3 +92,12 @@ action record and `cowrie.session.closed` event.
   the bounded window.
 
 Audit records are retained for 90 days in `session_response_actions`.
+
+## Readiness contract
+
+`GET /v1/health` requires the same bearer service credential as terminate. It
+returns `200 {"ok":true,"status":"ready"}` only when the agent can connect to
+the local Cowrie Unix control socket. It never sends a Cowrie action. Missing or
+invalid authentication returns 401; an unavailable socket returns 503 without
+disclosing its filesystem path. The dashboard checks this endpoint before
+making response controls available to an Admin operator.
