@@ -22,8 +22,10 @@ The Pi agent must bind only to its Tailscale address. Tailnet grants should
 allow the dashboard service identity to reach the response-agent port and no
 other source. The Cowrie hook is disabled unless
 `HONEYPOT_COWRIE_CONTROL_SOCKET` is set. The dashboard control remains disabled
-unless both `COWRIE_RESPONSE_AGENT_URL` and `COWRIE_RESPONSE_AGENT_TOKEN` are
-set server-side.
+unless `COWRIE_RESPONSE_AGENT_URL` and one valid server-side credential are
+configured. Production dashboard services should provide the credential
+through `COWRIE_RESPONSE_AGENT_TOKEN_FILE`; `COWRIE_RESPONSE_AGENT_TOKEN` is a
+local-development fallback.
 
 Example grant (merge with the existing tailnet policy and tag ownership):
 
@@ -32,15 +34,35 @@ Example grant (merge with the existing tailnet policy and tag ownership):
   "grants": [
     {
       "src": ["tag:pti-dashboard"],
-      "dst": ["tag:pti-honeypot"],
+      "dst": ["tag:honeypot-pi"],
       "ip": ["tcp:8788"]
     }
   ]
 }
 ```
 
+The merge-ready grant, tag-owner definitions, policy regression test, and
+deployment sequence live in `integrations/tailscale/`.
+
 Do not grant the operator user group direct access to port 8788. Human access
 continues through the dashboard's authenticated action route.
+
+The production dashboard node should join the tailnet as the non-human service
+identity `tag:pti-dashboard`. Do not tag a developer workstation to simulate
+this identity: applying a tag replaces user ownership semantics. Keep the
+temporary IP-source grant only for local testing, then remove it after a tagged
+dashboard deployment passes the same synthetic-session termination check.
+
+## Dashboard credential input
+
+- Set `COWRIE_RESPONSE_AGENT_URL=http://<pi-tailscale-ip-or-magicdns>:8788`.
+- Load the shared token as a systemd credential and set
+  `COWRIE_RESPONSE_AGENT_TOKEN_FILE=%d/response-agent-token`.
+- The credential must resolve to an absolute regular file, not a symlink, with
+  no group or other permission bits. A missing, oversized, malformed, or
+  insecure file disables response control.
+- Never set the token through a `NEXT_PUBLIC_*` variable or copy it into an
+  immutable application release.
 
 ## Pi deployment inputs
 

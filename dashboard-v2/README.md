@@ -21,12 +21,17 @@ DASHBOARD_V2_ACCESS_KEY=<deployment dashboard access key>
 DASHBOARD_V2_SESSION_SECRET=<deployment session secret>
 MONGODB_URI=<server-only MongoDB connection string>
 COWRIE_RESPONSE_AGENT_URL=http://<pi-tailscale-ip>:8788
-COWRIE_RESPONSE_AGENT_TOKEN=<shared response-agent token, never a NEXT_PUBLIC variable>
+COWRIE_RESPONSE_AGENT_TOKEN_FILE=/run/credentials/honeypot-dashboard-v2.service/response-agent-token
 ```
 
 The app fails closed when dashboard authentication is not configured. The two
-`COWRIE_RESPONSE_AGENT_*` variables are optional; without both, the Response tab
-remains read-only. When configured, only Admin operators can request the
+response-agent settings are optional; without the URL and one valid credential,
+the Response tab remains read-only. Production should use
+`COWRIE_RESPONSE_AGENT_TOKEN_FILE`, pointing to an absolute, regular,
+non-symlink file with no group/other permissions. `COWRIE_RESPONSE_AGENT_TOKEN`
+remains available only as a local-development fallback. If a token-file path is
+configured but unsafe or unreadable, the dashboard fails closed and never falls
+back to the inline token. When configured, only Admin operators can request the
 allow-listed terminate-session action. The browser never receives the agent
 token, and the dashboard records requested, delivered, verified, or failed
 action state in MongoDB. MongoDB credentials remain server-only and are never

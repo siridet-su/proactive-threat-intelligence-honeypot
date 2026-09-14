@@ -1,15 +1,48 @@
 import "server-only";
 
+import { lstatSync, readFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
+
 const SESSION_ID_PATTERN = /^[0-9a-f]{12}$/;
 const ACTION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AGENT_TIMEOUT_MS = 4_000;
+const MIN_TOKEN_LENGTH = 32;
+const MAX_TOKEN_BYTES = 4_096;
 
 export type ResponseAgentResult =
   | { delivered: true; status: "terminating" }
   | { delivered: false; category: "not_found" | "unconfigured" | "unavailable" | "rejected" };
 
+function validBearerToken(value: string): string | null {
+  const token = value.trim();
+  if (token.length < MIN_TOKEN_LENGTH || Buffer.byteLength(token, "utf8") > MAX_TOKEN_BYTES) return null;
+  if (/[\s\u0000-\u001f\u007f]/u.test(token)) return null;
+  return token;
+}
+
+function tokenFromPrivateFile(configuredPath: string): string | null {
+  const tokenPath = configuredPath.trim();
+  if (!tokenPath || !isAbsolute(tokenPath)) return null;
+  try {
+    const stat = lstatSync(/* turbopackIgnore: true */ tokenPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || stat.size > MAX_TOKEN_BYTES) return null;
+    return validBearerToken(readFileSync(/* turbopackIgnore: true */ tokenPath, {
+      encoding: "utf8",
+      flag: "r",
+    }));
+  } catch {
+    return null;
+  }
+}
+
+function responseAgentToken(): string | null {
+  const tokenFile = process.env.COWRIE_RESPONSE_AGENT_TOKEN_FILE;
+  if (tokenFile?.trim()) return tokenFromPrivateFile(tokenFile);
+  return validBearerToken(process.env.COWRIE_RESPONSE_AGENT_TOKEN ?? "");
+}
+
 export function responseControlConfigured(): boolean {
-  return Boolean(process.env.COWRIE_RESPONSE_AGENT_URL?.trim() && (process.env.COWRIE_RESPONSE_AGENT_TOKEN?.trim().length ?? 0) >= 32);
+  return Boolean(process.env.COWRIE_RESPONSE_AGENT_URL?.trim() && responseAgentToken());
 }
 
 function isPrivateManagementHost(hostname: string): boolean {
@@ -34,8 +67,8 @@ function responseAgentEndpoint(sessionId: string): URL {
 }
 
 export async function requestSessionTermination(sessionId: string, actionId: string): Promise<ResponseAgentResult> {
-  const token = process.env.COWRIE_RESPONSE_AGENT_TOKEN?.trim();
-  if (!token || !responseControlConfigured()) return { delivered: false, category: "unconfigured" };
+  const token = responseAgentToken();
+  if (!token || !process.env.COWRIE_RESPONSE_AGENT_URL?.trim()) return { delivered: false, category: "unconfigured" };
   if (!ACTION_ID_PATTERN.test(actionId)) return { delivered: false, category: "rejected" };
 
   let endpoint: URL;

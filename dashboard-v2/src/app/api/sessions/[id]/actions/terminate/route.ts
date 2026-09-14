@@ -34,10 +34,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const actionId = new URL(request.url).searchParams.get("actionId") ?? undefined;
   if (actionId && !ACTION_ID_PATTERN.test(actionId)) return NextResponse.json({ error: "Invalid action ID" }, { status: 400 });
   const action = administrator ? await getTerminateAction(id, actionId) : null;
+  const configured = responseControlConfigured();
   return NextResponse.json({
-    available: administrator && responseControlConfigured(),
+    available: administrator && configured,
     authorized: administrator,
-    configured: responseControlConfigured(),
+    configured,
     active: await sessionIsActive(id),
     action,
   }, { headers: { "Cache-Control": "no-store" } });
