@@ -1060,6 +1060,7 @@ export function FilesystemActivity() {
               >
                 <CwdRouteHistory
                   selectedSession={selectedSession}
+                  sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
                   historyStatus={historyStatus}
                   historyCursor={historyCursor}
@@ -1246,6 +1247,7 @@ export function FilesystemActivity() {
               >
                 <CwdRouteHistory
                   selectedSession={selectedSession}
+                  sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
                   historyStatus={historyStatus}
                   historyCursor={historyCursor}

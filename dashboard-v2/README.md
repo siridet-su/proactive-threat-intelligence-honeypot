@@ -19,9 +19,19 @@ DASHBOARD_API_READ_TOKEN=<monitor read token, never a NEXT_PUBLIC variable>
 DASHBOARD_V2_OPERATOR_ID=<deployment operator id>
 DASHBOARD_V2_ACCESS_KEY=<deployment dashboard access key>
 DASHBOARD_V2_SESSION_SECRET=<deployment session secret>
+MONGODB_URI=<server-only MongoDB connection string>
+COWRIE_RESPONSE_AGENT_URL=http://<pi-tailscale-ip>:8788
+COWRIE_RESPONSE_AGENT_TOKEN=<shared response-agent token, never a NEXT_PUBLIC variable>
 ```
 
-The app fails closed when dashboard authentication is not configured. No Mongo URI or Mongo credential belongs in this application. The BFF exposes only allowlisted GET routes and excludes the sensitive monitor command route.
+The app fails closed when dashboard authentication is not configured. The two
+`COWRIE_RESPONSE_AGENT_*` variables are optional; without both, the Response tab
+remains read-only. When configured, only Admin operators can request the
+allow-listed terminate-session action. The browser never receives the agent
+token, and the dashboard records requested, delivered, verified, or failed
+action state in MongoDB. MongoDB credentials remain server-only and are never
+exposed through a `NEXT_PUBLIC_*` variable. The sensitive monitor command-detail
+route remains excluded and is not used as a control channel.
 
 ## API and data documentation
 

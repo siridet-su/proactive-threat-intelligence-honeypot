@@ -172,6 +172,20 @@ export interface SessionCwdHistoryPage {
   nextCursor: string | null;
 }
 
+export type SessionTerminateActionStatus = "requested" | "delivered" | "verified" | "failed";
+
+export interface SessionTerminateAction {
+  actionId: string;
+  sessionId: string;
+  action: "terminate_session";
+  status: SessionTerminateActionStatus;
+  requestedBy: string;
+  requestedAt: string;
+  deliveredAt: string | null;
+  verifiedAt: string | null;
+  failureCategory: string | null;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

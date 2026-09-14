@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CornerDownRight,
@@ -9,6 +10,7 @@ import {
   History,
   Pause,
   Play,
+  Power,
   Plus,
   RefreshCw,
   Rewind,
@@ -19,10 +21,24 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
-import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
+import type { FilesystemTopologySession, SessionCwdHistoryEvent, SessionTerminateAction } from "@/lib/dashboardTypes";
 import { actionLabel, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
 
 type SidebarTab = "replay" | "commands" | "actions";
+type TerminateCapability = "idle" | "loading" | "available" | "forbidden" | "unconfigured" | "error";
+
+interface TerminateStatePayload {
+  available?: boolean;
+  authorized?: boolean;
+  configured?: boolean;
+  action?: SessionTerminateAction | null;
+}
+
+function terminateCapabilityFrom(document: TerminateStatePayload): TerminateCapability {
+  return document.available ? "available" : !document.authorized ? "forbidden" : !document.configured ? "unconfigured" : "error";
+}
 
 const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
   replay: 1,
@@ -43,6 +59,7 @@ interface CwdRouteHistoryProps {
   historyCursor: string | null;
   selectedHistoryEventId: string | null;
   layout?: "card" | "sidebar";
+  sessionIsLive?: boolean;
   onSelectHistoryEventId: (eventId: string | null) => void;
   onLoadEarlier: () => void;
   isPlaying?: boolean;
@@ -61,6 +78,7 @@ export function CwdRouteHistory({
   historyCursor,
   selectedHistoryEventId,
   layout = "card",
+  sessionIsLive = false,
   onSelectHistoryEventId,
   onLoadEarlier,
   isPlaying: controlledIsPlaying,
@@ -77,6 +95,13 @@ export function CwdRouteHistory({
   const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("replay");
   const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
+  const [terminateCapability, setTerminateCapability] = useState<TerminateCapability>("idle");
+  const [terminateCapabilitySessionId, setTerminateCapabilitySessionId] = useState<string | null>(null);
+  const [terminateAction, setTerminateAction] = useState<SessionTerminateAction | null>(null);
+  const [terminateDialogOpen, setTerminateDialogOpen] = useState(false);
+  const [terminateProcessing, setTerminateProcessing] = useState(false);
+  const [terminateError, setTerminateError] = useState<string | undefined>();
+  const [operationToast, setOperationToast] = useState<{ kind: OperationToastKind; title: string; description: string } | null>(null);
   const shouldReduceMotion = useReducedMotion();
 
   const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
@@ -102,6 +127,9 @@ export function CwdRouteHistory({
   const selectedHistoryEvent = selectedHistoryIndex >= 0 ? displayedHistory[selectedHistoryIndex] : null;
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
+  const controlSessionId = selectedSession?.sessionId ?? null;
+  const visibleTerminateAction = terminateAction?.sessionId === controlSessionId ? terminateAction : null;
+  const visibleTerminateCapability = terminateCapabilitySessionId === controlSessionId ? terminateCapability : "loading";
 
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
@@ -176,6 +204,85 @@ export function CwdRouteHistory({
     setSidebarTabDirection(SIDEBAR_TAB_COLUMN[nextTab] > sidebarTabColumn ? 1 : -1);
     setSidebarTab(nextTab);
   };
+
+  const fetchTerminateState = useCallback(async (sessionId: string, actionId?: string, signal?: AbortSignal) => {
+    const query = actionId ? `?actionId=${encodeURIComponent(actionId)}` : "";
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/actions/terminate${query}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal,
+    });
+    if (!response.ok) throw new Error("Response control status unavailable");
+    return await response.json() as TerminateStatePayload;
+  }, []);
+
+  useEffect(() => {
+    if (!isSidebar || sidebarTab !== "actions" || !controlSessionId) return;
+    const controller = new AbortController();
+    void fetchTerminateState(controlSessionId, undefined, controller.signal)
+      .then((document) => {
+        setTerminateAction(document.action ?? null);
+        setTerminateCapability(terminateCapabilityFrom(document));
+        setTerminateCapabilitySessionId(controlSessionId);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setTerminateCapability("error");
+          setTerminateCapabilitySessionId(controlSessionId);
+        }
+      });
+    return () => controller.abort();
+  }, [controlSessionId, fetchTerminateState, isSidebar, sidebarTab]);
+
+  useEffect(() => {
+    if (!controlSessionId || !visibleTerminateAction || !["requested", "delivered"].includes(visibleTerminateAction.status)) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      void fetchTerminateState(controlSessionId, visibleTerminateAction.actionId, controller.signal)
+        .then((document) => {
+          const action = document.action ?? null;
+          setTerminateAction(action);
+          setTerminateCapability(terminateCapabilityFrom(document));
+          setTerminateCapabilitySessionId(controlSessionId);
+          if (action?.status === "verified") {
+            window.clearInterval(timer);
+            setOperationToast({ kind: "success", title: "Session disconnected", description: "Cowrie emitted the verified session-closed lifecycle event." });
+          } else if (action?.status === "failed") {
+            window.clearInterval(timer);
+          }
+        })
+        .catch(() => undefined);
+    }, 1_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [controlSessionId, fetchTerminateState, visibleTerminateAction]);
+
+  const handleTerminateSession = useCallback(async () => {
+    if (!selectedSession) return;
+    setTerminateProcessing(true);
+    setTerminateError(undefined);
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(selectedSession.sessionId)}/actions/terminate`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: selectedSession.sessionId }),
+      });
+      const document = await response.json() as { error?: string; action?: SessionTerminateAction; reconciling?: boolean };
+      if (document.action) setTerminateAction(document.action);
+      if (!response.ok) throw new Error(document.error ?? "Terminate request failed");
+      setTerminateDialogOpen(false);
+      setOperationToast(document.reconciling
+        ? { kind: "success", title: "Reconciling session state", description: "The Pi no longer has this transport. Waiting for Cowrie's closure event before confirming the result." }
+        : { kind: "success", title: "Disconnect requested", description: "The Pi accepted the scoped request. Waiting for Cowrie to confirm session closure." });
+    } catch (error) {
+      setTerminateError(error instanceof Error ? error.message : "Terminate request failed");
+    } finally {
+      setTerminateProcessing(false);
+    }
+  }, [selectedSession]);
 
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
@@ -303,7 +410,6 @@ export function CwdRouteHistory({
             />
                 </div>
               ) : sidebarTab === "actions" ? (
-                /* Response controls remain unavailable until an authoritative action API exists. */
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">
             <div className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2.5">
               <div className="text-xs font-semibold text-text">Selected session</div>
@@ -318,11 +424,44 @@ export function CwdRouteHistory({
                 </div>
               </div>
             </div>
-            <RegionState
-              kind="empty"
-              title="Response controls unavailable"
-              description="This dashboard has no verified terminate-session or firewall-block action API. No command has been sent to the honeypot."
-            />
+            {visibleTerminateAction && (
+              <div className={`rounded-xl border p-3 ${visibleTerminateAction.status === "verified" ? "border-success-border bg-success-subtle" : visibleTerminateAction.status === "failed" ? "border-danger-border bg-danger-subtle" : "border-warning-border bg-warning-subtle"}`} aria-live="polite">
+                <div className="flex items-center gap-2">
+                  {visibleTerminateAction.status === "verified" ? <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" /> : <Power className={`h-4 w-4 ${visibleTerminateAction.status === "failed" ? "text-danger" : "text-warning"}`} aria-hidden="true" />}
+                  <span className="text-xs font-semibold text-text">
+                    {visibleTerminateAction.status === "verified" ? "Disconnect verified" : visibleTerminateAction.status === "failed" ? "Disconnect failed" : visibleTerminateAction.status === "requested" ? "Reconciling session state" : "Disconnect in progress"}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs leading-5 text-text-muted">
+                  {visibleTerminateAction.status === "verified" ? "Cowrie confirmed that this exact transport closed." : visibleTerminateAction.status === "failed" ? `No verified closure${visibleTerminateAction.failureCategory ? ` (${visibleTerminateAction.failureCategory.replaceAll("_", " ")})` : ""}.` : visibleTerminateAction.status === "requested" ? "The transport changed state during delivery; awaiting authoritative lifecycle confirmation." : "Request delivered to the Pi; awaiting the session-closed event."}
+                </p>
+              </div>
+            )}
+            {visibleTerminateCapability === "loading" ? (
+              <RegionState kind="loading" title="Checking response channel" />
+            ) : visibleTerminateCapability === "forbidden" ? (
+              <RegionState kind="empty" title="Admin access required" description="Only an Admin operator can disconnect a live Cowrie session." />
+            ) : visibleTerminateCapability === "unconfigured" ? (
+              <RegionState kind="empty" title="Response channel not configured" description="Configure the dashboard-to-Pi response agent before operational controls become available." />
+            ) : visibleTerminateCapability === "error" ? (
+              <RegionState kind="error" title="Response channel unavailable" description="The control capability could not be verified. No request was sent." />
+            ) : !sessionIsLive ? (
+              <RegionState kind="empty" title="Session already closed" description="Response actions are disabled for retained audit sessions." />
+            ) : visibleTerminateAction && ["requested", "delivered", "verified"].includes(visibleTerminateAction.status) ? null : (
+              <div className="rounded-xl border border-danger-border bg-danger-subtle p-3">
+                <div className="flex items-start gap-2.5">
+                  <Power className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-text">Disconnect this Cowrie session</p>
+                    <p className="mt-1 text-xs leading-5 text-text-muted">Closes only transport <span className="font-mono text-text">{selectedSession.sessionId}</span>. It does not block the source IP or run a shell command.</p>
+                  </div>
+                </div>
+                <button type="button" className="ui-button ui-button-danger mt-3 w-full" onClick={() => { setTerminateError(undefined); setTerminateDialogOpen(true); }}>
+                  <Power className="h-4 w-4" aria-hidden="true" />
+                  Disconnect session
+                </button>
+              </div>
+            )}
                 </div>
               ) : (
                 /* Tab 1: Sleek Compact Route Replay */
@@ -623,6 +762,19 @@ export function CwdRouteHistory({
           </AnimatePresence>
         )}
       </div>
+      <ConfirmDialog
+        open={terminateDialogOpen}
+        onOpenChange={setTerminateDialogOpen}
+        onConfirm={handleTerminateSession}
+        title="Disconnect this live Cowrie session?"
+        description={`This immediately closes session ${selectedSession?.sessionId ?? ""} from ${selectedSession?.sourceIp ?? "the selected source"}. The source IP is not blocked and Cowrie remains online.`}
+        confirmLabel="Disconnect session"
+        confirmVariant="danger"
+        isProcessing={terminateProcessing}
+        processingLabel="Sending request…"
+        errorMessage={terminateError}
+      />
+      {operationToast && <OperationToast {...operationToast} onDismiss={() => setOperationToast(null)} />}
     </div>
   );
 }
