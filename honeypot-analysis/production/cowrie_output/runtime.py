@@ -17,7 +17,7 @@ from production.utils.cowrie_privacy import CowriePrivacyPolicy, load_policy
 
 MANIFEST_SCHEMA_VERSION = "cowrie_output_bundle_manifest.v4"
 VALIDATION_SCHEMA_VERSION = "cowrie_output_boundary_validation.v1"
-EXPECTED_STARTING_SANITIZER_REVISION = "5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02"
+EXPECTED_STARTING_SANITIZER_REVISION = "f1b9dabe4c98cac3363bf04b877437d770f90c39"
 DEPLOYMENT_CONTRACT = {
     "expected_starting_sanitizer_revision": EXPECTED_STARTING_SANITIZER_REVISION,
     "compatibility": {

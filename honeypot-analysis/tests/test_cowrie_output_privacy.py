@@ -869,7 +869,7 @@ def test_starting_sanitizer_link_and_manifest_are_exactly_bound(tmp_path: Path) 
 def test_deployment_is_bound_to_current_accepted_sanitizer_release() -> None:
     assert (
         EXPECTED_STARTING_SANITIZER_REVISION
-        == "5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02"
+        == "f1b9dabe4c98cac3363bf04b877437d770f90c39"
     )
     assert (
         DEPLOYMENT_CONTRACT["expected_starting_sanitizer_revision"]

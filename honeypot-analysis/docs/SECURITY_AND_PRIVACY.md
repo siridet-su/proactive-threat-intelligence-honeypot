@@ -12,15 +12,17 @@ event or exception text. TTY replay is disabled because its shell prompt can
 persist attacker-controlled identity data. Credential-bearing historical
 records are restricted and receipt-bound but are not rewritten or deleted.
 
-The accepted Pi revision recorded by final production evidence is
-`5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02`. Its installer uses a closed
-manifest inventory, verifies the Cowrie/Python/Twisted binding, stops only
-Cowrie, preserves the forwarder process, seals a non-overwriting owner-only
-rollback receipt, and rejects release bytecode. Native JSON rotation leaves a
-bounded group-readable handoff interval so the unchanged forwarder can drain
-the renamed inode before it is sealed owner-only; categorical rotation is a
-separate policy. These are repository-recorded acceptance properties, not a
-claim about current live files.
+The original accepted Pi revision recorded by final production evidence is
+`5bb3b97fbe3b9034c70fc6ca2aba0ad9d159bb02`. The verified live upgrade
+predecessor is `f1b9dabe4c98cac3363bf04b877437d770f90c39`; new bundles are bound to
+that exact starting revision. The installer uses a closed manifest inventory,
+verifies the Cowrie/Python/Twisted binding, stops only Cowrie, preserves the
+forwarder process, seals a non-overwriting owner-only rollback receipt, and
+rejects release bytecode. Native JSON rotation leaves a bounded group-readable
+handoff interval so the unchanged forwarder can drain the renamed inode before
+it is sealed owner-only; categorical rotation is a separate policy. These are
+repository-recorded acceptance properties; live state must still be verified
+before each rollout.
 
 SQLite, spools, reports, TTY evidence, keys, and deployment metadata are
 outside the source release and use owner/group-restricted modes. The retained
