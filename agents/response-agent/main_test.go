@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
@@ -96,5 +97,31 @@ func TestTerminateSessionRejectsInvalidSessionBeforeControl(t *testing.T) {
 	testServer(controller).terminateSession(recorder, request)
 	if recorder.status != http.StatusBadRequest || controller.called {
 		t.Fatalf("status=%d called=%v", recorder.status, controller.called)
+	}
+}
+
+func TestPrivateCredentialFileAcceptsOnlyPrivateFilesAndSystemdCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		mode os.FileMode
+		want bool
+	}{
+		{name: "owner read write", path: "/etc/honeypot/token", mode: 0o600, want: true},
+		{name: "owner read", path: "/etc/honeypot/token", mode: 0o400, want: true},
+		{name: "systemd credential", path: "/run/credentials/honeypot-response-agent.service/token", mode: 0o440, want: true},
+		{name: "group readable outside credential mount", path: "/etc/honeypot/token", mode: 0o440, want: false},
+		{name: "lookalike credential path", path: "/run/credentials-unsafe/token", mode: 0o440, want: false},
+		{name: "credential path traversal", path: "/run/credentials/../token", mode: 0o440, want: false},
+		{name: "world readable", path: "/run/credentials/service/token", mode: 0o444, want: false},
+		{name: "symlink", path: "/etc/honeypot/token", mode: os.ModeSymlink | 0o600, want: false},
+		{name: "directory", path: "/etc/honeypot/token", mode: os.ModeDir | 0o700, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := privateCredentialFile(test.path, test.mode); got != test.want {
+				t.Fatalf("privateCredentialFile(%q, %v)=%v want %v", test.path, test.mode, got, test.want)
+			}
+		})
 	}
 }

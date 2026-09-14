@@ -147,12 +147,27 @@ func requiredEnvironment(name string) string {
 	return value
 }
 
+func privateCredentialFile(path string, mode os.FileMode) bool {
+	if mode&os.ModeSymlink != 0 || !mode.IsRegular() {
+		return false
+	}
+	permissions := mode.Perm()
+	if permissions&0o007 != 0 {
+		return false
+	}
+	if permissions&0o070 == 0 {
+		return true
+	}
+	credentialRoot := filepath.Clean("/run/credentials") + string(os.PathSeparator)
+	return permissions == 0o440 && strings.HasPrefix(filepath.Clean(path), credentialRoot)
+}
+
 func loadToken(path string) string {
 	metadata, err := os.Lstat(path)
 	if err != nil {
 		log.Fatalf("read response agent credential metadata: %v", err)
 	}
-	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() || metadata.Mode().Perm()&0o077 != 0 {
+	if !privateCredentialFile(path, metadata.Mode()) {
 		log.Fatal("response agent credential must be a private regular file")
 	}
 	content, err := os.ReadFile(filepath.Clean(path))
