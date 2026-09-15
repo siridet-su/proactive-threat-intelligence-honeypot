@@ -12,3 +12,4 @@ staging evidence belong in `../validation/`.
 | [Post-session analysis contract](post-session-analysis-contract.md) | Target | Atlas-to-cloud handoff and evidence-safe results. |
 | [Honeypot dashboard UX](honeypot-dashboard-ux.md) | Target | Investigation-first dashboard navigation, layouts, and TI presentation. |
 | [Atlas Free Tier data lifecycle](atlas-free-tier-data-lifecycle.md) | Target | Retention, TTL, index, and rollup constraints for the 512 MB tier. |
+| [Honeypot Portal & Customer Installer](../HONEYPOT-PORTAL-INSTALLER-GUIDE.md) | Target | Outbound WSS gateway, scoped actions, and transactional customer-appliance design. |

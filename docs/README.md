@@ -15,6 +15,7 @@ and historical material inherited from the previous team.
 5. [Security and malware policy](SECURITY-AND-MALWARE-POLICY.md) — containment,
    artifact handling, and threat-intelligence boundaries.
 6. [Architecture decisions](adr/) — durable decisions and their rationale.
+7. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
 
 ## Document status labels
 
