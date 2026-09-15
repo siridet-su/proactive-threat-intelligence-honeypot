@@ -1,7 +1,7 @@
 ---
 title: Project roadmap
 status: target
-last_verified: 2026-08-25
+last_verified: 2026-09-15
 ---
 
 # Project roadmap
@@ -21,6 +21,10 @@ last_verified: 2026-08-25
   backpressure, and rollback tests on a non-public listener.
 - Do not attach the adaptive gateway to the live listener until explicit staging
   acceptance criteria pass.
+- Keep reset-per-login virtual filesystems as the default. The bounded
+  [returning-attacker continuity](design/returning-attacker-continuity.md)
+  overlay remains future work until runtime ownership, actor identity,
+  filesystem telemetry, retention, and isolation gates pass.
 
 ## Phase 2 — Principal telemetry pipeline
 
