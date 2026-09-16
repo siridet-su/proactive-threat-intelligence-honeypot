@@ -1,6 +1,6 @@
 import type { SessionTerminateAction } from "@/lib/dashboardTypes";
-import type { TerminateCapability, TerminateStatePayload } from "./useResponseAction";
-import { terminateCapabilityFrom } from "./useResponseAction";
+import type { TerminateCapability, TerminateStatePayload } from "./responseActionTypes";
+import { terminateCapabilityFrom } from "./responseActionTypes";
 
 export const INITIAL_POLL_DELAY_NON_LIVE_MS = 100;
 export const INITIAL_POLL_DELAY_LIVE_MS = 1_000;
@@ -38,13 +38,17 @@ export function computePollingDeadline(
   now: number,
   maxDurationMs: number,
 ): number {
+  const maxAllowedDeadline = now + maxDurationMs;
   if (requestedAt) {
     const reqTime = new Date(requestedAt).getTime();
     if (!Number.isNaN(reqTime)) {
-      return reqTime + maxDurationMs;
+      // If requestedAt is in the past: reqTime + maxDurationMs <= now + maxDurationMs.
+      // If requestedAt is genuinely old (e.g. 30s ago): reqTime + maxDurationMs <= now (immediate timeout).
+      // If requestedAt is in the future (clock skew): clamp to maxAllowedDeadline (now + maxDurationMs).
+      return Math.min(reqTime + maxDurationMs, maxAllowedDeadline);
     }
   }
-  return now + maxDurationMs;
+  return maxAllowedDeadline;
 }
 
 export class ResponseActionPollingController {
@@ -234,5 +238,148 @@ export class ResponseActionPollingController {
       this.abortController = null;
     }
     this.inFlight = false;
+  }
+}
+
+export interface ResponseActionLifecycleSyncParams {
+  sessionId: string | null;
+  actionId: string | null;
+  actionStatus?: string | null;
+  sessionIsLive?: boolean;
+  requestedAt?: string | null;
+  enabled?: boolean;
+  fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
+  onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
+  onTerminal: (event: PollerTerminalEvent) => void;
+  // Overridable dependencies for deterministic testing
+  clock?: { now: () => number };
+  timer?: {
+    setTimeout: (fn: () => void, ms: number) => unknown;
+    clearTimeout: (id: unknown) => void;
+  };
+  maxDurationMs?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  backoffFactor?: number;
+}
+
+export class ResponseActionLifecycleManager {
+  private activeSessionId: string | null = null;
+  private activeActionId: string | null = null;
+  private terminalKey: string | null = null;
+  private controller: ResponseActionPollingController | null = null;
+  private latestCallbacks: {
+    fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
+    onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
+    onTerminal: (event: PollerTerminalEvent) => void;
+  } | null = null;
+
+  getActiveIdentity(): { sessionId: string; actionId: string } | null {
+    if (
+      this.activeSessionId &&
+      this.activeActionId &&
+      this.controller &&
+      !this.controller.isAborted() &&
+      !this.controller.isTerminal()
+    ) {
+      return { sessionId: this.activeSessionId, actionId: this.activeActionId };
+    }
+    return null;
+  }
+
+  getController(): ResponseActionPollingController | null {
+    return this.controller;
+  }
+
+  sync(params: ResponseActionLifecycleSyncParams): void {
+    this.latestCallbacks = {
+      fetchState: params.fetchState,
+      onActionUpdate: params.onActionUpdate,
+      onTerminal: params.onTerminal,
+    };
+
+    const isActionPending = params.actionStatus === "requested" || params.actionStatus === "delivered";
+    const shouldPoll = Boolean(params.enabled && params.sessionId && params.actionId && isActionPending);
+
+    if (!shouldPoll || !params.sessionId || !params.actionId) {
+      this.abortCurrent();
+      return;
+    }
+
+    const currentKey = `${params.sessionId}:${params.actionId}`;
+
+    // If this exact action already reached a terminal state (verified, failed, timeout),
+    // do not restart polling for it.
+    if (this.terminalKey === currentKey) {
+      return;
+    }
+
+    // Lifecycle identity is strictly (sessionId, actionId)
+    const isSameIdentity =
+      this.activeSessionId === params.sessionId &&
+      this.activeActionId === params.actionId &&
+      this.controller !== null &&
+      !this.controller.isAborted() &&
+      !this.controller.isTerminal();
+
+    if (isSameIdentity) {
+      // Identity unchanged and active: do not replace controller, abort, or reset timing
+      return;
+    }
+
+    // New action identity or prior controller aborted: clean up prior controller
+    this.abortCurrent();
+
+    this.activeSessionId = params.sessionId;
+    this.activeActionId = params.actionId;
+    this.terminalKey = null;
+
+    // Capture initial timing configuration strictly when this identity starts
+    const initialSessionIsLive = Boolean(params.sessionIsLive);
+    const initialRequestedAt = params.requestedAt;
+
+    const controller = new ResponseActionPollingController({
+      sessionId: params.sessionId,
+      actionId: params.actionId,
+      sessionIsLive: initialSessionIsLive,
+      requestedAt: initialRequestedAt,
+      clock: params.clock,
+      timer: params.timer,
+      maxDurationMs: params.maxDurationMs,
+      initialDelayMs: params.initialDelayMs,
+      maxDelayMs: params.maxDelayMs,
+      backoffFactor: params.backoffFactor,
+      fetchState: (sid, aid, signal) => {
+        if (!this.latestCallbacks) return Promise.reject(new Error("Lifecycle manager destroyed"));
+        return this.latestCallbacks.fetchState(sid, aid, signal);
+      },
+      onActionUpdate: (action, capability) => {
+        if (!this.latestCallbacks) return;
+        this.latestCallbacks.onActionUpdate(action, capability);
+      },
+      onTerminal: (event) => {
+        this.terminalKey = currentKey;
+        if (!this.latestCallbacks) return;
+        this.latestCallbacks.onTerminal(event);
+      },
+    });
+
+    this.controller = controller;
+    controller.start();
+  }
+
+  abortCurrent(): void {
+    if (this.controller) {
+      this.controller.abort();
+      this.controller = null;
+    }
+    this.activeSessionId = null;
+    this.activeActionId = null;
+  }
+
+  destroy(): void {
+    this.abortCurrent();
+    this.terminalKey = null;
+    this.latestCallbacks = null;
   }
 }

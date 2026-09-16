@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionTerminateAction } from "../src/lib/dashboardTypes";
-import type { TerminateStatePayload } from "../src/components/filesystem/useResponseAction";
+import type { TerminateStatePayload } from "../src/components/filesystem/responseActionTypes";
 import {
   computePollingDeadline,
   MAX_POLL_DURATION_MS,
+  ResponseActionLifecycleManager,
   ResponseActionPollingController,
 } from "../src/components/filesystem/responseActionPoller";
 
@@ -34,6 +35,79 @@ describe("ResponseActionPollingController (FA-003)", () => {
     expect(deadlineInvalid).toBe(baseNow + 24_000);
   });
 
+  it("clamps future requestedAt to clock.now() + maxDurationMs against clock skew", () => {
+    const baseNow = 1_000_000;
+    const futureOffset = 10_000; // 10s in the future due to server/client clock skew
+    const reqIso = new Date(baseNow + futureOffset).toISOString();
+    const deadlineFromReq = computePollingDeadline(reqIso, baseNow, 24_000);
+    // Must be clamped to baseNow + 24_000, NOT baseNow + 10_000 + 24_000
+    expect(deadlineFromReq).toBe(baseNow + 24_000);
+
+    // Genuinely old action: requested 30s ago
+    const oldReqIso = new Date(baseNow - 30_000).toISOString();
+    const oldDeadline = computePollingDeadline(oldReqIso, baseNow, 24_000);
+    expect(oldDeadline).toBe(baseNow - 6_000);
+  });
+
+  it("times out immediately if action requestedAt is genuinely older than max duration", async () => {
+    const onTerminal = vi.fn();
+    const oldRequestedAt = new Date(Date.now() - 30_000).toISOString();
+
+    const poller = new ResponseActionPollingController({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      requestedAt: oldRequestedAt,
+      sessionIsLive: false,
+      fetchState: vi.fn(async () => ({ available: true })),
+      onActionUpdate: vi.fn(),
+      onTerminal,
+    });
+
+    poller.start();
+
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+    expect(onTerminal).toHaveBeenCalledWith({ kind: "timeout" });
+    expect(poller.isTerminal()).toBe(true);
+  });
+
+  it("clamps deadline when requestedAt is in the future and stops polling at exactly max duration", async () => {
+    const onTerminal = vi.fn();
+    const futureRequestedAt = new Date(Date.now() + 10_000).toISOString();
+
+    const poller = new ResponseActionPollingController({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      requestedAt: futureRequestedAt,
+      sessionIsLive: false,
+      fetchState: vi.fn(async () => ({
+        action: {
+          actionId: "act-1",
+          sessionId: "sess-1",
+          action: "terminate_session",
+          status: "delivered",
+          requestedBy: "op-1",
+          requestedAt: futureRequestedAt,
+          deliveredAt: null,
+          verifiedAt: null,
+          failureCategory: null,
+        } as SessionTerminateAction,
+        available: true,
+      })),
+      onActionUpdate: vi.fn(),
+      onTerminal,
+    });
+
+    poller.start();
+
+    // Advance exactly 24_000ms from start
+    await vi.advanceTimersByTimeAsync(MAX_POLL_DURATION_MS);
+
+    // Should have timed out at 24_000ms, not waited 34_000ms
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+    expect(onTerminal).toHaveBeenCalledWith({ kind: "timeout" });
+    expect(poller.isTerminal()).toBe(true);
+  });
+
   it("keeps one lifecycle and one deadline when status transitions from requested to delivered", async () => {
     const onActionUpdate = vi.fn();
     const onTerminal = vi.fn();
@@ -41,7 +115,7 @@ describe("ResponseActionPollingController (FA-003)", () => {
     let callCount = 0;
     const fetchState = vi.fn(async (_sid: string, actionId: string) => {
       callCount++;
-      const status = callCount === 1 ? "delivered" : "delivered";
+      const status = callCount === 1 ? "requested" : "delivered";
       return {
         action: {
           actionId,
@@ -50,7 +124,7 @@ describe("ResponseActionPollingController (FA-003)", () => {
           status,
           requestedBy: "op-1",
           requestedAt: new Date(Date.now()).toISOString(),
-          deliveredAt: callCount === 1 ? new Date(Date.now()).toISOString() : null,
+          deliveredAt: callCount === 1 ? null : new Date(Date.now()).toISOString(),
           verifiedAt: null,
           failureCategory: null,
         } as SessionTerminateAction,
@@ -76,7 +150,7 @@ describe("ResponseActionPollingController (FA-003)", () => {
 
     expect(fetchState).toHaveBeenCalledTimes(1);
     expect(onActionUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "delivered" }),
+      expect.objectContaining({ status: "requested" }),
       "available",
     );
     expect(poller.deadline).toBe(initialDeadline);
@@ -84,9 +158,13 @@ describe("ResponseActionPollingController (FA-003)", () => {
     // Delay advanced to 150ms monotonically, not reset to 100ms
     expect(poller.getCurrentDelay()).toBe(150);
 
-    // Next attempt fires at 150ms
+    // Next attempt fires at 150ms and receives "delivered"
     await vi.advanceTimersByTimeAsync(150);
     expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(onActionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "delivered" }),
+      "available",
+    );
 
     poller.abort();
   });
@@ -573,5 +651,403 @@ describe("ResponseActionPollingController (FA-003)", () => {
     // The 13th poll fires at 21,506ms. The 14th poll would be at 25,006ms, but deadline timer fires at 24,000ms.
     // Total requests is strictly 13.
     expect(fetchState).toHaveBeenCalledTimes(13);
+  });
+});
+
+describe("ResponseActionLifecycleManager Orchestration (FA-003)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("preserves active controller and monotonic delay progression across sessionIsLive true -> false transition", async () => {
+    const onActionUpdate = vi.fn();
+    const onTerminal = vi.fn();
+    const fetchState = vi.fn(async () => ({
+      action: {
+        actionId: "act-1",
+        sessionId: "sess-1",
+        action: "terminate_session",
+        status: "requested",
+        requestedBy: "op-1",
+        requestedAt: new Date().toISOString(),
+        deliveredAt: null,
+        verifiedAt: null,
+        failureCategory: null,
+      } as SessionTerminateAction,
+      available: true,
+    }));
+
+    const manager = new ResponseActionLifecycleManager();
+
+    // 1. Initial sync with sessionIsLive = true (live session termination)
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: true,
+      enabled: true,
+      fetchState,
+      onActionUpdate,
+      onTerminal,
+    });
+
+    const initialController = manager.getController();
+    expect(initialController).not.toBeNull();
+    // Live session starts with 1,000ms delay
+    expect(initialController?.getCurrentDelay()).toBe(1_000);
+
+    // First attempt fires at 1,000ms
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(initialController?.getCurrentDelay()).toBe(1_500);
+
+    // 2. Normal terminate flow: session disappears from live snapshot (sessionIsLive becomes false)
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false, // Changed from true to false!
+      enabled: true,
+      fetchState,
+      onActionUpdate,
+      onTerminal,
+    });
+
+    // Controller MUST NOT be replaced, aborted, or reset
+    expect(manager.getController()).toBe(initialController);
+    expect(initialController?.isAborted()).toBe(false);
+    // Crucial check: delay must remain 1,500ms, NOT reset to non-live initial 100ms!
+    expect(initialController?.getCurrentDelay()).toBe(1_500);
+
+    // 100ms passes: second poll must NOT fire (proves it was not reset to 100ms)
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetchState).toHaveBeenCalledTimes(1);
+
+    // Advance remaining 1,400ms (total 1,500ms): second poll fires at 1,500ms
+    await vi.advanceTimersByTimeAsync(1_400);
+    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(initialController?.getCurrentDelay()).toBe(2_250);
+
+    manager.destroy();
+  });
+
+  it("preserves active controller when requestedAt updates or status transitions to delivered", async () => {
+    const onActionUpdate = vi.fn();
+    const fetchState = vi.fn(async () => ({
+      action: {
+        actionId: "act-1",
+        sessionId: "sess-1",
+        action: "terminate_session",
+        status: "delivered",
+        requestedBy: "op-1",
+        requestedAt: new Date().toISOString(),
+        deliveredAt: new Date().toISOString(),
+        verifiedAt: null,
+        failureCategory: null,
+      } as SessionTerminateAction,
+      available: true,
+    }));
+
+    const manager = new ResponseActionLifecycleManager();
+
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      requestedAt: new Date().toISOString(),
+      enabled: true,
+      fetchState,
+      onActionUpdate,
+      onTerminal: vi.fn(),
+    });
+
+    const controller = manager.getController();
+    expect(controller).not.toBeNull();
+    expect(controller?.getCurrentDelay()).toBe(100);
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(controller?.getCurrentDelay()).toBe(150);
+
+    // Reconcile with updated status ("delivered") and new requestedAt string
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "delivered",
+      sessionIsLive: false,
+      requestedAt: new Date(Date.now() - 500).toISOString(),
+      enabled: true,
+      fetchState,
+      onActionUpdate,
+      onTerminal: vi.fn(),
+    });
+
+    // Controller must remain the same
+    expect(manager.getController()).toBe(controller);
+    expect(controller?.getCurrentDelay()).toBe(150);
+
+    // Fires at 150ms monotonically
+    await vi.advanceTimersByTimeAsync(150);
+    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(controller?.getCurrentDelay()).toBe(225);
+
+    manager.destroy();
+  });
+
+  it("bounds request count across live-to-non-live transition and status updates over 24 seconds", async () => {
+    const fetchState = vi.fn(async () => ({
+      action: {
+        actionId: "act-1",
+        sessionId: "sess-1",
+        action: "terminate_session",
+        status: "delivered",
+        requestedBy: "op-1",
+        requestedAt: new Date().toISOString(),
+        deliveredAt: null,
+        verifiedAt: null,
+        failureCategory: null,
+      } as SessionTerminateAction,
+      available: true,
+    }));
+
+    const manager = new ResponseActionLifecycleManager();
+
+    // Start with live session (1,000ms initial delay)
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: true,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    // Poll 1 at 1,000ms
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchState).toHaveBeenCalledTimes(1);
+
+    // Simulate session dropping from live topology and delivered status update
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "delivered",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    // Advance remainder of 24_000ms
+    await vi.advanceTimersByTimeAsync(23_000);
+
+    // Over 24,000ms with initial 1,000ms:
+    // Delays: 1000 + 1500 + 2250 + 3375 + 3500 + 3500 + 3500 + 3500 = 22,125ms (8 requests).
+    // Attempt 9 would be at 25,625ms, which exceeds deadline.
+    // If it had reset to 100ms, request count would have surged above 13.
+    expect(fetchState).toHaveBeenCalledTimes(8);
+
+    manager.destroy();
+  });
+
+  it("aborts previous controller and starts a new lifecycle when sessionId changes", async () => {
+    const fetchState = vi.fn(async () => ({ available: true }));
+    const manager = new ResponseActionLifecycleManager();
+
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    const controller1 = manager.getController();
+    expect(controller1).not.toBeNull();
+    expect(controller1?.isAborted()).toBe(false);
+
+    // Session changed to sess-2
+    manager.sync({
+      sessionId: "sess-2",
+      actionId: "act-2",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    expect(controller1?.isAborted()).toBe(true);
+    const controller2 = manager.getController();
+    expect(controller2).not.toBe(controller1);
+    expect(controller2?.sessionId).toBe("sess-2");
+    expect(controller2?.actionId).toBe("act-2");
+
+    manager.destroy();
+  });
+
+  it("aborts previous controller and starts a new lifecycle when actionId changes", async () => {
+    const fetchState = vi.fn(async () => ({ available: true }));
+    const manager = new ResponseActionLifecycleManager();
+
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    const controller1 = manager.getController();
+
+    // Action changed to act-2 on same session
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-2",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    expect(controller1?.isAborted()).toBe(true);
+    const controller2 = manager.getController();
+    expect(controller2).not.toBe(controller1);
+    expect(controller2?.actionId).toBe("act-2");
+
+    manager.destroy();
+  });
+
+  it("aborts controller when enabled is toggled to false", async () => {
+    const fetchState = vi.fn(async () => ({ available: true }));
+    const manager = new ResponseActionLifecycleManager();
+
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    const controller = manager.getController();
+    expect(controller?.isAborted()).toBe(false);
+
+    // Disabled
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: false,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    expect(controller?.isAborted()).toBe(true);
+    expect(manager.getController()).toBeNull();
+
+    manager.destroy();
+  });
+
+  it("destroys controller on unmount cleanup", async () => {
+    const fetchState = vi.fn(async () => ({ available: true }));
+    const manager = new ResponseActionLifecycleManager();
+
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+
+    const controller = manager.getController();
+    expect(controller?.isAborted()).toBe(false);
+
+    manager.destroy();
+
+    expect(controller?.isAborted()).toBe(true);
+    expect(manager.getController()).toBeNull();
+  });
+
+  it("does not restart polling for the same identity after a terminal event occurs", async () => {
+    const onTerminal = vi.fn();
+    const verifiedAction: SessionTerminateAction = {
+      actionId: "act-1",
+      sessionId: "sess-1",
+      action: "terminate_session",
+      status: "verified",
+      requestedBy: "op-1",
+      requestedAt: new Date().toISOString(),
+      deliveredAt: new Date().toISOString(),
+      verifiedAt: new Date().toISOString(),
+      failureCategory: null,
+    };
+
+    const fetchState = vi.fn(async () => ({
+      action: verifiedAction,
+      available: false,
+    }));
+
+    const manager = new ResponseActionLifecycleManager();
+
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal,
+    });
+
+    // Advance 100ms: poll returns verified
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+    expect(fetchState).toHaveBeenCalledTimes(1);
+
+    // Subsequent sync before parent updates actionStatus (e.g. still passed "requested" or "delivered")
+    manager.sync({
+      sessionId: "sess-1",
+      actionId: "act-1",
+      actionStatus: "requested",
+      sessionIsLive: false,
+      enabled: true,
+      fetchState,
+      onActionUpdate: vi.fn(),
+      onTerminal,
+    });
+
+    // Must NOT start a new controller
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchState).toHaveBeenCalledTimes(1);
+
+    manager.destroy();
   });
 });

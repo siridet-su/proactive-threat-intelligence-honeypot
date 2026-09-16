@@ -3,22 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { FilesystemTopologySession, SessionTerminateAction } from "@/lib/dashboardTypes";
-import type { OperationToastKind } from "@/components/ui/OperationToast";
-import { ResponseActionPollingController } from "./responseActionPoller";
+import type { OperationToastKind, TerminateCapability, TerminateStatePayload } from "./responseActionTypes";
+import { terminateCapabilityFrom } from "./responseActionTypes";
+import { ResponseActionLifecycleManager } from "./responseActionPoller";
 
-export type TerminateCapability = "idle" | "loading" | "available" | "forbidden" | "unconfigured" | "error";
-export type { OperationToastKind };
-
-export interface TerminateStatePayload {
-  available?: boolean;
-  authorized?: boolean;
-  configured?: boolean;
-  action?: SessionTerminateAction | null;
-}
-
-export function terminateCapabilityFrom(document: TerminateStatePayload): TerminateCapability {
-  return document.available ? "available" : !document.authorized ? "forbidden" : !document.configured ? "unconfigured" : "error";
-}
+export type { TerminateCapability, OperationToastKind, TerminateStatePayload };
+export { terminateCapabilityFrom };
 
 export interface UseResponseActionOptions {
   selectedSession: FilesystemTopologySession | null;
@@ -92,40 +82,20 @@ export function useResponseAction({
 
   const actionId = visibleTerminateAction?.actionId ?? null;
   const actionStatus = visibleTerminateAction?.status ?? null;
-  const shouldPoll = Boolean(
-    enabled &&
-    controlSessionId &&
-    actionId &&
-    (actionStatus === "requested" || actionStatus === "delivered")
-  );
+  const managerRef = useRef<ResponseActionLifecycleManager | null>(null);
 
-  const pollerRef = useRef<ResponseActionPollingController | null>(null);
-
-  // Bounded single-lifecycle polling per action
+  // Keep single-lifecycle polling synchronized across renders and state changes
   useEffect(() => {
-    if (!shouldPoll || !controlSessionId || !actionId) {
-      if (pollerRef.current) {
-        pollerRef.current.abort();
-        pollerRef.current = null;
-      }
-      return;
+    if (!managerRef.current) {
+      managerRef.current = new ResponseActionLifecycleManager();
     }
-
-    // Do not restart polling if the controller for this exact session and action is already active
-    if (pollerRef.current?.matches(controlSessionId, actionId)) {
-      return;
-    }
-
-    if (pollerRef.current) {
-      pollerRef.current.abort();
-      pollerRef.current = null;
-    }
-
-    const poller = new ResponseActionPollingController({
+    managerRef.current.sync({
       sessionId: controlSessionId,
       actionId,
-      requestedAt: visibleTerminateAction?.requestedAt,
+      actionStatus,
       sessionIsLive,
+      requestedAt: visibleTerminateAction?.requestedAt,
+      enabled,
       fetchState: fetchTerminateState,
       onActionUpdate: (action, capability) => {
         setTerminateAction(action);
@@ -157,17 +127,14 @@ export function useResponseAction({
         }
       },
     });
+  }, [controlSessionId, actionId, actionStatus, sessionIsLive, visibleTerminateAction?.requestedAt, enabled, fetchTerminateState]);
 
-    pollerRef.current = poller;
-    poller.start();
-
+  // Clean up polling controller strictly upon unmount
+  useEffect(() => {
     return () => {
-      poller.abort();
-      if (pollerRef.current === poller) {
-        pollerRef.current = null;
-      }
+      managerRef.current?.destroy();
     };
-  }, [controlSessionId, actionId, shouldPoll, sessionIsLive, enabled, fetchTerminateState, visibleTerminateAction?.requestedAt]);
+  }, []);
 
   const handleTerminateSession = useCallback(async () => {
     if (!selectedSession) return;
