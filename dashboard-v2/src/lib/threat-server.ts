@@ -170,6 +170,19 @@ function normalizeThreat(
     typeColor = "bg-slate-800 text-slate-300 border-slate-700";
   }
 
+  // The canonical session projection persists explicit lifecycle evidence.
+  // Do not infer activity from recency or from a missing heartbeat: a closed
+  // session must remain closed in the feed after its final update.
+  const lifecycle = session.lifecycle;
+  const lifecycleStatus = lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle)
+    ? String((lifecycle as Document).status ?? "").trim().toLowerCase()
+    : "";
+  const endTime = session.end_time ?? session.ended_at ?? session.closed_at ?? null;
+  const isEnded = session.is_ended === true
+    || session.ended === true
+    || Boolean(endTime)
+    || ["closed", "ended", "complete", "completed", "terminated", "disconnected"].includes(lifecycleStatus);
+
   return {
     id: typeof session.session_id === "string" && session.session_id
       ? session.session_id
@@ -183,8 +196,12 @@ function normalizeThreat(
     severity,
     classification,
     typeColor,
-    duration: "Active",
+    duration: isEnded ? "Closed" : "Active",
     geo: { lat, lon, country, city },
+    is_ended: isEnded,
+    ended: isEnded,
+    end_time: endTime,
+    session_status: isEnded ? "closed" : "active",
   };
 }
 

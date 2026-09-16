@@ -57,6 +57,7 @@ from production.prediction.prediction_snapshot_contract import (
     PredictionSnapshotIntegrityError,
 )
 from production.prediction.external_vomm_artifact import load_external_vomm_artifact
+from production.ensemble.evidence import build_ensemble_from_session_payload
 from production.prediction.vomm_rollback import (
     MODE as VOMM_ROLLBACK_MODE,
     ValidatedVommRollbackPredictor,
@@ -1158,6 +1159,13 @@ class SessionWorker:
                     "status": "prohibited",
                     "reason": "prediction alone cannot create an alert",
                 }
+                # Late fusion is a bounded advisory projection over the same
+                # outbox payload. Model2 is only consumed when a completed
+                # run result is already attached to this exact session.
+                snapshot["ensemble_evidence"] = build_ensemble_from_session_payload(
+                    payload,
+                    computed_at=utc_now(),
+                )
                 if isinstance(
                     self.prediction_engine, FrozenTransformerPocPredictor
                 ):
@@ -1260,6 +1268,10 @@ class SessionWorker:
         self._apply_session_ttp_correlations(state)
         payload = self._session_payload(state)
         payload["status"] = "closed"
+        payload["ensemble_evidence"] = build_ensemble_from_session_payload(
+            payload,
+            computed_at=utc_now(),
+        )
         durable_snapshot = self.storage.load_session_event_snapshot(
             str(payload.get("session_id") or ""),
             self._processing_event_id,

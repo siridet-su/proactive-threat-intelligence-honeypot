@@ -1,0 +1,110 @@
+{
+  "schema_version": "trusted_reference_manifest.v1",
+  "manifest_id": "pti-trusted-reference-snapshots",
+  "generated_at": "2026-09-16",
+  "runtime_fetch": "disabled",
+  "source_artifacts": {
+    "mitre-attack-enterprise": {
+      "type": "stix-json",
+      "name": "MITRE ATT&CK Enterprise STIX dataset",
+      "url": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json",
+      "sha256": "dc1639caa5501d720e280cf1cbd8fbe009884a0c9b3e6e9ed9d0c25166c3d8f4",
+      "retrieved_at": "2026-09-16",
+      "supports": [
+        "ATT&CK technique identity, title, and version at the recorded snapshot"
+      ],
+      "does_not_support": [
+        "that a matching command succeeded",
+        "attacker intent, attribution, compromise, or real-host effects"
+      ]
+    },
+    "cisa-small-business": {
+      "type": "html",
+      "name": "CISA Small and Medium-Sized Business Resources",
+      "url": "https://www.cisa.gov/audiences/small-and-medium-businesses/secure-your-business/smb-resources",
+      "sha256": "3a9624c3f35b62959f08030062beb9c5cdedc33f6344cb215ca34dfdf9dea265",
+      "retrieved_at": "2026-09-16",
+      "supports": [
+        "general small-business cybersecurity risk-reduction guidance",
+        "manual corroboration and incident-response planning rationale"
+      ],
+      "does_not_support": [
+        "proof that a particular Cowrie event occurred",
+        "proof of compromise or credential acquisition",
+        "automatic response authorization"
+      ],
+      "aliases": [
+        "https://www.cisa.gov/cyber-guidance-small-businesses"
+      ]
+    },
+    "nist-small-business": {
+      "type": "html",
+      "name": "NIST Small Business Cybersecurity Corner",
+      "url": "https://www.nist.gov/itl/smallbusinesscyber",
+      "sha256": "6bd55f64c1351920681c3f91edcf470ce6ad36fe626371841b9d90eea48f3bad",
+      "retrieved_at": "2026-09-16",
+      "supports": [
+        "general small-business cybersecurity practice guidance",
+        "manual review and corroboration rationale"
+      ],
+      "does_not_support": [
+        "proof that a particular Cowrie event occurred",
+        "proof of compromise or attacker intent",
+        "automatic response authorization"
+      ]
+    }
+  },
+  "runtime_cache": {
+    "path": "data/feeds/mitre_attack_cache.json",
+    "version": "14.1",
+    "sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
+    "role": "historical runtime metadata; not a substitute for current ATT&CK source provenance"
+  },
+  "default_scope": {
+    "supports": [
+      "the cited source's documented semantics and metadata only"
+    ],
+    "does_not_support": [
+      "event occurrence outside the referenced observation",
+      "command success unless separately recorded by Cowrie",
+      "attacker intent, attribution, compromise, persistence, exfiltration, or real-host effects",
+      "automatic response authorization"
+    ]
+  },
+  "techniques": {
+    "T1003": {"name": "OS Credential Dumping", "canonical_url": "https://attack.mitre.org/techniques/T1003/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--0a3ead4e-6d47-4ccb-854c-a6a4f9d96b22", "object_sha256": "239ae538eb052d92993e40329f1459eab10880effe494c2956b45c0c75e032cd", "modified": "2025-10-24T17:48:22.201Z", "version": "2.2", "revoked": false},
+    "T1007": {"name": "System Service Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1007/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--322bad5a-1c49-4d23-ab79-76d641794afa", "object_sha256": "f07e4b5d34a39d4c9a220db721333ae3b1f2ea1920f6492af4f19eb0bff5820b", "modified": "2026-05-12T15:12:00.624Z", "version": "1.6", "revoked": false},
+    "T1016": {"name": "System Network Configuration Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1016/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--707399d6-ab3e-4963-9315-d9d3818cd6a0", "object_sha256": "ec4b73c6cf8719083fb2aa93a925b7d83fd24e1f4b1c5b23f546dd437f09eb0a", "modified": "2026-05-12T15:12:00.641Z", "version": "1.7", "revoked": false},
+    "T1018": {"name": "Remote System Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1018/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--e358d692-23c0-4a31-9eb6-ecc13a8d7735", "object_sha256": "0ddf0b84d6d87caac4933e63a5064e485905364535a395b2d566a013408f7c9a", "modified": "2026-05-12T15:12:00.722Z", "version": "3.6", "revoked": false},
+    "T1021": {"name": "Remote Services", "canonical_url": "https://attack.mitre.org/techniques/T1021/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--54a649ff-439a-41a4-9856-8d144a2551ba", "object_sha256": "a35c8b5421c7297adb01321bd1548c24bbe1e59ef7d794a8a3b7638e05a48e17", "modified": "2025-10-24T17:48:48.472Z", "version": "1.6", "revoked": false},
+    "T1027": {"name": "Obfuscated Files or Information", "canonical_url": "https://attack.mitre.org/techniques/T1027/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--b3d682b6-98f2-4fb0-aa3b-b4df007ca70a", "object_sha256": "17a6ea86660a12d0f5a43e5c78ac1f5ead288c13d708646a041f878b68486850", "modified": "2026-05-12T15:12:00.708Z", "version": "2.0", "revoked": false},
+    "T1033": {"name": "System Owner/User Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1033/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--03d7999c-1f4c-42cc-8373-e7690d318104", "object_sha256": "9654b0b16d1c14c6578815eb2628861824951e5a93345c768ab1c4f85144d312", "modified": "2026-05-12T15:12:00.620Z", "version": "1.6", "revoked": false},
+    "T1036": {"name": "Masquerading", "canonical_url": "https://attack.mitre.org/techniques/T1036/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--42e8de7b-37b2-4258-905a-6897815e58e0", "object_sha256": "c0147a74575de6569434661f7224f8360b60f106a6856a9aea1d7c705055b947", "modified": "2026-05-12T15:12:00.629Z", "version": "2.0", "revoked": false},
+    "T1041": {"name": "Exfiltration Over C2 Channel", "canonical_url": "https://attack.mitre.org/techniques/T1041/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--92d7da27-2d91-488e-a00c-059dc162766d", "object_sha256": "9f96c5dd11d7e5d5504106c6d75226901300334323d9af7f743cec280169dbdc", "modified": "2026-05-12T15:12:00.706Z", "version": "2.3", "revoked": false},
+    "T1046": {"name": "Network Service Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1046/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--e3a12395-188d-4051-9a16-ea8e14d07b88", "object_sha256": "c6467d2baa4f52d5209872cfcfd8f3e698518a1c8d33e3ad9ed37b792b146459", "modified": "2026-05-12T15:12:00.723Z", "version": "3.2", "revoked": false},
+    "T1049": {"name": "System Network Connections Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1049/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--7e150503-88e7-4861-866b-ff1ac82c4475", "object_sha256": "6d9deae2c7d073d7d91f4c393d06d4c7abbcbf4e6c15b285407c42a3e5ddafe6", "modified": "2026-05-12T15:12:00.652Z", "version": "2.5", "revoked": false},
+    "T1053": {"name": "Scheduled Task/Job", "canonical_url": "https://attack.mitre.org/techniques/T1053/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--35dd844a-b219-4e2b-a6bb-efa9a75995a9", "object_sha256": "7061e5de6ce2a3c83411e2d5e55a56c813b019e25a5216f5eeeb27c983ec9a2b", "modified": "2026-05-12T15:12:00.626Z", "version": "2.5", "revoked": false},
+    "T1057": {"name": "Process Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1057/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--8f4a33ec-8b1f-4b80-a2f6-642b2e479580", "object_sha256": "55edbb5ff950b41db1cc030070ba5220bd64f4fa87e8f457097f12c0acadfc21", "modified": "2026-05-12T15:12:00.705Z", "version": "1.6", "revoked": false},
+    "T1059": {"name": "Command and Scripting Interpreter", "canonical_url": "https://attack.mitre.org/techniques/T1059/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--7385dfaf-6886-4229-9ecd-6fd678040830", "object_sha256": "17bfddbbb066ff02ad7c5ab97c06f2c2c10f3f8b2e9b39417fd2ea953ec8950e", "modified": "2026-05-12T15:12:00.641Z", "version": "2.7", "revoked": false},
+    "T1069": {"name": "Permission Groups Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1069/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--15dbf668-795c-41e6-8219-f0447c0e64ce", "object_sha256": "af16992db5d1aad7ce2495c4286a5feda45765a5f856986e15b64a484c0c8cca", "modified": "2025-10-24T17:48:26.378Z", "version": "2.6", "revoked": false},
+    "T1070": {"name": "Indicator Removal", "canonical_url": "https://attack.mitre.org/techniques/T1070/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--799ace7f-e227-4411-baa0-8868704f2a69", "object_sha256": "65ed1f0dd3d7646d1a77988435dfb747f83e434f592954a28a5b63a09f9b8145", "modified": "2026-05-12T15:12:00.643Z", "version": "3.0", "revoked": false},
+    "T1082": {"name": "System Information Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1082/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--354a7f88-63fb-41b5-a801-ce3b377b36f1", "object_sha256": "72664245a537b01333686e962f4ba8fa4466086f47defd6fd6d1164f135e775d", "modified": "2026-05-12T15:12:00.625Z", "version": "3.0", "revoked": false},
+    "T1083": {"name": "File and Directory Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1083/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--7bc57495-ea59-4380-be31-a64af124ef18", "object_sha256": "7bf8cd8b2fbd156fa98ee58b93a3aed847934b4c6fc88cf8bb4b6c3f22c75332", "modified": "2026-05-12T15:12:00.644Z", "version": "1.7", "revoked": false},
+    "T1087": {"name": "Account Discovery", "canonical_url": "https://attack.mitre.org/techniques/T1087/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--72b74d71-8169-42aa-92e0-e7b04b9f5a08", "object_sha256": "73af066d7e70edbda4e24323f85c592f994f806c516920410a637bbde417282c", "modified": "2026-05-12T15:12:00.641Z", "version": "2.6", "revoked": false},
+    "T1087.001": {"name": "Local Account", "canonical_url": "https://attack.mitre.org/techniques/T1087/001/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--25659dd6-ea12-45c4-97e6-381e3e4b593e", "object_sha256": "bf179fbf7e82d75bd5d80f1973dc232df07bdea1a9fc78d0600602b6308134a7", "modified": "2026-05-12T15:12:00.623Z", "version": "1.5", "revoked": false},
+    "T1098": {"name": "Account Manipulation", "canonical_url": "https://attack.mitre.org/techniques/T1098/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--a10641f4-87b4-45a3-a906-92a149cb2c27", "object_sha256": "d022469503dd36284efb7a0ab1332cc18311f501b7a93f8c393f9e791d1f0472", "modified": "2026-05-12T15:12:00.706Z", "version": "2.8", "revoked": false},
+    "T1105": {"name": "Ingress Tool Transfer", "canonical_url": "https://attack.mitre.org/techniques/T1105/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--e6919abc-99f9-4c6c-95a5-14761e7b2add", "object_sha256": "59da775ba232203a62198d09bd01e23ff0d6eb4aa03915e0f6523ab8c024b27e", "modified": "2026-05-12T15:12:00.723Z", "version": "2.6", "revoked": false},
+    "T1136": {"name": "Create Account", "canonical_url": "https://attack.mitre.org/techniques/T1136/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--e01be9c5-e763-4caf-aeb7-000b416aef67", "object_sha256": "b63fe3e387c8f3e2f9e3e59b9f6cf61053e62ee714172f3adb830ad56546d593", "modified": "2025-10-24T17:49:30.136Z", "version": "2.6", "revoked": false},
+    "T1140": {"name": "Deobfuscate/Decode Files or Information", "canonical_url": "https://attack.mitre.org/techniques/T1140/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--3ccef7ae-cb5e-48f6-8302-897105fbf55c", "object_sha256": "8da2cc7039898de6dc13c956866ee1876b2c1b311bc0c6b40e2dbbd51f71013d", "modified": "2026-05-12T15:12:00.628Z", "version": "2.0", "revoked": false},
+    "T1222": {"name": "File and Directory Permissions Modification", "canonical_url": "https://attack.mitre.org/techniques/T1222/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--65917ae0-b854-4139-83fe-bf2441cf0196", "object_sha256": "37e888ab2e04d5dbe1237d38d948971d5d64ef0abf0fdbecbd9a42b67b59aff6", "modified": "2026-05-12T15:12:00.637Z", "version": "3.0", "revoked": false},
+    "T1496": {"name": "Resource Hijacking", "canonical_url": "https://attack.mitre.org/techniques/T1496/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--cd25c1b4-935c-4f0e-ba8d-552f28bc4783", "object_sha256": "955df368744c7bc93d30525005f4f85949f12a14ad32894989928fea0f7c17a4", "modified": "2025-10-24T17:49:24.276Z", "version": "2.0", "revoked": false},
+    "T1543": {"name": "Create or Modify System Process", "canonical_url": "https://attack.mitre.org/techniques/T1543/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--106c0cf6-bf73-4601-9aa8-0945c2715ec5", "object_sha256": "3bd0149494421a91ce543a94e1d60ab23ed2b4082f0caa2eae1baa3fb5a12a98", "modified": "2026-05-12T15:12:00.621Z", "version": "1.2", "revoked": false},
+    "T1546": {"name": "Event Triggered Execution", "canonical_url": "https://attack.mitre.org/techniques/T1546/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--b6301b64-ef57-4cce-bb0b-77026f14a8db", "object_sha256": "9a7d21e738846e580c98e42087ee6247059a387fd841f32af0f2af47b9abafe8", "modified": "2026-08-04T20:30:56.386Z", "version": "1.4", "revoked": false},
+    "T1547": {"name": "Boot or Logon Autostart Execution", "canonical_url": "https://attack.mitre.org/techniques/T1547/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--1ecb2399-e8ba-4f6b-8ba7-5c27d49405cf", "object_sha256": "26f3709e1cdd6ef77d44567f73b95e2fe028d10c30ed153f72c58b4bb1713024", "modified": "2025-10-24T17:48:29.846Z", "version": "1.3", "revoked": false},
+    "T1548": {"name": "Abuse Elevation Control Mechanism", "canonical_url": "https://attack.mitre.org/techniques/T1548/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--67720091-eee3-4d2d-ae16-8264567f6f5b", "object_sha256": "ec05d4086cf61ab314e9a32b9d62fe7699d0eb3791b936ab13c620dc484bc672", "modified": "2026-05-12T15:12:00.639Z", "version": "2.0", "revoked": false},
+    "T1552": {"name": "Unsecured Credentials", "canonical_url": "https://attack.mitre.org/techniques/T1552/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--435dfb86-2697-4867-85b5-2fef496c0517", "object_sha256": "02b8eb578b7bfed0d08238cf532395d877f64a4d7e46e02a298bff8bf6f47b6e", "modified": "2025-10-24T17:48:42.785Z", "version": "1.5", "revoked": false},
+    "T1560": {"name": "Archive Collected Data", "canonical_url": "https://attack.mitre.org/techniques/T1560/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--53ac20cd-aca3-406e-9aa0-9fc7fdc60a5a", "object_sha256": "3ead667c7f1fa0572dec9d61ebf3cf5a685b4cbca6a9116553dbcb52bcdf4fe2", "modified": "2026-05-12T15:12:00.633Z", "version": "1.0", "revoked": false},
+    "T1562": {"name": "Impair Defenses", "canonical_url": "https://attack.mitre.org/techniques/T1562/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--3d333250-30e4-4a82-9edc-756c68afc529", "object_sha256": "80477d9a7b6dbaae00d5aea755903b4374c45cd6a1cc5273d5beb984b785c7a3", "modified": "2026-04-14T22:54:52.137Z", "version": "1.7", "revoked": true, "superseded_by": "T1685"},
+    "T1685": {"name": "Disable or Modify Tools", "canonical_url": "https://attack.mitre.org/techniques/T1685/", "source_artifact_id": "mitre-attack-enterprise", "object_id": "attack-pattern--bbde9781-60aa-4b8a-a911-895b0c1b3872", "object_sha256": "20cd4ab4a44e62797fc1f9fc97d19d94a0bb2f2171d6db382a732a209935797a", "modified": "2026-05-12T15:12:00.712Z", "version": "1.0", "revoked": false}
+  }
+}

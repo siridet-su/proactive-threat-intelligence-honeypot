@@ -1,0 +1,26 @@
+[Unit]
+Description=Model2 V7 exact-session ensemble result bridge
+After=model2-v7-receiver.service
+
+[Service]
+Type=simple
+User=model2v7
+Group=honeypot
+SupplementaryGroups=model2v7
+Environment=PYTHONPATH=/opt/honeypot
+ExecStart=/usr/bin/python3 /usr/local/libexec/model2-v7-ensemble-bridge.py --results /var/lib/model2-v7/results --socket /run/model2-v7-ensemble/bridge.sock
+Restart=always
+RestartSec=2
+UMask=0027
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/opt/honeypot /var/lib/model2-v7/results /usr/local/libexec/model2-v7-ensemble-bridge.py
+ReadWritePaths=/run/model2-v7-ensemble
+RestrictAddressFamilies=AF_UNIX
+RuntimeDirectory=model2-v7-ensemble
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
