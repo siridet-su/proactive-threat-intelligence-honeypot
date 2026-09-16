@@ -1228,6 +1228,71 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
   );
 }
 
+function booleanLabel(value: unknown): string {
+  if (value === true) return "YES";
+  if (value === false) return "NO";
+  return "Not reported";
+}
+
+function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
+  const ensemble = record(data.ensemble_evidence);
+  const model1 = record(ensemble.model1);
+  const model2 = record(ensemble.model2);
+  const binding = record(model2.binding);
+  const results = list(ensemble.results).map(record);
+  const model1Only = list(ensemble.model1_only_labels).map(record);
+
+  if (!hasMeaningfulRecord(ensemble)) {
+    return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
+  }
+
+  const architecture = model2.one_model === true
+    ? "UNIFIED_ONE_MODEL"
+    : model2.one_model === false
+      ? "NOT_UNIFIED"
+      : "Not reported";
+
+  return (
+    <>
+      <SummaryGrid fields={[
+        ["Authority", summaryValue(ensemble.ensemble_authority, "ADVISORY_ONLY")],
+        ["Model1", model1.applicable === true ? "APPLICABLE" : model1.applicable === false ? "NOT_APPLICABLE" : "Not reported"],
+        ["Model2 status", summaryValue(model2.status, "Unavailable")],
+        ["Model2 architecture", architecture],
+        ["One inference call", booleanLabel(model2.one_inference_call)],
+        ["Independent binary heads", booleanLabel(model2.independent_binary_heads)],
+        ["Model2 version", summaryValue(model2.model_version || model2.artifact_id, "Not reported")],
+        ["Run ID", summaryValue(ensemble.run_id, "Not reported")],
+        ["Measurement ID", summaryValue(model2.measurement_id || binding.measurement_id, "Not reported")],
+        ["Episode ID", summaryValue(model2.episode_id || binding.episode_id, "Not reported")],
+        ["Numeric score fusion", ensemble.fused_score === null ? "NONE" : display(ensemble.fused_score)],
+        ["Computed at", summaryValue(ensemble.ensemble_computed_at, "Not reported")],
+      ]} />
+      <p className="mt-3 rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">
+        Model2 is one unified multi-output shadow model used for corroboration. Model1 remains the primary classifier; native scores are shown separately and are not numerically fused.
+      </p>
+      {results.length > 0 && (
+        <ol className="mt-3 space-y-2">
+          {results.map((item, index) => (
+            <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
+                <span className="ui-badge text-[11px]">{summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
+              </div>
+              <div className="mt-2 grid gap-1 text-text-muted sm:grid-cols-2">
+                <span>Model1: <span className="font-mono text-text">{summaryValue(item.model1_result, "NOT_APPLICABLE")}</span>{item.model1_margin !== null && item.model1_margin !== undefined ? ` · margin ${display(item.model1_margin)}` : ""}</span>
+                <span>Model2: <span className="font-mono text-text">{summaryValue(item.model2_result, "UNAVAILABLE")}</span>{item.model2_score !== null && item.model2_score !== undefined ? ` · score ${display(item.model2_score)}` : ""}</span>
+              </div>
+              <p className="mt-1 text-text-muted">Relation: {summaryValue(item.model2_relation, "Not recorded")} · primary source: {summaryValue(item.primary_source, "NONE")}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+      {model1Only.length > 0 && <p className="mt-3 text-xs text-text-muted">Model1-only labels: {model1Only.map((item) => summaryValue(item.technique_id, "unknown")).join(", ")}</p>}
+    </>
+  );
+}
+
 function AiAdvisorySummary({ data }: { data: JsonRecord }) {
   const advisory = record(data.advisory);
   const validation = record(advisory.validation);
@@ -1528,6 +1593,7 @@ export function SessionAnalysisPanels({
     "No Cowrie authentication attempts were recorded.",
   );
   const classificationResult = detailPanelResult(detailResult, classificationEvents.length > 0, "No classification evidence was established.");
+  const ensembleResult = detailPanelResult(detailResult, hasMeaningfulRecord(detail.ensemble_evidence), "No stored Model1 + Model2 ensemble evidence is available.");
   const filesResult = detailPanelResult(detailResult, analystObservables.length > 0, "No file or observable evidence is available.");
   const provenanceResult = detailPanelResult(detailResult, Object.values(provenance).some(hasMeaningfulValue), "No provenance record is available.");
   const aiAdvisory = get("ai-advisory");
@@ -1571,6 +1637,16 @@ export function SessionAnalysisPanels({
         </div>
         <Panel eyebrow="Trusted observations" title="Classification and ATT&CK mappings" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult}>
           <ClassificationList items={classificationEvents} trustedMappings={trustedTtps} />
+        </Panel>
+      </section>
+
+      <section aria-label="Model ensemble evidence">
+        <div className="mb-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Shadow corroboration</p>
+          <p className="mt-1 text-xs text-text-muted">The stored late-fusion evidence is read-only; Model1 remains primary and Model2 never authorizes response.</p>
+        </div>
+        <Panel eyebrow="Model evidence" title="Model1 + Model2 ensemble" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult}>
+          <Model2EnsembleSummary data={detail} />
         </Panel>
       </section>
 
