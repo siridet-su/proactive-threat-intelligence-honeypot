@@ -307,14 +307,29 @@ export function FilesystemActivity() {
   const {
     authoritativeClosedSessions,
     auditDirectoryTotalCount,
-    hasMoreAuditSessions,
-    isLoadingAuditSessions,
-    loadMoreAuditSessions,
     recordRemoteAuditSessions,
+    directoryHasMore,
+    directoryIsLoading,
+    directoryIsComplete,
+    loadMoreDirectory,
+    searchQuery: auditSearchQuery,
+    searchItems: auditSearchItems,
+    searchHasMore: auditSearchHasMore,
+    searchIsLoading: auditSearchIsLoading,
+    searchIsComplete: auditSearchIsComplete,
+    searchSessions: searchAuditSessions,
+    loadMoreSearch: loadMoreAuditSearch,
+    clearSearch: clearAuditSearch,
+    summary: auditSummary,
+    status: auditStatus,
+    errorMessage: auditErrorMessage,
+    retryInitialDirectory,
   } = useAuditDirectory({
     viewMode,
     snapshotRecentClosedSessions: snapshot?.recentClosedSessions ?? [],
     extraAuditSessions,
+    hideHomeOnly,
+    targetPathFilter,
   });
 
   const {
@@ -333,20 +348,28 @@ export function FilesystemActivity() {
       activeSessions: snapshot?.sessions ?? [],
       authoritativeClosedSessions,
       snapshotRecentClosedSessions: snapshot?.recentClosedSessions ?? [],
+      summary: auditSummary,
       auditDirectoryTotalCount,
       hideHomeOnly,
       targetPathFilter,
       selectedSessionId,
+      isSearchActive: Boolean(auditSearchQuery.trim()),
+      searchResults: auditSearchItems,
+      isDirectoryComplete: directoryIsComplete,
     });
   }, [
     viewMode,
     snapshot?.sessions,
     authoritativeClosedSessions,
     snapshot?.recentClosedSessions,
+    auditSummary,
     auditDirectoryTotalCount,
     hideHomeOnly,
     targetPathFilter,
     selectedSessionId,
+    auditSearchQuery,
+    auditSearchItems,
+    directoryIsComplete,
   ]);
 
   const selectedSession = useMemo(
@@ -847,9 +870,25 @@ export function FilesystemActivity() {
                   onResetFilters={handleResetAuditFilters}
                   allSessionsList={allSessions}
                   onRemoteSessionsLoaded={recordRemoteAuditSessions}
-                  hasMoreRemote={hasMoreAuditSessions}
-                  isLoadingRemote={isLoadingAuditSessions}
-                  onLoadMore={loadMoreAuditSessions}
+                  hasMoreRemote={directoryHasMore}
+                  isLoadingRemote={directoryIsLoading}
+                  onLoadMore={loadMoreDirectory}
+                  directoryHasMore={directoryHasMore}
+                  directoryIsLoading={directoryIsLoading}
+                  directoryIsComplete={directoryIsComplete}
+                  onLoadMoreDirectory={loadMoreDirectory}
+                  searchResults={auditSearchItems}
+                  searchHasMore={auditSearchHasMore}
+                  searchIsLoading={auditSearchIsLoading}
+                  searchIsComplete={auditSearchIsComplete}
+                  onSearch={(q) => void searchAuditSessions(q)}
+                  onLoadMoreSearch={loadMoreAuditSearch}
+                  onClearSearch={clearAuditSearch}
+                  hideHomeOnly={hideHomeOnly}
+                  targetPathFilter={targetPathFilter}
+                  status={auditStatus}
+                  errorMessage={auditErrorMessage}
+                  onRetry={retryInitialDirectory}
                 />
                 <AuditFilterControls
                   hideHomeOnly={hideHomeOnly}
@@ -1187,9 +1226,25 @@ export function FilesystemActivity() {
                 onResetFilters={handleResetAuditFilters}
                 allSessionsList={allSessions}
                 onRemoteSessionsLoaded={recordRemoteAuditSessions}
-                hasMoreRemote={hasMoreAuditSessions}
-                isLoadingRemote={isLoadingAuditSessions}
-                onLoadMore={loadMoreAuditSessions}
+                hasMoreRemote={directoryHasMore}
+                isLoadingRemote={directoryIsLoading}
+                onLoadMore={loadMoreDirectory}
+                directoryHasMore={directoryHasMore}
+                directoryIsLoading={directoryIsLoading}
+                directoryIsComplete={directoryIsComplete}
+                onLoadMoreDirectory={loadMoreDirectory}
+                searchResults={auditSearchItems}
+                searchHasMore={auditSearchHasMore}
+                searchIsLoading={auditSearchIsLoading}
+                searchIsComplete={auditSearchIsComplete}
+                onSearch={(q) => void searchAuditSessions(q)}
+                onLoadMoreSearch={loadMoreAuditSearch}
+                onClearSearch={clearAuditSearch}
+                hideHomeOnly={hideHomeOnly}
+                targetPathFilter={targetPathFilter}
+                status={auditStatus}
+                errorMessage={auditErrorMessage}
+                onRetry={retryInitialDirectory}
               />
               <div className="h-4 w-px bg-border hidden sm:block shrink-0" aria-hidden="true" />
               <AuditFilterControls

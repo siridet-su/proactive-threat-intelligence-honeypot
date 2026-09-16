@@ -20,6 +20,8 @@ import {
   ComboboxSearchInput,
   useComboboxNavigation,
 } from "./ComboboxPopover";
+import { sessionTouchesPath } from "./filesystemUtils";
+import { getPaginationRenderState } from "./useAuditDirectory";
 
 export interface AuditSessionSelectProps {
   sessions: readonly FilesystemTopologySession[];
@@ -31,6 +33,32 @@ export interface AuditSessionSelectProps {
   hasActiveFilters?: boolean;
   onResetFilters?: () => void;
   allSessionsList?: readonly (FilesystemTopologySession | FilesystemClosedSession)[];
+
+  // Directory pagination
+  directoryHasMore?: boolean;
+  directoryIsLoading?: boolean;
+  directoryIsComplete?: boolean;
+  onLoadMoreDirectory?: () => void;
+
+  // Search pagination & callbacks
+  searchResults?: readonly FilesystemClosedSession[];
+  searchHasMore?: boolean;
+  searchIsLoading?: boolean;
+  searchIsComplete?: boolean;
+  onSearch?: (query: string) => void;
+  onLoadMoreSearch?: () => void;
+  onClearSearch?: () => void;
+
+  // Active filters for scoped searching
+  hideHomeOnly?: boolean;
+  targetPathFilter?: string | null;
+
+  // Error and retry state
+  status?: "idle" | "loading" | "success" | "error";
+  errorMessage?: string | null;
+  onRetry?: () => void;
+
+  // Legacy fallback callback
   onRemoteSessionsLoaded?: (
     sessions: readonly FilesystemClosedSession[],
     totalCount?: number,
@@ -51,6 +79,22 @@ export function AuditSessionSelect({
   hasActiveFilters,
   onResetFilters,
   allSessionsList,
+  directoryHasMore,
+  directoryIsLoading,
+  directoryIsComplete,
+  onLoadMoreDirectory,
+  searchResults,
+  searchHasMore,
+  searchIsLoading,
+  searchIsComplete,
+  onSearch,
+  onLoadMoreSearch,
+  onClearSearch,
+  hideHomeOnly = false,
+  targetPathFilter = null,
+  status,
+  errorMessage,
+  onRetry,
   onRemoteSessionsLoaded,
   hasMoreRemote: hasMoreRemoteProp,
   isLoadingRemote: isLoadingRemoteProp,
@@ -68,15 +112,39 @@ export function AuditSessionSelect({
   const triggerId = `audit-session-select-${generatedId}`;
   const menuId = `${triggerId}-menu`;
 
-  const effectiveHasMore = hasMoreRemoteProp !== undefined ? hasMoreRemoteProp : hasMoreRemote;
-  const effectiveIsLoading = isLoadingRemoteProp !== undefined ? isLoadingRemoteProp : isLoadingRemote;
+  const isSearchActive = Boolean(searchQuery.trim());
+
+  const effectiveHasMore = isSearchActive
+    ? searchHasMore !== undefined
+      ? searchHasMore
+      : hasMoreRemoteProp !== undefined
+        ? hasMoreRemoteProp
+        : hasMoreRemote
+    : directoryHasMore !== undefined
+      ? directoryHasMore
+      : hasMoreRemoteProp !== undefined
+        ? hasMoreRemoteProp
+        : hasMoreRemote;
+
+  const effectiveIsLoading = isSearchActive
+    ? searchIsLoading !== undefined
+      ? searchIsLoading
+      : isLoadingRemoteProp !== undefined
+        ? isLoadingRemoteProp
+        : isLoadingRemote
+    : directoryIsLoading !== undefined
+      ? directoryIsLoading
+      : isLoadingRemoteProp !== undefined
+        ? isLoadingRemoteProp
+        : isLoadingRemote;
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery("");
     setRemoteSessions([]);
     setRemoteCursor(null);
     setHasMoreRemote(false);
-  }, []);
+    onClearSearch?.();
+  }, [onClearSearch]);
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
@@ -84,20 +152,30 @@ export function AuditSessionSelect({
       setRemoteSessions([]);
       setRemoteCursor(null);
       setHasMoreRemote(false);
+      onClearSearch?.();
+    } else if (onSearch) {
+      onSearch(value);
     }
   };
 
-  // Query remote audit directory when searching
+  // Standalone fallback: Query remote audit directory when searching without parent onSearch
   useEffect(() => {
     if (!open) return;
+    if (onSearch) return; // parent handles search
     const query = searchQuery.trim();
     if (!query) return;
 
     const timer = setTimeout(async () => {
       setIsLoadingRemote(true);
       try {
+        const params = new URLSearchParams();
+        params.set("q", query);
+        params.set("limit", "25");
+        if (hideHomeOnly) params.set("hideHome", "1");
+        if (targetPathFilter) params.set("targetPath", targetPathFilter);
+
         const response = await fetch(
-          `/api/filesystem-topology/audit-sessions?q=${encodeURIComponent(query)}&limit=25`,
+          `/api/filesystem-topology/audit-sessions?${params.toString()}`,
           { cache: "no-store" },
         );
         if (!response.ok) return;
@@ -117,14 +195,27 @@ export function AuditSessionSelect({
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [open, searchQuery, onRemoteSessionsLoaded]);
+  }, [open, searchQuery, onSearch, hideHomeOnly, targetPathFilter, onRemoteSessionsLoaded]);
 
   const handleLoadMore = useCallback(async () => {
     if (effectiveIsLoading) return;
-    if (onLoadMore) {
-      onLoadMore();
-      return;
+    if (isSearchActive) {
+      if (onLoadMoreSearch) {
+        onLoadMoreSearch();
+        return;
+      }
+    } else {
+      if (onLoadMoreDirectory) {
+        onLoadMoreDirectory();
+        return;
+      }
+      if (onLoadMore) {
+        onLoadMore();
+        return;
+      }
     }
+
+    // Standalone fallback
     setIsLoadingRemote(true);
     try {
       const q = searchQuery.trim();
@@ -132,6 +223,8 @@ export function AuditSessionSelect({
       if (q) params.set("q", q);
       if (remoteCursor) params.set("cursor", remoteCursor);
       params.set("limit", "25");
+      if (hideHomeOnly) params.set("hideHome", "1");
+      if (targetPathFilter) params.set("targetPath", targetPathFilter);
 
       const response = await fetch(
         `/api/filesystem-topology/audit-sessions?${params.toString()}`,
@@ -155,25 +248,38 @@ export function AuditSessionSelect({
     } finally {
       setIsLoadingRemote(false);
     }
-  }, [effectiveIsLoading, onLoadMore, onRemoteSessionsLoaded, remoteCursor, searchQuery]);
+  }, [
+    effectiveIsLoading,
+    isSearchActive,
+    onLoadMoreSearch,
+    onLoadMoreDirectory,
+    onLoadMore,
+    searchQuery,
+    remoteCursor,
+    hideHomeOnly,
+    targetPathFilter,
+    onRemoteSessionsLoaded,
+  ]);
 
   const combinedClosedSessions = useMemo(() => {
-    const seen = new Set<string>();
-    const list: FilesystemClosedSession[] = [];
-    for (const s of recentClosedSessions) {
-      if (!seen.has(s.sessionId)) {
-        seen.add(s.sessionId);
-        list.push(s);
-      }
+    if (isSearchActive) {
+      const base = searchResults ?? remoteSessions;
+      return base.filter((s) => {
+        if (hasActiveFilters && hideHomeOnly && s.auditSummary?.homeOnly) return false;
+        if (hasActiveFilters && targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
+        return true;
+      });
     }
-    for (const s of remoteSessions) {
-      if (!seen.has(s.sessionId)) {
-        seen.add(s.sessionId);
-        list.push(s);
-      }
-    }
-    return list;
-  }, [recentClosedSessions, remoteSessions]);
+    return recentClosedSessions as FilesystemClosedSession[];
+  }, [
+    isSearchActive,
+    searchResults,
+    remoteSessions,
+    hasActiveFilters,
+    hideHomeOnly,
+    targetPathFilter,
+    recentClosedSessions,
+  ]);
 
   const effectiveAllSessions = useMemo(
     () => allSessionsList ?? [...sessions, ...combinedClosedSessions],
@@ -362,9 +468,25 @@ export function AuditSessionSelect({
           onClear={handleClearSearch}
           onKeyDown={handleInputKeyDown}
           placeholder="Search IP, session ID, or path..."
-          isLoading={isLoadingRemote}
+          isLoading={effectiveIsLoading}
           ariaControls={menuId}
         />
+
+        {/* Error banner if directory fetch failed */}
+        {status === "error" && (
+          <div className="mx-2 mb-2 p-2 rounded-lg border border-danger-border bg-danger-subtle text-xs font-mono flex items-center justify-between gap-2">
+            <span className="text-danger truncate">{errorMessage ?? "Failed to load audit directory"}</span>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="px-2 py-1 rounded bg-danger text-white hover:bg-danger-hover transition-colors shrink-0 text-xs font-sans font-semibold cursor-pointer"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Callout if currently audited session is hidden by active filter */}
         {isSelectedFilteredOut && selectedSession && (
@@ -522,33 +644,51 @@ export function AuditSessionSelect({
                 </div>
 
                 {/* Pagination / Remote Directory Retrieval */}
-                {(effectiveHasMore || (!searchQuery && recentClosedSessions.length >= 12 && remoteSessions.length === 0)) && (
-                  <div className="pt-2 px-1">
-                    <button
-                      type="button"
-                      onClick={handleLoadMore}
-                      disabled={effectiveIsLoading}
-                      className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border/80 bg-surface-subtle/70 px-2 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-hover hover:text-text hover:border-primary/40 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {effectiveIsLoading ? (
-                        <>
-                          <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                          <span>Loading audit directory…</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Load older closed sessions</span>
-                          <ChevronDown className="h-3 w-3 text-text-subtle" />
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-                {((remoteSessions.length > 0 && !effectiveHasMore) || (!effectiveHasMore && recentClosedSessions.length > 12)) && (
-                  <div className="pt-2 pb-1 text-center font-mono text-[11px] text-text-subtle">
-                    All matching directory sessions loaded ({combinedClosedSessions.length})
-                  </div>
-                )}
+                {(() => {
+                  const paginationState = getPaginationRenderState({
+                    effectiveHasMore,
+                    effectiveIsLoading,
+                    hasItems: combinedClosedSessions.length > 0,
+                    isComplete: isSearchActive ? Boolean(searchIsComplete) : Boolean(directoryIsComplete),
+                  });
+
+                  if (paginationState === "button") {
+                    return (
+                      <div className="pt-2 px-1">
+                        <button
+                          type="button"
+                          onClick={handleLoadMore}
+                          disabled={effectiveIsLoading}
+                          className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border/80 bg-surface-subtle/70 px-2 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-hover hover:text-text hover:border-primary/40 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {effectiveIsLoading ? (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                              <span>{isSearchActive ? "Loading search results…" : "Loading audit directory…"}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>{isSearchActive ? "Load more matching sessions" : "Load older closed sessions"}</span>
+                              <ChevronDown className="h-3 w-3 text-text-subtle" />
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (paginationState === "completed") {
+                    return (
+                      <div className="pt-2 pb-1 text-center font-mono text-[11px] text-text-subtle">
+                        {isSearchActive
+                          ? `All matching search results loaded (${combinedClosedSessions.length})`
+                          : `All matching directory sessions loaded (${combinedClosedSessions.length})`}
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })()}
               </div>
             )}
 

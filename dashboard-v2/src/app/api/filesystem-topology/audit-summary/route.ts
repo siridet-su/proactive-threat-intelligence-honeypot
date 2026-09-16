@@ -1,5 +1,5 @@
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { getAuditSessions } from "@/lib/filesystem-server";
+import { getAuditDirectorySummary } from "@/lib/filesystem-server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,29 +16,20 @@ export async function GET(request: Request) {
     const targetPath = url.searchParams.get("targetPath");
     const hideHomeParam = url.searchParams.get("hideHome");
     const hideHome = hideHomeParam === "1" || hideHomeParam === "true";
-    const cursor = url.searchParams.get("cursor");
-    const limitParam = url.searchParams.get("limit");
-    const limit = limitParam ? parseInt(limitParam, 10) : 25;
 
-    const summaryParam = url.searchParams.get("summary") ?? url.searchParams.get("facets");
-    const includeSummary = summaryParam === "1" || summaryParam === "true" || cursor === null;
-
-    const page = await getAuditSessions({
+    const summary = await getAuditDirectorySummary({
       search: search || null,
       targetPath: targetPath || null,
       hideHome,
-      cursor: cursor || null,
-      limit: Number.isNaN(limit) ? 25 : limit,
-      includeSummary,
     });
 
-    return Response.json(page, {
+    return Response.json(summary, {
       headers: {
         "Cache-Control": "no-store",
       },
     });
   } catch (error) {
-    console.error("[AUDIT SESSIONS API ERROR]", error);
-    return Response.json({ error: "Failed to fetch audit sessions" }, { status: 500 });
+    console.error("[AUDIT SUMMARY API ERROR]", error);
+    return Response.json({ error: "Failed to fetch audit summary" }, { status: 500 });
   }
 }

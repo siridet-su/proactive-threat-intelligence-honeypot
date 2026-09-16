@@ -152,10 +152,18 @@ export interface FilesystemClosedSession extends FilesystemTopologySession {
   };
 }
 
+export interface AuditDirectorySummary {
+  totalSessions: number;
+  homeOnlyCount: number;
+  distinctPaths: { path: string; sessionCount: number }[];
+  matchingCount?: number;
+}
+
 export interface AuditSessionsPage {
   items: FilesystemClosedSession[];
   nextCursor: string | null;
   totalItems: number;
+  summary?: AuditDirectorySummary;
 }
 
 export interface FilesystemTopologySnapshot {
