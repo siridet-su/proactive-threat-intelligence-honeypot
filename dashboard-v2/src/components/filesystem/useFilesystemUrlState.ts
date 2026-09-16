@@ -177,7 +177,7 @@ export function useFilesystemUrlState(
       sessionId: currentSession,
       hideHome: hideHomeOnly,
       targetPath: targetPathFilter,
-      hop: selectedHistoryEventId,
+      hop: selectedHistoryEventId ?? requestedHopRef.current,
     });
 
     const currentSearch = window.location.search;

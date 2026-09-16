@@ -93,16 +93,21 @@ export function getHistoryWindowMetrics(
   loadedItems: number,
   reportedTotalItems: number,
   selectedIndex: number,
+  explicitHopNumber?: number | null,
 ): HistoryWindowMetrics {
   const safeLoadedItems = Math.max(0, Math.trunc(loadedItems));
   const totalItems = Math.max(safeLoadedItems, Math.trunc(reportedTotalItems));
   const indexOffset = totalItems - safeLoadedItems;
+  const defaultSelectedNumber = selectedIndex >= 0 ? indexOffset + selectedIndex + 1 : 0;
+  const selectedNumber = typeof explicitHopNumber === "number" && explicitHopNumber > 0
+    ? explicitHopNumber
+    : defaultSelectedNumber;
   return {
     totalItems,
     loadedItems: safeLoadedItems,
     unloadedItems: indexOffset,
     indexOffset,
-    selectedNumber: selectedIndex >= 0 ? indexOffset + selectedIndex + 1 : 0,
+    selectedNumber,
   };
 }
 

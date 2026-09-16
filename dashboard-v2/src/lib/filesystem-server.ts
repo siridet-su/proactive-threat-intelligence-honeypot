@@ -307,6 +307,78 @@ export async function getSessionCwdHistory(sessionId: string, cursor: string | n
   };
 }
 
+export interface SessionCwdHopResolution {
+  item: SessionCwdHistoryEvent | null;
+  hopNumber?: number;
+  successfulHopNumber?: number;
+  totalItems?: number;
+}
+
+export async function getSessionCwdHistoryHop(
+  sessionId: string,
+  eventId: string,
+): Promise<SessionCwdHopResolution> {
+  const sanitizedSessionId = typeof sessionId === "string" ? sessionId.trim().slice(0, 300) : "";
+  const sanitizedEventId = typeof eventId === "string" ? eventId.trim().slice(0, 300) : "";
+  if (!sanitizedSessionId || !sanitizedEventId) {
+    return { item: null };
+  }
+
+  const client = await getMongoClient();
+  const collection = client.db(DATABASE_NAME).collection<Document & { _id: string }>(HISTORY_COLLECTION);
+
+  // 1. Primary indexed read: attempt fast primary key lookup on canonical _id_
+  let doc = await collection.findOne({ _id: sanitizedEventId });
+  if (doc) {
+    const docSessionId = asString(doc.sessionId) ?? asString(doc.session_id);
+    if (docSessionId !== sanitizedSessionId) {
+      // Cross-session: return null to prevent data leakage across sessions
+      return { item: null };
+    }
+  } else {
+    // 2. Legacy fallback: check sessionId + eventId
+    doc = await collection.findOne({ sessionId: sanitizedSessionId, eventId: sanitizedEventId });
+    if (!doc) {
+      doc = await collection.findOne({ session_id: sanitizedSessionId, eventId: sanitizedEventId });
+    }
+    if (!doc) {
+      return { item: null };
+    }
+  }
+
+  const item = normalizeHistoryEvent(doc);
+  if (!item) {
+    return { item: null };
+  }
+
+  // Compute exact chronological hop numbers in MongoDB using the compound index
+  const docAt = doc.at instanceof Date ? doc.at : new Date(item.at);
+  const docEventId = asString(doc.eventId) ?? asString(doc._id?.toString()) ?? item.id;
+  const sessionFilter: Document = { $or: [{ sessionId: sanitizedSessionId }, { session_id: sanitizedSessionId }] };
+  const chronologicalFilter: Document = {
+    $or: [
+      { at: { $lt: docAt } },
+      { at: docAt, eventId: { $lte: docEventId } },
+    ],
+  };
+
+  const [hopNumber, successfulHopNumber, totalItems] = await Promise.all([
+    collection.countDocuments({ $and: [sessionFilter, chronologicalFilter] }),
+    collection.countDocuments({ $and: [sessionFilter, { action: { $ne: "failed_change" } }, chronologicalFilter] }),
+    collection.countDocuments(sessionFilter),
+  ]);
+
+  item.hopNumber = hopNumber;
+  item.successfulHopNumber = successfulHopNumber;
+
+  return {
+    item,
+    hopNumber,
+    successfulHopNumber,
+    totalItems,
+  };
+}
+
 export interface AuditSessionsQueryOptions {
   search?: string | null;
   targetPath?: string | null;

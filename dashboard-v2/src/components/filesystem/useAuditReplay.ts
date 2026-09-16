@@ -147,9 +147,14 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
 
   const selectedHistoryIndex = useMemo(() => {
     if (!displayedHistory.length) return -1;
-    const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
-    return index >= 0 ? index : displayedHistory.length - 1;
+    if (selectedHistoryEventId === null) return displayedHistory.length - 1;
+    return displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
   }, [displayedHistory, selectedHistoryEventId]);
+
+  const currentEvent = selectedHistoryIndex >= 0 ? displayedHistory[selectedHistoryIndex] : null;
+  const explicitHopNumber = showFailedAttempts
+    ? currentEvent?.hopNumber
+    : currentEvent?.successfulHopNumber ?? currentEvent?.hopNumber;
 
   const displayedHistoryMetrics = useMemo(
     () =>
@@ -157,6 +162,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
         displayedHistory.length,
         showFailedAttempts ? historyTotalItems : historyTotalSuccessfulItems,
         selectedHistoryIndex,
+        explicitHopNumber,
       ),
     [
       displayedHistory.length,
@@ -164,6 +170,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
       historyTotalSuccessfulItems,
       selectedHistoryIndex,
       showFailedAttempts,
+      explicitHopNumber,
     ],
   );
 

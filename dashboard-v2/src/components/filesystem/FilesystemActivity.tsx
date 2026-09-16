@@ -217,11 +217,16 @@ export function FilesystemActivity() {
     historyTotalSuccessfulItems,
     historyComplete,
     historyStatus,
+    hopResolutionStatus,
+    requestedHop,
+    clearRequestedHop,
+    selectLatestHop,
     loadHistory,
     resetHistory,
   } = useSessionCwdHistory({
     requestedHopRef,
     onSelectHistoryEventId: setSelectedHistoryEventId,
+    viewMode,
   });
 
   // Audit replay scrubber, timer, and active hop route hook
@@ -1184,6 +1189,10 @@ export function FilesystemActivity() {
                   historyComplete={historyComplete}
                   selectedHistoryEventId={selectedHistoryEventId}
                   layout="sidebar"
+                  hopResolutionStatus={hopResolutionStatus}
+                  requestedHop={requestedHop}
+                  onClearHop={clearRequestedHop}
+                  onShowLatestHop={selectLatestHop}
                   onSelectHistoryEventId={setSelectedHistoryEventId}
                   onLoadEarlier={() => {
                     if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
@@ -1508,6 +1517,10 @@ export function FilesystemActivity() {
                   historyComplete={historyComplete}
                   selectedHistoryEventId={selectedHistoryEventId}
                   layout="sidebar"
+                  hopResolutionStatus={hopResolutionStatus}
+                  requestedHop={requestedHop}
+                  onClearHop={clearRequestedHop}
+                  onShowLatestHop={selectLatestHop}
                   onSelectHistoryEventId={setSelectedHistoryEventId}
                   onLoadEarlier={() => {
                     if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);

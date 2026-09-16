@@ -187,6 +187,10 @@ export interface SessionCwdHistoryEvent {
   action: "entered" | "changed" | "failed_change";
   status: CwdObservationStatus;
   sourceEventId: string | null;
+  /** 1-based chronological index within the complete retained session route. */
+  hopNumber?: number;
+  /** 1-based chronological index excluding failed_change attempts. */
+  successfulHopNumber?: number;
 }
 
 export interface SessionCwdHistoryPage {

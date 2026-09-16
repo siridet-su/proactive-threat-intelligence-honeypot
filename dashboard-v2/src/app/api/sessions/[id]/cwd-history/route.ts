@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { getSessionCwdHistory } from "@/lib/filesystem-server";
+import { getSessionCwdHistory, getSessionCwdHistoryHop } from "@/lib/filesystem-server";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
   const { id } = await params;
   try {
-    const cursor = new URL(request.url).searchParams.get("cursor");
+    const url = new URL(request.url);
+    const hop = url.searchParams.get("hop");
+    if (hop) {
+      const result = await getSessionCwdHistoryHop(id, hop);
+      if (!result.item) {
+        return NextResponse.json({ item: null, error: "Hop not found or unavailable" }, { status: 404 });
+      }
+      return NextResponse.json(result, {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+
+    const cursor = url.searchParams.get("cursor");
     return NextResponse.json(await getSessionCwdHistory(id, cursor), {
       headers: { "Cache-Control": "no-store" },
     });

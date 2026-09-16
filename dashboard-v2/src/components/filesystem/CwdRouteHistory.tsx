@@ -22,8 +22,6 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { OperationToast } from "@/components/ui/OperationToast";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
   actionLabel,
@@ -37,6 +35,9 @@ import {
   type ReplayPacingMode,
 } from "./filesystemUtils";
 import { useResponseAction } from "./useResponseAction";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { OperationToast } from "@/components/ui/OperationToast";
+import type { HopResolutionStatus } from "./sessionHopResolver";
 
 type SidebarTab = "replay" | "commands" | "actions";
 
@@ -63,6 +64,10 @@ interface CwdRouteHistoryProps {
   selectedHistoryEventId: string | null;
   layout?: "card" | "sidebar";
   sessionIsLive?: boolean;
+  hopResolutionStatus?: HopResolutionStatus;
+  requestedHop?: string | null;
+  onClearHop?: () => void;
+  onShowLatestHop?: () => void;
   onSelectHistoryEventId: (eventId: string | null) => void;
   onLoadEarlier: () => void;
   isPlaying?: boolean;
@@ -87,6 +92,10 @@ export function CwdRouteHistory({
   selectedHistoryEventId,
   layout = "card",
   sessionIsLive = false,
+  hopResolutionStatus = "idle",
+  requestedHop = null,
+  onClearHop,
+  onShowLatestHop,
   onSelectHistoryEventId,
   onLoadEarlier,
   isPlaying: controlledIsPlaying,
@@ -447,6 +456,50 @@ export function CwdRouteHistory({
               ) : (
                 /* Tab 1: Sleek Compact Route Replay */
                 <>
+            {/* Hop resolution feedback alert for unavailable, missing, or cross-session hops */}
+            {(hopResolutionStatus === "not-found" || hopResolutionStatus === "error") && (
+              <div
+                role="alert"
+                className="mb-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
+                data-testid="hop-resolution-alert"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-amber-100">
+                      {hopResolutionStatus === "not-found"
+                        ? "Requested hop unavailable"
+                        : "Error resolving requested hop"}
+                    </p>
+                    <p className="mt-0.5 text-amber-200/80">
+                      {hopResolutionStatus === "not-found"
+                        ? `The requested hop "${requestedHop}" could not be found or has expired.`
+                        : `Could not retrieve hop "${requestedHop}".`}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    {onShowLatestHop && (
+                      <button
+                        type="button"
+                        onClick={onShowLatestHop}
+                        className="rounded bg-amber-500/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors"
+                      >
+                        Show latest hop
+                      </button>
+                    )}
+                    {onClearHop && (
+                      <button
+                        type="button"
+                        onClick={onClearHop}
+                        className="rounded border border-amber-500/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20 transition-colors"
+                      >
+                        Clear hop
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Sleek Compact Hop Deck */}
             <div className="rounded-xl border border-border bg-surface-subtle p-2.5 shadow-2xs" aria-live="polite">
               {/* Controls & Scrubber Row */}
