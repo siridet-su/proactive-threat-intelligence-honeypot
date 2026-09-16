@@ -29,13 +29,14 @@ def test_staging_workflow_is_scoped_to_dashboard_and_staging_pushes() -> None:
     assert "CLOUDFLARE_API_TOKEN" not in workflow
 
 
-def test_staging_uses_explicit_direct_api_handlers_without_bff_proxy() -> None:
+def test_staging_uses_explicit_session_gated_api_handlers() -> None:
     api_root = DASHBOARD / "src/app/api"
     assert not (api_root / "[...path]/route.ts").exists()
     for relative in ("threats/route.ts", "hardware/route.ts", "malware/route.ts", "users/route.ts"):
         route = (api_root / relative).read_text(encoding="utf-8")
         assert "export async function GET" in route
-        assert "clientPromise" in route
+        assert "getSessionFromRequest" in route
+        assert "clientPromise" not in route
 
 
 def test_staging_unit_is_non_root_and_loopback_only() -> None:

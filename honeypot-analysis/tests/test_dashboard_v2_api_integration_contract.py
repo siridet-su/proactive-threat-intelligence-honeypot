@@ -14,11 +14,15 @@ def _active_source() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in paths) + "\n"
 
 
+def _fetches(source: str, route: str) -> bool:
+    return f'fetch("{route}"' in source or f"fetch('{route}'" in source
+
+
 def test_dashboard_v2_uses_explicit_runtime_api_routes_without_demo_fixtures() -> None:
     source = _active_source()
-    assert 'fetch("/api/threats")' in source
-    assert 'fetch("/api/hardware")' in source
-    assert 'fetch("/api/auth/login"' in source
+    assert _fetches(source, "/api/threats")
+    assert _fetches(source, "/api/hardware")
+    assert _fetches(source, "/api/auth/login")
     assert "mockData" not in source
     assert "password098" not in source
     assert "OP_4725" not in source
@@ -27,9 +31,10 @@ def test_dashboard_v2_uses_explicit_runtime_api_routes_without_demo_fixtures() -
 
 def test_dashboard_v2_session_detail_uses_typed_evidence_and_no_action_executor() -> None:
     detail = (DASHBOARD / "src/app/(main)/threat-intel/[id]/page.tsx").read_text(encoding="utf-8")
-    assert "isDashboardThreatEvent" in detail
-    assert 'fetch("/api/threats")' in detail
-    assert "ERROR: SESSION ARCHIVED OR NOT FOUND" in detail
+    assert "type DetailRecord = Record<string, unknown>" in detail
+    assert "useThreatFeed" in detail
+    assert "sessionLifecycleStatus" in detail
+    assert "SessionAnalysisPanels" in detail
     assert "safe_to_auto_execute" not in detail
     assert "execute authorization" not in detail.lower()
 
@@ -47,11 +52,14 @@ def test_dashboard_v2_exposes_only_explicit_direct_api_route_handlers() -> None:
         route = (api_root / relative).read_text(encoding="utf-8")
         assert "export const dynamic" in route or relative == "users/route.ts"
         assert "export async function GET" in route
-        assert "clientPromise" in route
+        assert "getSessionFromRequest" in route
+        assert "clientPromise" not in route
 
 
 def test_dashboard_v2_does_not_embed_automatic_response_execution() -> None:
     source = _active_source()
-    assert "safe_to_auto_execute" not in source
+    assert "safe_to_auto_execute: false" in source
+    assert "automatic_policy_mutation: false" in source
+    assert "automatic_response_execution: false" in source
     assert "exec(" not in source
     assert "child_process" not in source
