@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,11 @@ def test_dashboard_v2_uses_explicit_runtime_api_routes_without_demo_fixtures() -
 
 def test_dashboard_v2_session_detail_uses_typed_evidence_and_no_action_executor() -> None:
     detail = (DASHBOARD / "src/app/(main)/threat-intel/[id]/page.tsx").read_text(encoding="utf-8")
+    assert "SessionAnalysisPanels" in detail
+    assert "session-analysis-semantics" in detail
+    assert "session-intelligence" in detail
+    assert "observed_tactic_path" in detail
+    assert "handleNextDistinct" in detail
     assert "type DetailRecord = Record<string, unknown>" in detail
     assert "useThreatFeed" in detail
     assert "sessionLifecycleStatus" in detail
@@ -54,7 +60,12 @@ def test_dashboard_v2_exposes_only_explicit_direct_api_route_handlers() -> None:
         assert "export async function GET" in route
         assert "getSessionFromRequest" in route
         assert "clientPromise" not in route
-
+    session_analysis = (api_root / "session-analysis/[capability]/route.ts").read_text(encoding="utf-8")
+    assert "export const dynamic" in session_analysis
+    assert "export async function GET" in session_analysis
+    assert "getSessionFromRequest" in session_analysis
+    assert "safe_to_auto_execute: false" in session_analysis
+    assert "automatic_response_execution: false" in session_analysis
 
 def test_dashboard_v2_does_not_embed_automatic_response_execution() -> None:
     source = _active_source()
@@ -63,3 +74,11 @@ def test_dashboard_v2_does_not_embed_automatic_response_execution() -> None:
     assert "automatic_response_execution: false" in source
     assert "exec(" not in source
     assert "child_process" not in source
+    assert "execFile" not in source
+    assert "execSync" not in source
+    assert "spawn(" not in source
+    assert not re.search(r"\bexec\s*\(", source)
+
+    session_analysis = (DASHBOARD / "src/app/api/session-analysis/[capability]/route.ts").read_text(encoding="utf-8")
+    assert "requires_manual_approval: true" in session_analysis
+    assert "safe_to_auto_execute: false" in session_analysis

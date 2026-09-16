@@ -113,6 +113,15 @@ def test_monitor_asset_uses_separate_endpoint_labels_and_text_content() -> None:
     assert "/api/ai-advisory?session_id=" in html
     assert "AI-generated advisory — non-authoritative" in html
     assert "Unverified AI candidates" in html
+    assert "provenance.provider_id" in html
+    assert "provenance.model_id" in html
+    assert "Provider: ${providerId || '—'} · model: ${modelId || '—'}" in html
+    assert "renderEnsembleEvidenceCard" in html
+    assert "Model1 + Model2 Ensemble Evidence" in html
+    assert "UNIFIED_ONE_MODEL" in html
+    assert "Independent binary heads" in html
+    assert "numeric scores are not fused" in html
+    assert "detail?.ensemble_evidence" in html
     assert "item.textContent = String(paragraph?.text || '')" in html
     assert "renderAIAdvisoryPanel(aiResult)" in html
 

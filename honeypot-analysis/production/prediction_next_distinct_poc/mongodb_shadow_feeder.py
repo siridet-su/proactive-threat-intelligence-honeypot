@@ -417,8 +417,21 @@ class MongoShadowFeeder:
         phase_count = _positive_int(payload.get("prediction_trusted_phase_count"), "prediction_trusted_phase_count")
         if revision != progression or phase_count != progression:
             raise FeederReject("session counters do not equal v3 progression")
+        ended = bool(doc.get("ended"))
         prior = self.state["sessions"].get(sequence_id)
-        if prior and progression <= int(prior.get("last_progression", 0)):
+        if prior:
+            prior_manifest_hash = _text(prior.get("last_history_manifest_hash"))
+            prior_ended = prior.get("last_ended")
+            same_state = (
+                bool(prior_manifest_hash)
+                and prior_ended is not None
+                and progression == int(prior.get("last_progression", 0))
+                and manifest_hash == prior_manifest_hash
+                and ended == bool(prior_ended)
+            )
+        else:
+            same_state = False
+        if same_state:
             self.metrics["duplicate_rows"] += 1
             return "DUPLICATE"
         if dry_run:
@@ -429,7 +442,8 @@ class MongoShadowFeeder:
         except PredictorFailure:
             self.metrics["predictor_failures"] += 1
             raise
-        prediction_id = hashlib.sha256(("shadow-next-distinct-v2\\0" + self.deployment_id + "\\0" + sequence_id + "\\0" + str(progression)).encode()).hexdigest()
+        state_identity = "\\0".join((str(progression), manifest_hash, "1" if ended else "0"))
+        prediction_id = hashlib.sha256(("shadow-next-distinct-v2\\0" + self.deployment_id + "\\0" + sequence_id + "\\0" + state_identity).encode()).hexdigest()
         record = {
             "schema_version": "gcp_cowrie_shadow_prediction_record.v2",
             "prediction_id": prediction_id,
@@ -437,7 +451,7 @@ class MongoShadowFeeder:
             "progression_index": progression,
             "history": observations[-MAX_HISTORY:],
             "history_length": len(observations[-MAX_HISTORY:]),
-            "session_ended": bool(doc.get("ended")),
+            "session_ended": ended,
             "updated_at": cursor["updated_at"],
             "revision": cursor["revision"],
             "evidence_cutoff_sha256": digest(manifest["evidence_cutoff"]),
@@ -453,7 +467,16 @@ class MongoShadowFeeder:
             "recorded_at": time.time(),
         }
         self._append_record(record)
-        self.state["sessions"][sequence_id] = {"last_progression": progression, "last_cursor": cursor, "ended": bool(doc.get("ended")), "manifest_hash": manifest_hash}
+        self.state["sessions"][sequence_id] = {
+            "last_progression": progression,
+            "last_cursor": cursor,
+            # Keep the legacy fields while rolling out the explicit state
+            # fingerprint; older readers can still inspect this state file.
+            "ended": ended,
+            "manifest_hash": manifest_hash,
+            "last_ended": ended,
+            "last_history_manifest_hash": manifest_hash,
+        }
         self.metrics["rows_eligible"] += 1
         self.metrics["predictions_emitted"] += 1
         return "EMITTED"

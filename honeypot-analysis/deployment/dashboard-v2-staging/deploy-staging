@@ -75,15 +75,25 @@ lock_sha="${lock_sha,,}"
 actual_sha="$($SHA256SUM "$artifact" | awk '{print $1}')"
 [[ "$actual_sha" == "$artifact_sha" ]] || die 'artifact SHA-256 does not match the CI manifest'
 
+archive_paths="$($TAR -tzf "$artifact")" || die 'archive listing failed'
 while IFS= read -r entry; do
   entry="${entry#./}"
   [[ -n "$entry" ]] || continue
-  [[ "$entry" != /* && "$entry" != ../* && "$entry" != */../* ]] || die 'archive contains a path traversal entry'
+  [[ "$entry" != /* && "$entry" != .. && "$entry" != ../* && "$entry" != */.. && "$entry" != */../* ]] || die 'archive contains a path traversal entry'
   case "$entry" in
     server.js|build-metadata.json|package.json|.next|.next/*|node_modules|node_modules/*|public|public/*) ;;
     *) die "archive contains an unexpected path: $entry" ;;
   esac
-done < <($TAR -tzf "$artifact")
+done <<< "$archive_paths"
+
+archive_verbose="$($TAR -tvzf "$artifact")" || die 'archive type listing failed'
+while IFS= read -r listing; do
+  [[ -n "$listing" ]] || continue
+  case "$(printf '%s' "$listing" | /usr/bin/cut -c1)" in
+    -|d) ;;
+    *) die 'archive contains an unsupported member type' ;;
+  esac
+done <<< "$archive_verbose"
 
 candidate="$(/usr/bin/mktemp -d "$RELEASES/.incoming.XXXXXX")"
 cleanup_candidate() {
@@ -182,9 +192,13 @@ check_health() {
             --output "$health_page" http://127.0.0.1:3001/ \
             && /usr/bin/grep -Fq 'STAGING' "$health_page" \
             && /usr/bin/grep -Fq "$expected_short" "$health_page"; then
-            local unauth_status
-            unauth_status="$($CURL --silent --show-error --max-time 3 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3001/api/health || true)"
-            if [[ "$unauth_status" == '401' ]]; then
+            # The current dashboard uses explicit route handlers and no
+            # legacy catch-all /api/health route. Probe a backend-independent
+            # explicit route with an unsupported method so a 405 proves the
+            # Next runtime/router is serving the packaged release.
+            local route_status
+            route_status="$($CURL --silent --show-error --max-time 3 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3001/api/auth/login || true)"
+            if [[ "$route_status" == '405' ]]; then
               healthy=1
               break
             fi
