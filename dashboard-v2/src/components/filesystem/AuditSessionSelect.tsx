@@ -98,6 +98,26 @@ export function AuditSessionSelect({
   const generatedId = useId();
   const triggerId = `audit-session-select-${generatedId}`;
   const menuId = `${triggerId}-menu`;
+  const openRef = useRef(open);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  const wasOpenRef = useRef(open);
+  useEffect(() => {
+    if (wasOpenRef.current && !open) {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      setSearchQuery("");
+      setRemoteSessions([]);
+      setRemoteCursor(null);
+      setHasMoreRemote(false);
+      onClearSearch?.();
+    }
+    wasOpenRef.current = open;
+  }, [open, onClearSearch]);
 
   const isSearchActive = Boolean(searchQuery.trim());
 
@@ -141,9 +161,11 @@ export function AuditSessionSelect({
       setRemoteCursor(null);
       setHasMoreRemote(false);
       onClearSearch?.();
-    } else if (onSearch) {
+    } else if (onSearch && openRef.current) {
       debounceTimerRef.current = setTimeout(() => {
-        onSearch(trimmed);
+        if (openRef.current) {
+          onSearch(trimmed);
+        }
       }, 250);
     }
   };
@@ -152,6 +174,7 @@ export function AuditSessionSelect({
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
       }
     };
   }, []);
@@ -164,6 +187,7 @@ export function AuditSessionSelect({
     if (!query) return;
 
     const timer = setTimeout(async () => {
+      if (!openRef.current) return;
       setIsLoadingRemote(true);
       try {
         const params = new URLSearchParams();
@@ -335,12 +359,35 @@ export function AuditSessionSelect({
   );
 
   const closeMenu = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     setOpen(false);
     setSearchQuery("");
     setRemoteSessions([]);
     setRemoteCursor(null);
     setHasMoreRemote(false);
-  }, []);
+    onClearSearch?.();
+  }, [onClearSearch]);
+
+  const handleToggleOpen = useCallback(() => {
+    setOpen((prev) => {
+      if (prev) {
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+        setSearchQuery("");
+        setRemoteSessions([]);
+        setRemoteCursor(null);
+        setHasMoreRemote(false);
+        onClearSearch?.();
+        return false;
+      }
+      return true;
+    });
+  }, [onClearSearch]);
 
   const handleSelect = useCallback(
     (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
@@ -385,7 +432,7 @@ export function AuditSessionSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={menuId}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={handleToggleOpen}
         onKeyDown={handleTriggerKeyDown}
         className={`h-9 min-h-9 max-w-[280px] sm:max-w-md flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text transition-colors cursor-pointer select-none ${
           open

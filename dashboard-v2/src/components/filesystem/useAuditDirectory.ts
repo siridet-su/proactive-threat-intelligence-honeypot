@@ -23,21 +23,49 @@ export interface AuditScope {
   q?: string | null;
 }
 
+export function normalizeAuditScopeTargetPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  const stripped = trimmed.replace(/\/+$/, "");
+  return stripped || "/";
+}
+
+export function normalizeAuditScopeQuery(q: string | null | undefined): string | null {
+  if (!q) return null;
+  const trimmed = q.trim();
+  return trimmed ? trimmed.toLowerCase() : null;
+}
+
 /**
- * Creates a stable canonical string key for an audit query scope.
+ * Creates a deterministic canonical string key for an audit query scope as a JSON tuple:
+ * [hideHome: boolean, targetPath: string | null, q: string | null]
+ * Round-trips characters such as &, |, %, =, spaces, and Unicode without collision.
  */
 export function createAuditScopeKey(scope: AuditScope): string {
-  const normPath = scope.targetPath ? scope.targetPath.trim().replace(/\/+$/, "") || "/" : "";
-  const normQ = scope.q ? scope.q.trim().toLowerCase() : "";
-  return `hideHome=${scope.hideHome ? "1" : "0"}|targetPath=${normPath}|q=${normQ}`;
+  const hideHome = Boolean(scope.hideHome);
+  const targetPath = normalizeAuditScopeTargetPath(scope.targetPath);
+  const q = normalizeAuditScopeQuery(scope.q);
+  return JSON.stringify([hideHome, targetPath, q]);
 }
 
 export function parseAuditScopeKey(key: string): AuditScope {
-  const params = new URLSearchParams(key.replace(/\|/g, "&"));
-  const hideHome = params.get("hideHome") === "1";
-  const targetPath = params.get("targetPath") || null;
-  const q = params.get("q") || null;
-  return { hideHome, targetPath, q };
+  if (!key) {
+    return { hideHome: false, targetPath: null, q: null };
+  }
+  try {
+    const parsed = JSON.parse(key);
+    if (Array.isArray(parsed) && parsed.length === 3) {
+      return {
+        hideHome: Boolean(parsed[0]),
+        targetPath: typeof parsed[1] === "string" ? parsed[1] : null,
+        q: typeof parsed[2] === "string" ? parsed[2] : null,
+      };
+    }
+  } catch {
+    // fallback
+  }
+  return { hideHome: false, targetPath: null, q: null };
 }
 
 /**
@@ -249,22 +277,30 @@ export function deriveAuthoritativeAuditMetrics({
     allSessions.map((s) => [s.sessionId, s]),
   );
 
+  const resolvedCurrentScopeKey =
+    currentScopeKey ?? createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+  const resolvedSummaryScopeKey =
+    summaryScopeKey !== undefined ? summaryScopeKey : summary ? resolvedCurrentScopeKey : null;
+
+  // Check if summary matches current scope
+  const isScopeMatch =
+    Boolean(summary) &&
+    summaryStatus === "success" &&
+    resolvedSummaryScopeKey !== null &&
+    resolvedSummaryScopeKey === resolvedCurrentScopeKey;
+
   // Distinct paths: merge active session paths with server-side closed distinct paths
+  // Only use summary.distinctPaths when summaryStatus is success and summaryScopeKey matches currentScopeKey
   let distinctPaths: DistinctPathOption[];
-  if (isAudit && summary && Array.isArray(summary.distinctPaths) && summary.distinctPaths.length > 0) {
+  if (isAudit && isScopeMatch && summary && Array.isArray(summary.distinctPaths) && summary.distinctPaths.length > 0) {
     const activeDistinct = getDistinctSessionPaths(activeSessions, []);
     distinctPaths = mergeAuthoritativeDistinctPaths(activeDistinct, summary.distinctPaths);
   } else {
     distinctPaths = getDistinctSessionPaths(activeSessions, effectiveClosedSessions);
   }
 
-  // Check if summary matches current scope
-  const isScopeMatch =
-    Boolean(summary) &&
-    summaryStatus === "success" &&
-    (!currentScopeKey || !summaryScopeKey || summaryScopeKey === currentScopeKey);
-
   // Home-only count across all effective sessions
+  // Only use summary.homeOnlyCount when summaryStatus is success and summaryScopeKey matches currentScopeKey
   let homeOnlyCount = 0;
   if (isAudit && isScopeMatch && summary && typeof summary.homeOnlyCount === "number") {
     let activeHomeOnly = 0;
@@ -289,10 +325,11 @@ export function deriveAuthoritativeAuditMetrics({
   const filteredClosedSessions = effectiveClosedSessions.filter(filterFn);
 
   // Total session count
+  // Only use summary.totalSessions or auditDirectoryTotalCount when isScopeMatch is true
   let totalSessionsCount = 0;
-  if (isAudit && summary && typeof summary.totalSessions === "number") {
+  if (isAudit && isScopeMatch && summary && typeof summary.totalSessions === "number") {
     totalSessionsCount = activeSessions.length + summary.totalSessions;
-  } else if (isAudit && typeof auditDirectoryTotalCount === "number" && auditDirectoryTotalCount > 0) {
+  } else if (isAudit && isScopeMatch && typeof auditDirectoryTotalCount === "number" && auditDirectoryTotalCount > 0) {
     totalSessionsCount = activeSessions.length + auditDirectoryTotalCount;
   } else {
     totalSessionsCount = activeSessions.length + effectiveClosedSessions.length;
@@ -304,7 +341,9 @@ export function deriveAuthoritativeAuditMetrics({
   const isAuthoritative = !isAudit || (isScopeMatch && Boolean(summary)) || isDirectoryComplete;
 
   if (!hasActiveFilters && isAudit) {
-    // When no filter is active in audit mode, filtered count equals total count
+    // When no filter is active in audit mode:
+    // If scope matches, totalSessionsCount is authoritative.
+    // If summary is loading or failed, totalSessionsCount is loaded count, and isAuthoritative is false.
     filteredSessionsCount = totalSessionsCount;
   } else if (
     isAudit &&
@@ -323,7 +362,8 @@ export function deriveAuthoritativeAuditMetrics({
     hideHomeOnly &&
     !targetPathFilter &&
     summary &&
-    typeof summary.homeOnlyCount === "number"
+    typeof summary.homeOnlyCount === "number" &&
+    typeof summary.totalSessions === "number"
   ) {
     // Home-only filter with valid scope summary
     filteredSessionsCount =
@@ -331,7 +371,7 @@ export function deriveAuthoritativeAuditMetrics({
   } else if (isAudit && isScopeMatch && hasActiveFilters && summary && typeof summary.matchingCount === "number") {
     filteredSessionsCount = filteredActiveSessions.length + summary.matchingCount;
   } else {
-    // Stale summary, error, or in-flight fetch: fall back to loaded items count
+    // Stale summary, error, or in-flight fetch: explicitly non-authoritative loaded-data fallback
     filteredSessionsCount = filteredActiveSessions.length + filteredClosedSessions.length;
   }
 
@@ -459,6 +499,10 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   }
 
   const fetchInitial = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null }) => {
+    // When hideHome or targetPath changes (or on any initial scope fetch),
+    // abort and clear any active search state before the new directory scope becomes active.
+    clearSearch();
+
     directoryAbortController?.abort();
     directoryAbortController = new AbortController();
     const currentGen = ++directoryGeneration;
@@ -567,19 +611,24 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   ) => {
     const trimmed = query.trim();
     if (!trimmed) {
-      searchAbortController?.abort();
-      searchAbortController = null;
-      searchGeneration++;
-      setState({
-        searchQuery: "",
-        searchItems: [],
-        searchCursor: null,
-        searchHasMore: false,
-        searchIsComplete: false,
-        searchIsLoading: false,
-        searchScopeKey: "",
-      });
+      clearSearch();
       return;
+    }
+
+    const hideHome = Boolean(filterOptions?.hideHome);
+    const targetPath = filterOptions?.targetPath ?? null;
+    const scopeKey = createAuditScopeKey({ hideHome, targetPath, q: trimmed });
+
+    if (cursor) {
+      // Never combine a search cursor created under one scope with filters from another scope.
+      if (state.searchScopeKey && state.searchScopeKey !== scopeKey) {
+        clearSearch();
+        return;
+      }
+      if (!state.searchCursor || state.searchCursor !== cursor) {
+        clearSearch();
+        return;
+      }
     }
 
     // Abort previous search request
@@ -587,10 +636,6 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     searchAbortController = new AbortController();
     const currentGen = ++searchGeneration;
     const signal = searchAbortController.signal;
-
-    const hideHome = Boolean(filterOptions?.hideHome);
-    const targetPath = filterOptions?.targetPath ?? null;
-    const scopeKey = createAuditScopeKey({ hideHome, targetPath, q: trimmed });
 
     setState({
       searchQuery: trimmed,
@@ -648,9 +693,25 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   const loadMoreSearch = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null }) => {
     if (state.searchIsLoading || !state.searchHasMore || !state.searchCursor || !state.searchQuery) return;
     const parsed = parseAuditScopeKey(state.searchScopeKey);
-    const hideHome = filterOptions?.hideHome ?? parsed.hideHome;
-    const targetPath = filterOptions?.targetPath !== undefined ? filterOptions.targetPath : parsed.targetPath;
-    return searchSessions(state.searchQuery, state.searchCursor, { hideHome, targetPath });
+
+    // loadMoreSearch must either use the exact stored search scope or reject/reset when the current scope differs.
+    if (filterOptions) {
+      const requestedHideHome = Boolean(filterOptions.hideHome);
+      const requestedTargetPath = filterOptions.targetPath ?? null;
+      if (
+        requestedHideHome !== parsed.hideHome ||
+        normalizeAuditScopeTargetPath(requestedTargetPath) !== normalizeAuditScopeTargetPath(parsed.targetPath)
+      ) {
+        clearSearch();
+        return;
+      }
+    }
+
+    // Always use the exact stored search scope
+    return searchSessions(state.searchQuery, state.searchCursor, {
+      hideHome: parsed.hideHome,
+      targetPath: parsed.targetPath,
+    });
   };
 
   const clearSearch = () => {
@@ -704,20 +765,34 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
       if (!res.ok) {
         throw new Error(`Server returned status ${res.status}`);
       }
-      const data = (await res.json()) as AuditDirectorySummary;
+      const data = (await res.json()) as unknown;
       if (signal.aborted || currentGen !== summaryGeneration) return;
 
-      if (data && typeof data === "object" && typeof data.totalSessions === "number") {
+      const isValidSummary =
+        Boolean(data) &&
+        typeof data === "object" &&
+        data !== null &&
+        typeof (data as AuditDirectorySummary).totalSessions === "number" &&
+        typeof (data as AuditDirectorySummary).homeOnlyCount === "number" &&
+        Array.isArray((data as AuditDirectorySummary).distinctPaths);
+
+      if (isValidSummary) {
         setState({
-          summary: data,
+          summary: data as AuditDirectorySummary,
           summaryScopeKey: scopeKey,
           summaryStatus: "success",
           summaryIsLoading: false,
+          summaryError: null,
         });
+      } else {
+        // An HTTP 2xx response with an invalid summary payload must leave loading state and enter an error state.
+        throw new Error("Invalid summary payload received from server");
       }
     } catch (err: unknown) {
       if (signal.aborted || currentGen !== summaryGeneration) return;
       setState({
+        summary: null,
+        summaryScopeKey: null,
         summaryStatus: "error",
         summaryError: err instanceof Error ? err.message : "Failed to load summary",
         summaryIsLoading: false,
@@ -764,7 +839,7 @@ export function useAuditDirectory({
 
   const prevScopeRef = useRef<string>("");
 
-  // When in audit mode and filter scope changes: fetch initial page of the new scope
+  // When in audit mode and filter scope changes: abort and clear search, then fetch initial page & summary of the new scope
   useEffect(() => {
     if (viewMode !== "audit") {
       prevScopeRef.current = "";
@@ -774,6 +849,7 @@ export function useAuditDirectory({
     if (prevScopeRef.current === currentScopeKey) return;
     prevScopeRef.current = currentScopeKey;
 
+    store.clearSearch();
     void store.fetchInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
     void store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
   }, [viewMode, hideHomeOnly, targetPathFilter, store]);
@@ -845,6 +921,9 @@ export function useAuditDirectory({
     hasMoreAuditSessions: storeState.directoryHasMore,
     isLoadingAuditSessions: storeState.directoryIsLoading,
     loadMoreAuditSessions: store.loadMoreDirectory,
-    auditDirectoryTotalCount: storeState.summary?.totalSessions ?? storeState.directoryItems.length,
+    auditDirectoryTotalCount:
+      (storeState.summaryStatus === "success" && storeState.summaryScopeKey === currentScopeKey
+        ? storeState.summary?.totalSessions
+        : null) ?? storeState.directoryItems.length,
   };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildAuditSessionsUrl,
@@ -9,6 +9,7 @@ import {
   mergeAuthoritativeClosedSessions,
   mergeAuthoritativeDistinctPaths,
   parseAuditScopeKey,
+  type AuditScope,
 } from "../src/components/filesystem/useAuditDirectory";
 import {
   buildAuditSessionsQuery,
@@ -568,12 +569,34 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
     it("round-trips createAuditScopeKey and parseAuditScopeKey", () => {
       const scope = { hideHome: true, targetPath: "/etc/nginx", q: "attacker" };
       const key = createAuditScopeKey(scope);
-      expect(key).toBe("hideHome=1|targetPath=/etc/nginx|q=attacker");
+      expect(key).toBe(JSON.stringify([true, "/etc/nginx", "attacker"]));
       expect(parseAuditScopeKey(key)).toEqual({
         hideHome: true,
         targetPath: "/etc/nginx",
         q: "attacker",
       });
+    });
+
+    it("round-trips paths and queries containing &, |, %, =, spaces, and Unicode with normalization", () => {
+      const scope: AuditScope = {
+        hideHome: true,
+        targetPath: "/var/log|audit&test=1%20/dir///",
+        q: "  Attacker & | % = 📁 นคร / test  ",
+      };
+
+      const key = createAuditScopeKey(scope);
+      expect(key.startsWith("[")).toBe(true);
+
+      const parsed = parseAuditScopeKey(key);
+      expect(parsed.hideHome).toBe(true);
+      // Target path normalized: trailing slashes stripped
+      expect(parsed.targetPath).toBe("/var/log|audit&test=1%20/dir");
+      // Query normalized: trimmed and lowercase
+      expect(parsed.q).toBe("attacker & | % = 📁 นคร / test");
+
+      // Root path preserves single slash
+      const rootKey = createAuditScopeKey({ hideHome: false, targetPath: "///" });
+      expect(parseAuditScopeKey(rootKey).targetPath).toBe("/");
     });
 
     it("discards out-of-order summary response for previous scope when later scope resolves first", async () => {
@@ -680,6 +703,82 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
       expect(errorMetrics.isAuthoritative).toBe(false);
       expect(errorMetrics.filteredSessionsCount).toBe(1);
     });
+
+    it("stale or mismatched summary cannot affect totalSessionsCount or distinctPaths", () => {
+      const staleSummary: AuditDirectorySummary = {
+        totalSessions: 9999,
+        homeOnlyCount: 500,
+        matchingCount: 8888,
+        distinctPaths: [{ path: "/stale/backdoor", sessionCount: 9999 }],
+      };
+
+      const loadedSessions = [
+        createClosedSession("sess-1", "2026-09-16T08:00:00.000Z", ["/var/log"], false),
+      ];
+
+      // Scope mismatch: current scope is /var, summary is for /etc
+      const currentScopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/var" });
+      const staleScopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/etc" });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loadedSessions,
+        snapshotRecentClosedSessions: [],
+        summary: staleSummary,
+        summaryScopeKey: staleScopeKey,
+        currentScopeKey,
+        summaryStatus: "success", // even if status is success, mismatched scope key prevents using summary
+        targetPathFilter: "/var",
+      });
+
+      // totalSessionsCount MUST NOT use 9999; must fall back to loaded count
+      expect(metrics.totalSessionsCount).toBe(1);
+      // distinctPaths MUST NOT contain /stale/backdoor
+      expect(metrics.distinctPaths.some((p) => p.path === "/stale/backdoor")).toBe(false);
+      // isAuthoritative MUST be false
+      expect(metrics.isAuthoritative).toBe(false);
+
+      // Loading state also ignores stale summary
+      const loadingMetrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loadedSessions,
+        snapshotRecentClosedSessions: [],
+        summary: staleSummary,
+        summaryScopeKey: currentScopeKey,
+        currentScopeKey,
+        summaryStatus: "loading",
+        targetPathFilter: "/var",
+      });
+      expect(loadingMetrics.totalSessionsCount).toBe(1);
+      expect(loadingMetrics.distinctPaths.some((p) => p.path === "/stale/backdoor")).toBe(false);
+      expect(loadingMetrics.isAuthoritative).toBe(false);
+    });
+
+    it("exits loading with an error when server returns an HTTP 2xx response with invalid summary payload", async () => {
+      const mockFetch: typeof fetch = async () => {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            // Invalid payload missing required summary fields
+            malformed: true,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      await store.fetchSummary({ hideHome: false, targetPath: null });
+
+      // Must leave loading state and enter error state
+      expect(store.getState().summaryIsLoading).toBe(false);
+      expect(store.getState().summaryStatus).toBe("error");
+      expect(store.getState().summaryError).toContain("Invalid summary payload");
+      expect(store.getState().summary).toBeNull();
+      expect(store.getState().summaryScopeKey).toBeNull();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -762,6 +861,82 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
       expect(store.getState().searchIsLoading).toBe(false);
       expect(store.getState().searchCursor).toBeNull();
       expect(store.getState().searchHasMore).toBe(false);
+    });
+
+    it("aborts and clears active search state when filter scope changes", async () => {
+      let searchAborted = false;
+      const mockFetch: typeof fetch = async (input, init) => {
+        const url = String(input);
+        if (url.includes("q=")) {
+          const signal = init?.signal as AbortSignal | undefined;
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              searchAborted = true;
+            });
+          }
+          return new Promise(() => {}); // never resolves
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            items: [],
+            nextCursor: null,
+            totalItems: 0,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Start search under scope 1
+      void store.searchSessions("attacker", null, { hideHome: false, targetPath: null });
+      expect(store.getState().searchIsLoading).toBe(true);
+      expect(store.getState().searchQuery).toBe("attacker");
+
+      // Filter scope changes: fetchInitial for new scope
+      await store.fetchInitial({ hideHome: true, targetPath: "/var" });
+
+      // Active search must be aborted and cleared
+      expect(searchAborted).toBe(true);
+      expect(store.getState().searchQuery).toBe("");
+      expect(store.getState().searchItems).toEqual([]);
+      expect(store.getState().searchIsLoading).toBe(false);
+      expect(store.getState().searchCursor).toBeNull();
+    });
+
+    it("never sends an old search cursor with a new filter scope and rejects/resets instead", async () => {
+      const requestedUrls: string[] = [];
+
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        return {
+          ok: true,
+          json: async () => ({
+            items: [createClosedSession("search-1", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
+            nextCursor: "cursor-scope-1",
+            totalItems: 5,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Search page 1 under scope { hideHome: false, targetPath: null }
+      await store.searchSessions("malware", null, { hideHome: false, targetPath: null });
+      expect(store.getState().searchCursor).toBe("cursor-scope-1");
+
+      // Attempt to loadMoreSearch with a DIFFERENT scope { hideHome: true, targetPath: "/etc" }
+      await store.loadMoreSearch({ hideHome: true, targetPath: "/etc" });
+
+      // Must reject/reset! Search cursor is NOT sent with the new filter scope.
+      const invalidCombinedUrl = requestedUrls.find(
+        (u) => u.includes("cursor=cursor-scope-1") && (u.includes("hideHome=1") || u.includes("targetPath")),
+      );
+      expect(invalidCombinedUrl).toBeUndefined();
+      // Search state should be reset
+      expect(store.getState().searchCursor).toBeNull();
+      expect(store.getState().searchQuery).toBe("");
     });
   });
 
@@ -846,9 +1021,9 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
   });
 
   // ---------------------------------------------------------------------------
-  // Suite E: Server Summary Semantics and normalizeSessionAuditSummary Alignment
+  // Suite E: Query Builder Contracts and normalizeSessionAuditSummary Alignment
   // ---------------------------------------------------------------------------
-  describe("Suite E: Server Summary Semantics and normalizeSessionAuditSummary Alignment", () => {
+  describe("Suite E: Query Builder Contracts and normalizeSessionAuditSummary Alignment", () => {
     it("strictly conforms to normalizeSessionAuditSummary semantics for visited paths, root handling, and homeOnly", () => {
       // 1. Root only is NOT home-only
       const rootOnly = normalizeSessionAuditSummary("/", [], [], 1);
@@ -890,9 +1065,9 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
   });
 
   // ---------------------------------------------------------------------------
-  // Suite F: Debounced Search and Request Volume Verification
+  // Suite F: Search and Pagination Request Parameter Contracts and Debounce Cancellation
   // ---------------------------------------------------------------------------
-  describe("Suite F: Debounced Search and Request Volume Verification", () => {
+  describe("Suite F: Search and Pagination Request Parameter Contracts and Debounce Cancellation", () => {
     it("does not include summary parameter on search requests or paginated requests", () => {
       // Regular search URL has q, no summary
       const searchUrl = buildAuditSessionsUrl({ q: "test", limit: 25 });
@@ -907,6 +1082,59 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
       // Initial directory URL can request summary
       const summaryUrl = buildAuditSessionsUrl({ summary: true, limit: 50 });
       expect(summaryUrl).toContain("summary=1");
+    });
+
+    it("closing or clearing cancels a pending debounced search and fires onClearSearch", () => {
+      vi.useFakeTimers();
+      try {
+        let searchFired = false;
+        let clearFired = false;
+        let searchedVal: string | null = null;
+        const onSearch = (val: string) => {
+          searchFired = true;
+          searchedVal = val;
+        };
+        const onClearSearch = () => {
+          clearFired = true;
+        };
+
+        // Simulate the debounce lifecycle
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        let isOpen = true;
+
+        const handleSearchChange = (val: string) => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            if (isOpen) onSearch(val);
+          }, 250);
+        };
+
+        const handleClose = () => {
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+          isOpen = false;
+          onClearSearch();
+        };
+
+        // User types search query
+        handleSearchChange("attacker");
+        expect(searchFired).toBe(false);
+
+        // Before 250ms expires (at 100ms), user closes popover
+        vi.advanceTimersByTime(100);
+        handleClose();
+        expect(clearFired).toBe(true);
+
+        // Advance beyond the 250ms threshold
+        vi.advanceTimersByTime(300);
+        // Search request MUST NOT have fired
+        expect(searchFired).toBe(false);
+        expect(searchedVal).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
