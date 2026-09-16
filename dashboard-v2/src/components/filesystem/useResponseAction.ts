@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { FilesystemTopologySession, SessionTerminateAction } from "@/lib/dashboardTypes";
 import type { OperationToastKind } from "@/components/ui/OperationToast";
+import { ResponseActionPollingController } from "./responseActionPoller";
 
 export type TerminateCapability = "idle" | "loading" | "available" | "forbidden" | "unconfigured" | "error";
 export type { OperationToastKind };
@@ -89,65 +90,84 @@ export function useResponseAction({
     return () => controller.abort();
   }, [controlSessionId, fetchTerminateState, enabled]);
 
-  // Bounded exponential polling backoff for requested/delivered actions
+  const actionId = visibleTerminateAction?.actionId ?? null;
+  const actionStatus = visibleTerminateAction?.status ?? null;
+  const shouldPoll = Boolean(
+    enabled &&
+    controlSessionId &&
+    actionId &&
+    (actionStatus === "requested" || actionStatus === "delivered")
+  );
+
+  const pollerRef = useRef<ResponseActionPollingController | null>(null);
+
+  // Bounded single-lifecycle polling per action
   useEffect(() => {
-    if (!controlSessionId || !visibleTerminateAction || !["requested", "delivered"].includes(visibleTerminateAction.status)) return;
-    const controller = new AbortController();
-    let timeoutId: number | null = null;
-    let currentDelay = !sessionIsLive ? 100 : 1_000;
-    const startTime = Date.now();
-    const MAX_POLL_DURATION_MS = 24_000;
+    if (!shouldPoll || !controlSessionId || !actionId) {
+      if (pollerRef.current) {
+        pollerRef.current.abort();
+        pollerRef.current = null;
+      }
+      return;
+    }
 
-    const poll = () => {
-      void fetchTerminateState(controlSessionId, visibleTerminateAction.actionId, controller.signal)
-        .then((document) => {
-          if (controller.signal.aborted) return;
-          const action = document.action ?? null;
-          setTerminateAction(action);
-          setTerminateCapability(terminateCapabilityFrom(document));
-          setTerminateCapabilitySessionId(controlSessionId);
+    // Do not restart polling if the controller for this exact session and action is already active
+    if (pollerRef.current?.matches(controlSessionId, actionId)) {
+      return;
+    }
 
-          if (action?.status === "verified") {
-            setOperationToast({
-              kind: "success",
-              title: "Session disconnected",
-              description: "Cowrie emitted the verified session-closed lifecycle event.",
-            });
-            return;
-          }
-          if (action?.status === "failed") {
-            const description = action.failureCategory
-              ? `Action failed: ${action.failureCategory.replace(/_/g, " ")}`
-              : "Session termination could not be verified.";
-            setOperationToast({
-              kind: "error",
-              title: "Disconnection failed",
-              description,
-            });
-            return;
-          }
+    if (pollerRef.current) {
+      pollerRef.current.abort();
+      pollerRef.current = null;
+    }
 
-          if (Date.now() - startTime < MAX_POLL_DURATION_MS) {
-            currentDelay = Math.min(3_500, Math.round(currentDelay * 1.5));
-            timeoutId = window.setTimeout(poll, currentDelay);
-          }
-        })
-        .catch(() => {
-          if (controller.signal.aborted) return;
-          if (Date.now() - startTime < MAX_POLL_DURATION_MS) {
-            currentDelay = Math.min(3_500, Math.round(currentDelay * 1.5));
-            timeoutId = window.setTimeout(poll, currentDelay);
-          }
-        });
-    };
+    const poller = new ResponseActionPollingController({
+      sessionId: controlSessionId,
+      actionId,
+      requestedAt: visibleTerminateAction?.requestedAt,
+      sessionIsLive,
+      fetchState: fetchTerminateState,
+      onActionUpdate: (action, capability) => {
+        setTerminateAction(action);
+        setTerminateCapability(capability);
+        setTerminateCapabilitySessionId(controlSessionId);
+      },
+      onTerminal: (event) => {
+        if (event.kind === "verified") {
+          setOperationToast({
+            kind: "success",
+            title: "Session disconnected",
+            description: "Cowrie emitted the verified session-closed lifecycle event.",
+          });
+        } else if (event.kind === "failed") {
+          const description = event.failureCategory
+            ? `Action failed: ${event.failureCategory.replace(/_/g, " ")}`
+            : "Session termination could not be verified.";
+          setOperationToast({
+            kind: "error",
+            title: "Disconnection failed",
+            description,
+          });
+        } else if (event.kind === "timeout") {
+          setOperationToast({
+            kind: "error",
+            title: "Disconnection timed out",
+            description: "Session closure could not be verified within the expected window. State reconciliation may still be in progress.",
+          });
+        }
+      },
+    });
 
-    timeoutId = window.setTimeout(poll, currentDelay);
+    pollerRef.current = poller;
+    poller.start();
 
     return () => {
-      controller.abort();
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      poller.abort();
+      if (pollerRef.current === poller) {
+        pollerRef.current = null;
+      }
     };
-  }, [controlSessionId, fetchTerminateState, sessionIsLive, visibleTerminateAction]);
+  }, [controlSessionId, actionId, shouldPoll, sessionIsLive, enabled, fetchTerminateState, visibleTerminateAction?.requestedAt]);
 
   const handleTerminateSession = useCallback(async () => {
     if (!selectedSession) return;
