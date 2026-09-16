@@ -8,6 +8,13 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from production.policies.reference_provenance import (
+    project_root,
+    validate_attack_reference,
+    validate_manifest_binding,
+    validate_runtime_cache_binding,
+)
+
 
 SCHEMA_VERSION = "classification_rule_policy.v3"
 AUTHORITY_DECISION_SCHEMA = "command_authority_decision.v1"
@@ -112,6 +119,33 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
     if not policy.get("version"):
         errors.append("policy: missing version")
     body = policy.get("policy", policy)
+    reference_manifest = validate_manifest_binding(
+        policy,
+        errors,
+        root=project_root(),
+    )
+    validate_runtime_cache_binding(
+        policy.get("mitre_cache_binding"),
+        errors,
+        root=project_root(),
+    )
+    cache_binding = policy.get("mitre_cache_binding")
+    if isinstance(reference_manifest, dict) and isinstance(cache_binding, dict):
+        manifest_cache = reference_manifest.get("runtime_cache") or {}
+        for key in ("path", "version", "sha256"):
+            if cache_binding.get(key) != manifest_cache.get(key):
+                errors.append(
+                    f"mitre_cache_binding.{key}: does not match the reference manifest"
+                )
+    cache_techniques: Dict[str, Any] = {}
+    if isinstance(cache_binding, dict):
+        cache_path = project_root() / str(cache_binding.get("path") or "")
+        try:
+            loaded_cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_cache, dict) and isinstance(loaded_cache.get("techniques"), dict):
+                cache_techniques = loaded_cache["techniques"]
+        except (OSError, ValueError, json.JSONDecodeError):
+            cache_techniques = {}
     if isinstance(body, dict):
         review_mode = body.get("rule_review_mode", policy.get("rule_review_mode", "reviewed_only"))
         if str(review_mode or "").lower() not in ALLOWED_RULE_REVIEW_MODES:
@@ -134,6 +168,11 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
                 errors.append(
                     "policy.runtime_authority.trusted_literal_fallback_rule_ids "
                     "must be a list of rule IDs"
+                )
+            elif len({str(item).strip() for item in ids}) != len(ids):
+                errors.append(
+                    "policy.runtime_authority.trusted_literal_fallback_rule_ids "
+                    "contains duplicates"
                 )
     rules = _rules(policy)
     if not rules:
@@ -226,6 +265,52 @@ def validate_classification_rule_policy(policy: Dict[str, Any]) -> List[str]:
                 errors.append(f"{path}: confidence must be between 0 and 1")
         _validate_references(rule, path, errors)
         _validate_provenance(rule, path, errors)
+        provenance = rule.get("provenance") if isinstance(rule.get("provenance"), dict) else {}
+        reference_status = str(provenance.get("reference_status") or "").strip().lower()
+        retired = rule.get("enabled") is False or reference_status == "retired"
+        historical_pinned = reference_status == "historical_pinned"
+        if retired:
+            if rule.get("enabled") is not False:
+                errors.append(f"{path}: retired reference must be disabled")
+            if provenance.get("reference_status") != "retired":
+                errors.append(f"{path}: disabled reference must declare reference_status=retired")
+            if provenance.get("superseded_by") != "T1685":
+                errors.append(f"{path}: retired reference must declare superseded_by=T1685")
+        elif reference_status == "retired":
+            errors.append(f"{path}: retired reference must be disabled")
+        if historical_pinned:
+            if rule.get("enabled") is not True:
+                errors.append(f"{path}: historical_pinned reference must remain enabled")
+            if ttp != "T1562":
+                errors.append(f"{path}: historical_pinned reference must bind T1562")
+            if provenance.get("reference_snapshot") != (
+                "MITRE ATT&CK Enterprise STIX snapshot 2026-09-16; "
+                "runtime label pinned to local cache 14.1"
+            ):
+                errors.append(f"{path}: historical_pinned reference must declare the reviewed snapshot")
+        if isinstance(reference_manifest, dict):
+            for ref_index, reference in enumerate(_as_list(rule.get("references"))):
+                if isinstance(reference, dict) and "attack.mitre.org/techniques/" in str(reference.get("url") or ""):
+                    validate_attack_reference(
+                        reference,
+                        ttp,
+                        reference_manifest,
+                        errors,
+                        f"{path}.references[{ref_index}]",
+                        retired=retired,
+                        historical_pinned=historical_pinned,
+                    )
+        reviewed_tactic = rule.get("reviewed_tactic")
+        if reviewed_tactic is not None:
+            cache_entry = cache_techniques.get(ttp) or {}
+            tactics = cache_entry.get("tactics") if isinstance(cache_entry, dict) else []
+            expected_tactics = {
+                str(value).lower().replace(" ", "-")
+                for value in tactics
+                if isinstance(value, str) and value.strip()
+            }
+            if expected_tactics and str(reviewed_tactic).lower() not in expected_tactics:
+                errors.append(f"{path}: reviewed_tactic is not valid for bound TTP {ttp}")
     return errors
 
 

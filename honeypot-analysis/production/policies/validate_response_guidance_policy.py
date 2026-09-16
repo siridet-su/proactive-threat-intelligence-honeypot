@@ -15,6 +15,13 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from production.policies.reference_provenance import (
+    project_root,
+    validate_external_source_binding,
+    validate_manifest_binding,
+    validate_source_scope,
+)
+
 
 SCHEMA_VERSION = "response_guidance_policy.v3"
 ALLOWED_SEVERITIES = {"info", "low", "medium", "high", "critical"}
@@ -228,6 +235,12 @@ def validate_response_guidance_policy(policy: Any) -> List[str]:
     if policy.get("automatic_execution") is not False:
         errors.append("policy: automatic_execution must be false")
 
+    reference_manifest = validate_manifest_binding(
+        policy,
+        errors,
+        root=project_root(),
+    )
+
     sources = policy.get("trusted_sources")
     if not isinstance(sources, dict) or not sources:
         errors.append("policy: trusted_sources must be a non-empty object")
@@ -242,6 +255,22 @@ def validate_response_guidance_policy(policy: Any) -> List[str]:
                 errors.append(f"{path}: {key} is required")
         if _nonempty_text(source.get("accessed_at")) and _date(source.get("accessed_at")) is None:
             errors.append(f"{path}: accessed_at must be ISO-8601 date")
+        if reference_manifest is not None:
+            validate_external_source_binding(
+                str(source_id), source, reference_manifest, errors, path
+            )
+        if source.get("reference_scope") is not None:
+            validate_source_scope(
+                source.get("reference_scope"),
+                errors,
+                f"{path}.reference_scope",
+            )
+        elif not isinstance((reference_manifest or {}).get("default_scope"), dict):
+            errors.append(f"{path}.reference_scope: source or manifest scope is required")
+
+    scope_by_id = policy.get("reference_scope_by_id")
+    if not isinstance(scope_by_id, dict) or not scope_by_id:
+        errors.append("policy: reference_scope_by_id must be a non-empty object")
 
     seen_rules: set[str] = set()
     seen_actions: set[str] = set()
@@ -266,6 +295,11 @@ def validate_response_guidance_policy(policy: Any) -> List[str]:
                 errors.append(f"{path}: source_type must be trusted_control_guidance")
             _validate_references(rule, sources, path, errors)
             _validate_provenance(rule.get("provenance"), path, errors)
+            validate_source_scope(
+                (scope_by_id or {}).get(str(rule.get("rule_id") or "")),
+                errors,
+                f"{path}.reference_scope",
+            )
             _validate_condition(rule.get("applies_when"), path, errors)
             condition = rule.get("applies_when")
             semantic_family = rule.get("semantic_family")
@@ -310,6 +344,12 @@ def validate_response_guidance_policy(policy: Any) -> List[str]:
                     continue
                 for action_index, action in enumerate(actions):
                     _validate_action(action, sources, f"{path}.actions[{action_index}]", seen_actions, errors)
+                    if isinstance(action, dict):
+                        validate_source_scope(
+                            (scope_by_id or {}).get(str(action.get("action_id") or "")),
+                            errors,
+                            f"{path}.actions[{action_index}].reference_scope",
+                        )
     return errors
 
 

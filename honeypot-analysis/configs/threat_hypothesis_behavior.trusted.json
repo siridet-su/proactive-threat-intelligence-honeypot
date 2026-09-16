@@ -2,6 +2,10 @@
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
   "version": "2026-08-26-phase4b-semantic-replay-v1",
+  "reference_manifest": {
+    "path": "configs/trusted_reference_manifest.v1.json",
+    "sha256": "788543ecef24c0d7a9a2adff869076eac9c788908f7a4669d328d462b1df3e0f"
+  },
   "provenance": {
     "method": "developer-authored conservative behavior policy",
     "basis": [
@@ -22,7 +26,79 @@
     "reviewed": true,
     "reviewer": "project developer",
     "last_reviewed": "2026-08-11",
-    "review_status": "approved for scoped Cowrie SSH analysis"
+    "review_status": "approved for scoped Cowrie SSH analysis",
+    "reference_scope": {
+      "supports": [
+        "bounded hypotheses derived from ordered, typed Cowrie observations",
+        "explicit evidence references, relationship predicates, limitations, and falsifiers"
+      ],
+      "does_not_support": [
+        "attacker intent, attribution, successful compromise, persistence, exfiltration, or real-host effects",
+        "ATT&CK truth or response authorization without separate trusted evidence"
+      ]
+    },
+    "source_artifacts": [
+      {
+        "artifact_id": "threat-hypothesis-runtime",
+        "path": "production/reporting/threat_hypothesis.py",
+        "sha256": "673b0a63811d3fd515e99fd0a322d00c7c713f1adfaff20a6093308763b9e4d0",
+        "purpose": "hypothesis derivation, evidence references, limitations, and authority boundary",
+        "supports": [
+          "the executable derive/render behavior bound to the reviewed policy"
+        ],
+        "does_not_support": [
+          "claims beyond the policy and canonical Cowrie evidence"
+        ]
+      },
+      {
+        "artifact_id": "typed-relationship-runtime",
+        "path": "production/correlation/session_behavior_relationships.py",
+        "sha256": "0b0fff8136a8005a9db3efc7c105692fb1db056d8704e03f369975ab20ac5ed9",
+        "purpose": "ordered relationship and same-entity predicate evaluation",
+        "supports": [
+          "typed chain predicates and chronological relationship checks"
+        ],
+        "does_not_support": [
+          "real-world success or attacker intent"
+        ]
+      },
+      {
+        "artifact_id": "typed-command-semantics",
+        "path": "production/semantics/command_operations.py",
+        "sha256": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1",
+        "purpose": "typed command operation and entity/path resolution",
+        "supports": [
+          "operation-level parsing and resolved command entities"
+        ],
+        "does_not_support": [
+          "command success unless separately reported by Cowrie"
+        ]
+      },
+      {
+        "artifact_id": "threat-hypothesis-policy-tests",
+        "path": "tests/test_threat_hypothesis_behavior_policy.py",
+        "sha256": "c4736f4b30daa4e0b7c9439be116282c2da483236ad97847ab9afc1473d3c4e9",
+        "purpose": "trusted policy validation and fail-closed regression coverage",
+        "supports": [
+          "repeatable policy and containment checks"
+        ],
+        "does_not_support": [
+          "statistical accuracy or attribution"
+        ]
+      },
+      {
+        "artifact_id": "relationship-evaluation-tests",
+        "path": "tests/test_cross_family_relationship_evaluation.py",
+        "sha256": "f690e245436be955e1edbc06af2e587b7c96228150ed3151efb227ca9bdc5fea",
+        "purpose": "cross-family ordering and semantic containment regression coverage",
+        "supports": [
+          "repeatable relationship predicate checks"
+        ],
+        "does_not_support": [
+          "production-world observation beyond the supplied test evidence"
+        ]
+      }
+    ]
   },
   "policy": {
     "enabled": true,

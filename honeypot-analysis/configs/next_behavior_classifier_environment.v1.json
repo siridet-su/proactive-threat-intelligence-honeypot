@@ -8,7 +8,7 @@
     "mitre_cache_sha256": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c",
     "rule_policy_id": "honeypot-command-classification-rules",
     "rule_policy_path": "configs/classification_rules.trusted.json",
-    "rule_policy_sha256": "32744defdf1746d23764772ad20cf8fd4c2630c04f63ed85cbb4bbfc28f7d7fc",
+    "rule_policy_sha256": "00e662818839ebdbe6b240f376025c395241a50edd40d810a74424677ce95291",
     "rule_policy_version": "2026-08-11-operation-aware-v3",
     "securebert_candidate_threshold": 0.55,
     "trust_policy_path": "production/classification/trust.py",
@@ -70,11 +70,11 @@
       "production/semantics/command_operations.py": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1",
       "production/prediction/trusted_history.py": "531e0193f13d7238f8f200b2b6b5612578998f4932db42d84b52fcc879431772",
       "production/prediction/next_behavior_runtime.py": "bd1fd2b022812043654c944319b444c0cb2c5ce7647fb7a00056db53329b63cc",
-      "configs/classification_rules.trusted.json": "32744defdf1746d23764772ad20cf8fd4c2630c04f63ed85cbb4bbfc28f7d7fc",
+      "configs/classification_rules.trusted.json": "00e662818839ebdbe6b240f376025c395241a50edd40d810a74424677ce95291",
       "production/classification/trust.py": "9cc8529f025c31b368f0dc653a4de241bb668fd4e59b177f5e6297309bb63056",
       "data/feeds/mitre_attack_cache.json": "33af47bb0a3475cda60c2bea83ce305244bd747021f9e999652dc21520e4e35c"
     },
     "schema_version": "classifier_source_identity.v1",
-      "sha256": "087e8f076170f7eb0c22e9370ff80088c392df467836a79bf8a386be7a1e7208"
+    "sha256": "d428986bf94931a0269ef557d7528041b37f1948b1ab4d5a1743699f1d65ef0c"
   }
 }
