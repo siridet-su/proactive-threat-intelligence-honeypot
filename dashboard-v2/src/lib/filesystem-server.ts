@@ -322,107 +322,217 @@ export async function getAuditDirectorySummary(options: {
 } = {}): Promise<AuditDirectorySummary> {
   const client = await getMongoClient();
   const states = client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION);
-  const history = client.db(DATABASE_NAME).collection<Document>(HISTORY_COLLECTION);
 
-  const baseClosedQuery: Document = {
+  const baseClosedMatch: Document = {
     "lifecycle.status": "closed",
     "cwdState.path": { $type: "string", $ne: "" },
   };
 
-  const [totalSessions, pathRows] = await Promise.all([
-    states.countDocuments(baseClosedQuery),
-    history.aggregate<{ path: string; sessionCount: number }>([
-      {
-        $match: {
-          action: { $in: ["entered", "changed"] },
-          toPath: { $type: "string", $ne: "" },
-        },
+  const hasFilter = Boolean(options.hideHome || options.targetPath || options.search);
+
+  // Normalized search regex
+  const searchTrimmed = options.search?.trim();
+  const searchRegexStr = searchTrimmed
+    ? searchTrimmed.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    : null;
+
+  // Normalized target path prefix regex
+  let targetRegexStr: string | null = null;
+  if (options.targetPath?.trim()) {
+    let normTarget = options.targetPath.trim();
+    if (normTarget.length > 1 && normTarget.endsWith("/")) {
+      normTarget = normTarget.slice(0, -1);
+    }
+    targetRegexStr = `^${normTarget.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(/.*)?$`;
+  }
+
+  const pipeline: Document[] = [
+    { $match: baseClosedMatch },
+    {
+      $project: {
+        effectiveSessionId: { $ifNull: ["$sessionId", "$session_id"] },
+        sourceIp: 1,
+        cwdPath: "$cwdState.path",
       },
-      {
-        $group: {
-          _id: {
-            path: "$toPath",
-            sessionId: { $ifNull: ["$sessionId", "$session_id"] },
+    },
+    {
+      $lookup: {
+        from: HISTORY_COLLECTION,
+        let: { sid: "$effectiveSessionId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $in: ["$action", ["entered", "changed", "failed_change"]] },
+                  { $or: [{ $eq: ["$sessionId", "$$sid"] }, { $eq: ["$session_id", "$$sid"] }] },
+                ],
+              },
+            },
+          },
+          {
+            $project: {
+              fromPath: 1,
+              successfulToPath: {
+                $cond: [{ $eq: ["$action", "failed_change"] }, null, "$toPath"],
+              },
+            },
+          },
+        ],
+        as: "historyEvents",
+      },
+    },
+    {
+      $project: {
+        effectiveSessionId: 1,
+        sourceIp: 1,
+        cwdPath: 1,
+        visitedPaths: {
+          $filter: {
+            input: {
+              $setUnion: [
+                ["$cwdPath"],
+                "$historyEvents.fromPath",
+                "$historyEvents.successfulToPath",
+              ],
+            },
+            as: "p",
+            cond: {
+              $and: [
+                { $ne: ["$$p", null] },
+                { $ne: ["$$p", ""] },
+                { $regexMatch: { input: "$$p", regex: "^/" } },
+              ],
+            },
           },
         },
       },
-      {
-        $group: {
-          _id: "$_id.path",
-          sessionCount: { $sum: 1 },
+    },
+    {
+      $addFields: {
+        nonRootPaths: {
+          $filter: {
+            input: "$visitedPaths",
+            as: "p",
+            cond: { $ne: ["$$p", "/"] },
+          },
         },
       },
-      {
-        $project: {
-          path: "$_id",
-          sessionCount: 1,
-          _id: 0,
+    },
+    {
+      $addFields: {
+        hasHomePath: {
+          $anyElementTrue: {
+            $map: {
+              input: "$nonRootPaths",
+              as: "p",
+              in: {
+                $or: [
+                  { $eq: ["$$p", "/home"] },
+                  { $regexMatch: { input: "$$p", regex: "^/home/" } },
+                ],
+              },
+            },
+          },
+        },
+        hasOutsideHomePath: {
+          $anyElementTrue: {
+            $map: {
+              input: "$nonRootPaths",
+              as: "p",
+              in: {
+                $and: [
+                  { $ne: ["$$p", "/home"] },
+                  { $not: { $regexMatch: { input: "$$p", regex: "^/home/" } } },
+                ],
+              },
+            },
+          },
         },
       },
-      {
-        $sort: { sessionCount: -1, path: 1 },
+    },
+    {
+      $addFields: {
+        homeOnly: {
+          $and: ["$hasHomePath", { $not: "$hasOutsideHomePath" }],
+        },
+        matchesSearch: searchRegexStr
+          ? {
+              $or: [
+                { $regexMatch: { input: "$effectiveSessionId", regex: searchRegexStr, options: "i" } },
+                { $regexMatch: { input: { $ifNull: ["$sourceIp", ""] }, regex: searchRegexStr, options: "i" } },
+                { $regexMatch: { input: "$cwdPath", regex: searchRegexStr, options: "i" } },
+              ],
+            }
+          : true,
+        matchesTarget: targetRegexStr
+          ? {
+              $anyElementTrue: {
+                $map: {
+                  input: "$visitedPaths",
+                  as: "p",
+                  in: { $regexMatch: { input: "$$p", regex: targetRegexStr } },
+                },
+              },
+            }
+          : true,
       },
-    ]).toArray(),
-  ]);
+    },
+    {
+      $addFields: {
+        matchesFilter: {
+          $and: [
+            "$matchesSearch",
+            "$matchesTarget",
+            options.hideHome ? { $not: "$homeOnly" } : true,
+          ],
+        },
+      },
+    },
+    {
+      $facet: {
+        overview: [
+          {
+            $group: {
+              _id: null,
+              totalSessions: { $sum: 1 },
+              homeOnlyCount: { $sum: { $cond: ["$homeOnly", 1, 0] } },
+              matchingCount: { $sum: { $cond: ["$matchesFilter", 1, 0] } },
+            },
+          },
+        ],
+        distinctPaths: [
+          { $unwind: "$nonRootPaths" },
+          {
+            $group: {
+              _id: "$nonRootPaths",
+              sessionCount: { $sum: 1 },
+            },
+          },
+          { $sort: { sessionCount: -1, _id: 1 } },
+          { $limit: 100 },
+          {
+            $project: {
+              _id: 0,
+              path: "$_id",
+              sessionCount: 1,
+            },
+          },
+        ],
+      },
+    },
+  ];
 
-  const distinctPathMap = new Map<string, number>();
-  for (const row of pathRows) {
-    if (!row.path || row.path === "/") continue;
-    let norm = row.path.trim();
-    if (norm.length > 1 && norm.endsWith("/")) norm = norm.slice(0, -1);
-    distinctPathMap.set(norm, (distinctPathMap.get(norm) ?? 0) + row.sessionCount);
-  }
-  const distinctPaths = [...distinctPathMap.entries()]
-    .map(([path, sessionCount]) => ({ path, sessionCount }))
-    .sort((a, b) => b.sessionCount !== a.sessionCount ? b.sessionCount - a.sessionCount : a.path.localeCompare(b.path));
+  const result = await states.aggregate<{
+    overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
+    distinctPaths: Array<{ path: string; sessionCount: number }>;
+  }>(pipeline).toArray();
 
-  // Sessions that have traversed outside /home and /
-  const sensitiveSessionIds = await history.distinct("sessionId", {
-    action: { $in: ["entered", "changed"] },
-    toPath: { $not: { $regex: "^(/home(/.*)?|/)$" } },
-  });
-  const sensitiveSet = new Set(sensitiveSessionIds.filter(Boolean));
-
-  // Closed sessions that are home-only
-  const homeOnlyCount = await states.countDocuments({
-    ...baseClosedQuery,
-    sessionId: { $nin: Array.from(sensitiveSet) },
-  });
-
-  // Matching count for active filters
-  let matchingCount: number | undefined;
-  const hasFilter = Boolean(options.hideHome || options.targetPath || options.search);
-  if (hasFilter) {
-    const candidateQuery: Document = { ...baseClosedQuery };
-    if (options.search) {
-      const sanitized = options.search.trim().slice(0, 100);
-      if (sanitized) {
-        const regex = new RegExp(sanitized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-        candidateQuery.$or = [{ sourceIp: regex }, { sessionId: regex }];
-      }
-    }
-    if (options.hideHome) {
-      candidateQuery.sessionId = { $in: Array.from(sensitiveSet) };
-    }
-    if (options.targetPath) {
-      let normTarget = options.targetPath.trim();
-      if (normTarget.length > 1 && normTarget.endsWith("/")) normTarget = normTarget.slice(0, -1);
-      const targetRegex = new RegExp(`^${normTarget.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(/.*)?$`);
-      const targetSessionIds = await history.distinct("sessionId", {
-        action: { $in: ["entered", "changed"] },
-        toPath: { $regex: targetRegex },
-      });
-      const targetSet = new Set(targetSessionIds.filter(Boolean));
-      if (candidateQuery.sessionId && typeof candidateQuery.sessionId === "object") {
-        const existingIn = (candidateQuery.sessionId as { $in?: string[] }).$in ?? [];
-        const intersected = existingIn.filter((id) => targetSet.has(id));
-        candidateQuery.sessionId = { $in: intersected };
-      } else {
-        candidateQuery.sessionId = { $in: Array.from(targetSet) };
-      }
-    }
-    matchingCount = await states.countDocuments(candidateQuery);
-  }
+  const overview = result[0]?.overview?.[0];
+  const totalSessions = overview?.totalSessions ?? 0;
+  const homeOnlyCount = overview?.homeOnlyCount ?? 0;
+  const matchingCount = hasFilter ? (overview?.matchingCount ?? 0) : undefined;
+  const distinctPaths = result[0]?.distinctPaths ?? [];
 
   return {
     totalSessions,

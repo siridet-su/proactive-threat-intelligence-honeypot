@@ -17,6 +17,29 @@ import {
 
 export const DEFAULT_AUDIT_DIRECTORY_LIMIT = 50;
 
+export interface AuditScope {
+  hideHome: boolean;
+  targetPath: string | null;
+  q?: string | null;
+}
+
+/**
+ * Creates a stable canonical string key for an audit query scope.
+ */
+export function createAuditScopeKey(scope: AuditScope): string {
+  const normPath = scope.targetPath ? scope.targetPath.trim().replace(/\/+$/, "") || "/" : "";
+  const normQ = scope.q ? scope.q.trim().toLowerCase() : "";
+  return `hideHome=${scope.hideHome ? "1" : "0"}|targetPath=${normPath}|q=${normQ}`;
+}
+
+export function parseAuditScopeKey(key: string): AuditScope {
+  const params = new URLSearchParams(key.replace(/\|/g, "&"));
+  const hideHome = params.get("hideHome") === "1";
+  const targetPath = params.get("targetPath") || null;
+  const q = params.get("q") || null;
+  return { hideHome, targetPath, q };
+}
+
 /**
  * Deduplicates and merges closed sessions from the snapshot buffer, audit directory queries,
  * and extra looked-up audit sessions into a single chronologically sorted list.
@@ -78,7 +101,7 @@ export function mergeAuthoritativeClosedSessions(
 
 /**
  * Merges distinct path options from active sessions and server-derived summary facets.
- * Deduplicates by path, taking the maximum session count or adding active occurrences.
+ * Deduplicates by path, summing distinct session occurrences across active and closed sessions.
  */
 export function mergeAuthoritativeDistinctPaths(
   activePaths: readonly DistinctPathOption[],
@@ -159,12 +182,13 @@ export interface AuthoritativeAuditMetricsOptions {
   authoritativeClosedSessions: readonly FilesystemClosedSession[];
   snapshotRecentClosedSessions: readonly FilesystemClosedSession[];
   summary?: AuditDirectorySummary | null;
+  summaryScopeKey?: string | null;
+  currentScopeKey?: string | null;
+  summaryStatus?: "idle" | "loading" | "success" | "error" | "stale";
   auditDirectoryTotalCount?: number | null;
   hideHomeOnly?: boolean;
   targetPathFilter?: string | null;
   selectedSessionId?: string | null;
-  isSearchActive?: boolean;
-  searchResults?: readonly FilesystemClosedSession[];
   isDirectoryComplete?: boolean;
 }
 
@@ -186,6 +210,7 @@ export interface AuthoritativeAuditMetrics {
  * Derives authoritative audit metrics, filter results, totals, and path options.
  * In live mode, strictly preserves snapshot buffer behavior.
  * In audit mode, derives all metrics from the authoritative retained closed sessions and server summary facets.
+ * Search results are strictly isolated to selector dropdown options and NEVER replace authoritative closed sessions.
  */
 export function deriveAuthoritativeAuditMetrics({
   viewMode,
@@ -193,22 +218,21 @@ export function deriveAuthoritativeAuditMetrics({
   authoritativeClosedSessions,
   snapshotRecentClosedSessions,
   summary,
+  summaryScopeKey,
+  currentScopeKey,
+  summaryStatus = "success",
   auditDirectoryTotalCount,
   hideHomeOnly = false,
   targetPathFilter = null,
   selectedSessionId = null,
-  isSearchActive = false,
-  searchResults = [],
   isDirectoryComplete = false,
 }: AuthoritativeAuditMetricsOptions): AuthoritativeAuditMetrics {
   const isAudit = viewMode === "audit";
 
   // In live mode, effectiveClosedSessions is strictly the snapshot's 12-item buffer.
-  // In audit mode, if search is active it uses search results, otherwise authoritative closed sessions.
+  // In audit mode, effectiveClosedSessions ALWAYS uses authoritative closed sessions (never replaced by search results!).
   const effectiveClosedSessions = isAudit
-    ? isSearchActive
-      ? [...searchResults]
-      : [...authoritativeClosedSessions]
+    ? [...authoritativeClosedSessions]
     : [...snapshotRecentClosedSessions];
 
   // Combined sessions with active sessions taking precedence if session ID overlaps
@@ -225,7 +249,7 @@ export function deriveAuthoritativeAuditMetrics({
     allSessions.map((s) => [s.sessionId, s]),
   );
 
-  // Distinct paths: if server summary provides full-directory distinct paths, merge them with active session paths
+  // Distinct paths: merge active session paths with server-side closed distinct paths
   let distinctPaths: DistinctPathOption[];
   if (isAudit && summary && Array.isArray(summary.distinctPaths) && summary.distinctPaths.length > 0) {
     const activeDistinct = getDistinctSessionPaths(activeSessions, []);
@@ -234,9 +258,15 @@ export function deriveAuthoritativeAuditMetrics({
     distinctPaths = getDistinctSessionPaths(activeSessions, effectiveClosedSessions);
   }
 
+  // Check if summary matches current scope
+  const isScopeMatch =
+    Boolean(summary) &&
+    summaryStatus === "success" &&
+    (!currentScopeKey || !summaryScopeKey || summaryScopeKey === currentScopeKey);
+
   // Home-only count across all effective sessions
   let homeOnlyCount = 0;
-  if (isAudit && summary && typeof summary.homeOnlyCount === "number") {
+  if (isAudit && isScopeMatch && summary && typeof summary.homeOnlyCount === "number") {
     let activeHomeOnly = 0;
     for (const s of activeSessions) {
       if (isHomeOnlySession(s)) activeHomeOnly++;
@@ -271,36 +301,37 @@ export function deriveAuthoritativeAuditMetrics({
   // Filtered sessions count
   let filteredSessionsCount = 0;
   const hasActiveFilters = hideHomeOnly || targetPathFilter !== null;
-  const isAuthoritative = !isAudit || Boolean(summary) || isDirectoryComplete;
+  const isAuthoritative = !isAudit || (isScopeMatch && Boolean(summary)) || isDirectoryComplete;
 
-  if (!hasActiveFilters && !isSearchActive && isAudit) {
+  if (!hasActiveFilters && isAudit) {
     // When no filter is active in audit mode, filtered count equals total count
     filteredSessionsCount = totalSessionsCount;
   } else if (
     isAudit &&
-    !isSearchActive &&
+    isScopeMatch &&
     hasActiveFilters &&
     targetPathFilter &&
     summary &&
     typeof summary.matchingCount === "number"
   ) {
-    // When targetPathFilter is active and server summary provides matchingCount
+    // When targetPathFilter is active and server summary provides matchingCount for this scope
     filteredSessionsCount = filteredActiveSessions.length + summary.matchingCount;
   } else if (
     isAudit &&
-    !isSearchActive &&
+    isScopeMatch &&
     hasActiveFilters &&
     hideHomeOnly &&
     !targetPathFilter &&
     summary &&
     typeof summary.homeOnlyCount === "number"
   ) {
-    // Home-only filter with summary available
+    // Home-only filter with valid scope summary
     filteredSessionsCount =
       filteredActiveSessions.length + Math.max(0, summary.totalSessions - summary.homeOnlyCount);
-  } else if (isAudit && !isSearchActive && hasActiveFilters && summary && typeof summary.matchingCount === "number") {
+  } else if (isAudit && isScopeMatch && hasActiveFilters && summary && typeof summary.matchingCount === "number") {
     filteredSessionsCount = filteredActiveSessions.length + summary.matchingCount;
   } else {
+    // Stale summary, error, or in-flight fetch: fall back to loaded items count
     filteredSessionsCount = filteredActiveSessions.length + filteredClosedSessions.length;
   }
 
@@ -344,6 +375,7 @@ export interface AuditDirectoryStoreState {
   directoryHasMore: boolean;
   directoryIsLoading: boolean;
   directoryIsComplete: boolean;
+  directoryScopeKey: string;
 
   // Search state
   searchQuery: string;
@@ -352,18 +384,23 @@ export interface AuditDirectoryStoreState {
   searchHasMore: boolean;
   searchIsLoading: boolean;
   searchIsComplete: boolean;
+  searchScopeKey: string;
 
   // Summary state
   summary: AuditDirectorySummary | null;
+  summaryScopeKey: string | null;
   summaryIsLoading: boolean;
+  summaryStatus: "idle" | "loading" | "success" | "error" | "stale";
+  summaryError: string | null;
 
-  // Lifecycle
+  // Global lifecycle
   status: "idle" | "loading" | "success" | "error";
   errorMessage: string | null;
 }
 
 /**
- * Creates an authoritative audit directory store with decoupled directory and search pagination states.
+ * Creates an authoritative audit directory store with decoupled directory and search pagination states,
+ * generation guards, abort controllers, and scope-bound summary tracking.
  */
 export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = {}) {
   const fetcher =
@@ -379,6 +416,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     directoryHasMore: false,
     directoryIsLoading: false,
     directoryIsComplete: false,
+    directoryScopeKey: "",
 
     searchQuery: "",
     searchItems: [],
@@ -386,17 +424,28 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     searchHasMore: false,
     searchIsLoading: false,
     searchIsComplete: false,
+    searchScopeKey: "",
 
     summary: null,
+    summaryScopeKey: null,
     summaryIsLoading: false,
+    summaryStatus: "idle",
+    summaryError: null,
 
     status: "idle",
     errorMessage: null,
   };
 
   const listeners = new Set<() => void>();
-  let inFlightDirectory = false;
-  let inFlightSearch = false;
+
+  let directoryAbortController: AbortController | null = null;
+  let directoryGeneration = 0;
+
+  let searchAbortController: AbortController | null = null;
+  let searchGeneration = 0;
+
+  let summaryAbortController: AbortController | null = null;
+  let summaryGeneration = 0;
 
   function notify() {
     for (const l of listeners) {
@@ -410,23 +459,41 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   }
 
   const fetchInitial = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null }) => {
-    if (inFlightDirectory) return;
-    inFlightDirectory = true;
-    setState({ directoryIsLoading: true, status: "loading", errorMessage: null });
+    directoryAbortController?.abort();
+    directoryAbortController = new AbortController();
+    const currentGen = ++directoryGeneration;
+    const signal = directoryAbortController.signal;
+
+    const hideHome = Boolean(filterOptions?.hideHome);
+    const targetPath = filterOptions?.targetPath ?? null;
+    const scopeKey = createAuditScopeKey({ hideHome, targetPath });
+
+    setState({
+      directoryItems: [],
+      directoryCursor: null,
+      directoryHasMore: false,
+      directoryIsComplete: false,
+      directoryScopeKey: scopeKey,
+      directoryIsLoading: true,
+      status: "loading",
+      errorMessage: null,
+    });
 
     try {
       const url = buildAuditSessionsUrl({
         limit: defaultLimit,
-        summary: true,
-        hideHome: filterOptions?.hideHome,
-        targetPath: filterOptions?.targetPath,
+        hideHome,
+        targetPath,
       });
 
-      const res = await fetcher(url, { cache: "no-store" });
+      const res = await fetcher(url, { cache: "no-store", signal });
+      if (signal.aborted || currentGen !== directoryGeneration) return;
       if (!res.ok) {
         throw new Error(`Server returned status ${res.status}`);
       }
       const data = (await res.json()) as Partial<AuditSessionsPage>;
+      if (signal.aborted || currentGen !== directoryGeneration) return;
+
       if (Array.isArray(data.items)) {
         setState({
           directoryItems: data.items,
@@ -434,20 +501,18 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
           directoryHasMore: Boolean(data.nextCursor),
           directoryIsComplete: !data.nextCursor,
           status: "success",
-          summary: data.summary ?? state.summary,
           directoryIsLoading: false,
         });
       } else {
         throw new Error("Invalid response format");
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      if (signal.aborted || currentGen !== directoryGeneration) return;
       setState({
         status: "error",
         errorMessage: err instanceof Error ? err.message : "Failed to load audit directory",
         directoryIsLoading: false,
       });
-    } finally {
-      inFlightDirectory = false;
     }
   };
 
@@ -456,19 +521,25 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   };
 
   const loadMoreDirectory = async () => {
-    if (inFlightDirectory || !state.directoryHasMore || !state.directoryCursor) return;
-    inFlightDirectory = true;
+    if (state.directoryIsLoading || !state.directoryHasMore || !state.directoryCursor) return;
+    const currentGen = directoryGeneration;
     setState({ directoryIsLoading: true });
 
     try {
+      const parsedScope = parseAuditScopeKey(state.directoryScopeKey);
       const url = buildAuditSessionsUrl({
         limit: defaultLimit,
         cursor: state.directoryCursor,
+        hideHome: parsedScope.hideHome,
+        targetPath: parsedScope.targetPath,
       });
 
       const res = await fetcher(url, { cache: "no-store" });
+      if (currentGen !== directoryGeneration) return;
       if (!res.ok) return;
       const data = (await res.json()) as Partial<AuditSessionsPage>;
+      if (currentGen !== directoryGeneration) return;
+
       if (Array.isArray(data.items)) {
         const seen = new Set(state.directoryItems.map((s) => s.sessionId));
         const additions = data.items.filter((s) => !seen.has(s.sessionId));
@@ -483,8 +554,9 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     } catch {
       // ignore pagination network error
     } finally {
-      inFlightDirectory = false;
-      setState({ directoryIsLoading: false });
+      if (currentGen === directoryGeneration) {
+        setState({ directoryIsLoading: false });
+      }
     }
   };
 
@@ -495,6 +567,9 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   ) => {
     const trimmed = query.trim();
     if (!trimmed) {
+      searchAbortController?.abort();
+      searchAbortController = null;
+      searchGeneration++;
       setState({
         searchQuery: "",
         searchItems: [],
@@ -502,14 +577,26 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
         searchHasMore: false,
         searchIsComplete: false,
         searchIsLoading: false,
+        searchScopeKey: "",
       });
       return;
     }
 
-    inFlightSearch = true;
+    // Abort previous search request
+    searchAbortController?.abort();
+    searchAbortController = new AbortController();
+    const currentGen = ++searchGeneration;
+    const signal = searchAbortController.signal;
+
+    const hideHome = Boolean(filterOptions?.hideHome);
+    const targetPath = filterOptions?.targetPath ?? null;
+    const scopeKey = createAuditScopeKey({ hideHome, targetPath, q: trimmed });
+
     setState({
       searchQuery: trimmed,
+      searchScopeKey: scopeKey,
       searchIsLoading: true,
+      ...(cursor ? {} : { searchItems: [], searchCursor: null, searchHasMore: false, searchIsComplete: false }),
     });
 
     try {
@@ -517,13 +604,17 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
         q: trimmed,
         cursor: cursor ?? undefined,
         limit: 25,
-        hideHome: filterOptions?.hideHome,
-        targetPath: filterOptions?.targetPath,
+        hideHome,
+        targetPath,
       });
 
-      const res = await fetcher(url, { cache: "no-store" });
+      const res = await fetcher(url, { cache: "no-store", signal });
+      if (signal.aborted || currentGen !== searchGeneration) return;
       if (!res.ok) return;
+
       const data = (await res.json()) as Partial<AuditSessionsPage>;
+      if (signal.aborted || currentGen !== searchGeneration) return;
+
       if (Array.isArray(data.items)) {
         if (cursor) {
           const seen = new Set(state.searchItems.map((s) => s.sessionId));
@@ -546,19 +637,26 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
         }
       }
     } catch {
-      // preserve local search results
+      // ignore aborted or network error
     } finally {
-      inFlightSearch = false;
-      setState({ searchIsLoading: false });
+      if (currentGen === searchGeneration) {
+        setState({ searchIsLoading: false });
+      }
     }
   };
 
   const loadMoreSearch = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null }) => {
-    if (inFlightSearch || !state.searchHasMore || !state.searchCursor || !state.searchQuery) return;
-    return searchSessions(state.searchQuery, state.searchCursor, filterOptions);
+    if (state.searchIsLoading || !state.searchHasMore || !state.searchCursor || !state.searchQuery) return;
+    const parsed = parseAuditScopeKey(state.searchScopeKey);
+    const hideHome = filterOptions?.hideHome ?? parsed.hideHome;
+    const targetPath = filterOptions?.targetPath !== undefined ? filterOptions.targetPath : parsed.targetPath;
+    return searchSessions(state.searchQuery, state.searchCursor, { hideHome, targetPath });
   };
 
   const clearSearch = () => {
+    searchAbortController?.abort();
+    searchAbortController = null;
+    searchGeneration++;
     setState({
       searchQuery: "",
       searchItems: [],
@@ -566,6 +664,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
       searchHasMore: false,
       searchIsComplete: false,
       searchIsLoading: false,
+      searchScopeKey: "",
     });
   };
 
@@ -578,26 +677,51 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     });
   };
 
-  const fetchSummary = async (hideHome: boolean, targetPath: string | null, search: string | null) => {
-    setState({ summaryIsLoading: true });
+  const fetchSummary = async (scope: AuditScope) => {
+    summaryAbortController?.abort();
+    summaryAbortController = new AbortController();
+    const currentGen = ++summaryGeneration;
+    const signal = summaryAbortController.signal;
+
+    const scopeKey = createAuditScopeKey(scope);
+    setState({
+      summaryIsLoading: true,
+      summaryStatus: "loading",
+      summaryError: null,
+    });
+
     try {
       const params = new URLSearchParams();
-      if (hideHome) params.set("hideHome", "1");
-      if (targetPath) params.set("targetPath", targetPath);
-      if (search) params.set("q", search);
+      if (scope.hideHome) params.set("hideHome", "1");
+      if (scope.targetPath) params.set("targetPath", scope.targetPath);
+      if (scope.q?.trim()) params.set("q", scope.q.trim());
 
       const res = await fetcher(`/api/filesystem-topology/audit-summary?${params.toString()}`, {
         cache: "no-store",
+        signal,
       });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data && typeof data === "object" && "totalSessions" in data) {
-        setState({ summary: data as AuditDirectorySummary });
+      if (signal.aborted || currentGen !== summaryGeneration) return;
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
       }
-    } catch {
-      // ignore
-    } finally {
-      setState({ summaryIsLoading: false });
+      const data = (await res.json()) as AuditDirectorySummary;
+      if (signal.aborted || currentGen !== summaryGeneration) return;
+
+      if (data && typeof data === "object" && typeof data.totalSessions === "number") {
+        setState({
+          summary: data,
+          summaryScopeKey: scopeKey,
+          summaryStatus: "success",
+          summaryIsLoading: false,
+        });
+      }
+    } catch (err: unknown) {
+      if (signal.aborted || currentGen !== summaryGeneration) return;
+      setState({
+        summaryStatus: "error",
+        summaryError: err instanceof Error ? err.message : "Failed to load summary",
+        summaryIsLoading: false,
+      });
     }
   };
 
@@ -638,24 +762,21 @@ export function useAuditDirectory({
   const store = useMemo(() => createAuditDirectoryStore(), []);
   const storeState = useSyncExternalStore(store.subscribe, store.getState, store.getState);
 
-  const initialFetchAttemptedRef = useRef(false);
+  const prevScopeRef = useRef<string>("");
 
-  // Trigger initial fetch when entering audit mode
+  // When in audit mode and filter scope changes: fetch initial page of the new scope
   useEffect(() => {
     if (viewMode !== "audit") {
-      initialFetchAttemptedRef.current = false;
+      prevScopeRef.current = "";
       return;
     }
-    if (initialFetchAttemptedRef.current) return;
-    initialFetchAttemptedRef.current = true;
-    void store.fetchInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
-  }, [viewMode, hideHomeOnly, targetPathFilter, store]);
+    const currentScopeKey = createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+    if (prevScopeRef.current === currentScopeKey) return;
+    prevScopeRef.current = currentScopeKey;
 
-  // Whenever filter parameters change in audit mode, update summary facets
-  useEffect(() => {
-    if (viewMode !== "audit") return;
-    void store.fetchSummary(hideHomeOnly, targetPathFilter, storeState.searchQuery || null);
-  }, [viewMode, hideHomeOnly, targetPathFilter, storeState.searchQuery, store]);
+    void store.fetchInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+    void store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+  }, [viewMode, hideHomeOnly, targetPathFilter, store]);
 
   const authoritativeClosedSessions = useMemo(() => {
     return mergeAuthoritativeClosedSessions(
@@ -678,7 +799,13 @@ export function useAuditDirectory({
 
   const retryInitialDirectory = useCallback(async () => {
     await store.retryInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+    await store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
   }, [store, hideHomeOnly, targetPathFilter]);
+
+  const currentScopeKey = useMemo(
+    () => createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter }),
+    [hideHomeOnly, targetPathFilter],
+  );
 
   return {
     // Directory state
@@ -703,6 +830,9 @@ export function useAuditDirectory({
 
     // Summary / facets state
     summary: storeState.summary,
+    summaryScopeKey: storeState.summaryScopeKey,
+    currentScopeKey,
+    summaryStatus: storeState.summaryStatus,
     summaryIsLoading: storeState.summaryIsLoading,
 
     // Lifecycle / error state
@@ -712,9 +842,6 @@ export function useAuditDirectory({
     recordLookedUpSession: store.recordLookedUpSession,
 
     // Backward compatibility aliases
-    recordRemoteAuditSessions: (sessions: readonly FilesystemClosedSession[], ..._rest: unknown[]) => {
-      sessions.forEach(store.recordLookedUpSession);
-    },
     hasMoreAuditSessions: storeState.directoryHasMore,
     isLoadingAuditSessions: storeState.directoryIsLoading,
     loadMoreAuditSessions: store.loadMoreDirectory,

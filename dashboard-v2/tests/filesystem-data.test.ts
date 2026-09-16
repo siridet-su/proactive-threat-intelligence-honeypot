@@ -143,6 +143,7 @@ describe("filesystem audit sessions cursor and query", () => {
         {
           $or: [
             { sessionId: { $regex: /192\.168\.1\.1 \(test\)/i } },
+            { session_id: { $regex: /192\.168\.1\.1 \(test\)/i } },
             { sourceIp: { $regex: /192\.168\.1\.1 \(test\)/i } },
             { "cwdState.path": { $regex: /192\.168\.1\.1 \(test\)/i } },
           ],

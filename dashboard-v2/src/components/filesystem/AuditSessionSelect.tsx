@@ -57,16 +57,6 @@ export interface AuditSessionSelectProps {
   status?: "idle" | "loading" | "success" | "error";
   errorMessage?: string | null;
   onRetry?: () => void;
-
-  // Legacy fallback callback
-  onRemoteSessionsLoaded?: (
-    sessions: readonly FilesystemClosedSession[],
-    totalCount?: number,
-    nextCursor?: string | null,
-  ) => void;
-  hasMoreRemote?: boolean;
-  isLoadingRemote?: boolean;
-  onLoadMore?: () => void;
 }
 
 export function AuditSessionSelect({
@@ -95,10 +85,6 @@ export function AuditSessionSelect({
   status,
   errorMessage,
   onRetry,
-  onRemoteSessionsLoaded,
-  hasMoreRemote: hasMoreRemoteProp,
-  isLoadingRemote: isLoadingRemoteProp,
-  onLoadMore,
 }: AuditSessionSelectProps) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -108,6 +94,7 @@ export function AuditSessionSelect({
   const [isLoadingRemote, setIsLoadingRemote] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generatedId = useId();
   const triggerId = `audit-session-select-${generatedId}`;
   const menuId = `${triggerId}-menu`;
@@ -117,28 +104,24 @@ export function AuditSessionSelect({
   const effectiveHasMore = isSearchActive
     ? searchHasMore !== undefined
       ? searchHasMore
-      : hasMoreRemoteProp !== undefined
-        ? hasMoreRemoteProp
-        : hasMoreRemote
+      : hasMoreRemote
     : directoryHasMore !== undefined
       ? directoryHasMore
-      : hasMoreRemoteProp !== undefined
-        ? hasMoreRemoteProp
-        : hasMoreRemote;
+      : hasMoreRemote;
 
   const effectiveIsLoading = isSearchActive
     ? searchIsLoading !== undefined
       ? searchIsLoading
-      : isLoadingRemoteProp !== undefined
-        ? isLoadingRemoteProp
-        : isLoadingRemote
+      : isLoadingRemote
     : directoryIsLoading !== undefined
       ? directoryIsLoading
-      : isLoadingRemoteProp !== undefined
-        ? isLoadingRemoteProp
-        : isLoadingRemote;
+      : isLoadingRemote;
 
   const handleClearSearch = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     setSearchQuery("");
     setRemoteSessions([]);
     setRemoteCursor(null);
@@ -148,15 +131,30 @@ export function AuditSessionSelect({
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
-    if (!value.trim()) {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
       setRemoteSessions([]);
       setRemoteCursor(null);
       setHasMoreRemote(false);
       onClearSearch?.();
     } else if (onSearch) {
-      onSearch(value);
+      debounceTimerRef.current = setTimeout(() => {
+        onSearch(trimmed);
+      }, 250);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   // Standalone fallback: Query remote audit directory when searching without parent onSearch
   useEffect(() => {
@@ -185,7 +183,6 @@ export function AuditSessionSelect({
           setRemoteSessions(page.items);
           setRemoteCursor(page.nextCursor ?? null);
           setHasMoreRemote(Boolean(page.nextCursor));
-          onRemoteSessionsLoaded?.(page.items, page.totalItems, page.nextCursor ?? null);
         }
       } catch {
         // preserve local results
@@ -195,7 +192,7 @@ export function AuditSessionSelect({
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [open, searchQuery, onSearch, hideHomeOnly, targetPathFilter, onRemoteSessionsLoaded]);
+  }, [open, searchQuery, onSearch, hideHomeOnly, targetPathFilter]);
 
   const handleLoadMore = useCallback(async () => {
     if (effectiveIsLoading) return;
@@ -207,10 +204,6 @@ export function AuditSessionSelect({
     } else {
       if (onLoadMoreDirectory) {
         onLoadMoreDirectory();
-        return;
-      }
-      if (onLoadMore) {
-        onLoadMore();
         return;
       }
     }
@@ -241,7 +234,6 @@ export function AuditSessionSelect({
         });
         setRemoteCursor(page.nextCursor ?? null);
         setHasMoreRemote(Boolean(page.nextCursor));
-        onRemoteSessionsLoaded?.(page.items, page.totalItems, page.nextCursor ?? null);
       }
     } catch {
       // ignore
@@ -253,12 +245,10 @@ export function AuditSessionSelect({
     isSearchActive,
     onLoadMoreSearch,
     onLoadMoreDirectory,
-    onLoadMore,
     searchQuery,
     remoteCursor,
     hideHomeOnly,
     targetPathFilter,
-    onRemoteSessionsLoaded,
   ]);
 
   const combinedClosedSessions = useMemo(() => {

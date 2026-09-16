@@ -3,11 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   buildAuditSessionsUrl,
   createAuditDirectoryStore,
+  createAuditScopeKey,
   deriveAuthoritativeAuditMetrics,
   getPaginationRenderState,
   mergeAuthoritativeClosedSessions,
   mergeAuthoritativeDistinctPaths,
+  parseAuditScopeKey,
 } from "../src/components/filesystem/useAuditDirectory";
+import {
+  buildAuditSessionsQuery,
+  normalizeSessionAuditSummary,
+} from "../src/lib/filesystem-data";
 import type {
   AuditDirectorySummary,
   FilesystemClosedSession,
@@ -211,7 +217,7 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
       // Setup mock fetch
       const mockFetch: typeof fetch = async (input) => {
         const url = String(input);
-        if (url.includes("summary=1")) {
+        if (!url.includes("q=")) {
           // Initial directory page: has more pages
           return {
             ok: true,
@@ -503,6 +509,404 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         { path: "/etc", sessionCount: 6 }, // 1 active + 5 server
         { path: "/opt/secret", sessionCount: 2 },
       ]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Suite A: Selected-Session Persistence During Search
+  // ---------------------------------------------------------------------------
+  describe("Suite A: Selected-Session Persistence During Search", () => {
+    it("preserves selected closed session in allSessions and sessionById when search query does not match it", () => {
+      const sessionA = createClosedSession("sess-A", "2026-09-16T08:00:00.000Z", ["/var/log"], false);
+      const sessionB = createClosedSession("sess-B", "2026-09-16T07:30:00.000Z", ["/tmp"], false);
+
+      // User has sessionA selected initially
+      const initialMetrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [sessionA, sessionB],
+        snapshotRecentClosedSessions: [],
+        selectedSessionId: "sess-A",
+      });
+
+      expect(initialMetrics.sessionById.get("sess-A")).toBeDefined();
+      expect(initialMetrics.sessionById.get("sess-A")?.sessionId).toBe("sess-A");
+      expect(initialMetrics.isSelectedFilteredOut).toBe(false);
+
+      // User types a search query for "sess-B" or non-matching query
+      // The authoritative closed sessions must NOT be replaced by search results!
+      const duringSearchMetrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [sessionA, sessionB],
+        snapshotRecentClosedSessions: [],
+        selectedSessionId: "sess-A",
+      });
+
+      // Session A remains selected and present in sessionById & allSessions
+      expect(duringSearchMetrics.sessionById.has("sess-A")).toBe(true);
+      expect(duringSearchMetrics.allSessions.some((s) => s.sessionId === "sess-A")).toBe(true);
+      expect(duringSearchMetrics.isSelectedFilteredOut).toBe(false);
+
+      // Explicit user selection switches to session B
+      const switchedMetrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [sessionA, sessionB],
+        snapshotRecentClosedSessions: [],
+        selectedSessionId: "sess-B",
+      });
+      expect(switchedMetrics.sessionById.get("sess-B")?.sessionId).toBe("sess-B");
+      expect(switchedMetrics.isSelectedFilteredOut).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Suite B: Scope-Bound Summary and Stale Response Discard
+  // ---------------------------------------------------------------------------
+  describe("Suite B: Scope-Bound Summary and Stale Response Discard", () => {
+    it("round-trips createAuditScopeKey and parseAuditScopeKey", () => {
+      const scope = { hideHome: true, targetPath: "/etc/nginx", q: "attacker" };
+      const key = createAuditScopeKey(scope);
+      expect(key).toBe("hideHome=1|targetPath=/etc/nginx|q=attacker");
+      expect(parseAuditScopeKey(key)).toEqual({
+        hideHome: true,
+        targetPath: "/etc/nginx",
+        q: "attacker",
+      });
+    });
+
+    it("discards out-of-order summary response for previous scope when later scope resolves first", async () => {
+      let resolveVarSummary!: (value: Response) => void;
+      const varPromise = new Promise<Response>((resolve) => {
+        resolveVarSummary = resolve;
+      });
+
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        if (url.includes("targetPath=%2Fvar")) {
+          return varPromise;
+        }
+        if (url.includes("targetPath=%2Fetc")) {
+          // /etc resolves immediately
+          return {
+            ok: true,
+            json: async () => ({
+              totalSessions: 100,
+              homeOnlyCount: 20,
+              matchingCount: 15,
+              distinctPaths: [{ path: "/etc", sessionCount: 15 }],
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404 } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Step 1: Request summary for /var (scope 1)
+      const varCall = store.fetchSummary({ hideHome: false, targetPath: "/var" });
+
+      // Step 2: Request summary for /etc (scope 2)
+      await store.fetchSummary({ hideHome: false, targetPath: "/etc" });
+
+      // Store must now reflect /etc scope
+      const etcScopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/etc" });
+      expect(store.getState().summaryScopeKey).toBe(etcScopeKey);
+      expect(store.getState().summary?.matchingCount).toBe(15);
+
+      // Step 3: Now resolve the delayed /var response
+      resolveVarSummary({
+        ok: true,
+        json: async () => ({
+          totalSessions: 100,
+          homeOnlyCount: 20,
+          matchingCount: 2,
+          distinctPaths: [{ path: "/var", sessionCount: 2 }],
+        }),
+      } as Response);
+      await varCall;
+
+      // Stale /var response MUST have been discarded by generation guard
+      expect(store.getState().summaryScopeKey).toBe(etcScopeKey);
+      expect(store.getState().summary?.matchingCount).toBe(15);
+    });
+
+    it("marks isAuthoritative as false and falls back safely when summary scope does not match or fails", () => {
+      const summaryForEtc: AuditDirectorySummary = {
+        totalSessions: 100,
+        homeOnlyCount: 20,
+        matchingCount: 50,
+        distinctPaths: [{ path: "/etc", sessionCount: 50 }],
+      };
+
+      const loadedSessions = [
+        createClosedSession("sess-1", "2026-09-16T08:00:00.000Z", ["/var/log"], false),
+      ];
+
+      // Current scope is /var, but summary is for /etc (mismatched scope)
+      const currentScopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/var" });
+      const summaryScopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/etc" });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loadedSessions,
+        snapshotRecentClosedSessions: [],
+        summary: summaryForEtc,
+        summaryScopeKey,
+        currentScopeKey,
+        summaryStatus: "stale",
+        targetPathFilter: "/var",
+      });
+
+      // isAuthoritative MUST be false when scope keys do not match
+      expect(metrics.isAuthoritative).toBe(false);
+      // matchingCount from /etc (50) must NOT be applied to /var!
+      expect(metrics.filteredSessionsCount).toBe(1); // falls back to loaded sessions matching /var
+
+      // Summary error state also yields isAuthoritative: false
+      const errorMetrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loadedSessions,
+        snapshotRecentClosedSessions: [],
+        summary: null,
+        summaryScopeKey: null,
+        currentScopeKey,
+        summaryStatus: "error",
+        targetPathFilter: "/var",
+      });
+      expect(errorMetrics.isAuthoritative).toBe(false);
+      expect(errorMetrics.filteredSessionsCount).toBe(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Suite C: Search Race Conditions and In-Flight Cancellation
+  // ---------------------------------------------------------------------------
+  describe("Suite C: Search Race Conditions and In-Flight Cancellation", () => {
+    it("discards out-of-order search response when subsequent query resolves earlier", async () => {
+      let resolveQueryA!: (value: Response) => void;
+      const queryAPromise = new Promise<Response>((resolve) => {
+        resolveQueryA = resolve;
+      });
+
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        const searchParams = new URL(url, "http://localhost").searchParams;
+        if (searchParams.get("q") === "a") {
+          return queryAPromise;
+        }
+        if (searchParams.get("q") === "ab") {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [createClosedSession("sess-ab", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
+              nextCursor: null,
+              totalItems: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404 } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Trigger "a" first, then "ab"
+      const callA = store.searchSessions("a");
+      await store.searchSessions("ab");
+
+      // Verify "ab" results are active
+      expect(store.getState().searchQuery).toBe("ab");
+      expect(store.getState().searchItems.map((s) => s.sessionId)).toEqual(["sess-ab"]);
+
+      // Resolve "a" late
+      resolveQueryA({
+        ok: true,
+        json: async () => ({
+          items: [createClosedSession("sess-a-stale", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
+          nextCursor: null,
+          totalItems: 1,
+        }),
+      } as Response);
+      await callA;
+
+      // Stale "a" response must be discarded by generation guard
+      expect(store.getState().searchQuery).toBe("ab");
+      expect(store.getState().searchItems.map((s) => s.sessionId)).toEqual(["sess-ab"]);
+    });
+
+    it("aborts in-flight search and cleanly resets search state on clearSearch", async () => {
+      let aborted = false;
+      const mockFetch: typeof fetch = async (_input, init) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        if (signal) {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+        }
+        return new Promise(() => {}); // never resolves
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      void store.searchSessions("in-flight-query");
+      expect(store.getState().searchIsLoading).toBe(true);
+
+      store.clearSearch();
+
+      expect(aborted).toBe(true);
+      expect(store.getState().searchQuery).toBe("");
+      expect(store.getState().searchItems).toEqual([]);
+      expect(store.getState().searchIsLoading).toBe(false);
+      expect(store.getState().searchCursor).toBeNull();
+      expect(store.getState().searchHasMore).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Suite D: Filter Scope Preservation Across Directory Pagination
+  // ---------------------------------------------------------------------------
+  describe("Suite D: Filter Scope Preservation Across Directory Pagination", () => {
+    it("preserves active filter scope across directory pagination pages", async () => {
+      const requestedUrls: string[] = [];
+
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        requestedUrls.push(url);
+
+        if (url.includes("cursor=page-1-cursor")) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [createClosedSession("sess-page2", "2026-09-16T07:00:00.000Z", ["/etc"], false)],
+              nextCursor: null,
+              totalItems: 51,
+            }),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            items: [createClosedSession("sess-page1", "2026-09-16T08:00:00.000Z", ["/etc"], false)],
+            nextCursor: "page-1-cursor",
+            totalItems: 51,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Page 1 with scoped filter
+      await store.fetchInitial({ hideHome: true, targetPath: "/etc" });
+      expect(store.getState().directoryScopeKey).toBe(createAuditScopeKey({ hideHome: true, targetPath: "/etc" }));
+      expect(store.getState().directoryCursor).toBe("page-1-cursor");
+
+      // Page 2: loadMoreDirectory must preserve hideHome and targetPath
+      await store.loadMoreDirectory();
+      expect(requestedUrls.length).toBe(2);
+      const page2Url = requestedUrls[1];
+      expect(page2Url).toContain("hideHome=1");
+      expect(page2Url).toContain("targetPath=%2Fetc");
+      expect(page2Url).toContain("cursor=page-1-cursor");
+      expect(store.getState().directoryItems.length).toBe(2);
+    });
+
+    it("aborts in-flight pagination, resets items, and fetches page 1 when filter scope changes", async () => {
+      const requestedUrls: string[] = [];
+
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        return {
+          ok: true,
+          json: async () => ({
+            items: [createClosedSession("sess-scoped", "2026-09-16T08:00:00.000Z", ["/var"], false)],
+            nextCursor: "next-cursor",
+            totalItems: 10,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Scope 1: /etc
+      await store.fetchInitial({ hideHome: false, targetPath: "/etc" });
+      expect(store.getState().directoryScopeKey).toBe(createAuditScopeKey({ hideHome: false, targetPath: "/etc" }));
+
+      // Scope 2: /var
+      await store.fetchInitial({ hideHome: true, targetPath: "/var" });
+      expect(store.getState().directoryScopeKey).toBe(createAuditScopeKey({ hideHome: true, targetPath: "/var" }));
+      expect(requestedUrls[1]).toContain("hideHome=1");
+      expect(requestedUrls[1]).toContain("targetPath=%2Fvar");
+      expect(requestedUrls[1]).not.toContain("cursor=");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Suite E: Server Summary Semantics and normalizeSessionAuditSummary Alignment
+  // ---------------------------------------------------------------------------
+  describe("Suite E: Server Summary Semantics and normalizeSessionAuditSummary Alignment", () => {
+    it("strictly conforms to normalizeSessionAuditSummary semantics for visited paths, root handling, and homeOnly", () => {
+      // 1. Root only is NOT home-only
+      const rootOnly = normalizeSessionAuditSummary("/", [], [], 1);
+      expect(rootOnly.visitedPaths).toEqual(["/"]);
+      expect(rootOnly.homeOnly).toBe(false);
+
+      // 2. Traversal through root while only visiting /home/user IS home-only
+      const rootPlusHome = normalizeSessionAuditSummary("/", ["/home/operator"], ["/"], 2);
+      expect(rootPlusHome.visitedPaths).toEqual(["/", "/home/operator"]);
+      expect(rootPlusHome.homeOnly).toBe(true);
+
+      // 3. Current path outside /home prevents home-only even with 0 events
+      const outsideHomeCurrent = normalizeSessionAuditSummary("/etc", [], [], 0);
+      expect(outsideHomeCurrent.visitedPaths).toEqual(["/etc"]);
+      expect(outsideHomeCurrent.homeOnly).toBe(false);
+
+      // 4. Session visiting both home and non-home is NOT home-only
+      const mixedSession = normalizeSessionAuditSummary("/home/user", ["/home/user"], ["/var/log"], 2);
+      expect(mixedSession.homeOnly).toBe(false);
+    });
+
+    it("verifies buildAuditSessionsQuery enforces closed lifecycle and covers legacy session_id and cwdState.path", () => {
+      const query = buildAuditSessionsQuery({ search: "victim-path" });
+      const andConditions = (query as { $and: Array<Record<string, unknown>> }).$and;
+
+      // Closed lifecycle check
+      expect(andConditions).toContainEqual({ "lifecycle.status": "closed" });
+      expect(andConditions).toContainEqual({ "cwdState.path": { $type: "string", $ne: "" } });
+
+      // Search check covers sessionId, session_id, sourceIp, and cwdState.path
+      const searchCondition = andConditions.find((c) => Array.isArray(c.$or));
+      expect(searchCondition).toBeDefined();
+      const orClauses = searchCondition?.$or as Array<Record<string, unknown>>;
+      expect(orClauses.some((c) => "sessionId" in c)).toBe(true);
+      expect(orClauses.some((c) => "session_id" in c)).toBe(true);
+      expect(orClauses.some((c) => "sourceIp" in c)).toBe(true);
+      expect(orClauses.some((c) => "cwdState.path" in c)).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Suite F: Debounced Search and Request Volume Verification
+  // ---------------------------------------------------------------------------
+  describe("Suite F: Debounced Search and Request Volume Verification", () => {
+    it("does not include summary parameter on search requests or paginated requests", () => {
+      // Regular search URL has q, no summary
+      const searchUrl = buildAuditSessionsUrl({ q: "test", limit: 25 });
+      expect(searchUrl).not.toContain("summary=1");
+      expect(searchUrl).toContain("q=test");
+
+      // Pagination cursor URL has cursor, no summary
+      const cursorUrl = buildAuditSessionsUrl({ cursor: "cursor-xyz", limit: 25 });
+      expect(cursorUrl).not.toContain("summary=1");
+      expect(cursorUrl).toContain("cursor=cursor-xyz");
+
+      // Initial directory URL can request summary
+      const summaryUrl = buildAuditSessionsUrl({ summary: true, limit: 50 });
+      expect(summaryUrl).toContain("summary=1");
     });
   });
 });

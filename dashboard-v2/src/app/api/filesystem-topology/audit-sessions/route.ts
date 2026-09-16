@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const limit = limitParam ? parseInt(limitParam, 10) : 25;
 
     const summaryParam = url.searchParams.get("summary") ?? url.searchParams.get("facets");
-    const includeSummary = summaryParam === "1" || summaryParam === "true" || cursor === null;
+    const includeSummary = summaryParam === "1" || summaryParam === "true";
 
     const page = await getAuditSessions({
       search: search || null,

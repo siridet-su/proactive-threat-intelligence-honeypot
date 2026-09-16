@@ -112,6 +112,7 @@ export function buildAuditSessionsQuery(options: {
     conditions.push({
       $or: [
         { sessionId: { $regex: rx } },
+        { session_id: { $regex: rx } },
         { sourceIp: { $regex: rx } },
         { "cwdState.path": { $regex: rx } },
       ],

@@ -307,12 +307,10 @@ export function FilesystemActivity() {
   const {
     authoritativeClosedSessions,
     auditDirectoryTotalCount,
-    recordRemoteAuditSessions,
     directoryHasMore,
     directoryIsLoading,
     directoryIsComplete,
     loadMoreDirectory,
-    searchQuery: auditSearchQuery,
     searchItems: auditSearchItems,
     searchHasMore: auditSearchHasMore,
     searchIsLoading: auditSearchIsLoading,
@@ -321,9 +319,13 @@ export function FilesystemActivity() {
     loadMoreSearch: loadMoreAuditSearch,
     clearSearch: clearAuditSearch,
     summary: auditSummary,
+    summaryScopeKey: auditSummaryScopeKey,
+    currentScopeKey: auditCurrentScopeKey,
+    summaryStatus: auditSummaryStatus,
     status: auditStatus,
     errorMessage: auditErrorMessage,
     retryInitialDirectory,
+    recordLookedUpSession,
   } = useAuditDirectory({
     viewMode,
     snapshotRecentClosedSessions: snapshot?.recentClosedSessions ?? [],
@@ -349,12 +351,13 @@ export function FilesystemActivity() {
       authoritativeClosedSessions,
       snapshotRecentClosedSessions: snapshot?.recentClosedSessions ?? [],
       summary: auditSummary,
+      summaryScopeKey: auditSummaryScopeKey,
+      currentScopeKey: auditCurrentScopeKey,
+      summaryStatus: auditSummaryStatus,
       auditDirectoryTotalCount,
       hideHomeOnly,
       targetPathFilter,
       selectedSessionId,
-      isSearchActive: Boolean(auditSearchQuery.trim()),
-      searchResults: auditSearchItems,
       isDirectoryComplete: directoryIsComplete,
     });
   }, [
@@ -363,12 +366,13 @@ export function FilesystemActivity() {
     authoritativeClosedSessions,
     snapshot?.recentClosedSessions,
     auditSummary,
+    auditSummaryScopeKey,
+    auditCurrentScopeKey,
+    auditSummaryStatus,
     auditDirectoryTotalCount,
     hideHomeOnly,
     targetPathFilter,
     selectedSessionId,
-    auditSearchQuery,
-    auditSearchItems,
     directoryIsComplete,
   ]);
 
@@ -480,7 +484,7 @@ export function FilesystemActivity() {
           const page = data as Partial<AuditSessionsPage>;
           const found = page.items?.find((s) => s.sessionId === targetId);
           if (found) {
-            recordRemoteAuditSessions([found], page.totalItems);
+            recordLookedUpSession(found);
             setExtraAuditSessions((prev) => {
               const next = new Map(prev);
               next.set(found.sessionId, found);
@@ -500,7 +504,7 @@ export function FilesystemActivity() {
       selectedSessionIdRef.current = null;
       setSelectedSessionId(null);
     },
-    [recordRemoteAuditSessions, selectSession, setExpiredSessionId],
+    [recordLookedUpSession, selectSession, setExpiredSessionId],
   );
 
   useEffect(() => {
@@ -869,10 +873,6 @@ export function FilesystemActivity() {
                   hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
                   onResetFilters={handleResetAuditFilters}
                   allSessionsList={allSessions}
-                  onRemoteSessionsLoaded={recordRemoteAuditSessions}
-                  hasMoreRemote={directoryHasMore}
-                  isLoadingRemote={directoryIsLoading}
-                  onLoadMore={loadMoreDirectory}
                   directoryHasMore={directoryHasMore}
                   directoryIsLoading={directoryIsLoading}
                   directoryIsComplete={directoryIsComplete}
@@ -1225,10 +1225,6 @@ export function FilesystemActivity() {
                 hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
                 onResetFilters={handleResetAuditFilters}
                 allSessionsList={allSessions}
-                onRemoteSessionsLoaded={recordRemoteAuditSessions}
-                hasMoreRemote={directoryHasMore}
-                isLoadingRemote={directoryIsLoading}
-                onLoadMore={loadMoreDirectory}
                 directoryHasMore={directoryHasMore}
                 directoryIsLoading={directoryIsLoading}
                 directoryIsComplete={directoryIsComplete}
