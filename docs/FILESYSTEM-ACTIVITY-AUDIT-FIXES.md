@@ -38,13 +38,13 @@ and the corrective work are not conflated.
 
 ## Current focus
 
-**In progress:** `FA-001` — make Audit directory filtering and counts authoritative.
+**Current focus:** Completed `FA-001` (authoritative audit directory filtering); next up is `FA-002`.
 
 ## Remediation backlog
 
 | ID | Priority | Status | Original items | Problem | Acceptance criteria | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| `FA-001` | `P0` | `IN PROGRESS` | `FS-001`, `FS-005`, `FS-007` | Audit filter options, `0/N`, totals, and path counts are calculated from the live snapshot plus only 12 recent closed sessions. Remote results remain local to the selector. | Audit totals and filtered results include the complete retained closed-session directory; remote pages become part of one authoritative parent data model; selected/pinned semantics and path options agree with the result set. | — |
+| `FA-001` | `P0` | `DONE` | `FS-001`, `FS-005`, `FS-007` | Audit filter options, `0/N`, totals, and path counts are calculated from the live snapshot plus only 12 recent closed sessions. Remote results remain local to the selector. | Audit totals and filtered results include the complete retained closed-session directory; remote pages become part of one authoritative parent data model; selected/pinned semantics and path options agree with the result set. | Dedicated `useAuditDirectory` & `deriveAuthoritativeAuditMetrics`; remote pages promoted to authoritative parent model; full directory totals/distinct paths/0-N verified across >12 closed sessions; 12 new Vitest regression tests in `filesystem-audit-directory.test.ts` (176 total passing); zero ESLint warnings; Next.js production build clean; `git diff --check` clean. |
 | `FA-002` | `P0` | `TODO` | `FS-007` | `hideHome` and `targetPath` are applied after MongoDB pagination, while `totalItems` and `nextCursor` describe the unfiltered query. | Filtering occurs before page slicing, or pagination iterates until it produces a truthful filtered page; `items`, `totalItems`, and `nextCursor` share the same filter scope; empty intermediate pages cannot hide later matches. | — |
 | `FA-003` | `P0` | `TODO` | `FS-011` | Response-action polling restarts its effect whenever a new action object is stored, resetting delay and the client deadline. A pending non-live action can poll near 100 ms intervals. | A single polling lifecycle survives state updates; delay increases monotonically to the configured ceiling; polling stops at terminal state or the bounded deadline; changing selected session aborts the prior lifecycle; terminal feedback remains visible. | — |
 | `FA-004` | `P0` | `TODO` | `FS-011` | Status polling can expose a false capability error when the 10-second Pi-health cache expires, and each poll still reads action and session state separately. | Pending-action status remains truthful after cache expiry without producing Pi health ping storms; database work per poll is documented and minimized; tests use fake timers to assert request cadence, total requests, timeout, abort, and terminal behavior. | — |
@@ -90,4 +90,5 @@ Recorded on 2026-09-16 before remediation:
 
 | Date | Change | Evidence |
 | --- | --- | --- |
+| 2026-09-16 | Completed FA-001: made Audit directory filtering, totals, and path options authoritative. | 10 test suites / 176 Vitest tests passing; zero-warning ESLint; Next.js production build clean; clean git diff --check. |
 | 2026-09-16 | Created remediation checklist from the FS-001 through FS-019 audit. | Static code review plus baseline test, lint, build, and diff checks. |

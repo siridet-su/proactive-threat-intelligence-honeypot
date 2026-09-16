@@ -36,17 +36,19 @@ import {
   buildAuditSnapshot,
   clampTimelineSidebarWidth,
   formatUpdateAge,
-  getDistinctSessionPaths,
   isHomeOnlySession,
   resolveSessionSelection,
   sessionTouchesPath,
-  type DistinctPathOption,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { useFilesystemStreaming } from "./useFilesystemStreaming";
 import { useSessionCwdHistory } from "./useSessionCwdHistory";
 import { useFilesystemUrlState } from "./useFilesystemUrlState";
 import { useAuditReplay } from "./useAuditReplay";
+import {
+  deriveAuthoritativeAuditMetrics,
+  useAuditDirectory,
+} from "./useAuditDirectory";
 
 export function FilesystemActivity() {
   const shouldReduceMotion = useReducedMotion();
@@ -301,23 +303,60 @@ export function FilesystemActivity() {
     handleSnapshotAppliedRef.current = handleSnapshotApplied;
   }, [handleSnapshotApplied]);
 
-  const allSessions = useMemo(() => {
-    const combined: (FilesystemTopologySession | FilesystemClosedSession)[] = [
-      ...(snapshot?.sessions ?? []),
-      ...(snapshot?.recentClosedSessions ?? []),
-    ];
-    if (!extraAuditSessions.size) return combined;
-    const seen = new Set(combined.map((s) => s.sessionId));
-    for (const session of extraAuditSessions.values()) {
-      if (!seen.has(session.sessionId)) {
-        combined.push(session);
-      }
-    }
-    return combined;
-  }, [snapshot, extraAuditSessions]);
-  const sessionById = useMemo(() => new Map(allSessions.map((s) => [s.sessionId, s])), [allSessions]);
-  const selectedSession = useMemo(() => sessionById.get(selectedSessionId ?? "") ?? null, [selectedSessionId, sessionById]);
+  // Authoritative closed session audit directory hook
+  const {
+    authoritativeClosedSessions,
+    auditDirectoryTotalCount,
+    hasMoreAuditSessions,
+    isLoadingAuditSessions,
+    loadMoreAuditSessions,
+    recordRemoteAuditSessions,
+  } = useAuditDirectory({
+    viewMode,
+    snapshotRecentClosedSessions: snapshot?.recentClosedSessions ?? [],
+    extraAuditSessions,
+  });
+
+  const {
+    allSessions,
+    sessionById,
+    distinctPaths,
+    filteredActiveSessions,
+    filteredClosedSessions,
+    homeOnlyCount,
+    totalSessionsCount,
+    filteredSessionsCount,
+    isSelectedFilteredOut,
+  } = useMemo(() => {
+    return deriveAuthoritativeAuditMetrics({
+      viewMode,
+      activeSessions: snapshot?.sessions ?? [],
+      authoritativeClosedSessions,
+      snapshotRecentClosedSessions: snapshot?.recentClosedSessions ?? [],
+      auditDirectoryTotalCount,
+      hideHomeOnly,
+      targetPathFilter,
+      selectedSessionId,
+    });
+  }, [
+    viewMode,
+    snapshot?.sessions,
+    authoritativeClosedSessions,
+    snapshot?.recentClosedSessions,
+    auditDirectoryTotalCount,
+    hideHomeOnly,
+    targetPathFilter,
+    selectedSessionId,
+  ]);
+
+  const selectedSession = useMemo(
+    () => sessionById.get(selectedSessionId ?? "") ?? null,
+    [selectedSessionId, sessionById],
+  );
+
   const selectedClosedSession = useMemo(() => {
+    const fromAuthoritative = authoritativeClosedSessions.find((s) => s.sessionId === selectedSessionId);
+    if (fromAuthoritative) return fromAuthoritative;
     const fromSnapshot = snapshot?.recentClosedSessions.find((s) => s.sessionId === selectedSessionId);
     if (fromSnapshot) return fromSnapshot;
     const fromExtra = extraAuditSessions.get(selectedSessionId ?? "");
@@ -325,59 +364,12 @@ export function FilesystemActivity() {
       return fromExtra as FilesystemClosedSession;
     }
     return null;
-  }, [selectedSessionId, snapshot, extraAuditSessions]);
+  }, [selectedSessionId, authoritativeClosedSessions, snapshot, extraAuditSessions]);
+
   const selectedNode = useMemo(
     () => snapshot?.nodes.find((n) => n.path === selectedPath) ?? null,
     [selectedPath, snapshot],
   );
-
-  const distinctPaths: DistinctPathOption[] = useMemo(() => {
-    return getDistinctSessionPaths(
-      snapshot?.sessions ?? [],
-      snapshot?.recentClosedSessions ?? [],
-    );
-  }, [snapshot]);
-
-  const {
-    filteredActiveSessions,
-    filteredClosedSessions,
-    homeOnlyCount,
-    totalSessionsCount,
-    filteredSessionsCount,
-  } = useMemo(() => {
-    const allActive = snapshot?.sessions ?? [];
-    const allClosed = snapshot?.recentClosedSessions ?? [];
-    let homeCount = 0;
-    for (const s of allActive) {
-      if (isHomeOnlySession(s)) homeCount++;
-    }
-    for (const s of allClosed) {
-      if (isHomeOnlySession(s)) homeCount++;
-    }
-
-    const filterFn = (s: FilesystemTopologySession | FilesystemClosedSession) => {
-      if (hideHomeOnly && isHomeOnlySession(s)) {
-        return false;
-      }
-      if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) {
-        return false;
-      }
-      return true;
-    };
-
-    const filteredActive = allActive.filter(filterFn);
-    const filteredClosed = allClosed.filter(filterFn);
-    const total = allActive.length + allClosed.length;
-    const filtered = filteredActive.length + filteredClosed.length;
-
-    return {
-      filteredActiveSessions: filteredActive,
-      filteredClosedSessions: filteredClosed,
-      homeOnlyCount: homeCount,
-      totalSessionsCount: total,
-      filteredSessionsCount: filtered,
-    };
-  }, [snapshot, hideHomeOnly, targetPathFilter]);
 
   const hasActiveFilters = hideHomeOnly || targetPathFilter !== null;
 
@@ -385,13 +377,6 @@ export function FilesystemActivity() {
     setHideHomeOnly(false);
     setTargetPathFilter(null);
   }, [setHideHomeOnly, setTargetPathFilter]);
-
-  const isSelectedFilteredOut = useMemo(() => {
-    if (!selectedSession || !hasActiveFilters) return false;
-    if (hideHomeOnly && isHomeOnlySession(selectedSession)) return true;
-    if (targetPathFilter && !sessionTouchesPath(selectedSession, targetPathFilter)) return true;
-    return false;
-  }, [selectedSession, hasActiveFilters, hideHomeOnly, targetPathFilter]);
 
   const auditCanvasTitle = useMemo(() => {
     if (!selectedSession) return "No Session Selected";
@@ -472,6 +457,7 @@ export function FilesystemActivity() {
           const page = data as Partial<AuditSessionsPage>;
           const found = page.items?.find((s) => s.sessionId === targetId);
           if (found) {
+            recordRemoteAuditSessions([found], page.totalItems);
             setExtraAuditSessions((prev) => {
               const next = new Map(prev);
               next.set(found.sessionId, found);
@@ -491,7 +477,7 @@ export function FilesystemActivity() {
       selectedSessionIdRef.current = null;
       setSelectedSessionId(null);
     },
-    [selectSession, setExpiredSessionId],
+    [recordRemoteAuditSessions, selectSession, setExpiredSessionId],
   );
 
   useEffect(() => {
@@ -860,6 +846,10 @@ export function FilesystemActivity() {
                   hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
                   onResetFilters={handleResetAuditFilters}
                   allSessionsList={allSessions}
+                  onRemoteSessionsLoaded={recordRemoteAuditSessions}
+                  hasMoreRemote={hasMoreAuditSessions}
+                  isLoadingRemote={isLoadingAuditSessions}
+                  onLoadMore={loadMoreAuditSessions}
                 />
                 <AuditFilterControls
                   hideHomeOnly={hideHomeOnly}
@@ -1196,6 +1186,10 @@ export function FilesystemActivity() {
                 hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
                 onResetFilters={handleResetAuditFilters}
                 allSessionsList={allSessions}
+                onRemoteSessionsLoaded={recordRemoteAuditSessions}
+                hasMoreRemote={hasMoreAuditSessions}
+                isLoadingRemote={isLoadingAuditSessions}
+                onLoadMore={loadMoreAuditSessions}
               />
               <div className="h-4 w-px bg-border hidden sm:block shrink-0" aria-hidden="true" />
               <AuditFilterControls

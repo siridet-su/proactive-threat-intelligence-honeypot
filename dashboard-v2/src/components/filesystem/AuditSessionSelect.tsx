@@ -31,6 +31,14 @@ export interface AuditSessionSelectProps {
   hasActiveFilters?: boolean;
   onResetFilters?: () => void;
   allSessionsList?: readonly (FilesystemTopologySession | FilesystemClosedSession)[];
+  onRemoteSessionsLoaded?: (
+    sessions: readonly FilesystemClosedSession[],
+    totalCount?: number,
+    nextCursor?: string | null,
+  ) => void;
+  hasMoreRemote?: boolean;
+  isLoadingRemote?: boolean;
+  onLoadMore?: () => void;
 }
 
 export function AuditSessionSelect({
@@ -43,6 +51,10 @@ export function AuditSessionSelect({
   hasActiveFilters,
   onResetFilters,
   allSessionsList,
+  onRemoteSessionsLoaded,
+  hasMoreRemote: hasMoreRemoteProp,
+  isLoadingRemote: isLoadingRemoteProp,
+  onLoadMore,
 }: AuditSessionSelectProps) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -55,6 +67,9 @@ export function AuditSessionSelect({
   const generatedId = useId();
   const triggerId = `audit-session-select-${generatedId}`;
   const menuId = `${triggerId}-menu`;
+
+  const effectiveHasMore = hasMoreRemoteProp !== undefined ? hasMoreRemoteProp : hasMoreRemote;
+  const effectiveIsLoading = isLoadingRemoteProp !== undefined ? isLoadingRemoteProp : isLoadingRemote;
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery("");
@@ -92,6 +107,7 @@ export function AuditSessionSelect({
           setRemoteSessions(page.items);
           setRemoteCursor(page.nextCursor ?? null);
           setHasMoreRemote(Boolean(page.nextCursor));
+          onRemoteSessionsLoaded?.(page.items, page.totalItems, page.nextCursor ?? null);
         }
       } catch {
         // preserve local results
@@ -101,10 +117,14 @@ export function AuditSessionSelect({
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [open, searchQuery]);
+  }, [open, searchQuery, onRemoteSessionsLoaded]);
 
   const handleLoadMore = useCallback(async () => {
-    if (isLoadingRemote) return;
+    if (effectiveIsLoading) return;
+    if (onLoadMore) {
+      onLoadMore();
+      return;
+    }
     setIsLoadingRemote(true);
     try {
       const q = searchQuery.trim();
@@ -128,13 +148,14 @@ export function AuditSessionSelect({
         });
         setRemoteCursor(page.nextCursor ?? null);
         setHasMoreRemote(Boolean(page.nextCursor));
+        onRemoteSessionsLoaded?.(page.items, page.totalItems, page.nextCursor ?? null);
       }
     } catch {
       // ignore
     } finally {
       setIsLoadingRemote(false);
     }
-  }, [isLoadingRemote, remoteCursor, searchQuery]);
+  }, [effectiveIsLoading, onLoadMore, onRemoteSessionsLoaded, remoteCursor, searchQuery]);
 
   const combinedClosedSessions = useMemo(() => {
     const seen = new Set<string>();
@@ -501,15 +522,15 @@ export function AuditSessionSelect({
                 </div>
 
                 {/* Pagination / Remote Directory Retrieval */}
-                {(hasMoreRemote || (!searchQuery && recentClosedSessions.length >= 12 && remoteSessions.length === 0)) && (
+                {(effectiveHasMore || (!searchQuery && recentClosedSessions.length >= 12 && remoteSessions.length === 0)) && (
                   <div className="pt-2 px-1">
                     <button
                       type="button"
                       onClick={handleLoadMore}
-                      disabled={isLoadingRemote}
+                      disabled={effectiveIsLoading}
                       className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border/80 bg-surface-subtle/70 px-2 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-hover hover:text-text hover:border-primary/40 transition-colors cursor-pointer disabled:opacity-50"
                     >
-                      {isLoadingRemote ? (
+                      {effectiveIsLoading ? (
                         <>
                           <Loader2 className="h-3 w-3 animate-spin text-primary" />
                           <span>Loading audit directory…</span>
@@ -523,7 +544,7 @@ export function AuditSessionSelect({
                     </button>
                   </div>
                 )}
-                {remoteSessions.length > 0 && !hasMoreRemote && (
+                {((remoteSessions.length > 0 && !effectiveHasMore) || (!effectiveHasMore && recentClosedSessions.length > 12)) && (
                   <div className="pt-2 pb-1 text-center font-mono text-[11px] text-text-subtle">
                     All matching directory sessions loaded ({combinedClosedSessions.length})
                   </div>
