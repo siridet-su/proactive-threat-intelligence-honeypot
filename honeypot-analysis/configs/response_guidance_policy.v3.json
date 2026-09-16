@@ -2,10 +2,14 @@
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
   "version": "3.7.0",
-  "updated_at": "2026-08-11",
+  "updated_at": "2026-09-16",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
   "automatic_execution": false,
+  "reference_manifest": {
+    "path": "configs/trusted_reference_manifest.v1.json",
+    "sha256": "788543ecef24c0d7a9a2adff869076eac9c788908f7a4669d328d462b1df3e0f"
+  },
   "migration": {
     "replaces_new_writes_from": ["smb_action_policy.v1", "response_guidance.v2"],
     "legacy_policy_sha256": "3f07b615dc63b01bdefd69ee3bd5d9fad1ee08030d6861d0f675362df5ab7fab",
@@ -15,51 +19,152 @@
     "cisa-small-business": {
       "name": "CISA Cyber Guidance for Small Businesses",
       "type": "government_guidance",
-      "url": "https://www.cisa.gov/cyber-guidance-small-businesses",
-      "source_version": "referenced-2026-07-16",
-      "accessed_at": "2026-07-16"
+      "url": "https://www.cisa.gov/audiences/small-and-medium-businesses/secure-your-business/smb-resources",
+      "source_version": "snapshot-2026-09-16",
+      "accessed_at": "2026-09-16",
+      "manifest_source_id": "cisa-small-business",
+      "snapshot_sha256": "3a9624c3f35b62959f08030062beb9c5cdedc33f6344cb215ca34dfdf9dea265",
+      "reference_scope": {
+        "supports": [
+          "general small-business cybersecurity risk reduction",
+          "manual corroboration and incident-response planning rationale"
+        ],
+        "does_not_support": [
+          "proof that a particular Cowrie event occurred",
+          "proof of compromise, intent, or automatic response authorization"
+        ]
+      }
     },
     "nist-small-business": {
       "name": "NIST Small Business Cybersecurity Corner",
       "type": "government_guidance",
       "url": "https://www.nist.gov/itl/smallbusinesscyber",
-      "source_version": "referenced-2026-07-16",
-      "accessed_at": "2026-07-16"
+      "source_version": "snapshot-2026-09-16",
+      "accessed_at": "2026-09-16",
+      "manifest_source_id": "nist-small-business",
+      "snapshot_sha256": "6bd55f64c1351920681c3f91edcf470ce6ad36fe626371841b9d90eea48f3bad",
+      "reference_scope": {
+        "supports": [
+          "general small-business cybersecurity practice guidance",
+          "manual review and corroboration rationale"
+        ],
+        "does_not_support": [
+          "proof that a particular Cowrie event occurred",
+          "proof of compromise, intent, or automatic response authorization"
+        ]
+      }
     },
     "mitre-t1552": {
       "name": "MITRE ATT&CK T1552 Unsecured Credentials",
       "type": "attack_technique",
       "url": "https://attack.mitre.org/techniques/T1552/",
-      "source_version": "referenced-2026-07-16",
-      "accessed_at": "2026-07-16"
+      "source_version": "snapshot-2026-09-16",
+      "accessed_at": "2026-09-16",
+      "manifest_source_id": "mitre-attack-enterprise",
+      "manifest_technique_id": "T1552",
+      "snapshot_sha256": "02b8eb578b7bfed0d08238cf532395d877f64a4d7e46e02a298bff8bf6f47b6e"
     },
     "mitre-t1105": {
       "name": "MITRE ATT&CK T1105 Ingress Tool Transfer",
       "type": "attack_technique",
       "url": "https://attack.mitre.org/techniques/T1105/",
-      "source_version": "referenced-2026-07-16",
-      "accessed_at": "2026-07-16"
+      "source_version": "snapshot-2026-09-16",
+      "accessed_at": "2026-09-16",
+      "manifest_source_id": "mitre-attack-enterprise",
+      "manifest_technique_id": "T1105",
+      "snapshot_sha256": "59da775ba232203a62198d09bd01e23ff0d6eb4aa03915e0f6523ab8c024b27e"
     },
     "mitre-t1059": {
       "name": "MITRE ATT&CK T1059 Command and Scripting Interpreter",
       "type": "attack_technique",
       "url": "https://attack.mitre.org/techniques/T1059/",
-      "source_version": "referenced-2026-07-16",
-      "accessed_at": "2026-07-16"
+      "source_version": "snapshot-2026-09-16",
+      "accessed_at": "2026-09-16",
+      "manifest_source_id": "mitre-attack-enterprise",
+      "manifest_technique_id": "T1059",
+      "snapshot_sha256": "17bfddbbb066ff02ad7c5ab97c06f2c2c10f3f8b2e9b39417fd2ea953ec8950e"
     },
     "mitre-t1053": {
       "name": "MITRE ATT&CK T1053 Scheduled Task/Job",
       "type": "attack_technique",
       "url": "https://attack.mitre.org/techniques/T1053/",
-      "source_version": "referenced-2026-07-16",
-      "accessed_at": "2026-07-16"
+      "source_version": "snapshot-2026-09-16",
+      "accessed_at": "2026-09-16",
+      "manifest_source_id": "mitre-attack-enterprise",
+      "manifest_technique_id": "T1053",
+      "snapshot_sha256": "7061e5de6ce2a3c83411e2d5e55a56c813b019e25a5216f5eeeb27c983ec9a2b"
     },
     "mitre-t1070": {
       "name": "MITRE ATT&CK T1070 Indicator Removal",
       "type": "attack_technique",
       "url": "https://attack.mitre.org/techniques/T1070/",
-      "source_version": "referenced-2026-07-16",
-      "accessed_at": "2026-07-16"
+      "source_version": "snapshot-2026-09-16",
+      "accessed_at": "2026-09-16",
+      "manifest_source_id": "mitre-attack-enterprise",
+      "manifest_technique_id": "T1070",
+      "snapshot_sha256": "65ed1f0dd3d7646d1a77988435dfb747f83e434f592954a28a5b63a09f9b8145"
+    }
+  },
+  "reference_scope_by_id": {
+    "observed-interactive-command": {
+      "supports": ["the presence of an interactive command in the canonical Cowrie session"],
+      "does_not_support": ["activity on a real host", "compromise, intent, or attribution"]
+    },
+    "observed-cowrie-inspection-command": {
+      "supports": ["manual review of a parsed inspection operation reported by Cowrie"],
+      "does_not_support": ["malicious intent", "real-host effects", "successful compromise"]
+    },
+    "observed-cowrie-filesystem-change-command": {
+      "supports": ["manual review of a parsed filesystem-change operation reported by Cowrie"],
+      "does_not_support": ["resulting filesystem state", "persistence", "real-host effects"]
+    },
+    "observed-cowrie-execution-attempt-command": {
+      "supports": ["corroboration of a typed execution-attempt observation"],
+      "does_not_support": ["completed execution", "program effects", "compromise or intent"]
+    },
+    "observed-credential-access-candidate": {
+      "supports": ["bounded review of a typed credential-related path read"],
+      "does_not_support": ["credential acquisition", "credential reuse", "successful compromise"]
+    },
+    "observed-cowrie-transfer-event": {
+      "supports": ["hash or transfer-indicator review for a direct Cowrie transfer event"],
+      "does_not_support": ["execution of the transferred artifact", "effect on a real host"]
+    },
+    "observed-cowrie-command-transfer-attempt": {
+      "supports": ["manual review of an observed command-level transfer attempt"],
+      "does_not_support": ["successful transfer", "retrieval, execution, or real-host effect"]
+    },
+    "observed-command-corroboration": {
+      "supports": ["manual corroboration of the observed source in authorized authentication logs"],
+      "does_not_support": ["actor attribution", "automatic blocking or response"]
+    },
+    "review-observed-source-in-real-auth-logs": {
+      "supports": ["a human-led check of authentication telemetry for the observed source"],
+      "does_not_support": ["authorization to execute a response", "proof that the source is the attacker"]
+    },
+    "observed-credential-access-corroboration": {
+      "supports": ["a bounded manual review for credential exposure or reuse indicators"],
+      "does_not_support": ["proof that credentials were acquired or reused", "automatic credential action"]
+    },
+    "review-credential-exposure-and-reuse": {
+      "supports": ["manual review of credential exposure and reuse indicators"],
+      "does_not_support": ["credential disclosure in the recommendation itself", "automatic remediation"]
+    },
+    "observed-transfer-event-corroboration": {
+      "supports": ["manual hash and transfer-indicator correlation"],
+      "does_not_support": ["artifact execution", "real-host impact", "automatic containment"]
+    },
+    "hunt-observed-transfer-indicators": {
+      "supports": ["manual hunting for observed transfer indicators"],
+      "does_not_support": ["proof of delivery success", "automatic blocking or deletion"]
+    },
+    "observed-execution-corroboration": {
+      "supports": ["manual corroboration of an observed execution attempt"],
+      "does_not_support": ["completed execution", "program effects", "automatic response"]
+    },
+    "correlate-observed-execution-attempt": {
+      "supports": ["manual correlation of an observed execution-attempt event"],
+      "does_not_support": ["proof of execution success", "compromise, persistence, or automatic execution"]
     }
   },
   "finding_rules": [

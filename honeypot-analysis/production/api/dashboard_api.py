@@ -178,6 +178,7 @@ def _current_prediction_payload(snapshot: Dict[str, Any], feedback_rows: list[Di
         "prediction_contract": payload.get("prediction_contract") or "",
         "active_model": payload.get("active_model") or {},
         "next_behavior_output": payload.get("next_behavior_output") or {},
+        "ensemble_evidence": payload.get("ensemble_evidence") or {},
         "authority": payload.get("authority") or {},
         "deployment_decision": payload.get("deployment_decision") or "",
         "original_selection_status": payload.get("original_selection_status") or "",

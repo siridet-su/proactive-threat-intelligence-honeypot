@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from production.utils.sensitive_data import redact_exception_for_log
+from production.policies.reference_provenance import (
+    project_root,
+    validate_manifest_binding,
+    validate_source_artifacts,
+    validate_source_scope,
+)
 
 
 SCHEMA_VERSION = "threat_hypothesis_behavior_policy.v1"
@@ -180,6 +186,7 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
         if not str(document.get(key) or "").strip():
             errors.append(f"policy: missing {key}")
     provenance = document.get("provenance")
+    validate_manifest_binding(document, errors, root=project_root())
     if not isinstance(provenance, dict):
         errors.append("policy: missing provenance")
     else:
@@ -191,6 +198,18 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
         _validate_string_list(provenance.get("basis"), "policy.provenance.basis", errors)
 
     body = policy_body(document)
+    if isinstance(provenance, dict) and body.get("enabled") is True:
+        validate_source_scope(
+            provenance.get("reference_scope"),
+            errors,
+            "policy.provenance.reference_scope",
+        )
+        validate_source_artifacts(
+            provenance.get("source_artifacts"),
+            errors,
+            root=project_root(),
+            path_prefix="policy.provenance.source_artifacts",
+        )
     if not isinstance(body.get("enabled"), bool):
         errors.append("policy.enabled: must be boolean")
     event_types = body.get("event_types") or {}

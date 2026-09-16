@@ -724,6 +724,21 @@ def _snapshot_reference_candidates(
             }
             for evidence_id in sorted(item for item in ids if item):
                 indexed.setdefault(evidence_id, []).append((source, deepcopy(item)))
+    # Typed semantic selection may bind a guidance item to a trusted
+    # classification evidence ID that is represented only by the canonical
+    # semantic graph's bounded evidence node.  Index that projection as a
+    # fallback while preserving the higher-priority direct/observed
+    # projections above.
+    graph = snapshot.get("semantic_graph")
+    if isinstance(graph, Mapping):
+        for item in graph.get("evidence_nodes") or []:
+            if not isinstance(item, dict):
+                continue
+            evidence_id = _clean(item.get("evidence_id"))
+            if evidence_id:
+                indexed.setdefault(evidence_id, []).append(
+                    ("semantic_graph.evidence_nodes", deepcopy(item))
+                )
     return indexed
 
 
@@ -736,6 +751,7 @@ _REFERENCE_SOURCE_PRIORITY = (
     "cowrie_event_evidence",
     "trusted_attck_candidates",
     "classification_events",
+    "semantic_graph.evidence_nodes",
 )
 
 

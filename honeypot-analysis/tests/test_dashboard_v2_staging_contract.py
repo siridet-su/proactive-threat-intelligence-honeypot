@@ -36,14 +36,13 @@ def test_staging_uses_explicit_api_handlers_and_session_analysis_bff() -> None:
         route = (api_root / relative).read_text(encoding="utf-8")
         assert "export async function GET" in route
         assert "getSessionFromRequest" in route
-
+        assert "clientPromise" not in route
     session_analysis = (api_root / "session-analysis/[capability]/route.ts").read_text(encoding="utf-8")
     assert "export const dynamic" in session_analysis
     assert "export async function GET" in session_analysis
     assert "getSessionFromRequest" in session_analysis
     assert "safe_to_auto_execute: false" in session_analysis
     assert "automatic_response_execution: false" in session_analysis
-
 
 def test_staging_unit_is_non_root_and_loopback_only() -> None:
     unit = (DEPLOYMENT / "honeypot-dashboard-v2-staging.service").read_text(encoding="utf-8")
