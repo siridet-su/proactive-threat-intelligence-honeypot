@@ -11,6 +11,15 @@ export interface TerminateStatePayload {
   action?: SessionTerminateAction | null;
 }
 
-export function terminateCapabilityFrom(document: TerminateStatePayload): TerminateCapability {
-  return document.available ? "available" : !document.authorized ? "forbidden" : !document.configured ? "unconfigured" : "error";
+export function terminateCapabilityFrom(
+  document: TerminateStatePayload,
+  previousCapability?: TerminateCapability,
+): TerminateCapability {
+  if (document.available === true) return "available";
+  if (!document.authorized) return "forbidden";
+  if (!document.configured) return "unconfigured";
+  if (document.available === false) return "error";
+  // When document.available is undefined (status-only response where health was not probed),
+  // preserve the previous authoritative capability if provided, or default to "available".
+  return previousCapability ?? "available";
 }

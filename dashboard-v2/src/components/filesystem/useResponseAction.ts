@@ -95,6 +95,7 @@ export function useResponseAction({
       actionStatus,
       sessionIsLive,
       requestedAt: visibleTerminateAction?.requestedAt,
+      initialCapability: terminateCapability,
       enabled,
       fetchState: fetchTerminateState,
       onActionUpdate: (action, capability) => {
@@ -127,7 +128,7 @@ export function useResponseAction({
         }
       },
     });
-  }, [controlSessionId, actionId, actionStatus, sessionIsLive, visibleTerminateAction?.requestedAt, enabled, fetchTerminateState]);
+  }, [controlSessionId, actionId, actionStatus, sessionIsLive, visibleTerminateAction?.requestedAt, terminateCapability, enabled, fetchTerminateState]);
 
   // Clean up polling controller strictly upon unmount
   useEffect(() => {

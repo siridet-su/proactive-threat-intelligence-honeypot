@@ -18,6 +18,7 @@ export interface ResponseActionPollerOptions {
   actionId: string;
   requestedAt?: string | null;
   sessionIsLive?: boolean;
+  initialCapability?: TerminateCapability;
   fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
   onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
   onTerminal: (event: PollerTerminalEvent) => void;
@@ -59,6 +60,7 @@ export class ResponseActionPollingController {
   readonly backoffFactor: number;
 
   private currentDelay: number;
+  private currentCapability: TerminateCapability;
   private readonly fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
   private readonly onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
   private readonly onTerminal: (event: PollerTerminalEvent) => void;
@@ -82,6 +84,7 @@ export class ResponseActionPollingController {
     this.fetchState = options.fetchState;
     this.onActionUpdate = options.onActionUpdate;
     this.onTerminal = options.onTerminal;
+    this.currentCapability = options.initialCapability ?? "available";
 
     this.clock = options.clock ?? { now: () => Date.now() };
     this.timer = options.timer ?? {
@@ -165,7 +168,8 @@ export class ResponseActionPollingController {
       this.abortController = null;
 
       const action = document.action ?? null;
-      const capability = terminateCapabilityFrom(document);
+      const capability = terminateCapabilityFrom(document, this.currentCapability);
+      this.currentCapability = capability;
       this.onActionUpdate(action, capability);
 
       if (action?.status === "verified") {
@@ -247,6 +251,7 @@ export interface ResponseActionLifecycleSyncParams {
   actionStatus?: string | null;
   sessionIsLive?: boolean;
   requestedAt?: string | null;
+  initialCapability?: TerminateCapability;
   enabled?: boolean;
   fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
   onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
@@ -343,6 +348,7 @@ export class ResponseActionLifecycleManager {
       actionId: params.actionId,
       sessionIsLive: initialSessionIsLive,
       requestedAt: initialRequestedAt,
+      initialCapability: params.initialCapability,
       clock: params.clock,
       timer: params.timer,
       maxDurationMs: params.maxDurationMs,

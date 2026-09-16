@@ -122,6 +122,33 @@ export interface TerminateActionWithState {
   active: boolean;
 }
 
+/**
+ * Database operations documentation:
+ *
+ * 1. Pending actionId poll path (normal):
+ *    - 1 MongoDB read: Single aggregation pipeline on ACTIONS_COLLECTION matching
+ *      { actionId, sessionId, action: "terminate_session" } with $lookup joining
+ *      SESSION_STATE_COLLECTION (cwd_session_state) for lifecycle status and closedAt.
+ *    - 0 MongoDB writes: When the action remains in "requested" or "delivered" status
+ *      and the session is active or not yet verifiably closed.
+ *
+ * 2. Terminal actionId poll path (already resolved):
+ *    - 1 MongoDB read: Same aggregation pipeline returns action already in "verified" or "failed" status.
+ *    - 0 MongoDB writes.
+ *
+ * 3. Terminal reconciliation paths (state transition):
+ *    - 1 MongoDB read: Aggregation pipeline reads action and session lifecycle.
+ *    - 1 MongoDB write: Atomic findOneAndUpdate on ACTIONS_COLLECTION:
+ *      a) Verified: When session lifecycle status is "closed" and closedAt >= requestedAt.
+ *      b) Failed: When verification timeout (20s) has elapsed.
+ *    - Both transitions match { status: { $in: ["requested", "delivered"] } } ensuring
+ *      concurrent reconciliation is idempotent and terminal states cannot regress or duplicate.
+ *
+ * 4. Initial capability path (without actionId):
+ *    - 1 MongoDB read: Aggregation pipeline matching { sessionId, action: "terminate_session" }
+ *      sorted by requestedAt descending (limit 1) with $lookup to SESSION_STATE_COLLECTION.
+ *    - If no action exists yet for the session, 1 findOne read on SESSION_STATE_COLLECTION for liveness.
+ */
 export async function getTerminateActionWithState(
   sessionId: string,
   actionId?: string,
@@ -129,10 +156,42 @@ export async function getTerminateActionWithState(
   await ensureActionIndexes();
   const client = await getMongoClient();
   const db = client.db(DATABASE_NAME);
-  const document = await db.collection(ACTIONS_COLLECTION).findOne(
-    actionId ? { actionId, sessionId, action: "terminate_session" } : { sessionId, action: "terminate_session" },
-    { sort: { requestedAt: -1 } },
-  );
+
+  const matchFilter: Document = actionId
+    ? { actionId, sessionId, action: "terminate_session" }
+    : { sessionId, action: "terminate_session" };
+
+  const pipeline: Document[] = [
+    { $match: matchFilter },
+    { $sort: { requestedAt: -1 } },
+    { $limit: 1 },
+    {
+      $lookup: {
+        from: SESSION_STATE_COLLECTION,
+        localField: "sessionId",
+        foreignField: "sessionId",
+        as: "sessionDocs",
+      },
+    },
+    {
+      $project: {
+        actionId: 1,
+        sessionId: 1,
+        action: 1,
+        status: 1,
+        requestedBy: 1,
+        requestedAt: 1,
+        deliveredAt: 1,
+        verifiedAt: 1,
+        failureCategory: 1,
+        open: 1,
+        sessionLifecycle: { $arrayElemAt: ["$sessionDocs.lifecycle", 0] },
+      },
+    },
+  ];
+
+  const [document] = await db.collection(ACTIONS_COLLECTION).aggregate(pipeline).toArray();
+
   if (!document) {
     const state = await db.collection(SESSION_STATE_COLLECTION).findOne(
       { sessionId },
@@ -143,29 +202,26 @@ export async function getTerminateActionWithState(
       active: state?.lifecycle?.status === "active",
     };
   }
+
+  const active = document.sessionLifecycle?.status === "active";
   const action = normalizeAction(document);
-  if (action.status !== "requested" && action.status !== "delivered") {
-    if (action.status === "verified") {
-      return { action, active: false };
-    }
-    const state = await db.collection(SESSION_STATE_COLLECTION).findOne(
-      { sessionId },
-      { projection: { "lifecycle.status": 1 } },
-    );
-    return {
-      action,
-      active: state?.lifecycle?.status === "active",
-    };
+
+  // If already terminal, return directly without write operations
+  if (action.status === "verified") {
+    return { action, active: false };
+  }
+  if (action.status === "failed") {
+    return { action, active };
   }
 
-  const state = await db.collection(SESSION_STATE_COLLECTION).findOne(
-    { sessionId },
-    { projection: { lifecycle: 1 } },
-  );
-  const closedAt = asDateString(state?.lifecycle?.closedAt);
-  if (state?.lifecycle?.status === "closed" && closedAt && Date.parse(closedAt) >= Date.parse(action.requestedAt)) {
+  // Only requested or delivered actions can transition to terminal verified or failed
+  const closedAt = asDateString(document.sessionLifecycle?.closedAt);
+  const isClosed = document.sessionLifecycle?.status === "closed";
+  const isQualifyingClosure = isClosed && closedAt && Date.parse(closedAt) >= Date.parse(action.requestedAt);
+
+  if (isQualifyingClosure) {
     const updated = await db.collection(ACTIONS_COLLECTION).findOneAndUpdate(
-      { actionId: action.actionId, status: { $in: ["requested", "delivered"] } },
+      { actionId: action.actionId, sessionId: action.sessionId, status: { $in: ["requested", "delivered"] } },
       { $set: { status: "verified", verifiedAt: new Date(closedAt), failureCategory: null, open: false } },
       { returnDocument: "after" },
     );
@@ -174,16 +230,22 @@ export async function getTerminateActionWithState(
       active: false,
     };
   }
+
   if (Date.now() - Date.parse(action.requestedAt) > VERIFICATION_TIMEOUT_MS) {
-    const failed = await markTerminateActionFailed(action.actionId, "verification_timeout");
+    const failed = await db.collection(ACTIONS_COLLECTION).findOneAndUpdate(
+      { actionId: action.actionId, sessionId: action.sessionId, status: { $in: ["requested", "delivered"] } },
+      { $set: { status: "failed", failureCategory: "verification_timeout", open: false } },
+      { returnDocument: "after" },
+    );
     return {
-      action: failed,
-      active: state?.lifecycle?.status === "active",
+      action: failed ? normalizeAction(failed) : action,
+      active,
     };
   }
+
   return {
     action,
-    active: state?.lifecycle?.status === "active",
+    active,
   };
 }
 

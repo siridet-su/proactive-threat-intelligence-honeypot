@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
 import {
   requestSessionTermination,
-  responseControlCachedHealth,
   responseControlConfigured,
   responseControlHealthy,
 } from "@/lib/response-control";
@@ -41,23 +40,41 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (actionId && !ACTION_ID_PATTERN.test(actionId)) return NextResponse.json({ error: "Invalid action ID" }, { status: 400 });
   const configured = responseControlConfigured();
 
-  // If actionId is provided, this request is checking status on an existing/pending action.
-  // We do NOT perform an active Pi health check over the network during status polling,
-  // preventing outbound ping storms. We reuse cached health state instead.
+  // If actionId is provided, this request is an existing-action status query,
+  // NOT a capability probe. Status polling must never initiate Pi /v1/health requests
+  // or convert pending actions into false capability errors when health caches expire.
   const isStatusPoll = Boolean(actionId);
 
-  const [{ action, active }, healthy] = await Promise.all([
-    administrator
-      ? getTerminateActionWithState(id, actionId)
-      : (async () => ({ action: null, active: await sessionIsActive(id) }))(),
-    administrator && configured
-      ? (isStatusPoll ? responseControlCachedHealth() : responseControlHealthy())
-      : false,
-  ]);
+  if (!administrator) {
+    const active = await sessionIsActive(id);
+    return NextResponse.json({
+      ...(isStatusPoll ? {} : { available: false }),
+      authorized: false,
+      configured,
+      active,
+      action: null,
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  const { action, active } = await getTerminateActionWithState(id, actionId);
+
+  if (isStatusPoll) {
+    // Explicit status response contract: 'available' is omitted because health was not checked.
+    // Client preserves last authoritative capability state.
+    return NextResponse.json({
+      authorized: true,
+      configured,
+      active,
+      action,
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  // Initial capability probe without actionId: probe health using 10-second anti-ping-storm cache
+  const healthy = configured ? await responseControlHealthy() : false;
 
   return NextResponse.json({
-    available: administrator && healthy,
-    authorized: administrator,
+    available: healthy,
+    authorized: true,
     configured,
     active,
     action,
